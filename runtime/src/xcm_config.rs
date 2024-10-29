@@ -108,7 +108,8 @@ impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
 				OriginKind::Superuser,
 				MultiLocation {
 					parents: 1,
-					interior: X2(GlobalConsensus(bridged_network), Parachain(KAWABUNGA_PARACHAIN_ID)),
+					interior:
+						X2(GlobalConsensus(bridged_network), Parachain(KAWABUNGA_PARACHAIN_ID)),
 				},
 			) if bridged_network == BridgedNetwork::get() => Ok(RuntimeOrigin::root()),
 			(_, origin) => Err(origin),

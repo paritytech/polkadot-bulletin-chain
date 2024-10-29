@@ -1,5 +1,5 @@
 use core::marker::PhantomData;
-use frame_support::weights::Weight;
+use polkadot_sdk_frame::weights_prelude::*;
 
 /// Weight functions needed for relayer_set.
 pub trait WeightInfo {

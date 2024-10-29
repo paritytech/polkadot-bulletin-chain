@@ -137,8 +137,7 @@ impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for 
 
 	type BridgesGrandpaPalletInstance = WithPolkadotBridgeGrandpaInstance;
 	type ParasPalletName = AtPolkadotParasPalletName;
-	type ParaStoredHeaderDataBuilder =
-		SingleParaStoredHeaderDataBuilder<BridgeHubPolkadotOrRococo>;
+	type ParaStoredHeaderDataBuilder = SingleParaStoredHeaderDataBuilder<BridgeHubPolkadotOrRococo>;
 	type HeadsToKeep = BridgeHubPolkadotHeadsToKeep;
 	type MaxParaHeadDataSize = MaxPolkadotBrdgeHubHeadSize;
 }
@@ -333,9 +332,7 @@ pub mod benchmarking {
 	impl BridgeParachainsConfig<WithPolkadotBridgeParachainsInstance> for Runtime {
 		fn parachains() -> Vec<bp_polkadot_core::parachains::ParaId> {
 			use bp_runtime::Parachain;
-			vec![bp_polkadot_core::parachains::ParaId(
-				BridgeHubPolkadotOrRococo::PARACHAIN_ID,
-			)]
+			vec![bp_polkadot_core::parachains::ParaId(BridgeHubPolkadotOrRococo::PARACHAIN_ID)]
 		}
 
 		fn prepare_parachain_heads_proof(

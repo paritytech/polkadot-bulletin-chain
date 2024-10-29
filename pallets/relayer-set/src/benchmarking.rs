@@ -16,9 +16,13 @@
 #![cfg(feature = "runtime-benchmarks")]
 
 use super::{Pallet as RelayerSet, *};
-use frame_benchmarking::v2::{account, benchmarks, impl_benchmark_test_suite, vec, BenchmarkError};
-use frame_support::traits::EnsureOrigin;
-use frame_system::{EventRecord, Pallet as System};
+use polkadot_sdk_frame::{
+	deps::{
+		frame_benchmarking::v2::*,
+		frame_system::{EventRecord, Pallet as System},
+	},
+	prelude::*,
+};
 
 const SEED: u32 = 0;
 

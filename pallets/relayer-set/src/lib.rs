@@ -24,13 +24,7 @@ mod tests;
 pub mod weights;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-use frame_support::{pallet_prelude::DispatchResult, traits::Get, DefaultNoBound};
-use frame_system::pallet_prelude::BlockNumberFor;
-use sp_runtime::{
-	traits::{Saturating, Zero},
-	transaction_validity::{InvalidTransaction, TransactionValidityError},
-};
-use sp_std::vec::Vec;
+use polkadot_sdk_frame::prelude::*;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;
@@ -45,11 +39,9 @@ struct Relayer<BlockNumber> {
 	min_bridge_tx_block: BlockNumber,
 }
 
-#[frame_support::pallet]
+#[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::pallet_prelude::*;
-	use frame_system::pallet_prelude::*;
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
