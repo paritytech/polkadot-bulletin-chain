@@ -67,6 +67,7 @@ try-runtime-cli = { version = "0.10.0-dev", optional = true, git = "https://gith
 
 [build-dependencies]
 substrate-build-script-utils = { version = "3.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+#polkadot-sdk = { git = "https://github.com/paritytech/polkadot-sdk.git", features = ["substrate-build-script-utils"] }
 
 [features]
 default = []
