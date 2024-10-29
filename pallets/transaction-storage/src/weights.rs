@@ -47,7 +47,7 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::{Weight, constants::RocksDbWeight}};
+use polkadot_sdk_frame::weights_prelude::*;
 use core::marker::PhantomData;
 
 /// Weight functions needed for pallet_transaction_storage.

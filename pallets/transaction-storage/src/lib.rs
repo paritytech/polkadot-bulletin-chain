@@ -33,12 +33,7 @@ mod mock;
 mod tests;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-use frame_system::pallet_prelude::BlockNumberFor;
-use sp_runtime::{
-	traits::{BlakeTwo256, Hash, One, Saturating, Zero},
-	transaction_validity::InvalidTransaction,
-};
-use sp_std::{prelude::*, result};
+use polkadot_sdk_frame::{deps::*, prelude::*};
 use sp_transaction_storage_proof::{
 	encode_index, random_chunk, InherentError, TransactionStorageProof, CHUNK_SIZE,
 	INHERENT_IDENTIFIER,
@@ -67,9 +62,7 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
 /// Number of transactions and bytes covered by an authorization.
-#[derive(
-	PartialEq, Eq, sp_runtime::RuntimeDebug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
-)]
+#[derive(PartialEq, Eq, RuntimeDebug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct AuthorizationExtent {
 	/// Number of transactions.
 	pub transactions: u32,
@@ -104,14 +97,7 @@ type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 
 /// State data for a stored transaction.
 #[derive(
-	Encode,
-	Decode,
-	Clone,
-	sp_runtime::RuntimeDebug,
-	PartialEq,
-	Eq,
-	scale_info::TypeInfo,
-	MaxEncodedLen,
+	Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen,
 )]
 pub struct TransactionInfo {
 	/// Chunk trie root.
@@ -151,11 +137,9 @@ fn num_chunks(bytes: u32) -> u32 {
 	((bytes as u64 + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64) as u32
 }
 
-#[frame_support::pallet]
+#[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::pallet_prelude::*;
-	use frame_system::pallet_prelude::*;
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
@@ -591,10 +575,7 @@ pub mod pallet {
 			proof.map(|proof| Call::check_proof { proof })
 		}
 
-		fn check_inherent(
-			_call: &Self::Call,
-			_data: &InherentData,
-		) -> result::Result<(), Self::Error> {
+		fn check_inherent(_call: &Self::Call, _data: &InherentData) -> Result<(), Self::Error> {
 			Ok(())
 		}
 

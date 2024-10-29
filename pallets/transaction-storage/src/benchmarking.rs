@@ -20,10 +20,10 @@
 #![cfg(feature = "runtime-benchmarks")]
 
 use super::{Pallet as TransactionStorage, *};
-use frame_benchmarking::{v2::*, whitelisted_caller};
-use frame_support::traits::{EnsureOrigin, Get, OnFinalize, OnInitialize};
-use frame_system::{pallet_prelude::BlockNumberFor, EventRecord, Pallet as System, RawOrigin};
-use sp_runtime::traits::{One, Zero};
+use polkadot_sdk_frame::{
+	benchmarking::prelude::*,
+	deps::frame_system::{EventRecord, Pallet as System, RawOrigin},
+};
 use sp_transaction_storage_proof::TransactionStorageProof;
 
 // Proof generated from max size storage:
