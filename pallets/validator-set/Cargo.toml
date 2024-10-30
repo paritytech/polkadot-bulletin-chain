@@ -10,69 +10,26 @@ codec = { package = "parity-scale-codec", version = "3.6.1", default-features = 
 log = "0.4.17"
 scale-info = { version = "2.5.0", default-features = false, features = ["derive"] }
 
-[dependencies.sp-core]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.sp-io]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.sp-runtime]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.sp-std]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.sp-staking]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.frame-benchmarking]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-optional = true
-branch = 'polkadot-v1.0.0'
-
-[dependencies.frame-support]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.frame-system]
-default-features = false
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
-
-[dependencies.pallet-session]
-default-features = false
-features = ['historical']
-git = 'https://github.com/paritytech/substrate.git'
-branch = 'polkadot-v1.0.0'
+polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", default-features = false, features = [
+    "experimental",
+    "runtime",
+] }
+sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", default-features = false }
+pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", default-features = false, features = [
+    "historical",
+] }
 
 [dev-dependencies]
 serde = { version = "1.0.126", features = ["derive"] }
 
 [features]
 default = ['std']
-runtime-benchmarks = ['frame-benchmarking/runtime-benchmarks']
+runtime-benchmarks = ['polkadot-sdk-frame/runtime-benchmarks']
 std = [
     'codec/std',
-    'frame-benchmarking/std',
-    'frame-support/std',
-    'frame-system/std',
     'scale-info/std',
-    'sp-core/std',
-    'sp-io/std',
-    'sp-std/std',
-    'sp-runtime/std',
+    
+    'polkadot-sdk-frame/std',
     'pallet-session/std',
 ]
-try-runtime = ['frame-support/try-runtime']
+try-runtime = ['polkadot-sdk-frame/try-runtime']
