@@ -6,11 +6,6 @@ repository = "https://github.com/zdave-parity/polkadot-bulletin-chain.git"
 [workspace]
 resolver = "2"
 members = [
-    "bridges/bin/runtime-common",
-    "bridges/modules/grandpa",
-    "bridges/modules/messages",
-    "bridges/modules/parachains",
-    "bridges/modules/xcm-bridge-hub-router",
     "node",
     "pallets/relayer-set",
     "pallets/transaction-storage",
