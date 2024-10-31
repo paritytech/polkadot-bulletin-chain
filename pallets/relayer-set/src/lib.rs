@@ -24,7 +24,7 @@ mod tests;
 pub mod weights;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-use polkadot_sdk_frame::prelude::*;
+use polkadot_sdk_frame::{deps::sp_core::sp_std::prelude::*, prelude::*};
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;

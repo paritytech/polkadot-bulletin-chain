@@ -33,7 +33,10 @@ mod mock;
 mod tests;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-use polkadot_sdk_frame::{deps::*, prelude::*};
+use polkadot_sdk_frame::{
+	deps::{sp_core::sp_std::prelude::*, *},
+	prelude::*,
+};
 use sp_transaction_storage_proof::{
 	encode_index, random_chunk, InherentError, TransactionStorageProof, CHUNK_SIZE,
 	INHERENT_IDENTIFIER,

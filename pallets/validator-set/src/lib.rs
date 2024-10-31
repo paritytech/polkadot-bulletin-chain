@@ -44,7 +44,7 @@ pub mod weights;
 use codec::{Decode, Encode, MaxEncodedLen};
 use pallet_session::SessionManager;
 use polkadot_sdk_frame::{
-	deps::{frame_system::RawOrigin, sp_runtime::Perbill, *},
+	deps::{frame_system::RawOrigin, sp_core::sp_std::prelude::*, sp_runtime::Perbill, *},
 	prelude::*,
 	traits::ConvertInto,
 };

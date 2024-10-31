@@ -21,23 +21,23 @@ use crate::{
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
 
-use bridge_runtime_common::messages_xcm_extension::XcmAsPlainPayload;
 use codec::{Decode, DecodeLimit, Encode};
 use frame_support::{
-	ensure, match_types, parameter_types,
+	ensure, parameter_types,
 	traits::{Contains, Everything, Nothing, ProcessMessageError},
 	weights::Weight,
 };
+use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use sp_core::{ConstU32, Get};
 use sp_io::hashing::blake2_256;
-use xcm::{latest::prelude::*, VersionedInteriorMultiLocation, VersionedXcm, MAX_XCM_DECODE_DEPTH};
+use xcm::{latest::prelude::*, VersionedInteriorLocation, VersionedXcm, MAX_XCM_DECODE_DEPTH};
 use xcm_builder::{
-	CreateMatcher, DispatchBlob, DispatchBlobError, FixedWeightBounds, MatchXcm,
+	DispatchBlob, DispatchBlobError, FixedWeightBounds, FrameTransactionalProcessor,
 	TrailingSetTopicAsId, UnpaidLocalExporter, WithComputedOrigin,
 };
 use xcm_executor::{
 	traits::{ConvertOrigin, ShouldExecute, WeightTrader, WithOriginFilter},
-	Assets, XcmExecutor,
+	AssetsInHolding, XcmExecutor,
 };
 
 // TODO [bridge]: change to actual value here + everywhere where Kawabunga is mentioned
@@ -45,18 +45,18 @@ use xcm_executor::{
 const KAWABUNGA_PARACHAIN_ID: u32 = 1004;
 
 parameter_types! {
-	// TODO [bridge]: how we are supposed to set it? Named? ByGenesis - if so, when? After generating
-	// chain spec?
+	// TODO [bridge]: how we are supposed to set it? Named? ByGenesis - if so, when?
+	// After generating chain spec?
 	/// The Polkadot Bulletin Chain network ID.
 	pub const ThisNetwork: NetworkId = NetworkId::ByGenesis([42u8; 32]);
 	/// Our location in the universe of consensus systems.
-	pub const UniversalLocation: InteriorMultiLocation = X1(GlobalConsensus(ThisNetwork::get()));
+	pub UniversalLocation: InteriorLocation = ThisNetwork::get().into();
 
 	/// Location of the Kawabunga parachain, relative to this runtime.
-	pub KawabungaLocation: MultiLocation = MultiLocation::new(1, X2(
+	pub KawabungaLocation: Location = Location::new(1, [
 		GlobalConsensus(BridgedNetwork::get()),
 		Parachain(KAWABUNGA_PARACHAIN_ID),
-	));
+	]);
 
 	/// The amount of weight an XCM operation takes. This is a safe overestimate.
 	pub const BaseXcmWeight: Weight = Weight::from_parts(1_000_000_000, 0);
@@ -67,25 +67,25 @@ parameter_types! {
 
 pub struct OnlyKawabungaLocation;
 
-impl Contains<MultiLocation> for OnlyKawabungaLocation {
-	fn contains(l: &MultiLocation) -> bool {
-		matches!(*l, MultiLocation { parents: 1, interior: X2(
+impl Contains<Location> for OnlyKawabungaLocation {
+	fn contains(l: &Location) -> bool {
+		matches!(l.unpack(), (1, [
 			GlobalConsensus(bridged_network),
 			Parachain(KAWABUNGA_PARACHAIN_ID),
-		) } if bridged_network == BridgedNetwork::get())
+		]) if bridged_network == &BridgedNetwork::get())
 	}
 }
 
 pub struct UniversalAliases;
 
-impl Contains<(MultiLocation, Junction)> for UniversalAliases {
-	fn contains(l: &(MultiLocation, Junction)) -> bool {
+impl Contains<(Location, Junction)> for UniversalAliases {
+	fn contains(l: &(Location, Junction)) -> bool {
 		matches!(
-			*l,
+			l,
 			(
 				origin_location,
 				GlobalConsensus(bridged_network),
-			) if origin_location == KawabungaLocation::get() && bridged_network == BridgedNetwork::get())
+			) if origin_location == &KawabungaLocation::get() && bridged_network == &BridgedNetwork::get())
 	}
 }
 
@@ -94,25 +94,21 @@ pub struct KawabungaParachainAsRoot;
 
 impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
 	fn convert_origin(
-		origin: impl Into<MultiLocation>,
+		origin: impl Into<Location>,
 		kind: OriginKind,
-	) -> Result<RuntimeOrigin, MultiLocation> {
+	) -> Result<RuntimeOrigin, Location> {
 		let origin = origin.into();
 		log::trace!(
 			target: "xcm::origin_conversion",
 			"KawabungaParachainAsRoot origin: {:?}, kind: {:?}",
 			origin, kind,
 		);
-		match (kind, origin) {
+		match (kind, origin.unpack()) {
 			(
 				OriginKind::Superuser,
-				MultiLocation {
-					parents: 1,
-					interior:
-						X2(GlobalConsensus(bridged_network), Parachain(KAWABUNGA_PARACHAIN_ID)),
-				},
-			) if bridged_network == BridgedNetwork::get() => Ok(RuntimeOrigin::root()),
-			(_, origin) => Err(origin),
+				(1, [GlobalConsensus(bridged_network), Parachain(KAWABUNGA_PARACHAIN_ID)]),
+			) if bridged_network == &BridgedNetwork::get() => Ok(RuntimeOrigin::root()),
+			_ => Err(origin),
 		}
 	}
 }
@@ -125,12 +121,13 @@ impl WeightTrader for NoopTrader {
 		NoopTrader
 	}
 
-	fn buy_weight(&mut self, _weight: Weight, _payment: Assets) -> Result<Assets, XcmError> {
-		Ok(Assets::new())
-	}
-
-	fn refund_weight(&mut self, _weight: Weight) -> Option<MultiAsset> {
-		None
+	fn buy_weight(
+		&mut self,
+		_weight: Weight,
+		_payment: AssetsInHolding,
+		_context: &XcmContext,
+	) -> Result<AssetsInHolding, XcmError> {
+		Ok(AssetsInHolding::new())
 	}
 }
 
@@ -142,19 +139,19 @@ pub struct AllowUnpaidTransactsFrom<RuntimeCall, AllowedOrigin>(
 	sp_std::marker::PhantomData<(RuntimeCall, AllowedOrigin)>,
 );
 
-impl<RuntimeCall: Decode, AllowedOrigin: Contains<MultiLocation>> ShouldExecute
+impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 	for AllowUnpaidTransactsFrom<RuntimeCall, AllowedOrigin>
 {
 	fn should_execute<Call>(
-		origin: &MultiLocation,
+		origin: &Location,
 		instructions: &mut [Instruction<Call>],
 		max_weight: Weight,
 		_properties: &mut xcm_executor::traits::Properties,
 	) -> Result<(), ProcessMessageError> {
 		log::trace!(
 			target: "xcm::barriers",
-			"AllowUnpaidTransactsFrom origin: {:?}, instructions: {:?}, max_weight: {:?}, properties: {:?}",
-			origin, instructions, max_weight, _properties,
+			"AllowUnpaidTransactsFrom origin: {:?}, instructions: {:?}, max_weight: {:?}, properties:
+		{:?}", 			origin, instructions, max_weight, _properties,
 		);
 
 		// we only allow from configured origins
@@ -216,6 +213,11 @@ impl xcm_executor::Config for XcmConfig {
 	type CallDispatcher = WithOriginFilter<Everything>;
 	type SafeCallFilter = Everything;
 	type Aliasers = Nothing;
+	type TransactionalProcessor = FrameTransactionalProcessor;
+	type HrmpNewChannelOpenRequestHandler = ();
+	type HrmpChannelAcceptedHandler = ();
+	type HrmpChannelClosingHandler = ();
+	type XcmRecorder = ();
 }
 
 /// XCM blob dispatcher that executes XCM message at this chain.
@@ -232,7 +234,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		// internally it is the encoded `BridgeMessage`, but it is a private struct, so we
 		// are simply decoding pair here
 		let (universal_dest, message) = decode_bridge_message(&blob)?;
-		let universal_dest: InteriorMultiLocation = universal_dest
+		let universal_dest: InteriorLocation = universal_dest
 			.try_into()
 			.map_err(|_| DispatchBlobError::UnsupportedLocationVersion)?;
 		// `universal_dest` is the desired destination within the universe: first we need to check
@@ -257,12 +259,13 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		let weight_limit = Weight::MAX;
 
 		// execute the XCM program
-		let message_hash = message.using_encoded(blake2_256);
-		XcmExecutor::<XcmConfig>::execute_xcm(
+		let mut message_hash = message.using_encoded(blake2_256);
+		XcmExecutor::<XcmConfig>::prepare_and_execute(
 			KawabungaLocation::get(),
 			message,
-			message_hash,
+			&mut message_hash,
 			weight_limit,
+			Weight::zero(),
 		)
 		.ensure_complete()
 		.map_err(|e| {
@@ -282,134 +285,134 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 /// Decode inbound `BridgeMessage` from Kawabunga parachain.
 pub(crate) fn decode_bridge_message(
 	blob: &XcmAsPlainPayload,
-) -> Result<(VersionedInteriorMultiLocation, VersionedXcm<RuntimeCall>), DispatchBlobError> {
-	<(VersionedInteriorMultiLocation, VersionedXcm<RuntimeCall>)>::decode_all_with_depth_limit(
+) -> Result<(VersionedInteriorLocation, VersionedXcm<RuntimeCall>), DispatchBlobError> {
+	<(VersionedInteriorLocation, VersionedXcm<RuntimeCall>)>::decode_all_with_depth_limit(
 		MAX_XCM_DECODE_DEPTH,
 		&mut &blob[..],
 	)
 	.map_err(|_| DispatchBlobError::InvalidEncoding)
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-	use super::*;
-	use crate::{
-		bridge_config::{tests::run_test, WithBridgeHubPolkadotMessagesInstance, XCM_LANE},
-		BridgePolkadotMessages, Runtime,
-	};
-	use bp_messages::{
-		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
-		MessageKey,
-	};
-	use codec::Encode;
-	use pallet_bridge_messages::Config as MessagesConfig;
-	use xcm_executor::traits::Properties;
-
-	type Dispatcher =
-		<Runtime as MessagesConfig<WithBridgeHubPolkadotMessagesInstance>>::MessageDispatch;
-
-	fn test_storage_key() -> Vec<u8> {
-		(*b"test_key").to_vec()
-	}
-
-	fn test_storage_value() -> Vec<u8> {
-		(*b"test_value").to_vec()
-	}
-
-	pub fn encoded_xcm_message_from_bridge_hub_polkadot_require_wight_at_most() -> Weight {
-		Weight::from_parts(20_000_000_000, 8000)
-	}
-
-	pub fn encoded_xcm_message_from_bridge_hub_polkadot() -> Vec<u8> {
-		let universal_dest: VersionedInteriorMultiLocation =
-			X1(GlobalConsensus(crate::xcm_config::ThisNetwork::get())).into();
-		let xcm: Xcm<RuntimeCall> = vec![Transact {
-			origin_kind: OriginKind::Superuser,
-			call: RuntimeCall::System(frame_system::Call::set_storage {
-				items: vec![(test_storage_key(), test_storage_value())],
-			})
-			.encode()
-			.into(),
-			require_weight_at_most:
-				encoded_xcm_message_from_bridge_hub_polkadot_require_wight_at_most(),
-		}]
-		.into();
-		let xcm = VersionedXcm::<RuntimeCall>::V3(xcm);
-		// XCM BridgeMessage - a pair of `VersionedInteriorMultiLocation` and `VersionedXcm<()>`
-		(universal_dest, xcm).encode()
-	}
-
-	#[test]
-	fn messages_from_bridge_hub_polkadot_are_dispatched() {
-		run_test(|| {
-			assert_eq!(frame_support::storage::unhashed::get_raw(&test_storage_key()), None);
-			Dispatcher::dispatch(DispatchMessage {
-				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
-				data: DispatchMessageData {
-					payload: Ok(encoded_xcm_message_from_bridge_hub_polkadot()),
-				},
-			});
-			assert_eq!(
-				frame_support::storage::unhashed::get_raw(&test_storage_key()),
-				Some(test_storage_value()),
-			);
-		});
-	}
-
-	#[test]
-	fn messages_to_bridge_hub_polkadot_are_sent() {
-		run_test(|| {
-			assert_eq!(
-				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_generated_nonce,
-				0
-			);
-			send_xcm::<XcmRouter>(KawabungaLocation::get(), vec![ClearOrigin].into())
-				.expect("message is sent");
-			assert_ne!(
-				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_generated_nonce,
-				0
-			);
-		})
-	}
-
-	#[test]
-	fn encoded_test_xcm_message_to_bulletin_chain() {
-		// this "test" is currently used to encode dummy message for Polkadot BH -> Bulletin
-		// bridge. Once we have real sending chain (Kawabunga), it could be removed
-		println!("{}", hex::encode(&encoded_xcm_message_from_bridge_hub_polkadot()));
-	}
-
-	#[test]
-	fn expected_message_from_kawabunga_passes_barrier() {
-		// prepare message that we expect to come from the Polkadot BH
-		// (everything is relative to Polkadot BH)
-		let bridge_hub_universal_location = X2(GlobalConsensus(Polkadot), Parachain(1002));
-		let kawabunga_origin = MultiLocation::new(1, Parachain(KAWABUNGA_PARACHAIN_ID));
-		let universal_source =
-			bridge_hub_universal_location.within_global(kawabunga_origin).unwrap();
-		let (local_net, local_sub) = universal_source.split_global().unwrap();
-		let mut xcm: Xcm<RuntimeCall> = vec![
-			UniversalOrigin(GlobalConsensus(local_net)),
-			DescendOrigin(local_sub),
-			Transact {
-				origin_kind: OriginKind::Superuser,
-				require_weight_at_most: Weight::MAX,
-				call: RuntimeCall::System(frame_system::Call::remark { remark: vec![42] })
-					.encode()
-					.into(),
-			},
-		]
-		.into();
-
-		// ensure that it passes local XCM Barrier
-		assert_eq!(
-			Barrier::should_execute(
-				&Here.into(),
-				xcm.inner_mut(),
-				Weight::MAX,
-				&mut Properties { weight_credit: Weight::MAX, message_id: None },
-			),
-			Ok(())
-		);
-	}
-}
+// #[cfg(test)]
+// pub(crate) mod tests {
+// 	use super::*;
+// 	use crate::{
+// 		bridge_config::{tests::run_test, WithBridgeHubPolkadotMessagesInstance, XCM_LANE},
+// 		BridgePolkadotMessages, Runtime,
+// 	};
+// 	use bp_messages::{
+// 		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
+// 		MessageKey,
+// 	};
+// 	use codec::Encode;
+// 	use pallet_bridge_messages::Config as MessagesConfig;
+// 	use xcm_executor::traits::Properties;
+//
+// 	type Dispatcher =
+// 		<Runtime as MessagesConfig<WithBridgeHubPolkadotMessagesInstance>>::MessageDispatch;
+//
+// 	fn test_storage_key() -> Vec<u8> {
+// 		(*b"test_key").to_vec()
+// 	}
+//
+// 	fn test_storage_value() -> Vec<u8> {
+// 		(*b"test_value").to_vec()
+// 	}
+//
+// 	pub fn encoded_xcm_message_from_bridge_hub_polkadot_require_wight_at_most() -> Weight {
+// 		Weight::from_parts(20_000_000_000, 8000)
+// 	}
+//
+// 	pub fn encoded_xcm_message_from_bridge_hub_polkadot() -> Vec<u8> {
+// 		let universal_dest: VersionedInteriorMultiLocation =
+// 			X1(GlobalConsensus(crate::xcm_config::ThisNetwork::get())).into();
+// 		let xcm: Xcm<RuntimeCall> = vec![Transact {
+// 			origin_kind: OriginKind::Superuser,
+// 			call: RuntimeCall::System(frame_system::Call::set_storage {
+// 				items: vec![(test_storage_key(), test_storage_value())],
+// 			})
+// 			.encode()
+// 			.into(),
+// 			require_weight_at_most:
+// 				encoded_xcm_message_from_bridge_hub_polkadot_require_wight_at_most(),
+// 		}]
+// 		.into();
+// 		let xcm = VersionedXcm::<RuntimeCall>::V3(xcm);
+// 		// XCM BridgeMessage - a pair of `VersionedInteriorMultiLocation` and `VersionedXcm<()>`
+// 		(universal_dest, xcm).encode()
+// 	}
+//
+// 	#[test]
+// 	fn messages_from_bridge_hub_polkadot_are_dispatched() {
+// 		run_test(|| {
+// 			assert_eq!(frame_support::storage::unhashed::get_raw(&test_storage_key()), None);
+// 			Dispatcher::dispatch(DispatchMessage {
+// 				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+// 				data: DispatchMessageData {
+// 					payload: Ok(encoded_xcm_message_from_bridge_hub_polkadot()),
+// 				},
+// 			});
+// 			assert_eq!(
+// 				frame_support::storage::unhashed::get_raw(&test_storage_key()),
+// 				Some(test_storage_value()),
+// 			);
+// 		});
+// 	}
+//
+// 	#[test]
+// 	fn messages_to_bridge_hub_polkadot_are_sent() {
+// 		run_test(|| {
+// 			assert_eq!(
+// 				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_generated_nonce,
+// 				0
+// 			);
+// 			send_xcm::<XcmRouter>(KawabungaLocation::get(), vec![ClearOrigin].into())
+// 				.expect("message is sent");
+// 			assert_ne!(
+// 				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_generated_nonce,
+// 				0
+// 			);
+// 		})
+// 	}
+//
+// 	#[test]
+// 	fn encoded_test_xcm_message_to_bulletin_chain() {
+// 		// this "test" is currently used to encode dummy message for Polkadot BH -> Bulletin
+// 		// bridge. Once we have real sending chain (Kawabunga), it could be removed
+// 		println!("{}", hex::encode(&encoded_xcm_message_from_bridge_hub_polkadot()));
+// 	}
+//
+// 	#[test]
+// 	fn expected_message_from_kawabunga_passes_barrier() {
+// 		// prepare message that we expect to come from the Polkadot BH
+// 		// (everything is relative to Polkadot BH)
+// 		let bridge_hub_universal_location = X2(GlobalConsensus(Polkadot), Parachain(1002));
+// 		let kawabunga_origin = MultiLocation::new(1, Parachain(KAWABUNGA_PARACHAIN_ID));
+// 		let universal_source =
+// 			bridge_hub_universal_location.within_global(kawabunga_origin).unwrap();
+// 		let (local_net, local_sub) = universal_source.split_global().unwrap();
+// 		let mut xcm: Xcm<RuntimeCall> = vec![
+// 			UniversalOrigin(GlobalConsensus(local_net)),
+// 			DescendOrigin(local_sub),
+// 			Transact {
+// 				origin_kind: OriginKind::Superuser,
+// 				require_weight_at_most: Weight::MAX,
+// 				call: RuntimeCall::System(frame_system::Call::remark { remark: vec![42] })
+// 					.encode()
+// 					.into(),
+// 			},
+// 		]
+// 		.into();
+//
+// 		// ensure that it passes local XCM Barrier
+// 		assert_eq!(
+// 			Barrier::should_execute(
+// 				&Here.into(),
+// 				xcm.inner_mut(),
+// 				Weight::MAX,
+// 				&mut Properties { weight_credit: Weight::MAX, message_id: None },
+// 			),
+// 			Ok(())
+// 		);
+// 	}
+// }

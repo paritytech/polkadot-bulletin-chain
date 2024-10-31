@@ -31,32 +31,54 @@ use core::marker::PhantomData;
 /// Weight functions for `pallet_bridge_grandpa`.
 pub struct WeightInfo<T>(PhantomData<T>);
 impl<T: frame_system::Config> pallet_bridge_grandpa::WeightInfo for WeightInfo<T> {
-	/// Storage: `BridgePolkadotGrandpa::PalletOperatingMode` (r:1 w:0)
-	/// Proof: `BridgePolkadotGrandpa::PalletOperatingMode` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
-	/// Storage: `BridgePolkadotGrandpa::BestFinalized` (r:1 w:1)
-	/// Proof: `BridgePolkadotGrandpa::BestFinalized` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
-	/// Storage: `BridgePolkadotGrandpa::CurrentAuthoritySet` (r:1 w:0)
-	/// Proof: `BridgePolkadotGrandpa::CurrentAuthoritySet` (`max_values`: Some(1), `max_size`: Some(50250), added: 50745, mode: `MaxEncodedLen`)
-	/// Storage: `BridgePolkadotGrandpa::ImportedHashesPointer` (r:1 w:1)
-	/// Proof: `BridgePolkadotGrandpa::ImportedHashesPointer` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `BridgePolkadotGrandpa::ImportedHashes` (r:1 w:1)
-	/// Proof: `BridgePolkadotGrandpa::ImportedHashes` (`max_values`: Some(1024), `max_size`: Some(36), added: 1521, mode: `MaxEncodedLen`)
-	/// Storage: `BridgePolkadotGrandpa::ImportedHeaders` (r:0 w:2)
-	/// Proof: `BridgePolkadotGrandpa::ImportedHeaders` (`max_values`: Some(1024), `max_size`: Some(68), added: 1553, mode: `MaxEncodedLen`)
-	/// The range of component `p` is `[1, 838]`.
+	/// Storage: `BridgeWestendGrandpa::CurrentAuthoritySet` (r:1 w:0)
+	/// Proof: `BridgeWestendGrandpa::CurrentAuthoritySet` (`max_values`: Some(1), `max_size`: Some(50250), added: 50745, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::PalletOperatingMode` (r:1 w:0)
+	/// Proof: `BridgeWestendGrandpa::PalletOperatingMode` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::BestFinalized` (r:1 w:1)
+	/// Proof: `BridgeWestendGrandpa::BestFinalized` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::FreeHeadersRemaining` (r:1 w:0)
+	/// Proof: `BridgeWestendGrandpa::FreeHeadersRemaining` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::ImportedHashesPointer` (r:1 w:1)
+	/// Proof: `BridgeWestendGrandpa::ImportedHashesPointer` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::ImportedHashes` (r:1 w:1)
+	/// Proof: `BridgeWestendGrandpa::ImportedHashes` (`max_values`: Some(1024), `max_size`: Some(36), added: 1521, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::ImportedHeaders` (r:0 w:2)
+	/// Proof: `BridgeWestendGrandpa::ImportedHeaders` (`max_values`: Some(1024), `max_size`: Some(68), added: 1553, mode: `MaxEncodedLen`)
+	/// The range of component `p` is `[1, 168]`.
 	/// The range of component `v` is `[50, 100]`.
 	fn submit_finality_proof(p: u32, v: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `33 + p * (60 ±0)`
+		//  Measured:  `438 + p * (60 ±0)`
 		//  Estimated: `51735`
-		// Minimum execution time: 263_147_000 picoseconds.
-		Weight::from_parts(264_988_000, 0)
+		// Minimum execution time: 313_304_000 picoseconds.
+		Weight::from_parts(20_632_995, 0)
 			.saturating_add(Weight::from_parts(0, 51735))
-			// Standard Error: 42_235
-			.saturating_add(Weight::from_parts(31_359_286, 0).saturating_mul(p.into()))
-			// Standard Error: 325_910
-			.saturating_add(Weight::from_parts(6_309_359, 0).saturating_mul(v.into()))
-			.saturating_add(T::DbWeight::get().reads(5))
+			// Standard Error: 13_694
+			.saturating_add(Weight::from_parts(40_797_990, 0).saturating_mul(p.into()))
+			// Standard Error: 45_696
+			.saturating_add(Weight::from_parts(2_594_504, 0).saturating_mul(v.into()))
+			.saturating_add(T::DbWeight::get().reads(6))
 			.saturating_add(T::DbWeight::get().writes(5))
+	}
+	/// Storage: `BridgeWestendGrandpa::CurrentAuthoritySet` (r:1 w:1)
+	/// Proof: `BridgeWestendGrandpa::CurrentAuthoritySet` (`max_values`: Some(1), `max_size`: Some(50250), added: 50745, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::ImportedHashesPointer` (r:1 w:1)
+	/// Proof: `BridgeWestendGrandpa::ImportedHashesPointer` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::ImportedHashes` (r:1 w:1)
+	/// Proof: `BridgeWestendGrandpa::ImportedHashes` (`max_values`: Some(1024), `max_size`: Some(36), added: 1521, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::BestFinalized` (r:0 w:1)
+	/// Proof: `BridgeWestendGrandpa::BestFinalized` (`max_values`: Some(1), `max_size`: Some(36), added: 531, mode: `MaxEncodedLen`)
+	/// Storage: `BridgeWestendGrandpa::ImportedHeaders` (r:0 w:2)
+	/// Proof: `BridgeWestendGrandpa::ImportedHeaders` (`max_values`: Some(1024), `max_size`: Some(68), added: 1553, mode: `MaxEncodedLen`)
+	fn force_set_pallet_state() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `452`
+		//  Estimated: `51735`
+		// Minimum execution time: 98_033_000 picoseconds.
+		Weight::from_parts(117_394_000, 0)
+			.saturating_add(Weight::from_parts(0, 51735))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().writes(6))
 	}
 }
