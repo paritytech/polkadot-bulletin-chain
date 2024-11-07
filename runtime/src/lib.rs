@@ -2,6 +2,8 @@
 // `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
 #![recursion_limit = "256"]
 
+extern crate alloc;
+
 // Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
@@ -13,12 +15,11 @@ use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
 use pallet_bridge_messages::Call as BridgeMessagesCall;
 use pallet_bridge_parachains::Call as BridgeParachainsCall;
 use pallet_grandpa::AuthorityId as GrandpaId;
-use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	create_runtime_str, generic, impl_opaque_keys, impl_tx_ext_default,
+	generic, impl_opaque_keys, impl_tx_ext_default,
 	traits::{
 		AccountIdLookup, BlakeTwo256, Block as BlockT, ConvertInto, DispatchInfoOf,
 		IdentifyAccount, NumberFor, OpaqueKeys, PostDispatchInfoOf, SignedExtension, Verify,
@@ -35,6 +36,7 @@ use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
 // A few exports that help ease life for downstream crates.
+use frame_support::genesis_builder_helper::{build_state, get_preset};
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
@@ -57,6 +59,7 @@ pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
 
 mod bridge_config;
+mod genesis_config_presets;
 mod weights;
 mod xcm_config;
 
@@ -96,7 +99,6 @@ pub mod opaque {
 		pub struct SessionKeys {
 			pub babe: Babe,
 			pub grandpa: Grandpa,
-			pub im_online: ImOnline,
 		}
 	}
 }
@@ -105,9 +107,9 @@ pub mod opaque {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: create_runtime_str!("polkadot-bulletin-chain"),
-	impl_name: create_runtime_str!("polkadot-bulletin-chain"),
-	authoring_version: 1,
+	spec_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
+	impl_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
+	authoring_version: 0,
 	// The version of the runtime specification. A full node will not attempt to use its native
 	//   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,
 	//   `spec_version`, and `authoring_version` are the same between Wasm and native.
@@ -184,7 +186,6 @@ parameter_types! {
 	pub const EquivocationReportPeriodInBlocks: u64 =
 		EquivocationReportPeriodInEpochs::get() * (EPOCH_DURATION_IN_BLOCKS as u64);
 
-	pub const ImOnlineUnsignedPriority: TransactionPriority = TransactionPriority::max_value();
 
 	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
 	pub const StoragePeriod: BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
@@ -194,7 +195,7 @@ parameter_types! {
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = DAYS as TransactionLongevity;
 
-	pub const SudoPriority: TransactionPriority = ImOnlineUnsignedPriority::get() - 1;
+	pub const SudoPriority: TransactionPriority = TransactionPriority::max_value();
 
 	pub const SetKeysCooldownBlocks: BlockNumber = 5 * MINUTES;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
@@ -314,19 +315,7 @@ impl pallet_offences::Config for Runtime {
 
 impl pallet_authorship::Config for Runtime {
 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
-	type EventHandler = ImOnline;
-}
-
-impl pallet_im_online::Config for Runtime {
-	type AuthorityId = ImOnlineId;
-	type MaxKeys = MaxAuthorities;
-	type MaxPeerInHeartbeats = ConstU32<0>; // Not used any more
-	type RuntimeEvent = RuntimeEvent;
-	type ValidatorSet = Historical;
-	type NextSessionRotation = Babe;
-	type ReportUnresponsiveness = Offences;
-	type UnsignedPriority = ImOnlineUnsignedPriority;
-	type WeightInfo = pallet_im_online::weights::SubstrateWeight<Runtime>;
+	type EventHandler = ();
 }
 
 impl pallet_timestamp::Config for Runtime {
@@ -387,15 +376,13 @@ construct_runtime!(
 		// Babe must be called before Session
 		Babe: pallet_babe::{Pallet, Call, Storage, Config<T>, ValidateUnsigned} = 1,
 		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent} = 2,
-		// Authorship must be before session in order to note author in the correct session for
-		// im-online.
+		// Authorship must be before session in order to note author in the correct session.
 		Authorship: pallet_authorship::{Pallet, Storage} = 10,
 		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
 		Historical: pallet_session::historical::{Pallet} = 12,
 		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
 		Session: pallet_session::{Pallet, Call, Storage, Event, Config<T>} = 14,
-		ImOnline: pallet_im_online::{Pallet, Call, Storage, Event<T>, ValidateUnsigned, Config<T>} = 15,
-		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 16,
+		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
 
 		// Storage
 		TransactionStorage: pallet_transaction_storage::{Pallet, Call, Storage, Event<T>} = 40,
@@ -829,6 +816,20 @@ impl_runtime_apis! {
 				Runtime,
 				bridge_config::WithBridgeHubPolkadotMessagesInstance,
 			>(lane, begin, end)
+		}
+	}
+
+	impl sp_genesis_builder::GenesisBuilder<Block> for Runtime {
+		fn build_state(config: Vec<u8>) -> sp_genesis_builder::Result {
+			build_state::<RuntimeGenesisConfig>(config)
+		}
+
+		fn get_preset(id: &Option<sp_genesis_builder::PresetId>) -> Option<Vec<u8>> {
+			get_preset::<RuntimeGenesisConfig>(id, genesis_config_presets::get_preset)
+		}
+
+		fn preset_names() -> Vec<sp_genesis_builder::PresetId> {
+			genesis_config_presets::preset_names()
 		}
 	}
 

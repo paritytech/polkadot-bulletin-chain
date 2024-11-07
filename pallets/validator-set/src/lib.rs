@@ -220,6 +220,7 @@ impl<T: Config> Pallet<T> {
 		})?;
 
 		frame_system::Pallet::<T>::inc_providers(who);
+		frame_system::Pallet::<T>::inc_sufficients(who);
 
 		Ok(())
 	}

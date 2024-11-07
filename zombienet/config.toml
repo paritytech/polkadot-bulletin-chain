@@ -4,10 +4,7 @@
 
 [relaychain]
 chain = "local"
-default_command = "./bin/polkadot-bulletin-chain"
-
-	[relaychain.genesis.runtime.validatorSet]
-	initialValidators = ["5GNJqTPyNqANBkUVMN1LPPrxXnFouWXoe2wNSmmEoLctxiZY", "5HpG9w8EBLe5XCrbczpwq5TSXvedjrBGCwqxK1iQ7qUsSWFc"]
+default_command = "/home/serban/workplace/sources/polkadot-bulletin-chain/target/release/polkadot-bulletin-chain"
 
 	[[relaychain.nodes]]
 	name = "alice"

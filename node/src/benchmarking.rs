@@ -13,6 +13,7 @@ use sp_inherents::{InherentData, InherentDataProvider};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{OpaqueExtrinsic, SaturatedConversion};
 
+use sp_runtime::traits::transaction_extension::AsTransactionExtension;
 use std::{sync::Arc, time::Duration};
 
 /// Generates extrinsics for the `benchmark overhead` command.
@@ -80,7 +81,7 @@ pub fn create_benchmark_extrinsic(
 		)),
 		frame_system::CheckNonce::<runtime::Runtime>::from(nonce),
 		frame_system::CheckWeight::<runtime::Runtime>::new(),
-		runtime::ValidateSigned,
+		AsTransactionExtension::<runtime::ValidateSigned>(runtime::ValidateSigned),
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
 	);
 

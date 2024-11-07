@@ -15,6 +15,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 codec = { package = "parity-scale-codec", version = "3.6.1", default-features = false, features = ["derive"] }
 log = { version = "0.4", default-features = false }
 scale-info = { version = "2.5.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.132", default-features = false, features = ["alloc"] }
 
 frame-executive = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 frame-support = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
@@ -33,6 +34,7 @@ sp-block-builder = { default-features = false, git = "https://github.com/parityt
 sp-consensus-babe = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-consensus-grandpa = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-core = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
+sp-genesis-builder = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-inherents = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-io = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-offchain = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
@@ -95,6 +97,7 @@ std = [
 	"codec/std",
 	"log/std",
 	"scale-info/std",
+	"serde_json/std",
 
 	"frame-executive/std",
 	"frame-support/std",
