@@ -776,7 +776,7 @@ impl_runtime_apis! {
 
 		fn free_headers_interval() -> Option<u32> {
 			<Runtime as pallet_bridge_grandpa::Config<
-				bridge_config::WithPolkadotBridgeGrandpaInstance
+				bridge_config::WithRococoBridgeGrandpaInstance
 			>>::FreeHeadersInterval::get()
 		}
 	}
@@ -801,7 +801,7 @@ impl_runtime_apis! {
 		) -> Vec<bp_messages::InboundMessageDetails> {
 			bridge_runtime_common::messages_api::inbound_message_details::<
 				Runtime,
-				bridge_config::WithBridgeHubPolkadotMessagesInstance,
+				bridge_config::WithBridgeHubRococoMessagesInstance,
 			>(lane, messages)
 		}
 	}
@@ -814,7 +814,7 @@ impl_runtime_apis! {
 		) -> Vec<bp_messages::OutboundMessageDetails> {
 			bridge_runtime_common::messages_api::outbound_message_details::<
 				Runtime,
-				bridge_config::WithBridgeHubPolkadotMessagesInstance,
+				bridge_config::WithBridgeHubRococoMessagesInstance,
 			>(lane, begin, end)
 		}
 	}

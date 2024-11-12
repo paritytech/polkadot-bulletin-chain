@@ -66,6 +66,7 @@ bp-parachains = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = 
 bp-polkadot = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-polkadot-bulletin = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-polkadot-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+bp-rococo = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bridge-runtime-common = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 pallet-bridge-grandpa = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
@@ -143,6 +144,7 @@ std = [
 	"bp-polkadot/std",
 	"bp-polkadot-bulletin/std",
 	"bp-polkadot-core/std",
+	"bp-rococo/std",
 	"bp-runtime/std",
 	"bridge-runtime-common/std",
 	"pallet-bridge-grandpa/std",

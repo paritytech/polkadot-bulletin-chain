@@ -17,7 +17,7 @@
 //! XCM configuration for Polkadot Bulletin chain.
 
 use crate::{
-	bridge_config::{BridgedNetwork, ToBridgeHubPolkadotHaulBlobExporter},
+	bridge_config::{BridgedNetwork, ToBridgeHubRococoHaulBlobExporter},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
 
@@ -28,7 +28,7 @@ use frame_support::{
 	weights::Weight,
 };
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
-use sp_core::{ConstU32, Get};
+use sp_core::ConstU32;
 use sp_io::hashing::blake2_256;
 use xcm::{latest::prelude::*, VersionedInteriorLocation, VersionedXcm, MAX_XCM_DECODE_DEPTH};
 use xcm_builder::{
@@ -171,7 +171,7 @@ type LocalOriginConverter = (
 );
 
 /// Only bridged destination is supported.
-pub type XcmRouter = UnpaidLocalExporter<ToBridgeHubPolkadotHaulBlobExporter, UniversalLocation>;
+pub type XcmRouter = UnpaidLocalExporter<ToBridgeHubRococoHaulBlobExporter, UniversalLocation>;
 
 /// The barriers one of which must be passed for an XCM message to be executed.
 pub type Barrier = TrailingSetTopicAsId<
@@ -208,7 +208,7 @@ impl xcm_executor::Config for XcmConfig {
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = ConstU32<0>;
 	type FeeManager = ();
-	type MessageExporter = ToBridgeHubPolkadotHaulBlobExporter;
+	type MessageExporter = ToBridgeHubRococoHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
 	type SafeCallFilter = Everything;

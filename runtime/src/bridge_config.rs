@@ -2,38 +2,22 @@
 
 use crate::{
 	xcm_config::{decode_bridge_message, XcmConfig},
-	AccountId, BridgePolkadotGrandpa, ConstU32, Runtime, RuntimeEvent, RuntimeOrigin,
+	ConstU32, Runtime, RuntimeEvent,
 };
 use bp_messages::{
 	source_chain::MessagesBridge,
 	target_chain::{DispatchMessage, MessageDispatch},
-	LegacyLaneId, MessageNonce,
+	LegacyLaneId,
 };
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
-use bp_runtime::{messages::MessageDispatchResult, ChainId, UnderlyingChainProvider};
+use bp_runtime::messages::MessageDispatchResult;
 use codec::{Decode, Encode};
-// use bridge_runtime_common::{
-// 	messages::{
-// 		source::{
-// 			FromThisChainMaximalOutboundPayloadSize, FromThisChainMessageVerifier,
-// 			TargetHeaderChainAdapter,
-// 		},
-// 		target::SourceHeaderChainAdapter,
-// 		BridgedChainWithMessages, MessageBridge, ThisChainWithMessages,
-// 	},
-// 	messages_xcm_extension::{
-// 		SenderAndLane, XcmBlobHauler, XcmBlobHaulerAdapter, XcmBlobMessageDispatch,
-// 	},
-// };
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
-use sp_runtime::{
-	transaction_validity::{InvalidTransaction, TransactionValidity},
-	RuntimeDebug, SaturatedConversion,
-};
-use sp_std::{marker::PhantomData, vec::Vec};
-use xcm::prelude::*;
+use sp_runtime::SaturatedConversion;
+use sp_std::marker::PhantomData;
+use xcm::{latest::ROCOCO_GENESIS_HASH, prelude::*};
 use xcm_builder::{DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError, HaulBlobExporter};
 use xcm_executor::XcmExecutor;
 
@@ -41,25 +25,27 @@ use xcm_executor::XcmExecutor;
 pub const XCM_LANE: LegacyLaneId = LegacyLaneId([0, 0, 0, 0]);
 
 parameter_types! {
-	pub PolkadotGlobalConsensusNetwork: NetworkId = NetworkId::Polkadot;
-	pub PolkadotGlobalConsensusNetworkLocation: Location = Location::new(
+	pub RococoGlobalConsensusNetwork: NetworkId = NetworkId::ByGenesis(ROCOCO_GENESIS_HASH);
+	pub BridgedNetwork: NetworkId = RococoGlobalConsensusNetwork::get();
+	pub RococoGlobalConsensusNetworkLocation: Location = Location::new(
 		1,
-		[GlobalConsensus(PolkadotGlobalConsensusNetwork::get())]
+		[GlobalConsensus(RococoGlobalConsensusNetwork::get())]
 	);
+
 	/// A number of Polkadot mandatory headers that are accepted for free at every
 	/// **this chain** block.
-	pub const MaxFreePolkadotHeadersPerBlock: u32 = 4;
+	pub const MaxFreeRococoHeadersPerBlock: u32 = 4;
 	/// A number of Polkadot header digests that we keep in the storage.
-	pub const PolkadotHeadersToKeep: u32 = 1024;
+	pub const RococoHeadersToKeep: u32 = 1024;
 	/// A name of parachains pallet at Pokadot.
-	pub const AtPolkadotParasPalletName: &'static str = bp_polkadot::PARAS_PALLET_NAME;
+	pub const AtRococoParasPalletName: &'static str = bp_rococo::PARAS_PALLET_NAME;
 
 // 	/// Chain identifier of Polkadot Bridge Hub.
 // 	pub const BridgeHubPolkadotChainId: ChainId = bp_runtime::BRIDGE_HUB_POLKADOT_CHAIN_ID;
 	/// A number of Polkadot Bridge Hub head digests that we keep in the storage.
-	pub const BridgeHubPolkadotHeadsToKeep: u32 = 1024;
+	pub const BridgeHubRococoHeadsToKeep: u32 = 1024;
 	/// A maximal size of Polkadot Bridge Hub head digest.
-	pub const MaxPolkadotBridgeHubHeadSize: u32 = bp_polkadot::MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE;
+	pub const MaxBridgeHubRococoHeadSize: u32 = bp_rococo::MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE;
 
 // 	/// All active outbound lanes.
 // 	pub const ActiveOutboundLanes: &'static [LaneId] = &[XCM_LANE];
@@ -80,21 +66,6 @@ parameter_types! {
 // 	pub NeverSentMessage: Option<Xcm<()>> = None;
 }
 
-/// Bridged chain global consensus network.
-pub struct BridgedNetwork;
-
-impl sp_runtime::traits::Get<NetworkId> for BridgedNetwork {
-	#[cfg(not(feature = "rococo"))]
-	fn get() -> NetworkId {
-		Polkadot
-	}
-
-	#[cfg(feature = "rococo")]
-	fn get() -> NetworkId {
-		Rococo
-	}
-}
-
 // impl bp_runtime::Parachain for BridgeHubPolkadotOrRococo {
 // 	#[cfg(not(feature = "rococo"))]
 // 	const PARACHAIN_ID: u32 = bp_bridge_hub_polkadot::BridgeHubPolkadot::PARACHAIN_ID;
@@ -103,29 +74,29 @@ impl sp_runtime::traits::Get<NetworkId> for BridgedNetwork {
 // }
 //
 /// An instance of `pallet_bridge_grandpa` used to bridge with Polkadot.
-pub type WithPolkadotBridgeGrandpaInstance = ();
-impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtime {
+pub type WithRococoBridgeGrandpaInstance = ();
+impl pallet_bridge_grandpa::Config<WithRococoBridgeGrandpaInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::bridge_polkadot_grandpa::WeightInfo<Runtime>;
 
-	type BridgedChain = bp_polkadot::Polkadot;
-	type MaxFreeHeadersPerBlock = MaxFreePolkadotHeadersPerBlock;
+	type BridgedChain = bp_rococo::Rococo;
+	type MaxFreeHeadersPerBlock = MaxFreeRococoHeadersPerBlock;
 	type FreeHeadersInterval = ConstU32<5>;
-	type HeadersToKeep = PolkadotHeadersToKeep;
+	type HeadersToKeep = RococoHeadersToKeep;
 }
 
 /// An instance of `pallet_bridge_parachains` used to bridge with Polkadot.
-pub type WithPolkadotBridgeParachainsInstance = ();
-impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for Runtime {
+pub type WithRococoBridgeParachainsInstance = ();
+impl pallet_bridge_parachains::Config<WithRococoBridgeParachainsInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::bridge_polkadot_parachains::WeightInfo<Runtime>;
 
-	type BridgesGrandpaPalletInstance = WithPolkadotBridgeGrandpaInstance;
-	type ParasPalletName = AtPolkadotParasPalletName;
+	type BridgesGrandpaPalletInstance = WithRococoBridgeGrandpaInstance;
+	type ParasPalletName = AtRococoParasPalletName;
 	type ParaStoredHeaderDataBuilder =
-		SingleParaStoredHeaderDataBuilder<bp_bridge_hub_polkadot::BridgeHubPolkadot>;
-	type HeadsToKeep = BridgeHubPolkadotHeadsToKeep;
-	type MaxParaHeadDataSize = MaxPolkadotBridgeHubHeadSize;
+		SingleParaStoredHeaderDataBuilder<bp_bridge_hub_rococo::BridgeHubRococo>;
+	type HeadsToKeep = BridgeHubRococoHeadsToKeep;
+	type MaxParaHeadDataSize = MaxBridgeHubRococoHeadSize;
 }
 
 const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
@@ -211,17 +182,17 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 }
 
 /// An instance of `pallet_bridge_messages` used to bridge with Polkadot Bridge Hub.
-pub type WithBridgeHubPolkadotMessagesInstance = ();
-impl pallet_bridge_messages::Config<WithBridgeHubPolkadotMessagesInstance> for Runtime {
+pub type WithBridgeHubRococoMessagesInstance = ();
+impl pallet_bridge_messages::Config<WithBridgeHubRococoMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::bridge_polkadot_messages::WeightInfo<Runtime>;
 
 	type ThisChain = bp_polkadot_bulletin::PolkadotBulletin;
-	type BridgedChain = bp_bridge_hub_polkadot::BridgeHubPolkadot;
+	type BridgedChain = bp_bridge_hub_rococo::BridgeHubRococo;
 	type BridgedHeaderChain = pallet_bridge_parachains::ParachainHeaders<
 		Runtime,
-		WithPolkadotBridgeParachainsInstance,
-		bp_bridge_hub_polkadot::BridgeHubPolkadot,
+		WithRococoBridgeParachainsInstance,
+		bp_bridge_hub_rococo::BridgeHubRococo,
 	>;
 
 	type OutboundPayload = XcmAsPlainPayload;
@@ -232,7 +203,7 @@ impl pallet_bridge_messages::Config<WithBridgeHubPolkadotMessagesInstance> for R
 	type DeliveryConfirmationPayments = ();
 
 	type MessageDispatch = WithXcmWeightDispatcher<
-		XcmBlobMessageDispatch<FromBridgeHubPolkadotBlobDispatcher, Self::WeightInfo>,
+		XcmBlobMessageDispatch<FromBridgeHubRococoBlobDispatcher, Self::WeightInfo>,
 	>;
 	type OnMessagesDelivered = ();
 }
@@ -278,7 +249,7 @@ where
 }
 
 /// Dispatches received XCM messages from the Polkadot Bridge Hub.
-pub type FromBridgeHubPolkadotBlobDispatcher = crate::xcm_config::ImmediateXcmDispatcher;
+pub type FromBridgeHubRococoBlobDispatcher = crate::xcm_config::ImmediateXcmDispatcher;
 
 pub struct XcmBlobHauler<Runtime, MessagesInstance> {
 	_marker: PhantomData<(Runtime, MessagesInstance)>,
@@ -322,9 +293,9 @@ where
 }
 
 /// Export XCM messages to be relayed to the Polkadot Bridge Hub chain.
-pub type ToBridgeHubPolkadotHaulBlobExporter = HaulBlobExporter<
-	XcmBlobHauler<Runtime, WithBridgeHubPolkadotMessagesInstance>,
-	PolkadotGlobalConsensusNetworkLocation,
+pub type ToBridgeHubRococoHaulBlobExporter = HaulBlobExporter<
+	XcmBlobHauler<Runtime, WithBridgeHubRococoMessagesInstance>,
+	RococoGlobalConsensusNetworkLocation,
 	AlwaysV4,
 	(),
 >;
