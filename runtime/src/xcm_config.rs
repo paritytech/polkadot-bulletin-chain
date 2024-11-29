@@ -48,7 +48,7 @@ parameter_types! {
 	// TODO [bridge]: how we are supposed to set it? Named? ByGenesis - if so, when?
 	// After generating chain spec?
 	/// The Polkadot Bulletin Chain network ID.
-	pub const ThisNetwork: NetworkId = NetworkId::ByGenesis([42u8; 32]);
+	pub const ThisNetwork: NetworkId = NetworkId::PolkadotBulletin;
 	/// Our location in the universe of consensus systems.
 	pub UniversalLocation: InteriorLocation = ThisNetwork::get().into();
 

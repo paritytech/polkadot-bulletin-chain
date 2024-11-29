@@ -74,6 +74,8 @@ pallet-bridge-parachains = { git = "https://github.com/paritytech/polkadot-sdk.g
 pallet-bridge-messages = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 pallet-bridge-relayers = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 pallet-xcm-bridge-hub = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+pallet-transaction-payment = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+pallet-transaction-payment-rpc-runtime-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 
 # XCM dependencies
 xcm = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", package = "staging-xcm" }
@@ -133,6 +135,8 @@ std = [
 	"frame-system-benchmarking?/std",
 
 	"pallet-relayer-set/std",
+	"pallet-transaction-payment/std",
+	"pallet-transaction-payment-rpc-runtime-api/std",
 	"pallet-transaction-storage/std",
 	"pallet-validator-set/std",
 
@@ -179,6 +183,7 @@ runtime-benchmarks = [
 	"pallet-xcm-bridge-hub/runtime-benchmarks",
 
 	"pallet-relayer-set/runtime-benchmarks",
+	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
 
@@ -205,6 +210,7 @@ try-runtime = [
 	"pallet-xcm-bridge-hub/try-runtime",
 
 	"pallet-relayer-set/try-runtime",
+	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
 ]

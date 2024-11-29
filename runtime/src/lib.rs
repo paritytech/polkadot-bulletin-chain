@@ -36,7 +36,6 @@ use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
 // A few exports that help ease life for downstream crates.
-use frame_support::genesis_builder_helper::{build_state, get_preset};
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
@@ -51,8 +50,13 @@ pub use frame_support::{
 	},
 	StorageValue,
 };
+use frame_support::{
+	dispatch::{DispatchInfo, GetDispatchInfo},
+	genesis_builder_helper::{build_state, get_preset},
+};
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
+use pallet_transaction_payment::RuntimeDispatchInfo;
 use sp_runtime::traits::transaction_extension::AsTransactionExtension;
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -406,6 +410,7 @@ pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 pub type Block = generic::Block<Header, UncheckedExtrinsic>;
 
 fn validate_sudo(_who: &AccountId) -> TransactionValidity {
+	// TODO: make Sudo::key() accessible and uncomment this.
 	// // Only allow sudo transactions signed by the sudo account. The sudo pallet obviously checks
 	// // this, but not until transaction execution.
 	// if Sudo::key().map_or(false, |k| who == &k) {
@@ -784,7 +789,7 @@ impl_runtime_apis! {
 	impl bp_bridge_hub_polkadot::BridgeHubPolkadotFinalityApi<Block> for Runtime {
 		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_polkadot::Hash, bp_bridge_hub_polkadot::BlockNumber>> {
 			BridgePolkadotParachains::best_parachain_head_id::<
-				bp_bridge_hub_polkadot::BridgeHubPolkadot
+				bp_bridge_hub_rococo::BridgeHubRococo
 			>().unwrap_or(None)
 		}
 
@@ -899,6 +904,32 @@ impl_runtime_apis! {
 			// NOTE: intentional unwrap: we don't want to propagate the error backwards, and want to
 			// have a backtrace here.
 			Executive::try_execute_block(block, state_root_check, signature_check, select).expect("execute-block failed")
+		}
+	}
+
+	impl pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<Block, u128> for Runtime {
+		fn query_info(
+			uxt: <Block as BlockT>::Extrinsic,
+			_len: u32,
+		) -> RuntimeDispatchInfo<u128> {
+			let dispatch_info = <<Block as BlockT>::Extrinsic as GetDispatchInfo>::get_dispatch_info(&uxt);
+			RuntimeDispatchInfo {
+				weight: dispatch_info.total_weight(),
+				class: dispatch_info.class,
+				partial_fee: 0
+			}
+		}
+		fn query_fee_details(
+			_uxt: <Block as BlockT>::Extrinsic,
+			_len: u32,
+		) -> pallet_transaction_payment::FeeDetails<u128> {
+			todo!()
+		}
+		fn query_weight_to_fee(_weight: Weight) -> u128 {
+			todo!()
+		}
+		fn query_length_to_fee(_len: u32) -> u128 {
+			todo!()
 		}
 	}
 }

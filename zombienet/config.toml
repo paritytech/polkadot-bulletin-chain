@@ -4,13 +4,13 @@
 
 [relaychain]
 chain = "local"
-default_command = "/home/serban/workplace/sources/polkadot-bulletin-chain/target/release/polkadot-bulletin-chain"
+default_command = "{{POLKADOT_BULLETIN_BINARY_PATH}}"
 
 	[[relaychain.nodes]]
 	name = "alice"
 	ws_port = 10000
 	validator = true
-	args = [ "--ipfs-server", "-lbitswap=trace", "-lruntime=trace", "-lxcm=trace" ]
+	args = [ "--ipfs-server", "-lruntime=trace", "-lxcm=trace" ]
 
 	[[relaychain.nodes]]
 	name = "bob"

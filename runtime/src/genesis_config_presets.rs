@@ -1,8 +1,8 @@
 use crate::{
-	opaque::SessionKeys, AccountId, BabeConfig, BridgePolkadotGrandpaConfig,
-	BridgePolkadotMessagesConfig, BridgePolkadotParachainsConfig, RelayerSetConfig,
-	RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig, ValidatorSetConfig,
-	BABE_GENESIS_EPOCH_CONFIG,
+	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig,
+	BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig, BridgePolkadotParachainsConfig,
+	RelayerSetConfig, RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig,
+	ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
 };
 use scale_info::prelude::format;
 use sp_consensus_babe::AuthorityId as BabeId;
@@ -84,6 +84,7 @@ fn testnet_genesis(
 		},
 		bridge_polkadot_messages: BridgePolkadotMessagesConfig {
 			owner: Some(root_key),
+			opened_lanes: vec![XCM_LANE],
 			..Default::default()
 		},
 		..Default::default()
