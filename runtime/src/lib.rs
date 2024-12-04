@@ -393,9 +393,9 @@ construct_runtime!(
 
 		// Bridge
 		RelayerSet: pallet_relayer_set::{Pallet, Storage, Event<T>, Config<T>} = 50,
-		BridgePolkadotGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>, Config<T>} = 51,
-		BridgePolkadotParachains: pallet_bridge_parachains::{Pallet, Call, Storage, Event<T>, Config<T>} = 52,
-		BridgePolkadotMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>} = 53,
+		BridgeRococoGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>, Config<T>} = 51,
+		BridgeRococoParachains: pallet_bridge_parachains::{Pallet, Call, Storage, Event<T>, Config<T>} = 52,
+		BridgeRococoMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>} = 53,
 
 		// sudo
 		Sudo: pallet_sudo::{Pallet, Call, Storage, Event<T>, Config<T>} = 255,
@@ -478,16 +478,16 @@ impl SignedExtension for ValidateSigned {
 				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
 			Self::Call::Session(SessionCall::purge_keys {}) =>
 				validate_purge_keys(who).map(|_| None),
-			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
+			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
 			}) |
-			Self::Call::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
 			}) |
-			Self::Call::BridgePolkadotMessages(
+			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			Self::Call::BridgeRococoMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
 			_ => Err(InvalidTransaction::Call.into()),
@@ -511,16 +511,16 @@ impl SignedExtension for ValidateSigned {
 					..Default::default()
 				}),
 			Self::Call::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
-			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
+			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
 			}) |
-			Self::Call::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
 			}) |
-			Self::Call::BridgePolkadotMessages(
+			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			Self::Call::BridgeRococoMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
 				priority: BridgeTxPriority::get(),
@@ -552,11 +552,11 @@ impl SignedExtension for ValidateSigned {
 generate_bridge_reject_obsolete_headers_and_messages! {
 	RuntimeCall, AccountId,
 	// Grandpa
-	BridgePolkadotGrandpa,
+	BridgeRococoGrandpa,
 	// Parachains
-	BridgePolkadotParachains,
+	BridgeRococoParachains,
 	// Messages
-	BridgePolkadotMessages
+	BridgeRococoMessages
 }
 
 /// The SignedExtension to the basic transaction logic.
@@ -769,14 +769,14 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_polkadot::PolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_polkadot::Hash, bp_polkadot::BlockNumber>> {
-			BridgePolkadotGrandpa::best_finalized()
+	impl bp_rococo::RococoFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_rococo::Hash, bp_rococo::BlockNumber>> {
+			BridgeRococoGrandpa::best_finalized()
 		}
 
 		fn synced_headers_grandpa_info(
-		) -> Vec<bp_header_chain::StoredHeaderGrandpaInfo<bp_polkadot::Header>> {
-			BridgePolkadotGrandpa::synced_headers_grandpa_info()
+		) -> Vec<bp_header_chain::StoredHeaderGrandpaInfo<bp_rococo::Header>> {
+			BridgeRococoGrandpa::synced_headers_grandpa_info()
 		}
 
 		fn free_headers_interval() -> Option<u32> {
@@ -786,9 +786,9 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_bridge_hub_polkadot::BridgeHubPolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_polkadot::Hash, bp_bridge_hub_polkadot::BlockNumber>> {
-			BridgePolkadotParachains::best_parachain_head_id::<
+	impl bp_bridge_hub_rococo::BridgeHubRococoFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_rococo::Hash, bp_bridge_hub_rococo::BlockNumber>> {
+			BridgeRococoParachains::best_parachain_head_id::<
 				bp_bridge_hub_rococo::BridgeHubRococo
 			>().unwrap_or(None)
 		}
@@ -799,7 +799,7 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_bridge_hub_polkadot::FromBridgeHubPolkadotInboundLaneApi<Block> for Runtime {
+	impl bp_bridge_hub_rococo::FromBridgeHubRococoInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
 			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
@@ -811,7 +811,7 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_bridge_hub_polkadot::ToBridgeHubPolkadotOutboundLaneApi<Block> for Runtime {
+	impl bp_bridge_hub_rococo::ToBridgeHubRococoOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
 			begin: bp_messages::MessageNonce,

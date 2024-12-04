@@ -181,7 +181,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 	}
 }
 
-/// An instance of `pallet_bridge_messages` used to bridge with Polkadot Bridge Hub.
+/// An instance of `pallet_bridge_messages` used to bridge with Rococo Bridge Hub.
 pub type WithBridgeHubRococoMessagesInstance = ();
 impl pallet_bridge_messages::Config<WithBridgeHubRococoMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;

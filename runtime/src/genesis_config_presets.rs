@@ -1,8 +1,8 @@
 use crate::{
-	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig,
-	BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig, BridgePolkadotParachainsConfig,
-	RelayerSetConfig, RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig,
-	ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
+	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig, BridgeRococoGrandpaConfig,
+	BridgeRococoMessagesConfig, BridgeRococoParachainsConfig, RelayerSetConfig,
+	RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig, ValidatorSetConfig,
+	BABE_GENESIS_EPOCH_CONFIG,
 };
 use scale_info::prelude::format;
 use sp_consensus_babe::AuthorityId as BabeId;
@@ -74,15 +74,15 @@ fn testnet_genesis(
 			// would want to use separate keys for the relayers.
 			initial_relayers: initial_authorities.into_iter().map(|x| x.0).collect::<Vec<_>>(),
 		},
-		bridge_polkadot_grandpa: BridgePolkadotGrandpaConfig {
+		bridge_rococo_grandpa: BridgeRococoGrandpaConfig {
 			owner: Some(root_key.clone()),
 			..Default::default()
 		},
-		bridge_polkadot_parachains: BridgePolkadotParachainsConfig {
+		bridge_rococo_parachains: BridgeRococoParachainsConfig {
 			owner: Some(root_key.clone()),
 			..Default::default()
 		},
-		bridge_polkadot_messages: BridgePolkadotMessagesConfig {
+		bridge_rococo_messages: BridgeRococoMessagesConfig {
 			owner: Some(root_key),
 			opened_lanes: vec![XCM_LANE],
 			..Default::default()
