@@ -10,12 +10,12 @@ codec = { package = "parity-scale-codec", version = "3.6.1", default-features = 
 log = "0.4.17"
 scale-info = { version = "2.5.0", default-features = false, features = ["derive"] }
 
-polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false, features = [
+polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "cdf107de700388a52a17b2fb852c98420c78278e", default-features = false, features = [
     "experimental",
     "runtime",
 ] }
-sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false, features = [
+sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "cdf107de700388a52a17b2fb852c98420c78278e", default-features = false }
+pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "cdf107de700388a52a17b2fb852c98420c78278e", default-features = false, features = [
     "historical",
 ] }
 
