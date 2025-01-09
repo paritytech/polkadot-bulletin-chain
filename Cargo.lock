@@ -7489,6 +7489,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-transaction-payment-rpc-runtime-api"
+version = "28.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=cdf107de700388a52a17b2fb852c98420c78278e#cdf107de700388a52a17b2fb852c98420c78278e"
+dependencies = [
+ "pallet-transaction-payment",
+ "parity-scale-codec",
+ "sp-api 26.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=cdf107de700388a52a17b2fb852c98420c78278e)",
+ "sp-runtime 31.0.1 (git+https://github.com/paritytech/polkadot-sdk.git?rev=cdf107de700388a52a17b2fb852c98420c78278e)",
+ "sp-weights 27.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=cdf107de700388a52a17b2fb852c98420c78278e)",
+]
+
+[[package]]
 name = "pallet-transaction-storage"
 version = "4.0.0-dev"
 dependencies = [
@@ -8887,8 +8899,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
- "heck 0.4.1",
- "itertools 0.10.5",
+ "heck 0.5.0",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
