@@ -51,7 +51,7 @@ pub use frame_support::{
 	StorageValue,
 };
 use frame_support::{
-	dispatch::{DispatchInfo, GetDispatchInfo},
+	dispatch::{GetDispatchInfo},
 	genesis_builder_helper::{build_state, get_preset},
 };
 pub use frame_system::Call as SystemCall;
@@ -601,7 +601,7 @@ mod benches {
 		[pallet_validator_set, ValidatorSet]
 		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
 		[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-		[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
+		[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeopleHubPolkadotMessagesInstance>]
 		[pallet_relayer_set, RelayerSet]
 	);
 }
@@ -781,15 +781,15 @@ impl_runtime_apis! {
 
 		fn free_headers_interval() -> Option<u32> {
 			<Runtime as pallet_bridge_grandpa::Config<
-				bridge_config::WithRococoBridgeGrandpaInstance
+				bridge_config::WithPolkadotBridgeGrandpaInstance
 			>>::FreeHeadersInterval::get()
 		}
 	}
 
-	impl bp_bridge_hub_polkadot::BridgeHubPolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_polkadot::Hash, bp_bridge_hub_polkadot::BlockNumber>> {
+	impl people_bridge_primitives::PeopleHubPolkadotFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_people_hub_polkadot::Hash, bp_people_hub_polkadot::BlockNumber>> {
 			BridgePolkadotParachains::best_parachain_head_id::<
-				bp_bridge_hub_rococo::BridgeHubRococo
+				people_bridge_primitives::PeopleHubPolkadot
 			>().unwrap_or(None)
 		}
 
@@ -799,19 +799,19 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl bp_bridge_hub_polkadot::FromBridgeHubPolkadotInboundLaneApi<Block> for Runtime {
+	impl bp_people_hub_polkadot::FromPeopleHubPolkadotInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
 			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
 		) -> Vec<bp_messages::InboundMessageDetails> {
 			bridge_runtime_common::messages_api::inbound_message_details::<
 				Runtime,
-				bridge_config::WithBridgeHubRococoMessagesInstance,
+				bridge_config::WithPeopleHubPolkadotMessagesInstance,
 			>(lane, messages)
 		}
 	}
 
-	impl bp_bridge_hub_polkadot::ToBridgeHubPolkadotOutboundLaneApi<Block> for Runtime {
+	impl bp_people_hub_polkadot::ToPeopleHubPolkadotOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
 			begin: bp_messages::MessageNonce,
@@ -819,7 +819,7 @@ impl_runtime_apis! {
 		) -> Vec<bp_messages::OutboundMessageDetails> {
 			bridge_runtime_common::messages_api::outbound_message_details::<
 				Runtime,
-				bridge_config::WithBridgeHubRococoMessagesInstance,
+				bridge_config::WithPeopleHubPolkadotMessagesInstance,
 			>(lane, begin, end)
 		}
 	}

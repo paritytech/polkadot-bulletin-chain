@@ -17,7 +17,7 @@
 //! XCM configuration for Polkadot Bulletin chain.
 
 use crate::{
-	bridge_config::{BridgedNetwork, ToBridgeHubRococoHaulBlobExporter},
+	bridge_config::{BridgedNetwork, ToPeopleHubPolkadotHaulBlobExporter},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
 
@@ -171,7 +171,7 @@ type LocalOriginConverter = (
 );
 
 /// Only bridged destination is supported.
-pub type XcmRouter = UnpaidLocalExporter<ToBridgeHubRococoHaulBlobExporter, UniversalLocation>;
+pub type XcmRouter = UnpaidLocalExporter<ToPeopleHubPolkadotHaulBlobExporter, UniversalLocation>;
 
 /// The barriers one of which must be passed for an XCM message to be executed.
 pub type Barrier = TrailingSetTopicAsId<
@@ -208,7 +208,7 @@ impl xcm_executor::Config for XcmConfig {
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = ConstU32<0>;
 	type FeeManager = ();
-	type MessageExporter = ToBridgeHubRococoHaulBlobExporter;
+	type MessageExporter = ToPeopleHubPolkadotHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
 	type SafeCallFilter = Everything;
@@ -297,7 +297,7 @@ pub(crate) fn decode_bridge_message(
 // pub(crate) mod tests {
 // 	use super::*;
 // 	use crate::{
-// 		bridge_config::{tests::run_test, WithBridgeHubPolkadotMessagesInstance, XCM_LANE},
+// 		bridge_config::{tests::run_test, WithPeopleHubPolkadotMessagesInstance, XCM_LANE},
 // 		BridgePolkadotMessages, Runtime,
 // 	};
 // 	use bp_messages::{
@@ -309,7 +309,7 @@ pub(crate) fn decode_bridge_message(
 // 	use xcm_executor::traits::Properties;
 //
 // 	type Dispatcher =
-// 		<Runtime as MessagesConfig<WithBridgeHubPolkadotMessagesInstance>>::MessageDispatch;
+// 		<Runtime as MessagesConfig<WithPeopleHubPolkadotMessagesInstance>>::MessageDispatch;
 //
 // 	fn test_storage_key() -> Vec<u8> {
 // 		(*b"test_key").to_vec()

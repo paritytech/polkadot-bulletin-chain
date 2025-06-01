@@ -64,6 +64,8 @@ bp-header-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev 
 bp-messages = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-parachains = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-polkadot = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+
+bp-people-hub-polkadot = {path = "src/bridge-primitives", default-features = false }
 bp-polkadot-bulletin = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-polkadot-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 bp-rococo = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
@@ -76,6 +78,10 @@ pallet-bridge-relayers = { git = "https://github.com/paritytech/polkadot-sdk.git
 pallet-xcm-bridge-hub = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 pallet-transaction-payment = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+
+bp-bridge-hub-cumulus = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+
+
 
 # XCM dependencies
 xcm = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", package = "staging-xcm" }
@@ -128,6 +134,7 @@ std = [
 	"sp-transaction-pool/std",
 	"sp-transaction-storage-proof/std",
 	"sp-version/std",
+	"bp-bridge-hub-cumulus/std",
 
 	"frame-system-rpc-runtime-api/std",
 
@@ -147,6 +154,7 @@ std = [
 	"bp-parachains/std",
 	"bp-polkadot/std",
 	"bp-polkadot-bulletin/std",
+	"bp-people-hub-polkadot/std",
 	"bp-polkadot-core/std",
 	"bp-rococo/std",
 	"bp-runtime/std",
