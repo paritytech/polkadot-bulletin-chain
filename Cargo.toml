@@ -11,6 +11,7 @@ members = [
     "pallets/transaction-storage",
     "pallets/validator-set",
     "runtime",
+    "runtime/src/bridge-primitives",
 ]
 [profile.release]
 panic = "unwind"
