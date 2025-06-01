@@ -1,0 +1,39 @@
+[package]
+name = "bp-people-hub-polkadot"
+description = "Primitives of PeopleHubPolkadot parachain runtime."
+
+[dependencies]
+
+# Bridge Dependencies
+bp-bridge-hub-cumulus = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+bp-header-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+bp-polkadot-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+bp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+bp-messages = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+
+# Substrate Based Dependencies
+frame-support = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+sp-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+
+# Polkadot
+xcm = { version = "15.0.3", default-features = false, package = "staging-xcm" }
+[features]
+default = ["std"]
+std = [
+	"bp-bridge-hub-cumulus/std",
+	"bp-header-chain/std",
+	"bp-messages/std",
+	"bp-polkadot-core/std",
+	"bp-runtime/std",
+	"frame-support/std",
+	"sp-api/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"xcm/std",
+]
+runtime-benchmarks = [
+	"frame-support/runtime-benchmarks",
+	"sp-runtime/runtime-benchmarks",
+]

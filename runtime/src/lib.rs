@@ -66,6 +66,7 @@ mod bridge_config;
 mod genesis_config_presets;
 mod weights;
 mod xcm_config;
+mod people_bridge_primitives;
 
 /// An index to a block.
 pub type BlockNumber = u32;
