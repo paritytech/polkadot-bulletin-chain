@@ -513,6 +513,51 @@ pub mod pallet {
 			Self::deposit_event(Event::ExpiredPreimageAuthorizationRemoved { hash });
 			Ok(())
 		}
+
+		/// Refresh the expiration of an existing authorization for an account.
+		///
+		/// If the account does not have an authorization, the call will fail.
+		///
+		/// Parameters:
+		///
+		/// - `who`: The account to be credited with an authorization to store data.
+		///
+		/// The origin for this call must be the pallet's `Authorizer`. Emits
+		/// [`AccountAuthorizationRefreshed`](Event::AccountAuthorizationRefreshed) when successful.
+		#[pallet::call_index(7)]
+		#[pallet::weight(T::WeightInfo::refresh_account_authorization())]
+		pub fn refresh_account_authorization(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+		) -> DispatchResult {
+			T::Authorizer::ensure_origin(origin)?;
+			Self::refresh_authorization(AuthorizationScope::Account(who.clone()))?;
+			Self::deposit_event(Event::AccountAuthorizationRefreshed { who });
+			Ok(())
+		}
+
+		/// Refresh the expiration of an existing authorization for a preimage of a BLAKE2b hash.
+		///
+		/// If the preimage does not have an authorization, the call will fail.
+		///
+		/// Parameters:
+		///
+		/// - `hash`: The BLAKE2b hash of the data to be submitted.
+		///
+		/// The origin for this call must be the pallet's `Authorizer`. Emits
+		/// [`PreimageAuthorizationRefreshed`](Event::PreimageAuthorizationRefreshed) when
+		/// successful.
+		#[pallet::call_index(8)]
+		#[pallet::weight(T::WeightInfo::refresh_preimage_authorization())]
+		pub fn refresh_preimage_authorization(
+			origin: OriginFor<T>,
+			hash: ContentHash,
+		) -> DispatchResult {
+			T::Authorizer::ensure_origin(origin)?;
+			Self::refresh_authorization(AuthorizationScope::Preimage(hash))?;
+			Self::deposit_event(Event::PreimageAuthorizationRefreshed { hash });
+			Ok(())
+		}
 	}
 
 	#[pallet::event]
@@ -526,9 +571,13 @@ pub mod pallet {
 		ProofChecked,
 		/// An account `who` was authorized to store `bytes` bytes in `transactions` transactions.
 		AccountAuthorized { who: T::AccountId, transactions: u32, bytes: u64 },
+		/// An authorization for account `who` was refreshed.
+		AccountAuthorizationRefreshed { who: T::AccountId },
 		/// Authorization was given for a preimage of `hash` (not exceeding `max_size`) to be
 		/// stored by anyone.
 		PreimageAuthorized { hash: ContentHash, max_size: u64 },
+		/// An authorization for a preimage of `hash` was refreshed.
+		PreimageAuthorizationRefreshed { hash: ContentHash },
 		/// An expired account authorization was removed.
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
 		/// An expired preimage authorization was removed.
@@ -676,6 +725,22 @@ pub mod pallet {
 					Self::authorization_added(&scope);
 				}
 			});
+		}
+
+		/// Authorize data storage.
+		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
+			let expiration = frame_system::Pallet::<T>::block_number()
+				.saturating_add(T::AuthorizationPeriod::get());
+
+			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
+				if let Some(authorization) = maybe_authorization {
+					authorization.expiration = expiration;
+					Ok(())
+				} else {
+					// No previous authorization to refresh.
+					return Err(Error::<T>::AuthorizationNotFound.into())
+				}
+			})
 		}
 
 		/// Remove an expired authorization.
