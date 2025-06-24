@@ -182,6 +182,29 @@ mod benchmarks {
 	}
 
 	#[benchmark]
+	fn refresh_account_authorization() -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let who: T::AccountId = whitelisted_caller();
+		let transactions = 10;
+		let bytes: u64 = 1024 * 1024;
+		let origin2 = origin.clone();
+		TransactionStorage::<T>::authorize_account(
+			origin2 as T::RuntimeOrigin,
+			who.clone(),
+			transactions,
+			bytes,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, who.clone());
+
+		assert_last_event::<T>(Event::AccountAuthorizationRefreshed { who }.into());
+		Ok(())
+	}
+
+	#[benchmark]
 	fn authorize_preimage() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
@@ -192,6 +215,27 @@ mod benchmarks {
 		_(origin as T::RuntimeOrigin, hash, max_size);
 
 		assert_last_event::<T>(Event::PreimageAuthorized { hash, max_size }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn refresh_preimage_authorization() -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let hash = [0u8; 32];
+		let max_size: u64 = 1024 * 1024;
+		let origin2 = origin.clone();
+		TransactionStorage::<T>::authorize_preimage(
+			origin2 as T::RuntimeOrigin,
+			hash.clone(),
+			max_size,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, hash.clone());
+
+		assert_last_event::<T>(Event::PreimageAuthorizationRefreshed { hash }.into());
 		Ok(())
 	}
 
