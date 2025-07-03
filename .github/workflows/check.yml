@@ -41,7 +41,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
 
       - name: Install Rust stable toolchain
         uses: actions-rs/toolchain@v1
@@ -69,7 +69,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
 
       - name: Install Rust stable toolchain
         uses: actions-rs/toolchain@v1
