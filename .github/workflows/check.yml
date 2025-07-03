@@ -20,7 +20,7 @@ concurrency:
 # Common variable is defined in the workflow
 # Repo env variable doesn't work for PRs from forks
 env:
-  CI_IMAGE: "paritytech/ci-unified:bullseye-1.75.0-2024-01-22-v20240222"
+  CI_IMAGE: "paritytech/ci-unified:bullseye-1.84.1-2025-01-28-v202502131220"
 
 jobs:
   set-image:
