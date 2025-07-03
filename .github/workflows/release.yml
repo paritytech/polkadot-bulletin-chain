@@ -32,7 +32,6 @@ defaults:
   run:
     shell: bash
 
-
 jobs:
   create-release:
     # The type of runner that the job will run on
@@ -111,7 +110,7 @@ jobs:
 
       - name: Upload x86_64 linux binary to workflow
         if: (matrix.target == 'x86_64-unknown-linux-gnu')
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: node-template
           path: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/node-template
@@ -136,7 +135,7 @@ jobs:
 
       # Download the binary from the previous job
       - name: Download x86_64 linux binary
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: node-template
           path: ${{ github.workspace }}

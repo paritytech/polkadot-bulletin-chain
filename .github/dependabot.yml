@@ -3,9 +3,6 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "daily"
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "daily"
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
