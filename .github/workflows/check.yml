@@ -71,13 +71,6 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install Rust stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
       # Rust cache
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
