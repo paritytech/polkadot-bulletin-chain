@@ -87,5 +87,5 @@ jobs:
 
       - name: Cargo check (benchmarking)
         run: >
-          pushd node &&
+          cd node &&
           cargo check --features=runtime-benchmarks
