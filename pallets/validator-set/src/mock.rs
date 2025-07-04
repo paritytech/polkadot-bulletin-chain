@@ -19,25 +19,20 @@
 #![cfg(test)]
 
 use crate as pallet_validator_set;
-use frame_support::{
-	parameter_types,
-	traits::{ConstU32, ConstU64, OnFinalize, OnInitialize, OneSessionHandler},
-};
-use frame_system::{pallet_prelude::BlockNumberFor, EnsureRoot};
 use pallet_session::ShouldEndSession;
-use sp_core::H256;
-use sp_runtime::{
-	impl_opaque_keys,
-	testing::UintAuthorityId,
-	traits::{BlakeTwo256, ConvertInto, IdentityLookup},
-	BuildStorage,
+use polkadot_sdk_frame::{
+	deps::sp_runtime::{impl_opaque_keys, testing::UintAuthorityId, BoundToRuntimeAppPublic},
+	prelude::*,
+	runtime::prelude::*,
+	testing_prelude::*,
+	traits::{ConvertInto, OneSessionHandler},
 };
 use std::cell::Cell;
 
 pub type AccountId = u64;
 type Block = frame_system::mocking::MockBlock<Test>;
 
-frame_support::construct_runtime!(
+construct_runtime!(
 	pub struct Test {
 		System: frame_system,
 		ValidatorSet: pallet_validator_set,
@@ -65,7 +60,7 @@ impl OneSessionHandler<AccountId> for MockSessionHandler {
 	fn on_disabled(_i: u32) {}
 }
 
-impl sp_runtime::BoundToRuntimeAppPublic for MockSessionHandler {
+impl BoundToRuntimeAppPublic for MockSessionHandler {
 	type Public = UintAuthorityId;
 }
 
@@ -106,12 +101,12 @@ pub fn next_session() {
 	assert!(!END_SESSION.get());
 }
 
-pub fn new_test_ext() -> sp_io::TestExternalities {
+pub fn new_test_ext() -> TestExternalities {
 	let validators = vec![1, 2, 3];
 	let keys = validators.iter().map(|who| (*who, *who, (*who).into())).collect();
 	let t = RuntimeGenesisConfig {
 		system: Default::default(),
-		session: SessionConfig { keys },
+		session: SessionConfig { keys, non_authority_keys: vec![] },
 		validator_set: ValidatorSetConfig { initial_validators: validators.try_into().unwrap() },
 	}
 	.build_storage()
@@ -119,30 +114,11 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 	t.into()
 }
 
+#[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
-	type BaseCallFilter = frame_support::traits::Everything;
-	type BlockWeights = ();
-	type BlockLength = ();
-	type DbWeight = ();
-	type RuntimeOrigin = RuntimeOrigin;
 	type Nonce = u64;
-	type RuntimeCall = RuntimeCall;
-	type Hash = H256;
-	type Hashing = BlakeTwo256;
-	type AccountId = u64;
-	type Lookup = IdentityLookup<Self::AccountId>;
 	type Block = Block;
-	type RuntimeEvent = RuntimeEvent;
 	type BlockHashCount = ConstU64<250>;
-	type Version = ();
-	type PalletInfo = PalletInfo;
-	type AccountData = ();
-	type OnNewAccount = ();
-	type OnKilledAccount = ();
-	type SystemWeightInfo = ();
-	type SS58Prefix = ();
-	type OnSetCode = ();
-	type MaxConsumers = ConstU32<16>;
 }
 
 parameter_types! {
@@ -152,13 +128,13 @@ parameter_types! {
 impl pallet_validator_set::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
-	type AddRemoveOrigin = EnsureRoot<Self::AccountId>;
+	type AddRemoveOrigin = EnsureRoot<AccountId>;
 	type MaxAuthorities = ConstU32<6>;
 	type SetKeysCooldownBlocks = SetKeysCooldownBlocks;
 }
 
 impl pallet_session::Config for Test {
-	type ValidatorId = Self::AccountId;
+	type ValidatorId = AccountId;
 	type ValidatorIdOf = ConvertInto;
 	type ShouldEndSession = MockShouldEndSession;
 	type NextSessionRotation = ();

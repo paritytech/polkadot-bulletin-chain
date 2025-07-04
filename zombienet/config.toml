@@ -4,18 +4,15 @@
 
 [relaychain]
 chain = "local"
-default_command = "./target/release/polkadot-bulletin-chain"
-
-	[relaychain.genesis.runtime.validatorSet]
-	initialValidators = ["5GNJqTPyNqANBkUVMN1LPPrxXnFouWXoe2wNSmmEoLctxiZY", "5HpG9w8EBLe5XCrbczpwq5TSXvedjrBGCwqxK1iQ7qUsSWFc"]
+default_command = "{{POLKADOT_BULLETIN_BINARY_PATH}}"
 
 	[[relaychain.nodes]]
 	name = "alice"
-	ws_port = 9944
+	ws_port = 10000
 	validator = true
-	args = [ "--ipfs-server", "-lbitswap=trace" ]
+	args = [ "--ipfs-server", "-lruntime=trace", "-lxcm=trace" ]
 
 	[[relaychain.nodes]]
 	name = "bob"
-	ws_port = 9945
+	ws_port = 10001
 	validator = true

@@ -42,27 +42,19 @@ mod tests;
 pub mod weights;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-use frame_support::{
-	dispatch::RawOrigin,
-	ensure,
-	pallet_prelude::{DispatchResult, Weight},
-	traits::Get,
-	DefaultNoBound,
-};
-use frame_system::pallet_prelude::BlockNumberFor;
-pub use pallet::*;
 use pallet_session::SessionManager;
-use sp_runtime::{
-	traits::{ConvertInto, Zero},
-	transaction_validity::{InvalidTransaction, TransactionValidityError},
-	Perbill, Saturating,
+use polkadot_sdk_frame::{
+	deps::{frame_system::RawOrigin, sp_core::sp_std::prelude::*, sp_runtime::Perbill, *},
+	prelude::*,
+	traits::ConvertInto,
 };
 use sp_staking::{
-	offence::{DisableStrategy, OffenceDetails, OnOffenceHandler},
+	offence::{OffenceDetails, OnOffenceHandler},
 	SessionIndex,
 };
-use sp_std::vec::Vec;
 pub use weights::WeightInfo;
+
+pub use pallet::*;
 
 const LOG_TARGET: &str = "runtime::validator-set";
 
@@ -73,11 +65,9 @@ struct Validator<BlockNumber> {
 	min_set_keys_block: BlockNumber,
 }
 
-#[frame_support::pallet()]
+#[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_support::pallet_prelude::*;
-	use frame_system::pallet_prelude::*;
 
 	#[pallet::config]
 	pub trait Config:
@@ -230,6 +220,7 @@ impl<T: Config> Pallet<T> {
 		})?;
 
 		frame_system::Pallet::<T>::inc_providers(who);
+		frame_system::Pallet::<T>::inc_sufficients(who);
 
 		Ok(())
 	}
@@ -248,15 +239,14 @@ impl<T: Config> Pallet<T> {
 		{
 			log::trace!(
 				target: LOG_TARGET,
-				"Failed to purge session keys for validator {:?}: {:?}", who, err
+				"Failed to purge session keys for validator {who:?}: {err:?}"
 			);
 		}
 		if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
 			log::warn!(
 				target: LOG_TARGET,
-				"Failed to decrement provider reference count for validator {:?}, \
-				leaking reference: {:?}",
-				who, err
+				"Failed to decrement provider reference count for validator {who:?}, \
+				leaking reference: {err:?}"
 			);
 		}
 
@@ -323,7 +313,6 @@ where
 		>],
 		slash_fractions: &[Perbill],
 		_slash_session: SessionIndex,
-		disable_strategy: DisableStrategy,
 	) -> Weight {
 		let mut weight = Weight::zero();
 		let db_weight = T::DbWeight::get();
@@ -331,11 +320,6 @@ where
 		for (offender, slash_fraction) in offenders.iter().zip(slash_fractions) {
 			// Determine actions to take with this validator
 			let remove = !slash_fraction.is_zero();
-			let disable = match disable_strategy {
-				DisableStrategy::Never => false,
-				DisableStrategy::WhenSlashed => !slash_fraction.is_zero(),
-				DisableStrategy::Always => true,
-			};
 
 			if remove {
 				// Note that the validator might already have been removed (explicitly, for another
@@ -344,20 +328,6 @@ where
 				if Self::do_remove_validator(&offender.offender.0) {
 					weight.saturating_accrue(db_weight.reads_writes(1, 2));
 				}
-			}
-
-			if disable {
-				// Lookup validator index in Validators, check if in DisabledValidators
-				weight.saturating_accrue(db_weight.reads(2));
-				if pallet_session::Pallet::<T>::disable(&offender.offender.0) {
-					// Added to DisabledValidators
-					weight.saturating_accrue(db_weight.writes(1));
-				}
-
-				// Also disable in the next session, as removal won't take effect until the session
-				// after next
-				weight.saturating_accrue(db_weight.writes(1));
-				NextDisabledValidators::<T>::insert(&offender.offender.0, ());
 			}
 		}
 

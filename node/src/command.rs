@@ -124,7 +124,9 @@ pub fn run() -> sc_cli::Result<()> {
 							)
 						}
 
-						cmd.run::<Block, ()>(config)
+						cmd.run_with_spec::<sp_runtime::traits::HashingFor<Block>, ()>(Some(
+							config.chain_spec,
+						))
 					},
 					BenchmarkCmd::Block(cmd) => {
 						let PartialComponents { client, .. } = service::new_partial(&config)?;
@@ -149,11 +151,12 @@ pub fn run() -> sc_cli::Result<()> {
 						let ext_builder = RemarkBuilder::new(client.clone());
 
 						cmd.run(
-							config,
+							config.chain_spec.name().into(),
 							client,
 							inherent_benchmark_data()?,
 							Vec::new(),
 							&ext_builder,
+							false,
 						)
 					},
 					BenchmarkCmd::Extrinsic(cmd) => {
@@ -203,7 +206,8 @@ pub fn run() -> sc_cli::Result<()> {
 		None => {
 			let runner = cli.create_runner(&cli.run)?;
 			runner.run_node_until_exit(|config| async move {
-				service::new_full(config).map_err(sc_cli::Error::Service)
+				service::new_full::<sc_network::Litep2pNetworkBackend>(config)
+					.map_err(sc_cli::Error::Service)
 			})
 		},
 	}

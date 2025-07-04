@@ -1,7 +1,13 @@
+[workspace.package]
+authors = ["Parity Technologies <admin@parity.io>"]
+edition = "2021"
+repository = "https://github.com/zdave-parity/polkadot-bulletin-chain.git"
+
 [workspace]
 resolver = "2"
 members = [
     "node",
+    "pallets/relayer-set",
     "pallets/transaction-storage",
     "pallets/validator-set",
     "runtime",

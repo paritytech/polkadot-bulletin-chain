@@ -2,26 +2,33 @@
 // `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
 #![recursion_limit = "256"]
 
+extern crate alloc;
+
 // Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
+use frame_support::{derive_impl, traits::ValidatorRegistration};
 use frame_system::EnsureRoot;
+use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
+use pallet_bridge_messages::Call as BridgeMessagesCall;
+use pallet_bridge_parachains::Call as BridgeParachainsCall;
 use pallet_grandpa::AuthorityId as GrandpaId;
-use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
+use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	create_runtime_str, generic, impl_opaque_keys,
+	generic, impl_opaque_keys, impl_tx_ext_default,
 	traits::{
 		AccountIdLookup, BlakeTwo256, Block as BlockT, ConvertInto, DispatchInfoOf,
-		IdentifyAccount, NumberFor, OpaqueKeys, SignedExtension, Verify,
+		IdentifyAccount, NumberFor, OpaqueKeys, PostDispatchInfoOf, SignedExtension, Verify,
 	},
 	transaction_validity::{
 		InvalidTransaction, TransactionLongevity, TransactionPriority, TransactionSource,
 		TransactionValidity, TransactionValidityError, ValidTransaction,
 	},
-	ApplyExtrinsicResult, MultiSignature,
+	ApplyExtrinsicResult, DispatchResult, MultiSignature,
 };
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
@@ -32,7 +39,7 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem, Randomness,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, Randomness,
 		StorageInfo,
 	},
 	weights::{
@@ -43,11 +50,22 @@ pub use frame_support::{
 	},
 	StorageValue,
 };
+use frame_support::{
+	dispatch::{DispatchInfo, GetDispatchInfo},
+	genesis_builder_helper::{build_state, get_preset},
+};
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
+use pallet_transaction_payment::RuntimeDispatchInfo;
+use sp_runtime::traits::transaction_extension::AsTransactionExtension;
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
+
+mod bridge_config;
+mod genesis_config_presets;
+mod weights;
+mod xcm_config;
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -85,7 +103,6 @@ pub mod opaque {
 		pub struct SessionKeys {
 			pub babe: Babe,
 			pub grandpa: Grandpa,
-			pub im_online: ImOnline,
 		}
 	}
 }
@@ -94,9 +111,9 @@ pub mod opaque {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: create_runtime_str!("polkadot-bulletin-chain"),
-	impl_name: create_runtime_str!("polkadot-bulletin-chain"),
-	authoring_version: 1,
+	spec_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
+	impl_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
+	authoring_version: 0,
 	// The version of the runtime specification. A full node will not attempt to use its native
 	//   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,
 	//   `spec_version`, and `authoring_version` are the same between Wasm and native.
@@ -106,7 +123,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
-	state_version: 1,
+	system_version: 1,
 };
 
 /// This determines the average expected block time that we are targeting.
@@ -173,28 +190,30 @@ parameter_types! {
 	pub const EquivocationReportPeriodInBlocks: u64 =
 		EquivocationReportPeriodInEpochs::get() * (EPOCH_DURATION_IN_BLOCKS as u64);
 
-	pub const ImOnlineUnsignedPriority: TransactionPriority = TransactionPriority::max_value();
 
 	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
 	pub const StoragePeriod: BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
 	pub const AuthorizationPeriod: BlockNumber = 7 * DAYS;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = DAYS as TransactionLongevity;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetKeysPriority::get() - 1;
+	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = DAYS as TransactionLongevity;
 
-	pub const SudoPriority: TransactionPriority = ImOnlineUnsignedPriority::get() - 1;
+	pub const SudoPriority: TransactionPriority = TransactionPriority::max_value();
 
 	pub const SetKeysCooldownBlocks: BlockNumber = 5 * MINUTES;
-	pub const SetKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const SetKeysLongevity: TransactionLongevity = HOURS as TransactionLongevity;
+	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
+	pub const SetPurgeKeysLongevity: TransactionLongevity = HOURS as TransactionLongevity;
+
+	pub const BridgeTxFailCooldownBlocks: BlockNumber = 5 * MINUTES;
+	pub const BridgeTxPriority: TransactionPriority = StoreRenewPriority::get() - 1;
+	pub const BridgeTxLongevity: TransactionLongevity = HOURS as TransactionLongevity;
 }
 
 // Configure FRAME pallets to include in runtime.
 
+#[derive_impl(frame_system::config_preludes::SolochainDefaultConfig)]
 impl frame_system::Config for Runtime {
-	/// The basic call filter to use in dispatchable.
-	type BaseCallFilter = frame_support::traits::Everything;
 	/// The block type for the runtime.
 	type Block = Block;
 	/// Block & extrinsics weights: base values and limits.
@@ -227,18 +246,8 @@ impl frame_system::Config for Runtime {
 	///
 	/// This type is being generated by `construct_runtime!`.
 	type PalletInfo = PalletInfo;
-	/// What to do if a new account is created.
-	type OnNewAccount = ();
-	/// What to do if an account is fully reaped from the system.
-	type OnKilledAccount = ();
-	/// The data to be stored in an account.
-	type AccountData = ();
-	/// Weight information for the extrinsics of this pallet.
-	type SystemWeightInfo = ();
 	/// This is used as an identifier of the chain. 42 is the generic substrate prefix.
 	type SS58Prefix = SS58Prefix;
-	/// The set code logic, just the default since we're not a parachain.
-	type OnSetCode = ();
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 }
 
@@ -274,6 +283,7 @@ impl pallet_babe::Config for Runtime {
 	type DisabledValidators = Session;
 	type WeightInfo = ();
 	type MaxAuthorities = MaxAuthorities;
+	type MaxNominators = ConstU32<0>;
 	type KeyOwnerProof =
 		<Historical as KeyOwnerProofSystem<(KeyTypeId, pallet_babe::AuthorityId)>>::Proof;
 	type EquivocationReportSystem = pallet_babe::EquivocationReportSystem<
@@ -289,6 +299,7 @@ impl pallet_grandpa::Config for Runtime {
 
 	type WeightInfo = ();
 	type MaxAuthorities = MaxAuthorities;
+	type MaxNominators = ConstU32<0>;
 	type MaxSetIdSessionEntries = EquivocationReportPeriodInEpochs;
 
 	type KeyOwnerProof = <Historical as KeyOwnerProofSystem<(KeyTypeId, GrandpaId)>>::Proof;
@@ -308,19 +319,7 @@ impl pallet_offences::Config for Runtime {
 
 impl pallet_authorship::Config for Runtime {
 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Babe>;
-	type EventHandler = ImOnline;
-}
-
-impl pallet_im_online::Config for Runtime {
-	type AuthorityId = ImOnlineId;
-	type MaxKeys = MaxAuthorities;
-	type MaxPeerInHeartbeats = ConstU32<0>; // Not used any more
-	type RuntimeEvent = RuntimeEvent;
-	type ValidatorSet = Historical;
-	type NextSessionRotation = Babe;
-	type ReportUnresponsiveness = Offences;
-	type UnsignedPriority = ImOnlineUnsignedPriority;
-	type WeightInfo = pallet_im_online::weights::SubstrateWeight<Runtime>;
+	type EventHandler = ();
 }
 
 impl pallet_timestamp::Config for Runtime {
@@ -351,31 +350,55 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 }
 
-impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
+impl pallet_relayer_set::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = pallet_relayer_set::weights::SubstrateWeight<Runtime>;
+	type AddRemoveOrigin = EnsureRoot<AccountId>;
+	type BridgeTxFailCooldownBlocks = BridgeTxFailCooldownBlocks;
+}
+
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
 where
 	RuntimeCall: From<C>,
 {
 	type Extrinsic = UncheckedExtrinsic;
-	type OverarchingCall = RuntimeCall;
+	type RuntimeCall = RuntimeCall;
 }
 
-// Create the runtime by composing the FRAME pallets that were previously configured.
+impl<C> frame_system::offchain::CreateInherent<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_inherent(call: RuntimeCall) -> UncheckedExtrinsic {
+		UncheckedExtrinsic::new_bare(call)
+	}
+}
+
 construct_runtime!(
 	pub struct Runtime {
-		System: frame_system,
-		Babe: pallet_babe,
-		Timestamp: pallet_timestamp,
-		// Authorship must be before session in order to note author in the correct session for
-		// im-online.
-		Authorship: pallet_authorship,
-		Offences: pallet_offences,
-		Historical: pallet_session::historical,
-		ValidatorSet: pallet_validator_set,
-		Session: pallet_session,
-		ImOnline: pallet_im_online,
-		Grandpa: pallet_grandpa,
-		Sudo: pallet_sudo,
-		TransactionStorage: pallet_transaction_storage,
+		System: frame_system::{Pallet, Call, Storage, Config<T>, Event<T>} = 0,
+		// Babe must be called before Session
+		Babe: pallet_babe::{Pallet, Call, Storage, Config<T>, ValidateUnsigned} = 1,
+		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent} = 2,
+		// Authorship must be before session in order to note author in the correct session.
+		Authorship: pallet_authorship::{Pallet, Storage} = 10,
+		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
+		Historical: pallet_session::historical::{Pallet} = 12,
+		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
+		Session: pallet_session::{Pallet, Call, Storage, Event, Config<T>} = 14,
+		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
+
+		// Storage
+		TransactionStorage: pallet_transaction_storage::{Pallet, Call, Storage, Event<T>} = 40,
+
+		// Bridge
+		RelayerSet: pallet_relayer_set::{Pallet, Storage, Event<T>, Config<T>} = 50,
+		BridgePolkadotGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>, Config<T>} = 51,
+		BridgePolkadotParachains: pallet_bridge_parachains::{Pallet, Call, Storage, Event<T>, Config<T>} = 52,
+		BridgePolkadotMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>} = 53,
+
+		// sudo
+		Sudo: pallet_sudo::{Pallet, Call, Storage, Event<T>, Config<T>} = 255,
 	}
 );
 
@@ -386,11 +409,26 @@ pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 /// Block type as expected by this runtime.
 pub type Block = generic::Block<Header, UncheckedExtrinsic>;
 
-fn validate_sudo(who: &AccountId) -> TransactionValidity {
-	// Only allow sudo transactions signed by the sudo account. The sudo pallet obviously checks
-	// this, but not until transaction execution.
-	if Sudo::key().map_or(false, |k| who == &k) {
-		Ok(ValidTransaction { priority: SudoPriority::get(), ..Default::default() })
+fn validate_sudo(_who: &AccountId) -> TransactionValidity {
+	// TODO: make Sudo::key() accessible and uncomment this.
+	// // Only allow sudo transactions signed by the sudo account. The sudo pallet obviously checks
+	// // this, but not until transaction execution.
+	// if Sudo::key().map_or(false, |k| who == &k) {
+	// 	Ok(ValidTransaction { priority: SudoPriority::get(), ..Default::default() })
+	// } else {
+	// 	Err(InvalidTransaction::BadSigner.into())
+	// }
+	Ok(ValidTransaction { priority: SudoPriority::get(), ..Default::default() })
+}
+
+fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
+	// Only allow if account has keys to purge
+	if Session::is_registered(who) {
+		Ok(ValidTransaction {
+			priority: SetPurgeKeysPriority::get(),
+			longevity: SetPurgeKeysLongevity::get(),
+			..Default::default()
+		})
 	} else {
 		Err(InvalidTransaction::BadSigner.into())
 	}
@@ -416,7 +454,8 @@ impl SignedExtension for ValidateSigned {
 	type AccountId = AccountId;
 	type Call = RuntimeCall;
 	type AdditionalSigned = ();
-	type Pre = ();
+	/// `Some(who)` if the transaction is a bridge transaction.
+	type Pre = Option<AccountId>;
 
 	const IDENTIFIER: &'static str = "ValidateSigned";
 
@@ -433,10 +472,24 @@ impl SignedExtension for ValidateSigned {
 	) -> Result<Self::Pre, TransactionValidityError> {
 		match call {
 			Self::Call::TransactionStorage(call) =>
-				TransactionStorage::pre_dispatch_signed(who, call),
-			Self::Call::Sudo(_) => validate_sudo(who).map(|_| ()),
-			Self::Call::Session(pallet_session::Call::<Runtime>::set_keys { .. }) =>
-				ValidatorSet::pre_dispatch_set_keys(who),
+				TransactionStorage::pre_dispatch_signed(who, call).map(|()| None),
+			Self::Call::Sudo(_) => validate_sudo(who).map(|_| None),
+			Self::Call::Session(SessionCall::set_keys { .. }) =>
+				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
+			Self::Call::Session(SessionCall::purge_keys {}) =>
+				validate_purge_keys(who).map(|_| None),
+			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotParachains(
+				BridgeParachainsCall::submit_parachain_heads { .. },
+			) |
+			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotMessages(
+				BridgeMessagesCall::receive_messages_delivery_proof { .. },
+			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
 			_ => Err(InvalidTransaction::Call.into()),
 		}
 	}
@@ -451,19 +504,63 @@ impl SignedExtension for ValidateSigned {
 		match call {
 			Self::Call::TransactionStorage(call) => TransactionStorage::validate_signed(who, call),
 			Self::Call::Sudo(_) => validate_sudo(who),
-			Self::Call::Session(pallet_session::Call::<Runtime>::set_keys { .. }) =>
-				ValidatorSet::validate_set_keys(who).map(|_| ValidTransaction {
-					priority: SetKeysPriority::get(),
-					longevity: SetKeysLongevity::get(),
+			Self::Call::Session(SessionCall::set_keys { .. }) =>
+				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
+					priority: SetPurgeKeysPriority::get(),
+					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
 				}),
+			Self::Call::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotParachains(
+				BridgeParachainsCall::submit_parachain_heads { .. },
+			) |
+			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotMessages(
+				BridgeMessagesCall::receive_messages_delivery_proof { .. },
+			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
+				priority: BridgeTxPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			}),
 			_ => Err(InvalidTransaction::Call.into()),
 		}
 	}
+
+	fn post_dispatch(
+		pre: Option<Self::Pre>,
+		_info: &DispatchInfoOf<Self::Call>,
+		_post_info: &PostDispatchInfoOf<Self::Call>,
+		_len: usize,
+		result: &DispatchResult,
+	) -> Result<(), TransactionValidityError> {
+		if result.is_err() {
+			if let Some(Some(who)) = pre {
+				RelayerSet::post_dispatch_failed_bridge_tx(&who);
+			}
+		}
+		Ok(())
+	}
+}
+
+// it'll generate signed extensions to invalidate obsolete bridge transactions before
+// they'll be included into block
+generate_bridge_reject_obsolete_headers_and_messages! {
+	RuntimeCall, AccountId,
+	// Grandpa
+	BridgePolkadotGrandpa,
+	// Parachains
+	BridgePolkadotParachains,
+	// Messages
+	BridgePolkadotMessages
 }
 
 /// The SignedExtension to the basic transaction logic.
-pub type SignedExtra = (
+pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
 	frame_system::CheckTxVersion<Runtime>,
@@ -471,14 +568,15 @@ pub type SignedExtra = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	ValidateSigned,
+	AsTransactionExtension<ValidateSigned>,
+	BridgeRejectObsoleteHeadersAndMessages,
 );
 
 /// Unchecked extrinsic type as expected by this runtime.
 pub type UncheckedExtrinsic =
-	generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, SignedExtra>;
+	generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
 /// The payload being signed in transactions.
-pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
+pub type SignedPayload = generic::SignedPayload<RuntimeCall, TxExtension>;
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -501,6 +599,10 @@ mod benches {
 		[pallet_sudo, Sudo]
 		[pallet_transaction_storage, TransactionStorage]
 		[pallet_validator_set, ValidatorSet]
+		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
+		[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
+		[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
+		[pallet_relayer_set, RelayerSet]
 	);
 }
 
@@ -514,7 +616,7 @@ impl_runtime_apis! {
 			Executive::execute_block(block);
 		}
 
-		fn initialize_block(header: &<Block as BlockT>::Header) {
+		fn initialize_block(header: &<Block as BlockT>::Header) -> sp_runtime::ExtrinsicInclusionMode {
 			Executive::initialize_block(header)
 		}
 	}
@@ -667,6 +769,75 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl bp_polkadot::PolkadotFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_polkadot::Hash, bp_polkadot::BlockNumber>> {
+			BridgePolkadotGrandpa::best_finalized()
+		}
+
+		fn synced_headers_grandpa_info(
+		) -> Vec<bp_header_chain::StoredHeaderGrandpaInfo<bp_polkadot::Header>> {
+			BridgePolkadotGrandpa::synced_headers_grandpa_info()
+		}
+
+		fn free_headers_interval() -> Option<u32> {
+			<Runtime as pallet_bridge_grandpa::Config<
+				bridge_config::WithRococoBridgeGrandpaInstance
+			>>::FreeHeadersInterval::get()
+		}
+	}
+
+	impl bp_bridge_hub_polkadot::BridgeHubPolkadotFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_polkadot::Hash, bp_bridge_hub_polkadot::BlockNumber>> {
+			BridgePolkadotParachains::best_parachain_head_id::<
+				bp_bridge_hub_rococo::BridgeHubRococo
+			>().unwrap_or(None)
+		}
+
+		fn free_headers_interval() -> Option<u32> {
+			// "free interval" is not currently used for parachains
+			None
+		}
+	}
+
+	impl bp_bridge_hub_polkadot::FromBridgeHubPolkadotInboundLaneApi<Block> for Runtime {
+		fn message_details(
+			lane: bp_messages::LegacyLaneId,
+			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
+		) -> Vec<bp_messages::InboundMessageDetails> {
+			bridge_runtime_common::messages_api::inbound_message_details::<
+				Runtime,
+				bridge_config::WithBridgeHubRococoMessagesInstance,
+			>(lane, messages)
+		}
+	}
+
+	impl bp_bridge_hub_polkadot::ToBridgeHubPolkadotOutboundLaneApi<Block> for Runtime {
+		fn message_details(
+			lane: bp_messages::LegacyLaneId,
+			begin: bp_messages::MessageNonce,
+			end: bp_messages::MessageNonce,
+		) -> Vec<bp_messages::OutboundMessageDetails> {
+			bridge_runtime_common::messages_api::outbound_message_details::<
+				Runtime,
+				bridge_config::WithBridgeHubRococoMessagesInstance,
+			>(lane, begin, end)
+		}
+	}
+
+	impl sp_genesis_builder::GenesisBuilder<Block> for Runtime {
+		fn build_state(config: Vec<u8>) -> sp_genesis_builder::Result {
+			build_state::<RuntimeGenesisConfig>(config)
+		}
+
+		fn get_preset(id: &Option<sp_genesis_builder::PresetId>) -> Option<Vec<u8>> {
+			get_preset::<RuntimeGenesisConfig>(id, genesis_config_presets::get_preset)
+		}
+
+		fn preset_names() -> Vec<sp_genesis_builder::PresetId> {
+			genesis_config_presets::preset_names()
+		}
+	}
+
 	#[cfg(feature = "runtime-benchmarks")]
 	impl frame_benchmarking::Benchmark<Block> for Runtime {
 		fn benchmark_metadata(extra: bool) -> (
@@ -677,6 +848,9 @@ impl_runtime_apis! {
 			use frame_support::traits::StorageInfoTrait;
 			use frame_system_benchmarking::Pallet as SystemBench;
 			use baseline::Pallet as BaselineBench;
+
+			use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
+			use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
 
 			let mut list = Vec::<BenchmarkList>::new();
 			list_benchmarks!(list, extra);
@@ -693,6 +867,9 @@ impl_runtime_apis! {
 
 			use frame_system_benchmarking::Pallet as SystemBench;
 			use baseline::Pallet as BaselineBench;
+
+			use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
+			use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
 
 			impl frame_system_benchmarking::Config for Runtime {}
 			impl baseline::Config for Runtime {}
@@ -727,6 +904,32 @@ impl_runtime_apis! {
 			// NOTE: intentional unwrap: we don't want to propagate the error backwards, and want to
 			// have a backtrace here.
 			Executive::try_execute_block(block, state_root_check, signature_check, select).expect("execute-block failed")
+		}
+	}
+
+	impl pallet_transaction_payment_rpc_runtime_api::TransactionPaymentApi<Block, u128> for Runtime {
+		fn query_info(
+			uxt: <Block as BlockT>::Extrinsic,
+			_len: u32,
+		) -> RuntimeDispatchInfo<u128> {
+			let dispatch_info = <<Block as BlockT>::Extrinsic as GetDispatchInfo>::get_dispatch_info(&uxt);
+			RuntimeDispatchInfo {
+				weight: dispatch_info.total_weight(),
+				class: dispatch_info.class,
+				partial_fee: 0
+			}
+		}
+		fn query_fee_details(
+			_uxt: <Block as BlockT>::Extrinsic,
+			_len: u32,
+		) -> pallet_transaction_payment::FeeDetails<u128> {
+			todo!()
+		}
+		fn query_weight_to_fee(_weight: Weight) -> u128 {
+			todo!()
+		}
+		fn query_length_to_fee(_len: u32) -> u128 {
+			todo!()
 		}
 	}
 }
