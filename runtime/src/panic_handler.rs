@@ -1,6 +1,6 @@
 //! Panic handler for builds without `std`.
 
-// TODO: Remove this file once `sp-io` is uipgraded.
+// TODO: Remove this file once `sp-io` is upgraded.
 //       See https://github.com/paritytech/polkadot-bulletin-chain/issues/18.
 
 use sp_core::LogLevel;
