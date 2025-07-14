@@ -11,7 +11,7 @@ use bp_messages::{
 };
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_runtime::messages::MessageDispatchResult;
-use codec::{Decode, Encode};
+use codec::{Decode, DecodeWithMemTracking, Encode};
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
@@ -102,7 +102,16 @@ impl pallet_bridge_parachains::Config<WithRococoBridgeParachainsInstance> for Ru
 const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
 
 /// Message dispatch result type for single message.
-#[derive(CloneNoBound, EqNoBound, PartialEqNoBound, Encode, Decode, Debug, TypeInfo)]
+#[derive(
+	CloneNoBound,
+	EqNoBound,
+	PartialEqNoBound,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Debug,
+	TypeInfo,
+)]
 pub enum XcmBlobMessageDispatchResult {
 	/// We've been unable to decode message payload.
 	InvalidPayload,
