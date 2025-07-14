@@ -295,7 +295,9 @@ impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
 
 	fn start_session(_start_index: SessionIndex) {
 		for (who, _) in NextDisabledValidators::<T>::drain() {
-			pallet_session::Pallet::<T>::disable(&who);
+			if let Some(i) = pallet_session::Pallet::<T>::validator_id_to_index(&who) {
+				pallet_session::Pallet::<T>::disable_index(i);
+			}
 		}
 	}
 }
