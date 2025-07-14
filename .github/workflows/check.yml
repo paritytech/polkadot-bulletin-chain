@@ -58,8 +58,7 @@ jobs:
           cache-all-crates: true
 
       - name: Cargo check
-        run: |
-          SKIP_WASM_BUILD=1 cargo check
+        run: cargo check
 
   check-benchmarking:
     name: Cargo check (benchmarking)
