@@ -447,6 +447,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	sp_runtime::RuntimeDebug,
 	codec::Encode,
 	codec::Decode,
+	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
 pub struct ValidateSigned;
