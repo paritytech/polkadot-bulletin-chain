@@ -15,7 +15,7 @@ use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
 use pallet_bridge_messages::Call as BridgeMessagesCall;
 use pallet_bridge_parachains::Call as BridgeParachainsCall;
 use pallet_grandpa::AuthorityId as GrandpaId;
-use pallet_session::Call as SessionCall;
+use pallet_session::{historical as session_historical, Call as SessionCall};
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
@@ -269,9 +269,13 @@ impl pallet_session::Config for Runtime {
 	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = opaque::SessionKeys;
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
+	type Currency = ();
+	type DisablingStrategy = ();
+	type KeyDeposit = ();
 }
 
 impl pallet_session::historical::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }
@@ -383,9 +387,9 @@ construct_runtime!(
 		// Authorship must be before session in order to note author in the correct session.
 		Authorship: pallet_authorship::{Pallet, Storage} = 10,
 		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
-		Historical: pallet_session::historical::{Pallet} = 12,
+		Historical: pallet_session::historical::{Pallet, Event<T>} = 12,
 		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
-		Session: pallet_session::{Pallet, Call, Storage, Event, Config<T>} = 14,
+		Session: pallet_session::{Pallet, Call, Storage, Event<T>, Config<T>} = 14,
 		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
 
 		// Storage
