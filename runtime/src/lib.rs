@@ -64,6 +64,7 @@ pub use sp_runtime::{Perbill, Permill};
 
 mod bridge_config;
 mod genesis_config_presets;
+mod panic_handler;
 mod weights;
 mod xcm_config;
 
