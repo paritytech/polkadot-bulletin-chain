@@ -21,6 +21,7 @@ pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", rev =
 
 [dev-dependencies]
 serde = { version = "1.0.126", features = ["derive"] }
+pallets-common = { version = "0.1.0", default-features = false, path = "../common" }
 
 [features]
 default = ['std']

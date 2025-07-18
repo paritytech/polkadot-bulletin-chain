@@ -270,9 +270,10 @@ impl pallet_session::Config for Runtime {
 	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = opaque::SessionKeys;
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
-	type Currency = ();
-	type DisablingStrategy = ();
+	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
 	type KeyDeposit = ();
+	// TODO: check this
+	type DisablingStrategy = ();
 }
 
 impl pallet_session::historical::Config for Runtime {
@@ -381,7 +382,7 @@ where
 
 construct_runtime!(
 	pub struct Runtime {
-		System: frame_system::{Pallet, Call, Storage, Config<T>, Event<T>} = 0,
+		System: frame_system = 0,
 		// Babe must be called before Session
 		Babe: pallet_babe::{Pallet, Call, Storage, Config<T>, ValidateUnsigned} = 1,
 		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent} = 2,
@@ -390,7 +391,7 @@ construct_runtime!(
 		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
 		Historical: pallet_session::historical::{Pallet, Event<T>} = 12,
 		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
-		Session: pallet_session::{Pallet, Call, Storage, Event<T>, Config<T>} = 14,
+		Session: pallet_session = 14,
 		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
 
 		// Storage
