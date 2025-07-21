@@ -18,11 +18,11 @@ codec = { package = "parity-scale-codec", version = "3.7.5", default-features = 
 log = "0.4.17"
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
 
-polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "436b4935b52562f79a83b6ecadeac7dcbc1c2367", default-features = false, features = [
+polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860", default-features = false, features = [
 	"experimental",
 	"runtime",
 ] }
-sp-transaction-storage-proof = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "436b4935b52562f79a83b6ecadeac7dcbc1c2367", default-features = false }
+sp-transaction-storage-proof = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860", default-features = false }
 
 [features]
 default = ["std"]
