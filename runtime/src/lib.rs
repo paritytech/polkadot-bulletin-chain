@@ -15,11 +15,11 @@ use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
 use pallet_bridge_messages::Call as BridgeMessagesCall;
 use pallet_bridge_parachains::Call as BridgeParachainsCall;
 use pallet_grandpa::AuthorityId as GrandpaId;
-use pallet_session::{historical as session_historical, Call as SessionCall};
+use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	generic, impl_opaque_keys, impl_tx_ext_default,
+	generic, impl_opaque_keys,
 	traits::{
 		AccountIdLookup, BlakeTwo256, Block as BlockT, ConvertInto, DispatchInfoOf,
 		IdentifyAccount, NumberFor, OpaqueKeys, PostDispatchInfoOf, SignedExtension, Verify,
@@ -51,7 +51,7 @@ pub use frame_support::{
 	StorageValue,
 };
 use frame_support::{
-	dispatch::{DispatchInfo, GetDispatchInfo},
+	dispatch::GetDispatchInfo,
 	genesis_builder_helper::{build_state, get_preset},
 };
 pub use frame_system::Call as SystemCall;
