@@ -97,6 +97,7 @@ impl pallet_bridge_parachains::Config<WithRococoBridgeParachainsInstance> for Ru
 		SingleParaStoredHeaderDataBuilder<bp_bridge_hub_rococo::BridgeHubRococo>;
 	type HeadsToKeep = BridgeHubRococoHeadsToKeep;
 	type MaxParaHeadDataSize = MaxBridgeHubRococoHeadSize;
+	type OnNewHead = ();
 }
 
 const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
@@ -163,7 +164,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 				return MessageDispatchResult {
 					unspent_weight: Weight::zero(),
 					dispatch_level_result: XcmBlobMessageDispatchResult::InvalidPayload,
-				}
+				};
 			},
 		};
 		let dispatch_level_result = match BlobDispatcher::dispatch_blob(payload) {
@@ -242,7 +243,8 @@ where
 			.map_err(drop)
 			.and_then(|payload| decode_bridge_message(payload).map(|(_, xcm)| xcm).map_err(drop))
 			.and_then(|xcm| xcm.try_into().map_err(drop))
-			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm).map_err(drop))
+			// TODO: FAIL-CI Weight::MAX maybe change for something else, hard-coded or Weight::MAX/4...
+			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
 			.map(|weighed_xcm| weighed_xcm.weight_of())
 			.unwrap_or(Weight::zero())
 	}
