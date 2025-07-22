@@ -20,7 +20,6 @@ clap = { version = "4.2.5", features = ["derive"] }
 futures = { version = "0.3.21", features = ["thread-pool"]}
 
 frame-system = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-pallet-im-online = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-cli = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-client-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-consensus = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }

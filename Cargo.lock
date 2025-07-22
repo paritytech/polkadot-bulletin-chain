@@ -8008,25 +8008,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-im-online"
-version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860#161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "pallet-authorship",
- "parity-scale-codec",
- "scale-info",
- "sp-application-crypto 30.0.0",
- "sp-core 28.0.0",
- "sp-io 30.0.0",
- "sp-runtime 31.0.1",
- "sp-staking 26.0.0",
-]
-
-[[package]]
 name = "pallet-message-queue"
 version = "31.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860#161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860"
@@ -8763,7 +8744,6 @@ dependencies = [
  "frame-system",
  "futures",
  "jsonrpsee 0.24.7",
- "pallet-im-online",
  "polkadot-bulletin-chain-runtime",
  "sc-basic-authorship",
  "sc-cli 0.36.0",
@@ -8833,7 +8813,6 @@ dependencies = [
  "pallet-bridge-parachains",
  "pallet-bridge-relayers",
  "pallet-grandpa",
- "pallet-im-online",
  "pallet-offences",
  "pallet-relayer-set",
  "pallet-session",

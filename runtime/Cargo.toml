@@ -23,7 +23,6 @@ frame-try-runtime = { default-features = false, git = "https://github.com/parity
 pallet-authorship = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-babe = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-grandpa = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-pallet-im-online = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-offences = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-session = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-sudo = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -107,7 +106,6 @@ std = [
 	"pallet-authorship/std",
 	"pallet-babe/std",
 	"pallet-grandpa/std",
-	"pallet-im-online/std",
 	"pallet-offences/std",
 	"pallet-session/std",
 	"pallet-sudo/std",
@@ -164,7 +162,6 @@ runtime-benchmarks = [
 	"frame-system/runtime-benchmarks",
 	"pallet-babe/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
-	"pallet-im-online/runtime-benchmarks",
 	"pallet-offences/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
@@ -195,7 +192,6 @@ try-runtime = [
 	"pallet-authorship/try-runtime",
 	"pallet-babe/try-runtime",
 	"pallet-grandpa/try-runtime",
-	"pallet-im-online/try-runtime",
 	"pallet-offences/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-sudo/try-runtime",
