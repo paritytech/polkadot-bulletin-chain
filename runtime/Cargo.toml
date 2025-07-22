@@ -44,6 +44,7 @@ sp-std = { default-features = false, git = "https://github.com/paritytech/polkad
 sp-transaction-pool = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 sp-transaction-storage-proof = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 sp-version = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
+sp-storage = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 
 # Used for the node's RPCs
 frame-system-rpc-runtime-api = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
@@ -78,6 +79,12 @@ pallet-xcm-bridge-hub = { git = "https://github.com/paritytech/polkadot-sdk.git"
 xcm = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", package = "staging-xcm" }
 xcm-builder = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", package = "staging-xcm-builder" }
 xcm-executor = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", package = "staging-xcm-executor" }
+
+# TODO: just to pass `--features runtime-benchmarks`
+pallet-xcm = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
+pallet-staking = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
+sp-staking = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
+parachains-common = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 
 [build-dependencies]
 substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", optional = true }
@@ -156,7 +163,12 @@ std = [
 	"xcm/std",
 
 	"pallet-bridge-relayers/std",
+	"pallet-staking?/std",
+	"pallet-xcm?/std",
+	"parachains-common?/std",
 	"sp-genesis-builder/std",
+	"sp-staking?/std",
+	"sp-storage?/std",
 	"substrate-wasm-builder",
 ]
 runtime-benchmarks = [
@@ -168,6 +180,7 @@ runtime-benchmarks = [
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
+	"sp-storage",
 
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-system-benchmarking/runtime-benchmarks",
@@ -188,6 +201,11 @@ runtime-benchmarks = [
 	"xcm-builder/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
+
+	"pallet-staking/runtime-benchmarks",
+	"pallet-xcm/runtime-benchmarks",
+	"parachains-common/runtime-benchmarks",
+	"sp-staking/runtime-benchmarks",
 ]
 try-runtime = [
 	"frame-executive/try-runtime",
@@ -209,10 +227,13 @@ try-runtime = [
 
 	"pallet-bridge-relayers/try-runtime",
 	"pallet-relayer-set/try-runtime",
+	"pallet-staking?/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
+	"pallet-xcm?/try-runtime",
 	"pallets-common/try-runtime",
+	"parachains-common?/try-runtime",
 	"sp-runtime/try-runtime",
 ]
 rococo = []
