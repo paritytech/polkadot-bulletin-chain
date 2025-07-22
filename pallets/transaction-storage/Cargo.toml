@@ -13,10 +13,10 @@ readme = "README.md"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-array-bytes = { version = "6.1", optional = true }
-codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false }
-log = "0.4.17"
-scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
+array-bytes = { optional = true, workspace = true }
+codec = { workspace = true }
+log = { workspace = true, default-features = true }
+scale-info = { features = ["derive"], workspace = true }
 
 polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860", default-features = false, features = [
 	"experimental",
