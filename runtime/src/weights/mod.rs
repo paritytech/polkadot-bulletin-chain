@@ -22,6 +22,7 @@ impl pallet_bridge_parachains::WeightInfoExt
 	for bridge_polkadot_parachains::WeightInfo<crate::Runtime>
 {
 	fn expected_extra_storage_proof_size() -> u32 {
+                // TODO: (clean up) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
 		bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE
 	}
 
@@ -38,6 +39,7 @@ impl pallet_bridge_messages::WeightInfoExt
 	for bridge_polkadot_messages::WeightInfo<crate::Runtime>
 {
 	fn expected_extra_storage_proof_size() -> u32 {
+                // TODO: (clean up) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
 		bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE
 	}
 

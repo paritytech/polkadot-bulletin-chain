@@ -146,12 +146,10 @@ impl pallet_session::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
 	type KeyDeposit = ();
-	// TODO: check this
 	type DisablingStrategy = ();
 }
 
 impl pallet_session::historical::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }

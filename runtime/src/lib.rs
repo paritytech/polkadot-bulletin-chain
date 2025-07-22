@@ -276,7 +276,6 @@ impl pallet_session::Config for Runtime {
 }
 
 impl pallet_session::historical::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }
@@ -388,7 +387,7 @@ construct_runtime!(
 		// Authorship must be before session in order to note author in the correct session.
 		Authorship: pallet_authorship::{Pallet, Storage} = 10,
 		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
-		Historical: pallet_session::historical::{Pallet, Event<T>} = 12,
+		Historical: pallet_session::historical = 12,
 		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
 		Session: pallet_session = 14,
 		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,

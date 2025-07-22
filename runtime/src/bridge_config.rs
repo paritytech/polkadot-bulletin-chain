@@ -244,6 +244,7 @@ where
 			.and_then(|payload| decode_bridge_message(payload).map(|(_, xcm)| xcm).map_err(drop))
 			.and_then(|xcm| xcm.try_into().map_err(drop))
 			// TODO: FAIL-CI Weight::MAX maybe change for something else, hard-coded or Weight::MAX/4...
+			// TODO: (real weights) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
 			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
 			.map(|weighed_xcm| weighed_xcm.weight_of())
 			.unwrap_or(Weight::zero())
