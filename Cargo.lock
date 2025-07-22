@@ -8383,7 +8383,6 @@ dependencies = [
 name = "pallets-common"
 version = "0.1.0"
 dependencies = [
- "log",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
@@ -8750,26 +8749,20 @@ dependencies = [
  "sc-client-api 28.0.0",
  "sc-consensus 0.33.0",
  "sc-consensus-babe",
- "sc-consensus-beefy",
  "sc-consensus-grandpa",
  "sc-consensus-grandpa-rpc",
  "sc-executor 0.32.0",
  "sc-network 0.34.0",
  "sc-offchain",
  "sc-rpc 29.0.0",
- "sc-rpc-api 0.33.0",
  "sc-service 0.35.0",
- "sc-statement-store",
  "sc-telemetry 15.0.0",
  "sc-transaction-pool 28.0.0",
  "sc-transaction-pool-api 28.0.0",
- "serde_json",
  "sp-api 26.0.0",
  "sp-block-builder 26.0.0",
  "sp-blockchain 28.0.0",
  "sp-consensus-babe 0.32.0",
- "sp-consensus-beefy",
- "sp-consensus-grandpa 13.0.0",
  "sp-core 28.0.0",
  "sp-genesis-builder 0.8.0",
  "sp-inherents 26.0.0",
@@ -11184,40 +11177,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sc-consensus-beefy"
-version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860#161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860"
-dependencies = [
- "array-bytes 6.2.3",
- "async-channel 1.9.0",
- "async-trait",
- "futures",
- "log",
- "parity-scale-codec",
- "parking_lot 0.12.3",
- "sc-client-api 28.0.0",
- "sc-consensus 0.33.0",
- "sc-network 0.34.0",
- "sc-network-gossip",
- "sc-network-sync 0.33.0",
- "sc-network-types",
- "sc-utils 14.0.0",
- "sp-api 26.0.0",
- "sp-application-crypto 30.0.0",
- "sp-arithmetic 23.0.0",
- "sp-blockchain 28.0.0",
- "sp-consensus 0.32.0",
- "sp-consensus-beefy",
- "sp-core 28.0.0",
- "sp-keystore 0.34.0",
- "sp-runtime 31.0.1",
- "substrate-prometheus-endpoint 0.17.0",
- "thiserror 1.0.69",
- "tokio",
- "wasm-timer",
-]
-
-[[package]]
 name = "sc-consensus-epochs"
 version = "0.33.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860#161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860"
@@ -12329,25 +12288,6 @@ dependencies = [
  "parity-scale-codec",
  "parking_lot 0.12.3",
  "sp-core 32.0.0",
-]
-
-[[package]]
-name = "sc-statement-store"
-version = "10.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860#161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860"
-dependencies = [
- "log",
- "parity-db",
- "parking_lot 0.12.3",
- "sc-client-api 28.0.0",
- "sc-keystore 25.0.0",
- "sp-api 26.0.0",
- "sp-blockchain 28.0.0",
- "sp-core 28.0.0",
- "sp-runtime 31.0.1",
- "sp-statement-store 10.0.0",
- "substrate-prometheus-endpoint 0.17.0",
- "tokio",
 ]
 
 [[package]]
@@ -13743,26 +13683,6 @@ dependencies = [
  "sp-inherents 30.0.0",
  "sp-runtime 35.0.0",
  "sp-timestamp 30.0.0",
-]
-
-[[package]]
-name = "sp-consensus-beefy"
-version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860#161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860"
-dependencies = [
- "parity-scale-codec",
- "scale-info",
- "serde",
- "sp-api 26.0.0",
- "sp-application-crypto 30.0.0",
- "sp-core 28.0.0",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860)",
- "sp-io 30.0.0",
- "sp-keystore 0.34.0",
- "sp-mmr-primitives",
- "sp-runtime 31.0.1",
- "sp-weights 27.0.0",
- "strum 0.26.3",
 ]
 
 [[package]]
