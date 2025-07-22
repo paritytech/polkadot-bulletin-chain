@@ -11,25 +11,24 @@ repository.workspace = true
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false }
-log = "0.4.17"
-scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
+codec = { workspace = true }
+scale-info = { features = ["derive"], workspace = true }
 
 polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860", default-features = false, features = [
-    "experimental",
-    "runtime",
+	"experimental",
+	"runtime",
 ] }
 
 [features]
 default = ["std"]
 runtime-benchmarks = [
-    "polkadot-sdk-frame/runtime-benchmarks"
+	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
-    "codec/std",
-    "scale-info/std",
-    "polkadot-sdk-frame/std"
+	"codec/std",
+	"polkadot-sdk-frame/std",
+	"scale-info/std",
 ]
 try-runtime = [
-    "polkadot-sdk-frame/try-runtime"
+	"polkadot-sdk-frame/try-runtime",
 ]

@@ -12,10 +12,10 @@ repository = "https://github.com/paritytech/polkadot-bulletin-chain/"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false, features = ["derive"] }
-log = { version = "0.4", default-features = false }
-scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
-serde_json = { version = "1.0.132", default-features = false, features = ["alloc"] }
+codec = { workspace = true, features = ["derive"] }
+log = { workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+serde_json = { features = ["alloc"], workspace = true }
 frame-executive = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 frame-support = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 frame-system = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -23,7 +23,6 @@ frame-try-runtime = { default-features = false, git = "https://github.com/parity
 pallet-authorship = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-babe = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-grandpa = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-pallet-im-online = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-offences = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-session = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 pallet-sudo = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -86,11 +85,11 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [dev-dependencies]
 bp-test-utils = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 bridge-runtime-common = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860", features = ["integrity-test"] }
-hex = "0.4"
+hex = { workspace = true }
 sp-io = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-keyring = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-trie = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-static_assertions = "1.1"
+static_assertions = { workspace = true }
 
 [features]
 default = ["std"]
@@ -107,7 +106,6 @@ std = [
 	"pallet-authorship/std",
 	"pallet-babe/std",
 	"pallet-grandpa/std",
-	"pallet-im-online/std",
 	"pallet-offences/std",
 	"pallet-session/std",
 	"pallet-sudo/std",
@@ -133,8 +131,8 @@ std = [
 	"frame-system-benchmarking?/std",
 
 	"pallet-relayer-set/std",
-	"pallet-transaction-payment/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
+	"pallet-transaction-payment/std",
 	"pallet-transaction-storage/std",
 	"pallet-validator-set/std",
 	"pallets-common/std",
@@ -149,14 +147,16 @@ std = [
 	"bp-runtime/std",
 	"bridge-runtime-common/std",
 	"pallet-bridge-grandpa/std",
-	"pallet-bridge-parachains/std",
 	"pallet-bridge-messages/std",
+	"pallet-bridge-parachains/std",
 	"pallet-xcm-bridge-hub/std",
 
-	"xcm/std",
 	"xcm-builder/std",
 	"xcm-executor/std",
+	"xcm/std",
 
+	"pallet-bridge-relayers/std",
+	"sp-genesis-builder/std",
 	"substrate-wasm-builder",
 ]
 runtime-benchmarks = [
@@ -164,7 +164,6 @@ runtime-benchmarks = [
 	"frame-system/runtime-benchmarks",
 	"pallet-babe/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
-	"pallet-im-online/runtime-benchmarks",
 	"pallet-offences/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
@@ -184,8 +183,11 @@ runtime-benchmarks = [
 	"pallet-transaction-storage/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
 
+	"pallet-bridge-relayers/runtime-benchmarks",
+	"pallets-common/runtime-benchmarks",
 	"xcm-builder/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
+	"xcm/runtime-benchmarks",
 ]
 try-runtime = [
 	"frame-executive/try-runtime",
@@ -195,7 +197,6 @@ try-runtime = [
 	"pallet-authorship/try-runtime",
 	"pallet-babe/try-runtime",
 	"pallet-grandpa/try-runtime",
-	"pallet-im-online/try-runtime",
 	"pallet-offences/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-sudo/try-runtime",
@@ -206,9 +207,12 @@ try-runtime = [
 	"pallet-bridge-parachains/try-runtime",
 	"pallet-xcm-bridge-hub/try-runtime",
 
+	"pallet-bridge-relayers/try-runtime",
 	"pallet-relayer-set/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
+	"pallets-common/try-runtime",
+	"sp-runtime/try-runtime",
 ]
 rococo = []

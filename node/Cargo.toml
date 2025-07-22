@@ -16,16 +16,14 @@ targets = ["x86_64-unknown-linux-gnu"]
 name = "polkadot-bulletin-chain"
 
 [dependencies]
-clap = { version = "4.2.5", features = ["derive"] }
-futures = { version = "0.3.21", features = ["thread-pool"]}
+clap = { features = ["derive"], workspace = true }
+futures = { features = ["thread-pool"], workspace = true }
 
 frame-system = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-pallet-im-online = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-cli = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-client-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-consensus = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-consensus-babe = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-sc-consensus-beefy = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-consensus-grandpa = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-consensus-grandpa-rpc = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-executor = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -33,13 +31,10 @@ sc-network = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "16
 sc-offchain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-rpc = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-service = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-sc-statement-store = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-telemetry = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-transaction-pool = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sc-transaction-pool-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-consensus-babe = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-sp-consensus-beefy = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-sp-consensus-grandpa = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-inherents = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-io = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -49,10 +44,8 @@ sp-timestamp = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "
 sp-transaction-storage-proof = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 
 # These dependencies are used for the node's RPCs
-serde_json = { version = "1.0.132", default-features = true }
-jsonrpsee = { version = "0.24.3", features = ["server"] }
+jsonrpsee = { features = ["server"], workspace = true }
 sc-basic-authorship = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
-sc-rpc-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-block-builder = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
 sp-blockchain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -67,7 +60,7 @@ frame-benchmarking-cli = { git = "https://github.com/paritytech/polkadot-sdk.git
 polkadot-bulletin-chain-runtime = { version = "0.1.0-dev", path = "../runtime" }
 
 # CLI-specific dependencies
-try-runtime-cli = { optional = true, version = "0.42" }
+try-runtime-cli = { optional = true, workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860" }
@@ -76,12 +69,20 @@ substrate-build-script-utils = { git = "https://github.com/paritytech/polkadot-s
 default = []
 # Dependencies that are only required if runtime benchmarking should be built.
 runtime-benchmarks = [
-	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
-	"frame-benchmarking/runtime-benchmarks",
 	"frame-benchmarking-cli/runtime-benchmarks",
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
+	"sc-service/runtime-benchmarks",
+	"sp-runtime/runtime-benchmarks",
 ]
 # Enable features that allow the runtime to be tried and debugged. Name might be subject to change
 # in the near future.
-try-runtime = ["polkadot-bulletin-chain-runtime/try-runtime"]
+try-runtime = [
+	"frame-system/try-runtime",
+	"polkadot-bulletin-chain-runtime/try-runtime",
+	"sp-runtime/try-runtime",
+	"try-runtime-cli?/try-runtime",
+]
 # To bridge with Rococo Bridge Hub instead of Polkadot Bridge Hub
 rococo = ["polkadot-bulletin-chain-runtime/rococo"]

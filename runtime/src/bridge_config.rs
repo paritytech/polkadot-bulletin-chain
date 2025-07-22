@@ -25,6 +25,7 @@ use xcm_executor::XcmExecutor;
 pub const XCM_LANE: LegacyLaneId = LegacyLaneId([0, 0, 0, 0]);
 
 parameter_types! {
+	// TODO: (change to Polkadot - or make this `pub storage` for supporting Rococo and Polkadot)
 	pub RococoGlobalConsensusNetwork: NetworkId = NetworkId::ByGenesis(ROCOCO_GENESIS_HASH);
 	pub BridgedNetwork: NetworkId = RococoGlobalConsensusNetwork::get();
 	pub RococoGlobalConsensusNetworkLocation: Location = Location::new(
@@ -308,7 +309,7 @@ where
 pub type ToBridgeHubRococoHaulBlobExporter = HaulBlobExporter<
 	XcmBlobHauler<Runtime, WithBridgeHubRococoMessagesInstance>,
 	RococoGlobalConsensusNetworkLocation,
-	AlwaysV4,
+	AlwaysV5,
 	(),
 >;
 
