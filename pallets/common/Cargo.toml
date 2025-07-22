@@ -1,17 +1,17 @@
 [package]
-name = "pallet-relayer-set"
-version = "1.0.0"
+name = "pallets-common"
+version = "0.1.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2021"
 license = "Apache-2.0"
-description = "Relayer set pallet"
+description = "Common utilities for pallets and/or runtime"
+repository.workspace = true
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 codec = { workspace = true }
-log = { workspace = true, default-features = true }
 scale-info = { features = ["derive"], workspace = true }
 
 polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false, features = [
@@ -26,7 +26,6 @@ runtime-benchmarks = [
 ]
 std = [
 	"codec/std",
-	"log/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 ]

@@ -19,7 +19,7 @@ use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	generic, impl_opaque_keys, impl_tx_ext_default,
+	generic, impl_opaque_keys,
 	traits::{
 		AccountIdLookup, BlakeTwo256, Block as BlockT, ConvertInto, DispatchInfoOf,
 		IdentifyAccount, NumberFor, OpaqueKeys, PostDispatchInfoOf, SignedExtension, Verify,
@@ -51,7 +51,7 @@ pub use frame_support::{
 	StorageValue,
 };
 use frame_support::{
-	dispatch::{DispatchInfo, GetDispatchInfo},
+	dispatch::GetDispatchInfo,
 	genesis_builder_helper::{build_state, get_preset},
 };
 pub use frame_system::Call as SystemCall;
@@ -64,7 +64,6 @@ pub use sp_runtime::{Perbill, Permill};
 
 mod bridge_config;
 mod genesis_config_presets;
-mod panic_handler;
 mod weights;
 mod xcm_config;
 
@@ -270,9 +269,14 @@ impl pallet_session::Config for Runtime {
 	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = opaque::SessionKeys;
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
+	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
+	type KeyDeposit = ();
+	// TODO: check it later
+	type DisablingStrategy = ();
 }
 
 impl pallet_session::historical::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }
@@ -366,40 +370,40 @@ where
 	type RuntimeCall = RuntimeCall;
 }
 
-impl<C> frame_system::offchain::CreateInherent<C> for Runtime
+impl<C> frame_system::offchain::CreateBare<C> for Runtime
 where
 	RuntimeCall: From<C>,
 {
-	fn create_inherent(call: RuntimeCall) -> UncheckedExtrinsic {
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
 		UncheckedExtrinsic::new_bare(call)
 	}
 }
 
 construct_runtime!(
 	pub struct Runtime {
-		System: frame_system::{Pallet, Call, Storage, Config<T>, Event<T>} = 0,
+		System: frame_system = 0,
 		// Babe must be called before Session
-		Babe: pallet_babe::{Pallet, Call, Storage, Config<T>, ValidateUnsigned} = 1,
-		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent} = 2,
+		Babe: pallet_babe = 1,
+		Timestamp: pallet_timestamp = 2,
 		// Authorship must be before session in order to note author in the correct session.
-		Authorship: pallet_authorship::{Pallet, Storage} = 10,
-		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
-		Historical: pallet_session::historical::{Pallet} = 12,
-		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
-		Session: pallet_session::{Pallet, Call, Storage, Event, Config<T>} = 14,
-		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
+		Authorship: pallet_authorship = 10,
+		Offences: pallet_offences = 11,
+		Historical: pallet_session::historical = 12,
+		ValidatorSet: pallet_validator_set = 13,
+		Session: pallet_session = 14,
+		Grandpa: pallet_grandpa = 15,
 
 		// Storage
-		TransactionStorage: pallet_transaction_storage::{Pallet, Call, Storage, Event<T>} = 40,
+		TransactionStorage: pallet_transaction_storage = 40,
 
 		// Bridge
-		RelayerSet: pallet_relayer_set::{Pallet, Storage, Event<T>, Config<T>} = 50,
-		BridgeRococoGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>, Config<T>} = 51,
-		BridgeRococoParachains: pallet_bridge_parachains::{Pallet, Call, Storage, Event<T>, Config<T>} = 52,
-		BridgeRococoMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>} = 53,
+		RelayerSet: pallet_relayer_set = 50,
+		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
+		BridgeRococoParachains: pallet_bridge_parachains = 52,
+		BridgeRococoMessages: pallet_bridge_messages = 53,
 
 		// sudo
-		Sudo: pallet_sudo::{Pallet, Call, Storage, Event<T>, Config<T>} = 255,
+		Sudo: pallet_sudo = 255,
 	}
 );
 
@@ -447,6 +451,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	sp_runtime::RuntimeDebug,
 	codec::Encode,
 	codec::Decode,
+	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
 pub struct ValidateSigned;
