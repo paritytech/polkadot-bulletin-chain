@@ -82,7 +82,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: parity-default
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [set-image]
     container:
