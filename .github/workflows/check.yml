@@ -35,7 +35,8 @@ jobs:
 
   check:
     name: Cargo check
-    runs-on: ubuntu-latest
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
     needs: [set-image]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -61,7 +62,8 @@ jobs:
 
   check-benchmarking:
     name: Cargo check (benchmarking)
-    runs-on: ubuntu-latest
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
     needs: [set-image]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -82,8 +84,9 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    timeout-minutes: 60
     needs: [set-image]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
