@@ -22,13 +22,14 @@ polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", r
 [features]
 default = ["std"]
 runtime-benchmarks = [
-	"polkadot-sdk-frame/runtime-benchmarks"
+	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
 	"codec/std",
+	"log/std",
+	"polkadot-sdk-frame/std",
 	"scale-info/std",
-	"polkadot-sdk-frame/std"
 ]
 try-runtime = [
-	"polkadot-sdk-frame/try-runtime"
+	"polkadot-sdk-frame/try-runtime",
 ]

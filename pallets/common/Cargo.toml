@@ -15,20 +15,20 @@ codec = { package = "parity-scale-codec", version = "3.7.5", default-features = 
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
 
 polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "161e7f4d8b9b6908694d0ccc9bd0ef4a1674e860", default-features = false, features = [
-    "experimental",
-    "runtime",
+	"experimental",
+	"runtime",
 ] }
 
 [features]
 default = ["std"]
 runtime-benchmarks = [
-    "polkadot-sdk-frame/runtime-benchmarks"
+	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
-    "codec/std",
-    "scale-info/std",
-    "polkadot-sdk-frame/std"
+	"codec/std",
+	"polkadot-sdk-frame/std",
+	"scale-info/std",
 ]
 try-runtime = [
-    "polkadot-sdk-frame/try-runtime"
+	"polkadot-sdk-frame/try-runtime",
 ]

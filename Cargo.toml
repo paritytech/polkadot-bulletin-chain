@@ -6,12 +6,12 @@ repository = "https://github.com/zdave-parity/polkadot-bulletin-chain.git"
 [workspace]
 resolver = "2"
 members = [
-    "node",
-    "pallets/common",
-    "pallets/relayer-set",
-    "pallets/transaction-storage",
-    "pallets/validator-set",
-    "runtime",
+	"node",
+	"pallets/common",
+	"pallets/relayer-set",
+	"pallets/transaction-storage",
+	"pallets/validator-set",
+	"runtime",
 ]
 [profile.release]
 panic = "unwind"

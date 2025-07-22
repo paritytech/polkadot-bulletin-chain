@@ -32,8 +32,9 @@ runtime-benchmarks = [
 ]
 std = [
 	"codec/std",
-	"scale-info/std",
+	"log/std",
 	"polkadot-sdk-frame/std",
+	"scale-info/std",
 	"sp-transaction-storage-proof/std",
 ]
 try-runtime = [

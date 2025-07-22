@@ -131,8 +131,8 @@ std = [
 	"frame-system-benchmarking?/std",
 
 	"pallet-relayer-set/std",
-	"pallet-transaction-payment/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
+	"pallet-transaction-payment/std",
 	"pallet-transaction-storage/std",
 	"pallet-validator-set/std",
 	"pallets-common/std",
@@ -147,14 +147,16 @@ std = [
 	"bp-runtime/std",
 	"bridge-runtime-common/std",
 	"pallet-bridge-grandpa/std",
-	"pallet-bridge-parachains/std",
 	"pallet-bridge-messages/std",
+	"pallet-bridge-parachains/std",
 	"pallet-xcm-bridge-hub/std",
 
-	"xcm/std",
 	"xcm-builder/std",
 	"xcm-executor/std",
+	"xcm/std",
 
+	"pallet-bridge-relayers/std",
+	"sp-genesis-builder/std",
 	"substrate-wasm-builder",
 ]
 runtime-benchmarks = [
@@ -181,8 +183,11 @@ runtime-benchmarks = [
 	"pallet-transaction-storage/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
 
+	"pallet-bridge-relayers/runtime-benchmarks",
+	"pallets-common/runtime-benchmarks",
 	"xcm-builder/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
+	"xcm/runtime-benchmarks",
 ]
 try-runtime = [
 	"frame-executive/try-runtime",
@@ -202,9 +207,12 @@ try-runtime = [
 	"pallet-bridge-parachains/try-runtime",
 	"pallet-xcm-bridge-hub/try-runtime",
 
+	"pallet-bridge-relayers/try-runtime",
 	"pallet-relayer-set/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
+	"pallets-common/try-runtime",
+	"sp-runtime/try-runtime",
 ]
 rococo = []
