@@ -276,6 +276,7 @@ impl pallet_session::Config for Runtime {
 }
 
 impl pallet_session::historical::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }
@@ -382,27 +383,27 @@ construct_runtime!(
 	pub struct Runtime {
 		System: frame_system = 0,
 		// Babe must be called before Session
-		Babe: pallet_babe::{Pallet, Call, Storage, Config<T>, ValidateUnsigned} = 1,
-		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent} = 2,
+		Babe: pallet_babe = 1,
+		Timestamp: pallet_timestamp = 2,
 		// Authorship must be before session in order to note author in the correct session.
-		Authorship: pallet_authorship::{Pallet, Storage} = 10,
-		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
+		Authorship: pallet_authorship = 10,
+		Offences: pallet_offences = 11,
 		Historical: pallet_session::historical = 12,
-		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
+		ValidatorSet: pallet_validator_set = 13,
 		Session: pallet_session = 14,
-		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
+		Grandpa: pallet_grandpa = 15,
 
 		// Storage
-		TransactionStorage: pallet_transaction_storage::{Pallet, Call, Storage, Event<T>} = 40,
+		TransactionStorage: pallet_transaction_storage = 40,
 
 		// Bridge
-		RelayerSet: pallet_relayer_set::{Pallet, Storage, Event<T>, Config<T>} = 50,
-		BridgeRococoGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>, Config<T>} = 51,
-		BridgeRococoParachains: pallet_bridge_parachains::{Pallet, Call, Storage, Event<T>, Config<T>} = 52,
-		BridgeRococoMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>} = 53,
+		RelayerSet: pallet_relayer_set = 50,
+		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
+		BridgeRococoParachains: pallet_bridge_parachains = 52,
+		BridgeRococoMessages: pallet_bridge_messages = 53,
 
 		// sudo
-		Sudo: pallet_sudo::{Pallet, Call, Storage, Event<T>, Config<T>} = 255,
+		Sudo: pallet_sudo = 255,
 	}
 );
 
