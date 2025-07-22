@@ -80,23 +80,23 @@ jobs:
           cd node &&
           cargo check --features=runtime-benchmarks
 
-    test:
-      name: Test
-      runs-on: parity-default
-      timeout-minutes: 15
-      needs: [set-image]
-      container:
-        image: ${{ needs.set-image.outputs.CI_IMAGE }}
-      steps:
-        - name: Checkout sources
-          uses: actions/checkout@v4
+  test:
+    name: Test
+    runs-on: parity-default
+    timeout-minutes: 15
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
-        - name: Rust cache
-          uses: Swatinem/rust-cache@v2
-          with:
-            cache-on-failure: true
-            cache-all-crates: true
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
 
-        # TODO: enable `--all-features`.
-        - name: Run tests
-          run: cargo test --workspace
+      # TODO: enable `--all-features`.
+      - name: Run tests
+        run: cargo test --workspace
