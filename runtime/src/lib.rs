@@ -271,7 +271,7 @@ impl pallet_session::Config for Runtime {
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
 	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
 	type KeyDeposit = ();
-	// TODO: check this
+	// TODO: check it later
 	type DisablingStrategy = ();
 }
 
