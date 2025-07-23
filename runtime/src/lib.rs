@@ -335,6 +335,7 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = ();
 }
 
+// TODO: remove sudo before go live
 impl pallet_sudo::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -593,21 +594,21 @@ pub type Executive = frame_executive::Executive<
 >;
 
 #[cfg(feature = "runtime-benchmarks")]
-#[macro_use]
-extern crate frame_benchmarking;
-
-#[cfg(feature = "runtime-benchmarks")]
 mod benches {
-	define_benchmarks!(
+    frame_benchmarking::define_benchmarks!(
 		[frame_benchmarking, BaselineBench::<Runtime>]
 		[frame_system, SystemBench::<Runtime>]
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
 		[pallet_transaction_storage, TransactionStorage]
 		[pallet_validator_set, ValidatorSet]
-		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
-		[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-		[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
+		// TODO: Rococo vs Polkadot https://github.com/paritytech/polkadot-bulletin-chain/issues/22
+		[pallet_bridge_grandpa, BridgeRococoGrandpa]
+		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithRococoBridgeParachainsInstance>]
+		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubRococoMessagesInstance>]
+		// [pallet_bridge_grandpa, BridgePolkadotGrandpa]
+		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
+		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
 		[pallet_relayer_set, RelayerSet]
 	);
 }
@@ -866,10 +867,12 @@ impl_runtime_apis! {
 			(list, storage_info)
 		}
 
+		#[allow(non_local_definitions)]
 		fn dispatch_benchmark(
 			config: frame_benchmarking::BenchmarkConfig
-		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, sp_runtime::RuntimeString> {
-			use frame_benchmarking::{baseline, Benchmarking, BenchmarkBatch, TrackedStorageKey};
+		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
+            use sp_storage::TrackedStorageKey;
+			use frame_benchmarking::{baseline, Benchmarking, BenchmarkBatch};
 
 			use frame_system_benchmarking::Pallet as SystemBench;
 			use baseline::Pallet as BaselineBench;
