@@ -147,8 +147,17 @@ pub fn new_partial(
 pub fn new_full<
 	N: sc_network::NetworkBackend<Block, <Block as sp_runtime::traits::Block>::Hash>,
 >(
-	config: Configuration,
+	mut config: Configuration,
 ) -> Result<TaskManager, ServiceError> {
+	// Override default idle connection timeout of 10 seconds to give IPFS clients more time to
+	// query data over Bitswap. This is needed when manually adding our node to a swarm of an IPFS
+	// node, because the IPFS node doesn't keep any active substreams with us and our node closes
+	// a connection after `idle_connection_timeout`.
+	let config = {
+		config.network.idle_connection_timeout = Duration::from_secs(3600);
+		config
+	};
+
 	let sc_service::PartialComponents {
 		client,
 		backend,
