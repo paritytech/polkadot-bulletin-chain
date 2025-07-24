@@ -8873,6 +8873,7 @@ dependencies = [
  "sp-transaction-storage-proof 26.0.0",
  "substrate-build-script-utils",
  "substrate-frame-rpc-system",
+ "tracing",
  "try-runtime-cli",
 ]
 

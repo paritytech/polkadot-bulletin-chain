@@ -8,13 +8,16 @@ use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE
 use polkadot_bulletin_chain_runtime::Block;
 use sc_cli::SubstrateCli;
 use sc_service::PartialComponents;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 #[cfg(feature = "try-runtime")]
 use {
 	polkadot_bulletin_chain_runtime::SLOT_DURATION,
 	try_runtime_cli::block_building_info::timestamp_with_babe_info,
 };
+
+/// Log target for this file.
+const LOG_TARGET: &str = "command";
 
 impl SubstrateCli for Cli {
 	fn impl_name() -> String {
@@ -206,7 +209,25 @@ pub fn run() -> sc_cli::Result<()> {
 		},
 		None => {
 			let runner = cli.create_runner(&cli.run)?;
-			runner.run_node_until_exit(|config| async move {
+			runner.run_node_until_exit(|mut config| async move {
+				// Override default idle connection timeout of 10 seconds to give IPFS clients more
+				// time to query data over Bitswap. This is needed when manually adding our node
+				// to a swarm of an IPFS node, because the IPFS node doesn't keep any active
+				// substreams with us and our node closes a connection after
+				// `idle_connection_timeout`.
+				const IPFS_WORKAROUND_TIMEOUT: Duration = Duration::from_secs(3600);
+
+				if config.network.idle_connection_timeout < IPFS_WORKAROUND_TIMEOUT {
+					tracing::info!(
+						target: LOG_TARGET,
+						old = ?config.network.idle_connection_timeout,
+						overriden_with = ?IPFS_WORKAROUND_TIMEOUT,
+						"Overriding `config.network.idle_connection_timeout` to allow long-lived connections with IPFS nodes",
+
+					);
+					config.network.idle_connection_timeout = IPFS_WORKAROUND_TIMEOUT;
+				}
+
 				service::new_full::<sc_network::Litep2pNetworkBackend>(config)
 					.map_err(sc_cli::Error::Service)
 			})
