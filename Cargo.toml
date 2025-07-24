@@ -16,6 +16,7 @@ serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
 static_assertions = { version = "1.1" }
 try-runtime-cli = { version = "0.42" }
+tracing = { version = "0.1.41", default-features = false }
 
 [workspace]
 resolver = "2"
