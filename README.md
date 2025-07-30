@@ -41,10 +41,10 @@ TODO: describe use-cases or calls that are triggered from Bulletin
 ### Pallets
 
 #### polkadot-bulletin-chain/pallets/relayer-set
-TODO: add simple desc, what this pallet does and why we need it
+Controls the authorized relayers between Bulletin and PoP-polkadot.
 
 ####  polkadot-bulletin-chain/pallets/validator-set
-TODO: add simple desc, what this pallet does and why we need it
+Controls the validator set. Currently set in genesis and validators can be added and removed by root.
 
 ####  polkadot-bulletin-chain/pallets/transaction-storage
-TODO: add simple desc, what this pallet does and why we need it
+Stores arbitrary data via the `store` extrinsic, provided that either the signer or the preimage of the data are pre-authorized.
