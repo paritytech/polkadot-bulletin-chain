@@ -27,7 +27,7 @@ The main purpose of the Bulletin chain is to provide storage for the People Chai
 #### Storage
 The core functionality of the bulletin chain is in the transaction-storage pallet, which indexes transcations and manages storage proofs for arbitrary data. 
 
-Data is added via the `transactionStorage.store` extrinsic, provided the storage of the data is authorized by root call. Authorization is granted either for a specific account via authorize_account or for data with a specific preimage via authorize_preimage.
+Data is added via the `transactionStorage.store` extrinsic, provided the storage of the data is authorized by root call. Authorization is granted either for a specific account via authorize_account or for data with a specific preimage via authorize_preimage. Once data is stored, it can be retrieved from IPFS with the Blake2B hash of the data.
 
 
 #### Bridge to PeopleChain
@@ -47,4 +47,4 @@ Controls the authorized relayers between Bulletin and PoP-polkadot.
 Controls the validator set. Currently set in genesis and validators can be added and removed by root.
 
 ####  polkadot-bulletin-chain/pallets/transaction-storage
-Stores arbitrary data via the `store` extrinsic, provided that either the signer or the preimage of the data are pre-authorized.
+Stores arbitrary data on IPFS via the `store` extrinsic, provided that either the signer or the preimage of the data are pre-authorized. Stored data can be retrieved from IPFS or directly from the node via the transaction index or hash.
