@@ -36,7 +36,7 @@ For Rococo, we have a PeopleRococo → BridgeHubRococo → Bulletin connection.
 For Polkadot, the bulletin chain is bridged to directly from the proof-of-personhood chain (instead of through BridgeHub, for ease of upgrade), allowing the PoP chain to authorize preimages for storage and allowing accounts to store data.
 
 #### PeopleChain integration
-TODO: describe use-cases or calls that are triggered from Bulletin
+PeopleChain root will call `authorize_preimage` to prime Bulletin to expect data with that hash, after which a user account will submit it via `store`
 
 ### Pallets
 
