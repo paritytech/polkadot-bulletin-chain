@@ -17,6 +17,12 @@ TODO: clarify if we need to store transactiond for two weeks or other period.
 
 ## Runtime functionality
 
+The Bulletin chain runtime is a standard BaBE + GRANDPA chain with a custom validator set pallet which is (currently) controlled by root call (TODO: clarify whether this should be sudo, governance, etc). The core functionality of it is in the transaction-storage pallet, which indexes transcations and manages storage proofs for arbitrary data. 
+
+Data is added via the `transactionStorage.store` extrinsic, provided the signer is pre-authorized by root call. Authorization is granted either for a specific account via authorize_account or for data with a specific preimage via authorize_preimage.
+
+The bulletin chain is bridged to directly from the proof-of-personhood chain (instead of through BridgeHub, for ease of upgrade), allowing the PoP chain to authorize preimages for storage and allowing accounts to store data.
+
 ### Core functionality
 
 The main purpose of the Bulletin chain is to provide storage for the People Chain over the bridge.
