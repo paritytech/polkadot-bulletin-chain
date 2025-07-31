@@ -1,9 +1,19 @@
 use crate::{
-	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig, BridgeRococoGrandpaConfig,
-	BridgeRococoMessagesConfig, BridgeRococoParachainsConfig, RelayerSetConfig,
-	RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig, ValidatorSetConfig,
-	BABE_GENESIS_EPOCH_CONFIG,
+	opaque::SessionKeys, AccountId, BabeConfig, RelayerSetConfig, RuntimeGenesisConfig,
+	SessionConfig, Signature, SudoConfig, ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
 };
+
+#[cfg(feature = "polkadot")]
+use crate::{
+	bridge_config::XCM_LANE, BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig,
+	BridgePolkadotParachainsConfig,
+};
+#[cfg(feature = "rococo")]
+use crate::{
+	bridge_config::XCM_LANE, BridgeRococoGrandpaConfig, BridgeRococoMessagesConfig,
+	BridgeRococoParachainsConfig,
+};
+
 use scale_info::prelude::format;
 use sp_consensus_babe::AuthorityId as BabeId;
 use sp_consensus_grandpa::AuthorityId as GrandpaId;
@@ -45,6 +55,7 @@ fn session_keys(babe: BabeId, grandpa: GrandpaId) -> SessionKeys {
 /// Configure initial storage state for FRAME modules.
 fn testnet_genesis(
 	initial_authorities: Vec<(AccountId, BabeId, GrandpaId)>,
+	bridges_pallet_owner: Option<AccountId>,
 	root_key: AccountId,
 ) -> serde_json::Value {
 	let config = RuntimeGenesisConfig {
@@ -74,16 +85,35 @@ fn testnet_genesis(
 			// would want to use separate keys for the relayers.
 			initial_relayers: initial_authorities.into_iter().map(|x| x.0).collect::<Vec<_>>(),
 		},
+		#[cfg(feature = "rococo")]
 		bridge_rococo_grandpa: BridgeRococoGrandpaConfig {
-			owner: Some(root_key.clone()),
+			owner: bridges_pallet_owner.clone(),
 			..Default::default()
 		},
+		#[cfg(feature = "rococo")]
 		bridge_rococo_parachains: BridgeRococoParachainsConfig {
-			owner: Some(root_key.clone()),
+			owner: bridges_pallet_owner.clone(),
 			..Default::default()
 		},
+		#[cfg(feature = "rococo")]
 		bridge_rococo_messages: BridgeRococoMessagesConfig {
-			owner: Some(root_key),
+			owner: bridges_pallet_owner,
+			opened_lanes: vec![XCM_LANE],
+			..Default::default()
+		},
+		#[cfg(feature = "polkadot")]
+		bridge_polkadot_grandpa: BridgePolkadotGrandpaConfig {
+			owner: bridges_pallet_owner.clone(),
+			..Default::default()
+		},
+		#[cfg(feature = "polkadot")]
+		bridge_polkadot_parachains: BridgePolkadotParachainsConfig {
+			owner: bridges_pallet_owner.clone(),
+			..Default::default()
+		},
+		#[cfg(feature = "polkadot")]
+		bridge_polkadot_messages: BridgePolkadotMessagesConfig {
+			owner: bridges_pallet_owner,
 			opened_lanes: vec![XCM_LANE],
 			..Default::default()
 		},
@@ -99,6 +129,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 		sp_genesis_builder::DEV_RUNTIME_PRESET => testnet_genesis(
 			// Initial PoA authorities
 			vec![authority_keys_from_seed("Alice")],
+			// Bridges pallet owner
+			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 			// Sudo account
 			get_account_id_from_seed::<sr25519::Public>("Alice"),
 		),
@@ -110,6 +142,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 				authority_keys_from_seed("Bob"),
 				authority_keys_from_seed("Bob//stash"),
 			],
+			// Bridges pallet owner
+			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 			// Sudo account
 			get_account_id_from_seed::<sr25519::Public>("Alice"),
 		),
@@ -117,7 +151,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 	};
 	Some(
 		serde_json::to_string(&patch)
-			.expect("serialization to json is expected to work. qed.")
+			.expect("serialization to JSON is expected to work. qed.")
 			.into_bytes(),
 	)
 }

@@ -12,6 +12,7 @@ repository = "https://github.com/paritytech/polkadot-bulletin-chain/"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
+cfg-if = { workspace = true }
 codec = { workspace = true, features = ["derive"] }
 log = { workspace = true }
 scale-info = { features = ["derive"], workspace = true }
@@ -237,3 +238,4 @@ try-runtime = [
 	"sp-runtime/try-runtime",
 ]
 rococo = []
+polkadot = []

@@ -62,7 +62,13 @@ use sp_runtime::traits::transaction_extension::AsTransactionExtension;
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
 
+#[cfg(feature = "rococo")]
 mod bridge_config;
+#[cfg(feature = "polkadot")]
+mod polkadot_bridge_config;
+#[cfg(feature = "polkadot")]
+use polkadot_bridge_config as bridge_config;
+
 mod genesis_config_presets;
 mod weights;
 mod xcm_config;
@@ -399,9 +405,15 @@ construct_runtime!(
 
 		// Bridge
 		RelayerSet: pallet_relayer_set = 50,
+
+		#[cfg(feature = "rococo")]
 		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
+		#[cfg(feature = "rococo")]
 		BridgeRococoParachains: pallet_bridge_parachains = 52,
+		#[cfg(feature = "rococo")]
 		BridgeRococoMessages: pallet_bridge_messages = 53,
+
+		// TODO: @antkve add here for Polkadot
 
 		// sudo
 		Sudo: pallet_sudo = 255,
@@ -478,25 +490,60 @@ impl SignedExtension for ValidateSigned {
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		match call {
-			Self::Call::TransactionStorage(call) =>
-				TransactionStorage::pre_dispatch_signed(who, call).map(|()| None),
+			// Transaction storage validation
+			Self::Call::TransactionStorage(inner_call) =>
+				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+
+			// Sudo validation
 			Self::Call::Sudo(_) => validate_sudo(who).map(|_| None),
+
+			// Session key management
 			Self::Call::Session(SessionCall::set_keys { .. }) =>
 				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
 			Self::Call::Session(SessionCall::purge_keys {}) =>
 				validate_purge_keys(who).map(|_| None),
+
+			// Bridge-related calls
+			#[cfg(feature = "rococo")]
 			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
 			}) |
 			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
 			}) |
+			Self::Call::BridgeRococoParachains(
+				BridgeParachainsCall::submit_parachain_heads_ex { .. },
+			) |
 			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
 				..
 			}) |
 			Self::Call::BridgeRococoMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+			#[cfg(feature = "polkadot")]
+			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+				..
+			}) |
+			Self::Call::BridgePolkadotParachains(
+				BridgeParachainsCall::submit_parachain_heads { .. },
+			) |
+			Self::Call::BridgePolkadotParachains(
+				BridgeParachainsCall::submit_parachain_heads_ex { .. },
+			) |
+			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotMessages(
+				BridgeMessagesCall::receive_messages_delivery_proof { .. },
+			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+
+			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}
 	}
@@ -509,21 +556,37 @@ impl SignedExtension for ValidateSigned {
 		_len: usize,
 	) -> TransactionValidity {
 		match call {
-			Self::Call::TransactionStorage(call) => TransactionStorage::validate_signed(who, call),
+			// Transaction storage call
+			Self::Call::TransactionStorage(inner_call) =>
+				TransactionStorage::validate_signed(who, inner_call),
+
+			// Sudo call
 			Self::Call::Sudo(_) => validate_sudo(who),
+
+			// Session key management
 			Self::Call::Session(SessionCall::set_keys { .. }) =>
 				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
 				}),
+
 			Self::Call::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+
+			// Bridge-related calls
+			#[cfg(feature = "rococo")]
 			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
 			}) |
 			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
 			}) |
+			Self::Call::BridgeRococoParachains(
+				BridgeParachainsCall::submit_parachain_heads_ex { .. },
+			) |
 			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
 				..
 			}) |
@@ -534,6 +597,31 @@ impl SignedExtension for ValidateSigned {
 				longevity: BridgeTxLongevity::get(),
 				..Default::default()
 			}),
+			#[cfg(feature = "polkadot")]
+			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+				..
+			}) |
+			Self::Call::BridgePolkadotParachains(
+				BridgeParachainsCall::submit_parachain_heads { .. },
+			) |
+			Self::Call::BridgePolkadotParachains(
+				BridgeParachainsCall::submit_parachain_heads_ex { .. },
+			) |
+			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			Self::Call::BridgePolkadotMessages(
+				BridgeMessagesCall::receive_messages_delivery_proof { .. },
+			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
+				priority: BridgeTxPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			}),
+
+			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}
 	}
@@ -554,8 +642,9 @@ impl SignedExtension for ValidateSigned {
 	}
 }
 
-// it'll generate signed extensions to invalidate obsolete bridge transactions before
-// they'll be included into block
+// It'll generate signed extensions to invalidate obsolete bridge transactions before
+// they'll be included in the block
+#[cfg(feature = "rococo")]
 generate_bridge_reject_obsolete_headers_and_messages! {
 	RuntimeCall, AccountId,
 	// Grandpa
@@ -564,6 +653,16 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 	BridgeRococoParachains,
 	// Messages
 	BridgeRococoMessages
+}
+#[cfg(feature = "polkadot")]
+generate_bridge_reject_obsolete_headers_and_messages! {
+	RuntimeCall, AccountId,
+	// Grandpa
+	BridgePolkadotGrandpa,
+	// Parachains
+	BridgePolkadotParachains,
+	// Messages
+	BridgePolkadotMessages
 }
 
 /// The SignedExtension to the basic transaction logic.
@@ -595,22 +694,39 @@ pub type Executive = frame_executive::Executive<
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
-    frame_benchmarking::define_benchmarks!(
-		[frame_benchmarking, BaselineBench::<Runtime>]
-		[frame_system, SystemBench::<Runtime>]
-		[pallet_timestamp, Timestamp]
-		[pallet_sudo, Sudo]
-		[pallet_transaction_storage, TransactionStorage]
-		[pallet_validator_set, ValidatorSet]
-		// TODO: Rococo vs Polkadot https://github.com/paritytech/polkadot-bulletin-chain/issues/22
-		[pallet_bridge_grandpa, BridgeRococoGrandpa]
-		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithRococoBridgeParachainsInstance>]
-		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubRococoMessagesInstance>]
-		// [pallet_bridge_grandpa, BridgePolkadotGrandpa]
-		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
-		[pallet_relayer_set, RelayerSet]
-	);
+	cfg_if::cfg_if! {
+		if #[cfg(feature = "rococo")] {
+			frame_benchmarking::define_benchmarks!(
+				[frame_benchmarking, BaselineBench::<Runtime>]
+				[frame_system, SystemBench::<Runtime>]
+				[pallet_timestamp, Timestamp]
+				[pallet_sudo, Sudo]
+				[pallet_transaction_storage, TransactionStorage]
+				[pallet_validator_set, ValidatorSet]
+				[pallet_relayer_set, RelayerSet]
+
+				[pallet_bridge_grandpa, BridgeRococoGrandpa]
+				// TODO: finish benchmarking
+				// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithRococoBridgeParachainsInstance>]
+				// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubRococoMessagesInstance>]
+			);
+		} else if #[cfg(feature = "polkadot")] {
+			frame_benchmarking::define_benchmarks!(
+				[frame_benchmarking, BaselineBench::<Runtime>]
+				[frame_system, SystemBench::<Runtime>]
+				[pallet_timestamp, Timestamp]
+				[pallet_sudo, Sudo]
+				[pallet_transaction_storage, TransactionStorage]
+				[pallet_validator_set, ValidatorSet]
+				[pallet_relayer_set, RelayerSet]
+
+				// TODO: finish benchmarking
+				[pallet_bridge_grandpa, BridgePolkadotGrandpa]
+				[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
+				[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
+			);
+		}
+	}
 }
 
 impl_runtime_apis! {
@@ -776,6 +892,7 @@ impl_runtime_apis! {
 		}
 	}
 
+	#[cfg(feature = "rococo")]
 	impl bp_rococo::RococoFinalityApi<Block> for Runtime {
 		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_rococo::Hash, bp_rococo::BlockNumber>> {
 			BridgeRococoGrandpa::best_finalized()
@@ -793,6 +910,7 @@ impl_runtime_apis! {
 		}
 	}
 
+	#[cfg(feature = "rococo")]
 	impl bp_bridge_hub_rococo::BridgeHubRococoFinalityApi<Block> for Runtime {
 		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_rococo::Hash, bp_bridge_hub_rococo::BlockNumber>> {
 			BridgeRococoParachains::best_parachain_head_id::<
@@ -806,6 +924,7 @@ impl_runtime_apis! {
 		}
 	}
 
+	#[cfg(feature = "rococo")]
 	impl bp_bridge_hub_rococo::FromBridgeHubRococoInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
@@ -818,6 +937,7 @@ impl_runtime_apis! {
 		}
 	}
 
+	#[cfg(feature = "rococo")]
 	impl bp_bridge_hub_rococo::ToBridgeHubRococoOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
@@ -871,7 +991,7 @@ impl_runtime_apis! {
 		fn dispatch_benchmark(
 			config: frame_benchmarking::BenchmarkConfig
 		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
-            use sp_storage::TrackedStorageKey;
+			use sp_storage::TrackedStorageKey;
 			use frame_benchmarking::{baseline, Benchmarking, BenchmarkBatch};
 
 			use frame_system_benchmarking::Pallet as SystemBench;
