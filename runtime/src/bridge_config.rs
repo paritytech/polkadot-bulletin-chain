@@ -1,4 +1,6 @@
-//! With Polkadot Bridge Hub bridge configuration.
+#![cfg(feature = "rococo")]
+
+//! With Rococo Bridge Hub bridge configuration.
 
 use crate::{
 	xcm_config::{decode_bridge_message, XcmConfig},
@@ -25,7 +27,6 @@ use xcm_executor::XcmExecutor;
 pub const XCM_LANE: LegacyLaneId = LegacyLaneId([0, 0, 0, 0]);
 
 parameter_types! {
-	// TODO: (change to Polkadot - or make this `pub storage` for supporting Rococo and Polkadot)
 	pub RococoGlobalConsensusNetwork: NetworkId = NetworkId::ByGenesis(ROCOCO_GENESIS_HASH);
 	pub BridgedNetwork: NetworkId = RococoGlobalConsensusNetwork::get();
 	pub RococoGlobalConsensusNetworkLocation: Location = Location::new(
@@ -41,8 +42,6 @@ parameter_types! {
 	/// A name of parachains pallet at Pokadot.
 	pub const AtRococoParasPalletName: &'static str = bp_rococo::PARAS_PALLET_NAME;
 
-// 	/// Chain identifier of Polkadot Bridge Hub.
-// 	pub const BridgeHubPolkadotChainId: ChainId = bp_runtime::BRIDGE_HUB_POLKADOT_CHAIN_ID;
 	/// A number of Polkadot Bridge Hub head digests that we keep in the storage.
 	pub const BridgeHubRococoHeadsToKeep: u32 = 1024;
 	/// A maximal size of Polkadot Bridge Hub head digest.
@@ -244,8 +243,8 @@ where
 			.map_err(drop)
 			.and_then(|payload| decode_bridge_message(payload).map(|(_, xcm)| xcm).map_err(drop))
 			.and_then(|xcm| xcm.try_into().map_err(drop))
-			// TODO: FAIL-CI Weight::MAX maybe change for something else, hard-coded or Weight::MAX/4...
-			// TODO: (real weights) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
+			// TODO: FAIL-CI Weight::MAX maybe change for something else, hard-coded or
+			// Weight::MAX/4... TODO: (real weights) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
 			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
 			.map(|weighed_xcm| weighed_xcm.weight_of())
 			.unwrap_or(Weight::zero())
@@ -305,8 +304,8 @@ where
 	}
 }
 
-/// Export XCM messages to be relayed to the Polkadot Bridge Hub chain.
-pub type ToBridgeHubRococoHaulBlobExporter = HaulBlobExporter<
+/// Export XCM messages to be relayed to the Rococo Bridge Hub chain.
+pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 	XcmBlobHauler<Runtime, WithBridgeHubRococoMessagesInstance>,
 	RococoGlobalConsensusNetworkLocation,
 	AlwaysV5,

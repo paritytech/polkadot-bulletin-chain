@@ -5,6 +5,7 @@ repository = "https://github.com/zdave-parity/polkadot-bulletin-chain.git"
 
 [workspace.dependencies]
 array-bytes = { version = "6.1" }
+cfg-if = { version = "1.0" }
 clap = { version = "4.2.5" }
 codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false }
 futures = { version = "0.3.21" }
@@ -15,8 +16,8 @@ scale-info = { version = "2.11.6", default-features = false }
 serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
 static_assertions = { version = "1.1" }
-try-runtime-cli = { version = "0.42" }
 tracing = { version = "0.1.41", default-features = false }
+try-runtime-cli = { version = "0.42" }
 
 [workspace]
 resolver = "2"
@@ -29,4 +30,6 @@ members = [
 	"runtime",
 ]
 [profile.release]
+# Polkadot runtime requires unwinding.
+opt-level = 3
 panic = "unwind"
