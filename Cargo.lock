@@ -8910,6 +8910,7 @@ dependencies = [
  "pallet-grandpa",
  "pallet-offences",
  "pallet-relayer-set",
+ "pallet-revive",
  "pallet-session",
  "pallet-staking",
  "pallet-sudo",

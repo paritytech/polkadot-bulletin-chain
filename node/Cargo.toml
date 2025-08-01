@@ -68,8 +68,8 @@ substrate-build-script-utils = { git = "https://github.com/paritytech/polkadot-s
 
 [features]
 default = [
-    # TODO: temporary let's activate rococo by default
-    "rococo"
+	# TODO: temporary let's activate rococo by default
+	"rococo",
 ]
 # Dependencies that are only required if runtime benchmarking should be built.
 runtime-benchmarks = [
@@ -86,7 +86,7 @@ try-runtime = [
 	"frame-system/try-runtime",
 	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",
-	"try-runtime-cli?/try-runtime",
+	"try-runtime-cli/try-runtime",
 ]
 # To bridge with Rococo Bridge Hub
 rococo = ["polkadot-bulletin-chain-runtime/rococo"]

@@ -81,11 +81,12 @@ xcm = { default-features = false, git = "https://github.com/paritytech/polkadot-
 xcm-builder = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", package = "staging-xcm-builder" }
 xcm-executor = { default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", package = "staging-xcm-executor" }
 
-# TODO: just to pass `--features runtime-benchmarks`
+# TODO: just to pass `--features runtime-benchmarks` or `--features try-runtime`
 pallet-xcm = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 pallet-staking = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 sp-staking = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 parachains-common = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
+pallet-revive = { optional = true, default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602" }
 
 [build-dependencies]
 substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", optional = true }
@@ -164,6 +165,7 @@ std = [
 	"xcm/std",
 
 	"pallet-bridge-relayers/std",
+	"pallet-revive?/std",
 	"pallet-staking?/std",
 	"pallet-xcm?/std",
 	"parachains-common?/std",
@@ -203,6 +205,7 @@ runtime-benchmarks = [
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
 
+	"pallet-revive?/runtime-benchmarks",
 	"pallet-staking/runtime-benchmarks",
 	"pallet-xcm/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
@@ -228,7 +231,8 @@ try-runtime = [
 
 	"pallet-bridge-relayers/try-runtime",
 	"pallet-relayer-set/try-runtime",
-	"pallet-staking?/try-runtime",
+	"pallet-revive/try-runtime",
+	"pallet-staking/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
