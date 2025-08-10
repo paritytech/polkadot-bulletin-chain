@@ -37,6 +37,7 @@ construct_runtime!(
 		System: frame_system,
 		ValidatorSet: pallet_validator_set,
 		Session: pallet_session,
+		Historical: pallet_session::historical,
 	}
 );
 
@@ -143,9 +144,13 @@ impl pallet_session::Config for Test {
 	type Keys = MockSessionKeys;
 	type WeightInfo = ();
 	type RuntimeEvent = RuntimeEvent;
+	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
+	type KeyDeposit = ();
+	type DisablingStrategy = ();
 }
 
 impl pallet_session::historical::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }

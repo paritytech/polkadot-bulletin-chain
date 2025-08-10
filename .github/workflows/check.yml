@@ -1,4 +1,4 @@
-name: Check Set-Up & Build
+name: CI
 
 # Controls when the action will run.
 on:
@@ -11,35 +11,102 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+# Cancel previous runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Parity CI image to use
+# Common variable is defined in the workflow
+# Repo env variable doesn't work for PRs from forks
+env:
+  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+
 jobs:
-  check:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-22.04
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+  set-image:
+    # This workaround sets the container image for each job using 'set-image' job output.
+    # env variables don't work for PRs from forks, so we need to use outputs.
+    runs-on: ubuntu-latest
+    outputs:
+      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - id: set_image
+        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
-      - name: Install linux dependencies
+  check:
+    name: Cargo check
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Cargo check
+        run: cargo check --workspace
+
+  check-benchmarking:
+    name: Cargo check (benchmarking)
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Cargo check (Rococo) (benchmarking)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang libssl-dev llvm libudev-dev protobuf-compiler
+          cargo check --workspace --features=rococo,runtime-benchmarks
 
-      - name: Install Rust
+      #- name: Cargo check (Polkadot) (benchmarking)
+      #  run: |
+      #    cargo check --workspace --features=polkadot,runtime-benchmarks
+
+  test:
+    name: Test
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    timeout-minutes: 60
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Run tests
         run: |
-          rustup update stable --no-self-update
-          rustup target add wasm32-unknown-unknown
+          cargo test --workspace
+          cargo test --workspace --features=runtime-benchmarks
 
-      # Rust cache
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Check Build
+      - name: Run (Rococo) runtime tests
         run: |
-          SKIP_WASM_BUILD=1 cargo check --release
+          cargo test -p polkadot-bulletin-chain-runtime --features=rococo
+          cargo test -p polkadot-bulletin-chain-runtime --features=rococo,runtime-benchmarks
 
-      - name: Check Build for Benchmarking
-        run: >
-          pushd node &&
-          cargo check --features=runtime-benchmarks --release
+      #- name: Run (Polkadot) runtime tests
+      #  run: |
+      #    cargo test -p polkadot-bulletin-chain-runtime --features=polkadot
+      #    cargo test -p polkadot-bulletin-chain-runtime --features=polkadot,runtime-benchmarks

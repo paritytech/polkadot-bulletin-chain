@@ -6,30 +6,40 @@ edition = '2021'
 license = 'Apache-2.0'
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "3.6.1", default-features = false, features = ["derive"] }
-log = "0.4.17"
-scale-info = { version = "2.5.0", default-features = false, features = ["derive"] }
+codec = { workspace = true, features = ["derive"] }
+log = { workspace = true, default-features = true }
+scale-info = { features = ["derive"], workspace = true }
 
-polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false, features = [
-    "experimental",
-    "runtime",
+polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false, features = [
+	"runtime",
 ] }
-sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false, features = [
-    "historical",
+sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false, features = [
+	"historical",
 ] }
 
 [dev-dependencies]
-serde = { version = "1.0.126", features = ["derive"] }
+serde = { features = ["derive"], workspace = true }
+pallets-common = { version = "0.1.0", default-features = false, path = "../common" }
 
 [features]
 default = ['std']
-runtime-benchmarks = ['polkadot-sdk-frame/runtime-benchmarks']
-std = [
-    'codec/std',
-    'scale-info/std',
-    
-    'polkadot-sdk-frame/std',
-    'pallet-session/std',
+runtime-benchmarks = [
+	"pallets-common/runtime-benchmarks",
+	"sp-staking/runtime-benchmarks",
+	'polkadot-sdk-frame/runtime-benchmarks',
 ]
-try-runtime = ['polkadot-sdk-frame/try-runtime']
+std = [
+	"log/std",
+	"pallets-common/std",
+	"sp-staking/std",
+	'codec/std',
+	'pallet-session/std',
+	'polkadot-sdk-frame/std',
+	'scale-info/std',
+]
+try-runtime = [
+	"pallet-session/try-runtime",
+	"pallets-common/try-runtime",
+	'polkadot-sdk-frame/try-runtime',
+]

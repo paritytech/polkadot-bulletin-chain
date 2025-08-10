@@ -1,4 +1,6 @@
-//! With Polkadot Bridge Hub bridge configuration.
+#![cfg(feature = "rococo")]
+
+//! With Rococo Bridge Hub bridge configuration.
 
 use crate::{
 	xcm_config::{decode_bridge_message, XcmConfig},
@@ -11,7 +13,7 @@ use bp_messages::{
 };
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_runtime::messages::MessageDispatchResult;
-use codec::{Decode, Encode};
+use codec::{Decode, DecodeWithMemTracking, Encode};
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
@@ -93,16 +95,38 @@ impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for 
 
 	type BridgesGrandpaPalletInstance = WithPolkadotBridgeGrandpaInstance;
 	type ParasPalletName = AtPolkadotParasPalletName;
+
+	#[cfg(feature = "polkadot")]
+	type ParaStoredHeaderDataBuilder =
+		SingleParaStoredHeaderDataBuilder<bp_bridge_hub_rococo::BridgeHubRococo>;
+	#[cfg(feature = "polkadot")]
+	type HeadsToKeep = BridgeHubRococoHeadsToKeep;
+	#[cfg(feature = "polkadot")]
+	type MaxParaHeadDataSize = MaxBridgeHubRococoHeadSize;
+	#[cfg(feature = "rococo")]
 	type ParaStoredHeaderDataBuilder =
 		SingleParaStoredHeaderDataBuilder<bp_people_hub_polkadot::PeopleHubPolkadot>;
+	#[cfg(feature = "rococo")]
 	type HeadsToKeep = PeopleHubPolkadotHeadsToKeep;
+	#[cfg(feature = "rococo")]
 	type MaxParaHeadDataSize = MaxPeopleHubPolkadotHeadSize;
+
+	type OnNewHead = ();
 }
 
 const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
 
 /// Message dispatch result type for single message.
-#[derive(CloneNoBound, EqNoBound, PartialEqNoBound, Encode, Decode, Debug, TypeInfo)]
+#[derive(
+	CloneNoBound,
+	EqNoBound,
+	PartialEqNoBound,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Debug,
+	TypeInfo,
+)]
 pub enum XcmBlobMessageDispatchResult {
 	/// We've been unable to decode message payload.
 	InvalidPayload,
@@ -154,7 +178,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 				return MessageDispatchResult {
 					unspent_weight: Weight::zero(),
 					dispatch_level_result: XcmBlobMessageDispatchResult::InvalidPayload,
-				}
+				};
 			},
 		};
 		let dispatch_level_result = match BlobDispatcher::dispatch_blob(payload) {
@@ -182,7 +206,9 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 }
 
 /// An instance of `pallet_bridge_messages` used to bridge with Polkadot Bridge Hub.
+#[cfg(feature = "polkadot")]
 pub type WithPeopleHubPolkadotMessagesInstance = ();
+#[cfg(feature = "polkadot")]
 impl pallet_bridge_messages::Config<WithPeopleHubPolkadotMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::bridge_polkadot_messages::WeightInfo<Runtime>;
@@ -204,6 +230,36 @@ impl pallet_bridge_messages::Config<WithPeopleHubPolkadotMessagesInstance> for R
 
 	type MessageDispatch = WithXcmWeightDispatcher<
 		XcmBlobMessageDispatch<FromPeopleHubPolkadotBlobDispatcher, Self::WeightInfo>,
+	>;
+	type OnMessagesDelivered = ();
+}
+
+
+/// An instance of `pallet_bridge_messages` used to bridge with Rococo Bridge Hub.
+#[cfg(feature = "rococo")]
+pub type WithBridgeHubRococoMessagesInstance = ();
+#[cfg(feature = "rococo")]
+impl pallet_bridge_messages::Config<WithBridgeHubRococoMessagesInstance> for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = crate::weights::bridge_polkadot_messages::WeightInfo<Runtime>;
+
+	type ThisChain = bp_polkadot_bulletin::PolkadotBulletin;
+	type BridgedChain = bp_bridge_hub_rococo::BridgeHubRococo;
+	type BridgedHeaderChain = pallet_bridge_parachains::ParachainHeaders<
+		Runtime,
+		WithRococoBridgeParachainsInstance,
+		bp_bridge_hub_rococo::BridgeHubRococo,
+	>;
+
+	type OutboundPayload = XcmAsPlainPayload;
+	type InboundPayload = XcmAsPlainPayload;
+	type LaneId = LegacyLaneId;
+
+	type DeliveryPayments = ();
+	type DeliveryConfirmationPayments = ();
+
+	type MessageDispatch = WithXcmWeightDispatcher<
+		XcmBlobMessageDispatch<FromBridgeHubRococoBlobDispatcher, Self::WeightInfo>,
 	>;
 	type OnMessagesDelivered = ();
 }
@@ -233,7 +289,9 @@ where
 			.map_err(drop)
 			.and_then(|payload| decode_bridge_message(payload).map(|(_, xcm)| xcm).map_err(drop))
 			.and_then(|xcm| xcm.try_into().map_err(drop))
-			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm).map_err(drop))
+			// TODO: FAIL-CI Weight::MAX maybe change for something else, hard-coded or
+			// Weight::MAX/4... TODO: (real weights) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
+			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
 			.map(|weighed_xcm| weighed_xcm.weight_of())
 			.unwrap_or(Weight::zero())
 	}
@@ -292,11 +350,11 @@ where
 	}
 }
 
-/// Export XCM messages to be relayed to the Polkadot Bridge Hub chain.
-pub type ToPeopleHubPolkadotHaulBlobExporter = HaulBlobExporter<
-	XcmBlobHauler<Runtime, WithPeopleHubPolkadotMessagesInstance>,
-	PolkadotGlobalConsensusNetworkLocation,
-	AlwaysV4,
+/// Export XCM messages to be relayed to the Rococo Bridge Hub chain.
+pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
+	XcmBlobHauler<Runtime, WithBridgeHubRococoMessagesInstance>,
+	RococoGlobalConsensusNetworkLocation,
+	AlwaysV5,
 	(),
 >;
 
