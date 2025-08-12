@@ -25,7 +25,7 @@ use bp_polkadot_core::*;
 
 use bp_header_chain::ChainWithGrandpa;
 use bp_runtime::{
-	decl_bridge_finality_runtime_apis, extensions::PrevalidateAttests, Chain, ChainId,
+	decl_bridge_finality_runtime_apis, Chain, ChainId,
 };
 use frame_support::{sp_runtime::StateVersion, weights::Weight};
 
@@ -65,23 +65,8 @@ impl ChainWithGrandpa for Polkadot {
 	const AVERAGE_HEADER_SIZE: u32 = AVERAGE_HEADER_SIZE;
 }
 
-/// The TransactionExtension used by Polkadot.
-pub type TransactionExtension = SuffixedCommonTransactionExtension<PrevalidateAttests>;
-
-/// Name of the parachains pallet in the Polkadot runtime.
-pub const PARAS_PALLET_NAME: &str = "Paras";
-
 /// Name of the With-Polkadot GRANDPA pallet instance that is deployed at bridged chains.
 pub const WITH_POLKADOT_GRANDPA_PALLET_NAME: &str = "BridgePolkadotGrandpa";
-/// Name of the With-Polkadot parachains pallet instance that is deployed at bridged chains.
-pub const WITH_POLKADOT_BRIDGE_PARACHAINS_PALLET_NAME: &str = "BridgePolkadotParachains";
-
-/// Maximal size of encoded `bp_parachains::ParaStoredHeaderData` structure among all Polkadot
-/// parachains.
-///
-/// It includes the block number and state root, so it shall be near 40 bytes, but let's have some
-/// reserve.
-pub const MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE: u32 = 128;
 
 decl_bridge_finality_runtime_apis!(polkadot, grandpa);
 

@@ -19,16 +19,17 @@ use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	generic, impl_opaque_keys,
-	traits::{
-		AccountIdLookup, BlakeTwo256, Block as BlockT, ConvertInto, DispatchInfoOf,
-		IdentifyAccount, NumberFor, OpaqueKeys, PostDispatchInfoOf, SignedExtension, Verify,
-	},
-	transaction_validity::{
-		InvalidTransaction, TransactionLongevity, TransactionPriority, TransactionSource,
-		TransactionValidity, TransactionValidityError, ValidTransaction,
-	},
-	ApplyExtrinsicResult, DispatchResult, MultiSignature,
+    generic, impl_opaque_keys,
+    traits::{
+        AccountIdLookup, AsSystemOriginSigner, BlakeTwo256, Block as BlockT, ConvertInto,
+        DispatchInfoOf, IdentifyAccount, Implication, NumberFor, OpaqueKeys, PostDispatchInfoOf,
+        TransactionExtension, Verify,
+    },
+    transaction_validity::{
+        InvalidTransaction, TransactionLongevity, TransactionPriority, TransactionSource,
+        TransactionValidity, TransactionValidityError, ValidTransaction,
+    },
+    ApplyExtrinsicResult, DispatchResult, MultiSignature,
 };
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
@@ -59,7 +60,7 @@ use frame_support::{
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
 use pallet_transaction_payment::RuntimeDispatchInfo;
-use sp_runtime::traits::transaction_extension::AsTransactionExtension;
+// no longer using the adapter; `ValidateSigned` implements `TransactionExtension` directly
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
@@ -469,191 +470,160 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 /// `ValidateUnsigned` equivalent for signed transactions.
 ///
 /// This chain has no transaction fees, so we require checks equivalent to those performed by
-/// `ValidateUnsigned` for all signed transactions. Substrate has no built-in mechanism for this;
-/// it is handled by this `SignedExtension`.
+/// `ValidateUnsigned` for all signed transactions.
 #[derive(
-	Clone,
-	PartialEq,
-	Eq,
-	sp_runtime::RuntimeDebug,
-	codec::Encode,
-	codec::Decode,
-	codec::DecodeWithMemTracking,
-	scale_info::TypeInfo,
+    Clone,
+    PartialEq,
+    Eq,
+    sp_runtime::RuntimeDebug,
+    codec::Encode,
+    codec::Decode,
+    codec::DecodeWithMemTracking,
+    scale_info::TypeInfo,
 )]
 pub struct ValidateSigned;
 
-impl SignedExtension for ValidateSigned {
-	type AccountId = AccountId;
-	type Call = RuntimeCall;
-	type AdditionalSigned = ();
-	/// `Some(who)` if the transaction is a bridge transaction.
-	type Pre = Option<AccountId>;
+impl TransactionExtension<RuntimeCall> for ValidateSigned {
+    const IDENTIFIER: &'static str = "ValidateSigned";
 
-	const IDENTIFIER: &'static str = "ValidateSigned";
+    type Implicit = ();
+    fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> { Ok(()) }
 
-	fn additional_signed(&self) -> Result<Self::AdditionalSigned, TransactionValidityError> {
-		Ok(())
-	}
+    type Val = ();
+    /// `Some(who)` if the transaction is a bridge transaction.
+    type Pre = Option<AccountId>;
 
-	fn pre_dispatch(
-		self,
-		who: &Self::AccountId,
-		call: &Self::Call,
-		_info: &DispatchInfoOf<Self::Call>,
-		_len: usize,
-	) -> Result<Self::Pre, TransactionValidityError> {
-		match call {
-			// Transaction storage validation
-			Self::Call::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+    fn weight(&self, _call: &RuntimeCall) -> Weight { Weight::zero() }
 
-			// Sudo validation
-			Self::Call::Sudo(_) => validate_sudo(who).map(|_| None),
+    fn validate(
+        &self,
+        origin: RuntimeOrigin,
+        call: &RuntimeCall,
+        _info: &DispatchInfoOf<RuntimeCall>,
+        _len: usize,
+        _self_implicit: Self::Implicit,
+        _inherited_implication: &impl Implication,
+        _source: TransactionSource,
+    ) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
+        let who = origin
+            .as_system_origin_signer()
+            .ok_or(InvalidTransaction::BadSigner)?;
 
-			// Session key management
-			Self::Call::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
-			Self::Call::Session(SessionCall::purge_keys {}) =>
-				validate_purge_keys(who).map(|_| None),
+        let validity = match call {
+            // Transaction storage call
+            RuntimeCall::TransactionStorage(inner_call) =>
+                TransactionStorage::validate_signed(who, inner_call),
 
-			// Bridge-related calls
-			#[cfg(feature = "rococo")]
-			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
-				..
-			}) |
-			Self::Call::BridgeRococoParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			Self::Call::BridgeRococoMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
-			#[cfg(feature = "polkadot")]
-			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			Self::Call::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			Self::Call::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			Self::Call::BridgePolkadotMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+            // Sudo call
+            RuntimeCall::Sudo(_) => validate_sudo(who),
 
-			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
-		}
-	}
+            // Session key management
+            RuntimeCall::Session(SessionCall::set_keys { .. }) =>
+                ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
+                    priority: SetPurgeKeysPriority::get(),
+                    longevity: SetPurgeKeysLongevity::get(),
+                    ..Default::default()
+                }),
 
-	fn validate(
-		&self,
-		who: &Self::AccountId,
-		call: &Self::Call,
-		_info: &DispatchInfoOf<Self::Call>,
-		_len: usize,
-	) -> TransactionValidity {
-		match call {
-			// Transaction storage call
-			Self::Call::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+            RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
 
-			// Sudo call
-			Self::Call::Sudo(_) => validate_sudo(who),
+            // Bridge-related calls
+            #[cfg(feature = "rococo")]
+            RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof { .. }) |
+            RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex { .. }) |
+            RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads { .. }) |
+            RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads_ex { .. }) |
+            RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof { .. }) |
+            RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_delivery_proof { .. }) =>
+                RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
+                    priority: BridgeTxPriority::get(),
+                    longevity: BridgeTxLongevity::get(),
+                    ..Default::default()
+                }),
 
-			// Session key management
-			Self::Call::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
-					priority: SetPurgeKeysPriority::get(),
-					longevity: SetPurgeKeysLongevity::get(),
-					..Default::default()
-				}),
+            #[cfg(feature = "polkadot")]
+            RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof { .. }) |
+            RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex { .. }) |
+            RuntimeCall::BridgePolkadotParachains(BridgeParachainsCall::submit_parachain_heads { .. }) |
+            RuntimeCall::BridgePolkadotParachains(BridgeParachainsCall::submit_parachain_heads_ex { .. }) |
+            RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof { .. }) |
+            RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_delivery_proof { .. }) =>
+                RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
+                    priority: BridgeTxPriority::get(),
+                    longevity: BridgeTxLongevity::get(),
+                    ..Default::default()
+                }),
 
-			Self::Call::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+            // All other calls are invalid
+            _ => Err(InvalidTransaction::Call.into()),
+        }?;
 
-			// Bridge-related calls
-			#[cfg(feature = "rococo")]
-			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
-				..
-			}) |
-			Self::Call::BridgeRococoParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			Self::Call::BridgeRococoMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			#[cfg(feature = "polkadot")]
-			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			Self::Call::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			Self::Call::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			Self::Call::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			Self::Call::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			Self::Call::BridgePolkadotMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
+        Ok((validity, (), origin))
+    }
 
-			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
-		}
-	}
+    fn prepare(
+        self,
+        _val: Self::Val,
+        origin: &RuntimeOrigin,
+        call: &RuntimeCall,
+        _info: &DispatchInfoOf<RuntimeCall>,
+        _len: usize,
+    ) -> Result<Self::Pre, TransactionValidityError> {
+        let who = origin
+            .as_system_origin_signer()
+            .ok_or(InvalidTransaction::BadSigner)?;
+        match call {
+            // Transaction storage validation
+            RuntimeCall::TransactionStorage(inner_call) =>
+                TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
 
-	fn post_dispatch(
-		pre: Option<Self::Pre>,
-		_info: &DispatchInfoOf<Self::Call>,
-		_post_info: &PostDispatchInfoOf<Self::Call>,
-		_len: usize,
-		result: &DispatchResult,
-	) -> Result<(), TransactionValidityError> {
-		if result.is_err() {
-			if let Some(Some(who)) = pre {
-				RelayerSet::post_dispatch_failed_bridge_tx(&who);
-			}
-		}
-		Ok(())
-	}
+            // Sudo validation
+            RuntimeCall::Sudo(_) => validate_sudo(who).map(|_| None),
+
+            // Session key management
+            RuntimeCall::Session(SessionCall::set_keys { .. }) =>
+                ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
+            RuntimeCall::Session(SessionCall::purge_keys {}) =>
+                validate_purge_keys(who).map(|_| None),
+
+            // Bridge-related calls
+            #[cfg(feature = "rococo")]
+            RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof { .. }) |
+            RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex { .. }) |
+            RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads { .. }) |
+            RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads_ex { .. }) |
+            RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof { .. }) |
+            RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_delivery_proof { .. }) =>
+                RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+
+            #[cfg(feature = "polkadot")]
+            RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof { .. }) |
+            RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex { .. }) |
+            RuntimeCall::BridgePolkadotParachains(BridgeParachainsCall::submit_parachain_heads { .. }) |
+            RuntimeCall::BridgePolkadotParachains(BridgeParachainsCall::submit_parachain_heads_ex { .. }) |
+            RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof { .. }) |
+            RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_delivery_proof { .. }) =>
+                RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+
+            // All other calls are invalid
+            _ => Err(InvalidTransaction::Call.into()),
+        }
+    }
+
+    fn post_dispatch_details(
+        pre: Self::Pre,
+        _info: &DispatchInfoOf<RuntimeCall>,
+        _post_info: &PostDispatchInfoOf<RuntimeCall>,
+        _len: usize,
+        result: &DispatchResult,
+    ) -> Result<Weight, TransactionValidityError> {
+        if result.is_err() {
+            if let Some(who) = pre {
+                RelayerSet::post_dispatch_failed_bridge_tx(&who);
+            }
+        }
+        Ok(Weight::zero())
+    }
 }
 
 // It'll generate signed extensions to invalidate obsolete bridge transactions before
@@ -688,7 +658,7 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	AsTransactionExtension<ValidateSigned>,
+    ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
 
