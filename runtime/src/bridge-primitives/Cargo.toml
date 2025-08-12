@@ -5,17 +5,17 @@ description = "Primitives of PeopleHubPolkadot parachain runtime."
 [dependencies]
 
 # Bridge Dependencies
-bp-bridge-hub-cumulus = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-bp-header-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-bp-polkadot-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-bp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-bp-messages = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+bp-bridge-hub-cumulus = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+bp-header-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+bp-polkadot-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+bp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+bp-messages = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
 
 # Substrate Based Dependencies
-frame-support = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-sp-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
-sp-std = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "0e09ad448bce27fcd255370cc2827ea5d2cf3892", default-features = false }
+frame-support = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+sp-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+sp-std = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
 
 # Polkadot
 xcm = { version = "15.0.3", default-features = false, package = "staging-xcm" }

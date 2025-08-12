@@ -22,8 +22,11 @@ impl pallet_bridge_parachains::WeightInfoExt
 	for bridge_polkadot_parachains::WeightInfo<crate::Runtime>
 {
 	fn expected_extra_storage_proof_size() -> u32 {
-                // TODO: (clean up) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
-		bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE
+		// TODO: (clean up) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
+		#[cfg(feature = "rococo")]
+		{ bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE }
+		#[cfg(feature = "polkadot")]
+		{ bp_people_hub_polkadot::EXTRA_STORAGE_PROOF_SIZE }
 	}
 
 	fn submit_parachain_heads_overhead_from_runtime() -> Weight {
@@ -39,8 +42,11 @@ impl pallet_bridge_messages::WeightInfoExt
 	for bridge_polkadot_messages::WeightInfo<crate::Runtime>
 {
 	fn expected_extra_storage_proof_size() -> u32 {
-                // TODO: (clean up) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
-		bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE
+		// TODO: (clean up) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
+		#[cfg(feature = "rococo")]
+		{ bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE }
+		#[cfg(feature = "polkadot")]
+		{ bp_people_hub_polkadot::EXTRA_STORAGE_PROOF_SIZE }
 	}
 
 	fn receive_messages_proof_overhead_from_runtime() -> Weight {

@@ -35,6 +35,8 @@ use sp_std::prelude::*;
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
+// The Polkadot finality runtime API is declared in `polkadot_bridge_config` and implemented below.
+
 // A few exports that help ease life for downstream crates.
 pub use frame_support::{
 	construct_runtime, parameter_types,
@@ -61,6 +63,10 @@ use sp_runtime::traits::transaction_extension::AsTransactionExtension;
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
+
+// Ensure mutually exclusive network features
+#[cfg(all(feature = "rococo", feature = "polkadot"))]
+compile_error!("Features 'rococo' and 'polkadot' cannot be enabled at the same time.");
 
 #[cfg(feature = "rococo")]
 mod bridge_config;
@@ -407,14 +413,21 @@ construct_runtime!(
 		// Bridge
 		RelayerSet: pallet_relayer_set = 50,
 
-		#[cfg(feature = "rococo")]
+		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
 		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
-		#[cfg(feature = "rococo")]
+		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
 		BridgeRococoParachains: pallet_bridge_parachains = 52,
-		#[cfg(feature = "rococo")]
+		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
 		BridgeRococoMessages: pallet_bridge_messages = 53,
 
-		// TODO: @antkve add here for Polkadot
+		// Use different indices for Polkadot so even if both features are enabled by mistake,
+		// indices won't collide.
+		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
+		BridgePolkadotGrandpa: pallet_bridge_grandpa = 61,
+		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
+		BridgePolkadotParachains: pallet_bridge_parachains = 62,
+		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
+		BridgePolkadotMessages: pallet_bridge_messages = 63,
 
 		// sudo
 		Sudo: pallet_sudo = 255,
@@ -721,7 +734,6 @@ mod benches {
 				[pallet_validator_set, ValidatorSet]
 				[pallet_relayer_set, RelayerSet]
 
-				// TODO: finish benchmarking
 				[pallet_bridge_grandpa, BridgePolkadotGrandpa]
 				[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
 				[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeopleHubPolkadotMessagesInstance>]
@@ -906,7 +918,7 @@ impl_runtime_apis! {
 
 		fn free_headers_interval() -> Option<u32> {
 			<Runtime as pallet_bridge_grandpa::Config<
-				bridge_config::WithPolkadotBridgeGrandpaInstance
+				bridge_config::WithRococoBridgeGrandpaInstance
 			>>::FreeHeadersInterval::get()
 		}
 	}
@@ -952,14 +964,14 @@ impl_runtime_apis! {
 		}
 	}
 
-	#[cfg(feature = "polkadot")]
-	impl bp_polkadot::PolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_polkadot::Hash, bp_polkadot::BlockNumber>> {
+    #[cfg(feature = "polkadot")]
+    impl crate::polkadot_bridge_config::PolkadotFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_polkadot_core::Hash, bp_polkadot_core::BlockNumber>> {
 			BridgePolkadotGrandpa::best_finalized()
 		}
 
 		fn synced_headers_grandpa_info(
-		) -> Vec<bp_header_chain::StoredHeaderGrandpaInfo<bp_polkadot::Header>> {
+		) -> Vec<bp_header_chain::StoredHeaderGrandpaInfo<bp_polkadot_core::Header>> {
 			BridgePolkadotGrandpa::synced_headers_grandpa_info()
 		}
 
