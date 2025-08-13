@@ -3,10 +3,10 @@ name = "polkadot-bulletin-chain-runtime"
 version = "0.1.0-dev"
 description = "Runtime for the Polkadot Bulletin Chain"
 authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
+edition.workspace = true
 license = "MIT-0"
 publish = false
-repository = "https://github.com/paritytech/polkadot-bulletin-chain/"
+repository.workspace = true
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

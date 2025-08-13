@@ -2,7 +2,7 @@
 name = "pallets-common"
 version = "0.1.0"
 authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
+edition.workspace = true
 license = "Apache-2.0"
 description = "Common utilities for pallets and/or runtime"
 repository.workspace = true

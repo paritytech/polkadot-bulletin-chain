@@ -2,7 +2,8 @@
 name = "pallet-relayer-set"
 version = "1.0.0"
 authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
+edition.workspace = true
+repository.workspace = true
 license = "Apache-2.0"
 description = "Relayer set pallet"
 

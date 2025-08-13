@@ -2,7 +2,8 @@
 name = 'pallet-validator-set'
 version = '1.0.0'
 authors = ['Gautam Dhameja <quasijatt@outlook.com>', 'Parity Technologies <admin@parity.io>']
-edition = '2021'
+edition.workspace = true
+repository.workspace = true
 license = 'Apache-2.0'
 
 [dependencies]

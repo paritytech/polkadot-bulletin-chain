@@ -3,10 +3,10 @@ name = "polkadot-bulletin-chain"
 version = "0.1.0-dev"
 description = "Polkadot Bulletin Chain node"
 authors = ["Parity Technologies <admin@parity.io>"]
-edition = "2021"
+edition.workspace = true
 license = "MIT-0"
 publish = false
-repository = "https://github.com/paritytech/polkadot-bulletin-chain/"
+repository.workspace = true
 build = "build.rs"
 
 [package.metadata.docs.rs]

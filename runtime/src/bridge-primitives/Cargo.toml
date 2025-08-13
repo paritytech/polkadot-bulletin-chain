@@ -1,6 +1,9 @@
 [package]
 name = "bp-people-hub-polkadot"
 description = "Primitives of PeopleHubPolkadot parachain runtime."
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
 
