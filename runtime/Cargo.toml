@@ -111,6 +111,7 @@ std = [
 	"scale-info/std",
 	"serde_json/std",
 
+	"bp-bridge-hub-cumulus/std",
 	"frame-executive/std",
 	"frame-support/std",
 	"frame-system/std",
@@ -136,7 +137,6 @@ std = [
 	"sp-transaction-pool/std",
 	"sp-transaction-storage-proof/std",
 	"sp-version/std",
-	"bp-bridge-hub-cumulus/std",
 
 	"frame-system-rpc-runtime-api/std",
 
@@ -154,8 +154,8 @@ std = [
 	"bp-header-chain/std",
 	"bp-messages/std",
 	"bp-parachains/std",
-	"bp-polkadot-bulletin/std",
 	"bp-people-hub-polkadot/std",
+	"bp-polkadot-bulletin/std",
 	"bp-polkadot-core/std",
 	"bp-rococo/std",
 	"bp-runtime/std",
@@ -174,8 +174,10 @@ std = [
 	"pallet-xcm?/std",
 	"parachains-common?/std",
 	"sp-genesis-builder/std",
+	"sp-keyring/std",
 	"sp-staking?/std",
 	"sp-storage?/std",
+	"sp-trie/std",
 	"substrate-wasm-builder",
 ]
 runtime-benchmarks = [
@@ -209,6 +211,7 @@ runtime-benchmarks = [
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
 
+	"bp-people-hub-polkadot/runtime-benchmarks",
 	"pallet-staking/runtime-benchmarks",
 	"pallet-xcm/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
