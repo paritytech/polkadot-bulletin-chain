@@ -1485,6 +1485,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-people-hub-polkadot"
+version = "0.0.0"
+dependencies = [
+ "bp-bridge-hub-cumulus",
+ "bp-header-chain",
+ "bp-messages",
+ "bp-polkadot-core",
+ "bp-runtime",
+ "frame-support 28.0.0",
+ "sp-api 26.0.0",
+ "sp-runtime 31.0.1",
+ "sp-std 14.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=db5e645422ccf952018a3c466a33fef477858602)",
+ "staging-xcm",
+]
+
+[[package]]
 name = "bp-polkadot-bulletin"
 version = "0.4.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=db5e645422ccf952018a3c466a33fef477858602#db5e645422ccf952018a3c466a33fef477858602"
@@ -8881,10 +8897,12 @@ dependencies = [
 name = "polkadot-bulletin-chain-runtime"
 version = "0.1.0-dev"
 dependencies = [
+ "bp-bridge-hub-cumulus",
  "bp-bridge-hub-rococo",
  "bp-header-chain",
  "bp-messages",
  "bp-parachains",
+ "bp-people-hub-polkadot",
  "bp-polkadot-bulletin",
  "bp-polkadot-core",
  "bp-rococo",
@@ -8910,7 +8928,6 @@ dependencies = [
  "pallet-grandpa",
  "pallet-offences",
  "pallet-relayer-set",
- "pallet-revive",
  "pallet-session",
  "pallet-staking",
  "pallet-sudo",
