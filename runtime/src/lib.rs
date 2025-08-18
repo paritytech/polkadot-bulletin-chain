@@ -705,8 +705,8 @@ mod benches {
 				[pallet_relayer_set, RelayerSet]
 
 				[pallet_bridge_grandpa, BridgePolkadotGrandpa]
-				[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-				[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeopleHubPolkadotMessagesInstance>]
+				// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
+				// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeopleHubPolkadotMessagesInstance>]
 			);
 		}
 	}
