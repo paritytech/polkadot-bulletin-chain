@@ -413,22 +413,22 @@ construct_runtime!(
 
 		// Bridge
 		RelayerSet: pallet_relayer_set = 50,
-
-		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
-		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
-		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
-		BridgeRococoParachains: pallet_bridge_parachains = 52,
-		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
-		BridgeRococoMessages: pallet_bridge_messages = 53,
-
+		
 		// Use different indices for Polkadot so even if both features are enabled by mistake,
 		// indices won't collide.
 		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
-		BridgePolkadotGrandpa: pallet_bridge_grandpa = 61,
+		BridgePolkadotGrandpa: pallet_bridge_grandpa = 51,
 		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
-		BridgePolkadotParachains: pallet_bridge_parachains = 62,
+		BridgePolkadotParachains: pallet_bridge_parachains = 52,
 		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
-		BridgePolkadotMessages: pallet_bridge_messages = 63,
+		BridgePolkadotMessages: pallet_bridge_messages = 53,
+
+		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
+		BridgeRococoGrandpa: pallet_bridge_grandpa = 61,
+		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
+		BridgeRococoParachains: pallet_bridge_parachains = 62,
+		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
+		BridgeRococoMessages: pallet_bridge_messages = 63,
 
 		// sudo
 		Sudo: pallet_sudo = 255,
