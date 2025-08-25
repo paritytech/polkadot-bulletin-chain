@@ -299,7 +299,7 @@ pub(crate) fn decode_bridge_message(
 // pub(crate) mod tests {
 // 	use super::*;
 // 	use crate::{
-// 		bridge_config::{tests::run_test, WithPeopleHubPolkadotMessagesInstance, XCM_LANE},
+// 		bridge_config::{tests::run_test, WithPeoplePolkadotMessagesInstance, XCM_LANE},
 // 		BridgePolkadotMessages, Runtime,
 // 	};
 // 	use bp_messages::{
@@ -311,7 +311,7 @@ pub(crate) fn decode_bridge_message(
 // 	use xcm_executor::traits::Properties;
 //
 // 	type Dispatcher =
-// 		<Runtime as MessagesConfig<WithPeopleHubPolkadotMessagesInstance>>::MessageDispatch;
+// 		<Runtime as MessagesConfig<WithPeoplePolkadotMessagesInstance>>::MessageDispatch;
 //
 // 	fn test_storage_key() -> Vec<u8> {
 // 		(*b"test_key").to_vec()

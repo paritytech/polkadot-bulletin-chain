@@ -21,7 +21,7 @@ tracing = { version = "0.1.41", default-features = false }
 try-runtime-cli = { version = "0.42" }
 
 # Local workspace members
-bp-people-hub-polkadot = { path = "runtime/src/bridge-primitives", default-features = false }
+bp-people-polkadot = { path = "runtime/src/bridge-primitives", default-features = false }
 pallet-relayer-set = { version = "1.0.0", path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { version = "4.0.0-dev", path = "pallets/transaction-storage", default-features = false }
 pallet-validator-set = { version = "1.0.0", path = "pallets/validator-set", default-features = false }

@@ -706,7 +706,7 @@ mod benches {
 
 				[pallet_bridge_grandpa, BridgePolkadotGrandpa]
 				// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-				// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeopleHubPolkadotMessagesInstance>]
+				// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>]
 			);
 		}
 	}
@@ -953,10 +953,10 @@ impl_runtime_apis! {
 	}
 
 	#[cfg(feature = "polkadot")]
-	impl people_bridge_primitives::PeopleHubPolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_people_hub_polkadot::Hash, bp_people_hub_polkadot::BlockNumber>> {
+	impl people_bridge_primitives::PeoplePolkadotFinalityApi<Block> for Runtime {
+		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_people_polkadot::Hash, bp_people_polkadot::BlockNumber>> {
 			BridgePolkadotParachains::best_parachain_head_id::<
-				people_bridge_primitives::PeopleHubPolkadot
+				people_bridge_primitives::PeoplePolkadot
 			>().unwrap_or(None)
 		}
 
@@ -967,20 +967,20 @@ impl_runtime_apis! {
 	}
 
 	#[cfg(feature = "polkadot")]
-	impl bp_people_hub_polkadot::FromPeopleHubPolkadotInboundLaneApi<Block> for Runtime {
+	impl bp_people_polkadot::FromPeoplePolkadotInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
 			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
 		) -> Vec<bp_messages::InboundMessageDetails> {
 			bridge_runtime_common::messages_api::inbound_message_details::<
 				Runtime,
-				bridge_config::WithPeopleHubPolkadotMessagesInstance,
+				bridge_config::WithPeoplePolkadotMessagesInstance,
 			>(lane, messages)
 		}
 	}
 
 	#[cfg(feature = "polkadot")]
-	impl bp_people_hub_polkadot::ToPeopleHubPolkadotOutboundLaneApi<Block> for Runtime {
+	impl bp_people_polkadot::ToPeoplePolkadotOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
 			begin: bp_messages::MessageNonce,
@@ -988,7 +988,7 @@ impl_runtime_apis! {
 		) -> Vec<bp_messages::OutboundMessageDetails> {
 			bridge_runtime_common::messages_api::outbound_message_details::<
 				Runtime,
-				bridge_config::WithPeopleHubPolkadotMessagesInstance,
+				bridge_config::WithPeoplePolkadotMessagesInstance,
 			>(lane, begin, end)
 		}
 	}

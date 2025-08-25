@@ -90,20 +90,20 @@ parameter_types! {
 	pub const AtPolkadotParasPalletName: &'static str = "Paras";
 
 // 	/// Chain identifier of Polkadot Bridge Hub.
-// 	pub const BridgeHubPolkadotChainId: ChainId = bp_runtime::people_hub_POLKADOT_CHAIN_ID;
+// 	pub const BridgeHubPolkadotChainId: ChainId = bp_runtime::PEOPLE_POLKADOT_CHAIN_ID;
 	/// A number of Polkadot Bridge Hub head digests that we keep in the storage.
-	pub const PeopleHubPolkadotHeadsToKeep: u32 = 1024;
+	pub const PeoplePolkadotHeadsToKeep: u32 = 1024;
 	/// A maximal size of Polkadot Bridge Hub head digest.
-	pub const MaxPeopleHubPolkadotHeadSize: u32 = 128;
+	pub const MaxPeoplePolkadotHeadSize: u32 = 128;
 
 // 	/// All active outbound lanes.
 // 	pub const ActiveOutboundLanes: &'static [LaneId] = &[XCM_LANE];
 // 	/// Maximal number of unrewarded relayer entries.
 // 	pub const MaxUnrewardedRelayerEntriesAtInboundLane: MessageNonce =
-// 		bp_people_hub_polkadot::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
+// 		bp_people_polkadot::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
 // 	/// Maximal number of unconfirmed messages.
 // 	pub const MaxUnconfirmedMessagesAtInboundLane: MessageNonce =
-// 		bp_people_hub_polkadot::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
+// 		bp_people_polkadot::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
 //
 // 	/// Sending chain location and lane used to communicate with Polkadot Bulletin chain.
 // 	pub FromPolkadotBulletinToBridgeHubPolkadotRoute: SenderAndLane = SenderAndLane::new(
@@ -117,9 +117,9 @@ parameter_types! {
 
 // impl bp_runtime::Parachain for BridgeHubPolkadotOrPolkadot {
 // 	#[cfg(not(feature = "polkadot"))]
-// 	const PARACHAIN_ID: u32 = bp_people_hub_polkadot::BridgeHubPolkadot::PARACHAIN_ID;
+// 	const PARACHAIN_ID: u32 = bp_people_polkadot::BridgeHubPolkadot::PARACHAIN_ID;
 // 	#[cfg(feature = "polkadot")]
-// 	const PARACHAIN_ID: u32 = bp_people_hub_polkadot::PeopleHubPolkadot::PARACHAIN_ID;
+// 	const PARACHAIN_ID: u32 = bp_people_polkadot::PeoplePolkadot::PARACHAIN_ID;
 // }
 //
 /// An instance of `pallet_bridge_grandpa` used to bridge with Polkadot.
@@ -143,9 +143,9 @@ impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for 
 	type BridgesGrandpaPalletInstance = WithPolkadotBridgeGrandpaInstance;
 	type ParasPalletName = AtPolkadotParasPalletName;
 	type ParaStoredHeaderDataBuilder =
-		SingleParaStoredHeaderDataBuilder<bp_people_hub_polkadot::PeopleHubPolkadot>;
-	type HeadsToKeep = PeopleHubPolkadotHeadsToKeep;
-	type MaxParaHeadDataSize = MaxPeopleHubPolkadotHeadSize;
+		SingleParaStoredHeaderDataBuilder<bp_people_polkadot::PeoplePolkadot>;
+	type HeadsToKeep = PeoplePolkadotHeadsToKeep;
+	type MaxParaHeadDataSize = MaxPeoplePolkadotHeadSize;
 	type OnNewHead = ();
 }
 
@@ -241,17 +241,17 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 }
 
 /// An instance of `pallet_bridge_messages` used to bridge with Polkadot Bridge Hub.
-pub type WithPeopleHubPolkadotMessagesInstance = ();
-impl pallet_bridge_messages::Config<WithPeopleHubPolkadotMessagesInstance> for Runtime {
+pub type WithPeoplePolkadotMessagesInstance = ();
+impl pallet_bridge_messages::Config<WithPeoplePolkadotMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::bridge_polkadot_messages::WeightInfo<Runtime>;
 
 	type ThisChain = bp_polkadot_bulletin::PolkadotBulletin;
-	type BridgedChain = bp_people_hub_polkadot::PeopleHubPolkadot;
+	type BridgedChain = bp_people_polkadot::PeoplePolkadot;
 	type BridgedHeaderChain = pallet_bridge_parachains::ParachainHeaders<
 		Runtime,
 		WithPolkadotBridgeParachainsInstance,
-		bp_people_hub_polkadot::PeopleHubPolkadot,
+		bp_people_polkadot::PeoplePolkadot,
 	>;
 
 	type OutboundPayload = XcmAsPlainPayload;
@@ -262,7 +262,7 @@ impl pallet_bridge_messages::Config<WithPeopleHubPolkadotMessagesInstance> for R
 	type DeliveryConfirmationPayments = ();
 
 	type MessageDispatch = WithXcmWeightDispatcher<
-		XcmBlobMessageDispatch<FromPeopleHubPolkadotBlobDispatcher, Self::WeightInfo>,
+		XcmBlobMessageDispatch<FromPeoplePolkadotBlobDispatcher, Self::WeightInfo>,
 	>;
 	type OnMessagesDelivered = ();
 }
@@ -308,7 +308,7 @@ where
 }
 
 /// Dispatches received XCM messages from the Polkadot Bridge Hub.
-pub type FromPeopleHubPolkadotBlobDispatcher = crate::xcm_config::ImmediateXcmDispatcher;
+pub type FromPeoplePolkadotBlobDispatcher = crate::xcm_config::ImmediateXcmDispatcher;
 
 pub struct XcmBlobHauler<Runtime, MessagesInstance> {
 	_marker: PhantomData<(Runtime, MessagesInstance)>,
@@ -353,7 +353,7 @@ where
 
 /// Export XCM messages to be relayed to the Polkadot Bridge Hub chain.
 pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
-	XcmBlobHauler<Runtime, WithPeopleHubPolkadotMessagesInstance>,
+	XcmBlobHauler<Runtime, WithPeoplePolkadotMessagesInstance>,
 	PolkadotGlobalConsensusNetworkLocation,
 	AlwaysV4,
 	(),
@@ -366,13 +366,13 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 	/// Proof of messages, coming from BridgeHubPolkadot.
 // 	pub type FromBridgeHubPolkadotMessagesProof =
 // 		bridge_runtime_common::messages::target::FromBridgedChainMessagesProof<
-// 			bp_people_hub_polkadot::Hash,
+// 			bp_people_polkadot::Hash,
 // 		>;
 //
 // 	/// Message delivery proof for `BridgeHubPolkadot` messages.
 // 	pub type ToBridgeHubPolkadotMessagesDeliveryProof =
 // 		bridge_runtime_common::messages::source::FromBridgedChainMessagesDeliveryProof<
-// 			bp_people_hub_polkadot::Hash,
+// 			bp_people_polkadot::Hash,
 // 		>;
 //
 // 	use bridge_runtime_common::messages_benchmarking::{
@@ -453,8 +453,8 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 	use crate::{
 // 		xcm_config::{
 // 			tests::{
-// 				encoded_xcm_message_from_people_hub_polkadot,
-// 				encoded_xcm_message_from_people_hub_polkadot_require_wight_at_most,
+// 				encoded_xcm_message_from_people_polkadot,
+// 				encoded_xcm_message_from_people_polkadot_require_wight_at_most,
 // 			},
 // 			BaseXcmWeight,
 // 		},
@@ -499,7 +499,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 	use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
 //
 // 	const POLKADOT_HEADER_NUMBER: bp_polkadot::BlockNumber = 100;
-// 	const people_hub_HEADER_NUMBER: bp_people_hub_polkadot::BlockNumber = 200;
+// 	const people_hub_HEADER_NUMBER: bp_people_polkadot::BlockNumber = 200;
 //
 // 	#[derive(Clone, Copy)]
 // 	enum HeaderType {
@@ -528,8 +528,8 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 	}
 //
 // 	fn polkadot_header(t: HeaderType) -> bp_polkadot::Header {
-// 		let people_hub_polkadot_head_storage_proof = people_hub_polkadot_head_storage_proof(t);
-// 		let state_root = people_hub_polkadot_head_storage_proof.0;
+// 		let people_polkadot_head_storage_proof = people_polkadot_head_storage_proof(t);
+// 		let state_root = people_polkadot_head_storage_proof.0;
 // 		bp_test_utils::test_header_with_root(POLKADOT_HEADER_NUMBER, state_root)
 // 	}
 //
@@ -537,29 +537,29 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		bp_test_utils::make_default_justification(&polkadot_header(t))
 // 	}
 //
-// 	fn people_hub_polkadot_header(t: HeaderType) -> bp_people_hub_polkadot::Header {
+// 	fn people_polkadot_header(t: HeaderType) -> bp_people_polkadot::Header {
 // 		bp_test_utils::test_header_with_root(
 // 			people_hub_HEADER_NUMBER,
 // 			match t {
-// 				HeaderType::WithMessages => people_hub_polkadot_message_storage_proof().0,
+// 				HeaderType::WithMessages => people_polkadot_message_storage_proof().0,
 // 				HeaderType::WithDeliveredMessages =>
-// 					people_hub_polkadot_message_delivery_storage_proof().0,
+// 					people_polkadot_message_delivery_storage_proof().0,
 // 			},
 // 		)
 // 	}
 //
-// 	fn people_hub_polkadot_head_storage_proof(
+// 	fn people_polkadot_head_storage_proof(
 // 		t: HeaderType,
 // 	) -> (bp_polkadot::Hash, ParaHeadsProof) {
 // 		let (state_root, proof, _) =
 // 			bp_test_utils::prepare_parachain_heads_proof::<bp_polkadot::Header>(vec![(
 // 				BridgeHubPolkadotOrPolkadot::PARACHAIN_ID,
-// 				ParaHead(people_hub_polkadot_header(t).encode()),
+// 				ParaHead(people_polkadot_header(t).encode()),
 // 			)]);
 // 		(state_root, proof)
 // 	}
 //
-// 	fn people_hub_polkadot_message_storage_proof() -> (bp_people_hub_polkadot::Hash,
+// 	fn people_polkadot_message_storage_proof() -> (bp_people_polkadot::Hash,
 // RawStorageProof) 	{
 // 		prepare_messages_storage_proof::<WithBridgeHubPolkadotMessageBridge>(
 // 			XCM_LANE,
@@ -572,10 +572,10 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		)
 // 	}
 //
-// 	fn people_hub_polkadot_message_proof(
-// 	) -> FromBridgedChainMessagesProof<bp_people_hub_polkadot::Hash> {
-// 		let (_, storage_proof) = people_hub_polkadot_message_storage_proof();
-// 		let bridged_header_hash = people_hub_polkadot_header(HeaderType::WithMessages).hash();
+// 	fn people_polkadot_message_proof(
+// 	) -> FromBridgedChainMessagesProof<bp_people_polkadot::Hash> {
+// 		let (_, storage_proof) = people_polkadot_message_storage_proof();
+// 		let bridged_header_hash = people_polkadot_header(HeaderType::WithMessages).hash();
 // 		FromBridgedChainMessagesProof {
 // 			bridged_header_hash,
 // 			storage_proof,
@@ -585,8 +585,8 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		}
 // 	}
 //
-// 	fn people_hub_polkadot_message_delivery_storage_proof(
-// 	) -> (bp_people_hub_polkadot::Hash, RawStorageProof) {
+// 	fn people_polkadot_message_delivery_storage_proof(
+// 	) -> (bp_people_polkadot::Hash, RawStorageProof) {
 // 		let storage_key = bp_messages::storage_keys::inbound_lane_data_key(
 // 			WithBridgeHubPolkadotMessageBridge::BRIDGED_MESSAGES_PALLET_NAME,
 // 			&XCM_LANE,
@@ -605,23 +605,23 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		let mut mdb = MemoryDB::default();
 // 		{
 // 			let mut trie =
-// 				TrieDBMutBuilderV1::<bp_people_hub_polkadot::Hasher>::new(&mut mdb, &mut root)
+// 				TrieDBMutBuilderV1::<bp_people_polkadot::Hasher>::new(&mut mdb, &mut root)
 // 					.build();
 // 			trie.insert(&storage_key, &storage_value).unwrap();
 // 		}
 //
 // 		let storage_proof =
-// 			record_all_trie_keys::<LayoutV1<bp_people_hub_polkadot::Hasher>, _>(&mdb, &root)
+// 			record_all_trie_keys::<LayoutV1<bp_people_polkadot::Hasher>, _>(&mdb, &root)
 // 				.unwrap();
 //
 // 		(root, storage_proof)
 // 	}
 //
-// 	fn people_hub_polkadot_message_delivery_proof(
-// 	) -> FromBridgedChainMessagesDeliveryProof<bp_people_hub_polkadot::Hash> {
-// 		let (_, storage_proof) = people_hub_polkadot_message_delivery_storage_proof();
+// 	fn people_polkadot_message_delivery_proof(
+// 	) -> FromBridgedChainMessagesDeliveryProof<bp_people_polkadot::Hash> {
+// 		let (_, storage_proof) = people_polkadot_message_delivery_storage_proof();
 // 		let bridged_header_hash =
-// 			people_hub_polkadot_header(HeaderType::WithDeliveredMessages).hash();
+// 			people_polkadot_header(HeaderType::WithDeliveredMessages).hash();
 // 		FromBridgedChainMessagesDeliveryProof { bridged_header_hash, storage_proof, lane: XCM_LANE }
 // 	}
 //
@@ -725,9 +725,9 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 					at_relay_block: (POLKADOT_HEADER_NUMBER, polkadot_header(t).hash()),
 // 					parachains: vec![(
 // 						BridgeHubPolkadotOrPolkadot::PARACHAIN_ID.into(),
-// 						people_hub_polkadot_header(t).hash(),
+// 						people_polkadot_header(t).hash(),
 // 					)],
-// 					parachain_heads_proof: people_hub_polkadot_head_storage_proof(t).1,
+// 					parachain_heads_proof: people_polkadot_head_storage_proof(t).1,
 // 				},
 // 			),
 // 		)
@@ -741,7 +741,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			RuntimeCall::BridgePolkadotMessages(
 // 				pallet_bridge_messages::Call::receive_messages_proof {
 // 					relayer_id_at_bridged_chain: relayer_account_at_polkadot(),
-// 					proof: people_hub_polkadot_message_proof(),
+// 					proof: people_polkadot_message_proof(),
 // 					messages_count: 1,
 // 					dispatch_weight: Weight::zero(),
 // 				},
@@ -756,7 +756,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			signer,
 // 			RuntimeCall::BridgePolkadotMessages(
 // 				pallet_bridge_messages::Call::receive_messages_delivery_proof {
-// 					proof: people_hub_polkadot_message_delivery_proof(),
+// 					proof: people_polkadot_message_delivery_proof(),
 // 					relayers_state: UnrewardedRelayersState {
 // 						unrewarded_relayer_entries: 1,
 // 						messages_in_oldest_entry: 1,
@@ -830,7 +830,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 //
 // 			assert_eq!(
 // 				BridgeHubPolkadotHeadersProvider::finalized_header_state_root(
-// 					people_hub_polkadot_header(HeaderType::WithMessages).hash()
+// 					people_polkadot_header(HeaderType::WithMessages).hash()
 // 				),
 // 				None,
 // 			);
@@ -844,7 +844,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			);
 // 			assert_eq!(
 // 				BridgeHubPolkadotHeadersProvider::finalized_header_state_root(
-// 					people_hub_polkadot_header(HeaderType::WithMessages).hash()
+// 					people_polkadot_header(HeaderType::WithMessages).hash()
 // 				),
 // 				None
 // 			);
@@ -856,9 +856,9 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			));
 // 			assert_eq!(
 // 				BridgeHubPolkadotHeadersProvider::finalized_header_state_root(
-// 					people_hub_polkadot_header(HeaderType::WithMessages).hash()
+// 					people_polkadot_header(HeaderType::WithMessages).hash()
 // 				),
-// 				Some(*people_hub_polkadot_header(HeaderType::WithMessages).state_root())
+// 				Some(*people_polkadot_header(HeaderType::WithMessages).state_root())
 // 			);
 // 		});
 // 	}
@@ -933,7 +933,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			Runtime,
 // 			WithBridgeHubPolkadotMessagesInstance,
 // 		>(
-// 			bp_people_hub_polkadot::EXTRA_STORAGE_PROOF_SIZE,
+// 			bp_people_polkadot::EXTRA_STORAGE_PROOF_SIZE,
 // 			bp_polkadot_bulletin::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
 // 			bp_polkadot_bulletin::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
 // 			false,
@@ -963,10 +963,10 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			},
 // 			messages_pallet_constants: AssertBridgeMessagesPalletConstants {
 // 				max_unrewarded_relayers_in_bridged_confirmation_tx:
-// 					bp_people_hub_polkadot::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
+// 					bp_people_polkadot::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
 // 				max_unconfirmed_messages_in_bridged_confirmation_tx:
-// 					bp_people_hub_polkadot::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
-// 				bridged_chain_id: bp_runtime::people_hub_POLKADOT_CHAIN_ID,
+// 					bp_people_polkadot::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
+// 				bridged_chain_id: bp_runtime::PEOPLE_POLKADOT_CHAIN_ID,
 // 			},
 // 			pallet_names: AssertBridgePalletNames {
 // 				with_this_chain_messages_pallet_name:
@@ -974,7 +974,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 				with_bridged_chain_grandpa_pallet_name:
 // 					bp_polkadot::WITH_POLKADOT_GRANDPA_PALLET_NAME,
 // 				with_bridged_chain_messages_pallet_name:
-// 					bp_people_hub_polkadot::WITH_people_hub_POLKADOT_MESSAGES_PALLET_NAME,
+// 					bp_people_polkadot::WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME,
 // 			},
 // 		});
 // 	}
@@ -988,10 +988,10 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 				>>::MessageDispatch::dispatch_weight(&mut DispatchMessage {
 // 					key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
 // 					data: DispatchMessageData {
-// 						payload: Ok(encoded_xcm_message_from_people_hub_polkadot())
+// 						payload: Ok(encoded_xcm_message_from_people_polkadot())
 // 					},
 // 				}),
-// 				encoded_xcm_message_from_people_hub_polkadot_require_wight_at_most()
+// 				encoded_xcm_message_from_people_polkadot_require_wight_at_most()
 // 					.saturating_add(BaseXcmWeight::get())
 // 			);
 // 		});

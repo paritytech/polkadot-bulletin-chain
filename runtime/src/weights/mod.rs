@@ -26,7 +26,7 @@ impl pallet_bridge_parachains::WeightInfoExt
 		#[cfg(feature = "rococo")]
 		{ bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE }
 		#[cfg(feature = "polkadot")]
-		{ bp_people_hub_polkadot::EXTRA_STORAGE_PROOF_SIZE }
+		{ bp_people_polkadot::EXTRA_STORAGE_PROOF_SIZE }
 	}
 
 	fn submit_parachain_heads_overhead_from_runtime() -> Weight {
@@ -46,7 +46,7 @@ impl pallet_bridge_messages::WeightInfoExt
 		#[cfg(feature = "rococo")]
 		{ bp_bridge_hub_rococo::EXTRA_STORAGE_PROOF_SIZE }
 		#[cfg(feature = "polkadot")]
-		{ bp_people_hub_polkadot::EXTRA_STORAGE_PROOF_SIZE }
+		{ bp_people_polkadot::EXTRA_STORAGE_PROOF_SIZE }
 	}
 
 	fn receive_messages_proof_overhead_from_runtime() -> Weight {
