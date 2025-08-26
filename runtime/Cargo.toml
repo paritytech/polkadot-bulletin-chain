@@ -64,7 +64,6 @@ bp-header-chain = { workspace = true }
 bp-messages = { workspace = true }
 bp-parachains = { workspace = true }
 
-bp-people-polkadot = { workspace = true }
 bp-polkadot-bulletin = { workspace = true }
 bp-polkadot-core = { workspace = true }
 bp-rococo = { workspace = true }
@@ -154,7 +153,6 @@ std = [
 	"bp-header-chain/std",
 	"bp-messages/std",
 	"bp-parachains/std",
-	"bp-people-polkadot/std",
 	"bp-polkadot-bulletin/std",
 	"bp-polkadot-core/std",
 	"bp-rococo/std",
@@ -211,7 +209,6 @@ runtime-benchmarks = [
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
 
-	"bp-people-polkadot/runtime-benchmarks",
 	"pallet-staking/runtime-benchmarks",
 	"pallet-xcm/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",

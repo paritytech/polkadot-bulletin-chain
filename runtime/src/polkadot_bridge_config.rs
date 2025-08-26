@@ -11,7 +11,7 @@ use bp_messages::{
 };
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_runtime::messages::MessageDispatchResult;
-use codec::{Decode, Encode, DecodeWithMemTracking};
+use codec::{Decode, DecodeWithMemTracking, Encode};
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
@@ -21,54 +21,126 @@ use xcm::prelude::*;
 use xcm_builder::{DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError, HaulBlobExporter};
 use xcm_executor::XcmExecutor;
 
-use bp_polkadot_core::*;
+use frame_support::weights::Weight;
 
-use bp_header_chain::ChainWithGrandpa;
-use bp_runtime::{
-	decl_bridge_finality_runtime_apis, Chain, ChainId,
-};
-use frame_support::{sp_runtime::StateVersion, weights::Weight};
+// TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
+pub mod bp_polkadot {
+	use bp_header_chain::ChainWithGrandpa;
+	use bp_polkadot_core::*;
+	use bp_runtime::{decl_bridge_finality_runtime_apis, Chain, ChainId};
+	use frame_support::weights::Weight;
+	use sp_runtime::StateVersion;
 
-/// Polkadot Chain
-pub struct Polkadot;
+	/// Polkadot Chain
+	pub struct Polkadot;
 
-impl Chain for Polkadot {
-	const ID: ChainId = *b"pdot";
+	impl Chain for Polkadot {
+		const ID: ChainId = *b"pdot";
 
-	type BlockNumber = BlockNumber;
-	type Hash = Hash;
-	type Hasher = Hasher;
-	type Header = Header;
+		type BlockNumber = BlockNumber;
+		type Hash = Hash;
+		type Hasher = Hasher;
+		type Header = Header;
 
-	type AccountId = AccountId;
-	type Balance = Balance;
-	type Nonce = Nonce;
-	type Signature = Signature;
+		type AccountId = AccountId;
+		type Balance = Balance;
+		type Nonce = Nonce;
+		type Signature = Signature;
 
-	const STATE_VERSION: StateVersion = StateVersion::V1;
+		const STATE_VERSION: StateVersion = StateVersion::V1;
 
-	fn max_extrinsic_size() -> u32 {
-		max_extrinsic_size()
+		fn max_extrinsic_size() -> u32 {
+			max_extrinsic_size()
+		}
+
+		fn max_extrinsic_weight() -> Weight {
+			max_extrinsic_weight()
+		}
 	}
 
-	fn max_extrinsic_weight() -> Weight {
-		max_extrinsic_weight()
+	impl ChainWithGrandpa for Polkadot {
+		const WITH_CHAIN_GRANDPA_PALLET_NAME: &'static str = WITH_POLKADOT_GRANDPA_PALLET_NAME;
+		const MAX_AUTHORITIES_COUNT: u32 = MAX_AUTHORITIES_COUNT;
+		const REASONABLE_HEADERS_IN_JUSTIFICATION_ANCESTRY: u32 =
+			REASONABLE_HEADERS_IN_JUSTIFICATION_ANCESTRY;
+		const MAX_MANDATORY_HEADER_SIZE: u32 = MAX_MANDATORY_HEADER_SIZE;
+		const AVERAGE_HEADER_SIZE: u32 = AVERAGE_HEADER_SIZE;
 	}
+
+	/// Name of the With-Polkadot GRANDPA pallet instance that is deployed at bridged chains.
+	pub const WITH_POLKADOT_GRANDPA_PALLET_NAME: &str = "BridgePolkadotGrandpa";
+
+	decl_bridge_finality_runtime_apis!(polkadot, grandpa);
 }
 
-impl ChainWithGrandpa for Polkadot {
-	const WITH_CHAIN_GRANDPA_PALLET_NAME: &'static str = WITH_POLKADOT_GRANDPA_PALLET_NAME;
-	const MAX_AUTHORITIES_COUNT: u32 = MAX_AUTHORITIES_COUNT;
-	const REASONABLE_HEADERS_IN_JUSTIFICATION_ANCESTRY: u32 =
-		REASONABLE_HEADERS_IN_JUSTIFICATION_ANCESTRY;
-	const MAX_MANDATORY_HEADER_SIZE: u32 = MAX_MANDATORY_HEADER_SIZE;
-	const AVERAGE_HEADER_SIZE: u32 = AVERAGE_HEADER_SIZE;
+// TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
+pub mod bp_people_polkadot {
+	use bp_bridge_hub_cumulus::*;
+	pub use bp_bridge_hub_cumulus::{BlockNumber, Hash, EXTRA_STORAGE_PROOF_SIZE};
+	use bp_messages::*;
+	use bp_runtime::{
+		decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain, ChainId,
+		Parachain,
+	};
+	use frame_support::{dispatch::DispatchClass, weights::Weight};
+	use sp_runtime::{RuntimeDebug, StateVersion};
+
+	/// PeoplePolkadot parachain.
+	#[derive(RuntimeDebug)]
+	pub struct PeoplePolkadot;
+
+	impl Chain for PeoplePolkadot {
+		const ID: ChainId = *b"phpd";
+		const STATE_VERSION: StateVersion = StateVersion::V1;
+
+		type BlockNumber = BlockNumber;
+		type Hash = Hash;
+		type Hasher = Hasher;
+		type Header = Header;
+
+		type AccountId = AccountId;
+		type Balance = Balance;
+		type Nonce = Nonce;
+		type Signature = Signature;
+
+		fn max_extrinsic_size() -> u32 {
+			*BlockLength::get().max.get(DispatchClass::Normal)
+		}
+
+		fn max_extrinsic_weight() -> Weight {
+			BlockWeights::get()
+				.get(DispatchClass::Normal)
+				.max_extrinsic
+				.unwrap_or(Weight::MAX)
+		}
+	}
+
+	impl Parachain for PeoplePolkadot {
+		const PARACHAIN_ID: u32 = PEOPLE_POLKADOT_PARACHAIN_ID;
+		const MAX_HEADER_SIZE: u32 = MAX_BRIDGE_HUB_HEADER_SIZE;
+	}
+
+	impl ChainWithMessages for PeoplePolkadot {
+		const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str =
+			WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME;
+		const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce =
+			MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
+		/// This constant limits the maximum number of messages in `receive_messages_proof`.
+		/// We need to adjust it from 4096 to 2024 due to the actual weights identified by
+		/// `check_message_lane_weights`. A higher value can be set once we switch
+		/// `max_extrinsic_weight` to `BlockWeightsForAsyncBacking`.
+		const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce = 2024;
+	}
+
+	/// Identifier of PeoplePolkadot in the Polkadot relay chain.
+	pub const PEOPLE_POLKADOT_PARACHAIN_ID: u32 = 1004;
+
+	/// Name of the With-PeoplePolkadot messages pallet instance that is deployed at bridged chains.
+	pub const WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME: &str = "PeoplePolkadotMessages";
+
+	decl_bridge_finality_runtime_apis!(people_polkadot);
+	decl_bridge_messages_runtime_apis!(people_polkadot, LegacyLaneId);
 }
-
-/// Name of the With-Polkadot GRANDPA pallet instance that is deployed at bridged chains.
-pub const WITH_POLKADOT_GRANDPA_PALLET_NAME: &str = "BridgePolkadotGrandpa";
-
-decl_bridge_finality_runtime_apis!(polkadot, grandpa);
 
 /// Lane that we are using to send and receive messages.
 pub const XCM_LANE: LegacyLaneId = LegacyLaneId([0, 0, 0, 0]);
@@ -128,7 +200,7 @@ impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtim
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::bridge_polkadot_grandpa::WeightInfo<Runtime>;
 
-	type BridgedChain = Polkadot;
+	type BridgedChain = bp_polkadot::Polkadot;
 	type MaxFreeHeadersPerBlock = MaxFreePolkadotHeadersPerBlock;
 	type FreeHeadersInterval = ConstU32<5>;
 	type HeadersToKeep = PolkadotHeadersToKeep;

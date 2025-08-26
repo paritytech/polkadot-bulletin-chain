@@ -1,6 +1,6 @@
 [package]
-name = "bp-people-polkadot"
-description = "Primitives of PeoplePolkadot parachain runtime."
+name = "bp-bulletin-polkadot"
+description = "Primitives of Bulletin parachain runtime."
 repository.workspace = true
 authors.workspace = true
 edition.workspace = true

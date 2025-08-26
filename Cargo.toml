@@ -21,7 +21,6 @@ tracing = { version = "0.1.41", default-features = false }
 try-runtime-cli = { version = "0.42" }
 
 # Local workspace members
-bp-people-polkadot = { path = "runtime/src/bridge-primitives", default-features = false }
 pallet-relayer-set = { version = "1.0.0", path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { version = "4.0.0-dev", path = "pallets/transaction-storage", default-features = false }
 pallet-validator-set = { version = "1.0.0", path = "pallets/validator-set", default-features = false }
@@ -91,6 +90,7 @@ bp-bridge-hub-rococo = { git = "https://github.com/paritytech/polkadot-sdk.git",
 bp-header-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
 bp-messages = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
 bp-parachains = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+# TODO: remove this and replace with local runtime/src/bridge-primitives
 bp-polkadot-bulletin = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
 bp-polkadot-core = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
 bp-rococo = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
@@ -125,7 +125,6 @@ members = [
 	"pallets/transaction-storage",
 	"pallets/validator-set",
 	"runtime",
-	"runtime/src/bridge-primitives",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.
