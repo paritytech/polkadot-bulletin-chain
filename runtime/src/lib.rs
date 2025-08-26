@@ -394,6 +394,36 @@ where
 	}
 }
 
+#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
+construct_runtime!(
+	pub struct Runtime {
+		System: frame_system = 0,
+		// Babe must be called before Session
+		Babe: pallet_babe = 1,
+		Timestamp: pallet_timestamp = 2,
+		// Authorship must be before session in order to note author in the correct session.
+		Authorship: pallet_authorship = 10,
+		Offences: pallet_offences = 11,
+		Historical: pallet_session::historical = 12,
+		ValidatorSet: pallet_validator_set = 13,
+		Session: pallet_session = 14,
+		Grandpa: pallet_grandpa = 15,
+
+		// Storage
+		TransactionStorage: pallet_transaction_storage = 40,
+
+		// Bridge (over BridgeHubRococo)
+		RelayerSet: pallet_relayer_set = 50,
+		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
+		BridgeRococoParachains: pallet_bridge_parachains = 52,
+		BridgeRococoMessages: pallet_bridge_messages = 53,
+
+		// sudo
+		Sudo: pallet_sudo = 255,
+	}
+);
+
+#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
 construct_runtime!(
 	pub struct Runtime {
 		System: frame_system = 0,
@@ -413,22 +443,9 @@ construct_runtime!(
 
 		// Bridge
 		RelayerSet: pallet_relayer_set = 50,
-		
-		// Use different indices for Polkadot so even if both features are enabled by mistake,
-		// indices won't collide.
-		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
 		BridgePolkadotGrandpa: pallet_bridge_grandpa = 51,
-		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
 		BridgePolkadotParachains: pallet_bridge_parachains = 52,
-		#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
 		BridgePolkadotMessages: pallet_bridge_messages = 53,
-
-		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
-		BridgeRococoGrandpa: pallet_bridge_grandpa = 61,
-		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
-		BridgeRococoParachains: pallet_bridge_parachains = 62,
-		#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
-		BridgeRococoMessages: pallet_bridge_messages = 63,
 
 		// sudo
 		Sudo: pallet_sudo = 255,
