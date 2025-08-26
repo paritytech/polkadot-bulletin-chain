@@ -70,6 +70,13 @@ pub mod bp_polkadot {
 	/// Name of the With-Polkadot GRANDPA pallet instance that is deployed at bridged chains.
 	pub const WITH_POLKADOT_GRANDPA_PALLET_NAME: &str = "BridgePolkadotGrandpa";
 
+	/// Maximal size of encoded `bp_parachains::ParaStoredHeaderData` structure among all Polkadot
+	/// parachains.
+	///
+	/// It includes the block number and state root, so it shall be near 40 bytes, but let's have
+	/// some reserve.
+	pub const MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE: u32 = 128;
+
 	decl_bridge_finality_runtime_apis!(polkadot, grandpa);
 }
 
@@ -157,16 +164,14 @@ parameter_types! {
 	/// **this chain** block.
 	pub const MaxFreePolkadotHeadersPerBlock: u32 = 4;
 	/// A number of Polkadot header digests that we keep in the storage.
-	pub const PolkadotHeadersToKeep: u32 = 1024;
+	pub const PolkadotHeadersToKeep: u32 = 1_200;
 	/// A name of parachains pallet at Pokadot.
 	pub const AtPolkadotParasPalletName: &'static str = "Paras";
 
-// 	/// Chain identifier of Polkadot Bridge Hub.
-// 	pub const BridgeHubPolkadotChainId: ChainId = bp_runtime::PEOPLE_POLKADOT_CHAIN_ID;
-	/// A number of Polkadot Bridge Hub head digests that we keep in the storage.
-	pub const PeoplePolkadotHeadsToKeep: u32 = 1024;
+	/// A number of People Polkadot head digests that we keep in the storage.
+	pub const PeoplePolkadotHeadsToKeep: u32 = 600;
 	/// A maximal size of Polkadot Bridge Hub head digest.
-	pub const MaxPeoplePolkadotHeadSize: u32 = 128;
+	pub const MaxPeoplePolkadotHeadSize: u32 = bp_polkadot::MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE;
 
 // 	/// All active outbound lanes.
 // 	pub const ActiveOutboundLanes: &'static [LaneId] = &[XCM_LANE];
