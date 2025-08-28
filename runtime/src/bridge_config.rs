@@ -449,7 +449,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 	};
 // 	use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
 //
-// 	const POLKADOT_HEADER_NUMBER: bp_polkadot_core::BlockNumber = 100;
+// 	const POLKADOT_HEADER_NUMBER: bp_polkadot::BlockNumber = 100;
 // 	const BRIDGE_HUB_HEADER_NUMBER: bp_bridge_hub_polkadot::BlockNumber = 200;
 //
 // 	#[derive(Clone, Copy)]
@@ -458,7 +458,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		WithDeliveredMessages,
 // 	}
 //
-// 	fn relayer_account_at_polkadot() -> bp_polkadot_core::AccountId {
+// 	fn relayer_account_at_polkadot() -> bp_polkadot::AccountId {
 // 		[42u8; 32].into()
 // 	}
 //
@@ -474,19 +474,19 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		AccountKeyring::Charlie
 // 	}
 //
-// 	fn polkadot_initial_header() -> bp_polkadot_core::Header {
+// 	fn polkadot_initial_header() -> bp_polkadot::Header {
 // 		bp_test_utils::test_header(POLKADOT_HEADER_NUMBER - 1)
 // 	}
 //
-// 	fn polkadot_header(t: HeaderType) -> bp_polkadot_core::Header {
+// 	fn polkadot_header(t: HeaderType) -> bp_polkadot::Header {
 // 		let bridge_hub_polkadot_head_storage_proof = bridge_hub_polkadot_head_storage_proof(t);
 // 		let state_root = bridge_hub_polkadot_head_storage_proof.0;
 // 		bp_test_utils::test_header_with_root(POLKADOT_HEADER_NUMBER, state_root)
 // 	}
 //
-// 	fn polkadot_grandpa_justification(t: HeaderType) ->
-// GrandpaJustification<bp_polkadot_core::Header> { 		bp_test_utils::make_default_justification(&
-// polkadot_header(t)) 	}
+// 	fn polkadot_grandpa_justification(t: HeaderType) -> GrandpaJustification<bp_polkadot::Header> {
+// 		bp_test_utils::make_default_justification(&polkadot_header(t))
+// 	}
 //
 // 	fn bridge_hub_polkadot_header(t: HeaderType) -> bp_bridge_hub_polkadot::Header {
 // 		bp_test_utils::test_header_with_root(
@@ -501,9 +501,9 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 //
 // 	fn bridge_hub_polkadot_head_storage_proof(
 // 		t: HeaderType,
-// 	) -> (bp_polkadot_core::Hash, ParaHeadsProof) {
+// 	) -> (bp_polkadot::Hash, ParaHeadsProof) {
 // 		let (state_root, proof, _) =
-// 			bp_test_utils::prepare_parachain_heads_proof::<bp_polkadot_core::Header>(vec![(
+// 			bp_test_utils::prepare_parachain_heads_proof::<bp_polkadot::Header>(vec![(
 // 				BridgeHubPolkadotOrRococo::PARACHAIN_ID,
 // 				ParaHead(bridge_hub_polkadot_header(t).encode()),
 // 			)]);
@@ -899,7 +899,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 			with_bridged_chain_messages_instance: WithBridgeHubPolkadotMessagesInstance,
 // 			bridge: WithBridgeHubPolkadotMessageBridge,
 // 			this_chain: bp_polkadot_bulletin::PolkadotBulletin,
-// 			bridged_chain: bp_polkadot_core::Polkadot,
+// 			bridged_chain: bp_polkadot::Polkadot,
 // 		);
 //
 // 		assert_complete_bridge_constants::<
@@ -923,7 +923,7 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 				with_this_chain_messages_pallet_name:
 // 					bp_polkadot_bulletin::WITH_POLKADOT_BULLETIN_MESSAGES_PALLET_NAME,
 // 				with_bridged_chain_grandpa_pallet_name:
-// 					bp_polkadot_core::WITH_POLKADOT_GRANDPA_PALLET_NAME,
+// 					bp_polkadot::WITH_POLKADOT_GRANDPA_PALLET_NAME,
 // 				with_bridged_chain_messages_pallet_name:
 // 					bp_bridge_hub_polkadot::WITH_BRIDGE_HUB_POLKADOT_MESSAGES_PALLET_NAME,
 // 			},
