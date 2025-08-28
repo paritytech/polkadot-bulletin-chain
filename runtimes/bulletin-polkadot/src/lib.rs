@@ -8,6 +8,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{derive_impl, traits::ValidatorRegistration};
 use frame_system::EnsureRoot;
@@ -505,6 +506,16 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				..Default::default()
 			}),
 
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner.into())
+					.map(|()| ValidTransaction {
+						priority: BridgeTxPriority::get(),
+						longevity: BridgeTxLongevity::get(),
+						..Default::default()
+					}),
+
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}?;
@@ -551,6 +562,12 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner.into())
+					.map(|()| Some(who.clone())),
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
