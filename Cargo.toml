@@ -132,3 +132,8 @@ members = [
 # Polkadot runtime requires unwinding.
 opt-level = 3
 panic = "unwind"
+
+[profile.production]
+inherits = "release"
+lto = true
+codegen-units = 1

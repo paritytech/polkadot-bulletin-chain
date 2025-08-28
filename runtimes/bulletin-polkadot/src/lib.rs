@@ -8,6 +8,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{derive_impl, traits::ValidatorRegistration};
 use frame_system::EnsureRoot;
@@ -339,13 +340,6 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = ();
 }
 
-// TODO: remove sudo before go live
-impl pallet_sudo::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
-}
-
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_transaction_storage::weights::SubstrateWeight<Runtime>;
@@ -406,9 +400,6 @@ construct_runtime!(
 		BridgePolkadotGrandpa: pallet_bridge_grandpa = 51,
 		BridgePolkadotParachains: pallet_bridge_parachains = 52,
 		BridgePolkadotMessages: pallet_bridge_messages = 53,
-
-		// sudo
-		Sudo: pallet_sudo = 255,
 	}
 );
 
@@ -418,18 +409,6 @@ pub type Address = sp_runtime::MultiAddress<AccountId, ()>;
 pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 /// Block type as expected by this runtime.
 pub type Block = generic::Block<Header, UncheckedExtrinsic>;
-
-fn validate_sudo(_who: &AccountId) -> TransactionValidity {
-	// TODO: make Sudo::key() accessible and uncomment this.
-	// // Only allow sudo transactions signed by the sudo account. The sudo pallet obviously checks
-	// // this, but not until transaction execution.
-	// if Sudo::key().map_or(false, |k| who == &k) {
-	// 	Ok(ValidTransaction { priority: SudoPriority::get(), ..Default::default() })
-	// } else {
-	// 	Err(InvalidTransaction::BadSigner.into())
-	// }
-	Ok(ValidTransaction { priority: SudoPriority::get(), ..Default::default() })
-}
 
 fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	// Only allow if account has keys to purge
@@ -493,9 +472,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			RuntimeCall::TransactionStorage(inner_call) =>
 				TransactionStorage::validate_signed(who, inner_call),
 
-			// Sudo call
-			RuntimeCall::Sudo(_) => validate_sudo(who),
-
 			// Session key management
 			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
 				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
@@ -530,6 +506,16 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				..Default::default()
 			}),
 
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner.into())
+					.map(|()| ValidTransaction {
+						priority: BridgeTxPriority::get(),
+						longevity: BridgeTxLongevity::get(),
+						..Default::default()
+					}),
+
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}?;
@@ -550,9 +536,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			// Transaction storage validation
 			RuntimeCall::TransactionStorage(inner_call) =>
 				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
-
-			// Sudo validation
-			RuntimeCall::Sudo(_) => validate_sudo(who).map(|_| None),
 
 			// Session key management
 			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
@@ -579,6 +562,12 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner.into())
+					.map(|()| Some(who.clone())),
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
@@ -646,7 +635,6 @@ mod benches {
 		[frame_benchmarking, BaselineBench::<Runtime>]
 		[frame_system, SystemBench::<Runtime>]
 		[pallet_timestamp, Timestamp]
-		[pallet_sudo, Sudo]
 		[pallet_transaction_storage, TransactionStorage]
 		[pallet_validator_set, ValidatorSet]
 		[pallet_relayer_set, RelayerSet]
