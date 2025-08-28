@@ -5,7 +5,6 @@
 [relaychain]
 chain = "local"
 default_command = "{{POLKADOT_BULLETIN_BINARY_PATH}}"
-chain_spec_command = "{{ENV_PATH}}/generate_pb_spec.sh"
 
 	[[relaychain.nodes]]
 	name = "alice"
