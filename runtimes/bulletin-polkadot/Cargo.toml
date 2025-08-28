@@ -25,7 +25,6 @@ pallet-babe = { workspace = true }
 pallet-grandpa = { workspace = true }
 pallet-offences = { workspace = true }
 pallet-session = { workspace = true }
-pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
@@ -117,7 +116,6 @@ std = [
 	"pallet-grandpa/std",
 	"pallet-offences/std",
 	"pallet-session/std",
-	"pallet-sudo/std",
 	"pallet-timestamp/std",
 	"sp-api/std",
 	"sp-block-builder/std",
@@ -179,7 +177,6 @@ runtime-benchmarks = [
 	"pallet-babe/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
 	"pallet-offences/runtime-benchmarks",
-	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 	"sp-storage",
@@ -219,7 +216,6 @@ try-runtime = [
 	"pallet-grandpa/try-runtime",
 	"pallet-offences/try-runtime",
 	"pallet-session/try-runtime",
-	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 
 	"pallet-bridge-grandpa/try-runtime",

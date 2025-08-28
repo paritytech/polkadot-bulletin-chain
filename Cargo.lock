@@ -1700,7 +1700,6 @@ dependencies = [
  "pallet-relayer-set",
  "pallet-session",
  "pallet-staking",
- "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
