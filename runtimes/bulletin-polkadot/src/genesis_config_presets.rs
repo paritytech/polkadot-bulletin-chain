@@ -4,8 +4,8 @@ use crate::{
 };
 
 use crate::{
-	bridge_config::XCM_LANE, BridgeRococoGrandpaConfig, BridgeRococoMessagesConfig,
-	BridgeRococoParachainsConfig,
+	bridge_config::XCM_LANE, BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig,
+	BridgePolkadotParachainsConfig,
 };
 
 use scale_info::prelude::format;
@@ -79,15 +79,15 @@ fn testnet_genesis(
 			// would want to use separate keys for the relayers.
 			initial_relayers: initial_authorities.into_iter().map(|x| x.0).collect::<Vec<_>>(),
 		},
-		bridge_rococo_grandpa: BridgeRococoGrandpaConfig {
+		bridge_polkadot_grandpa: BridgePolkadotGrandpaConfig {
 			owner: bridges_pallet_owner.clone(),
 			..Default::default()
 		},
-		bridge_rococo_parachains: BridgeRococoParachainsConfig {
+		bridge_polkadot_parachains: BridgePolkadotParachainsConfig {
 			owner: bridges_pallet_owner.clone(),
 			..Default::default()
 		},
-		bridge_rococo_messages: BridgeRococoMessagesConfig {
+		bridge_polkadot_messages: BridgePolkadotMessagesConfig {
 			owner: bridges_pallet_owner,
 			opened_lanes: vec![XCM_LANE],
 			..Default::default()

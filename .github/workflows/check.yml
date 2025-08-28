@@ -70,13 +70,9 @@ jobs:
           cache-on-failure: true
           cache-all-crates: true
 
-      - name: Cargo check (Rococo) (benchmarking)
+      - name: Cargo check benchmarking
         run: |
-          cargo check --workspace --features=rococo,runtime-benchmarks
-
-      #- name: Cargo check (Polkadot) (benchmarking)
-      #  run: |
-      #    cargo check --workspace --features=polkadot,runtime-benchmarks
+          cargo check --workspace --features=runtime-benchmarks
 
   test:
     name: Test
@@ -103,10 +99,10 @@ jobs:
 
       - name: Run (Rococo) runtime tests
         run: |
-          cargo test -p polkadot-bulletin-chain-runtime --features=rococo
-          cargo test -p polkadot-bulletin-chain-runtime --features=rococo,runtime-benchmarks
+          cargo test -p polkadot-bulletin-chain-runtime
+          cargo test -p polkadot-bulletin-chain-runtime --features=runtime-benchmarks
 
-      #- name: Run (Polkadot) runtime tests
-      #  run: |
-      #    cargo test -p polkadot-bulletin-chain-runtime --features=polkadot
-      #    cargo test -p polkadot-bulletin-chain-runtime --features=polkadot,runtime-benchmarks
+      - name: Run (Polkadot) runtime tests
+        run: |
+          cargo test -p bulletin-polkadot-runtime
+          cargo test -p bulletin-polkadot-runtime --features=runtime-benchmarks

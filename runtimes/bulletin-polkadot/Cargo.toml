@@ -1,7 +1,7 @@
 [package]
-name = "polkadot-bulletin-chain-runtime"
-version = "0.1.0-dev"
-description = "Runtime for the Rococo Bulletin Chain"
+name = "bulletin-polkadot-runtime"
+version = "1.0.0"
+description = "Polkadot Bulletin solochain"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true
 license = "MIT-0"
@@ -58,14 +58,12 @@ pallet-validator-set = { workspace = true }
 pallets-common = { workspace = true }
 
 # Bridge dependencies
-bp-bridge-hub-rococo = { workspace = true }
 bp-header-chain = { workspace = true }
 bp-messages = { workspace = true }
 bp-parachains = { workspace = true }
 
 bp-polkadot-bulletin = { workspace = true }
 bp-polkadot-core = { workspace = true }
-bp-rococo = { workspace = true }
 bp-runtime = { workspace = true }
 bridge-runtime-common = { workspace = true }
 pallet-bridge-grandpa = { workspace = true }
@@ -148,13 +146,11 @@ std = [
 	"pallet-validator-set/std",
 	"pallets-common/std",
 
-	"bp-bridge-hub-rococo/std",
 	"bp-header-chain/std",
 	"bp-messages/std",
 	"bp-parachains/std",
 	"bp-polkadot-bulletin/std",
 	"bp-polkadot-core/std",
-	"bp-rococo/std",
 	"bp-runtime/std",
 	"bridge-runtime-common/std",
 	"pallet-bridge-grandpa/std",

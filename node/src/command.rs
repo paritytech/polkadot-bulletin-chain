@@ -46,8 +46,14 @@ impl SubstrateCli for Cli {
 
 	fn load_spec(&self, id: &str) -> Result<Box<dyn sc_service::ChainSpec>, String> {
 		Ok(match id {
-			"dev" => Box::new(chain_spec::development_config()?),
-			"" | "local" => Box::new(chain_spec::local_testnet_config()?),
+			"dev" | "rococo-dev" => Box::new(chain_spec::rococo_development_config()?),
+			"local" | "rococo-local" => Box::new(chain_spec::rococo_local_testnet_config()?),
+			"polkadot-dev" => Box::new(chain_spec::polkadot_development_config()?),
+			"polkadot-local" => Box::new(chain_spec::polkadot_local_testnet_config()?),
+			"" => return Err(
+				"No chain_id or path specified! Either provide a path to the chain spec or specify chain_id: Rococo (dev, local, rococo-dev, rococo-local) or Polkadot (polkadot-dev, polkadot-local)"
+					.into(),
+			),
 			path =>
 				Box::new(chain_spec::ChainSpec::from_json_file(std::path::PathBuf::from(path))?),
 		})
