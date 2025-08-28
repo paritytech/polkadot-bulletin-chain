@@ -201,7 +201,7 @@ parameter_types! {
 pub type WithPolkadotBridgeGrandpaInstance = ();
 impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = crate::weights::bridge_polkadot_grandpa::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bridge_grandpa::WeightInfo<Runtime>;
 
 	type BridgedChain = bp_polkadot::Polkadot;
 	type MaxFreeHeadersPerBlock = MaxFreePolkadotHeadersPerBlock;
