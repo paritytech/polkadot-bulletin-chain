@@ -289,7 +289,7 @@ impl pallet_babe::Config for Runtime {
 	type ExpectedBlockTime = ConstU64<MILLISECS_PER_BLOCK>;
 	type EpochChangeTrigger = pallet_babe::ExternalTrigger;
 	type DisabledValidators = Session;
-	// TODO: weights
+
 	type WeightInfo = ();
 	type MaxAuthorities = MaxAuthorities;
 	type MaxNominators = ConstU32<0>;
@@ -305,7 +305,7 @@ impl pallet_babe::Config for Runtime {
 
 impl pallet_grandpa::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	// TODO: weights
+
 	type WeightInfo = ();
 	type MaxAuthorities = MaxAuthorities;
 	type MaxNominators = ConstU32<0>;
@@ -344,6 +344,7 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_transaction_storage::weights::SubstrateWeight<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
+	// TODO: add here comment
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
@@ -631,8 +632,10 @@ pub type Executive = frame_executive::Executive<
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
+	use super::*;
+
 	frame_benchmarking::define_benchmarks!(
-		[frame_benchmarking, BaselineBench::<Runtime>]
+		[frame_benchmarking::baseline, Baseline::<Runtime>]
 		[frame_system, SystemBench::<Runtime>]
 		[pallet_timestamp, Timestamp]
 		[pallet_transaction_storage, TransactionStorage]
@@ -643,7 +646,23 @@ mod benches {
 		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
 		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>]
 	);
+
+	pub use frame_benchmarking::{
+		baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList,
+	};
+	pub use frame_system_benchmarking::Pallet as SystemBench;
+
+	pub use frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys};
+	pub use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
+	pub use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
+	pub use sp_storage::TrackedStorageKey;
+
+	impl frame_system_benchmarking::Config for Runtime {}
+	impl frame_benchmarking::baseline::Config for Runtime {}
 }
+
+#[cfg(feature = "runtime-benchmarks")]
+use benches::*;
 
 impl_runtime_apis! {
 	impl sp_api::Core<Block> for Runtime {
@@ -883,19 +902,10 @@ impl_runtime_apis! {
 			Vec<frame_benchmarking::BenchmarkList>,
 			Vec<frame_support::traits::StorageInfo>,
 		) {
-			use frame_benchmarking::{baseline, Benchmarking, BenchmarkList};
-			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
-			use baseline::Pallet as BaselineBench;
-
-			use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
-			use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
-
 			let mut list = Vec::<BenchmarkList>::new();
 			list_benchmarks!(list, extra);
 
 			let storage_info = AllPalletsWithSystem::storage_info();
-
 			(list, storage_info)
 		}
 
@@ -903,21 +913,7 @@ impl_runtime_apis! {
 		fn dispatch_benchmark(
 			config: frame_benchmarking::BenchmarkConfig
 		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
-			use sp_storage::TrackedStorageKey;
-			use frame_benchmarking::{baseline, Benchmarking, BenchmarkBatch};
-
-			use frame_system_benchmarking::Pallet as SystemBench;
-			use baseline::Pallet as BaselineBench;
-
-			use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
-			use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
-
-			impl frame_system_benchmarking::Config for Runtime {}
-			impl baseline::Config for Runtime {}
-
-			use frame_support::traits::WhitelistedStorageKeys;
 			let whitelist: Vec<TrackedStorageKey> = AllPalletsWithSystem::whitelisted_storage_keys();
-
 			let mut batches = Vec::<BenchmarkBatch>::new();
 			let params = (&config, &whitelist);
 			add_benchmarks!(params, batches);

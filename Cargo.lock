@@ -11212,7 +11212,7 @@ dependencies = [
  "sp-statement-store 14.0.0",
  "sp-storage 21.0.0",
  "sp-trie 33.0.0",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
 ]
 
 [[package]]
@@ -11315,7 +11315,7 @@ dependencies = [
  "sp-core 32.0.0",
  "sp-runtime 35.0.0",
  "sp-state-machine 0.39.0",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
  "thiserror 1.0.69",
 ]
 
@@ -11794,7 +11794,7 @@ dependencies = [
  "sp-blockchain 32.0.0",
  "sp-core 32.0.0",
  "sp-runtime 35.0.0",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
@@ -11980,7 +11980,7 @@ dependencies = [
  "sp-consensus-grandpa 17.0.0",
  "sp-core 32.0.0",
  "sp-runtime 35.0.0",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
@@ -12022,7 +12022,7 @@ dependencies = [
  "sc-utils 17.0.0",
  "sp-consensus 0.36.0",
  "sp-runtime 35.0.0",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
 ]
 
 [[package]]
@@ -12232,7 +12232,7 @@ dependencies = [
  "jsonrpsee 0.22.5",
  "log",
  "serde_json",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
  "tokio",
  "tower",
  "tower-http 0.4.4",
@@ -12439,7 +12439,7 @@ dependencies = [
  "sp-trie 33.0.0",
  "sp-version 33.0.0",
  "static_init",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -12688,7 +12688,7 @@ dependencies = [
  "sp-runtime 35.0.0",
  "sp-tracing 17.1.0",
  "sp-transaction-pool 30.0.0",
- "substrate-prometheus-endpoint 0.17.2",
+ "substrate-prometheus-endpoint 0.17.7",
  "thiserror 1.0.69",
 ]
 
@@ -15301,9 +15301,9 @@ dependencies = [
 
 [[package]]
 name = "substrate-prometheus-endpoint"
-version = "0.17.2"
+version = "0.17.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe1fee79cb0bf260bb84b4fa885fae887646894a971abddae3d9ac4921531540"
+checksum = "d23e4bc8e910a312820d589047ab683928b761242dbe31dee081fbdb37cbe0be"
 dependencies = [
  "http-body-util",
  "hyper 1.5.2",
