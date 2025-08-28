@@ -22,4 +22,4 @@
 extern crate alloc;
 
 // TODO: move here the stuff from
-// bp-polkadot-bulletin = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
+// bp-polkadot-bulletin = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52", default-features = false }
