@@ -25,7 +25,7 @@ pub fn rococo_local_testnet_config() -> Result<ChainSpec, String> {
 			.ok_or_else(|| "Development wasm not available".to_string())?,
 		None,
 	)
-	.with_name("Local Testnet")
+	.with_name("Rococo Bulletin Local Testnet")
 	.with_id("local_testnet")
 	.with_chain_type(ChainType::Local)
 	.with_protocol_id(PROTOCOL_ID)
