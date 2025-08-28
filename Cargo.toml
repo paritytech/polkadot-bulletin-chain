@@ -21,12 +21,12 @@ tracing = { version = "0.1.41", default-features = false }
 try-runtime-cli = { version = "0.42" }
 
 # Local workspace members
-bulletin-polkadot-runtime = { version = "1.0.0", path = "runtimes/bulletin-polkadot" }
-pallet-relayer-set = { version = "1.0.0", path = "pallets/relayer-set", default-features = false }
-pallet-transaction-storage = { version = "4.0.0-dev", path = "pallets/transaction-storage", default-features = false }
-pallet-validator-set = { version = "1.0.0", path = "pallets/validator-set", default-features = false }
-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
-polkadot-bulletin-chain-runtime = { version = "0.1.0-dev", path = "runtime" }
+bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
+pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
+pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
+pallet-validator-set = { path = "pallets/validator-set", default-features = false }
+pallets-common = { path = "pallets/common", default-features = false }
+polkadot-bulletin-chain-runtime = { path = "runtime" }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "db5e645422ccf952018a3c466a33fef477858602", default-features = false }
