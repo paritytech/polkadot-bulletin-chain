@@ -256,7 +256,7 @@ impl frame_system::Config for Runtime {
 
 impl pallet_validator_set::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_validator_set::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = weights::pallet_validator_set::WeightInfo<Runtime>;
 	type AddRemoveOrigin = EnsureRoot<AccountId>;
 	type MaxAuthorities = MaxAuthorities;
 	type SetKeysCooldownBlocks = SetKeysCooldownBlocks;
@@ -336,13 +336,12 @@ impl pallet_timestamp::Config for Runtime {
 	type Moment = u64;
 	type OnTimestampSet = Babe;
 	type MinimumPeriod = ConstU64<{ SLOT_DURATION / 2 }>;
-	// TODO: weights
-	type WeightInfo = ();
+	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
 }
 
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_transaction_storage::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
 	// TODO: add here comment
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
@@ -357,7 +356,7 @@ impl pallet_transaction_storage::Config for Runtime {
 
 impl pallet_relayer_set::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_relayer_set::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = weights::pallet_relayer_set::WeightInfo<Runtime>;
 	type AddRemoveOrigin = EnsureRoot<AccountId>;
 	type BridgeTxFailCooldownBlocks = BridgeTxFailCooldownBlocks;
 }
@@ -647,9 +646,7 @@ mod benches {
 		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>]
 	);
 
-	pub use frame_benchmarking::{
-		baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList,
-	};
+	pub use frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList};
 	pub use frame_system_benchmarking::Pallet as SystemBench;
 
 	pub use frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys};
