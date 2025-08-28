@@ -62,17 +62,7 @@ use pallet_transaction_payment::RuntimeDispatchInfo;
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
 
-// Ensure mutually exclusive network features
-#[cfg(all(feature = "rococo", feature = "polkadot"))]
-compile_error!("Features 'rococo' and 'polkadot' cannot be enabled at the same time.");
-
-#[cfg(feature = "rococo")]
 mod bridge_config;
-#[cfg(feature = "polkadot")]
-mod polkadot_bridge_config;
-#[cfg(feature = "polkadot")]
-use polkadot_bridge_config::{self as bridge_config, bp_people_polkadot, bp_polkadot};
-
 mod genesis_config_presets;
 mod weights;
 mod xcm_config;
@@ -390,7 +380,6 @@ where
 	}
 }
 
-#[cfg(all(feature = "rococo", not(feature = "polkadot")))]
 construct_runtime!(
 	pub struct Runtime {
 		System: frame_system = 0,
@@ -413,35 +402,6 @@ construct_runtime!(
 		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
 		BridgeRococoParachains: pallet_bridge_parachains = 52,
 		BridgeRococoMessages: pallet_bridge_messages = 53,
-
-		// sudo
-		Sudo: pallet_sudo = 255,
-	}
-);
-
-#[cfg(all(feature = "polkadot", not(feature = "rococo")))]
-construct_runtime!(
-	pub struct Runtime {
-		System: frame_system = 0,
-		// Babe must be called before Session
-		Babe: pallet_babe = 1,
-		Timestamp: pallet_timestamp = 2,
-		// Authorship must be before session in order to note author in the correct session.
-		Authorship: pallet_authorship = 10,
-		Offences: pallet_offences = 11,
-		Historical: pallet_session::historical = 12,
-		ValidatorSet: pallet_validator_set = 13,
-		Session: pallet_session = 14,
-		Grandpa: pallet_grandpa = 15,
-
-		// Storage
-		TransactionStorage: pallet_transaction_storage = 40,
-
-		// Bridge
-		RelayerSet: pallet_relayer_set = 50,
-		BridgePolkadotGrandpa: pallet_bridge_grandpa = 51,
-		BridgePolkadotParachains: pallet_bridge_parachains = 52,
-		BridgePolkadotMessages: pallet_bridge_messages = 53,
 
 		// sudo
 		Sudo: pallet_sudo = 255,
@@ -543,7 +503,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
 
 			// Bridge-related calls
-			#[cfg(feature = "rococo")]
 			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
 			}) |
@@ -560,30 +519,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				..
 			}) |
 			RuntimeCall::BridgeRococoMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-
-			#[cfg(feature = "polkadot")]
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			RuntimeCall::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
 				priority: BridgeTxPriority::get(),
@@ -622,7 +557,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				validate_purge_keys(who).map(|_| None),
 
 			// Bridge-related calls
-			#[cfg(feature = "rococo")]
 			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
 			}) |
@@ -639,26 +573,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				..
 			}) |
 			RuntimeCall::BridgeRococoMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
-
-			#[cfg(feature = "polkadot")]
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			RuntimeCall::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
 
@@ -685,7 +599,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 
 // It'll generate signed extensions to invalidate obsolete bridge transactions before
 // they'll be included in the block
-#[cfg(feature = "rococo")]
 generate_bridge_reject_obsolete_headers_and_messages! {
 	RuntimeCall, AccountId,
 	// Grandpa
@@ -694,16 +607,6 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 	BridgeRococoParachains,
 	// Messages
 	BridgeRococoMessages
-}
-#[cfg(feature = "polkadot")]
-generate_bridge_reject_obsolete_headers_and_messages! {
-	RuntimeCall, AccountId,
-	// Grandpa
-	BridgePolkadotGrandpa,
-	// Parachains
-	BridgePolkadotParachains,
-	// Messages
-	BridgePolkadotMessages
 }
 
 /// The SignedExtension to the basic transaction logic.
@@ -735,38 +638,20 @@ pub type Executive = frame_executive::Executive<
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
-	cfg_if::cfg_if! {
-		if #[cfg(feature = "rococo")] {
-			frame_benchmarking::define_benchmarks!(
-				[frame_benchmarking, BaselineBench::<Runtime>]
-				[frame_system, SystemBench::<Runtime>]
-				[pallet_timestamp, Timestamp]
-				[pallet_sudo, Sudo]
-				[pallet_transaction_storage, TransactionStorage]
-				[pallet_validator_set, ValidatorSet]
-				[pallet_relayer_set, RelayerSet]
+	frame_benchmarking::define_benchmarks!(
+		[frame_benchmarking, BaselineBench::<Runtime>]
+		[frame_system, SystemBench::<Runtime>]
+		[pallet_timestamp, Timestamp]
+		[pallet_sudo, Sudo]
+		[pallet_transaction_storage, TransactionStorage]
+		[pallet_validator_set, ValidatorSet]
+		[pallet_relayer_set, RelayerSet]
 
-				[pallet_bridge_grandpa, BridgeRococoGrandpa]
-				// TODO: finish benchmarking
-				// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithRococoBridgeParachainsInstance>]
-				// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubRococoMessagesInstance>]
-			);
-		} else if #[cfg(feature = "polkadot")] {
-			frame_benchmarking::define_benchmarks!(
-				[frame_benchmarking, BaselineBench::<Runtime>]
-				[frame_system, SystemBench::<Runtime>]
-				[pallet_timestamp, Timestamp]
-				[pallet_sudo, Sudo]
-				[pallet_transaction_storage, TransactionStorage]
-				[pallet_validator_set, ValidatorSet]
-				[pallet_relayer_set, RelayerSet]
-
-				[pallet_bridge_grandpa, BridgePolkadotGrandpa]
-				// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-				// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>]
-			);
-		}
-	}
+		[pallet_bridge_grandpa, BridgeRococoGrandpa]
+		// TODO: finish benchmarking
+		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithRococoBridgeParachainsInstance>]
+		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubRococoMessagesInstance>]
+	);
 }
 
 impl_runtime_apis! {
@@ -932,7 +817,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	#[cfg(feature = "rococo")]
 	impl bp_rococo::RococoFinalityApi<Block> for Runtime {
 		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_rococo::Hash, bp_rococo::BlockNumber>> {
 			BridgeRococoGrandpa::best_finalized()
@@ -950,7 +834,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	#[cfg(feature = "rococo")]
 	impl bp_bridge_hub_rococo::BridgeHubRococoFinalityApi<Block> for Runtime {
 		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_bridge_hub_rococo::Hash, bp_bridge_hub_rococo::BlockNumber>> {
 			BridgeRococoParachains::best_parachain_head_id::<
@@ -964,7 +847,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	#[cfg(feature = "rococo")]
 	impl bp_bridge_hub_rococo::FromBridgeHubRococoInboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
@@ -977,7 +859,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	#[cfg(feature = "rococo")]
 	impl bp_bridge_hub_rococo::ToBridgeHubRococoOutboundLaneApi<Block> for Runtime {
 		fn message_details(
 			lane: bp_messages::LegacyLaneId,
@@ -987,65 +868,6 @@ impl_runtime_apis! {
 			bridge_runtime_common::messages_api::outbound_message_details::<
 				Runtime,
 				bridge_config::WithBridgeHubRococoMessagesInstance,
-			>(lane, begin, end)
-		}
-	}
-
-	#[cfg(feature = "polkadot")]
-	impl bp_polkadot::PolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_polkadot_core::Hash, bp_polkadot_core::BlockNumber>> {
-			BridgePolkadotGrandpa::best_finalized()
-		}
-
-		fn synced_headers_grandpa_info(
-		) -> Vec<bp_header_chain::StoredHeaderGrandpaInfo<bp_polkadot_core::Header>> {
-			BridgePolkadotGrandpa::synced_headers_grandpa_info()
-		}
-
-		fn free_headers_interval() -> Option<u32> {
-			<Runtime as pallet_bridge_grandpa::Config<
-				bridge_config::WithPolkadotBridgeGrandpaInstance
-			>>::FreeHeadersInterval::get()
-		}
-	}
-
-	#[cfg(feature = "polkadot")]
-	impl bp_people_polkadot::PeoplePolkadotFinalityApi<Block> for Runtime {
-		fn best_finalized() -> Option<bp_runtime::HeaderId<bp_people_polkadot::Hash, bp_people_polkadot::BlockNumber>> {
-			BridgePolkadotParachains::best_parachain_head_id::<
-				bp_people_polkadot::PeoplePolkadot
-			>().unwrap_or(None)
-		}
-
-		fn free_headers_interval() -> Option<u32> {
-			// "free interval" is not currently used for parachains
-			None
-		}
-	}
-
-	#[cfg(feature = "polkadot")]
-	impl bp_people_polkadot::FromPeoplePolkadotInboundLaneApi<Block> for Runtime {
-		fn message_details(
-			lane: bp_messages::LegacyLaneId,
-			messages: Vec<(bp_messages::MessagePayload, bp_messages::OutboundMessageDetails)>,
-		) -> Vec<bp_messages::InboundMessageDetails> {
-			bridge_runtime_common::messages_api::inbound_message_details::<
-				Runtime,
-				bridge_config::WithPeoplePolkadotMessagesInstance,
-			>(lane, messages)
-		}
-	}
-
-	#[cfg(feature = "polkadot")]
-	impl bp_people_polkadot::ToPeoplePolkadotOutboundLaneApi<Block> for Runtime {
-		fn message_details(
-			lane: bp_messages::LegacyLaneId,
-			begin: bp_messages::MessageNonce,
-			end: bp_messages::MessageNonce,
-		) -> Vec<bp_messages::OutboundMessageDetails> {
-			bridge_runtime_common::messages_api::outbound_message_details::<
-				Runtime,
-				bridge_config::WithPeoplePolkadotMessagesInstance,
 			>(lane, begin, end)
 		}
 	}

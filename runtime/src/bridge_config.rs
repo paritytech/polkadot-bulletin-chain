@@ -1,5 +1,3 @@
-#![cfg(feature = "rococo")]
-
 //! With Rococo Bridge Hub bridge configuration.
 
 use crate::{
@@ -486,9 +484,9 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		bp_test_utils::test_header_with_root(POLKADOT_HEADER_NUMBER, state_root)
 // 	}
 //
-// 	fn polkadot_grandpa_justification(t: HeaderType) -> GrandpaJustification<bp_polkadot_core::Header> {
-// 		bp_test_utils::make_default_justification(&polkadot_header(t))
-// 	}
+// 	fn polkadot_grandpa_justification(t: HeaderType) ->
+// GrandpaJustification<bp_polkadot_core::Header> { 		bp_test_utils::make_default_justification(&
+// polkadot_header(t)) 	}
 //
 // 	fn bridge_hub_polkadot_header(t: HeaderType) -> bp_bridge_hub_polkadot::Header {
 // 		bp_test_utils::test_header_with_root(

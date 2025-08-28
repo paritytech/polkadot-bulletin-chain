@@ -3,12 +3,6 @@ use crate::{
 	SessionConfig, Signature, SudoConfig, ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
 };
 
-#[cfg(feature = "polkadot")]
-use crate::{
-	bridge_config::XCM_LANE, BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig,
-	BridgePolkadotParachainsConfig,
-};
-#[cfg(feature = "rococo")]
 use crate::{
 	bridge_config::XCM_LANE, BridgeRococoGrandpaConfig, BridgeRococoMessagesConfig,
 	BridgeRococoParachainsConfig,
@@ -85,34 +79,15 @@ fn testnet_genesis(
 			// would want to use separate keys for the relayers.
 			initial_relayers: initial_authorities.into_iter().map(|x| x.0).collect::<Vec<_>>(),
 		},
-		#[cfg(feature = "rococo")]
 		bridge_rococo_grandpa: BridgeRococoGrandpaConfig {
 			owner: bridges_pallet_owner.clone(),
 			..Default::default()
 		},
-		#[cfg(feature = "rococo")]
 		bridge_rococo_parachains: BridgeRococoParachainsConfig {
 			owner: bridges_pallet_owner.clone(),
 			..Default::default()
 		},
-		#[cfg(feature = "rococo")]
 		bridge_rococo_messages: BridgeRococoMessagesConfig {
-			owner: bridges_pallet_owner,
-			opened_lanes: vec![XCM_LANE],
-			..Default::default()
-		},
-		#[cfg(feature = "polkadot")]
-		bridge_polkadot_grandpa: BridgePolkadotGrandpaConfig {
-			owner: bridges_pallet_owner.clone(),
-			..Default::default()
-		},
-		#[cfg(feature = "polkadot")]
-		bridge_polkadot_parachains: BridgePolkadotParachainsConfig {
-			owner: bridges_pallet_owner.clone(),
-			..Default::default()
-		},
-		#[cfg(feature = "polkadot")]
-		bridge_polkadot_messages: BridgePolkadotMessagesConfig {
 			owner: bridges_pallet_owner,
 			opened_lanes: vec![XCM_LANE],
 			..Default::default()
