@@ -643,14 +643,13 @@ mod benches {
 
 		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
 		[pallet_bridge_parachains, PolkadotParachains]
-		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>]
+		[pallet_bridge_messages, PolkadotMessages]
 	);
 
 	pub use frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList};
 	pub use frame_system_benchmarking::Pallet as SystemBench;
 
 	pub use frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys};
-	pub use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
 	pub use sp_storage::TrackedStorageKey;
 
 	impl frame_system_benchmarking::Config for Runtime {}
@@ -684,9 +683,68 @@ mod benches {
 		}
 	}
 
+	use bridge_runtime_common::messages_benchmarking::{
+		generate_xcm_builder_bridge_message_sample, prepare_message_delivery_proof_from_parachain,
+		prepare_message_proof_from_parachain,
+	};
+	use pallet_bridge_messages::{
+		benchmarking::{
+			Config as BridgeMessagesConfig, MessageDeliveryProofParams, MessageProofParams,
+		},
+		LaneIdOf,
+	};
+
+	impl BridgeMessagesConfig<bridge_config::WithPeoplePolkadotMessagesInstance> for Runtime {
+		fn is_relayer_rewarded(_relayer: &Self::AccountId) -> bool {
+			// TODO:
+			// no rewards, so we don't care
+			true
+		}
+
+		fn prepare_message_proof(
+			params: MessageProofParams<
+				LaneIdOf<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>,
+			>,
+		) -> (bridge_config::benchmarking::FromPeoplePolkadotMessagesProof, Weight) {
+			prepare_message_proof_from_parachain::<
+				Runtime,
+				bridge_config::WithPolkadotBridgeGrandpaInstance,
+				bridge_config::WithPeoplePolkadotMessagesInstance,
+			>(
+				params,
+				generate_xcm_builder_bridge_message_sample(
+					bridge_config::PeoplePolkadotLocation::get().interior().clone(),
+				),
+			)
+		}
+
+		fn prepare_message_delivery_proof(
+			params: MessageDeliveryProofParams<
+				AccountId,
+				LaneIdOf<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>,
+			>,
+		) -> bridge_config::benchmarking::ToPeoplePolkadotMessagesDeliveryProof {
+			prepare_message_delivery_proof_from_parachain::<
+				Runtime,
+				bridge_config::WithPolkadotBridgeGrandpaInstance,
+				bridge_config::WithPeoplePolkadotMessagesInstance,
+			>(params)
+		}
+
+		fn is_message_successfully_dispatched(_nonce: bp_messages::MessageNonce) -> bool {
+			// TODO:
+			// currently we have no means to detect that
+			true
+		}
+	}
+
 	pub type PolkadotParachains = pallet_bridge_parachains::benchmarking::Pallet<
 		Runtime,
 		bridge_config::WithPolkadotBridgeParachainsInstance,
+	>;
+	pub type PolkadotMessages = pallet_bridge_messages::benchmarking::Pallet<
+		Runtime,
+		bridge_config::WithPeoplePolkadotMessagesInstance,
 	>;
 }
 

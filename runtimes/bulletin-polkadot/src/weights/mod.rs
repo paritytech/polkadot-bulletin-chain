@@ -6,9 +6,9 @@ use ::pallet_bridge_parachains::WeightInfoExt as ParachainsWeightInfoExt;
 use ::pallet_bridge_relayers::WeightInfo as _;
 use frame_support::weights::Weight;
 
-pub mod bridge_polkadot_messages;
 pub mod bridge_polkadot_relayers;
 pub mod pallet_bridge_grandpa;
+pub mod pallet_bridge_messages;
 pub mod pallet_bridge_parachains;
 pub mod pallet_relayer_set;
 pub mod pallet_timestamp;
@@ -39,7 +39,7 @@ impl ParachainsWeightInfoExt for pallet_bridge_parachains::WeightInfo<crate::Run
 	}
 }
 
-impl MessagesWeightInfoExt for bridge_polkadot_messages::WeightInfo<crate::Runtime> {
+impl MessagesWeightInfoExt for pallet_bridge_messages::WeightInfo<crate::Runtime> {
 	fn expected_extra_storage_proof_size() -> u32 {
 		crate::bp_people_polkadot::EXTRA_STORAGE_PROOF_SIZE
 	}
