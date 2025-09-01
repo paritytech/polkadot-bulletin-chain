@@ -27,7 +27,7 @@ use crate::{
 use codec::{Decode, DecodeLimit, Encode};
 use frame_support::{
 	ensure, parameter_types,
-	traits::{Contains, Everything, Nothing, ProcessMessageError},
+	traits::{Contains, Equals, Everything, Nothing, ProcessMessageError},
 	weights::Weight,
 };
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
@@ -36,10 +36,10 @@ use sp_io::hashing::blake2_256;
 use xcm::{latest::prelude::*, VersionedInteriorLocation, VersionedXcm, MAX_XCM_DECODE_DEPTH};
 use xcm_builder::{
 	DispatchBlob, DispatchBlobError, FixedWeightBounds, FrameTransactionalProcessor, LocalExporter,
-	TrailingSetTopicAsId, WithComputedOrigin,
+	LocationAsSuperuser, TrailingSetTopicAsId, WithComputedOrigin,
 };
 use xcm_executor::{
-	traits::{ConvertOrigin, ShouldExecute, WeightTrader, WithOriginFilter},
+	traits::{ShouldExecute, WeightTrader, WithOriginFilter},
 	AssetsInHolding, XcmExecutor,
 };
 
@@ -75,30 +75,6 @@ impl Contains<(Location, Junction)> for UniversalAliases {
 				origin_location,
 				GlobalConsensus(bridged_network),
 			) if origin_location == &PeoplePolkadotLocation::get() && bridged_network == &BridgedNetwork::get())
-	}
-}
-
-/// Kawabunga location converter to local root.
-pub struct KawabungaParachainAsRoot;
-
-impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
-	fn convert_origin(
-		origin: impl Into<Location>,
-		kind: OriginKind,
-	) -> Result<RuntimeOrigin, Location> {
-		let origin = origin.into();
-		log::trace!(
-			target: "xcm::origin_conversion",
-			"KawabungaParachainAsRoot origin: {:?}, kind: {:?}",
-			origin, kind,
-		);
-		match (kind, origin.unpack()) {
-			(
-				OriginKind::Superuser,
-				(1, [GlobalConsensus(bridged_network), Parachain(PEOPLE_POLKADOT_PARACHAIN_ID)]),
-			) if bridged_network == &BridgedNetwork::get() => Ok(RuntimeOrigin::root()),
-			_ => Err(origin),
-		}
 	}
 }
 
@@ -150,14 +126,11 @@ impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 	}
 }
 
-/// The means that we convert an XCM origin `MultiLocation` into the runtime's `Origin` type for
+/// The means that we convert an XCM origin `Location` into the runtime's `Origin` type for
 /// local dispatch. This is a conversion function from an `OriginKind` type along with the
-/// `MultiLocation` value and returns an `Origin` value or an error.
-type LocalOriginConverter = (
-	// Currently we only accept XCM messages from Kawabunga and the origin for such messages
-	// is local root.
-	KawabungaParachainAsRoot,
-);
+/// `Location` value and returns an `Origin` value or an error.
+type XcmOriginToTransactDispatchOrigin =
+	(LocationAsSuperuser<Equals<PeoplePolkadotLocation>, RuntimeOrigin>,);
 
 /// Only bridged destination is supported.
 pub type XcmRouter = LocalExporter<ToBridgeHaulBlobExporter, UniversalLocation>;
@@ -179,7 +152,7 @@ impl xcm_executor::Config for XcmConfig {
 	type RuntimeCall = RuntimeCall;
 	type XcmSender = XcmRouter;
 	type AssetTransactor = ();
-	type OriginConverter = LocalOriginConverter;
+	type OriginConverter = XcmOriginToTransactDispatchOrigin;
 	type IsReserve = ();
 	type IsTeleporter = ();
 	type UniversalLocation = UniversalLocation;
@@ -207,6 +180,7 @@ impl xcm_executor::Config for XcmConfig {
 	type HrmpChannelAcceptedHandler = ();
 	type HrmpChannelClosingHandler = ();
 	type XcmRecorder = ();
+	// TODO: add here some impl?
 	type XcmEventEmitter = ();
 }
 
