@@ -4892,7 +4892,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite 0.2.16",
- "socket2 0.5.10",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -8598,7 +8598,7 @@ checksum = "4e69bf016dc406eff7d53a7d3f7cf1c2e72c82b9088aac1118591e36dd2cd3e9"
 dependencies = [
  "bitcoin_hashes 0.13.0",
  "rand 0.8.5",
- "rand_core 0.6.4",
+ "rand_core 0.5.1",
  "serde",
  "unicode-normalization",
 ]
@@ -8921,6 +8921,7 @@ dependencies = [
  "sc-client-api 28.0.0",
  "sc-consensus 0.33.0",
  "sc-consensus-babe",
+ "sc-consensus-babe-rpc",
  "sc-consensus-grandpa",
  "sc-consensus-grandpa-rpc",
  "sc-executor 0.32.0",
@@ -8934,12 +8935,14 @@ dependencies = [
  "sp-api 26.0.0",
  "sp-block-builder 26.0.0",
  "sp-blockchain 28.0.0",
+ "sp-consensus 0.32.0",
  "sp-consensus-babe 0.32.0",
  "sp-core 28.0.0",
  "sp-genesis-builder 0.8.0",
  "sp-inherents 26.0.0",
  "sp-io 30.0.0",
  "sp-keyring 31.0.0",
+ "sp-keystore 0.34.0",
  "sp-runtime 31.0.1",
  "sp-timestamp 26.0.0",
  "sp-transaction-storage-proof 26.0.0",
@@ -11353,6 +11356,28 @@ dependencies = [
  "sp-runtime 31.0.1",
  "sp-timestamp 26.0.0",
  "substrate-prometheus-endpoint 0.17.0",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sc-consensus-babe-rpc"
+version = "0.34.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=a64eb1fb02d4012948cba024fca2f27d94732e52#a64eb1fb02d4012948cba024fca2f27d94732e52"
+dependencies = [
+ "futures",
+ "jsonrpsee 0.24.7",
+ "sc-consensus-babe",
+ "sc-consensus-epochs",
+ "sc-rpc-api 0.33.0",
+ "serde",
+ "sp-api 26.0.0",
+ "sp-application-crypto 30.0.0",
+ "sp-blockchain 28.0.0",
+ "sp-consensus 0.32.0",
+ "sp-consensus-babe 0.32.0",
+ "sp-core 28.0.0",
+ "sp-keystore 0.34.0",
+ "sp-runtime 31.0.1",
  "thiserror 1.0.69",
 ]
 
