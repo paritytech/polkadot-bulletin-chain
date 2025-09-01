@@ -157,6 +157,11 @@ parameter_types! {
 		1,
 		[GlobalConsensus(PolkadotGlobalConsensusNetwork::get())]
 	);
+	/// Location of the PeoplePolkadot parachain, relative to this runtime.
+	pub PeoplePolkadotLocation: Location = Location::new(1, [
+		GlobalConsensus(BridgedNetwork::get()),
+		Parachain(bp_people_polkadot::PEOPLE_POLKADOT_PARACHAIN_ID),
+	]);
 
 	/// A number of Polkadot mandatory headers that are accepted for free at every
 	/// **this chain** block.
@@ -213,7 +218,7 @@ impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtim
 pub type WithPolkadotBridgeParachainsInstance = ();
 impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = crate::weights::bridge_polkadot_parachains::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bridge_parachains::WeightInfo<Runtime>;
 
 	type BridgesGrandpaPalletInstance = WithPolkadotBridgeGrandpaInstance;
 	type ParasPalletName = AtPolkadotParasPalletName;
@@ -430,7 +435,7 @@ where
 pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 	XcmBlobHauler<Runtime, WithPeoplePolkadotMessagesInstance>,
 	PolkadotGlobalConsensusNetworkLocation,
-	AlwaysV4,
+	AlwaysV5,
 	(),
 >;
 
@@ -492,32 +497,6 @@ pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 // 		fn is_message_successfully_dispatched(_nonce: bp_messages::MessageNonce) -> bool {
 // 			// currently we have no means to detect that
 // 			true
-// 		}
-// 	}
-//
-// 	use bridge_runtime_common::parachains_benchmarking::prepare_parachain_heads_proof;
-// 	use pallet_bridge_parachains::benchmarking::Config as BridgeParachainsConfig;
-// 	impl BridgeParachainsConfig<WithPolkadotBridgeParachainsInstance> for Runtime {
-// 		fn parachains() -> Vec<bp_polkadot::parachains::ParaId> {
-// 			use bp_runtime::Parachain;
-// 			vec![bp_polkadot::parachains::ParaId(BridgeHubPolkadotOrPolkadot::PARACHAIN_ID)]
-// 		}
-//
-// 		fn prepare_parachain_heads_proof(
-// 			parachains: &[bp_polkadot::parachains::ParaId],
-// 			parachain_head_size: u32,
-// 			proof_size: bp_runtime::StorageProofSize,
-// 		) -> (
-// 			pallet_bridge_parachains::RelayBlockNumber,
-// 			pallet_bridge_parachains::RelayBlockHash,
-// 			bp_polkadot::parachains::ParaHeadsProof,
-// 			Vec<(bp_polkadot::parachains::ParaId, bp_polkadot::parachains::ParaHash)>,
-// 		) {
-// 			prepare_parachain_heads_proof::<Runtime, WithPolkadotBridgeParachainsInstance>(
-// 				parachains,
-// 				parachain_head_size,
-// 				proof_size,
-// 			)
 // 		}
 // 	}
 // }

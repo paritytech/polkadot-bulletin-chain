@@ -642,7 +642,7 @@ mod benches {
 		[pallet_relayer_set, RelayerSet]
 
 		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
-		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
+		[pallet_bridge_parachains, PolkadotParachains]
 		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithPeoplePolkadotMessagesInstance>]
 	);
 
@@ -651,11 +651,43 @@ mod benches {
 
 	pub use frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys};
 	pub use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
-	pub use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
 	pub use sp_storage::TrackedStorageKey;
 
 	impl frame_system_benchmarking::Config for Runtime {}
 	impl frame_benchmarking::baseline::Config for Runtime {}
+
+	use bridge_runtime_common::parachains_benchmarking::prepare_parachain_heads_proof;
+	use pallet_bridge_parachains::benchmarking::Config as BridgeParachainsConfig;
+
+	impl BridgeParachainsConfig<bridge_config::WithPolkadotBridgeParachainsInstance> for Runtime {
+		fn parachains() -> Vec<bp_polkadot_core::parachains::ParaId> {
+			use bp_runtime::Parachain;
+			vec![bp_polkadot_core::parachains::ParaId(
+				bridge_config::bp_people_polkadot::PeoplePolkadot::PARACHAIN_ID,
+			)]
+		}
+
+		fn prepare_parachain_heads_proof(
+			parachains: &[bp_polkadot_core::parachains::ParaId],
+			parachain_head_size: u32,
+			proof_params: bp_runtime::UnverifiedStorageProofParams,
+		) -> (
+			bp_parachains::RelayBlockNumber,
+			bp_parachains::RelayBlockHash,
+			bp_polkadot_core::parachains::ParaHeadsProof,
+			Vec<(bp_polkadot_core::parachains::ParaId, bp_polkadot_core::parachains::ParaHash)>,
+		) {
+			prepare_parachain_heads_proof::<
+				Runtime,
+				bridge_config::WithPolkadotBridgeParachainsInstance,
+			>(parachains, parachain_head_size, proof_params)
+		}
+	}
+
+	pub type PolkadotParachains = pallet_bridge_parachains::benchmarking::Pallet<
+		Runtime,
+		bridge_config::WithPolkadotBridgeParachainsInstance,
+	>;
 }
 
 #[cfg(feature = "runtime-benchmarks")]
