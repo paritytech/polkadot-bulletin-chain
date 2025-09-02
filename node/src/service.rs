@@ -45,6 +45,7 @@ pub fn new_partial(
 			>,
 			sc_consensus_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
 			sc_consensus_babe::BabeLink<Block>,
+			sc_consensus_babe::BabeWorkerHandle<Block>,
 			Option<Telemetry>,
 		),
 	>,
@@ -128,9 +129,6 @@ pub fn new_partial(
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
 		})?;
 
-	// TODO Wire up to RPC
-	std::mem::forget(babe_worker_handle);
-
 	Ok(sc_service::PartialComponents {
 		client,
 		backend,
@@ -139,7 +137,7 @@ pub fn new_partial(
 		keystore_container,
 		select_chain,
 		transaction_pool,
-		other: (block_import, grandpa_link, babe_link, telemetry),
+		other: (block_import, grandpa_link, babe_link, babe_worker_handle, telemetry),
 	})
 }
 
@@ -157,7 +155,7 @@ pub fn new_full<
 		keystore_container,
 		select_chain,
 		transaction_pool,
-		other: (block_import, grandpa_link, babe_link, mut telemetry),
+		other: (block_import, grandpa_link, babe_link, babe_worker_handle, mut telemetry),
 	} = new_partial(&config)?;
 
 	let mut net_config = sc_network::config::FullNetworkConfiguration::<_, _, N>::new(
@@ -226,6 +224,8 @@ pub fn new_full<
 	let rpc_extensions_builder = {
 		let client = client.clone();
 		let pool = transaction_pool.clone();
+		let keystore = keystore_container.keystore();
+		let select_chain = select_chain.clone();
 
 		let justification_stream = grandpa_link.justification_stream();
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
@@ -240,6 +240,11 @@ pub fn new_full<
 			let deps = crate::rpc::FullDeps {
 				client: client.clone(),
 				pool: pool.clone(),
+				select_chain: select_chain.clone(),
+				babe: crate::rpc::BabeDeps {
+					babe_worker_handle: babe_worker_handle.clone(),
+					keystore: keystore.clone(),
+				},
 				grandpa: crate::rpc::GrandpaDeps {
 					subscription_executor,
 					shared_authority_set: shared_authority_set.clone(),
