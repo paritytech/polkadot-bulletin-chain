@@ -17,14 +17,17 @@
 //! XCM configuration for Polkadot Bulletin chain.
 
 use crate::{
-	bridge_config::{BridgedNetwork, ToBridgeHaulBlobExporter},
+	bridge_config::{
+		bp_people_polkadot::PEOPLE_POLKADOT_PARACHAIN_ID, BridgedNetwork, PeoplePolkadotLocation,
+		ToBridgeHaulBlobExporter,
+	},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
 
 use codec::{Decode, DecodeLimit, Encode};
 use frame_support::{
 	ensure, parameter_types,
-	traits::{Contains, Everything, Nothing, ProcessMessageError},
+	traits::{Contains, Equals, Everything, Nothing, ProcessMessageError},
 	weights::Weight,
 };
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
@@ -33,31 +36,18 @@ use sp_io::hashing::blake2_256;
 use xcm::{latest::prelude::*, VersionedInteriorLocation, VersionedXcm, MAX_XCM_DECODE_DEPTH};
 use xcm_builder::{
 	DispatchBlob, DispatchBlobError, FixedWeightBounds, FrameTransactionalProcessor, LocalExporter,
-	TrailingSetTopicAsId, WithComputedOrigin,
+	LocationAsSuperuser, TrailingSetTopicAsId, WithComputedOrigin,
 };
 use xcm_executor::{
-	traits::{ConvertOrigin, ShouldExecute, WeightTrader, WithOriginFilter},
+	traits::{ShouldExecute, WeightTrader, WithOriginFilter},
 	AssetsInHolding, XcmExecutor,
 };
 
-// TODO [bridge]: change to actual value here + everywhere where Kawabunga is mentioned
-/// Id of the Polkadot parachain that we are going to bridge with.
-const KAWABUNGA_PARACHAIN_ID: u32 = 1004;
-
 parameter_types! {
-	// TODO [bridge]: how we are supposed to set it? Named? ByGenesis - if so, when?
-	// After generating chain spec?
 	/// The Polkadot Bulletin Chain network ID.
 	pub const ThisNetwork: NetworkId = NetworkId::PolkadotBulletin;
 	/// Our location in the universe of consensus systems.
 	pub UniversalLocation: InteriorLocation = ThisNetwork::get().into();
-
-	/// TODO: (Kawabunga = People Chain) - rename somehow :)
-	/// Location of the Kawabunga parachain, relative to this runtime.
-	pub KawabungaLocation: Location = Location::new(1, [
-		GlobalConsensus(BridgedNetwork::get()),
-		Parachain(KAWABUNGA_PARACHAIN_ID),
-	]);
 
 	/// The amount of weight an XCM operation takes. This is a safe overestimate.
 	pub const BaseXcmWeight: Weight = Weight::from_parts(1_000_000_000, 0);
@@ -66,19 +56,17 @@ parameter_types! {
 	pub const MaxInstructions: u32 = 100;
 }
 
-pub struct OnlyKawabungaLocation;
-
-impl Contains<Location> for OnlyKawabungaLocation {
+pub struct OnlyPeoplePolkadotLocation;
+impl Contains<Location> for OnlyPeoplePolkadotLocation {
 	fn contains(l: &Location) -> bool {
 		matches!(l.unpack(), (1, [
 			GlobalConsensus(bridged_network),
-			Parachain(KAWABUNGA_PARACHAIN_ID),
+			Parachain(PEOPLE_POLKADOT_PARACHAIN_ID),
 		]) if bridged_network == &BridgedNetwork::get())
 	}
 }
 
 pub struct UniversalAliases;
-
 impl Contains<(Location, Junction)> for UniversalAliases {
 	fn contains(l: &(Location, Junction)) -> bool {
 		matches!(
@@ -86,31 +74,7 @@ impl Contains<(Location, Junction)> for UniversalAliases {
 			(
 				origin_location,
 				GlobalConsensus(bridged_network),
-			) if origin_location == &KawabungaLocation::get() && bridged_network == &BridgedNetwork::get())
-	}
-}
-
-/// Kawabunga location converter to local root.
-pub struct KawabungaParachainAsRoot;
-
-impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
-	fn convert_origin(
-		origin: impl Into<Location>,
-		kind: OriginKind,
-	) -> Result<RuntimeOrigin, Location> {
-		let origin = origin.into();
-		log::trace!(
-			target: "xcm::origin_conversion",
-			"KawabungaParachainAsRoot origin: {:?}, kind: {:?}",
-			origin, kind,
-		);
-		match (kind, origin.unpack()) {
-			(
-				OriginKind::Superuser,
-				(1, [GlobalConsensus(bridged_network), Parachain(KAWABUNGA_PARACHAIN_ID)]),
-			) if bridged_network == &BridgedNetwork::get() => Ok(RuntimeOrigin::root()),
-			_ => Err(origin),
-		}
+			) if origin_location == &PeoplePolkadotLocation::get() && bridged_network == &BridgedNetwork::get())
 	}
 }
 
@@ -162,14 +126,11 @@ impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 	}
 }
 
-/// The means that we convert an XCM origin `MultiLocation` into the runtime's `Origin` type for
+/// The means that we convert an XCM origin `Location` into the runtime's `Origin` type for
 /// local dispatch. This is a conversion function from an `OriginKind` type along with the
-/// `MultiLocation` value and returns an `Origin` value or an error.
-type LocalOriginConverter = (
-	// Currently we only accept XCM messages from Kawabunga and the origin for such messages
-	// is local root.
-	KawabungaParachainAsRoot,
-);
+/// `Location` value and returns an `Origin` value or an error.
+type XcmOriginToTransactDispatchOrigin =
+	(LocationAsSuperuser<Equals<PeoplePolkadotLocation>, RuntimeOrigin>,);
 
 /// Only bridged destination is supported.
 pub type XcmRouter = LocalExporter<ToBridgeHaulBlobExporter, UniversalLocation>;
@@ -178,7 +139,7 @@ pub type XcmRouter = LocalExporter<ToBridgeHaulBlobExporter, UniversalLocation>;
 pub type Barrier = TrailingSetTopicAsId<
 	WithComputedOrigin<
 		// We only allow unpaid execution from the Kawabunga parachain.
-		AllowUnpaidTransactsFrom<RuntimeCall, OnlyKawabungaLocation>,
+		AllowUnpaidTransactsFrom<RuntimeCall, OnlyPeoplePolkadotLocation>,
 		UniversalLocation,
 		ConstU32<2>,
 	>,
@@ -191,7 +152,7 @@ impl xcm_executor::Config for XcmConfig {
 	type RuntimeCall = RuntimeCall;
 	type XcmSender = XcmRouter;
 	type AssetTransactor = ();
-	type OriginConverter = LocalOriginConverter;
+	type OriginConverter = XcmOriginToTransactDispatchOrigin;
 	type IsReserve = ();
 	type IsTeleporter = ();
 	type UniversalLocation = UniversalLocation;
@@ -219,6 +180,7 @@ impl xcm_executor::Config for XcmConfig {
 	type HrmpChannelAcceptedHandler = ();
 	type HrmpChannelClosingHandler = ();
 	type XcmRecorder = ();
+	// TODO: add here some impl?
 	type XcmEventEmitter = ();
 }
 
@@ -251,7 +213,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		log::trace!(
 			target: "runtime::xcm",
 			"Going to dispatch XCM message from {:?}: {:?}",
-			KawabungaLocation::get(),
+			PeoplePolkadotLocation::get(),
 			message,
 		);
 
@@ -263,7 +225,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		// execute the XCM program
 		let mut message_hash = message.using_encoded(blake2_256);
 		XcmExecutor::<XcmConfig>::prepare_and_execute(
-			KawabungaLocation::get(),
+			PeoplePolkadotLocation::get(),
 			message,
 			&mut message_hash,
 			weight_limit,
@@ -274,7 +236,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 			log::trace!(
 				target: "runtime::xcm",
 				"XCM message from {:?} was dispatched with an error: {:?}",
-				KawabungaLocation::get(),
+				PeoplePolkadotLocation::get(),
 				e,
 			);
 
