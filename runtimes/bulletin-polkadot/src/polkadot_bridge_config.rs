@@ -141,7 +141,7 @@ pub mod bp_people_polkadot {
 	pub const PEOPLE_POLKADOT_PARACHAIN_ID: u32 = 1004;
 
 	/// Name of the With-PeoplePolkadot messages pallet instance that is deployed at bridged chains.
-	pub const WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME: &str = "PeoplePolkadotMessages";
+	pub const WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME: &str = "BridgePolkadotMessages";
 
 	decl_bridge_finality_runtime_apis!(people_polkadot);
 	decl_bridge_messages_runtime_apis!(people_polkadot, LegacyLaneId);
@@ -157,6 +157,11 @@ parameter_types! {
 		1,
 		[GlobalConsensus(PolkadotGlobalConsensusNetwork::get())]
 	);
+	/// Location of the PeoplePolkadot parachain, relative to this runtime.
+	pub PeoplePolkadotLocation: Location = Location::new(1, [
+		GlobalConsensus(BridgedNetwork::get()),
+		Parachain(bp_people_polkadot::PEOPLE_POLKADOT_PARACHAIN_ID),
+	]);
 
 	/// A number of Polkadot mandatory headers that are accepted for free at every
 	/// **this chain** block.
@@ -170,33 +175,8 @@ parameter_types! {
 	pub const PeoplePolkadotHeadsToKeep: u32 = 600;
 	/// A maximal size of Polkadot Bridge Hub head digest.
 	pub const MaxPeoplePolkadotHeadSize: u32 = bp_polkadot::MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE;
-
-// 	/// All active outbound lanes.
-// 	pub const ActiveOutboundLanes: &'static [LaneId] = &[XCM_LANE];
-// 	/// Maximal number of unrewarded relayer entries.
-// 	pub const MaxUnrewardedRelayerEntriesAtInboundLane: MessageNonce =
-// 		bp_people_polkadot::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
-// 	/// Maximal number of unconfirmed messages.
-// 	pub const MaxUnconfirmedMessagesAtInboundLane: MessageNonce =
-// 		bp_people_polkadot::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
-//
-// 	/// Sending chain location and lane used to communicate with Polkadot Bulletin chain.
-// 	pub FromPolkadotBulletinToBridgeHubPolkadotRoute: SenderAndLane = SenderAndLane::new(
-// 		Here.into(),
-// 		XCM_LANE,
-// 	);
-//
-// 	/// XCM message that is never sent to anyone.
-// 	pub NeverSentMessage: Option<Xcm<()>> = None;
 }
 
-// impl bp_runtime::Parachain for BridgeHubPolkadotOrPolkadot {
-// 	#[cfg(not(feature = "polkadot"))]
-// 	const PARACHAIN_ID: u32 = bp_people_polkadot::BridgeHubPolkadot::PARACHAIN_ID;
-// 	#[cfg(feature = "polkadot")]
-// 	const PARACHAIN_ID: u32 = bp_people_polkadot::PeoplePolkadot::PARACHAIN_ID;
-// }
-//
 /// An instance of `pallet_bridge_grandpa` used to bridge with Polkadot.
 pub type WithPolkadotBridgeGrandpaInstance = ();
 impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtime {
@@ -213,7 +193,7 @@ impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtim
 pub type WithPolkadotBridgeParachainsInstance = ();
 impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = crate::weights::bridge_polkadot_parachains::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bridge_parachains::WeightInfo<Runtime>;
 
 	type BridgesGrandpaPalletInstance = WithPolkadotBridgeGrandpaInstance;
 	type ParasPalletName = AtPolkadotParasPalletName;
@@ -319,7 +299,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 pub type WithPeoplePolkadotMessagesInstance = ();
 impl pallet_bridge_messages::Config<WithPeoplePolkadotMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = crate::weights::bridge_polkadot_messages::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bridge_messages::WeightInfo<Runtime>;
 
 	type ThisChain = bp_polkadot_bulletin::PolkadotBulletin;
 	type BridgedChain = bp_people_polkadot::PeoplePolkadot;
@@ -430,97 +410,28 @@ where
 pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 	XcmBlobHauler<Runtime, WithPeoplePolkadotMessagesInstance>,
 	PolkadotGlobalConsensusNetworkLocation,
-	AlwaysV4,
+	AlwaysV5,
 	(),
 >;
 
-// #[cfg(feature = "runtime-benchmarks")]
-// pub mod benchmarking {
-// 	use super::*;
-//
-// 	/// Proof of messages, coming from BridgeHubPolkadot.
-// 	pub type FromBridgeHubPolkadotMessagesProof =
-// 		bridge_runtime_common::messages::target::FromBridgedChainMessagesProof<
-// 			bp_people_polkadot::Hash,
-// 		>;
-//
-// 	/// Message delivery proof for `BridgeHubPolkadot` messages.
-// 	pub type ToBridgeHubPolkadotMessagesDeliveryProof =
-// 		bridge_runtime_common::messages::source::FromBridgedChainMessagesDeliveryProof<
-// 			bp_people_polkadot::Hash,
-// 		>;
-//
-// 	use bridge_runtime_common::messages_benchmarking::{
-// 		generate_xcm_builder_bridge_message_sample, prepare_message_delivery_proof_from_parachain,
-// 		prepare_message_proof_from_parachain,
-// 	};
-// 	use pallet_bridge_messages::benchmarking::{
-// 		Config as BridgeMessagesConfig, MessageDeliveryProofParams, MessageProofParams,
-// 	};
-//
-// 	impl BridgeMessagesConfig<WithBridgeHubPolkadotMessagesInstance> for Runtime {
-// 		fn is_relayer_rewarded(_relayer: &Self::AccountId) -> bool {
-// 			// no rewards, so we don't care
-// 			true
-// 		}
-//
-// 		fn prepare_message_proof(
-// 			params: MessageProofParams,
-// 		) -> (FromBridgeHubPolkadotMessagesProof, Weight) {
-// 			prepare_message_proof_from_parachain::<
-// 				Runtime,
-// 				WithPolkadotBridgeGrandpaInstance,
-// 				WithBridgeHubPolkadotMessageBridge,
-// 			>(
-// 				params,
-// 				generate_xcm_builder_bridge_message_sample(
-// 					*crate::xcm_config::KawabungaLocation::get().interior(),
-// 				),
-// 			)
-// 		}
-//
-// 		fn prepare_message_delivery_proof(
-// 			params: MessageDeliveryProofParams<AccountId>,
-// 		) -> ToBridgeHubPolkadotMessagesDeliveryProof {
-// 			prepare_message_delivery_proof_from_parachain::<
-// 				Runtime,
-// 				WithPolkadotBridgeGrandpaInstance,
-// 				WithBridgeHubPolkadotMessageBridge,
-// 			>(params)
-// 		}
-//
-// 		fn is_message_successfully_dispatched(_nonce: bp_messages::MessageNonce) -> bool {
-// 			// currently we have no means to detect that
-// 			true
-// 		}
-// 	}
-//
-// 	use bridge_runtime_common::parachains_benchmarking::prepare_parachain_heads_proof;
-// 	use pallet_bridge_parachains::benchmarking::Config as BridgeParachainsConfig;
-// 	impl BridgeParachainsConfig<WithPolkadotBridgeParachainsInstance> for Runtime {
-// 		fn parachains() -> Vec<bp_polkadot::parachains::ParaId> {
-// 			use bp_runtime::Parachain;
-// 			vec![bp_polkadot::parachains::ParaId(BridgeHubPolkadotOrPolkadot::PARACHAIN_ID)]
-// 		}
-//
-// 		fn prepare_parachain_heads_proof(
-// 			parachains: &[bp_polkadot::parachains::ParaId],
-// 			parachain_head_size: u32,
-// 			proof_size: bp_runtime::StorageProofSize,
-// 		) -> (
-// 			pallet_bridge_parachains::RelayBlockNumber,
-// 			pallet_bridge_parachains::RelayBlockHash,
-// 			bp_polkadot::parachains::ParaHeadsProof,
-// 			Vec<(bp_polkadot::parachains::ParaId, bp_polkadot::parachains::ParaHash)>,
-// 		) {
-// 			prepare_parachain_heads_proof::<Runtime, WithPolkadotBridgeParachainsInstance>(
-// 				parachains,
-// 				parachain_head_size,
-// 				proof_size,
-// 			)
-// 		}
-// 	}
-// }
+#[cfg(feature = "runtime-benchmarks")]
+pub mod benchmarking {
+	use super::*;
+
+	/// Proof of messages, coming from PeoplePolkadot.
+	pub type FromPeoplePolkadotMessagesProof =
+		bp_messages::target_chain::FromBridgedChainMessagesProof<
+			bp_people_polkadot::Hash,
+			pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
+		>;
+
+	/// Message delivery proof for `PeoplePolkadot` messages.
+	pub type ToPeoplePolkadotMessagesDeliveryProof =
+		bp_messages::source_chain::FromBridgedChainMessagesDeliveryProof<
+			bp_people_polkadot::Hash,
+			pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
+		>;
+}
 //
 // #[cfg(test)]
 // pub(crate) mod tests {

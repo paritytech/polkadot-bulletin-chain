@@ -367,8 +367,8 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Check storage proof for block number `block_number() - StoragePeriod`. If such block
-		/// does not exist the proof is expected to be `None`.
+		/// Check storage proof for block number `block_number() - StoragePeriod`. If such a block
+		/// does not exist, the proof is expected to be `None`.
 		///
 		/// ## Complexity
 		///

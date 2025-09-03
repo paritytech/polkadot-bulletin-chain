@@ -25,6 +25,7 @@ sc-cli = { workspace = true }
 sc-client-api = { workspace = true }
 sc-consensus = { workspace = true }
 sc-consensus-babe = { workspace = true }
+sc-consensus-babe-rpc = { workspace = true }
 sc-consensus-grandpa = { workspace = true }
 sc-consensus-grandpa-rpc = { workspace = true }
 sc-executor = { workspace = true }
@@ -35,11 +36,13 @@ sc-service = { workspace = true }
 sc-telemetry = { workspace = true }
 sc-transaction-pool = { workspace = true }
 sc-transaction-pool-api = { workspace = true }
+sp-consensus = { workspace = true }
 sp-consensus-babe = { workspace = true }
 sp-core = { workspace = true }
 sp-inherents = { workspace = true }
 sp-io = { workspace = true }
 sp-keyring = { workspace = true }
+sp-keystore = { workspace = true }
 sp-runtime = { workspace = true }
 sp-timestamp = { workspace = true }
 sp-transaction-storage-proof = { workspace = true }
@@ -54,7 +57,6 @@ sp-genesis-builder = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
 
 # These dependencies are used for runtime benchmarking
-frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }
 
 # Local Dependencies
@@ -74,7 +76,6 @@ substrate-build-script-utils = { workspace = true }
 runtime-benchmarks = [
 	"bulletin-polkadot-runtime/runtime-benchmarks",
 	"frame-benchmarking-cli/runtime-benchmarks",
-	"frame-benchmarking/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
 	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
