@@ -1,14 +1,21 @@
 //! Expose the auto generated weight files.
 
+use ::pallet_bridge_grandpa::WeightInfoExt as GrandpaWeightInfoExt;
+use ::pallet_bridge_messages::WeightInfoExt as MessagesWeightInfoExt;
+use ::pallet_bridge_parachains::WeightInfoExt as ParachainsWeightInfoExt;
+use ::pallet_bridge_relayers::WeightInfo as _;
 use frame_support::weights::Weight;
-use pallet_bridge_relayers::WeightInfo;
 
-pub mod bridge_polkadot_grandpa;
 pub mod bridge_polkadot_messages;
 pub mod bridge_polkadot_parachains;
 pub mod bridge_polkadot_relayers;
+pub mod pallet_bridge_grandpa;
+pub mod pallet_relayer_set;
+pub mod pallet_timestamp;
+pub mod pallet_transaction_storage;
+pub mod pallet_validator_set;
 
-impl pallet_bridge_grandpa::WeightInfoExt for bridge_polkadot_grandpa::WeightInfo<crate::Runtime> {
+impl GrandpaWeightInfoExt for pallet_bridge_grandpa::WeightInfo<crate::Runtime> {
 	fn submit_finality_proof_overhead_from_runtime() -> Weight {
 		// our signed extension:
 		// 1) checks whether relayer registration is active from validate/pre_dispatch;
@@ -18,9 +25,7 @@ impl pallet_bridge_grandpa::WeightInfoExt for bridge_polkadot_grandpa::WeightInf
 	}
 }
 
-impl pallet_bridge_parachains::WeightInfoExt
-	for bridge_polkadot_parachains::WeightInfo<crate::Runtime>
-{
+impl ParachainsWeightInfoExt for bridge_polkadot_parachains::WeightInfo<crate::Runtime> {
 	fn expected_extra_storage_proof_size() -> u32 {
 		crate::bp_people_polkadot::EXTRA_STORAGE_PROOF_SIZE
 	}
@@ -34,9 +39,7 @@ impl pallet_bridge_parachains::WeightInfoExt
 	}
 }
 
-impl pallet_bridge_messages::WeightInfoExt
-	for bridge_polkadot_messages::WeightInfo<crate::Runtime>
-{
+impl MessagesWeightInfoExt for bridge_polkadot_messages::WeightInfo<crate::Runtime> {
 	fn expected_extra_storage_proof_size() -> u32 {
 		crate::bp_people_polkadot::EXTRA_STORAGE_PROOF_SIZE
 	}

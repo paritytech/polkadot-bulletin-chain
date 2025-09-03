@@ -48,3 +48,10 @@ Controls the validator set. Currently set in genesis and validators can be added
 
 ####  polkadot-bulletin-chain/pallets/transaction-storage
 Stores arbitrary data on IPFS via the `store` extrinsic, provided that either the signer or the preimage of the data are pre-authorized. Stored data can be retrieved from IPFS or directly from the node via the transaction index or hash.
+
+### Fresh benchmarks
+
+Run on the dedicated machine from the root directory:
+```
+python3 scripts/cmd/cmd.py bench bulletin-polkadot
+```
