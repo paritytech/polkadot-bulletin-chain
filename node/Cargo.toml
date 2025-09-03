@@ -57,7 +57,6 @@ sp-genesis-builder = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
 
 # These dependencies are used for runtime benchmarking
-frame-benchmarking = { workspace = true }
 frame-benchmarking-cli = { workspace = true }
 
 # Local Dependencies
@@ -77,7 +76,6 @@ substrate-build-script-utils = { workspace = true }
 runtime-benchmarks = [
 	"bulletin-polkadot-runtime/runtime-benchmarks",
 	"frame-benchmarking-cli/runtime-benchmarks",
-	"frame-benchmarking/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
 	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",

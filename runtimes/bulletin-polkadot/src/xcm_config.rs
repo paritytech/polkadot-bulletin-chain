@@ -138,7 +138,7 @@ pub type XcmRouter = LocalExporter<ToBridgeHaulBlobExporter, UniversalLocation>;
 /// The barriers one of which must be passed for an XCM message to be executed.
 pub type Barrier = TrailingSetTopicAsId<
 	WithComputedOrigin<
-		// We only allow unpaid execution from the Kawabunga parachain.
+		// We only allow unpaid execution from the PeoplePolkadot parachain.
 		AllowUnpaidTransactsFrom<RuntimeCall, OnlyPeoplePolkadotLocation>,
 		UniversalLocation,
 		ConstU32<2>,
@@ -246,7 +246,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 	}
 }
 
-/// Decode inbound `BridgeMessage` from Kawabunga parachain.
+/// Decode inbound `BridgeMessage` from PeoplePolkadot parachain.
 pub(crate) fn decode_bridge_message(
 	blob: &XcmAsPlainPayload,
 ) -> Result<(VersionedInteriorLocation, VersionedXcm<RuntimeCall>), DispatchBlobError> {

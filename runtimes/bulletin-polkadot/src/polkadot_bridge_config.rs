@@ -141,7 +141,7 @@ pub mod bp_people_polkadot {
 	pub const PEOPLE_POLKADOT_PARACHAIN_ID: u32 = 1004;
 
 	/// Name of the With-PeoplePolkadot messages pallet instance that is deployed at bridged chains.
-	pub const WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME: &str = "PeoplePolkadotMessages";
+	pub const WITH_PEOPLE_POLKADOT_MESSAGES_PALLET_NAME: &str = "BridgePolkadotMessages";
 
 	decl_bridge_finality_runtime_apis!(people_polkadot);
 	decl_bridge_messages_runtime_apis!(people_polkadot, LegacyLaneId);
@@ -175,33 +175,8 @@ parameter_types! {
 	pub const PeoplePolkadotHeadsToKeep: u32 = 600;
 	/// A maximal size of Polkadot Bridge Hub head digest.
 	pub const MaxPeoplePolkadotHeadSize: u32 = bp_polkadot::MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE;
-
-// 	/// All active outbound lanes.
-// 	pub const ActiveOutboundLanes: &'static [LaneId] = &[XCM_LANE];
-// 	/// Maximal number of unrewarded relayer entries.
-// 	pub const MaxUnrewardedRelayerEntriesAtInboundLane: MessageNonce =
-// 		bp_people_polkadot::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
-// 	/// Maximal number of unconfirmed messages.
-// 	pub const MaxUnconfirmedMessagesAtInboundLane: MessageNonce =
-// 		bp_people_polkadot::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
-//
-// 	/// Sending chain location and lane used to communicate with Polkadot Bulletin chain.
-// 	pub FromPolkadotBulletinToBridgeHubPolkadotRoute: SenderAndLane = SenderAndLane::new(
-// 		Here.into(),
-// 		XCM_LANE,
-// 	);
-//
-// 	/// XCM message that is never sent to anyone.
-// 	pub NeverSentMessage: Option<Xcm<()>> = None;
 }
 
-// impl bp_runtime::Parachain for BridgeHubPolkadotOrPolkadot {
-// 	#[cfg(not(feature = "polkadot"))]
-// 	const PARACHAIN_ID: u32 = bp_people_polkadot::BridgeHubPolkadot::PARACHAIN_ID;
-// 	#[cfg(feature = "polkadot")]
-// 	const PARACHAIN_ID: u32 = bp_people_polkadot::PeoplePolkadot::PARACHAIN_ID;
-// }
-//
 /// An instance of `pallet_bridge_grandpa` used to bridge with Polkadot.
 pub type WithPolkadotBridgeGrandpaInstance = ();
 impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtime {
