@@ -66,7 +66,7 @@ pub use sp_runtime::{Perbill, Permill};
 mod polkadot_bridge_config;
 use polkadot_bridge_config::{self as bridge_config, bp_people_polkadot, bp_polkadot};
 
-mod genesis_config_presets;
+pub mod genesis_config_presets;
 mod weights;
 mod xcm_config;
 
