@@ -1,14 +1,12 @@
 use bulletin_polkadot_runtime as runtime;
-use frame_support::{assert_noop, assert_ok};
-use frame_support::traits::{Hooks, OnIdle};
-use pallet_transaction_storage::{Call as TxCall, AuthorizationExtent, Error as TxError, BAD_DATA_SIZE};
-use sp_core::{sr25519, Pair, Encode};
+use frame_support::assert_ok;
+use frame_support::traits::Hooks;
+use pallet_transaction_storage::{Call as TxCall, AuthorizationExtent, BAD_DATA_SIZE};
+use sp_core::{Pair, Encode};
 use runtime::{RuntimeOrigin, TransactionStorage, System, Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash};
 use sp_runtime::generic::Era;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::ApplyExtrinsicResult;
-use crate::runtime::AllPalletsWithSystem;
-use crate::runtime::Weight;
 use sp_transaction_storage_proof::TransactionStorageProof;
 
 pub fn run_to_block(n: u32, f: impl Fn() -> Option<TransactionStorageProof>) {
@@ -103,7 +101,6 @@ fn transaction_storage_runtime_sizes() {
 			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
 			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
 
-			// End current block and start the next one so each tx is in a separate block
 			block_number += 1;
 			run_to_block(block_number, || None);
 		}
