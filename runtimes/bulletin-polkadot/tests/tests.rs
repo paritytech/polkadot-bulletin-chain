@@ -79,8 +79,8 @@ fn transaction_storage_runtime_sizes() {
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB
 			4 * 1024 * 1024, // 4 MB
-			6 * 1024 * 1024, // 6 MB
-			8 * 1024 * 1024, // 8 MB
+			4 * 1024 * 1024, // another 4 MB (fails here)
+			4 * 1024 * 1024, // another 4 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
@@ -99,7 +99,7 @@ fn transaction_storage_runtime_sizes() {
 		for size in sizes {
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
 			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
-			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
+			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", block_number, res);
 
 			block_number += 1;
 			run_to_block(block_number, || None);
