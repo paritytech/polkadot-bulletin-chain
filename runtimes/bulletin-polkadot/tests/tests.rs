@@ -7,17 +7,15 @@ use runtime::BuildStorage;
 
 #[test]
 fn transaction_storage_runtime_sizes() {
-	let preset_id = sp_genesis_builder::PresetId::from(sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET);
-	let cfg_bytes = runtime::genesis_config_presets::get_preset(&preset_id).expect("preset should exist");
-	let cfg: runtime::RuntimeGenesisConfig = serde_json::from_slice(&cfg_bytes).expect("valid genesis config JSON");
-	let storage = cfg.build_storage().expect("build_storage should succeed");
-	sp_io::TestExternalities::new(storage)
+	sp_io::TestExternalities::new(
+		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
+	)
 	.execute_with(|| {
 		// Start at block 1
 		runtime::System::set_block_number(1);
 		runtime::TransactionStorage::on_initialize(1);
 
-		let who: runtime::AccountId = runtime::genesis_config_presets::get_account_id_from_seed::<sr25519::Public>("Alice");
+		let who: runtime::AccountId = sp_keyring::Sr25519Keyring::Alice.to_account_id();
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB
