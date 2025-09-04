@@ -2,8 +2,51 @@ use bulletin_polkadot_runtime as runtime;
 use frame_support::{assert_noop, assert_ok};
 use frame_support::traits::Hooks;
 use pallet_transaction_storage::{Call as TxCall, AuthorizationExtent, Error as TxError, BAD_DATA_SIZE};
-use sp_core::sr25519;
-use runtime::BuildStorage;
+use sp_core::{sr25519, Pair, Encode};
+use runtime::{Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash};
+use sp_runtime::generic::Era;
+use sp_keyring::Sr25519Keyring;
+use sp_runtime::ApplyExtrinsicResult;
+
+fn construct_extrinsic(
+	sender: sp_core::sr25519::Pair,
+	call: RuntimeCall,
+) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
+
+	let account_id = sp_runtime::AccountId32::from(sender.public());
+	frame_system::BlockHash::<Runtime>::insert(0, Hash::default());
+	let tx_ext: TxExtension = (
+		frame_system::CheckNonZeroSender::<Runtime>::new(),
+		frame_system::CheckSpecVersion::<Runtime>::new(),
+		frame_system::CheckTxVersion::<Runtime>::new(),
+		frame_system::CheckGenesis::<Runtime>::new(),
+		frame_system::CheckEra::<Runtime>::from(Era::immortal()),
+		frame_system::CheckNonce::<Runtime>::from(
+			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
+		)
+		.into(),
+		frame_system::CheckWeight::<Runtime>::new(),
+		runtime::ValidateSigned,
+		runtime::BridgeRejectObsoleteHeadersAndMessages,
+	)
+		.into();
+	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
+	let signature = payload.using_encoded(|e| sender.sign(e));
+	Ok(UncheckedExtrinsic::new_signed(
+		call,
+		account_id.into(),
+		runtime::Signature::Sr25519(signature),
+		tx_ext,
+	))
+}
+
+fn construct_and_apply_extrinsic(
+	account: sp_core::sr25519::Pair,
+	call: RuntimeCall,
+) -> ApplyExtrinsicResult {
+	let xt = construct_extrinsic(account, call)?;
+	Executive::apply_extrinsic(xt)
+}
 
 #[test]
 fn transaction_storage_runtime_sizes() {
@@ -36,10 +79,10 @@ fn transaction_storage_runtime_sizes() {
 			AuthorizationExtent { transactions: sizes.len() as u32, bytes: total_bytes },
 		);
 
+		let alice_pair = Sr25519Keyring::Alice.pair();
 		for size in sizes {
-			let call = TxCall::<runtime::Runtime>::store { data: vec![0u8; size] };
-			assert_ok!(runtime::TransactionStorage::pre_dispatch_signed(&who, &call));
-			assert_ok!(runtime::TransactionStorage::store(runtime::RuntimeOrigin::none(), vec![0u8; size]));
+			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
+			assert_ok!(construct_and_apply_extrinsic(alice_pair.clone(), call));
 		}
 
 		assert_eq!(
@@ -55,14 +98,11 @@ fn transaction_storage_runtime_sizes() {
 			1,
 			oversize as u64,
 		));
-		let too_big_call = TxCall::<runtime::Runtime>::store { data: vec![0u8; oversize] };
-		assert_noop!(
-			runtime::TransactionStorage::pre_dispatch_signed(&who, &too_big_call),
-			BAD_DATA_SIZE,
-		);
-		assert_noop!(
-			runtime::TransactionStorage::store(runtime::RuntimeOrigin::none(), vec![0u8; oversize]),
-			TxError::<runtime::Runtime>::BadDataSize,
+		let too_big_call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; oversize] });
+		let res = construct_and_apply_extrinsic(alice_pair, too_big_call);
+		assert_eq!(
+			res,
+			Err(BAD_DATA_SIZE.into())
 		);
 	});
 }
