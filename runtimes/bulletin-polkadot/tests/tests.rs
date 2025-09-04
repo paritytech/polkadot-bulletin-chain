@@ -1,12 +1,28 @@
 use bulletin_polkadot_runtime as runtime;
 use frame_support::{assert_noop, assert_ok};
-use frame_support::traits::Hooks;
+use frame_support::traits::{Hooks, OnIdle};
 use pallet_transaction_storage::{Call as TxCall, AuthorizationExtent, Error as TxError, BAD_DATA_SIZE};
 use sp_core::{sr25519, Pair, Encode};
-use runtime::{Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash};
+use runtime::{RuntimeOrigin, TransactionStorage, System, Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash};
 use sp_runtime::generic::Era;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::ApplyExtrinsicResult;
+use crate::runtime::AllPalletsWithSystem;
+use crate::runtime::Weight;
+use sp_transaction_storage_proof::TransactionStorageProof;
+
+pub fn run_to_block(n: u32, f: impl Fn() -> Option<TransactionStorageProof>) {
+	while System::block_number() < n {
+		if let Some(proof) = f() {
+			TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
+		}
+		TransactionStorage::on_finalize(System::block_number());
+		System::on_finalize(System::block_number());
+		System::set_block_number(System::block_number() + 1);
+		System::on_initialize(System::block_number());
+		TransactionStorage::on_initialize(System::block_number());
+	}
+}
 
 fn construct_extrinsic(
 	sender: sp_core::sr25519::Pair,
@@ -58,6 +74,8 @@ fn transaction_storage_runtime_sizes() {
 		runtime::System::set_block_number(1);
 		runtime::TransactionStorage::on_initialize(1);
 
+		let mut block_number: u32 = 1;
+
 		let who: runtime::AccountId = sp_keyring::Sr25519Keyring::Alice.to_account_id();
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
@@ -84,6 +102,10 @@ fn transaction_storage_runtime_sizes() {
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
 			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
 			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
+
+			// End current block and start the next one so each tx is in a separate block
+			block_number += 1;
+			run_to_block(block_number, || None);
 		}
 
 		assert_eq!(
