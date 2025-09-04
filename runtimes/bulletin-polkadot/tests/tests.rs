@@ -82,7 +82,8 @@ fn transaction_storage_runtime_sizes() {
 		let alice_pair = Sr25519Keyring::Alice.pair();
 		for size in sizes {
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
-			assert_ok!(construct_and_apply_extrinsic(alice_pair.clone(), call));
+			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
+			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
 		}
 
 		assert_eq!(
