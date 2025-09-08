@@ -48,10 +48,14 @@ impl SubstrateCli for Cli {
 		Ok(match id {
 			"dev" | "rococo-dev" => Box::new(chain_spec::rococo_development_config()?),
 			"local" | "rococo-local" => Box::new(chain_spec::rococo_local_testnet_config()?),
-			"polkadot-dev" => Box::new(chain_spec::polkadot_development_config()?),
-			"polkadot-local" => Box::new(chain_spec::polkadot_local_testnet_config()?),
+			"polkadot-dev" | "bulletin-polkadot-dev" => Box::new(chain_spec::bulletin_polkadot_development_config()?),
+			"polkadot-local" | "bulletin-polkadot-local" => Box::new(chain_spec::bulletin_polkadot_local_testnet_config()?),
+			"bulletin-polkadot" => Box::new(chain_spec::bulletin_polkadot_config()?),
 			"" => return Err(
-				"No chain_id or path specified! Either provide a path to the chain spec or specify chain_id: Rococo (dev, local, rococo-dev, rococo-local) or Polkadot (polkadot-dev, polkadot-local)"
+				"No chain_id or path specified! Either provide a path to the chain spec or specify chain_id: \
+				Polkadot Live (bulletin-polkadot) \
+				or Polkadot Dev/Local (bulletin-polkadot-dev, bulletin-polkadot-local) \
+				or Rococo (dev, local, rococo-dev, rococo-local)"
 					.into(),
 			),
 			path =>

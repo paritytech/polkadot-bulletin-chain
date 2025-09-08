@@ -33,7 +33,7 @@ pub fn rococo_local_testnet_config() -> Result<ChainSpec, String> {
 	.build())
 }
 
-pub fn polkadot_development_config() -> Result<ChainSpec, String> {
+pub fn bulletin_polkadot_development_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
 		bulletin_polkadot_runtime::WASM_BINARY
 			.ok_or_else(|| "bulletin_polkadot_runtime::WASM_BINARY not available".to_string())?,
@@ -47,7 +47,7 @@ pub fn polkadot_development_config() -> Result<ChainSpec, String> {
 	.build())
 }
 
-pub fn polkadot_local_testnet_config() -> Result<ChainSpec, String> {
+pub fn bulletin_polkadot_local_testnet_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
 		bulletin_polkadot_runtime::WASM_BINARY
 			.ok_or_else(|| "bulletin_polkadot_runtime::WASM_BINARY not available".to_string())?,
@@ -59,4 +59,9 @@ pub fn polkadot_local_testnet_config() -> Result<ChainSpec, String> {
 	.with_protocol_id(PROTOCOL_ID)
 	.with_genesis_config_preset_name(sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET)
 	.build())
+}
+
+/// Production/live Bulletin Polkadot chain configuration.
+pub fn bulletin_polkadot_config() -> Result<ChainSpec, String> {
+	ChainSpec::from_json_bytes(&include_bytes!("../chain-specs/bulletin-polkadot.json")[..])
 }
