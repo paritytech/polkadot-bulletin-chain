@@ -62,12 +62,22 @@ fn construct_and_apply_extrinsic(
 	account: sp_core::sr25519::Pair,
 	call: RuntimeCall,
 ) -> ApplyExtrinsicResult {
+	let dispatch_info = call.get_dispatch_info();
 	let xt = construct_extrinsic(account, call)?;
+	let xt_len = xt.encode().len();
+	log::info!(
+		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
+		dispatch_info.class,
+		dispatch_info.pays_fee,
+		dispatch_info.total_weight(),
+		xt_len
+	);
 	Executive::apply_extrinsic(xt)
 }
 
 #[test]
 fn transaction_storage_runtime_sizes() {
+	let _ = sp_tracing::try_init_simple();
 	sp_io::TestExternalities::new(
 		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
 	)
