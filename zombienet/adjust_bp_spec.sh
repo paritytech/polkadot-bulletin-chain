@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Add Alice(`5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY`)/Bob(`5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty`) as pre-defined validators
+# Add Alice(`5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY`) as pre-defined validator
 # We do this only if there is a `.genesis.runtimeGenesis.patch` object.
 # Otherwise we're working with the raw chain spec.
 $POLKADOT_BULLETIN_BINARY_PATH build-spec --chain bulletin-polkadot-local  \
@@ -8,8 +8,7 @@ $POLKADOT_BULLETIN_BINARY_PATH build-spec --chain bulletin-polkadot-local  \
     | jq '.id = "bulletin-polkadot"' \
     | jq '.chainType = "Live"' \
     | jq '.bootNodes = [
-        "/ip4/127.0.0.1/tcp/33333/ws/p2p/5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
-        "/ip4/127.0.0.1/tcp/33334/ws/p2p/5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
+        "/ip4/127.0.0.1/tcp/33333/ws/p2p/5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
     ]' \
     | jq '.genesis.runtimeGenesis.patch.session.keys = [
             [
@@ -19,21 +18,11 @@ $POLKADOT_BULLETIN_BINARY_PATH build-spec --chain bulletin-polkadot-local  \
                         "babe": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
                         "grandpa": "5FA9nQDVg267DEd8m1ZypXLBnvN7SFxYwV7ndqSYGiN9TTpu"
                     }
-            ],
-            [
-                "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty",
-                "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty",
-                    {
-                        "babe": "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty",
-                        "grandpa": "5GoNkf6WdbxCFnPdAnYYQyCjAKPJgLNxXwPjwTh6DGg6gN3E"
-                    }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
-            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
-            "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
+            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
-            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
-            "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
+            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
         ]'

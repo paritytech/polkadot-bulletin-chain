@@ -70,13 +70,20 @@ cargo build --release -p polkadot-bulletin-chain
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
 ```
 
-### Run a production chain (but only with Alice/Bob local validators or with your own keys)
-You can override the Alice/Bob validator keys here: [adjust\_bp\_spec.sh](./zombienet/adjust_bp_spec.sh) and test with your own keys (you should see finalized blocks in the logs).
+### Run a production chain (but only with Alice validator)
+You can override the Alice validator keys here: [adjust\_bp\_spec.sh](./zombienet/adjust_bp_spec.sh) (you should see finalized blocks in the logs).
 
 ```
 cargo build --release -p polkadot-bulletin-chain
 
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot.toml
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ENV_PATH=<path-to-zombienet-dir-in-bulletin-repo> zombienet -p native spawn ./zombienet/bulletin-polkadot.toml
+```
+
+### Run a production chain
+
+```
+cargo build --release -p polkadot-bulletin-chain
+./target/release/polkadot-bulletin-chain --chain bulletin-polkadot
 ```
 
 ### Fresh benchmarks

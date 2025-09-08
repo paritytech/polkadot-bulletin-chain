@@ -14,9 +14,3 @@ chain_spec_command = "{{ENV_PATH}}/adjust_bp_spec.sh {% raw %} {{chainName}} {% 
 	validator = true
 	args = [ "--ipfs-server", "-lruntime=trace"]
 
-	[[relaychain.nodes]]
-	name = "bob"
-	rpc_port = 12346
-	p2p_port = 33334
-	validator = true
-	args = ["-lruntime=trace"]

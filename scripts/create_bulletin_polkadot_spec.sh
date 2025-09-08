@@ -33,7 +33,8 @@ $binary build-spec --chain bulletin-polkadot-local > chain-spec-plain.json
 # convert runtime to hex
 cat $rt_path | od -A n -v -t x1 |  tr -d ' \n' > rt-hex.txt
 
-# TODO: provide bootNodes
+# TODO: provide bootNodes:
+# "/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/wss/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"
 
 # TODO: provide sessionKeys
 # TODO: provide validatorSet.initialValidators
@@ -52,23 +53,23 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
     | jq '.id = "bulletin-polkadot"' \
     | jq '.chainType = "Live"' \
     | jq '.bootNodes = [
-        "/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/wss/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"
+        "/ip4/127.0.0.1/tcp/33333/ws/p2p/5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
     ]' \
     | jq '.genesis.runtimeGenesis.patch.session.keys = [
             [
-                "14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3",
-                "14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3",
+                "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
                     {
-                        "babe": "14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3",
-                        "grandpa": "14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3"
+                        "babe": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                        "grandpa": "5FA9nQDVg267DEd8m1ZypXLBnvN7SFxYwV7ndqSYGiN9TTpu"
                     }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
-            "14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3"
+            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
-            "14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3"
+            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
         ]' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotGrandpa.owner)' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotParachains.owner)' \
