@@ -1,25 +1,29 @@
 use bulletin_polkadot_runtime as runtime;
-use frame_support::assert_ok;
-use frame_support::traits::Hooks;
+use frame_support::{assert_ok, assert_noop};
+use frame_support::traits::{Hooks, OnIdle};
 use pallet_transaction_storage::{Call as TxCall, AuthorizationExtent, BAD_DATA_SIZE};
+use frame_support::dispatch::GetDispatchInfo;
 use sp_core::{Pair, Encode};
-use runtime::{RuntimeOrigin, TransactionStorage, System, Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash};
+use runtime::{RuntimeOrigin, AllPalletsWithSystem, Weight, TransactionStorage, System, Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash, Header};
 use sp_runtime::generic::Era;
+use sp_runtime::traits::Header as _;
+use sp_runtime::traits::SaturatedConversion;
+use sp_runtime::traits::Dispatchable;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::ApplyExtrinsicResult;
 use sp_transaction_storage_proof::TransactionStorageProof;
 
-pub fn run_to_block(n: u32, f: impl Fn() -> Option<TransactionStorageProof>) {
-	while System::block_number() < n {
-		if let Some(proof) = f() {
-			TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-		}
-		TransactionStorage::on_finalize(System::block_number());
-		System::on_finalize(System::block_number());
-		System::set_block_number(System::block_number() + 1);
-		System::on_initialize(System::block_number());
-		TransactionStorage::on_initialize(System::block_number());
-	}
+fn run_to_block(n: u32) {
+	System::run_to_block_with::<AllPalletsWithSystem>(
+		n,
+		frame_system::RunToBlockHooks::default().after_initialize(|bn| {
+			AllPalletsWithSystem::on_idle(bn, Weight::MAX);
+		}),
+	);
+
+	let slot = runtime::Babe::current_slot();
+	let now = slot.saturated_into::<u64>() * runtime::SLOT_DURATION;
+	runtime::Timestamp::set(RuntimeOrigin::none(), now).unwrap();
 }
 
 fn construct_extrinsic(
@@ -71,6 +75,10 @@ fn transaction_storage_runtime_sizes() {
 		// Start at block 1
 		runtime::System::set_block_number(1);
 		runtime::TransactionStorage::on_initialize(1);
+		// set timestamp for block 1
+		let slot = runtime::Babe::current_slot();
+		let now = slot.saturated_into::<u64>() * runtime::SLOT_DURATION;
+		runtime::Timestamp::set(RuntimeOrigin::none(), now).unwrap();
 
 		let mut block_number: u32 = 1;
 
@@ -79,8 +87,8 @@ fn transaction_storage_runtime_sizes() {
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB
 			4 * 1024 * 1024, // 4 MB
-			4 * 1024 * 1024, // another 4 MB (fails here)
-			4 * 1024 * 1024, // another 4 MB
+			6 * 1024 * 1024, // 6 MB
+			8 * 1024 * 1024, // 8 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
@@ -99,10 +107,10 @@ fn transaction_storage_runtime_sizes() {
 		for size in sizes {
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
 			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
-			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", block_number, res);
+			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
 
 			block_number += 1;
-			run_to_block(block_number, || None);
+			run_to_block(block_number);
 		}
 
 		assert_eq!(
