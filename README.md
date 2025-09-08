@@ -49,6 +49,43 @@ Controls the validator set. Currently set in genesis and validators can be added
 ####  polkadot-bulletin-chain/pallets/transaction-storage
 Stores arbitrary data on IPFS via the `store` extrinsic, provided that either the signer or the preimage of the data are pre-authorized. Stored data can be retrieved from IPFS or directly from the node via the transaction index or hash.
 
+## Polkadot Bulletin production/live runtime
+
+### Initial genesis chain spec
+
+[bulletin-polkadot-genesis.json](./node/chain-specs/bulletin-polkadot.json)
+
+```
+cargo build --release -p polkadot-bulletin-chain
+
+./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot
+or
+./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot --raw
+```
+
+### Run local chain
+```
+cargo build --release -p polkadot-bulletin-chain
+
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
+```
+
+### Run a production chain (but only with Alice validator)
+You can override the Alice validator keys here: [adjust\_bp\_spec.sh](./zombienet/adjust_bp_spec.sh) (you should see finalized blocks in the logs).
+
+```
+cargo build --release -p polkadot-bulletin-chain
+
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ENV_PATH=<path-to-zombienet-dir-in-bulletin-repo> zombienet -p native spawn ./zombienet/bulletin-polkadot.toml
+```
+
+### Run a production chain
+
+```
+cargo build --release -p polkadot-bulletin-chain
+./target/release/polkadot-bulletin-chain --chain bulletin-polkadot
+```
+
 ### Fresh benchmarks
 
 Run on the dedicated machine from the root directory:
