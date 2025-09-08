@@ -55,7 +55,9 @@ Stores arbitrary data on IPFS via the `store` extrinsic, provided that either th
 
 [bulletin-polkadot-genesis.json](./node/chain-specs/bulletin-polkadot.json)
 
-```sh
+```
+cargo build --release -p polkadot-bulletin-chain
+
 ./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot
 or
 ./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot --raw
@@ -63,7 +65,18 @@ or
 
 ### Run local chain
 ```
+cargo build --release -p polkadot-bulletin-chain
+
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
+```
+
+### Run a production chain (but only with Alice/Bob local validators or with your own keys)
+You can override the Alice/Bob validator keys here: [adjust\_bp\_spec.sh](./zombienet/adjust_bp_spec.sh) and test with your own keys (you should see finalized blocks in the logs).
+
+```
+cargo build --release -p polkadot-bulletin-chain
+
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot.toml
 ```
 
 ### Fresh benchmarks

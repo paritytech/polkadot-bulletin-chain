@@ -180,6 +180,8 @@ parameter_types! {
 	// This is double the "normal" Relay Chain block length limit.
 	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
 		::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+	// Let's use substrate one: https://github.com/paritytech/ss58-registry/blob/main/ss58-registry.json
+	// (Note: Possibly we can add new one.)
 	pub const SS58Prefix: u8 = 42;
 
 	pub const MaxAuthorities: u32 = 100; // TODO

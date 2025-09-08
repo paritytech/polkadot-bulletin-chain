@@ -1,19 +1,22 @@
 # https://www.npmjs.com/package/@zombienet/cli
 # To run the network, execute the following command:
-# POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
+# POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ENV_PATH=<zombienet-dir> zombienet -p native spawn ./zombienet/bulletin-polkadot.toml
 
 [relaychain]
-chain = "bulletin-polkadot-local"
+chain = "bulletin-polkadot"
 default_command = "{{POLKADOT_BULLETIN_BINARY_PATH}}"
+chain_spec_command = "{{ENV_PATH}}/adjust_bp_spec.sh {% raw %} {{chainName}} {% endraw %}"
 
 	[[relaychain.nodes]]
 	name = "alice"
 	rpc_port = 12345
+	p2p_port = 33333
 	validator = true
 	args = [ "--ipfs-server", "-lruntime=trace"]
 
 	[[relaychain.nodes]]
 	name = "bob"
 	rpc_port = 12346
+	p2p_port = 33334
 	validator = true
 	args = ["-lruntime=trace"]
