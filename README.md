@@ -61,6 +61,11 @@ or
 ./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot --raw
 ```
 
+### Run local chain
+```
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
+```
+
 ### Fresh benchmarks
 
 Run on the dedicated machine from the root directory:
