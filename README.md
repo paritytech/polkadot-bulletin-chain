@@ -129,7 +129,7 @@ cat /tmp/bulletin/chains/bulletin-polkadot/keystore/626162654026e944eb9c6dabc42b
 
 # Grandpa (suri is `secretSeed`)
 ./target/release/polkadot-bulletin-chain key insert --chain bulletin-polkadot --base-path /tmp/bulletin --scheme ed25519 --key-type gran --suri 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
-# (check the generate file name, starts with babe / 62616265, e.g.: 6772616e4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b)
+# (check the generate file name, starts with granpa / 6772616e, e.g.: 6772616e4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b)
 # (contains the secret key)
 cat /tmp/bulletin/chains/bulletin-polkadot/keystore/6772616eddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
 # "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646"
