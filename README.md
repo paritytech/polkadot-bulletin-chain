@@ -153,7 +153,7 @@ cat /tmp/bulletin/chains/bulletin-polkadot/keystore/6772616eddf71d1605421edfa311
    ```
 * Run node
    ```
-   # rebuild because of updated chain spec
+   # point to updated chain spec
    ./target/release/polkadot-bulletin-chain --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
    or
    # rebuild because of updated chain spec
