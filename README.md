@@ -136,6 +136,42 @@ cat /tmp/bulletin/chains/bulletin-polkadot/keystore/6772616eddf71d1605421edfa311
 
 # Two files should be generated here:
 ./scripts/keystore-dump.sh /tmp/bulletin/chains/bulletin-polkadot/keystore
+(example output)
+Seed: 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+=== babe (sr25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Account ID:        0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Public key (SS58): 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+  SS58 Address:      5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+=== babe (ed25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Account ID:        0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Public key (SS58): 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+  SS58 Address:      5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+
+Seed: 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+=== gran (sr25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Account ID:        0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Public key (SS58): 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+  SS58 Address:      5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+=== gran (ed25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Account ID:        0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Public key (SS58): 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+  SS58 Address:      5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
 ```
 
 **Update genesis chain spec script**
