@@ -81,10 +81,87 @@ POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ENV_PATH=
 
 ### Run a production chain
 
+### Prepare keys for a production chain
+
+**Prerequisites:**
 ```
+# Build the node
 cargo build --release -p polkadot-bulletin-chain
-./target/release/polkadot-bulletin-chain --chain bulletin-polkadot
+
+# Working dir (can be customized)
+mkdir /tmp/bulletin
 ```
+
+**Generate a validator account**
+```
+./target/release/polkadot-bulletin-chain key generate --scheme sr25519 --output-type json
+{
+  "accountId": "0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b",
+  "networkId": "substrate",
+  "publicKey": "0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b",
+  "secretPhrase": "arm glove mutual frequent melt world bicycle bean later donor clown choice",
+  "secretSeed": "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646",
+  "ss58Address": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
+  "ss58PublicKey": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
+}
+```
+
+**Generate node-key (used for networking and peerId)**
+```
+./target/release/polkadot-bulletin-chain key generate-node-key --chain bulletin-polkadot --base-path /tmp/bulletin
+(example output)
+Generating key in "/tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519" (secret key)
+12D3KooWMTpYuDPNHoapmkfgJDCRe9XRcUuNzLYTgf82itZv4PZr (public key)
+
+# Validate node key
+./target/release/polkadot-bulletin-chain key inspect-node-key --file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+(should print the same public key as above)
+```
+
+**Generate initial session keys for genesis chain spec**
+```
+# Babe (suri is `secretSeed`)
+./target/release/polkadot-bulletin-chain key insert --chain bulletin-polkadot --base-path /tmp/bulletin --scheme sr25519 --key-type babe --suri 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+# (check the generate file name, starts with babe / 62616265, e.g.: 626162654026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b)
+# (contains the secret key)
+cat /tmp/bulletin/chains/bulletin-polkadot/keystore/626162654026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+# "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646"
+
+# Grandpa (suri is `secretSeed`)
+./target/release/polkadot-bulletin-chain key insert --chain bulletin-polkadot --base-path /tmp/bulletin --scheme ed25519 --key-type gran --suri 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+# (check the generate file name, starts with babe / 62616265, e.g.: 6772616e4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b)
+# (contains the secret key)
+cat /tmp/bulletin/chains/bulletin-polkadot/keystore/6772616eddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+# "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646"
+
+# Two files should be generated here:
+./scripts/keystore-dump.sh /tmp/bulletin/chains/bulletin-polkadot/keystore
+```
+
+**Update genesis chain spec script**
+* File `./scripts/create_bulletin_polkadot_spec.sh`
+* Update `.genesis.runtimeGenesis.patch.validatorSet.initialValidators` with a validator account public key (example above: `5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9`)
+* Update `genesis.runtimeGenesis.patch.session.keys` (and new element)
+  * validator account public key
+  * validator account public key
+    * babe: <Babe public key (sr25519), e.g. 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9>
+    * grandpa: <Grandpa public key (ed25519), e.g. 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w>
+* Update `.bootNodes` (if needed) - format: `"/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/wss/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"`
+* Generate new chain spec:
+   ```
+   ./scripts/create_bulletin_polkadot_spec.sh ./target/production/wbuild/bulletin-polkadot-runtime/bulletin_polkadot_runtime.compact.compressed.wasm
+   ```
+* Run node
+   ```
+   # rebuild because of updated chain spec
+   ./target/release/polkadot-bulletin-chain --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   or
+   # rebuild because of updated chain spec
+   cargo build --release -p polkadot-bulletin-chain
+   ./target/release/polkadot-bulletin-chain --validator --chain bulletin-polkadot --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   ```
+* **You should see finalized blocks in the logs.**
+* **!!! Push changes `./scripts/create_bulletin_polkadot_spec.sh` !!!**
 
 ### Fresh benchmarks
 

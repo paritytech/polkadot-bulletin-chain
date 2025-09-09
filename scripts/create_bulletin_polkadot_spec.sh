@@ -52,24 +52,22 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
     | jq '.name = "Polkadot Bulletin"' \
     | jq '.id = "bulletin-polkadot"' \
     | jq '.chainType = "Live"' \
-    | jq '.bootNodes = [
-        "/ip4/127.0.0.1/tcp/33333/ws/p2p/5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
-    ]' \
+    | jq '.bootNodes = []' \
     | jq '.genesis.runtimeGenesis.patch.session.keys = [
             [
-                "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
-                "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+                "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
+                "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
                     {
-                        "babe": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
-                        "grandpa": "5FA9nQDVg267DEd8m1ZypXLBnvN7SFxYwV7ndqSYGiN9TTpu"
+                        "babe": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
+                        "grandpa": "5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w"
                     }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
-            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
+            "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
-            "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
+            "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
         ]' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotGrandpa.owner)' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotParachains.owner)' \
@@ -78,9 +76,8 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
 
 # build a raw spec
 $binary build-spec --chain edited-chain-spec-plain.json --raw > chain-spec-raw.json
-cp edited-chain-spec-plain.json bulletin-polkadot-spec.json
+cp edited-chain-spec-plain.json ./node/chain-specs/bulletin-polkadot-plain.json
 cp chain-spec-raw.json ./node/chain-specs/bulletin-polkadot.json
-cp chain-spec-raw.json bulletin-polkadot-spec-raw.json
 
 # build genesis data
 $binary export-genesis-state --chain chain-spec-raw.json > bulletin-polkadot-genesis-head-data
