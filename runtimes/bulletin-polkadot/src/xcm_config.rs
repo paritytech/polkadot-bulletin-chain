@@ -96,6 +96,7 @@ impl WeightTrader for NoopTrader {
 	}
 }
 
+// TODO: wrong
 /// Allows execution from `origin` if it is contained in `AllowedOrigin`
 /// and if it is just a straight `Transact` which contains any call.
 ///
@@ -170,6 +171,7 @@ impl xcm_executor::Config for XcmConfig {
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = ConstU32<0>;
 	type FeeManager = ();
+	// TODO: check
 	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
@@ -210,6 +212,8 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		let message: Xcm<RuntimeCall> =
 			message.try_into().map_err(|_| DispatchBlobError::UnsupportedXcmVersion)?;
 
+		// TODO: security - filter DesendOrigin
+
 		log::trace!(
 			target: "runtime::xcm",
 			"Going to dispatch XCM message from {:?}: {:?}",
@@ -246,6 +250,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 	}
 }
 
+// TODO: check
 /// Decode inbound `BridgeMessage` from PeoplePolkadot parachain.
 pub(crate) fn decode_bridge_message(
 	blob: &XcmAsPlainPayload,
