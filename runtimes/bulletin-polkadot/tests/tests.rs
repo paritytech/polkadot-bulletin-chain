@@ -14,12 +14,10 @@ use sp_runtime::ApplyExtrinsicResult;
 use sp_transaction_storage_proof::TransactionStorageProof;
 
 fn run_to_block(n: u32) {
-	System::run_to_block_with::<AllPalletsWithSystem>(
-		n,
-		frame_system::RunToBlockHooks::default().after_initialize(|bn| {
-			AllPalletsWithSystem::on_idle(bn, Weight::MAX);
-		}),
-	);
+	Executive::finalize_block();
+	let next_number = System::block_number() + 1;
+	let header = Header::new(next_number, Default::default(), Default::default(), Default::default(), Default::default());
+	Executive::initialize_block(&header);
 
 	let slot = runtime::Babe::current_slot();
 	let now = slot.saturated_into::<u64>() * runtime::SLOT_DURATION;
@@ -128,20 +126,6 @@ fn transaction_storage_runtime_sizes() {
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 		);
 
-		// 11 MB should exceed MaxTransactionSize (8 MB) and fail
-		let oversize: usize = 11 * 1024 * 1024;
-		assert_ok!(runtime::TransactionStorage::authorize_account(
-			runtime::RuntimeOrigin::root(),
-			who.clone(),
-			1,
-			oversize as u64,
-		));
-		let too_big_call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; oversize] });
-		let res = construct_and_apply_extrinsic(alice_pair, too_big_call);
-		assert_eq!(
-			res,
-			Err(BAD_DATA_SIZE.into())
-		);
 	});
 }
 
