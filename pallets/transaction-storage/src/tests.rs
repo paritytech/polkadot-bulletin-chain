@@ -23,6 +23,7 @@ use super::{
 		TransactionStorage,
 	},
 	AuthorizationExtent, AuthorizationScope, Event, AUTHORIZATION_NOT_EXPIRED,
+	BAD_DATA_SIZE,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{prelude::*, testing_prelude::*};
@@ -293,5 +294,59 @@ fn consumed_authorization_clears() {
 		// Key should be cleared from Authorizations
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
+	});
+}
+
+#[test]
+fn stores_various_sizes_with_account_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let sizes: [usize; 5] = [
+			2000,            // 2 KB
+			1 * 1024 * 1024, // 1 MB
+			4 * 1024 * 1024, // 4 MB
+			6 * 1024 * 1024, // 6 MB
+			8 * 1024 * 1024, // 8 MB
+		];
+		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			sizes.len() as u32,
+			total_bytes,
+		));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: sizes.len() as u32, bytes: total_bytes },
+		);
+
+		for size in sizes {
+			let call = Call::store { data: vec![0u8; size] };
+			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
+		}
+
+		// After consuming the authorized sizes, authorization should be removed and providers cleared
+		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
+		assert!(System::providers(&who).is_zero());
+
+		// Now assert that an 11 MB payload exceeds the max size and fails, even with fresh authorization
+		let oversize: usize = 11 * 1024 * 1024; // 11 MB > DEFAULT_MAX_TRANSACTION_SIZE (8 MB)
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			oversize as u64,
+		));
+		let too_big_call = Call::store { data: vec![0u8; oversize] };
+		// pre_dispatch should reject due to BAD_DATA_SIZE
+		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &too_big_call), BAD_DATA_SIZE);
+		// dispatch should also reject with pallet Error::BadDataSize
+		assert_noop!(
+			Into::<RuntimeCall>::into(too_big_call).dispatch(RuntimeOrigin::none()),
+			Error::BadDataSize,
+		);
+		run_to_block(2, || None);
 	});
 }

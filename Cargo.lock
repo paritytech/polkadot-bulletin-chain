@@ -1727,6 +1727,7 @@ dependencies = [
  "sp-staking 26.0.0",
  "sp-std 14.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=a64eb1fb02d4012948cba024fca2f27d94732e52)",
  "sp-storage 19.0.0",
+ "sp-tracing 16.0.0",
  "sp-transaction-pool 26.0.0",
  "sp-transaction-storage-proof 26.0.0",
  "sp-trie 29.0.0",
@@ -8910,7 +8911,6 @@ version = "0.1.0-dev"
 dependencies = [
  "bulletin-polkadot-runtime",
  "clap",
- "frame-benchmarking",
  "frame-benchmarking-cli",
  "frame-system",
  "futures",
