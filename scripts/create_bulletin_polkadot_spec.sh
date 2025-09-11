@@ -79,8 +79,3 @@ $binary build-spec --chain edited-chain-spec-plain.json --raw > chain-spec-raw.j
 cp edited-chain-spec-plain.json ./node/chain-specs/bulletin-polkadot-plain.json
 cp chain-spec-raw.json ./node/chain-specs/bulletin-polkadot.json
 
-# build genesis data
-$binary export-genesis-state --chain chain-spec-raw.json > bulletin-polkadot-genesis-head-data
-
-# build genesis wasm
-$binary export-genesis-wasm --chain chain-spec-raw.json > bulletin-polkadot-wasm

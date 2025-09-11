@@ -46,6 +46,7 @@ impl SubstrateCli for Cli {
 
 	fn load_spec(&self, id: &str) -> Result<Box<dyn sc_service::ChainSpec>, String> {
 		Ok(match id {
+			// TODO: put behind feature and remove dependencies
 			"dev" | "rococo-dev" => Box::new(chain_spec::rococo_development_config()?),
 			"local" | "rococo-local" => Box::new(chain_spec::rococo_local_testnet_config()?),
 			"polkadot-dev" | "bulletin-polkadot-dev" => Box::new(chain_spec::bulletin_polkadot_development_config()?),
