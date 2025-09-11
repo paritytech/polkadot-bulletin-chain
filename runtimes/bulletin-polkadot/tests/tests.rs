@@ -1,17 +1,15 @@
 use bulletin_polkadot_runtime as runtime;
-use frame_support::{assert_ok, assert_noop};
-use frame_support::traits::{Hooks, OnIdle};
+use frame_support::assert_ok;
+use frame_support::traits::Hooks;
 use pallet_transaction_storage::{Call as TxCall, AuthorizationExtent, BAD_DATA_SIZE};
 use frame_support::dispatch::GetDispatchInfo;
 use sp_core::{Pair, Encode};
-use runtime::{RuntimeOrigin, AllPalletsWithSystem, Weight, TransactionStorage, System, Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash, Header};
+use runtime::{RuntimeOrigin, System, Runtime, BuildStorage, RuntimeCall, UncheckedExtrinsic, TxExtension, SignedPayload, Executive, Hash, Header};
 use sp_runtime::generic::Era;
 use sp_runtime::traits::Header as _;
 use sp_runtime::traits::SaturatedConversion;
-use sp_runtime::traits::Dispatchable;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::ApplyExtrinsicResult;
-use sp_transaction_storage_proof::TransactionStorageProof;
 use pallet_transaction_storage::DEFAULT_MAX_TRANSACTION_SIZE;
 
 fn advance_block() {
@@ -89,7 +87,6 @@ fn transaction_storage_runtime_sizes() {
 		let now = slot.saturated_into::<u64>() * runtime::SLOT_DURATION;
 		runtime::Timestamp::set(RuntimeOrigin::none(), now).unwrap();
 
-		let mut block_number: u32 = 1;
 
 		let who: runtime::AccountId = sp_keyring::Sr25519Keyring::Alice.to_account_id();
 		let sizes: [usize; 5] = [
@@ -118,7 +115,6 @@ fn transaction_storage_runtime_sizes() {
 			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
 			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
 
-			block_number += 1;
 			advance_block();
 		}
 
