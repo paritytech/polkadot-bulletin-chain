@@ -814,7 +814,6 @@ pub mod pallet {
 		/// Returns `true` if no more store/renew transactions can be included in the current
 		/// block.
 		fn block_transactions_full() -> bool {
-			log::trace!(target: LOG_TARGET, "BlockTransactions::<T>::decode_len(): {:?}", BlockTransactions::<T>::decode_len());
 			BlockTransactions::<T>::decode_len()
 				.map_or(false, |len| len >= T::MaxBlockTransactions::get() as usize)
 		}
