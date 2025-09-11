@@ -171,7 +171,7 @@ impl xcm_executor::Config for XcmConfig {
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = ConstU32<0>;
 	type FeeManager = ();
-	// TODO: check
+	// TODO: Why? This could allow processing of `ExportMessage` from People?
 	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
@@ -182,10 +182,11 @@ impl xcm_executor::Config for XcmConfig {
 	type HrmpChannelAcceptedHandler = ();
 	type HrmpChannelClosingHandler = ();
 	type XcmRecorder = ();
-	// TODO: add here some impl?
+	// TODO: maybe add here some emitter?
 	type XcmEventEmitter = ();
 }
 
+// TODO: setup pallet-message-queue and dispatch with MessageQueue, so we don't need this.
 /// XCM blob dispatcher that executes XCM message at this chain.
 ///
 /// That's a copy of `xcm_builder::BridgeBlobDispatcher` struct. The only difference is
