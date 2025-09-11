@@ -52,19 +52,21 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
     | jq '.name = "Polkadot Bulletin"' \
     | jq '.id = "bulletin-polkadot"' \
     | jq '.chainType = "Live"' \
-    | jq '.bootNodes = []' \
+    | jq '.bootNodes = [
+        "/dns/bulletin.w3f.community/tcp/30333/wss/p2p/12D3KooWQsAhfYnMMkTjTzpphSZWW4i8uUNNFYcKeMvQ4fudqHfT"
+    ]' \
     | jq '.genesis.runtimeGenesis.patch.session.keys = [
             [
-                "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
-                "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
+                "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
+                "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
                     {
-                        "babe": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
-                        "grandpa": "5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w"
+                        "babe": "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
+                        "grandpa": "5EmjeC7fdUZg6zFEWkh5iVVYijTQitoAKnw2uHgiJ1dC6168"
                     }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
-            "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
+            "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
             "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
