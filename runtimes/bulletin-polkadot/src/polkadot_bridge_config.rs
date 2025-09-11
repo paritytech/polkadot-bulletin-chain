@@ -206,7 +206,7 @@ impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for 
 
 const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
 
-/// Message dispatch result type for single message.
+/// Message dispatch result type for a single message.
 #[derive(
 	CloneNoBound,
 	EqNoBound,
@@ -218,11 +218,11 @@ const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
 	TypeInfo,
 )]
 pub enum XcmBlobMessageDispatchResult {
-	/// We've been unable to decode message payload.
+	/// We've been unable to decode the message payload.
 	InvalidPayload,
 	/// Message has been dispatched.
 	Dispatched,
-	/// Message has **NOT** been dispatched because of given error.
+	/// Message has **NOT** been dispatched because of a given error.
 	NotDispatched(#[codec(skip)] Option<DispatchBlobError>),
 }
 
@@ -432,7 +432,8 @@ pub mod benchmarking {
 			pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
 		>;
 }
-//
+
+// TODO: enable tests as much as possible
 // #[cfg(test)]
 // pub(crate) mod tests {
 // 	use super::*;
