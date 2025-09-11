@@ -1,7 +1,7 @@
 use bulletin_polkadot_runtime as runtime;
-use frame_support::{assert_ok, dispatch::GetDispatchInfo};
+use frame_support::{assert_ok, dispatch::GetDispatchInfo, traits::Get};
 use pallet_transaction_storage::{
-	AuthorizationExtent, Call as TxCall, BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
+	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
 };
 use runtime::{
 	BuildStorage, Executive, Hash, Header, Runtime, RuntimeCall, RuntimeOrigin, SignedPayload,
@@ -121,7 +121,7 @@ fn transaction_storage_runtime_sizes() {
 			advance_block();
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
-				RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store {
+				RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::store {
 					data: vec![0u8; size],
 				}),
 			);
@@ -141,17 +141,17 @@ fn transaction_storage_runtime_sizes() {
 			runtime::RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			oversize as u64,
+			oversized,
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 1_u32, bytes: oversize as u64 },
+			AuthorizationExtent { transactions: 1_u32, bytes: oversized },
 		);
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				account.pair(),
-				RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store {
-					data: vec![0u8; oversize]
+				RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::store {
+					data: vec![0u8; oversized as usize]
 				})
 			),
 			Err(BAD_DATA_SIZE.into())
