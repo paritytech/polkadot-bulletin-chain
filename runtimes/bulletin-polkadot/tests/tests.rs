@@ -12,8 +12,9 @@ use sp_runtime::traits::Dispatchable;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::ApplyExtrinsicResult;
 use sp_transaction_storage_proof::TransactionStorageProof;
+use pallet_transaction_storage::DEFAULT_MAX_TRANSACTION_SIZE;
 
-fn run_to_block(n: u32) {
+fn advance_block() {
 	Executive::finalize_block();
 	let next_number = System::block_number() + 1;
 	let header = Header::new(next_number, Default::default(), Default::default(), Default::default(), Default::default());
@@ -118,12 +119,27 @@ fn transaction_storage_runtime_sizes() {
 			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
 
 			block_number += 1;
-			run_to_block(block_number);
+			advance_block();
 		}
 
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+
+		// 11 MB should exceed MaxTransactionSize (8 MB) and fail
+		let oversize: usize = DEFAULT_MAX_TRANSACTION_SIZE as usize + 1;//11 * 1024 * 1024;
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			runtime::RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			oversize as u64,
+		));
+		let too_big_call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; oversize] });
+		let res = construct_and_apply_extrinsic(alice_pair, too_big_call);
+		assert_eq!(
+			res,
+			Err(BAD_DATA_SIZE.into())
 		);
 
 	});
