@@ -110,11 +110,10 @@ fn transaction_storage_runtime_sizes() {
 
 		// store data
 		for (index, size) in sizes.into_iter().enumerate() {
+			advance_block();
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
 			let res = construct_and_apply_extrinsic(account.pair(), call);
 			assert!(res.is_ok(), "Failed at index: {index} for size: {size}");
-
-			advance_block();
 		}
 
 		assert_eq!(
@@ -123,6 +122,7 @@ fn transaction_storage_runtime_sizes() {
 		);
 
 		// 11 MB should exceed MaxTransactionSize (8 MB) and fail
+		advance_block();
 		let oversize: usize = DEFAULT_MAX_TRANSACTION_SIZE as usize + 1;//11 * 1024 * 1024;
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			runtime::RuntimeOrigin::root(),
