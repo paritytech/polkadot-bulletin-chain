@@ -251,7 +251,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 	}
 }
 
-// TODO: check
+// TODO: check - remove and use BridgeMessage
 /// Decode inbound `BridgeMessage` from PeoplePolkadot parachain.
 pub(crate) fn decode_bridge_message(
 	blob: &XcmAsPlainPayload,
