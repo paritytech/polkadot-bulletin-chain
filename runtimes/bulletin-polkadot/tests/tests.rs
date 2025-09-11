@@ -132,9 +132,11 @@ fn transaction_storage_runtime_sizes() {
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 		);
 
-		// 11 MB should exceed MaxTransactionSize (8 MB) and fail
+		// (MaxTransactionSize+1) should exceed MaxTransactionSize and fail
+		let oversized: u64 =
+			(<<runtime::Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get() + 1)
+				.into();
 		advance_block();
-		let oversize: usize = DEFAULT_MAX_TRANSACTION_SIZE as usize + 1; //11 * 1024 * 1024;
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			runtime::RuntimeOrigin::root(),
 			who.clone(),
