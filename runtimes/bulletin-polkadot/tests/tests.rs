@@ -13,14 +13,17 @@ use sp_runtime::ApplyExtrinsicResult;
 use pallet_transaction_storage::DEFAULT_MAX_TRANSACTION_SIZE;
 
 fn advance_block() {
-	Executive::finalize_block();
-	let next_number = System::block_number() + 1;
+	let current_number = System::block_number();
+	if current_number > 0 {
+		Executive::finalize_block();
+	}
+	let next_number = current_number + 1;
 	let header = Header::new(next_number, Default::default(), Default::default(), Default::default(), Default::default());
 	Executive::initialize_block(&header);
 
 	let slot = runtime::Babe::current_slot();
 	let now = slot.saturated_into::<u64>() * runtime::SLOT_DURATION;
-	runtime::Timestamp::set(RuntimeOrigin::none(), now).unwrap();
+	assert_ok!(runtime::Timestamp::set(RuntimeOrigin::none(), now));
 }
 
 fn construct_extrinsic(
@@ -79,16 +82,11 @@ fn transaction_storage_runtime_sizes() {
 		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
 	)
 	.execute_with(|| {
-		// Start at block 1
-		runtime::System::set_block_number(1);
-		runtime::TransactionStorage::on_initialize(1);
-		// set timestamp for block 1
-		let slot = runtime::Babe::current_slot();
-		let now = slot.saturated_into::<u64>() * runtime::SLOT_DURATION;
-		runtime::Timestamp::set(RuntimeOrigin::none(), now).unwrap();
+		advance_block();
 
-
-		let who: runtime::AccountId = sp_keyring::Sr25519Keyring::Alice.to_account_id();
+		// prepare data     
+		let account = Sr25519Keyring::Alice;
+		let who: runtime::AccountId = account.to_account_id();
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB
@@ -98,6 +96,7 @@ fn transaction_storage_runtime_sizes() {
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
+		// authorize
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			runtime::RuntimeOrigin::root(),
 			who.clone(),
@@ -109,10 +108,10 @@ fn transaction_storage_runtime_sizes() {
 			AuthorizationExtent { transactions: sizes.len() as u32, bytes: total_bytes },
 		);
 
-		let alice_pair = Sr25519Keyring::Alice.pair();
+		// store data
 		for size in sizes {
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
-			let res = construct_and_apply_extrinsic(alice_pair.clone(), call);
+			let res = construct_and_apply_extrinsic(account.pair(), call);
 			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
 
 			advance_block();
@@ -127,12 +126,12 @@ fn transaction_storage_runtime_sizes() {
 		let oversize: usize = DEFAULT_MAX_TRANSACTION_SIZE as usize + 1;//11 * 1024 * 1024;
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			runtime::RuntimeOrigin::root(),
-			who.clone(),
+			who,
 			1,
 			oversize as u64,
 		));
 		let too_big_call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; oversize] });
-		let res = construct_and_apply_extrinsic(alice_pair, too_big_call);
+		let res = construct_and_apply_extrinsic(account.pair(), too_big_call);
 		assert_eq!(
 			res,
 			Err(BAD_DATA_SIZE.into())
