@@ -137,10 +137,14 @@ fn transaction_storage_runtime_sizes() {
 		let oversize: usize = DEFAULT_MAX_TRANSACTION_SIZE as usize + 1; //11 * 1024 * 1024;
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			runtime::RuntimeOrigin::root(),
-			who,
+			who.clone(),
 			1,
 			oversize as u64,
 		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1_u32, bytes: oversize as u64 },
+		);
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				account.pair(),
