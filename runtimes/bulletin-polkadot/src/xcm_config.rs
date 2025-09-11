@@ -96,11 +96,10 @@ impl WeightTrader for NoopTrader {
 	}
 }
 
-// TODO: wrong
 /// Allows execution from `origin` if it is contained in `AllowedOrigin`
 /// and if it is just a straight `Transact` which contains any call.
 ///
-/// That's a 1:1 copy of corresponding Cumulus structure.
+/// That's a 1:1 copy of the corresponding Cumulus structure.
 pub struct AllowUnpaidTransactsFrom<RuntimeCall, AllowedOrigin>(
 	sp_std::marker::PhantomData<(RuntimeCall, AllowedOrigin)>,
 );
@@ -120,6 +119,8 @@ impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 		{:?}", 			origin, instructions, max_weight, _properties,
 		);
 
+		// TODO: check if this is enough, because we don't filter `Transact` at all,
+		// but instead we allow all XCM instruction processing.
 		// we only allow from configured origins
 		ensure!(AllowedOrigin::contains(origin), ProcessMessageError::Unsupported);
 
@@ -139,7 +140,8 @@ pub type XcmRouter = LocalExporter<ToBridgeHaulBlobExporter, UniversalLocation>;
 /// The barriers one of which must be passed for an XCM message to be executed.
 pub type Barrier = TrailingSetTopicAsId<
 	WithComputedOrigin<
-		// We only allow unpaid execution from the PeoplePolkadot parachain.
+		// TODO: check if this is working, I think we executed `Trap` in zombienet with
+		// `DescendOrigin`. We only allow unpaid execution from the PeoplePolkadot parachain.
 		AllowUnpaidTransactsFrom<RuntimeCall, OnlyPeoplePolkadotLocation>,
 		UniversalLocation,
 		ConstU32<2>,
@@ -213,8 +215,6 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		let message: Xcm<RuntimeCall> =
 			message.try_into().map_err(|_| DispatchBlobError::UnsupportedXcmVersion)?;
 
-		// TODO: security - filter DesendOrigin
-
 		log::trace!(
 			target: "runtime::xcm",
 			"Going to dispatch XCM message from {:?}: {:?}",
@@ -230,6 +230,8 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		// execute the XCM program
 		let mut message_hash = message.using_encoded(blake2_256);
 		XcmExecutor::<XcmConfig>::prepare_and_execute(
+			// TODO: double-check if this, maybe should be just `Here`, I think we executed `Trap`
+			// in zombienet with `DescendOrigin`.
 			PeoplePolkadotLocation::get(),
 			message,
 			&mut message_hash,
