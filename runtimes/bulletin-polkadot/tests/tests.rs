@@ -109,10 +109,10 @@ fn transaction_storage_runtime_sizes() {
 		);
 
 		// store data
-		for size in sizes {
+		for (index, size) in sizes.into_iter().enumerate() {
 			let call = RuntimeCall::TransactionStorage(TxCall::<runtime::Runtime>::store { data: vec![0u8; size] });
 			let res = construct_and_apply_extrinsic(account.pair(), call);
-			assert!(res.is_ok(), "Failed at size={} bytes: {:?}", size, res);
+			assert!(res.is_ok(), "Failed at index: {index} for size: {size}");
 
 			advance_block();
 		}
