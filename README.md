@@ -52,6 +52,28 @@ Stores arbitrary data on IPFS via the `store` extrinsic, provided that either th
 
 ## Prepare for a production
 
+### Requirements
+
+There are no special requirements for the production runtime (just as the usual [validator/node](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator)), except those related to IPFS support.
+With the current configuration, the maximum storage requirement is estimated as follows:
+
+* Storing data for up to 2 weeks:
+
+  $$
+  2 \times 7 \times 24 \times 60 \times 60 = 1,209,600 \, \text{seconds}
+  $$
+
+  divided by a 6-second block time = **201,600 blocks**
+
+* Each block can contain up to 8–10 MiB (based on `MaxTransactionSize = 8 MiB` and `BlockLength = 1 MiB`)
+* Total = **1,612,800–2,016,000 MiB ≈ 1,575–1,968 GiB of storage (maximum)**
+
+But this is the maximum limit, assuming full utilization of every block for two weeks, which we are unlikely to reach.
+
+TODO: @georgepisaltu Can we provide a more realistic estimate based on the testnet data?
+
+TODO: @georgepisaltu Is this still valid that we need to keep 2-week data?
+
 ### Prepare keys for a production chain
 
 This chapter provides a one-time example setup. For more details about running a validator and key management, see: [https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”).
