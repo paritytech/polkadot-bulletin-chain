@@ -65,7 +65,7 @@ With the current configuration, the maximum storage requirement is estimated as 
 
   divided by a 6-second block time = **201,600 blocks**
 
-* Each block can contain up to 8–10 MiB (based on `MaxTransactionSize = 8 MiB` and `BlockLength = 1 MiB`)
+* Each block can contain up to 8–10 MiB (based on `MaxTransactionSize = 8 MiB` and `BlockLength = 10 MiB`)
 * Total = **1,612,800–2,016,000 MiB ≈ 1,575–1,968 GiB of storage (maximum)**
 
 But this is the maximum limit, assuming full utilization of every block for two weeks, which we are unlikely to reach.
