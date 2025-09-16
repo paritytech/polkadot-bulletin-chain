@@ -97,6 +97,7 @@ sp-io = { workspace = true }
 sp-keyring = { workspace = true }
 sp-trie = { workspace = true }
 static_assertions = { workspace = true }
+sp-tracing = { workspace = true }
 
 [features]
 default = ["std"]

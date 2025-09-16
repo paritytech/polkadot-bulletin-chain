@@ -49,8 +49,11 @@ pub use weights::WeightInfo;
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
 /// Maximum bytes that can be stored in one transaction.
+// TODO: find out what is "allocator" and "allocator limit"
 // Setting higher limit also requires raising the allocator limit.
+// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
+// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
