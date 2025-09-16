@@ -54,7 +54,7 @@ Stores arbitrary data on IPFS via the `store` extrinsic, provided that either th
 
 ### Prepare keys for a production chain
 
-This chapter provides a one-time example setup. For more details about running a validator and key management, see: [https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”).
+This chapter provides a one-time example setup. For more details about running a validator and key management, see: [https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”).
 
 **Prerequisites:**
 ```
@@ -166,11 +166,11 @@ _Note: This is relevant only for the initial launch; after that, we expect Polka
 * Run node
    ```
    # point to updated chain spec
-   ./target/release/polkadot-bulletin-chain --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   ./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
    or
    # rebuild because of updated chain spec
    cargo build --release -p polkadot-bulletin-chain
-   ./target/release/polkadot-bulletin-chain --validator --chain bulletin-polkadot --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   ./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
    ```
 * **You should see finalized blocks in the logs.**
 * **!!! Push changes `./scripts/create_bulletin_polkadot_spec.sh` !!!**
@@ -180,7 +180,7 @@ _Note: This is relevant only for the initial launch; after that, we expect Polka
 ### Run production chain
 ```
 # You can omit `--validator` if you are not part of the active validator set.
-./target/release/polkadot-bulletin-chain --validator --chain bulletin-polkadot <other-relevant-params: ./target/release/polkadot-bulletin-chain --help>
+./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot <other-relevant-params: ./target/release/polkadot-bulletin-chain --help>
 ```
 
 ### Run local chain
