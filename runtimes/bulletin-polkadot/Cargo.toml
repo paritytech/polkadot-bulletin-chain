@@ -84,7 +84,6 @@ pallet-xcm = { optional = true, workspace = true }
 pallet-staking = { optional = true, workspace = true }
 sp-staking = { optional = true, workspace = true }
 parachains-common = { optional = true, workspace = true }
-# pallet-revive = { optional = true, workspace = true }
 
 [build-dependencies]
 substrate-wasm-builder = { optional = true, workspace = true }
