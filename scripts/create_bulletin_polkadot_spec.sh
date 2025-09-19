@@ -53,7 +53,7 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
     | jq '.id = "bulletin-polkadot"' \
     | jq '.chainType = "Live"' \
     | jq '.bootNodes = [
-        "/dns/bulletin.w3f.community/tcp/30333/wss/p2p/12D3KooWQsAhfYnMMkTjTzpphSZWW4i8uUNNFYcKeMvQ4fudqHfT"
+        "/dns/bulletin.w3f.community/tcp/30333/wss/p2p/12D3KooWNcnUiQ1kbbgjzcL5yA1PN1jbp5xsTJXBCqJZ8nF8HTUg"
     ]' \
     | jq '.genesis.runtimeGenesis.patch.session.keys = [
             [
