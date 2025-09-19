@@ -33,9 +33,6 @@ $binary build-spec --chain bulletin-polkadot-local > chain-spec-plain.json
 # convert runtime to hex
 cat $rt_path | od -A n -v -t x1 |  tr -d ' \n' > rt-hex.txt
 
-# TODO: provide bootNodes:
-# "/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/wss/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"
-
 # TODO: provide sessionKeys
 # TODO: provide validatorSet.initialValidators
 # TODO: provide relayerSet.initialRelayers
@@ -52,19 +49,21 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
     | jq '.name = "Polkadot Bulletin"' \
     | jq '.id = "bulletin-polkadot"' \
     | jq '.chainType = "Live"' \
-    | jq '.bootNodes = []' \
+    | jq '.bootNodes = [
+        "/dns/bulletin.w3f.community/tcp/30333/ws/p2p/12D3KooWNcnUiQ1kbbgjzcL5yA1PN1jbp5xsTJXBCqJZ8nF8HTUg"
+    ]' \
     | jq '.genesis.runtimeGenesis.patch.session.keys = [
             [
-                "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
-                "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
+                "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
+                "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
                     {
-                        "babe": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
-                        "grandpa": "5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w"
+                        "babe": "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
+                        "grandpa": "5EmjeC7fdUZg6zFEWkh5iVVYijTQitoAKnw2uHgiJ1dC6168"
                     }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
-            "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
+            "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
             "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
