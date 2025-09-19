@@ -158,7 +158,7 @@ _Note: This is relevant only for the initial launch; after that, we expect Polka
   * validator account public key
     * babe: <Babe public key (sr25519), e.g. 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9>
     * grandpa: <Grandpa public key (ed25519), e.g. 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w>
-* Update `.bootNodes` (if needed) - format: `"/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/wss/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"`
+* Update `.bootNodes` (if needed) - format: `"/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/ws(s)/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"`
 * Generate new chain spec:
    ```
    ./scripts/create_bulletin_polkadot_spec.sh ./target/production/wbuild/bulletin-polkadot-runtime/bulletin_polkadot_runtime.compact.compressed.wasm

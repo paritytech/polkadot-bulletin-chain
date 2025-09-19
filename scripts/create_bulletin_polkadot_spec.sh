@@ -33,9 +33,6 @@ $binary build-spec --chain bulletin-polkadot-local > chain-spec-plain.json
 # convert runtime to hex
 cat $rt_path | od -A n -v -t x1 |  tr -d ' \n' > rt-hex.txt
 
-# TODO: provide bootNodes:
-# "/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/wss/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"
-
 # TODO: provide sessionKeys
 # TODO: provide validatorSet.initialValidators
 # TODO: provide relayerSet.initialRelayers

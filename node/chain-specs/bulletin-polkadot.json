@@ -3,7 +3,7 @@
   "id": "bulletin-polkadot",
   "chainType": "Live",
   "bootNodes": [
-    "/dns/bulletin.w3f.community/tcp/30333/wss/p2p/12D3KooWNcnUiQ1kbbgjzcL5yA1PN1jbp5xsTJXBCqJZ8nF8HTUg"
+    "/dns/bulletin.w3f.community/tcp/30333/ws/p2p/12D3KooWNcnUiQ1kbbgjzcL5yA1PN1jbp5xsTJXBCqJZ8nF8HTUg"
   ],
   "telemetryEndpoints": null,
   "protocolId": "dot-bulletin",
