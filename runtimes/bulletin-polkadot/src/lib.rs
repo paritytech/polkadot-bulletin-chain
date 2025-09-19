@@ -117,7 +117,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
 	impl_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
 	authoring_version: 0,
-	spec_version: 1_000_000,
+	spec_version: 1_000_001,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
