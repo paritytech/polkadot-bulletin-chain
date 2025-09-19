@@ -283,6 +283,7 @@ pub(crate) mod tests {
 	use pallet_bridge_messages::Config as MessagesConfig;
 	use sp_keyring::Sr25519Keyring as AccountKeyring;
 	use xcm_builder::BridgeMessage;
+	use xcm_executor::traits::Properties;
 
 	type Dispatcher =
 		<Runtime as MessagesConfig<WithPeoplePolkadotMessagesInstance>>::MessageDispatch;
@@ -399,44 +400,36 @@ pub(crate) mod tests {
 	// 		})
 	// 	}
 	//
-	// 	#[test]
-	// 	fn encoded_test_xcm_message_to_bulletin_chain() {
-	// 		// this "test" is currently used to encode dummy message for Polkadot BH -> Bulletin
-	// 		// bridge. Once we have real sending chain (Kawabunga), it could be removed
-	// 		println!("{}", hex::encode(&encoded_xcm_message_from_bridge_hub_polkadot()));
-	// 	}
-	//
-	// 	#[test]
-	// 	fn expected_message_from_kawabunga_passes_barrier() {
-	// 		// prepare message that we expect to come from the Polkadot BH
-	// 		// (everything is relative to Polkadot BH)
-	// 		let bridge_hub_universal_location = X2(GlobalConsensus(Polkadot), Parachain(1002));
-	// 		let kawabunga_origin = MultiLocation::new(1, Parachain(KAWABUNGA_PARACHAIN_ID));
-	// 		let universal_source =
-	// 			bridge_hub_universal_location.within_global(kawabunga_origin).unwrap();
-	// 		let (local_net, local_sub) = universal_source.split_global().unwrap();
-	// 		let mut xcm: Xcm<RuntimeCall> = vec![
-	// 			UniversalOrigin(GlobalConsensus(local_net)),
-	// 			DescendOrigin(local_sub),
-	// 			Transact {
-	// 				origin_kind: OriginKind::Superuser,
-	// 				require_weight_at_most: Weight::MAX,
-	// 				call: RuntimeCall::System(frame_system::Call::remark { remark: vec![42] })
-	// 					.encode()
-	// 					.into(),
-	// 			},
-	// 		]
-	// 		.into();
-	//
-	// 		// ensure that it passes local XCM Barrier
-	// 		assert_eq!(
-	// 			Barrier::should_execute(
-	// 				&Here.into(),
-	// 				xcm.inner_mut(),
-	// 				Weight::MAX,
-	// 				&mut Properties { weight_credit: Weight::MAX, message_id: None },
-	// 			),
-	// 			Ok(())
-	// 		);
-	// 	}
+	#[test]
+	fn expected_message_from_people_polkadot_passes_barrier() {
+		// prepare a message that we expect to come from the Polkadot BH
+		// (everything is relative to Polkadot BH)
+		let people_polkadot_as_universal_source: InteriorLocation =
+			[GlobalConsensus(BridgedNetwork::get()), Parachain(PEOPLE_POLKADOT_PARACHAIN_ID)]
+				.into();
+		let (local_net, local_sub) = people_polkadot_as_universal_source.split_global().unwrap();
+		let mut xcm: Xcm<RuntimeCall> = vec![
+			UniversalOrigin(GlobalConsensus(local_net)),
+			DescendOrigin(local_sub),
+			Transact {
+				origin_kind: OriginKind::Superuser,
+				fallback_max_weight: None,
+				call: RuntimeCall::System(frame_system::Call::remark { remark: vec![42] })
+					.encode()
+					.into(),
+			},
+		]
+		.into();
+
+		// ensure that it passes local XCM Barrier
+		assert_eq!(
+			Barrier::should_execute(
+				&Here.into(),
+				xcm.inner_mut(),
+				Weight::MAX,
+				&mut Properties { weight_credit: Weight::MAX, message_id: None },
+			),
+			Ok(())
+		);
+	}
 }
