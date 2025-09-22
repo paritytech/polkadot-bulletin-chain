@@ -54,6 +54,14 @@ Stores arbitrary data on IPFS via the `store` extrinsic, provided that either th
 
 ### Requirements
 
+#### Validator node args
+
+The validator node should be started with the following arguments:
+* `--ipfs-server` - enables IPFS support.
+* `--network-backend=litep2p` - enables Bitswap support, which is only available with the litep2p network backend, but this is Substrate’s default.
+
+#### Storage
+
 There are no special requirements for the production runtime (just as the usual [validator/node](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator)), except those related to IPFS support.
 With the current configuration, the maximum storage requirement is estimated as follows:
 
