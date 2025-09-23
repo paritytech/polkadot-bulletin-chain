@@ -7,9 +7,9 @@ use crate::{
 use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE};
 use polkadot_bulletin_chain_runtime::Block;
 use sc_cli::SubstrateCli;
+use sc_network::config::NetworkBackendType;
 use sc_service::PartialComponents;
 use std::{sync::Arc, time::Duration};
-
 #[cfg(feature = "try-runtime")]
 use {
 	polkadot_bulletin_chain_runtime::SLOT_DURATION,
@@ -237,6 +237,18 @@ pub fn run() -> sc_cli::Result<()> {
 
 					);
 					config.network.idle_connection_timeout = IPFS_WORKAROUND_TIMEOUT;
+				}
+
+				if config.network.ipfs_server {
+					match config.network.network_backend {
+						NetworkBackendType::Litep2p => (),
+						NetworkBackendType::Libp2p => {
+							return Err(
+								"For `ipfs-server`, we expect only the `config.network.network_backend=litep2p` (`--network-backend=litep2p`) setting, because Bitswap support requires it!"
+									.into(),
+							)
+						}
+					}
 				}
 
 				service::new_full::<sc_network::Litep2pNetworkBackend>(config)
