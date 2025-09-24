@@ -52,9 +52,39 @@ Stores arbitrary data on IPFS via the `store` extrinsic, provided that either th
 
 ## Prepare for a production
 
+### Requirements
+
+#### Validator node args
+
+The validator node should be started with the following arguments:
+* `--ipfs-server` - enables IPFS support.
+* `--network-backend=litep2p` - enables Bitswap support, which is only available with the litep2p network backend, but this is Substrate’s default.
+
+#### Storage
+
+There are no special requirements for the production runtime (just as the usual [validator/node](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator)), except those related to IPFS support.
+With the current configuration, the maximum storage requirement is estimated as follows:
+
+* Storing data for up to 2 weeks:
+
+  $$
+  2 \times 7 \times 24 \times 60 \times 60 = 1,209,600 \, \text{seconds}
+  $$
+
+  divided by a 6-second block time = **201,600 blocks**
+
+* Each block can contain up to 8–10 MiB (based on `MaxTransactionSize = 8 MiB` and `BlockLength = 10 MiB`)
+* Total = **1,612,800–2,016,000 MiB ≈ 1,575–1,968 GiB of storage (maximum)**
+
+But this is the maximum limit, assuming full utilization of every block for two weeks, which we are unlikely to reach.
+
+TODO: @georgepisaltu Can we provide a more realistic estimate based on the testnet data?
+
+TODO: @georgepisaltu Is this still valid that we need to keep 2-week data?
+
 ### Prepare keys for a production chain
 
-This chapter provides a one-time example setup. For more details about running a validator and key management, see: [https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”).
+This chapter provides a one-time example setup. For more details about running a validator and key management, see: [https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”).
 
 **Prerequisites:**
 ```
@@ -166,11 +196,11 @@ _Note: This is relevant only for the initial launch; after that, we expect Polka
 * Run node
    ```
    # point to updated chain spec
-   ./target/release/polkadot-bulletin-chain --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   ./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
    or
    # rebuild because of updated chain spec
    cargo build --release -p polkadot-bulletin-chain
-   ./target/release/polkadot-bulletin-chain --validator --chain bulletin-polkadot --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   ./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
    ```
 * **You should see finalized blocks in the logs.**
 * **!!! Push changes `./scripts/create_bulletin_polkadot_spec.sh` !!!**
@@ -180,7 +210,7 @@ _Note: This is relevant only for the initial launch; after that, we expect Polka
 ### Run production chain
 ```
 # You can omit `--validator` if you are not part of the active validator set.
-./target/release/polkadot-bulletin-chain --validator --chain bulletin-polkadot <other-relevant-params: ./target/release/polkadot-bulletin-chain --help>
+./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot <other-relevant-params: ./target/release/polkadot-bulletin-chain --help>
 ```
 
 ### Run local chain
