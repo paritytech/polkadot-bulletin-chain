@@ -135,6 +135,24 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
                         "babe": "5EqaVoqJY6QGK4DMCef5bDDYxMdJgrPcToDE9smrkUFMNBK7",
                         "grandpa": "5GfwHE99zesmMTZ9iBuQojp7WpsZmXuzf7nTspASLArfgsRB"
                     }
+            ],
+            # LuckyFriday
+            [
+                "5DCU9npKiBF9nKYxSenXqnATeKhdktxmTuiphtXDSJctKpcv",
+                "5DCU9npKiBF9nKYxSenXqnATeKhdktxmTuiphtXDSJctKpcv",
+                    {
+                        "babe": "5DCU9npKiBF9nKYxSenXqnATeKhdktxmTuiphtXDSJctKpcv",
+                        "grandpa": "5CWFeWVQwtuJxQbhoZjQ5HbJHzUM4UDSxTsQ29mx6rSaFHPh"
+                    }
+            ],
+            # STKD
+            [
+                "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF",
+                "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF",
+                    {
+                        "babe": "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF",
+                        "grandpa": "5D9Rm6zwSf94crszQFEwphhsU4r4L9RQ2Y5gWxKgseT8jUhT"
+                    }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
@@ -145,9 +163,12 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
             "5DUuWj49HpvNdWuD9Gsa3q4zqvzcfMx73bpxpn72FP9YvXWn",
             "5CkCZbuP2qzwy163fm6b7Y95evqvkwHwkBf9K11E43XXFKwF",
             "5DLCJxpSXYTRxJh7b9QFhQKr9nh3e5D298AruWGcM6tpNczM",
-            "5EqaVoqJY6QGK4DMCef5bDDYxMdJgrPcToDE9smrkUFMNBK7"
+            "5EqaVoqJY6QGK4DMCef5bDDYxMdJgrPcToDE9smrkUFMNBK7",
+            "5DCU9npKiBF9nKYxSenXqnATeKhdktxmTuiphtXDSJctKpcv",
+            "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
+            "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
             "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
         ]' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotGrandpa.owner)' \
