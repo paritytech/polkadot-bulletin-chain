@@ -13,6 +13,25 @@
 # This will return hex encoded call `pallet_bridge_grandpa::Call::initialize { init_data }`,
 # and then we can log `init_data` as JSON by: `serde_json::to_string(&init_data)` and use it for genesis JSON.
 
+# After launch, we can relay Polkadot finality
+#~/local_bridge_testing/bin/substrate-relay relay-headers polkadot-to-polkadot-bulletin \
+#      --only-free-headers \
+#      --source-uri wss://polkadot-rpc.dwellir.com \
+#      --source-version-mode Auto \
+#      --target-uri ws://localhost:10000 \
+#      --target-version-mode Auto \
+#      --target-signer //Alice \
+#      --target-transactions-mortality 4
+#
+#~/local_bridge_testing/bin/substrate-relay relay-parachains polkadot-to-polkadot-bulletin \
+#        --only-free-headers \
+#        --source-uri wss://polkadot-rpc.dwellir.com \
+#        --source-version-mode Auto \
+#        --target-uri ws://localhost:10000 \
+#        --target-version-mode Auto \
+#        --target-signer //Alice \
+#        --target-transactions-mortality 4
+
 # Add Alice(`5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY`) as pre-defined validator
 # We do this only if there is a `.genesis.runtimeGenesis.patch` object.
 # Otherwise we're working with the raw chain spec.
