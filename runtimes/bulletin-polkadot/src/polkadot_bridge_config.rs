@@ -1,6 +1,6 @@
 use crate::{
-	xcm_config::{decode_bridge_message, XcmConfig},
-	ConstU32, Runtime, RuntimeEvent,
+	xcm_config::{ImmediateExecutingXcmRouter, UniversalLocation, XcmConfig},
+	ConstU32, Runtime, RuntimeCall, RuntimeEvent,
 };
 use bp_messages::{
 	source_chain::MessagesBridge,
@@ -16,7 +16,10 @@ use scale_info::TypeInfo;
 use sp_runtime::SaturatedConversion;
 use sp_std::marker::PhantomData;
 use xcm::prelude::*;
-use xcm_builder::{DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError, HaulBlobExporter};
+use xcm_builder::{
+	BridgeBlobDispatcher, BridgeMessage, DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError,
+	HaulBlobExporter,
+};
 use xcm_executor::XcmExecutor;
 
 use frame_support::weights::Weight;
@@ -322,7 +325,8 @@ impl pallet_bridge_messages::Config<WithPeoplePolkadotMessagesInstance> for Runt
 	type OnMessagesDelivered = ();
 }
 
-/// Message dispatcher that decodes XCM message and return its actual dispatch weight.
+/// Message dispatcher that decodes XCM message and return its actual dispatch weight
+/// (Because we are doing direct dispatch with `ImmediateExecutingXcmRouter`).
 pub struct WithXcmWeightDispatcher<Inner>(PhantomData<Inner>);
 
 impl<Inner> MessageDispatch for WithXcmWeightDispatcher<Inner>
@@ -345,8 +349,16 @@ where
 			.payload
 			.as_ref()
 			.map_err(drop)
-			.and_then(|payload| decode_bridge_message(payload).map(|(_, xcm)| xcm).map_err(drop))
-			.and_then(|xcm| xcm.try_into().map_err(drop))
+			.and_then(|payload| {
+				BridgeMessage::decode(&mut &payload[..])
+					.map(|BridgeMessage { message: xcm, .. }| xcm)
+					.map_err(drop)
+			})
+			.and_then(|xcm| {
+				xcm.try_into()
+					.map(Xcm::<<XcmConfig as xcm_executor::Config>::RuntimeCall>::from)
+					.map_err(drop)
+			})
 			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
 			.map(|weighed_xcm| weighed_xcm.weight_of())
 			.unwrap_or(Weight::zero())
@@ -362,8 +374,14 @@ where
 	}
 }
 
-/// Dispatches received XCM messages from the Polkadot Bridge Hub.
-pub type FromPeoplePolkadotBlobDispatcher = crate::xcm_config::ImmediateXcmDispatcher;
+/// Dispatches received XCM messages from the People Polkadot.
+pub type FromPeoplePolkadotBlobDispatcher = BridgeBlobDispatcher<
+	// TODO: setup pallet-message-queue and enqueued dispatch with MessageQueue (see the docs for
+	// `DispatchBlob`).
+	ImmediateExecutingXcmRouter<XcmExecutor<XcmConfig>, RuntimeCall, PeoplePolkadotLocation>,
+	UniversalLocation,
+	(),
+>;
 
 pub struct XcmBlobHauler<Runtime, MessagesInstance> {
 	_marker: PhantomData<(Runtime, MessagesInstance)>,
