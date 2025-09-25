@@ -9,7 +9,7 @@ chain_spec_command = "{{ENV_PATH}}/adjust_bp_spec.sh {% raw %} {{chainName}} {% 
 
 	[[relaychain.nodes]]
 	name = "alice"
-	rpc_port = 12345
+	rpc_port = 10000
 	p2p_port = 33333
 	validator = true
 	args = [ "--ipfs-server", "-lruntime=trace"]
