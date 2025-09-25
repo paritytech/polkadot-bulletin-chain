@@ -153,6 +153,24 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
                         "babe": "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF",
                         "grandpa": "5D9Rm6zwSf94crszQFEwphhsU4r4L9RQ2Y5gWxKgseT8jUhT"
                     }
+            ],
+            # RotkoNetworks
+            [
+                "5FHxUPa3G1qDc2Ydk5kbeBhsSiBk1oDahs1GTpnYpWauNjG2",
+                "5FHxUPa3G1qDc2Ydk5kbeBhsSiBk1oDahs1GTpnYpWauNjG2",
+                    {
+                        "babe": "5FHxUPa3G1qDc2Ydk5kbeBhsSiBk1oDahs1GTpnYpWauNjG2",
+                        "grandpa": "5GrBSoJoDQHWp6u9bc1YgymEFYinA2gKCcutQNRmuvBzrYts"
+                    }
+            ],
+            # Interweb
+            [
+                "5FxEUwCxuneTboWyWjon7bbKuV7SFVMra1FsR34B5LMmvJoc",
+                "5FxEUwCxuneTboWyWjon7bbKuV7SFVMra1FsR34B5LMmvJoc",
+                    {
+                      "babe": "5FxEUwCxuneTboWyWjon7bbKuV7SFVMra1FsR34B5LMmvJoc",
+                      "grandpa": "5FBeLdNEy9g9SXuYqJdYQiMLFUn1r11BsXrbFEpfSZobD8sX"
+                    }
             ]
         ]' \
     | jq '.genesis.runtimeGenesis.patch.validatorSet.initialValidators = [
@@ -165,7 +183,9 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
             "5DLCJxpSXYTRxJh7b9QFhQKr9nh3e5D298AruWGcM6tpNczM",
             "5EqaVoqJY6QGK4DMCef5bDDYxMdJgrPcToDE9smrkUFMNBK7",
             "5DCU9npKiBF9nKYxSenXqnATeKhdktxmTuiphtXDSJctKpcv",
-            "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF"
+            "5CqUVRYw4tmPEqQrKKq8CibPMTK4Jj5rXdzPJtK5mBZgE1EF",
+            "5FHxUPa3G1qDc2Ydk5kbeBhsSiBk1oDahs1GTpnYpWauNjG2",
+            "5FxEUwCxuneTboWyWjon7bbKuV7SFVMra1FsR34B5LMmvJoc"
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
             "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
