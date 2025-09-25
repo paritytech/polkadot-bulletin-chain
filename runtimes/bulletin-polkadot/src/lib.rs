@@ -610,6 +610,7 @@ pub type TxExtension = (
 	frame_system::CheckWeight<Runtime>,
 	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
+	frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 );
 
 /// Unchecked extrinsic type as expected by this runtime.

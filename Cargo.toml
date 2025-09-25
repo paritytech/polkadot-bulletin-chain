@@ -38,6 +38,7 @@ frame-system-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk.
 frame-system-rpc-runtime-api = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52", default-features = false }
 frame-try-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52", default-features = false }
 polkadot-sdk-frame = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52", default-features = false }
+frame-metadata-hash-extension = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52", default-features = false }
 
 sc-basic-authorship = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52" }
 sc-cli = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "a64eb1fb02d4012948cba024fca2f27d94732e52" }

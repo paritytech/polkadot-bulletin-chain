@@ -20,6 +20,7 @@ frame-executive = { workspace = true }
 frame-support = { workspace = true }
 frame-system = { workspace = true }
 frame-try-runtime = { workspace = true, optional = true }
+frame-metadata-hash-extension = { workspace = true }
 pallet-authorship = { workspace = true }
 pallet-babe = { workspace = true }
 pallet-grandpa = { workspace = true }
@@ -235,3 +236,7 @@ try-runtime = [
 	"parachains-common?/try-runtime",
 	"sp-runtime/try-runtime",
 ]
+
+
+# Enable the metadata hash generation in the wasm builder.
+metadata-hash = ["substrate-wasm-builder/metadata-hash"]
