@@ -184,7 +184,7 @@ parameter_types! {
 	// (Note: Possibly we can add new one.)
 	pub const SS58Prefix: u8 = 42;
 
-	pub const MaxAuthorities: u32 = 100; // TODO
+	pub const MaxAuthorities: u32 = 100;
 
 	pub const EquivocationReportPeriodInEpochs: u64 = 168;
 	pub const EquivocationReportPeriodInBlocks: u64 =
@@ -249,6 +249,9 @@ impl frame_system::Config for Runtime {
 	/// This is used as an identifier of the chain. 42 is the generic substrate prefix.
 	type SS58Prefix = SS58Prefix;
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
+	/// Weight information for the extrinsics of this pallet.
+	type SystemWeightInfo = weights::frame_system::WeightInfo<Runtime>;
+	type ExtensionsWeightInfo = weights::frame_system_extensions::WeightInfo<Runtime>;
 }
 
 impl pallet_validator_set::Config for Runtime {
@@ -633,6 +636,7 @@ mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_benchmarking::baseline, Baseline::<Runtime>]
 		[frame_system, SystemBench::<Runtime>]
+		[frame_system_extensions, SystemExtensionsBench::<Runtime>]
 		[pallet_timestamp, Timestamp]
 		[pallet_transaction_storage, TransactionStorage]
 		[pallet_validator_set, ValidatorSet]
@@ -644,7 +648,9 @@ mod benches {
 	);
 
 	pub use frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList};
-	pub use frame_system_benchmarking::Pallet as SystemBench;
+	pub use frame_system_benchmarking::{
+		extensions::Pallet as SystemExtensionsBench, Pallet as SystemBench,
+	};
 
 	pub use frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys};
 	pub use sp_storage::TrackedStorageKey;
