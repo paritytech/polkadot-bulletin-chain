@@ -189,7 +189,7 @@ cat chain-spec-plain.json | jq --rawfile code rt-hex.txt '.genesis.runtimeGenesi
         ]' \
     | jq '.genesis.runtimeGenesis.patch.relayerSet.initialRelayers = [
             "5F1icJDawo79k3WmVMv9VcES5KgnBofTxokhZdFvHhPYeBa1",
-            "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
+            "5CSz6N73ga6gS2GPa2Np71AsCQNwPhdmkApJ8Wnup84AKLcy"
         ]' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotGrandpa.owner)' \
     | jq 'del(.genesis.runtimeGenesis.patch.bridgePolkadotParachains.owner)' \
