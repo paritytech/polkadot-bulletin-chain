@@ -7,6 +7,7 @@ use ::pallet_bridge_relayers::WeightInfo as _;
 use frame_support::weights::Weight;
 
 pub mod bridge_polkadot_relayers;
+pub mod frame_system;
 pub mod pallet_bridge_grandpa;
 pub mod pallet_bridge_messages;
 pub mod pallet_bridge_parachains;
