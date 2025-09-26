@@ -184,7 +184,7 @@ parameter_types! {
 	// (Note: Possibly we can add new one.)
 	pub const SS58Prefix: u8 = 42;
 
-	pub const MaxAuthorities: u32 = 100; // TODO
+	pub const MaxAuthorities: u32 = 100;
 
 	pub const EquivocationReportPeriodInEpochs: u64 = 168;
 	pub const EquivocationReportPeriodInBlocks: u64 =
