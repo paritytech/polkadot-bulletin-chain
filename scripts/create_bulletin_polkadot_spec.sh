@@ -45,8 +45,6 @@ cat $rt_path | od -A n -v -t x1 |  tr -d ' \n' > rt-hex.txt
 
 # Based on: https://github.com/paritytech/polkadot-bulletin-chain/pull/50
 
-# TODO: provide relayerSet.initialRelayers
-# TODO: replace 14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3 (//Bob)
 
 # replace the runtime in the spec with the given runtime and set some values to production
 # Boot nodes, invulnerables, and session keys from https://github.com/paritytech/devops/issues/2847
