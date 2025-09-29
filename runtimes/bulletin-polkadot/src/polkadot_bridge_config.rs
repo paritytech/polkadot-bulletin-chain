@@ -84,7 +84,7 @@ pub mod bp_polkadot {
 // TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
 pub mod bp_people_polkadot {
 	use bp_bridge_hub_cumulus::*;
-	pub use bp_bridge_hub_cumulus::{BlockNumber, Hash, EXTRA_STORAGE_PROOF_SIZE};
+	pub use bp_bridge_hub_cumulus::{BlockNumber, Hash, Hasher, Header, EXTRA_STORAGE_PROOF_SIZE};
 	use bp_messages::*;
 	use bp_runtime::{
 		decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain, ChainId,
@@ -455,18 +455,6 @@ pub mod benchmarking {
 #[cfg(test)]
 pub(crate) mod tests {
 	use super::*;
-	// 	use crate::{
-	// 		xcm_config::{
-	// 			tests::{
-	// 				encoded_xcm_message_from_people_polkadot,
-	// 				encoded_xcm_message_from_people_polkadot_require_wight_at_most,
-	// 			},
-	// 			BaseXcmWeight,
-	// 		},
-	// 		BridgePolkadotGrandpa, BridgePolkadotMessages, BridgeRejectObsoleteHeadersAndMessages,
-	// 		Executive, RuntimeCall, Signature, SignedExtra, SignedPayload, UncheckedExtrinsic,
-	// 		ValidateSigned,
-	// 	};
 	// 	use bp_header_chain::{justification::GrandpaJustification, HeaderChain, InitializationData};
 	// 	use bp_messages::{
 	// 		target_chain::DispatchMessageData, DeliveredMessages, InboundLaneData, MessageKey,
@@ -501,81 +489,13 @@ pub(crate) mod tests {
 		// 		transaction_validity::{InvalidTransaction, TransactionValidityError},
 		BuildStorage,
 	};
-	// 	use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
-	//
-	// 	const POLKADOT_HEADER_NUMBER: bp_polkadot::BlockNumber = 100;
-	// 	const people_hub_HEADER_NUMBER: bp_people_polkadot::BlockNumber = 200;
-	//
-	// 	#[derive(Clone, Copy)]
-	// 	enum HeaderType {
-	// 		WithMessages,
-	// 		WithDeliveredMessages,
-	// 	}
 	//
 	// 	fn relayer_account_at_polkadot() -> bp_polkadot::AccountId {
 	// 		[42u8; 32].into()
 	// 	}
-	//
-	// 	fn sudo_signer() -> AccountKeyring {
-	// 		AccountKeyring::Alice
-	// 	}
-	//
 	fn relayer_signer() -> AccountKeyring {
 		AccountKeyring::Bob
 	}
-	//
-	// 	fn non_relay_signer() -> AccountKeyring {
-	// 		AccountKeyring::Charlie
-	// 	}
-	//
-	// 	fn polkadot_initial_header() -> bp_polkadot::Header {
-	// 		bp_test_utils::test_header(POLKADOT_HEADER_NUMBER - 1)
-	// 	}
-	//
-	// 	fn polkadot_header(t: HeaderType) -> bp_polkadot::Header {
-	// 		let people_polkadot_head_storage_proof = people_polkadot_head_storage_proof(t);
-	// 		let state_root = people_polkadot_head_storage_proof.0;
-	// 		bp_test_utils::test_header_with_root(POLKADOT_HEADER_NUMBER, state_root)
-	// 	}
-	//
-	// 	fn polkadot_grandpa_justification(t: HeaderType) ->
-	// GrandpaJustification<bp_polkadot::Header> { 		bp_test_utils::make_default_justification(&
-	// polkadot_header(t)) 	}
-	//
-	// 	fn people_polkadot_header(t: HeaderType) -> bp_people_polkadot::Header {
-	// 		bp_test_utils::test_header_with_root(
-	// 			people_hub_HEADER_NUMBER,
-	// 			match t {
-	// 				HeaderType::WithMessages => people_polkadot_message_storage_proof().0,
-	// 				HeaderType::WithDeliveredMessages =>
-	// 					people_polkadot_message_delivery_storage_proof().0,
-	// 			},
-	// 		)
-	// 	}
-	//
-	// 	fn people_polkadot_head_storage_proof(
-	// 		t: HeaderType,
-	// 	) -> (bp_polkadot::Hash, ParaHeadsProof) {
-	// 		let (state_root, proof, _) =
-	// 			bp_test_utils::prepare_parachain_heads_proof::<bp_polkadot::Header>(vec![(
-	// 				BridgeHubPolkadotOrPolkadot::PARACHAIN_ID,
-	// 				ParaHead(people_polkadot_header(t).encode()),
-	// 			)]);
-	// 		(state_root, proof)
-	// 	}
-	//
-	// 	fn people_polkadot_message_storage_proof() -> (bp_people_polkadot::Hash,
-	// RawStorageProof) 	{
-	// 		prepare_messages_storage_proof::<WithBridgeHubPolkadotMessageBridge>(
-	// 			XCM_LANE,
-	// 			1..=1,
-	// 			None,
-	// 			StorageProofSize::Minimal(0),
-	// 			vec![42],
-	// 			encode_all_messages,
-	// 			encode_lane_data,
-	// 		)
-	// 	}
 	//
 	// 	fn people_polkadot_message_proof(
 	// 	) -> FromBridgedChainMessagesProof<bp_people_polkadot::Hash> {
@@ -590,38 +510,6 @@ pub(crate) mod tests {
 	// 		}
 	// 	}
 	//
-	// 	fn people_polkadot_message_delivery_storage_proof(
-	// 	) -> (bp_people_polkadot::Hash, RawStorageProof) {
-	// 		let storage_key = bp_messages::storage_keys::inbound_lane_data_key(
-	// 			WithBridgeHubPolkadotMessageBridge::BRIDGED_MESSAGES_PALLET_NAME,
-	// 			&XCM_LANE,
-	// 		)
-	// 		.0;
-	// 		let storage_value = InboundLaneData::<AccountId> {
-	// 			relayers: vec![UnrewardedRelayer {
-	// 				relayer: relayer_signer().into(),
-	// 				messages: DeliveredMessages { begin: 1, end: 1 },
-	// 			}]
-	// 			.into(),
-	// 			last_confirmed_nonce: 0,
-	// 		}
-	// 		.encode();
-	// 		let mut root = Default::default();
-	// 		let mut mdb = MemoryDB::default();
-	// 		{
-	// 			let mut trie =
-	// 				TrieDBMutBuilderV1::<bp_people_polkadot::Hasher>::new(&mut mdb, &mut root)
-	// 					.build();
-	// 			trie.insert(&storage_key, &storage_value).unwrap();
-	// 		}
-	//
-	// 		let storage_proof =
-	// 			record_all_trie_keys::<LayoutV1<bp_people_polkadot::Hasher>, _>(&mdb, &root)
-	// 				.unwrap();
-	//
-	// 		(root, storage_proof)
-	// 	}
-	//
 	// 	fn people_polkadot_message_delivery_proof(
 	// 	) -> FromBridgedChainMessagesDeliveryProof<bp_people_polkadot::Hash> {
 	// 		let (_, storage_proof) = people_polkadot_message_delivery_storage_proof();
@@ -629,49 +517,7 @@ pub(crate) mod tests {
 	// 			people_polkadot_header(HeaderType::WithDeliveredMessages).hash();
 	// 		FromBridgedChainMessagesDeliveryProof { bridged_header_hash, storage_proof, lane: XCM_LANE
 	// } 	}
-	//
-	// 	fn polkadot_authority_set() -> AuthorityList {
-	// 		bp_test_utils::authority_list()
-	// 	}
-	//
-	// 	fn polkadot_authority_set_id() -> SetId {
-	// 		1
-	// 	}
-	//
-	// 	// normally we would simply use `RuntimeCall::dispatch` in tests, but we need to test
-	// 	// signed extension here, so we need to generate full-scale transaction and dispatch
-	// 	// it using `Executive`
-	// 	fn construct_and_apply_extrinsic(
-	// 		signer: AccountKeyring,
-	// 		call: RuntimeCall,
-	// 	) -> sp_runtime::ApplyExtrinsicResult {
-	// 		let nonce = frame_system::Account::<Runtime>::get(AccountId::from(signer)).nonce;
-	// 		let extra: SignedExtra = (
-	// 			frame_system::CheckNonZeroSender::<Runtime>::new(),
-	// 			frame_system::CheckSpecVersion::<Runtime>::new(),
-	// 			frame_system::CheckTxVersion::<Runtime>::new(),
-	// 			frame_system::CheckGenesis::<Runtime>::new(),
-	// 			frame_system::CheckEra::<Runtime>::from(Era::immortal()),
-	// 			frame_system::CheckNonce::<Runtime>::from(nonce),
-	// 			frame_system::CheckWeight::<Runtime>::new(),
-	// 			ValidateSigned,
-	// 			BridgeRejectObsoleteHeadersAndMessages,
-	// 		);
-	// 		let payload = SignedPayload::new(call.clone(), extra.clone()).unwrap();
-	// 		let signature = payload.using_encoded(|e| signer.sign(e));
-	// 		Executive::apply_extrinsic(UncheckedExtrinsic::new_signed(
-	// 			call,
-	// 			AccountId::from(signer.public()).into(),
-	// 			Signature::Sr25519(signature.clone()),
-	// 			extra,
-	// 		))
-	// 	}
-	//
-	// 	fn assert_ok_ok(apply_result: sp_runtime::ApplyExtrinsicResult) {
-	// 		assert_ok!(apply_result);
-	// 		assert_ok!(apply_result.unwrap());
-	// 	}
-	//
+
 	pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 		let _ = sp_tracing::try_init_simple();
 		let mut t = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
@@ -683,59 +529,7 @@ pub(crate) mod tests {
 
 		sp_io::TestExternalities::new(t).execute_with(test)
 	}
-	//
-	// 	fn initialize_polkadot_grandpa_pallet() -> sp_runtime::ApplyExtrinsicResult {
-	// 		construct_and_apply_extrinsic(
-	// 			sudo_signer(),
-	// 			RuntimeCall::Sudo(pallet_sudo::Call::sudo {
-	// 				call: Box::new(RuntimeCall::BridgePolkadotGrandpa(
-	// 					pallet_bridge_grandpa::Call::initialize {
-	// 						init_data: InitializationData {
-	// 							header: Box::new(polkadot_initial_header()),
-	// 							authority_list: polkadot_authority_set(),
-	// 							set_id: polkadot_authority_set_id(),
-	// 							operating_mode: BasicOperatingMode::Normal,
-	// 						},
-	// 					},
-	// 				)),
-	// 			}),
-	// 		)
-	// 	}
-	//
-	// 	fn submit_polkadot_header(
-	// 		signer: AccountKeyring,
-	// 		t: HeaderType,
-	// 	) -> sp_runtime::ApplyExtrinsicResult {
-	// 		construct_and_apply_extrinsic(
-	// 			signer,
-	// 			RuntimeCall::BridgePolkadotGrandpa(
-	// 				pallet_bridge_grandpa::Call::submit_finality_proof {
-	// 					finality_target: Box::new(polkadot_header(t)),
-	// 					justification: polkadot_grandpa_justification(t),
-	// 				},
-	// 			),
-	// 		)
-	// 	}
-	//
-	// 	fn submit_polkadot_people_hub_header(
-	// 		signer: AccountKeyring,
-	// 		t: HeaderType,
-	// 	) -> sp_runtime::ApplyExtrinsicResult {
-	// 		construct_and_apply_extrinsic(
-	// 			signer,
-	// 			RuntimeCall::BridgePolkadotParachains(
-	// 				pallet_bridge_parachains::Call::submit_parachain_heads {
-	// 					at_relay_block: (POLKADOT_HEADER_NUMBER, polkadot_header(t).hash()),
-	// 					parachains: vec![(
-	// 						BridgeHubPolkadotOrPolkadot::PARACHAIN_ID.into(),
-	// 						people_polkadot_header(t).hash(),
-	// 					)],
-	// 					parachain_heads_proof: people_polkadot_head_storage_proof(t).1,
-	// 				},
-	// 			),
-	// 		)
-	// 	}
-	//
+
 	// 	fn submit_messages_from_polkadot_bridge_hub(
 	// 		signer: AccountKeyring,
 	// 	) -> sp_runtime::ApplyExtrinsicResult {
@@ -771,17 +565,6 @@ pub(crate) mod tests {
 	// 		)
 	// 	}
 	//
-	// 	fn emulate_sent_messages() {
-	// 		pallet_bridge_messages::OutboundLanes::<Runtime,
-	// WithBridgeHubPolkadotMessagesInstance>::insert( 			XCM_LANE,
-	// 			OutboundLaneData {
-	// 				oldest_unpruned_nonce: 1,
-	// 				latest_received_nonce: 0,
-	// 				latest_generated_nonce: 1,
-	// 			},
-	// 		);
-	// 	}
-	//
 	// 	#[test]
 	// 	fn may_initialize_grandpa_pallet_using_sudo() {
 	// 		run_test(|| {
@@ -790,141 +573,6 @@ pub(crate) mod tests {
 	// 			assert_eq!(
 	// 				BridgePolkadotGrandpa::best_finalized(),
 	// 				Some(polkadot_initial_header().id())
-	// 			);
-	// 		});
-	// 	}
-	//
-	// 	#[test]
-	// 	fn only_relayer_may_submit_polkadot_headers() {
-	// 		run_test(|| {
-	// 			assert_ok_ok(initialize_polkadot_grandpa_pallet());
-	//
-	// 			assert_eq!(
-	// 				BridgePolkadotGrandpa::best_finalized(),
-	// 				Some(polkadot_initial_header().id())
-	// 			);
-	//
-	// 			// Non-relayer may not submit Polkadot headers
-	// 			// can't use assert_noop here, because we need to mutate storage inside
-	// 			// the `construct_and_apply_extrinsic`
-	// 			assert_eq!(
-	// 				submit_polkadot_header(non_relay_signer(), HeaderType::WithMessages),
-	// 				Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner))
-	// 			);
-	// 			assert_eq!(
-	// 				BridgePolkadotGrandpa::best_finalized(),
-	// 				Some(polkadot_initial_header().id())
-	// 			);
-	//
-	// 			// Relayer may submit Polkadot headers
-	// 			assert_ok_ok(submit_polkadot_header(relayer_signer(), HeaderType::WithMessages));
-	// 			assert_eq!(
-	// 				BridgePolkadotGrandpa::best_finalized(),
-	// 				Some(polkadot_header(HeaderType::WithMessages).id())
-	// 			);
-	// 		});
-	// 	}
-	//
-	// 	#[test]
-	// 	fn only_relayer_may_submit_polkadot_people_hub_headers() {
-	// 		run_test(|| {
-	// 			assert_ok_ok(initialize_polkadot_grandpa_pallet());
-	// 			assert_ok_ok(submit_polkadot_header(relayer_signer(), HeaderType::WithMessages));
-	//
-	// 			assert_eq!(
-	// 				BridgeHubPolkadotHeadersProvider::finalized_header_state_root(
-	// 					people_polkadot_header(HeaderType::WithMessages).hash()
-	// 				),
-	// 				None,
-	// 			);
-	//
-	// 			// Non-relayer may NOT submit Polkadot BH headers
-	// 			// can't use assert_noop here, because we need to mutate storage inside
-	// 			// the `construct_and_apply_extrinsic`
-	// 			assert_eq!(
-	// 				submit_polkadot_people_hub_header(non_relay_signer(), HeaderType::WithMessages),
-	// 				Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
-	// 			);
-	// 			assert_eq!(
-	// 				BridgeHubPolkadotHeadersProvider::finalized_header_state_root(
-	// 					people_polkadot_header(HeaderType::WithMessages).hash()
-	// 				),
-	// 				None
-	// 			);
-	//
-	// 			// Relayer may submit Polkadot BH headers
-	// 			assert_ok_ok(submit_polkadot_people_hub_header(
-	// 				relayer_signer(),
-	// 				HeaderType::WithMessages,
-	// 			));
-	// 			assert_eq!(
-	// 				BridgeHubPolkadotHeadersProvider::finalized_header_state_root(
-	// 					people_polkadot_header(HeaderType::WithMessages).hash()
-	// 				),
-	// 				Some(*people_polkadot_header(HeaderType::WithMessages).state_root())
-	// 			);
-	// 		});
-	// 	}
-	//
-	// 	#[test]
-	// 	fn only_relayer_may_deliver_messages_from_polkadot_bridge_hub() {
-	// 		run_test(|| {
-	// 			assert_ok_ok(initialize_polkadot_grandpa_pallet());
-	// 			assert_ok_ok(submit_polkadot_header(relayer_signer(), HeaderType::WithMessages));
-	// 			assert_ok_ok(submit_polkadot_people_hub_header(
-	// 				relayer_signer(),
-	// 				HeaderType::WithMessages,
-	// 			));
-	//
-	// 			assert!(BridgePolkadotMessages::inbound_lane_data(XCM_LANE).relayers.is_empty());
-	//
-	// 			// Non-relayer may NOT deliver messages from Polkadot BH
-	// 			assert_eq!(
-	// 				submit_messages_from_polkadot_bridge_hub(non_relay_signer()),
-	// 				Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
-	// 			);
-	// 			assert!(BridgePolkadotMessages::inbound_lane_data(XCM_LANE).relayers.is_empty());
-	//
-	// 			// Relayer may deliver messages from Polkadot BH
-	// 			assert_ok_ok(submit_messages_from_polkadot_bridge_hub(relayer_signer()));
-	// 			assert!(!BridgePolkadotMessages::inbound_lane_data(XCM_LANE).relayers.is_empty());
-	// 		});
-	// 	}
-	//
-	// 	#[test]
-	// 	fn only_relayer_may_deliver_confirmations_from_polkadot_bridge_hub() {
-	// 		run_test(|| {
-	// 			assert_ok_ok(initialize_polkadot_grandpa_pallet());
-	// 			assert_ok_ok(submit_polkadot_header(
-	// 				relayer_signer(),
-	// 				HeaderType::WithDeliveredMessages,
-	// 			));
-	// 			assert_ok_ok(submit_polkadot_people_hub_header(
-	// 				relayer_signer(),
-	// 				HeaderType::WithDeliveredMessages,
-	// 			));
-	// 			emulate_sent_messages();
-	//
-	// 			assert_eq!(
-	// 				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_received_nonce,
-	// 				0
-	// 			);
-	//
-	// 			// Non-relayer may NOT deliver confirmations from Polkadot BH
-	// 			assert_eq!(
-	// 				submit_confirmations_from_polkadot_bridge_hub(non_relay_signer()),
-	// 				Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
-	// 			);
-	// 			assert_eq!(
-	// 				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_received_nonce,
-	// 				0
-	// 			);
-	//
-	// 			// Relayer may deliver confirmations from Polkadot BH
-	// 			assert_ok_ok(submit_confirmations_from_polkadot_bridge_hub(relayer_signer()));
-	// 			assert_ne!(
-	// 				BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_received_nonce,
-	// 				0
 	// 			);
 	// 		});
 	// 	}

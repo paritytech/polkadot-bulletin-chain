@@ -91,6 +91,7 @@ substrate-wasm-builder = { optional = true, workspace = true }
 [dev-dependencies]
 bp-test-utils = { workspace = true }
 bridge-runtime-common = { workspace = true, features = ["integrity-test"] }
+pallet-bridge-messages = { workspace = true, features = ["test-helpers"] }
 hex = { workspace = true }
 sp-io = { workspace = true }
 sp-keyring = { workspace = true }
