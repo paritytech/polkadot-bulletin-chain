@@ -114,8 +114,8 @@ pub mod opaque {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
-	impl_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
+	spec_name: alloc::borrow::Cow::Borrowed("bulletin-polkadot"),
+	impl_name: alloc::borrow::Cow::Borrowed("bulletin-polkadot"),
 	authoring_version: 0,
 	spec_version: 1_000_000,
 	impl_version: 1,
