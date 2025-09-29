@@ -63,8 +63,8 @@ use pallet_transaction_payment::RuntimeDispatchInfo;
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
 
-mod polkadot_bridge_config;
-use polkadot_bridge_config::{self as bridge_config, bp_people_polkadot, bp_polkadot};
+pub mod polkadot_bridge_config;
+pub use polkadot_bridge_config::{self as bridge_config, bp_people_polkadot, bp_polkadot};
 
 mod genesis_config_presets;
 mod weights;
@@ -114,8 +114,8 @@ pub mod opaque {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
-	impl_name: alloc::borrow::Cow::Borrowed("polkadot-bulletin-chain"),
+	spec_name: alloc::borrow::Cow::Borrowed("bulletin-polkadot"),
+	impl_name: alloc::borrow::Cow::Borrowed("bulletin-polkadot"),
 	authoring_version: 0,
 	spec_version: 1_000_001,
 	impl_version: 1,
@@ -274,7 +274,7 @@ impl pallet_session::Config for Runtime {
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
 	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
 	type KeyDeposit = ();
-	// TODO: check it later
+	// TODO: nothing for now, maybe in the future.
 	type DisablingStrategy = ();
 }
 
@@ -343,7 +343,7 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
-	// TODO: add here comment
+	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
