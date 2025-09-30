@@ -49,13 +49,13 @@ fn construct_extrinsic(
 		frame_system::CheckEra::<Runtime>::from(Era::immortal()),
 		frame_system::CheckNonce::<Runtime>::from(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
-		)
-		.into(),
+		),
 		frame_system::CheckWeight::<Runtime>::new(),
 		runtime::ValidateSigned,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
-	)
-		.into();
+#[cfg(all(feature = "std", feature = "metadata-hash"))]
+		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(true),
+	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
 	let signature = payload.using_encoded(|e| sender.sign(e));
 	Ok(UncheckedExtrinsic::new_signed(

@@ -600,6 +600,7 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 }
 
 /// The SignedExtension to the basic transaction logic.
+#[cfg(all(feature = "std", feature = "metadata-hash"))]
 pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -611,6 +612,19 @@ pub type TxExtension = (
 	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
 	frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
+);
+
+#[cfg(not(all(feature = "std", feature = "metadata-hash")))]
+pub type TxExtension = (
+	frame_system::CheckNonZeroSender<Runtime>,
+	frame_system::CheckSpecVersion<Runtime>,
+	frame_system::CheckTxVersion<Runtime>,
+	frame_system::CheckGenesis<Runtime>,
+	frame_system::CheckEra<Runtime>,
+	frame_system::CheckNonce<Runtime>,
+	frame_system::CheckWeight<Runtime>,
+	ValidateSigned,
+	BridgeRejectObsoleteHeadersAndMessages,
 );
 
 /// Unchecked extrinsic type as expected by this runtime.
