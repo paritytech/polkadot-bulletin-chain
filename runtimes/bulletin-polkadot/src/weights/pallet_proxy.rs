@@ -41,89 +41,45 @@ impl<T: frame_system::Config> pallet_proxy::WeightInfo for WeightInfo<T> {
 			.saturating_add(Weight::from_parts(47_440, 0).saturating_mul(p.into()))
 			.saturating_add(T::DbWeight::get().reads(1))
 	}
-	/// Storage: `Proxy::Proxies` (r:1 w:0)
-	/// Proof: `Proxy::Proxies` (`max_values`: None, `max_size`: Some(1241), added: 3716, mode: `MaxEncodedLen`)
-	/// Storage: `Proxy::Announcements` (r:1 w:1)
-	/// Proof: `Proxy::Announcements` (`max_values`: None, `max_size`: Some(2233), added: 4708, mode: `MaxEncodedLen`)
-	/// Storage: `System::Account` (r:1 w:1)
-	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `MaxEncodedLen`)
-	/// The range of component `a` is `[0, 31]`.
-	/// The range of component `p` is `[1, 31]`.
-	fn proxy_announced(a: u32, p: u32, ) -> Weight {
+	/// Storage: `Benchmark::Override` (r:0 w:0)
+	/// Proof: `Benchmark::Override` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	fn proxy_announced(_a: u32, _p: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `416 + a * (68 ±0) + p * (37 ±0)`
-		//  Estimated: `5698`
-		// Minimum execution time: 43_041_000 picoseconds.
-		Weight::from_parts(64_669_614, 0)
-			.saturating_add(Weight::from_parts(0, 5698))
-			// Standard Error: 2_560
-			.saturating_add(Weight::from_parts(256_351, 0).saturating_mul(a.into()))
-			// Standard Error: 2_645
-			.saturating_add(Weight::from_parts(43_401, 0).saturating_mul(p.into()))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(2))
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 18_446_744_073_709_551_000 picoseconds.
+		Weight::from_parts(18_446_744_073_709_551_000, 0)
+				.saturating_add(Weight::from_parts(0, 0))
 	}
-	/// Storage: `Proxy::Announcements` (r:1 w:1)
-	/// Proof: `Proxy::Announcements` (`max_values`: None, `max_size`: Some(2233), added: 4708, mode: `MaxEncodedLen`)
-	/// Storage: `System::Account` (r:1 w:1)
-	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `MaxEncodedLen`)
-	/// The range of component `a` is `[0, 31]`.
-	/// The range of component `p` is `[1, 31]`.
-	fn remove_announcement(a: u32, p: u32, ) -> Weight {
+	/// Storage: `Benchmark::Override` (r:0 w:0)
+	/// Proof: `Benchmark::Override` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	fn remove_announcement(_a: u32, _p: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `331 + a * (68 ±0)`
-		//  Estimated: `5698`
-		// Minimum execution time: 29_610_000 picoseconds.
-		Weight::from_parts(45_069_231, 0)
-			.saturating_add(Weight::from_parts(0, 5698))
-			// Standard Error: 1_551
-			.saturating_add(Weight::from_parts(238_612, 0).saturating_mul(a.into()))
-			// Standard Error: 1_603
-			.saturating_add(Weight::from_parts(8_028, 0).saturating_mul(p.into()))
-			.saturating_add(T::DbWeight::get().reads(2))
-			.saturating_add(T::DbWeight::get().writes(2))
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 18_446_744_073_709_551_000 picoseconds.
+		Weight::from_parts(18_446_744_073_709_551_000, 0)
+				.saturating_add(Weight::from_parts(0, 0))
 	}
-	/// Storage: `Proxy::Announcements` (r:1 w:1)
-	/// Proof: `Proxy::Announcements` (`max_values`: None, `max_size`: Some(2233), added: 4708, mode: `MaxEncodedLen`)
-	/// Storage: `System::Account` (r:1 w:1)
-	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `MaxEncodedLen`)
-	/// The range of component `a` is `[0, 31]`.
-	/// The range of component `p` is `[1, 31]`.
-	fn reject_announcement(a: u32, p: u32, ) -> Weight {
+	/// Storage: `Benchmark::Override` (r:0 w:0)
+	/// Proof: `Benchmark::Override` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	fn reject_announcement(_a: u32, _p: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `331 + a * (68 ±0)`
-		//  Estimated: `5698`
-		// Minimum execution time: 29_720_000 picoseconds.
-		Weight::from_parts(45_110_769, 0)
-			.saturating_add(Weight::from_parts(0, 5698))
-			// Standard Error: 1_571
-			.saturating_add(Weight::from_parts(236_395, 0).saturating_mul(a.into()))
-			// Standard Error: 1_623
-			.saturating_add(Weight::from_parts(5_904, 0).saturating_mul(p.into()))
-			.saturating_add(T::DbWeight::get().reads(2))
-			.saturating_add(T::DbWeight::get().writes(2))
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 18_446_744_073_709_551_000 picoseconds.
+		Weight::from_parts(18_446_744_073_709_551_000, 0)
+				.saturating_add(Weight::from_parts(0, 0))
 	}
-	/// Storage: `Proxy::Proxies` (r:1 w:0)
-	/// Proof: `Proxy::Proxies` (`max_values`: None, `max_size`: Some(1241), added: 3716, mode: `MaxEncodedLen`)
-	/// Storage: `Proxy::Announcements` (r:1 w:1)
-	/// Proof: `Proxy::Announcements` (`max_values`: None, `max_size`: Some(2233), added: 4708, mode: `MaxEncodedLen`)
-	/// Storage: `System::Account` (r:1 w:1)
-	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `MaxEncodedLen`)
-	/// The range of component `a` is `[0, 31]`.
-	/// The range of component `p` is `[1, 31]`.
-	fn announce(a: u32, p: u32, ) -> Weight {
+	/// Storage: `Benchmark::Override` (r:0 w:0)
+	/// Proof: `Benchmark::Override` (`max_values`: None, `max_size`: None, mode: `Measured`)
+	fn announce(_a: u32, _p: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `348 + a * (68 ±0) + p * (37 ±0)`
-		//  Estimated: `5698`
-		// Minimum execution time: 38_710_000 picoseconds.
-		Weight::from_parts(59_116_093, 0)
-			.saturating_add(Weight::from_parts(0, 5698))
-			// Standard Error: 1_726
-			.saturating_add(Weight::from_parts(240_669, 0).saturating_mul(a.into()))
-			// Standard Error: 1_784
-			.saturating_add(Weight::from_parts(38_028, 0).saturating_mul(p.into()))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(2))
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 18_446_744_073_709_551_000 picoseconds.
+		Weight::from_parts(18_446_744_073_709_551_000, 0)
+				.saturating_add(Weight::from_parts(0, 0))
 	}
 	/// Storage: `Proxy::Proxies` (r:1 w:1)
 	/// Proof: `Proxy::Proxies` (`max_values`: None, `max_size`: Some(1241), added: 3716, mode: `MaxEncodedLen`)
@@ -200,20 +156,14 @@ impl<T: frame_system::Config> pallet_proxy::WeightInfo for WeightInfo<T> {
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-	/// Storage: `Proxy::Proxies` (r:1 w:1)
-	/// Proof: `Proxy::Proxies` (`max_values`: None, `max_size`: Some(1241), added: 3716, mode: `MaxEncodedLen`)
-	/// Storage: `System::Account` (r:1 w:1)
-	/// Proof: `System::Account` (`max_values`: None, `max_size`: Some(128), added: 2603, mode: `MaxEncodedLen`)
-	/// Storage: `Proxy::Announcements` (r:1 w:1)
-	/// Proof: `Proxy::Announcements` (`max_values`: None, `max_size`: Some(2233), added: 4708, mode: `MaxEncodedLen`)
+	/// Storage: `Benchmark::Override` (r:0 w:0)
+	/// Proof: `Benchmark::Override` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	fn poke_deposit() -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `414`
-		//  Estimated: `5698`
-		// Minimum execution time: 51_520_000 picoseconds.
-		Weight::from_parts(78_361_500, 0)
-			.saturating_add(Weight::from_parts(0, 5698))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(3))
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 18_446_744_073_709_551_000 picoseconds.
+		Weight::from_parts(18_446_744_073_709_551_000, 0)
+				.saturating_add(Weight::from_parts(0, 0))
 	}
 }
