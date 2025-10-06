@@ -36,7 +36,9 @@ use scale_info::TypeInfo;
 ///
 /// Note: This is a workaround to satisfy the `pallet-session::Config::Currency` and
 /// `pallet-proxy::Config::Currency` trait requirements.
-pub struct NoCurrency<AccountId, HoldReason = ()>(core::marker::PhantomData<(AccountId, HoldReason)>);
+pub struct NoCurrency<AccountId, HoldReason = ()>(
+	core::marker::PhantomData<(AccountId, HoldReason)>,
+);
 
 impl<AccountId, HoldReason: Encode + Decode + TypeInfo + 'static> Inspect<AccountId>
 	for NoCurrency<AccountId, HoldReason>
@@ -180,9 +182,7 @@ impl<Balance: Default + Copy> TryMerge for ZeroImbalance<Balance> {
 	}
 }
 
-impl<AccountId, HoldReason> Currency<AccountId>
-	for NoCurrency<AccountId, HoldReason>
-{
+impl<AccountId, HoldReason> Currency<AccountId> for NoCurrency<AccountId, HoldReason> {
 	type Balance = u128;
 	type PositiveImbalance = ZeroImbalance<u128>;
 	type NegativeImbalance = ZeroImbalance<u128>;
@@ -265,9 +265,7 @@ impl<AccountId, HoldReason> Currency<AccountId>
 	}
 }
 
-impl<AccountId, HoldReason: Encode + Decode + TypeInfo + 'static> ReservableCurrency<AccountId>
-	for NoCurrency<AccountId, HoldReason>
-{
+impl<AccountId, HoldReason> ReservableCurrency<AccountId> for NoCurrency<AccountId, HoldReason> {
 	fn can_reserve(_who: &AccountId, _value: Self::Balance) -> bool {
 		true
 	}
