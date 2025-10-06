@@ -2,17 +2,17 @@ use crate::{
 	benchmarking::{inherent_benchmark_data, RemarkBuilder},
 	chain_spec,
 	cli::{Cli, Subcommand},
+	node_primitives::Block,
 	service,
 };
 use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE};
-use polkadot_bulletin_chain_runtime::Block;
 use sc_cli::SubstrateCli;
 use sc_network::config::NetworkBackendType;
 use sc_service::PartialComponents;
 use std::{sync::Arc, time::Duration};
 #[cfg(feature = "try-runtime")]
 use {
-	polkadot_bulletin_chain_runtime::SLOT_DURATION,
+	crate::node_primitives::SLOT_DURATION,
 	try_runtime_cli::block_building_info::timestamp_with_babe_info,
 };
 

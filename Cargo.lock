@@ -4903,7 +4903,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite 0.2.16",
- "socket2 0.4.10",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -8623,7 +8623,7 @@ checksum = "4e69bf016dc406eff7d53a7d3f7cf1c2e72c82b9088aac1118591e36dd2cd3e9"
 dependencies = [
  "bitcoin_hashes 0.13.0",
  "rand 0.8.5",
- "rand_core 0.5.1",
+ "rand_core 0.6.4",
  "serde",
  "unicode-normalization",
 ]
@@ -8935,12 +8935,19 @@ version = "0.1.0-dev"
 dependencies = [
  "bulletin-polkadot-runtime",
  "clap",
+ "frame-benchmarking",
  "frame-benchmarking-cli",
+ "frame-support 28.0.0",
  "frame-system",
+ "frame-system-rpc-runtime-api",
  "futures",
  "jsonrpsee 0.24.7",
+ "pallet-transaction-payment",
+ "pallet-transaction-payment-rpc-runtime-api",
  "polkadot-bulletin-chain-runtime",
+ "polkadot-primitives",
  "sc-basic-authorship",
+ "sc-chain-spec 28.0.0",
  "sc-cli 0.36.0",
  "sc-client-api 28.0.0",
  "sc-consensus 0.33.0",
@@ -8953,6 +8960,7 @@ dependencies = [
  "sc-offchain",
  "sc-rpc 29.0.0",
  "sc-service 0.35.0",
+ "sc-sync-state-rpc",
  "sc-telemetry 15.0.0",
  "sc-transaction-pool 28.0.0",
  "sc-transaction-pool-api 28.0.0",
@@ -8961,15 +8969,21 @@ dependencies = [
  "sp-blockchain 28.0.0",
  "sp-consensus 0.32.0",
  "sp-consensus-babe 0.32.0",
+ "sp-consensus-grandpa 13.0.0",
  "sp-core 28.0.0",
  "sp-genesis-builder 0.8.0",
  "sp-inherents 26.0.0",
  "sp-io 30.0.0",
  "sp-keyring 31.0.0",
  "sp-keystore 0.34.0",
+ "sp-offchain 26.0.0",
  "sp-runtime 31.0.1",
+ "sp-session 27.0.0",
  "sp-timestamp 26.0.0",
+ "sp-transaction-pool 26.0.0",
  "sp-transaction-storage-proof 26.0.0",
+ "sp-version 29.0.0",
+ "sp-weights 27.0.0",
  "substrate-build-script-utils",
  "substrate-frame-rpc-system",
  "tracing",
@@ -12517,6 +12531,25 @@ dependencies = [
  "parity-scale-codec",
  "parking_lot 0.12.3",
  "sp-core 32.0.0",
+]
+
+[[package]]
+name = "sc-sync-state-rpc"
+version = "0.34.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=a64eb1fb02d4012948cba024fca2f27d94732e52#a64eb1fb02d4012948cba024fca2f27d94732e52"
+dependencies = [
+ "jsonrpsee 0.24.7",
+ "parity-scale-codec",
+ "sc-chain-spec 28.0.0",
+ "sc-client-api 28.0.0",
+ "sc-consensus-babe",
+ "sc-consensus-epochs",
+ "sc-consensus-grandpa",
+ "serde",
+ "serde_json",
+ "sp-blockchain 28.0.0",
+ "sp-runtime 31.0.1",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
