@@ -143,7 +143,7 @@ if args.command == 'bench':
             template = templates.get(pallet)
             excluded_extrinsics = config.get("benchmarks_exclude_extrinsics", {}) or {}
             excluded = excluded_extrinsics.get(pallet, [])
-            excluded_string = ",".join(f"{pallet}::{e}" for e in extrinsics)
+            excluded_string = ",".join(f"{pallet}::{e}" for e in excluded)
 
             print(f'-- benchmarking {pallet} in {runtime} into {output_path} using template {template}')
 
