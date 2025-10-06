@@ -226,6 +226,7 @@ pub fn new_full<
 		let pool = transaction_pool.clone();
 		let keystore = keystore_container.keystore();
 		let select_chain = select_chain.clone();
+		let chain_spec = config.chain_spec.cloned_box();
 
 		let justification_stream = grandpa_link.justification_stream();
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
@@ -241,6 +242,7 @@ pub fn new_full<
 				client: client.clone(),
 				pool: pool.clone(),
 				select_chain: select_chain.clone(),
+				chain_spec: chain_spec.cloned_box(),
 				babe: crate::rpc::BabeDeps {
 					babe_worker_handle: babe_worker_handle.clone(),
 					keystore: keystore.clone(),

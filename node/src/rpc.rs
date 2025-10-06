@@ -15,6 +15,7 @@ use sc_consensus_grandpa::{
 };
 use sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer};
 use sc_rpc::SubscriptionTaskExecutor;
+use sc_sync_state_rpc::{SyncState, SyncStateApiServer};
 use sc_transaction_pool_api::TransactionPool;
 use sp_api::ProvideRuntimeApi;
 use sp_block_builder::BlockBuilder;
@@ -30,10 +31,12 @@ pub struct FullDeps<C, P, SC, B> {
 	pub pool: Arc<P>,
 	/// The chain selection strategy.
 	pub select_chain: SC,
+	/// A copy of the chain spec.
+	pub chain_spec: Box<dyn sc_chain_spec::ChainSpec>,
 	/// BABE RPC dependencies.
 	pub babe: BabeDeps,
 	/// GRANDPA RPC dependencies.
-	pub grandpa: GrandpaDeps<B>,
+	pub grandpa: GrandpaDeps<B>
 }
 
 /// BABE RPC dependencies.
@@ -65,7 +68,7 @@ pub fn create_full<C, P, SC, B>(
 where
 	C: ProvideRuntimeApi<Block>,
 	C: HeaderBackend<Block> + HeaderMetadata<Block, Error = BlockChainError> + 'static,
-	C: Send + Sync + 'static,
+	C: Send + Sync + 'static + sc_client_api::AuxStore,
 	C::Api: substrate_frame_rpc_system::AccountNonceApi<Block, AccountId, Nonce>,
 	C::Api: BlockBuilder<Block>,
 	C::Api: BabeApi<Block>,
@@ -77,21 +80,24 @@ where
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
 	let mut module = RpcModule::new(());
-	let FullDeps { client, pool, select_chain, babe, grandpa } = deps;
+	let FullDeps { client, pool, select_chain, chain_spec, babe, grandpa } = deps;
 	let BabeDeps { babe_worker_handle, keystore } = babe;
 
 	module.merge(System::new(client.clone(), pool).into_rpc())?;
 	module
-		.merge(Babe::new(client, babe_worker_handle.clone(), keystore, select_chain).into_rpc())?;
+		.merge(Babe::new(client.clone(), babe_worker_handle.clone(), keystore, select_chain).into_rpc())?;
 	module.merge(
 		Grandpa::new(
 			grandpa.subscription_executor,
-			grandpa.shared_authority_set,
+			grandpa.shared_authority_set.clone(),
 			grandpa.shared_voter_state,
 			grandpa.justification_stream,
 			grandpa.finality_proof_provider,
 		)
 		.into_rpc(),
+	)?;
+	module.merge(
+		SyncState::new(chain_spec, client, grandpa.shared_authority_set, babe_worker_handle)?.into_rpc(),
 	)?;
 
 	// Extend this RPC with a custom API by using the following syntax.

@@ -21,6 +21,7 @@ futures = { features = ["thread-pool"], workspace = true }
 tracing = { workspace = true }
 
 frame-system = { workspace = true }
+sc-chain-spec = { workspace = true }
 sc-cli = { workspace = true }
 sc-client-api = { workspace = true }
 sc-consensus = { workspace = true }
@@ -33,6 +34,7 @@ sc-network = { workspace = true }
 sc-offchain = { workspace = true }
 sc-rpc = { workspace = true }
 sc-service = { workspace = true }
+sc-sync-state-rpc = { workspace = true }
 sc-telemetry = { workspace = true }
 sc-transaction-pool = { workspace = true }
 sc-transaction-pool-api = { workspace = true }
