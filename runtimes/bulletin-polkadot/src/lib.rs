@@ -587,6 +587,12 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				longevity: BridgeTxLongevity::get(),
 				..Default::default()
 			}),
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
+				Ok(ValidTransaction {
+					priority: SudoPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}),
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}?;
@@ -642,6 +648,8 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 
 			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
 			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
+				Ok(Some(who.clone())),
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
