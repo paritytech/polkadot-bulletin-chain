@@ -1,6 +1,6 @@
 use crate::{
 	opaque::SessionKeys, AccountId, BabeConfig, RelayerSetConfig, RuntimeGenesisConfig,
-	SessionConfig, Signature, ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
+	SessionConfig, Signature, SudoConfig, ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
 };
 
 use crate::{
@@ -50,6 +50,7 @@ fn session_keys(babe: BabeId, grandpa: GrandpaId) -> SessionKeys {
 fn testnet_genesis(
 	initial_authorities: Vec<(AccountId, BabeId, GrandpaId)>,
 	bridges_pallet_owner: Option<AccountId>,
+	sudo_account: Option<AccountId>,
 ) -> serde_json::Value {
 	let config = RuntimeGenesisConfig {
 		validator_set: ValidatorSetConfig {
@@ -87,6 +88,7 @@ fn testnet_genesis(
 			opened_lanes: vec![XCM_LANE],
 			..Default::default()
 		},
+		sudo: SudoConfig { key: sudo_account },
 		..Default::default()
 	};
 
@@ -101,6 +103,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			vec![authority_keys_from_seed("Alice")],
 			// Bridges pallet owner
 			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
+			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 		),
 		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => testnet_genesis(
 			// Initial PoA authorities
@@ -111,6 +114,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 				authority_keys_from_seed("Bob//stash"),
 			],
 			// Bridges pallet owner
+			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 		),
 		_ => return None,

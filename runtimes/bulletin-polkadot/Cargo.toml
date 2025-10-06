@@ -26,6 +26,8 @@ pallet-grandpa = { workspace = true }
 pallet-offences = { workspace = true }
 pallet-session = { workspace = true }
 pallet-timestamp = { workspace = true }
+pallet-sudo = { workspace = true }
+pallet-proxy = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
 sp-consensus-babe = { workspace = true }
@@ -116,7 +118,9 @@ std = [
 	"pallet-babe/std",
 	"pallet-grandpa/std",
 	"pallet-offences/std",
+	"pallet-proxy/std",
 	"pallet-session/std",
+	"pallet-sudo/std",
 	"pallet-timestamp/std",
 	"sp-api/std",
 	"sp-block-builder/std",
@@ -129,6 +133,7 @@ std = [
 	"sp-runtime/std",
 	"sp-session/std",
 	"sp-std/std",
+	"sp-tracing/std",
 	"sp-transaction-pool/std",
 	"sp-transaction-storage-proof/std",
 	"sp-version/std",
@@ -178,6 +183,8 @@ runtime-benchmarks = [
 	"pallet-babe/runtime-benchmarks",
 	"pallet-grandpa/runtime-benchmarks",
 	"pallet-offences/runtime-benchmarks",
+	"pallet-proxy/runtime-benchmarks",
+	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 	"sp-storage",
@@ -216,7 +223,9 @@ try-runtime = [
 	"pallet-babe/try-runtime",
 	"pallet-grandpa/try-runtime",
 	"pallet-offences/try-runtime",
+	"pallet-proxy/try-runtime",
 	"pallet-session/try-runtime",
+	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 
 	"pallet-bridge-grandpa/try-runtime",
