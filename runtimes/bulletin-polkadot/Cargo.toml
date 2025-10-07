@@ -199,6 +199,7 @@ runtime-benchmarks = [
 	"pallet-xcm-bridge-hub/runtime-benchmarks",
 
 	"pallet-relayer-set/runtime-benchmarks",
+	"pallet-session/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
