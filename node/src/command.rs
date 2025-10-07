@@ -1,11 +1,13 @@
 use crate::{
-	benchmarking::{inherent_benchmark_data, RemarkBuilder},
+	benchmarking::inherent_benchmark_data,
 	chain_spec,
 	cli::{Cli, Subcommand},
 	node_primitives::Block,
 	service,
 };
-use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE};
+use frame_benchmarking_cli::{
+	BenchmarkCmd, ExtrinsicFactory, SubstrateRemarkBuilder, SUBSTRATE_REFERENCE_HARDWARE,
+};
 use sc_cli::SubstrateCli;
 use sc_network::config::NetworkBackendType;
 use sc_service::PartialComponents;
@@ -162,23 +164,24 @@ pub fn run() -> sc_cli::Result<()> {
 						cmd.run(config, client, db, storage, shared_cache)
 					},
 					BenchmarkCmd::Overhead(cmd) => {
-						let PartialComponents { client, .. } = service::new_partial(&config)?;
-						let ext_builder = RemarkBuilder::new(client.clone());
+						if cmd.params.runtime.is_some() {
+							return Err(sc_cli::Error::Input(
+								"Bulletin binary does not support `--runtime` flag for `benchmark overhead`. Please provide a chain spec or use the `frame-omni-bencher`."
+									.into(),
+							)
+								.into())
+						}
 
-						cmd.run(
-							config.chain_spec.name().into(),
-							client,
-							inherent_benchmark_data()?,
-							Vec::new(),
-							&ext_builder,
-							false,
+						cmd.run_with_default_builder_and_spec::<Block, ()>(
+							Some(config.chain_spec),
 						)
 					},
 					BenchmarkCmd::Extrinsic(cmd) => {
 						let PartialComponents { client, .. } = service::new_partial(&config)?;
-						// Register the *Remark* builder.
-						let ext_factory =
-							ExtrinsicFactory(vec![Box::new(RemarkBuilder::new(client.clone()))]);
+						// Register the *Remark* and *TKA* builders.
+						let ext_factory = ExtrinsicFactory(vec![
+							Box::new(SubstrateRemarkBuilder::new_from_client(client.clone())?),
+						]);
 
 						cmd.run(client, inherent_benchmark_data()?, Vec::new(), &ext_factory)
 					},

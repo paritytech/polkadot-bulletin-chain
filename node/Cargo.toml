@@ -20,7 +20,6 @@ clap = { features = ["derive"], workspace = true }
 futures = { features = ["thread-pool"], workspace = true }
 tracing = { workspace = true }
 
-frame-system = { workspace = true }
 sc-chain-spec = { workspace = true }
 frame-support = { workspace = true, optional = true }
 frame-system-rpc-runtime-api = { workspace = true }
@@ -47,7 +46,6 @@ sp-consensus-babe = { workspace = true }
 sp-core = { workspace = true }
 sp-inherents = { workspace = true }
 sp-io = { workspace = true }
-sp-keyring = { workspace = true }
 sp-keystore = { workspace = true }
 sp-runtime = { workspace = true }
 sp-timestamp = { workspace = true }
@@ -91,7 +89,6 @@ runtime-benchmarks = [
 	"bulletin-polkadot-runtime/runtime-benchmarks",
 	"frame-benchmarking-cli/runtime-benchmarks",
 	"frame-benchmarking/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
@@ -101,7 +98,6 @@ runtime-benchmarks = [
 # in the near future.
 try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
-	"frame-system/try-runtime",
 	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",
 	"try-runtime-cli/try-runtime",
