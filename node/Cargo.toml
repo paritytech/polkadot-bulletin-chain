@@ -77,9 +77,6 @@ polkadot-bulletin-chain-runtime = { workspace = true }
 # Polkadot production
 bulletin-polkadot-runtime = { workspace = true }
 
-# CLI-specific dependencies
-try-runtime-cli = { optional = true, workspace = true }
-
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
 
@@ -100,5 +97,4 @@ try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
 	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",
-	"try-runtime-cli/try-runtime",
 ]
