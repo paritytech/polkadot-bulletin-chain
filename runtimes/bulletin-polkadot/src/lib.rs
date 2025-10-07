@@ -540,7 +540,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
 				}),
-
 			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
 
 			// Bridge-related calls
@@ -576,6 +575,8 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 						longevity: BridgeTxLongevity::get(),
 						..Default::default()
 					}),
+
+			// Sudo calls
 			RuntimeCall::Proxy(_call) => Ok(ValidTransaction {
 				priority: SudoPriority::get(),
 				longevity: BridgeTxLongevity::get(),
@@ -592,6 +593,7 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 					longevity: BridgeTxLongevity::get(),
 					..Default::default()
 				}),
+
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}?;
@@ -645,6 +647,7 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 					.map_err(|_| InvalidTransaction::BadSigner.into())
 					.map(|()| Some(who.clone())),
 
+			// Sudo calls
 			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
 			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
 			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
