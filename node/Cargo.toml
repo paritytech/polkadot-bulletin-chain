@@ -20,14 +20,17 @@ clap = { features = ["derive"], workspace = true }
 futures = { features = ["thread-pool"], workspace = true }
 tracing = { workspace = true }
 
-frame-system = { workspace = true }
 sc-chain-spec = { workspace = true }
+frame-support = { workspace = true, optional = true }
+frame-system-rpc-runtime-api = { workspace = true }
+pallet-transaction-payment = { workspace = true }
 sc-cli = { workspace = true }
 sc-client-api = { workspace = true }
 sc-consensus = { workspace = true }
 sc-consensus-babe = { workspace = true }
 sc-consensus-babe-rpc = { workspace = true }
 sc-consensus-grandpa = { workspace = true }
+sp-consensus-grandpa = { workspace = true }
 sc-consensus-grandpa-rpc = { workspace = true }
 sc-executor = { workspace = true }
 sc-network = { workspace = true }
@@ -43,11 +46,14 @@ sp-consensus-babe = { workspace = true }
 sp-core = { workspace = true }
 sp-inherents = { workspace = true }
 sp-io = { workspace = true }
-sp-keyring = { workspace = true }
 sp-keystore = { workspace = true }
 sp-runtime = { workspace = true }
 sp-timestamp = { workspace = true }
 sp-transaction-storage-proof = { workspace = true }
+sp-transaction-pool = { workspace = true }
+sp-version = { workspace = true }
+sp-session = { workspace = true }
+sp-offchain = { workspace = true }
 
 # These dependencies are used for the node's RPCs
 jsonrpsee = { features = ["server"], workspace = true }
@@ -56,19 +62,20 @@ sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
 sp-blockchain = { workspace = true }
 sp-genesis-builder = { workspace = true }
+sp-weights = { workspace = true }
+pallet-transaction-payment-rpc-runtime-api = { workspace = true }
+polkadot-primitives = { workspace = true }
 substrate-frame-rpc-system = { workspace = true }
 
 # These dependencies are used for runtime benchmarking
 frame-benchmarking-cli = { workspace = true }
+frame-benchmarking = { optional = true, workspace = true, default-features = true }
 
 # Local Dependencies
 # Rococo testnet
 polkadot-bulletin-chain-runtime = { workspace = true }
 # Polkadot production
 bulletin-polkadot-runtime = { workspace = true }
-
-# CLI-specific dependencies
-try-runtime-cli = { optional = true, workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
@@ -78,7 +85,8 @@ substrate-build-script-utils = { workspace = true }
 runtime-benchmarks = [
 	"bulletin-polkadot-runtime/runtime-benchmarks",
 	"frame-benchmarking-cli/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
 	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
@@ -87,8 +95,6 @@ runtime-benchmarks = [
 # in the near future.
 try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
-	"frame-system/try-runtime",
 	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",
-	"try-runtime-cli/try-runtime",
 ]

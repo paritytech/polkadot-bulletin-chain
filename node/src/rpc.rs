@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use jsonrpsee::RpcModule;
-use polkadot_bulletin_chain_runtime::{opaque::Block, AccountId, BlockNumber, Hash, Nonce};
+use crate::node_primitives::{AccountId, Block, BlockNumber, Hash, Nonce};
 use sc_consensus_babe::{BabeApi, BabeWorkerHandle};
 use sc_consensus_grandpa::{
 	FinalityProofProvider, GrandpaJustificationStream, SharedAuthoritySet, SharedVoterState,
