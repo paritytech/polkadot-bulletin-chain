@@ -116,6 +116,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			],
 			// Bridges pallet owner
 			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
+			// Sudo
 			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 		),
 		_ => return None,
