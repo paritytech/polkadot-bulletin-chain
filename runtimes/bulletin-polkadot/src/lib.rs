@@ -60,7 +60,6 @@ use frame_support::{
 };
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
-use pallet_transaction_payment::RuntimeDispatchInfo;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -868,6 +867,12 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl frame_support::view_functions::runtime_api::RuntimeViewFunction<Block> for Runtime {
+		fn execute_view_function(id: frame_support::view_functions::ViewFunctionId, input: Vec<u8>) -> Result<Vec<u8>, frame_support::view_functions::ViewFunctionDispatchError> {
+			Runtime::execute_view_function(id, input)
+		}
+	}
+
 	impl sp_block_builder::BlockBuilder<Block> for Runtime {
 		fn apply_extrinsic(extrinsic: <Block as BlockT>::Extrinsic) -> ApplyExtrinsicResult {
 			Executive::apply_extrinsic(extrinsic)
@@ -1123,9 +1128,9 @@ impl_runtime_apis! {
 		fn query_info(
 			uxt: <Block as BlockT>::Extrinsic,
 			_len: u32,
-		) -> RuntimeDispatchInfo<u128> {
+		) -> pallet_transaction_payment::RuntimeDispatchInfo<u128> {
 			let dispatch_info = <<Block as BlockT>::Extrinsic as GetDispatchInfo>::get_dispatch_info(&uxt);
-			RuntimeDispatchInfo {
+			pallet_transaction_payment::RuntimeDispatchInfo {
 				weight: dispatch_info.total_weight(),
 				class: dispatch_info.class,
 				partial_fee: 0

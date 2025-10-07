@@ -1,8 +1,7 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
+use crate::{fake_runtime_api::RuntimeApi, node_primitives::Block};
 use futures::FutureExt;
-use polkadot_bulletin_chain_runtime as runtime;
-use runtime::{opaque::Block, RuntimeApi};
 use sc_client_api::{Backend, BlockBackend};
 use sc_consensus_grandpa::SharedVoterState;
 use sc_service::{error::Error as ServiceError, Configuration, TaskManager};

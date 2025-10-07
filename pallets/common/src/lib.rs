@@ -19,7 +19,7 @@ use codec::{Decode, Encode};
 use polkadot_sdk_frame::{
 	deps::frame_support,
 	prelude::{
-		fungible::{Dust, Inspect, InspectHold, MutateHold, Unbalanced, UnbalancedHold},
+		fungible::{Dust, Inspect, InspectHold, Mutate, MutateHold, Unbalanced, UnbalancedHold},
 		DepositConsequence, DispatchError, DispatchResult, Fortitude, Preservation, Provenance,
 		WithdrawConsequence, Zero,
 	},
@@ -127,6 +127,11 @@ impl<AccountId, HoldReason: Encode + Decode + TypeInfo + 'static> UnbalancedHold
 }
 
 impl<AccountId, HoldReason: Encode + Decode + TypeInfo + 'static> MutateHold<AccountId>
+	for NoCurrency<AccountId, HoldReason>
+{
+}
+
+impl<AccountId: Eq, HoldReason: Encode + Decode + TypeInfo + 'static> Mutate<AccountId>
 	for NoCurrency<AccountId, HoldReason>
 {
 }
