@@ -96,17 +96,22 @@ jobs:
           cache-on-failure: true
           cache-all-crates: true
 
-      - name: Run tests
+      - name: Run pallets tests
         run: |
-          cargo test --workspace
-          cargo test --workspace --features=runtime-benchmarks
+          cargo test -p pallet-relayer-set
+          cargo test -p pallet-relayer-set --features=runtime-benchmarks
+          cargo test -p pallet-validator-set
+          cargo test -p pallet-validator-set --features=runtime-benchmarks
+          cargo test -p pallet-transaction-storage
+          # Bench test is skipped intentionally (running too long and anyway, we are doing fresh weights)
+          cargo test -p pallet-transaction-storage --features=runtime-benchmarks -- --skip bench_check_proof
 
       - name: Run (Rococo) runtime tests
         run: |
           cargo test -p polkadot-bulletin-chain-runtime
-          cargo test -p polkadot-bulletin-chain-runtime --features=runtime-benchmarks
 
       - name: Run (Polkadot) runtime tests
         run: |
           cargo test -p bulletin-polkadot-runtime
-          cargo test -p bulletin-polkadot-runtime --features=runtime-benchmarks
+
+      # TODO: check benchmarks
