@@ -71,7 +71,7 @@ fn testnet_genesis(
 		babe: BabeConfig { epoch_config: BABE_GENESIS_EPOCH_CONFIG, ..Default::default() },
 		relayer_set: RelayerSetConfig {
 			// For simplicity just make the initial relayer set match the initial validator set. In
-			// practice even if the same entities control the validators and the relayers they
+			// practice, even if the same entities control the validators and the relayers, they
 			// would want to use separate keys for the relayers.
 			initial_relayers: initial_authorities.into_iter().map(|x| x.0).collect::<Vec<_>>(),
 		},
