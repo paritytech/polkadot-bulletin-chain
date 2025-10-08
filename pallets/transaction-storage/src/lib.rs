@@ -140,7 +140,7 @@ impl CheckContext {
 }
 
 fn num_chunks(bytes: u32) -> u32 {
-	((bytes as u64 + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64) as u32
+	(bytes as u64).div_ceil(CHUNK_SIZE as u64) as u32
 }
 
 #[polkadot_sdk_frame::pallet]
@@ -742,7 +742,7 @@ pub mod pallet {
 					Ok(())
 				} else {
 					// No previous authorization to refresh.
-					return Err(Error::<T>::AuthorizationNotFound.into())
+					Err(Error::<T>::AuthorizationNotFound.into())
 				}
 			})
 		}
@@ -818,7 +818,7 @@ pub mod pallet {
 		/// block.
 		fn block_transactions_full() -> bool {
 			BlockTransactions::<T>::decode_len()
-				.map_or(false, |len| len >= T::MaxBlockTransactions::get() as usize)
+				.is_some_and(|len| len >= T::MaxBlockTransactions::get() as usize)
 		}
 
 		/// Check that authorization exists for data of the given size to be stored in a single

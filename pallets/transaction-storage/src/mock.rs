@@ -44,9 +44,9 @@ impl frame_system::Config for Test {
 parameter_types! {
 	pub const StoragePeriod: BlockNumberFor<Test> = 10;
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::max_value();
+	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::max_value();
+	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
 }
 

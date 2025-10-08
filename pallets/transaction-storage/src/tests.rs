@@ -22,8 +22,7 @@ use super::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
 	},
-	AuthorizationExtent, AuthorizationScope, Event, AUTHORIZATION_NOT_EXPIRED,
-	BAD_DATA_SIZE,
+	AuthorizationExtent, AuthorizationScope, Event, AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{prelude::*, testing_prelude::*};
@@ -182,7 +181,7 @@ fn renews_data() {
 		};
 		run_to_block(16, proof_provider);
 		assert!(Transactions::get(1).is_none());
-		assert_eq!(Transactions::get(6).unwrap().get(0), Some(info).as_ref());
+		assert_eq!(Transactions::get(6).unwrap().first(), Some(info).as_ref());
 		run_to_block(17, proof_provider);
 		assert!(Transactions::get(6).is_none());
 	});
@@ -302,6 +301,7 @@ fn stores_various_sizes_with_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
+		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB
@@ -327,11 +327,13 @@ fn stores_various_sizes_with_account_authorization() {
 			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		}
 
-		// After consuming the authorized sizes, authorization should be removed and providers cleared
+		// After consuming the authorized sizes, authorization should be removed and providers
+		// cleared
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
 
-		// Now assert that an 11 MB payload exceeds the max size and fails, even with fresh authorization
+		// Now assert that an 11 MB payload exceeds the max size and fails, even with fresh
+		// authorization
 		let oversize: usize = 11 * 1024 * 1024; // 11 MB > DEFAULT_MAX_TRANSACTION_SIZE (8 MB)
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
