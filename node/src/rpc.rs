@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use jsonrpsee::RpcModule;
 use crate::node_primitives::{AccountId, Block, BlockNumber, Hash, Nonce};
+use jsonrpsee::RpcModule;
 use sc_consensus_babe::{BabeApi, BabeWorkerHandle};
 use sc_consensus_grandpa::{
 	FinalityProofProvider, GrandpaJustificationStream, SharedAuthoritySet, SharedVoterState,
@@ -36,7 +36,7 @@ pub struct FullDeps<C, P, SC, B> {
 	/// BABE RPC dependencies.
 	pub babe: BabeDeps,
 	/// GRANDPA RPC dependencies.
-	pub grandpa: GrandpaDeps<B>
+	pub grandpa: GrandpaDeps<B>,
 }
 
 /// BABE RPC dependencies.
@@ -84,8 +84,9 @@ where
 	let BabeDeps { babe_worker_handle, keystore } = babe;
 
 	module.merge(System::new(client.clone(), pool).into_rpc())?;
-	module
-		.merge(Babe::new(client.clone(), babe_worker_handle.clone(), keystore, select_chain).into_rpc())?;
+	module.merge(
+		Babe::new(client.clone(), babe_worker_handle.clone(), keystore, select_chain).into_rpc(),
+	)?;
 	module.merge(
 		Grandpa::new(
 			grandpa.subscription_executor,
@@ -97,7 +98,8 @@ where
 		.into_rpc(),
 	)?;
 	module.merge(
-		SyncState::new(chain_spec, client, grandpa.shared_authority_set, babe_worker_handle)?.into_rpc(),
+		SyncState::new(chain_spec, client, grandpa.shared_authority_set, babe_worker_handle)?
+			.into_rpc(),
 	)?;
 
 	// Extend this RPC with a custom API by using the following syntax.

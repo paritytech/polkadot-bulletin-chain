@@ -40,8 +40,6 @@ jobs:
     needs: [set-image]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    env:
-      SKIP_PALLET_REVIVE_FIXTURES: 1
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -62,8 +60,6 @@ jobs:
     needs: [set-image]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    env:
-      SKIP_PALLET_REVIVE_FIXTURES: 1
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -87,7 +83,6 @@ jobs:
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
-      SKIP_PALLET_REVIVE_FIXTURES: 1
       SKIP_WASM_BUILD: 1
     steps:
       - name: Checkout sources

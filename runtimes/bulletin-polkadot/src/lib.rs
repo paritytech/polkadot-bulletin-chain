@@ -10,7 +10,10 @@ include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
 use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
-use frame_support::{derive_impl, traits::ValidatorRegistration};
+use frame_support::{
+	derive_impl,
+	traits::{InstanceFilter, ValidatorRegistration},
+};
 use frame_system::EnsureRoot;
 use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
 use pallet_bridge_messages::Call as BridgeMessagesCall;
@@ -360,6 +363,61 @@ impl pallet_relayer_set::Config for Runtime {
 	type BridgeTxFailCooldownBlocks = BridgeTxFailCooldownBlocks;
 }
 
+impl pallet_sudo::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type WeightInfo = weights::pallet_sudo::WeightInfo<Runtime>;
+}
+
+#[derive(
+	Copy,
+	Clone,
+	Eq,
+	PartialEq,
+	Ord,
+	PartialOrd,
+	codec::Encode,
+	codec::Decode,
+	codec::DecodeWithMemTracking,
+	sp_runtime::RuntimeDebug,
+	codec::MaxEncodedLen,
+	scale_info::TypeInfo,
+)]
+pub enum ProxyType {
+	/// Fully permissioned proxy. Can execute any call on behalf of _proxied_.
+	Any,
+}
+impl Default for ProxyType {
+	fn default() -> Self {
+		Self::Any
+	}
+}
+impl InstanceFilter<RuntimeCall> for ProxyType {
+	fn filter(&self, _c: &RuntimeCall) -> bool {
+		true
+	}
+
+	fn is_superset(&self, _o: &Self) -> bool {
+		true
+	}
+}
+
+impl pallet_proxy::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = pallets_common::NoCurrency<AccountId>;
+	type ProxyType = ProxyType;
+	type ProxyDepositBase = ();
+	type ProxyDepositFactor = ();
+	type MaxProxies = ConstU32<16>;
+	type WeightInfo = weights::pallet_proxy::WeightInfo<Runtime>;
+	type MaxPending = ConstU32<0>;
+	type CallHasher = BlakeTwo256;
+	type AnnouncementDepositBase = ();
+	type AnnouncementDepositFactor = ();
+	type BlockNumberProvider = frame_system::Pallet<Runtime>;
+}
+
 impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
 where
 	RuntimeCall: From<C>,
@@ -399,6 +457,10 @@ construct_runtime!(
 		BridgePolkadotGrandpa: pallet_bridge_grandpa = 51,
 		BridgePolkadotParachains: pallet_bridge_parachains = 52,
 		BridgePolkadotMessages: pallet_bridge_messages = 53,
+
+		// Local Root
+		Sudo: pallet_sudo = 61,
+		Proxy: pallet_proxy = 62,
 	}
 );
 
@@ -478,7 +540,6 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
 				}),
-
 			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
 
 			// Bridge-related calls
@@ -514,6 +575,24 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 						longevity: BridgeTxLongevity::get(),
 						..Default::default()
 					}),
+
+			// Sudo calls
+			RuntimeCall::Proxy(_call) => Ok(ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			}),
+			RuntimeCall::Sudo(_call) => Ok(ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			}),
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
+				Ok(ValidTransaction {
+					priority: SudoPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}),
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
@@ -567,6 +646,12 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
 					.map_err(|_| InvalidTransaction::BadSigner.into())
 					.map(|()| Some(who.clone())),
+
+			// Sudo calls
+			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
+			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
+				Ok(Some(who.clone())),
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
@@ -644,6 +729,9 @@ mod benches {
 		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
 		[pallet_bridge_parachains, PolkadotParachains]
 		[pallet_bridge_messages, PolkadotMessages]
+
+		[pallet_sudo, Sudo]
+		[pallet_proxy, Proxy]
 	);
 
 	pub use frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList};

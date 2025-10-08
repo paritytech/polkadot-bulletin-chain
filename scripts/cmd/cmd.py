@@ -141,6 +141,9 @@ if args.command == 'bench':
             output_path = default_path if not pallet.startswith("pallet_xcm_benchmarks") else xcm_path
             templates = config.get("benchmarks_templates", {}) or {}
             template = templates.get(pallet)
+            excluded_extrinsics = config.get("benchmarks_exclude_extrinsics", {}) or {}
+            excluded = excluded_extrinsics.get(pallet, [])
+            excluded_string = ",".join(f"{pallet}::{e}" for e in excluded)
 
             print(f'-- benchmarking {pallet} in {runtime} into {output_path} using template {template}')
 
@@ -155,6 +158,7 @@ if args.command == 'bench':
                                f"--repeat=1 "
                                f"--heap-pages=4096 "
                                f"{f'--template={template} ' if template else ''}"
+                               f"{f'--exclude-extrinsics={excluded_string} ' if excluded_string else ''}"
                                )
             if status != 0 and not args.continue_on_fail:
                 print(f'Failed to benchmark {pallet} in {runtime}')
