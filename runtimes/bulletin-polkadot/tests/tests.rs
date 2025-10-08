@@ -75,7 +75,6 @@ pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 	.unwrap();
 	pallet_sudo::GenesisConfig::<Runtime> {
 		key: Some(sudo_relayer_signer().into()),
-		..Default::default()
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
