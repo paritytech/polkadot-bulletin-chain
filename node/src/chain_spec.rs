@@ -1,15 +1,30 @@
+use sc_chain_spec::ChainSpecExtension;
 use sc_service::ChainType;
+use sp_runtime::{Deserialize, Serialize};
 
 const PROTOCOL_ID: &str = "dot-bulletin";
 
+/// Node `ChainSpec` extensions.
+///
+/// Additional parameters for some Substrate core modules,
+/// customizable from the chain spec.
+#[derive(Default, Clone, Serialize, Deserialize, ChainSpecExtension)]
+#[serde(rename_all = "camelCase")]
+pub struct Extensions {
+	/// The light sync state.
+	///
+	/// This value will be set by the `sync-state rpc` implementation.
+	pub light_sync_state: sc_sync_state_rpc::LightSyncStateExtension,
+}
+
 /// Specialized `ChainSpec`. This is a specialization of the general Substrate ChainSpec type.
-pub type ChainSpec = sc_service::GenericChainSpec;
+pub type ChainSpec = sc_service::GenericChainSpec<Extensions>;
 
 pub fn rococo_development_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
 		polkadot_bulletin_chain_runtime::WASM_BINARY
 			.ok_or_else(|| "Development wasm not available".to_string())?,
-		None,
+		Default::default(),
 	)
 	.with_name("Development")
 	.with_id("dev")
@@ -23,7 +38,7 @@ pub fn rococo_local_testnet_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
 		polkadot_bulletin_chain_runtime::WASM_BINARY
 			.ok_or_else(|| "Development wasm not available".to_string())?,
-		None,
+		Default::default(),
 	)
 	.with_name("Rococo Bulletin Local Testnet")
 	.with_id("local_testnet")
@@ -37,7 +52,7 @@ pub fn bulletin_polkadot_development_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
 		bulletin_polkadot_runtime::WASM_BINARY
 			.ok_or_else(|| "bulletin_polkadot_runtime::WASM_BINARY not available".to_string())?,
-		None,
+		Default::default(),
 	)
 	.with_name("Polkadot Bulletin Development")
 	.with_id("dev")
@@ -51,7 +66,7 @@ pub fn bulletin_polkadot_local_testnet_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
 		bulletin_polkadot_runtime::WASM_BINARY
 			.ok_or_else(|| "bulletin_polkadot_runtime::WASM_BINARY not available".to_string())?,
-		None,
+		Default::default(),
 	)
 	.with_name("Polkadot Bulletin Local Testnet")
 	.with_id("local_testnet")

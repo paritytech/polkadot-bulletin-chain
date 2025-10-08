@@ -19,6 +19,7 @@ name = "polkadot-bulletin-chain"
 clap = { features = ["derive"], workspace = true }
 futures = { features = ["thread-pool"], workspace = true }
 tracing = { workspace = true }
+serde = { workspace = true }
 
 sc-chain-spec = { workspace = true }
 frame-support = { workspace = true, optional = true }
@@ -88,7 +89,9 @@ runtime-benchmarks = [
 	"frame-benchmarking-cli/runtime-benchmarks",
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
+	"pallet-transaction-payment/runtime-benchmarks",
 	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
+	"polkadot-primitives/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 ]
@@ -96,7 +99,9 @@ runtime-benchmarks = [
 # in the near future.
 try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
+	"frame-support/try-runtime",
 	"frame-try-runtime/try-runtime",
+	"pallet-transaction-payment/try-runtime",
 	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",
 ]

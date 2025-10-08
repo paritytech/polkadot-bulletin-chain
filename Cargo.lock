@@ -1755,9 +1755,11 @@ dependencies = [
  "pallet-bridge-relayers",
  "pallet-grandpa",
  "pallet-offences",
+ "pallet-proxy",
  "pallet-relayer-set",
  "pallet-session",
  "pallet-staking",
+ "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
@@ -7506,6 +7508,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-proxy"
+version = "28.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=bbbe659465b26daddf4239bd106837f0527b4a5e#bbbe659465b26daddf4239bd106837f0527b4a5e"
+dependencies = [
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+]
+
+[[package]]
 name = "pallet-relayer-set"
 version = "1.0.0"
 dependencies = [
@@ -8247,6 +8259,7 @@ dependencies = [
  "sc-telemetry",
  "sc-transaction-pool",
  "sc-transaction-pool-api",
+ "serde",
  "sp-api",
  "sp-block-builder",
  "sp-blockchain",

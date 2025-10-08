@@ -26,9 +26,10 @@ pallets-common = { workspace = true, default-features = false }
 [features]
 default = ['std']
 runtime-benchmarks = [
+	"pallet-session/runtime-benchmarks",
 	"pallets-common/runtime-benchmarks",
+	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-staking/runtime-benchmarks",
-	'polkadot-sdk-frame/runtime-benchmarks',
 ]
 std = [
 	"log/std",

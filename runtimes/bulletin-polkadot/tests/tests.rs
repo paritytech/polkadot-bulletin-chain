@@ -63,12 +63,18 @@ pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 	sp_tracing::try_init_simple();
 	let mut t = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
 	pallet_relayer_set::GenesisConfig::<Runtime> {
-		initial_relayers: vec![relayer_signer().into()],
+		initial_relayers: vec![relayer_signer().into(), sudo_relayer_signer().into()],
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
 	pallet_bridge_grandpa::GenesisConfig::<Runtime> {
 		owner: Some(bridge_owner_signer().to_account_id()),
+		..Default::default()
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+	pallet_sudo::GenesisConfig::<Runtime> {
+		key: Some(sudo_relayer_signer().into()),
 		..Default::default()
 	}
 	.assimilate_storage(&mut t)
@@ -89,6 +95,18 @@ enum HeaderType {
 fn assert_ok_ok(apply_result: sp_runtime::ApplyExtrinsicResult) {
 	assert_ok!(apply_result);
 	assert_ok!(apply_result.unwrap());
+}
+
+fn assert_ok_err(res: sp_runtime::ApplyExtrinsicResult, expected: sp_runtime::DispatchError) {
+	match res {
+		Ok(Err(e)) => assert_eq!(e, expected),
+		Ok(Ok(_)) => panic!("expected dispatch error, but call succeeded"),
+		Err(e) => panic!("expected valid tx; got validity error: {e:?}"),
+	}
+}
+
+fn sudo_relayer_signer() -> AccountKeyring {
+	AccountKeyring::Alice
 }
 
 fn relayer_signer() -> AccountKeyring {
@@ -499,5 +517,307 @@ fn only_relayer_may_deliver_confirmations_from_polkadot_bridge_hub() {
 		// assert_ok_ok(submit_confirmations_from_polkadot_bridge_hub(relayer_signer()));
 		// assert_ne!(BridgePolkadotMessages::outbound_lane_data(XCM_LANE).latest_received_nonce,
 		// 0);
+	});
+}
+
+fn test_sudo_can_execute_authorize_upgrade(system_call: RuntimeCall) {
+	run_test(|| {
+		assert!(runtime::System::authorized_upgrade().is_none());
+
+		let sudo_signer = sudo_relayer_signer();
+
+		let call_wrapped_in_sudo =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(system_call.clone()) });
+
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), call_wrapped_in_sudo));
+
+		assert!(runtime::System::authorized_upgrade().is_some());
+	});
+}
+
+#[test]
+fn sudo_can_execute_authorize_upgrade() {
+	let wasm_hash: sp_core::H256 = [0xFFu8; 32].into();
+	run_test(|| {
+		test_sudo_can_execute_authorize_upgrade(RuntimeCall::System(
+			runtime::SystemCall::authorize_upgrade { code_hash: wasm_hash },
+		));
+	});
+}
+
+#[test]
+fn sudo_can_execute_authorize_upgradewithout_checks() {
+	let wasm_hash: sp_core::H256 = [0xFFu8; 32].into();
+	run_test(|| {
+		test_sudo_can_execute_authorize_upgrade(RuntimeCall::System(
+			runtime::SystemCall::authorize_upgrade_without_checks { code_hash: wasm_hash },
+		));
+	});
+}
+
+fn test_non_sudo_cannot_execute_authorize_upgrade(system_call: RuntimeCall) {
+	run_test(|| {
+		assert!(runtime::System::authorized_upgrade().is_none());
+
+		let non_sudo_signer = relayer_signer();
+
+		let call_wrapped_in_sudo =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(system_call.clone()) });
+
+		assert_ok_err(
+			construct_and_apply_extrinsic(non_sudo_signer.pair(), call_wrapped_in_sudo),
+			pallet_sudo::Error::<Runtime>::RequireSudo.into(),
+		);
+
+		assert!(runtime::System::authorized_upgrade().is_none());
+	});
+}
+
+#[test]
+fn non_sudo_cannot_execute_authorize_upgrade() {
+	let wasm_hash: sp_core::H256 = [0xFFu8; 32].into();
+	run_test(|| {
+		test_non_sudo_cannot_execute_authorize_upgrade(RuntimeCall::System(
+			runtime::SystemCall::authorize_upgrade { code_hash: wasm_hash },
+		));
+	});
+}
+
+#[test]
+fn non_sudo_cannot_execute_authorize_upgrade_without_checks() {
+	let wasm_hash: sp_core::H256 = [0xFFu8; 32].into();
+	run_test(|| {
+		test_non_sudo_cannot_execute_authorize_upgrade(RuntimeCall::System(
+			runtime::SystemCall::authorize_upgrade_without_checks { code_hash: wasm_hash },
+		));
+	});
+}
+
+fn test_sudo_proxy_authorize_upgrade(system_call: RuntimeCall) {
+	let sudo_signer = sudo_relayer_signer();
+	let non_sudo_signer = relayer_signer();
+
+	let add_proxy_call = RuntimeCall::Proxy(pallet_proxy::Call::add_proxy {
+		delegate: sp_runtime::MultiAddress::Id(non_sudo_signer.to_account_id()),
+		proxy_type: Default::default(),
+		delay: 0,
+	});
+	assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), add_proxy_call));
+
+	let call_wrapped_in_sudo =
+		RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(system_call) });
+
+	let sudo_wrapped_in_proxy_call = RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+		real: sp_runtime::MultiAddress::Id(sudo_signer.to_account_id()),
+		force_proxy_type: None,
+		call: Box::new(call_wrapped_in_sudo),
+	});
+
+	assert_ok_ok(construct_and_apply_extrinsic(non_sudo_signer.pair(), sudo_wrapped_in_proxy_call));
+
+	assert!(runtime::System::authorized_upgrade().is_some());
+}
+
+#[test]
+fn sudo_can_add_proxy_then_proxy_executes_authorize_upgrade() {
+	let wasm_hash: sp_core::H256 = [0xFFu8; 32].into();
+	run_test(|| {
+		test_sudo_proxy_authorize_upgrade(RuntimeCall::System(
+			runtime::SystemCall::authorize_upgrade { code_hash: wasm_hash },
+		));
+	});
+}
+
+#[test]
+fn sudo_can_add_proxy_then_proxy_executes_authorize_upgrade_without_checks() {
+	let wasm_hash: sp_core::H256 = [0xFFu8; 32].into();
+	run_test(|| {
+		test_sudo_proxy_authorize_upgrade(RuntimeCall::System(
+			runtime::SystemCall::authorize_upgrade_without_checks { code_hash: wasm_hash },
+		));
+	});
+}
+
+#[test]
+fn sudo_can_add_non_relayer_proxy_but_proxy_still_cannot_execute() {
+	run_test(|| {
+		assert!(runtime::System::authorized_upgrade().is_none());
+
+		let sudo_signer = sudo_relayer_signer();
+		let non_relayer_signer = non_relay_signer();
+
+		let wasm_hash = runtime::System::block_hash(0);
+
+		let add_proxy_call = RuntimeCall::Proxy(pallet_proxy::Call::add_proxy {
+			delegate: sp_runtime::MultiAddress::Id(non_relayer_signer.to_account_id()),
+			proxy_type: Default::default(),
+			delay: 0,
+		});
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), add_proxy_call));
+
+		let call =
+			RuntimeCall::System(runtime::SystemCall::authorize_upgrade { code_hash: wasm_hash });
+		let call_wrapped_in_sudo =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(call.clone()) });
+
+		let sudo_wrapped_in_proxy_call = RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+			real: sp_runtime::MultiAddress::Id(sudo_signer.to_account_id()),
+			force_proxy_type: None,
+			call: Box::new(call_wrapped_in_sudo),
+		});
+
+		assert_eq!(
+			construct_and_apply_extrinsic(non_relayer_signer.pair(), sudo_wrapped_in_proxy_call,),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment))
+		);
+
+		assert!(runtime::System::authorized_upgrade().is_none());
+	});
+}
+
+#[test]
+fn can_add_up_to_max_number_of_proxies_and_fail_beyond() {
+	run_test(|| {
+		let sudo_signer = sudo_relayer_signer();
+
+		let max_proxies: u32 = <Runtime as pallet_proxy::Config>::MaxProxies::get();
+
+		let delegates: Vec<runtime::AccountId> = (1..=max_proxies)
+			.map(|i| {
+				let bytes = [i as u8; 32];
+				bytes.into()
+			})
+			.collect();
+
+		for delegate in &delegates {
+			let add_proxy_call = RuntimeCall::Proxy(pallet_proxy::Call::add_proxy {
+				delegate: sp_runtime::MultiAddress::Id(delegate.clone()),
+				proxy_type: Default::default(),
+				delay: 0,
+			});
+
+			assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), add_proxy_call));
+		}
+
+		let extra_account: runtime::AccountId = [0xFFu8; 32].into();
+		let extra_call = RuntimeCall::Proxy(pallet_proxy::Call::add_proxy {
+			delegate: sp_runtime::MultiAddress::Id(extra_account.clone()),
+			proxy_type: Default::default(),
+			delay: 0,
+		});
+
+		assert_ok_err(
+			construct_and_apply_extrinsic(sudo_signer.pair(), extra_call),
+			pallet_proxy::Error::<Runtime>::TooMany.into(),
+		);
+	});
+}
+
+#[test]
+fn sudo_executes_authorize_upgrade_without_checks_and_non_sudo_apply_it() {
+	run_test(|| {
+		assert!(runtime::System::authorized_upgrade().is_none());
+
+		let sudo_signer = sudo_relayer_signer();
+		let non_sudo_signer = relayer_signer();
+
+		let current_wasm =
+			sp_io::storage::get(b":code").expect("runtime code must exist in :code storage key");
+		let wasm_hash: runtime::Hash = sp_io::hashing::blake2_256(&current_wasm).into();
+
+		let authorize_call =
+			RuntimeCall::System(runtime::SystemCall::authorize_upgrade_without_checks {
+				code_hash: wasm_hash,
+			});
+		let sudo_wrapped =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(authorize_call.clone()) });
+
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), sudo_wrapped));
+
+		assert!(runtime::System::authorized_upgrade().is_some());
+
+		let apply_call = RuntimeCall::System(runtime::SystemCall::apply_authorized_upgrade {
+			code: current_wasm.to_vec(),
+		});
+
+		assert_ok_ok(construct_and_apply_extrinsic(non_sudo_signer.pair(), apply_call));
+	});
+}
+
+#[test]
+fn sudo_executes_authorize_upgrade_without_checks_with_wrong_hash_and_non_sudo_cannot_apply_it() {
+	run_test(|| {
+		assert!(runtime::System::authorized_upgrade().is_none());
+
+		let sudo_signer = sudo_relayer_signer();
+		let non_sudo_signer = relayer_signer();
+
+		let current_wasm =
+			sp_io::storage::get(b":code").expect("runtime code must exist in :code storage key");
+		let wrong_hash: runtime::Hash = [0xFFu8; 32].into();
+
+		let authorize_call =
+			RuntimeCall::System(runtime::SystemCall::authorize_upgrade_without_checks {
+				code_hash: wrong_hash,
+			});
+		let sudo_wrapped =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(authorize_call.clone()) });
+
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), sudo_wrapped));
+
+		assert!(runtime::System::authorized_upgrade().is_some());
+
+		let apply_call = RuntimeCall::System(runtime::SystemCall::apply_authorized_upgrade {
+			code: current_wasm.to_vec(),
+		});
+
+		assert_ok_err(
+			construct_and_apply_extrinsic(non_sudo_signer.pair(), apply_call),
+			frame_system::Error::<Runtime>::Unauthorized.into(),
+		);
+	});
+}
+
+#[test]
+fn sudo_executes_set_code_without_checks_is_success() {
+	run_test(|| {
+		let sudo_signer = sudo_relayer_signer();
+
+		let current_wasm =
+			sp_io::storage::get(b":code").expect("runtime code must exist in :code storage key");
+
+		let set_code_call = RuntimeCall::System(runtime::SystemCall::set_code_without_checks {
+			code: current_wasm.to_vec(),
+		});
+		let sudo_wrapped =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(set_code_call.clone()) });
+
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), sudo_wrapped));
+	});
+}
+
+#[test]
+fn sudo_kill_works() {
+	run_test(|| {
+		let sudo_signer = sudo_relayer_signer();
+
+		// Sudo works
+		let sudo_test_call =
+			RuntimeCall::System(runtime::SystemCall::authorize_upgrade_without_checks {
+				code_hash: [0xFFu8; 32].into(),
+			});
+		let sudo_wrapped =
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(sudo_test_call.clone()) });
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), sudo_wrapped.clone()));
+
+		// Remove sudo key
+		let remove_key = RuntimeCall::Sudo(pallet_sudo::Call::remove_key {});
+		assert_ok_ok(construct_and_apply_extrinsic(sudo_signer.pair(), remove_key));
+
+		// Sudo no longer works
+		assert_ok_err(
+			construct_and_apply_extrinsic(sudo_signer.pair(), sudo_wrapped),
+			pallet_sudo::Error::<Runtime>::RequireSudo.into(),
+		);
 	});
 }
