@@ -101,8 +101,7 @@ impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
 		let origin = origin.into();
 		log::trace!(
 			target: "xcm::origin_conversion",
-			"KawabungaParachainAsRoot origin: {:?}, kind: {:?}",
-			origin, kind,
+			"KawabungaParachainAsRoot origin: {origin:?}, kind: {kind:?}",
 		);
 		match (kind, origin.unpack()) {
 			(
@@ -151,8 +150,8 @@ impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 	) -> Result<(), ProcessMessageError> {
 		log::trace!(
 			target: "xcm::barriers",
-			"AllowUnpaidTransactsFrom origin: {:?}, instructions: {:?}, max_weight: {:?}, properties:
-		{:?}", 			origin, instructions, max_weight, _properties,
+			"AllowUnpaidTransactsFrom origin: {origin:?}, instructions: {instructions:?}, max_weight: {max_weight:?}, properties:
+		{_properties:?}",
 		);
 
 		// we only allow from configured origins

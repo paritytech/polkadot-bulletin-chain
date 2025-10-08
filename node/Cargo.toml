@@ -24,6 +24,7 @@ serde = { workspace = true }
 sc-chain-spec = { workspace = true }
 frame-support = { workspace = true, optional = true }
 frame-system-rpc-runtime-api = { workspace = true }
+frame-try-runtime = { workspace = true, optional = true }
 pallet-transaction-payment = { workspace = true }
 sc-cli = { workspace = true }
 sc-client-api = { workspace = true }
@@ -99,6 +100,7 @@ runtime-benchmarks = [
 try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
 	"frame-support/try-runtime",
+	"frame-try-runtime/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",

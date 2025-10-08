@@ -15,10 +15,3 @@
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
 pub use polkadot_primitives::{AccountId, Balance, Block, BlockNumber, Hash, Nonce};
-
-/// Should be aligned with runtimes.
-#[cfg(feature = "try-runtime")]
-pub const MILLISECS_PER_BLOCK: u64 = 6000;
-/// Should be aligned with runtimes.
-#[cfg(feature = "try-runtime")]
-pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;

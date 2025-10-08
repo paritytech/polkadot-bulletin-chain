@@ -281,9 +281,7 @@ where
 			.map_err(|e| {
 				log::error!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
-					"haul_blob result - error: {:?} on lane: {:?}",
-					e,
-					XCM_LANE,
+					"haul_blob result - error: {e:?} on lane: {XCM_LANE:?}",
 				);
 				HaulBlobError::Transport("MessageSenderError")
 			})?;

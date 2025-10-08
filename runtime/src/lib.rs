@@ -199,7 +199,7 @@ parameter_types! {
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = DAYS as TransactionLongevity;
 
-	pub const SudoPriority: TransactionPriority = TransactionPriority::max_value();
+	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 
 	pub const SetKeysCooldownBlocks: BlockNumber = 5 * MINUTES;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
