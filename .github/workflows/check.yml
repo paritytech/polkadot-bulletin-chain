@@ -78,6 +78,32 @@ jobs:
         run: |
           cargo check --workspace --features=runtime-benchmarks
 
+  clippy:
+    name: Cargo clippy
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    env:
+      SKIP_PALLET_REVIVE_FIXTURES: 1
+      RUSTFLAGS: "-D warnings"
+      SKIP_WASM_BUILD: 1
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Cargo clippy
+        run: |
+          cargo clippy --all-targets --locked --workspace --quiet
+          cargo clippy --all-targets --all-features --locked --workspace --quiet
+
   test:
     name: Test
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
