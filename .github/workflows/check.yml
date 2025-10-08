@@ -82,7 +82,6 @@ jobs:
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
-      SKIP_PALLET_REVIVE_FIXTURES: 1
       RUSTFLAGS: "-D warnings"
       SKIP_WASM_BUILD: 1
     steps:
