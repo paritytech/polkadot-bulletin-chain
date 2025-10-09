@@ -225,15 +225,11 @@ mod benchmarks {
 		let hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
 		let origin2 = origin.clone();
-		TransactionStorage::<T>::authorize_preimage(
-			origin2 as T::RuntimeOrigin,
-			hash.clone(),
-			max_size,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		TransactionStorage::<T>::authorize_preimage(origin2 as T::RuntimeOrigin, hash, max_size)
+			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, hash.clone());
+		_(origin as T::RuntimeOrigin, hash);
 
 		assert_last_event::<T>(Event::PreimageAuthorizationRefreshed { hash }.into());
 		Ok(())

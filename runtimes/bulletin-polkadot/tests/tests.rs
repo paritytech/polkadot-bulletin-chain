@@ -60,7 +60,7 @@ fn advance_block() {
 }
 
 pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
-	let _ = sp_tracing::try_init_simple();
+	sp_tracing::try_init_simple();
 	let mut t = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
 	pallet_relayer_set::GenesisConfig::<Runtime> {
 		initial_relayers: vec![relayer_signer().into(), sudo_relayer_signer().into()],
@@ -75,7 +75,6 @@ pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 	.unwrap();
 	pallet_sudo::GenesisConfig::<Runtime> {
 		key: Some(sudo_relayer_signer().into()),
-		..Default::default()
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
@@ -282,13 +281,11 @@ fn construct_extrinsic(
 		frame_system::CheckEra::<Runtime>::from(Era::immortal()),
 		frame_system::CheckNonce::<Runtime>::from(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
-		)
-		.into(),
+		),
 		frame_system::CheckWeight::<Runtime>::new(),
 		runtime::ValidateSigned,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
-	)
-		.into();
+	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
 	let signature = payload.using_encoded(|e| sender.sign(e));
 	Ok(UncheckedExtrinsic::new_signed(
@@ -318,7 +315,7 @@ fn construct_and_apply_extrinsic(
 
 #[test]
 fn transaction_storage_runtime_sizes() {
-	let _ = sp_tracing::try_init_simple();
+	sp_tracing::try_init_simple();
 	sp_io::TestExternalities::new(
 		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
 	)
@@ -328,6 +325,7 @@ fn transaction_storage_runtime_sizes() {
 		// prepare data
 		let account = Sr25519Keyring::Alice;
 		let who: runtime::AccountId = account.to_account_id();
+		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB

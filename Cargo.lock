@@ -8234,6 +8234,7 @@ dependencies = [
  "frame-benchmarking-cli",
  "frame-support",
  "frame-system-rpc-runtime-api",
+ "frame-try-runtime",
  "futures",
  "jsonrpsee",
  "pallet-transaction-payment",

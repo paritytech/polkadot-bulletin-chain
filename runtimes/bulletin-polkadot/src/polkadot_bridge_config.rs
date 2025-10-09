@@ -403,9 +403,7 @@ where
 			.map_err(|e| {
 				log::error!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
-					"haul_blob result - error: {:?} on lane: {:?}",
-					e,
-					XCM_LANE,
+					"haul_blob result - error: {e:?} on lane: {XCM_LANE:?}",
 				);
 				HaulBlobError::Transport("MessageSenderError")
 			})?;
@@ -519,7 +517,7 @@ pub(crate) mod tests {
 	// } 	}
 
 	pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
-		let _ = sp_tracing::try_init_simple();
+		sp_tracing::try_init_simple();
 		let mut t = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
 		pallet_relayer_set::GenesisConfig::<Runtime> {
 			initial_relayers: vec![relayer_signer().into()],

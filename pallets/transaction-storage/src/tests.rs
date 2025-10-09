@@ -181,7 +181,7 @@ fn renews_data() {
 		};
 		run_to_block(16, proof_provider);
 		assert!(Transactions::get(1).is_none());
-		assert_eq!(Transactions::get(6).unwrap().get(0), Some(info).as_ref());
+		assert_eq!(Transactions::get(6).unwrap().first(), Some(info).as_ref());
 		run_to_block(17, proof_provider);
 		assert!(Transactions::get(6).is_none());
 	});
@@ -301,6 +301,7 @@ fn stores_various_sizes_with_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
+		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
 			1 * 1024 * 1024, // 1 MB

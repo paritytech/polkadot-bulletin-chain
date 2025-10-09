@@ -63,6 +63,7 @@ impl SubstrateCli for Cli {
 }
 
 /// Parse and run command line arguments
+#[allow(clippy::result_large_err)]
 pub fn run() -> sc_cli::Result<()> {
 	let cli = Cli::from_args();
 
@@ -163,8 +164,7 @@ pub fn run() -> sc_cli::Result<()> {
 							return Err(sc_cli::Error::Input(
 								"Bulletin binary does not support `--runtime` flag for `benchmark overhead`. Please provide a chain spec or use the `frame-omni-bencher`."
 									.into(),
-							)
-								.into())
+							))
 						}
 
 						cmd.run_with_default_builder_and_spec::<Block, ()>(

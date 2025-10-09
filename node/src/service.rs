@@ -25,6 +25,7 @@ type FullGrandpaBlockImport =
 const GRANDPA_JUSTIFICATION_PERIOD: u32 = 512;
 
 #[allow(clippy::type_complexity)]
+#[allow(clippy::result_large_err)]
 pub fn new_partial(
 	config: &Configuration,
 ) -> Result<
@@ -141,6 +142,7 @@ pub fn new_partial(
 }
 
 /// Builds a new service for a full client.
+#[allow(clippy::result_large_err)]
 pub fn new_full<
 	N: sc_network::NetworkBackend<Block, <Block as sp_runtime::traits::Block>::Hash>,
 >(
@@ -211,7 +213,7 @@ pub fn new_full<
 		);
 	}
 
-	let role = config.role.clone();
+	let role = config.role;
 	let force_authoring = config.force_authoring;
 	let backoff_authoring_blocks: Option<()> = None;
 	let name = config.network.node_name.clone();
