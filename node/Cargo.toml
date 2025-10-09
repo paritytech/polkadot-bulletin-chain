@@ -1,6 +1,6 @@
 [package]
 name = "polkadot-bulletin-chain"
-version = "0.1.0-dev"
+version = "1.0.0"
 description = "Polkadot Bulletin Chain node"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true
