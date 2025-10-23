@@ -1,6 +1,8 @@
 # How to run
 
-### Install Kubo
+### Run Kubo locally
+
+#### Either install locally
 ```
 wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_linux-amd64.tar.gz
 tar -xvzf kubo_v0.38.1_linux-amd64.tar.gz
@@ -31,6 +33,19 @@ Gateway server listening on /ip4/127.0.0.1/tcp/8080
 Daemon is ready
 ```
 
+#### Or use docker
+
+```
+docker pull ipfs/kubo:latest
+docker run -d --name ipfs-node   -v ipfs-data:/data/ipfs   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:latest
+docker logs -f ipfs-node
+
+# specific version
+# docker pull ipfs  /kubo:v0.35.0
+# docker run -d --name ipfs-node-v0.35.0   -v ipfs-data:/data/ipfs-v0.35   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:v0.35.0
+# docker logs -f ipfs-node-v0.35.0
+```
+
 ### Download zombienet
 ```
 wget https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64
@@ -56,12 +71,23 @@ POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./zombien
 ```
 
 ### IPFS swarm connect of Bulletin nodes with `--ipfs-server`
+
+**Local Kubo:**
 ```
 ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 # connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
 ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 # connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
 ipfs swarm peers
+```
+
+**Kubo in Docker:** (use 172.17.0.1 or host.docker.internal)
+```
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+# specific version
+# docker exec -it ipfs-node-v0.35.0 ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+# docker exec -it ipfs-node-v0.35.0 ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 ```
 
 ### Trigger authorize, store and IPFS get

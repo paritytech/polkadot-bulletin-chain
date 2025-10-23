@@ -11,11 +11,11 @@ name = "alice"
 p2p_port = 10001
 rpc_port = 10000
 validator = true
-args = [ "--ipfs-server", "-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace"]
+args = [ "--ipfs-server", "-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace,litep2p::crypto::noise=debug"]
 
 [[relaychain.nodes]]
 name = "bob"
 p2p_port = 12347
 rpc_port = 12346
 validator = true
-args = ["-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace"]
+args = ["-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace,litep2p::crypto::noise=debug"]
