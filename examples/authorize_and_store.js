@@ -104,6 +104,8 @@ async function main() {
     let content = await read_from_ipfs(cid);
     console.log('Content as bytes:', content);
     console.log('Content as string:', content.toString());
+
+    await api.disconnect();
 }
 
 main().catch(console.error);
