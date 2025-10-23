@@ -1,51 +1,5 @@
 # How to run
 
-### Run Kubo locally
-
-#### Either install locally
-```
-wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_linux-amd64.tar.gz
-tar -xvzf kubo_v0.38.1_linux-amd64.tar.gz
-cd kubo
-sudo bash install.sh
-ipfs version
-ipfs init
-ipfs daemon
-```
-Output:
-```
-Initializing daemon...
-Kubo version: 0.38.0
-Repo version: 18
-System version: amd64/linux
-Golang version: go1.25.1
-PeerID: 12D3KooWKZcts5N54ukoNujKXMz6J84A6cn2mtBzxaEsU8uB6uDz
-2025/10/08 13:25:25 failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB). See https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes for details.
-Swarm listening on 127.0.0.1:4001 (TCP+UDP)
-Swarm listening on 172.17.0.1:4001 (TCP+UDP)
-Swarm listening on 192.168.3.242:4001 (TCP+UDP)
-Swarm listening on 192.168.4.241:4001 (TCP+UDP)
-Swarm listening on [::1]:4001 (TCP+UDP)
-Run 'ipfs id' to inspect announced and discovered multiaddrs of this node.
-RPC API server listening on /ip4/127.0.0.1/tcp/5001
-WebUI: http://127.0.0.1:5001/webui
-Gateway server listening on /ip4/127.0.0.1/tcp/8080
-Daemon is ready
-```
-
-#### Or use docker
-
-```
-docker pull ipfs/kubo:latest
-docker run -d --name ipfs-node   -v ipfs-data:/data/ipfs   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:latest
-docker logs -f ipfs-node
-
-# specific version
-# docker pull ipfs  /kubo:v0.35.0
-# docker run -d --name ipfs-node-v0.35.0   -v ipfs-data:/data/ipfs-v0.35   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:v0.35.0
-# docker logs -f ipfs-node-v0.35.0
-```
-
 ### Download zombienet
 ```
 wget https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64
@@ -65,27 +19,45 @@ cargo build --release -p polkadot-bulletin-chain
 wget https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64
 ```
 
-### Run Bulletin
+### Run Bulletin nodes with `--ipfs-server`
 ```
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./zombienet-linux-x64 -p native spawn ./zombienet/bulletin-polkadot-local.toml
 ```
 
-### IPFS swarm connect of Bulletin nodes with `--ipfs-server`
+### Run Kubo locally and connect Bulletin nodes
 
-**Local Kubo:**
+#### Either locally
 ```
+wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_linux-amd64.tar.gz
+tar -xvzf kubo_v0.38.1_linux-amd64.tar.gz
+cd kubo
+sudo bash install.sh
+ipfs version
+ipfs init
+ipfs daemon & # run in background
+
+# Connect nodes
 ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 # connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
 ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 # connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
-ipfs swarm peers
 ```
 
-**Kubo in Docker:** (use 172.17.0.1 or host.docker.internal)
+#### Or use docker (uses 172.17.0.1 or host.docker.internal for swarm connect)
+
 ```
+docker pull ipfs/kubo:latest
+docker run -d --name ipfs-node   -v ipfs-data:/data/ipfs   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:latest
+docker logs -f ipfs-node
+# Connect nodes
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+
 # specific version
+# docker pull ipfs  /kubo:v0.35.0
+# docker run -d --name ipfs-node-v0.35.0   -v ipfs-data:/data/ipfs-v0.35   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:v0.35.0
+# docker logs -f ipfs-node-v0.35.0
+# Connect nodes
 # docker exec -it ipfs-node-v0.35.0 ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 # docker exec -it ipfs-node-v0.35.0 ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 ```
