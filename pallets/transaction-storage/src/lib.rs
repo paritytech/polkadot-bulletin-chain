@@ -113,7 +113,9 @@ pub struct TransactionInfo {
 	/// Size of indexed data in bytes.
 	size: u32,
 	/// Total number of chunks added in the block with this transaction. This
-	/// is used find transaction info by block chunk index using binary search.
+	/// is used to find transaction info by block chunk index using binary search.
+	///
+	/// Cumulative value of all previous transactions in the block; the last transaction holds the total chunk value.
 	block_chunks: u32,
 }
 
@@ -385,39 +387,26 @@ pub mod pallet {
 		) -> DispatchResultWithPostInfo {
 			ensure_none(origin)?;
 			ensure!(!ProofChecked::<T>::get(), Error::<T>::DoubleCheck);
+
+			// Get the target block metadata.
 			let number = <frame_system::Pallet<T>>::block_number();
 			let period = T::StoragePeriod::get();
 			let target_number = number.saturating_sub(period);
 			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
 			let total_chunks = <ChunkCount<T>>::get(target_number);
 			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
-			let parent_hash = <frame_system::Pallet<T>>::parent_hash();
-			let selected_chunk_index = random_chunk(parent_hash.as_ref(), total_chunks);
-			let (info, chunk_index) = match <Transactions<T>>::get(target_number) {
-				Some(infos) => {
-					let index = match infos
-						.binary_search_by_key(&selected_chunk_index, |info| info.block_chunks)
-					{
-						Ok(index) => index,
-						Err(index) => index,
-					};
-					let info = infos.get(index).ok_or(Error::<T>::MissingStateData)?.clone();
-					let chunks = num_chunks(info.size);
-					let prev_chunks = info.block_chunks - chunks;
-					(info, selected_chunk_index - prev_chunks)
-				},
-				None => return Err(Error::<T>::MissingStateData.into()),
-			};
-			ensure!(
-				sp_io::trie::blake2_256_verify_proof(
-					info.chunk_root,
-					&proof.proof,
-					&encode_index(chunk_index),
-					&proof.chunk,
-					sp_runtime::StateVersion::V1,
-				),
-				Error::<T>::InvalidProof
-			);
+			let total_chunks = ChunkCount::<T>::get(target_number);
+			let transactions =
+				Transactions::<T>::get(target_number).ok_or(Error::<T>::MissingStateData)?;
+
+			// Verify the proof with a "random" chunk (randomness is based on the parent hash).
+			let parent_hash = frame_system::Pallet::<T>::parent_hash();
+			Self::ensure_chunk_proof(
+				proof,
+				parent_hash.as_ref(),
+				transactions.to_vec(),
+				total_chunks,
+			)?;
 			ProofChecked::<T>::put(true);
 			Self::deposit_event(Event::ProofChecked);
 			Ok(().into())
@@ -997,6 +986,62 @@ pub mod pallet {
 				longevity: T::StoreRenewLongevity::get(),
 				..Default::default()
 			}))
+		}
+
+		pub(crate) fn ensure_chunk_proof(
+			proof: TransactionStorageProof,
+			random_hash: &[u8],
+			infos: Vec<TransactionInfo>,
+			total_chunks: u32,
+		) -> Result<(), Error<T>> {
+			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
+			ensure!(!infos.is_empty(), Error::<T>::UnexpectedProof);
+
+			// Get the random chunk index (from all transactions in the block = 0..total_chunks).
+			let selected_block_chunk_index = random_chunk(random_hash.as_ref(), total_chunks);
+
+			// Let's find the corresponding transaction and its "local" chunk index for "global"
+			// `selected_block_chunk_index`.
+			let (tx_info, tx_chunk_index) = {
+				// Binary search for the transaction that owns this `selected_block_chunk_index`
+				// chunk.
+				let tx_index = infos
+					.binary_search_by_key(&selected_block_chunk_index, |info| {
+						// Each `info.block_chunks` is cumulative count, so last chunk index = count
+						// - 1.
+						let last_chunk_index = info.block_chunks.saturating_sub(1);
+						last_chunk_index
+					})
+					.unwrap_or_else(|tx_index| tx_index);
+
+				// Get the transaction and its local chunk index.
+				let tx_info = infos.get(tx_index).ok_or(Error::<T>::MissingStateData)?;
+				// We shouldn't reach this point; we rely on the fact that `fn store` does not allow
+				// empty transactions. Without this check, it would fail anyway below with
+				// `InvalidProof`.
+				ensure!(!tx_info.block_chunks.is_zero(), Error::<T>::BadDataSize);
+
+				// Convert a global chunk index into a transaction-local one.
+				let tx_chunks = num_chunks(tx_info.size);
+				let prev_chunks = tx_info.block_chunks - tx_chunks;
+				let tx_chunk_index = selected_block_chunk_index - prev_chunks;
+
+				(tx_info, tx_chunk_index)
+			};
+
+			// Verify the tx chunk proof.
+			ensure!(
+				sp_io::trie::blake2_256_verify_proof(
+					tx_info.chunk_root,
+					&proof.proof,
+					&encode_index(tx_chunk_index),
+					&proof.chunk,
+					sp_runtime::StateVersion::V1,
+				),
+				Error::<T>::InvalidProof
+			);
+
+			Ok(())
 		}
 	}
 }
