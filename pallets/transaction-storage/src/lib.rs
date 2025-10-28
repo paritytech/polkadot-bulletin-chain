@@ -638,6 +638,11 @@ pub mod pallet {
 		}
 
 		fn pre_dispatch(call: &Self::Call) -> Result<(), TransactionValidityError> {
+			// Allow inherents here.
+			if Self::is_inherent(call) {
+				return Ok(());
+			}
+
 			Self::check_unsigned(call, CheckContext::PreDispatch).map(|_| ())
 		}
 	}
