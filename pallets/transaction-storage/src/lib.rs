@@ -1003,7 +1003,7 @@ pub mod pallet {
 			ensure!(!infos.is_empty(), Error::<T>::UnexpectedProof);
 
 			// Get the random chunk index (from all transactions in the block = 0..total_chunks).
-			let selected_block_chunk_index = random_chunk(random_hash.as_ref(), total_chunks);
+			let selected_block_chunk_index = random_chunk(random_hash, total_chunks);
 
 			// Let's find the corresponding transaction and its "local" chunk index for "global"
 			// `selected_block_chunk_index`.
@@ -1012,10 +1012,9 @@ pub mod pallet {
 				// chunk.
 				let tx_index = infos
 					.binary_search_by_key(&selected_block_chunk_index, |info| {
-						// Each `info.block_chunks` is cumulative count, so last chunk index = count
-						// - 1.
-						let last_chunk_index = info.block_chunks.saturating_sub(1);
-						last_chunk_index
+						// Each `info.block_chunks` is cumulative count,
+						// so last chunk index = count - 1.
+						info.block_chunks.saturating_sub(1)
 					})
 					.unwrap_or_else(|tx_index| tx_index);
 
