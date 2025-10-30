@@ -1,0 +1,50 @@
+[settings]
+node_spawn_timeout = 240
+
+[relaychain]
+default_command = "{{POLKADOT_BINARY}}"
+default_args = ["-lparachain=debug,xcm=trace,runtime::bridge-hub=trace,runtime::bridge=trace,runtime::bridge-dispatch=trace,bridge=trace,runtime::bridge-messages=trace", "--blocks-pruning=128", "--state-pruning=128" ]
+chain = "polkadot-local"
+chain_spec_command = "{{CHAIN_SPEC_GEN_BINARY_FOR_POLKADOT}} {% raw %} {{chainName}} {% endraw %}"
+
+	[[relaychain.nodes]]
+	name = "alice"
+	validator = true
+	rpc_port = 9942
+	balance = 2000000000000
+
+	[[relaychain.nodes]]
+	name = "bob"
+	validator = true
+	rpc_port = 9943
+	balance = 2000000000000
+
+	[[relaychain.nodes]]
+	name = "charlie"
+	validator = true
+	rpc_port = 9944
+	balance = 2000000000000
+
+[[parachains]]
+id = 1004
+chain = "bulletin-westend-local"
+chain_spec_command = "{{ENV_PATH}}/generate_bw_spec.sh"
+cumulus_based = true
+
+	[[parachains.collators]]
+	name = "bulletin-westend-collator-1"
+	validator = true
+	command = "{{POLKADOT_PARACHAIN_BINARY}}"
+	rpc_port = 9910
+	args = [
+		"-lparachain=debug,runtime::bridge-hub=trace,runtime::bridge=trace,runtime::bridge-dispatch=trace,bridge=trace,runtime::bridge-messages=trace,xcm=trace", "--blocks-pruning=128", "--state-pruning=128"
+	]
+
+	[[parachains.collators]]
+	name = "bulletin-westend-collator-2"
+	validator = true
+	command = "{{POLKADOT_PARACHAIN_BINARY}}"
+	rpc_port = 8944
+	args = [
+		"-lparachain=trace,runtime::bridge-hub=trace,runtime::bridge=trace,runtime::bridge-dispatch=trace,bridge=trace,runtime::bridge-messages=trace,xcm=trace", "--blocks-pruning=128", "--state-pruning=128"
+	]
