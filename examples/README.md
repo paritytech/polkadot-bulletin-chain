@@ -68,4 +68,5 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 cd examples
 npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto @polkadot/util multiformats ipfs-http-client
 node authorize_and_store.js
+node store_dag.js
 ```
