@@ -4,8 +4,7 @@ node_spawn_timeout = 240
 [relaychain]
 default_command = "{{POLKADOT_BINARY}}"
 default_args = ["-lparachain=debug,xcm=trace,runtime::bridge-hub=trace,runtime::bridge=trace,runtime::bridge-dispatch=trace,bridge=trace,runtime::bridge-messages=trace", "--blocks-pruning=128", "--state-pruning=128" ]
-chain = "polkadot-local"
-chain_spec_command = "{{CHAIN_SPEC_GEN_BINARY_FOR_POLKADOT}} {% raw %} {{chainName}} {% endraw %}"
+chain = "westend-local"
 
 	[[relaychain.nodes]]
 	name = "alice"
