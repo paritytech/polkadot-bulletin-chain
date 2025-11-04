@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Coretime Westend Runtime genesis config presets
+//! # Bulletin Westend Runtime genesis config presets
 
 use crate::*;
 use alloc::{vec, vec::Vec};
@@ -26,10 +26,10 @@ use testnet_parachains_constants::westend::{
 	currency::UNITS as WND, xcm_version::SAFE_XCM_VERSION,
 };
 
-const CORETIME_WESTEND_ED: Balance = ExistentialDeposit::get();
-pub const CORETIME_PARA_ID: ParaId = ParaId::new(1005);
+const BULLETIN_WESTEND_ED: Balance = ExistentialDeposit::get();
+pub const BULLETIN_PARA_ID: ParaId = ParaId::new(2008);
 
-fn coretime_westend_genesis(
+fn bulletin_westend_genesis(
 	invulnerables: Vec<(AccountId, AuraId)>,
 	endowed_accounts: Vec<AccountId>,
 	endowment: Balance,
@@ -42,7 +42,7 @@ fn coretime_westend_genesis(
 		parachain_info: ParachainInfoConfig { parachain_id: id },
 		collator_selection: CollatorSelectionConfig {
 			invulnerables: invulnerables.iter().cloned().map(|(acc, _)| acc).collect(),
-			candidacy_bond: CORETIME_WESTEND_ED * 16,
+			candidacy_bond: BULLETIN_WESTEND_ED * 16,
 		},
 		session: SessionConfig {
 			keys: invulnerables
@@ -63,7 +63,7 @@ fn coretime_westend_genesis(
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 	let patch = match id.as_ref() {
-		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => coretime_westend_genesis(
+		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
 			vec![
 				(Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Alice.public().into()),
@@ -71,9 +71,9 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			],
 			Sr25519Keyring::well_known().map(|k| k.to_account_id()).collect(),
 			WND * 1_000_000,
-			CORETIME_PARA_ID,
+			BULLETIN_PARA_ID,
 		),
-		sp_genesis_builder::DEV_RUNTIME_PRESET => coretime_westend_genesis(
+		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
 			vec![(Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Alice.public().into())],
 			vec![
@@ -83,7 +83,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 				Sr25519Keyring::BobStash.to_account_id(),
 			],
 			WND * 1_000_000,
-			CORETIME_PARA_ID,
+			BULLETIN_PARA_ID,
 		),
 		_ => return None,
 	};

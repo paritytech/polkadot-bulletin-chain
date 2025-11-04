@@ -215,14 +215,14 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Coretime chain does not recognize a reserve location for any asset. Users must teleport ROC
+	// Bulletin chain does not recognize a reserve location for any asset. Users must teleport ROC
 	// where allowed (e.g. with the Relay Chain).
 	type IsReserve = ();
 	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
 	type Weigher = WeightInfoBounds<
-		crate::weights::xcm::CoretimeWestendXcmWeight<RuntimeCall>,
+		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
 		RuntimeCall,
 		MaxInstructions,
 	>;
@@ -291,7 +291,7 @@ impl pallet_xcm::Config for Runtime {
 	type XcmTeleportFilter = Everything;
 	type XcmReserveTransferFilter = Everything;
 	type Weigher = WeightInfoBounds<
-		crate::weights::xcm::CoretimeWestendXcmWeight<RuntimeCall>,
+		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
 		RuntimeCall,
 		MaxInstructions,
 	>;
