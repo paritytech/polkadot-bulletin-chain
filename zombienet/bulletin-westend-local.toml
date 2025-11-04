@@ -27,7 +27,6 @@ chain = "westend-local"
 [[parachains]]
 id = 1004
 chain = "bulletin-westend-local"
-chain_spec_command = "{{ENV_PATH}}/generate_bw_spec.sh"
 cumulus_based = true
 
 	[[parachains.collators]]
