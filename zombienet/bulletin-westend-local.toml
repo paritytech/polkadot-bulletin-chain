@@ -3,7 +3,7 @@ node_spawn_timeout = 240
 
 [relaychain]
 default_command = "{{POLKADOT_BINARY}}"
-default_args = ["-lparachain=debug,xcm=trace,runtime::bridge-hub=trace,runtime::bridge=trace,runtime::bridge-dispatch=trace,bridge=trace,runtime::bridge-messages=trace", "--blocks-pruning=128", "--state-pruning=128" ]
+default_args = ["-lruntime=debug,xcm=trace"]
 chain = "westend-local"
 
 	[[relaychain.nodes]]
