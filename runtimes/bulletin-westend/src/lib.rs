@@ -151,8 +151,8 @@ impl_opaque_keys! {
 
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("coretime-westend"),
-	impl_name: alloc::borrow::Cow::Borrowed("coretime-westend"),
+	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
+	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
 	spec_version: 1_018_001,
 	impl_version: 0,
