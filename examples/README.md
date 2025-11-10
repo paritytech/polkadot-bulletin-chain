@@ -1,11 +1,5 @@
 # How to run
 
-### Download zombienet
-```
-wget https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64
-chmod +x zombienet-linux-x64
-```
-
 ### Build Bulletin
 ```
 git clone https://github.com/paritytech/polkadot-bulletin-chain.git
@@ -15,8 +9,21 @@ cargo build --release -p polkadot-bulletin-chain
 
 ### Download Zombienet
 ```
-# cd polkadot-bulletin-chain - make sure we are here
+cd polkadot-bulletin-chain - make sure we are within the folder
+```
+
+#### Linux
+```
 wget https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64
+chmod +x zombienet-linux-x64
+```
+
+#### Mac OS
+`zombienet-macos-arm64` or `zombienet-macos-x64`
+
+```
+curl -L -o zombienet-macos-arm64 https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-macos-arm64
+chmod +x zombienet-macos-arm64 
 ```
 
 ### Run Bulletin nodes with `--ipfs-server`
