@@ -7,6 +7,7 @@ import * as sha256 from 'multiformats/hashes/sha2';
 import * as multihash from 'multiformats/hashes/digest';
 import { create } from 'ipfs-http-client';
 import { TextDecoder } from 'util';
+import { UnixFS } from 'ipfs-unixfs'
 
 async function authorizeAccount(api, pair, who, transactions, bytes) {
     const tx = api.tx.transactionStorage.authorizeAccount(who, transactions, bytes);
@@ -104,27 +105,20 @@ async function main() {
     // 4. Store DAG file
     console.log('\n============================\n4. DAG handling...');
     // Construct UnixFS file DAG
-    const offset = chunks.reduce((acc, { len }) => acc + len, 0);
-    const dagFile = {
-        Data: {
-            Type: 'File',
-            filesize: offset,
-        },
+    const blocksizes = chunks.map(c => c.len)
+    const totalSize = blocksizes.reduce((a, b) => a + b, 0)
+
+    const fileData = new UnixFS({
+        type: 'file',
+        fileSize: totalSize,
+        blocksizes
+    })
+    const dagNode = dagPB.prepare({
+        Data: fileData.marshal(),
         Links: chunks.map(({ cid, len }) => ({
             Name: '',
             Tsize: len,
-            Hash: cid,
-        })),
-    };
-    console.log(`\n\n[DAG] Generated dagFile:\n${JSON.stringify(dagFile, null, 2)}`);
-
-    // Convert Data to bytes — the key fix:
-    const dagNode = dagPB.prepare({
-        Data: new TextEncoder().encode(JSON.stringify(dagFile.Data)),
-        Links: dagFile.Links.map(link => ({
-            Name: link.Name,
-            Tsize: link.Tsize,
-            Hash: CID.asCID(link.Hash) ?? CID.parse(link.Hash['/']) // safe fallback
+                Hash: cid
         }))
     });
     // Dag Encode + hash
@@ -138,11 +132,12 @@ async function main() {
     await storeProof(api, who_pair, expectedRootCid);
 
     // Store DAG-PB node in IPFS
-    const dagCid = await ipfs.dag.put(dagNode, {
-        storeCodec: 'dag-pb',  // ensures DAG-PB format
-        hashAlg: 'sha2-256'
-    });
-    console.log(`[DAG] RootCID: ${dagCid}`);
+    // TODO: replace with store would work?
+    const dagCid = await ipfs.block.put(dagNodeAsBytes, {
+        format: 'dag-pb',
+        mhtype: 'sha2-256'
+    })
+    console.log("[DAG] RootCID:", dagCid.toString())
 
     // 4. Retrieve DAG-PB node and content from IPFS
     console.log('\n============================\n6.Reading chunks by DAG file:');
@@ -158,6 +153,16 @@ async function main() {
         const content = Buffer.concat(bytes);
         console.log(` [*] Chunk (${link.Hash}) length ${link.Tsize}:, content:\n`, new TextDecoder().decode(content));
     }
+
+    // Reading the content by rootCID
+    console.log('\n============================\n6.Reading the content by rootCID:');
+    const stored_chunks = [];
+    for await (const chunk of ipfs.cat(dagCid)) {
+        stored_chunks.push(chunk);
+    }
+    const content = Buffer.concat(stored_chunks);
+    console.log('[*] Content:\n', new TextDecoder().decode(content));
+    // TODO: verify if http IPFS gateway returns the content correctly for rootCID
 
     await api.disconnect();
 }
