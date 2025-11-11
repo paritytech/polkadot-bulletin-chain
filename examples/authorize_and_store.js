@@ -36,25 +36,12 @@ async function store(api, pair, data) {
     return cid
 }
 
-// Connect to a local IPFS node or Infura/IPFS gateway
+// Connect to a local IPFS gateway (e.g. Kubo)
 const ipfs = create({
     url: 'http://127.0.0.1:5001', // Local IPFS API
 });
 
-// async function test() {
-//     try {
-//         const id = await ipfs.id();
-//         console.log('✅ Connected to IPFS node:');
-//         console.log('Peer ID:', id.id);
-//         console.log('Addresses:', id.addresses);
-//     } catch (err) {
-//         console.error('❌ Failed to connect to IPFS:', err.message);
-//     }
-// }
-
 async function read_from_ipfs(cid) {
-    // await test();
-
     // Fetch the block (downloads via Bitswap if not local)
     console.log('Trying to get cid: ', cid);
     const block = await ipfs.block.get(cid);

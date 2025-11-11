@@ -7,6 +7,7 @@ import * as sha256 from 'multiformats/hashes/sha2';
 import * as multihash from 'multiformats/hashes/digest';
 import { create } from 'ipfs-http-client';
 import { TextDecoder } from 'util';
+import assert from 'assert';
 import { UnixFS } from 'ipfs-unixfs'
 
 async function authorizeAccount(api, pair, who, transactions, bytes) {
@@ -16,18 +17,28 @@ async function authorizeAccount(api, pair, who, transactions, bytes) {
     console.log('Transaction authorizeAccount result:', result.toHuman());
 }
 
-async function storeProof(api, pair, proof) {
-    console.log('\n\n\=====Storing proof:\n', proof);
+async function storeProof(api, pair, rootCID, dagFileBytes) {
+    console.log(`[Proof] Storing proof for rootCID: ${rootCID}`);
     let { nonce } = await api.query.system.account(pair.address);
+    // store proof aka DAG file as raw.
+    let proof_cid = await store(api, pair, dagFileBytes, nonce);
+
+    // This can be a serious pallet, this is just a demonstration.
+    const proof = `ProofCid: ${proof_cid.toString()} -> rootCID: ${rootCID.toString()}`;
     const tx = api.tx.system.remark(proof);
     const sudo_tx = api.tx.sudo.sudo(tx);
-    const result = await sudo_tx.signAndSend(pair, { nonce });
-    console.log('Transaction storeProof result: ', result);
-    console.log("=====\n\n\n");
+    const result = await sudo_tx.signAndSend(pair, { nonce: nonce.addn(1) });
+    if (result.isError) {
+        console.error('Transaction failed', result.dispatchError?.toHuman());
+        result
+    } else {
+        console.log(`\n[Proof] !!! Proof stored: ${proof}\n\n`);
+    }
+    return { proof_cid }
 }
 
 async function store(api, pair, data, nonce) {
-    console.log('Storing data:', data);
+    console.log(`Storing with nonce: ${nonce}, requested data: `, data);
 
     // 1️⃣ Hash the data using blake2b-256
     const hash = blake2AsU8a(data)
@@ -37,17 +48,18 @@ async function store(api, pair, data, nonce) {
     const cid = CID.createV1(0x55, mh); // 0x55 = raw codec
 
     // submit transaction
-    console.log('Sending store transaction: ', nonce);
     const tx = api.tx.transactionStorage.store(data);
     const result = await tx.signAndSend(pair, { nonce });
     console.log('Transaction store result:', result.toHuman());
     return cid
 }
 
-// Connect to a local IPFS node or Infura/IPFS gateway
+// Connect to a local IPFS gateway (e.g. Kubo)
 const ipfs = create({
     url: 'http://127.0.0.1:5001', // Local IPFS API
 });
+// For HTTP downloading
+const ipfs_over_http = 'http://127.0.0.1:8080/ipfs/';
 
 async function read_from_ipfs(cid) {
     // Fetch the block (downloads via Bitswap if not local)
@@ -55,6 +67,36 @@ async function read_from_ipfs(cid) {
     const block = await ipfs.block.get(cid);
     console.log('Received block: ', block);
     return block
+}
+
+async function constructIpfsDAG_PB(chunks) {
+    // Construct UnixFS file DAG
+    const blockSizes = chunks.map(c => BigInt(c.len))
+    const dagFileData = new UnixFS({
+        type: 'file',
+        blockSizes: blockSizes
+    });
+    console.log(`[DAG] BlockSizes: ${blockSizes}, dagFileData: `, dagFileData);
+    // Important part
+    const dagNode = dagPB.prepare({
+        Data: dagFileData.marshal(),
+        Links: chunks.map(({cid, len}) => ({
+            Name: '',       // can leave empty
+            Tsize: len,
+            Hash: cid
+        }))
+    });
+    console.log(`[DAG] dagNode: `, dagNode);
+    // Dag Encode + hash
+    const dagNodeAsBytes = dagPB.encode(dagNode);
+    const expectedRootCid = await calculateRootCID(dagNodeAsBytes);
+    return {dagNodeAsBytes, expectedRootCid};
+}
+
+async function calculateRootCID(dagNodeAsBytes) {
+    const dagHash = await sha256.sha256.digest(dagNodeAsBytes);
+    const expectedRootCid = CID.createV1(dagPB.code, dagHash);
+    return expectedRootCid;
 }
 
 async function main() {
@@ -73,96 +115,92 @@ async function main() {
     const transactions = 32;
     const bytes = 64 * 1024 * 1024; // 64 MB
 
-    console.log('\n============================\n1. Doing authorization...');
+    // 1. Authorize an account
+    console.log('\n============================\n||1. Doing authorization...');
     await authorizeAccount(api, sudo_pair, who, transactions, bytes);
     await new Promise(resolve => setTimeout(resolve, 7000));
-    let { nonce } = await api.query.system.account(who_pair.address);
     console.log('Authorized!');
 
     // 2. Store partial chunks (for example, split a big picture or video into chunks)
-    console.log('\n============================\n2. Storing data...');
+    console.log('\n============================\n||2. Storing chunked data...');
+    let { nonce } = await api.query.system.account(who_pair.address);
     const contents = [
         "Hello, Bulletin remote1 - " + new Date().toString(),
-        "Hello, Bulletin remote2 - " + new Date().toString(),
-        "Hello, Bulletin remote3 - " + new Date().toString()
+        "Hello, Bulletin remote22 - " + new Date().toString(),
+        "Hello, Bulletin remote333 - " + new Date().toString()
     ];
     const chunks = [];
     for (let i = 0; i < contents.length; i++) {
         const cid = await store(api, who_pair, contents[i], nonce.addn(i));
         console.log(`Stored data with CID${i + 1}:`, cid);
+        // Collect CIDs and lengths for DAG construction.
         chunks.push({ cid, len: contents[i].length });
     }
     await new Promise(resolve => setTimeout(resolve, 5000));
 
-    // 3. Read partial chunks
-    console.log('\n============================\n3. Reading partial contents...');
-    for (let i = 0; i < chunks.length; i++) {
-        const {cid, len} = chunks[i];
-        const content = await read_from_ipfs(cid);
-        console.log(`[*] CID${i + 1} ${cid} as bytes (${len} / ${content.length}), content:\n${new TextDecoder().decode(content)}`);
-    }
+    // 3. Store DAG file
+    console.log('\n============================\n||3. DAG-PB/UnixFs handling...');
+    const {dagNodeAsBytes, expectedRootCid} = await constructIpfsDAG_PB(chunks);
+    console.log(`[DAG] Calculated/ExpectedRootCid: ${expectedRootCid}`);
 
-    // 4. Store DAG file
-    console.log('\n============================\n4. DAG handling...');
-    // Construct UnixFS file DAG
-    const blocksizes = chunks.map(c => c.len)
-    const totalSize = blocksizes.reduce((a, b) => a + b, 0)
+    // 4. Store DAG-PB file (dagNode or dagNodeAsBytes) or just expectedRootCid as an on-chain proof.
+    console.log('\n============================\n||4. Storing DAG-PB file/proof on-chain...');
+    const { proof_cid } = await storeProof(api, who_pair, expectedRootCid, dagNodeAsBytes.buffer);
+    await new Promise(resolve => setTimeout(resolve, 7000));
+    // TODO: (just check for completion - how to reconstruct/verify).
+    // let dagContent = await read_from_ipfs(proof_cid);
+    // console.log(`dagContent: ${dagContent}`);
+    // let storedRootCid = await calculateRootCID(dagContent)
+    // assert.strictEqual(
+    //     storedRootCid.toString(),
+    //     expectedRootCid.toString(),
+    //     '❌ DAG CID does not match expected root CID'
+    // );
 
-    const fileData = new UnixFS({
-        type: 'file',
-        fileSize: totalSize,
-        blocksizes
-    })
-    const dagNode = dagPB.prepare({
-        Data: fileData.marshal(),
-        Links: chunks.map(({ cid, len }) => ({
-            Name: '',
-            Tsize: len,
-                Hash: cid
-        }))
-    });
-    // Dag Encode + hash
-    const dagNodeAsBytes = dagPB.encode(dagNode);
-    const dagHash = await sha256.sha256.digest(dagNodeAsBytes);
-    const expectedRootCid = CID.createV1(dagPB.code, dagHash);
-    console.log(`[DAG] ExpectedRootCid: ${expectedRootCid}`);
-
-    // Store DAG-PB file with rootCID as and on-chain proof, can be custom pallet/state
-    console.log('\n============================\n5. Storing DAG-PB proof...');
-    await storeProof(api, who_pair, expectedRootCid);
-
-    // Store DAG-PB node in IPFS
-    // TODO: replace with store would work?
-    const dagCid = await ipfs.block.put(dagNodeAsBytes, {
+    // Store DAG-PB node in the IPFS (There are two options, how to do that),
+    // so the IPFS HTTP gateways can read the whole just by rootCID.
+    console.log('\n============================\n||5. !!! IPFS - putting the DAG-PB file, so HTTP gateways can download it as chunked!');
+    // (Option 1)
+    const rootCid = await ipfs.block.put(dagNodeAsBytes, {
         format: 'dag-pb',
         mhtype: 'sha2-256'
-    })
-    console.log("[DAG] RootCID:", dagCid.toString())
+    });
+    // (Option 2)
+    // const rootCid = await ipfs.dag.put(dagNode, {
+    //     storeCodec: 'dag-pb',
+    //     hashAlg: 'sha2-256',
+    //     pin: true
+    // });
+    console.log("[DAG] IPFS stored rootCID:", rootCid.toString())
+    assert.strictEqual(
+        rootCid.toString(),
+        expectedRootCid.toString(),
+        '❌ DAG CID does not match expected root CID'
+    );
 
-    // 4. Retrieve DAG-PB node and content from IPFS
-    console.log('\n============================\n6.Reading chunks by DAG file:');
-    const dagResult = await ipfs.dag.get(dagCid);
-    console.log('Retrieved DAG-PB node:', JSON.stringify(dagResult.value, null, 2));
-
-    // Read each linked chunk from IPFS
-    for (const link of dagResult.value.Links) {
-        const bytes = [];
-        for await (const chunk of ipfs.cat(link.Hash)) {
-            bytes.push(chunk);
-        }
-        const content = Buffer.concat(bytes);
-        console.log(` [*] Chunk (${link.Hash}) length ${link.Tsize}:, content:\n`, new TextDecoder().decode(content));
-    }
+    // 6. Retrieve DAG-PB node and content from IPFS by chunks
+    console.log('\n============================\n||6.Reading chunks by DAG file:');
+    const dagResult = await ipfs.dag.get(rootCid);
+    console.log('Retrieved DAG-PB node:', JSON.stringify(dagResult.value));
 
     // Reading the content by rootCID
-    console.log('\n============================\n6.Reading the content by rootCID:');
+    console.log('\n============================\n||7.Reading the content (`ipfs cat`) by rootCID: ', rootCid.toString());
     const stored_chunks = [];
-    for await (const chunk of ipfs.cat(dagCid)) {
+    for await (const chunk of ipfs.cat(rootCid)) {
         stored_chunks.push(chunk);
     }
     const content = Buffer.concat(stored_chunks);
-    console.log('[*] Content:\n', new TextDecoder().decode(content));
-    // TODO: verify if http IPFS gateway returns the content correctly for rootCID
+    console.log('Content:', new TextDecoder().decode(content));
+
+    // Download the content from IPFS gateway
+    const url = ipfs_over_http + rootCid.toString();
+    console.log('\n============================\n||8. Downloading the full content (no chunking) by rootCID from url: ', url);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    console.log('File size:', buffer.length);
+    console.log('Content:', buffer.toString());
 
     await api.disconnect();
 }
