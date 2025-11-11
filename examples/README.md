@@ -111,9 +111,8 @@ xcode-select --install
 
 This means that your build script tried to use `libclang` (from LLVM) but couldn’t find it anywhere on your system or in the `DYLD_LIBRARY_PATH`.
 
-To fix:
-- `brew install llvm`
-- ```
+To fix:`brew install llvm`and 
+```
 export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
 export LD_LIBRARY_PATH="$LIBCLANG_PATH:$LD_LIBRARY_PATH"
 export DYLD_LIBRARY_PATH="$LIBCLANG_PATH:$DYLD_LIBRARY_PATH"
