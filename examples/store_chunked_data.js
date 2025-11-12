@@ -173,7 +173,7 @@ export async function buildUnixFSDag(metadataJson) {
     const blockSizes = chunks.map(c => BigInt(c.length))
     const fileData = new UnixFS({ type: 'file', blockSizes })
 
-    console.log(`🧩 Building UnixFS DAG:
+    console.log(`\n🧩 Building UnixFS DAG:
   • totalChunks: ${chunks.length}
   • blockSizes: ${blockSizes.join(', ')}`)
 
@@ -194,6 +194,55 @@ export async function buildUnixFSDag(metadataJson) {
 
     console.log(`✅ Built DAG root CID: ${rootCid.toString()}`)
     return { rootCid, dagBytes }
+}
+
+/**
+ * Reads a DAG-PB file from IPFS by CID, decodes it, and re-calculates its root CID.
+ *
+ * @param {object} ipfs - IPFS client (with .block.get)
+ * @param {CID|string} proofCid - CID of the stored DAG-PB node
+ * @returns {Promise<{ dagNode: any, rootCid: CID }>}
+ */
+export async function reconstructDagFromProof(ipfs, proofCid, expectedRootCid) {
+    console.log(`📦 Fetching DAG bytes for proof CID: ${proofCid.toString()}`);
+
+    // 1️⃣ Read the raw block bytes from IPFS
+    const block = await ipfs.block.get(proofCid);
+    const dagBytes = block instanceof Uint8Array ? block : new Uint8Array(block);
+
+    // 2️⃣ Decode the DAG-PB node structure
+    const dagNode = dagPB.decode(dagBytes);
+    console.log('📄 Decoded DAG node:', dagNode);
+
+    // 3️⃣ Recalculate root CID (same as IPFS does)
+    const hash = await sha256.sha256.digest(dagBytes);
+    const rootCid = CID.createV1(dagPB.code, hash);
+
+    assert.strictEqual(
+        rootCid.toString(),
+        expectedRootCid.toString(),
+        '❌ Root DAG CID does not match expected root CID'
+    );
+    console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
+}
+
+async function storeProof(api, sudoPair, pair, rootCID, dagFileBytes, nonceMgr, sudoNonceMgr) {
+    console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
+    // Compute CID manually (same as store() function)
+    const proofCid = cidFromBytes(dagFileBytes)
+
+    // Store DAG bytes in Bulletin
+    const storeTx = api.tx.transactionStorage.store(to_hex(dagFileBytes));
+    const storeResult = await storeTx.signAndSend(pair, { nonce: nonceMgr.getAndIncrement()})
+    console.log('📤 DAG proof "bytes" stored in Bulletin:', storeResult.toHuman?.())
+
+    // This can be a serious pallet, this is just a demonstration.
+    const proof = `ProofCid: ${proofCid.toString()} -> rootCID: ${rootCID.toString()}`;
+    const proofTx = api.tx.system.remark(proof);
+    const sudoTx = api.tx.sudo.sudo(proofTx);
+    const proofResult = await sudoTx.signAndSend(sudoPair, { nonce: sudoNonceMgr.getAndIncrement()});
+    console.log(`📤 DAG proof - "${proof}" - stored in Bulletin:`, proofResult.toHuman?.())
+    return { proofCid }
 }
 
 class NonceManager {
@@ -220,7 +269,7 @@ function filesAreEqual(path1, path2) {
     return true;
 }
 
-async function authorizeStorage(api, sudo_pair, pair, nonceMgr) {
+async function authorizeStorage(api, sudoPair, pair, nonceMgr) {
     // Ensure enough quota.
     const auth = await api.query.transactionStorage.authorizations({ "Account": pair.address});
     console.log('Authorization info:', auth.toHuman())
@@ -240,7 +289,7 @@ async function authorizeStorage(api, sudo_pair, pair, nonceMgr) {
 
     const transactions = 128;
     const bytes = 64 * 1024 * 1024; // 64 MB
-    await authorizeAccount(api, sudo_pair, pair.address, transactions, bytes, nonceMgr);
+    await authorizeAccount(api, sudoPair, pair.address, transactions, bytes, nonceMgr);
     await waitForNewBlock();
 }
 
@@ -270,13 +319,13 @@ async function main() {
 
     const keyring = new Keyring({ type: 'sr25519' })
     const pair = keyring.addFromUri('//Alice')
-    const sudo_pair = keyring.addFromUri('//Alice')
+    const sudoPair = keyring.addFromUri('//Alice')
     let { nonce } = await api.query.system.account(pair.address);
     const nonceMgr = new NonceManager(nonce);
     console.log(`💳 Using account: ${pair.address}, nonce: ${nonce}`)
 
     // Make sure an account can store data.
-    await authorizeStorage(api, sudo_pair, pair, nonceMgr);
+    await authorizeStorage(api, sudoPair, pair, nonceMgr);
 
     // Read the file, chunk it, store in Bulletin and return CIDs.
     let { chunks} = await storeChunkedFile(api, pair, FILE_PATH, nonceMgr);
@@ -295,6 +344,12 @@ async function main() {
     // Demonstrates how to download chunked content by one root CID.
     // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
     const { rootCid, dagBytes } = await buildUnixFSDag(metadataJson)
+
+    // Store DAG proof to the Bulletin.
+    let {proofCid} = await storeProof(api, sudoPair, pair, rootCid, Buffer.from(dagBytes), nonceMgr, nonceMgr);
+    await waitForNewBlock();
+    await reconstructDagFromProof(ipfs, proofCid, rootCid);
+
     // Store DAG into IPFS.
     // (Alternative: ipfs.dag.put(dagNode, {storeCodec: 'dag-pb', hashAlg: 'sha2-256', pin: true }))
     const dagCid = await ipfs.block.put(dagBytes, {
