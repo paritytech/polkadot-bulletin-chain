@@ -30,6 +30,7 @@ pub mod pallet_message_queue;
 pub mod pallet_session;
 pub mod pallet_timestamp;
 pub mod pallet_transaction_payment;
+pub mod pallet_transaction_storage;
 pub mod pallet_xcm;
 pub mod paritydb_weights;
 pub mod rocksdb_weights;
