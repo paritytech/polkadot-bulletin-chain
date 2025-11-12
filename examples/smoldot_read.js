@@ -2,7 +2,7 @@ import * as smoldot from 'smoldot';
 import fs from 'fs';
 
 const chainSpec = fs.readFileSync('./node/chain-specs/bulletin-polkadot.json', 'utf8');
-const client = smoldot.start( {logCallback: LogCallback});
+const client = smoldot.start();
 
 await client
     .addChain({ chainSpec })
