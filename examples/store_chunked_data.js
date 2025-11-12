@@ -6,15 +6,18 @@ import * as multihash from 'multiformats/hashes/digest'
 import { CID } from 'multiformats/cid'
 import { create } from 'ipfs-http-client'
 import * as dagPB from '@ipld/dag-pb'
-import { sha256 } from 'multiformats/hashes/sha2'
+import * as sha256 from 'multiformats/hashes/sha2';
 import { UnixFS } from 'ipfs-unixfs'
 import { TextDecoder } from 'util'
+import assert from "assert";
 
 // ---- CONFIG ----
 const WS_ENDPOINT = 'ws://127.0.0.1:10000' // Bulletin node
 const IPFS_API = 'http://127.0.0.1:5001'   // Local IPFS daemon
+const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 const FILE_PATH = './picture.svg'
 const OUT_PATH = './retrieved_picture.bin'
+const OUT_PATH2 = './retrieved_picture.bin2'
 const CHUNK_SIZE = 4 * 1024 // 4 KB
 // -----------------
 
@@ -79,6 +82,17 @@ async function retrieveMetadata(ipfs, metadataCid) {
     return metadataJson;
 }
 
+async function fileToDisk(outputPath, fullBuffer) {
+    await new Promise((resolve, reject) => {
+        const ws = fs.createWriteStream(outputPath);
+        ws.write(fullBuffer);
+        ws.end();
+        ws.on('finish', resolve);
+        ws.on('error', reject);
+    });
+    console.log(`💾 File saved to: ${outputPath}`);
+}
+
 /**
  * Fetches all chunks listed in metdataJson, concatenates into a single file,
  * and saves to disk (or returns as Buffer).
@@ -106,14 +120,7 @@ async function retrieveFileForMetadata(ipfs, metadataJson, outputPath) {
 
     // 4️⃣ Optionally save to disk
     if (outputPath) {
-        await new Promise((resolve, reject) => {
-            const ws = fs.createWriteStream(outputPath);
-            ws.write(fullBuffer);
-            ws.end();
-            ws.on('finish', resolve);
-            ws.on('error', reject);
-        });
-        console.log(`💾 File saved to: ${outputPath}`);
+        await fileToDisk(outputPath, fullBuffer);
     }
 
     return fullBuffer;
@@ -152,6 +159,43 @@ export async function storeMetadata(api, pair, chunks, nonceMgr) {
     return { metadataCid }
 }
 
+/**
+ * Build a UnixFS DAG-PB node for a file composed of chunks.
+ * @param {Object} metadataJson - JSON object containing chunks [{ cid, length }]
+ * @returns {Promise<{ rootCid: CID, dagBytes: Uint8Array }>}
+ */
+export async function buildUnixFSDag(metadataJson) {
+    // Extract chunk info
+    const chunks = metadataJson.chunks || []
+    if (!chunks.length) throw new Error('❌ metadataJson.chunks is empty')
+
+    // Prepare UnixFS file metadata
+    const blockSizes = chunks.map(c => BigInt(c.length))
+    const fileData = new UnixFS({ type: 'file', blockSizes })
+
+    console.log(`🧩 Building UnixFS DAG:
+  • totalChunks: ${chunks.length}
+  • blockSizes: ${blockSizes.join(', ')}`)
+
+    // Prepare DAG-PB node
+    const dagNode = dagPB.prepare({
+        Data: fileData.marshal(),
+        Links: chunks.map(c => ({
+            Name: '',
+            Tsize: c.length,
+            Hash: c.cid
+        }))
+    })
+
+    // Encode and hash to create dag root CID.
+    const dagBytes = dagPB.encode(dagNode)
+    const dagHash = await sha256.sha256.digest(dagBytes)
+    const rootCid = CID.createV1(dagPB.code, dagHash)
+
+    console.log(`✅ Built DAG root CID: ${rootCid.toString()}`)
+    return { rootCid, dagBytes }
+}
+
 class NonceManager {
     constructor(initialNonce) {
         this.nonce = initialNonce; // BN instance from api.query.system.account
@@ -182,6 +226,10 @@ async function main() {
         fs.unlinkSync(OUT_PATH);
         console.log(`File ${OUT_PATH} removed.`);
     }
+    if (fs.existsSync(OUT_PATH2)) {
+        fs.unlinkSync(OUT_PATH2);
+        console.log(`File ${OUT_PATH2} removed.`);
+    }
 
     console.log('🛰 Connecting to Bulletin node...')
     const provider = new WsProvider(WS_ENDPOINT)
@@ -200,6 +248,8 @@ async function main() {
     const transactions = 32;
     const bytes = 64 * 1024 * 1024; // 64 MB
     await authorizeAccount(api, sudo_pair, pair.address, transactions, bytes, nonceMgr);
+    // TODO: wait for a new block (or check if alice is already authorized).
+    await new Promise(resolve => setTimeout(resolve, 7000));
 
     // Read the file, chunk it, store in Bulletin and return CIDs.
     let { chunks} = await storeChunkedFile(api, pair, FILE_PATH, nonceMgr);
@@ -209,14 +259,45 @@ async function main() {
     // TODO: wait for a new block.
     await new Promise(resolve => setTimeout(resolve, 7000));
 
+    ////////////////////////////////////////////////////////////////////////////////////
     // 1. example manually retrieve the picture (no IPFS DAG feature)
     const metadataJson = await retrieveMetadata(ipfs, metadataCid)
     await retrieveFileForMetadata(ipfs, metadataJson, OUT_PATH);
     filesAreEqual(FILE_PATH, OUT_PATH);
 
+    ////////////////////////////////////////////////////////////////////////////////////
     // 2. example download picture by rootCID with IPFS DAG feature and HTTP gateway.
-    // TODO:
+    // Demonstrates how to download chunked content by one root CID.
+    // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
+    const { rootCid, dagBytes } = await buildUnixFSDag(metadataJson)
+    // Store DAG into IPFS.
+    // (Alternative: ipfs.dag.put(dagNode, {storeCodec: 'dag-pb', hashAlg: 'sha2-256', pin: true }))
+    const dagCid = await ipfs.block.put(dagBytes, {
+        format: 'dag-pb',
+        mhtype: 'sha2-256'
+    })
+    assert.strictEqual(
+        rootCid.toString(),
+        dagCid.toString(),
+        '❌ DAG CID does not match expected root CID'
+    );
+    console.log('🧱 DAG stored on IPFS with CID:', dagCid.toString())
+    console.log('\n🌐 Try opening in browser:')
+    console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
+    console.log('   (You’ll see binary content since this is an image)')
 
+    // Download the content from IPFS HTTP gateway
+    const contentUrl = `${HTTP_IPFS_API}/ipfs/${dagCid.toString()}`;
+    console.log('⬇️ Downloading the full content (no chunking) by rootCID from url: ', contentUrl);
+    const res = await fetch(contentUrl);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    const fullBuffer = Buffer.from(await res.arrayBuffer());
+    console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+    await fileToDisk(OUT_PATH2, fullBuffer);
+    filesAreEqual(FILE_PATH, OUT_PATH2);
+    filesAreEqual(OUT_PATH2, OUT_PATH);
+
+    console.log(`\n\n\n✅✅✅ Passed all tests ✅✅✅`);
     await api.disconnect()
 }
 
