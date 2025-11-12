@@ -220,6 +220,36 @@ function filesAreEqual(path1, path2) {
     return true;
 }
 
+async function authorizeStorage(api, sudo_pair, pair, nonceMgr) {
+    // Ensure enough quota.
+    const auth = await api.query.transactionStorage.authorizations({ "Account": pair.address});
+    console.log('Authorization info:', auth.toHuman())
+
+    if (!auth.isSome) {
+        console.log('ℹ️ No existing authorization found — requesting new one...');
+    } else {
+        const authValue = auth.unwrap().extent;
+        const transactions = authValue.transactions.toNumber();
+        const bytes = authValue.bytes.toNumber();
+
+        if (transactions > 10 && bytes > 24 * CHUNK_SIZE) {
+            console.log('✅ Account authorization is sufficient.');
+            return;
+        }
+    }
+
+    const transactions = 128;
+    const bytes = 64 * 1024 * 1024; // 64 MB
+    await authorizeAccount(api, sudo_pair, pair.address, transactions, bytes, nonceMgr);
+    await waitForNewBlock();
+}
+
+async function waitForNewBlock() {
+    // TODO: wait for a new block.
+    console.log('🛰 Waiting for new block...')
+    return new Promise(resolve => setTimeout(resolve, 7000))
+}
+
 async function main() {
     await cryptoWaitReady()
     if (fs.existsSync(OUT_PATH)) {
@@ -245,19 +275,14 @@ async function main() {
     const nonceMgr = new NonceManager(nonce);
     console.log(`💳 Using account: ${pair.address}, nonce: ${nonce}`)
 
-    const transactions = 32;
-    const bytes = 64 * 1024 * 1024; // 64 MB
-    await authorizeAccount(api, sudo_pair, pair.address, transactions, bytes, nonceMgr);
-    // TODO: wait for a new block (or check if alice is already authorized).
-    await new Promise(resolve => setTimeout(resolve, 7000));
+    // Make sure an account can store data.
+    await authorizeStorage(api, sudo_pair, pair, nonceMgr);
 
     // Read the file, chunk it, store in Bulletin and return CIDs.
     let { chunks} = await storeChunkedFile(api, pair, FILE_PATH, nonceMgr);
     // Store metadata file with all the CIDs to the Bulletin.
     const { metadataCid} = await storeMetadata(api, pair, chunks, nonceMgr);
-
-    // TODO: wait for a new block.
-    await new Promise(resolve => setTimeout(resolve, 7000));
+    await waitForNewBlock();
 
     ////////////////////////////////////////////////////////////////////////////////////
     // 1. example manually retrieve the picture (no IPFS DAG feature)
