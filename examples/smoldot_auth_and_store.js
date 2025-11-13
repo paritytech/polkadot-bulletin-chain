@@ -40,4 +40,4 @@ await client
         const response = await chain.nextJsonRpcResponse();
         console.log("✅ JSON-RPC response:", response);
       })
-
+      .then(() => client.terminate())
