@@ -67,9 +67,12 @@ use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 pub use sp_runtime::BuildStorage;
 use sp_runtime::{
 	generic, impl_opaque_keys,
-	traits::{Block as BlockT},
-	transaction_validity::{TransactionLongevity, TransactionPriority, TransactionSource, TransactionValidity},
-	ApplyExtrinsicResult, MultiAddress, Perbill
+	traits::{AsSystemOriginSigner, Block as BlockT, DispatchInfoOf, Implication, PostDispatchInfoOf},
+	transaction_validity::{
+		InvalidTransaction, TransactionLongevity, TransactionPriority, TransactionSource,
+		TransactionValidity, TransactionValidityError, ValidTransaction,
+	},
+	ApplyExtrinsicResult, MultiAddress, Perbill,
 };
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
@@ -110,6 +113,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 		frame_system::CheckNonce<Runtime>,
 		frame_system::CheckWeight<Runtime>,
 		pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
+		ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
@@ -249,6 +253,87 @@ impl pallet_timestamp::Config for Runtime {
 	type OnTimestampSet = Aura;
 	type MinimumPeriod = ConstU64<0>;
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
+}
+
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	sp_runtime::RuntimeDebug,
+	codec::Encode,
+	codec::Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+)]
+pub struct ValidateSigned;
+
+impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
+	const IDENTIFIER: &'static str = "ValidateSigned";
+
+	type Implicit = ();
+	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
+		Ok(())
+	}
+
+	type Val = ();
+	type Pre = ();
+
+	fn weight(&self, _call: &RuntimeCall) -> Weight {
+		Weight::zero()
+	}
+
+	fn validate(
+		&self,
+		origin: RuntimeOrigin,
+		call: &RuntimeCall,
+		_info: &DispatchInfoOf<RuntimeCall>,
+		_len: usize,
+		_self_implicit: Self::Implicit,
+		_inherited_implication: &impl Implication,
+		_source: TransactionSource,
+	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
+		// Only enforce special validation for transaction storage calls; pass through others.
+		let who = match origin.as_system_origin_signer() {
+			Some(who) => who,
+			None => return Ok((ValidTransaction::default(), (), origin)),
+		};
+
+		let validity = match call {
+			RuntimeCall::TransactionStorage(inner_call) =>
+				TransactionStorage::validate_signed(&who, inner_call),
+
+			_ => Ok(ValidTransaction::default()),
+		}?;
+
+		Ok((validity, (), origin))
+	}
+
+	fn prepare(
+		self,
+		_val: Self::Val,
+		origin: &RuntimeOrigin,
+		call: &RuntimeCall,
+		_info: &DispatchInfoOf<RuntimeCall>,
+		_len: usize,
+	) -> Result<Self::Pre, TransactionValidityError> {
+		// Only enforce pre-dispatch for transaction storage calls; pass through others.
+		if let Some(who) = origin.as_system_origin_signer() {
+			if let RuntimeCall::TransactionStorage(inner_call) = call {
+				TransactionStorage::pre_dispatch_signed(&who, inner_call)?;
+			}
+		}
+		Ok(())
+	}
+
+	fn post_dispatch_details(
+		_pre: Self::Pre,
+		_info: &DispatchInfoOf<RuntimeCall>,
+		_post_info: &PostDispatchInfoOf<RuntimeCall>,
+		_len: usize,
+		_result: &sp_runtime::DispatchResult,
+	) -> Result<Weight, TransactionValidityError> {
+		Ok(Weight::zero())
+	}
 }
 
 impl pallet_transaction_storage::Config for Runtime {

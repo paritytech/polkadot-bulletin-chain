@@ -18,18 +18,158 @@
 
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
-	Block, Runtime, RuntimeCall, RuntimeOrigin,
+	Block, Runtime, RuntimeCall, RuntimeOrigin, TxExtension, UncheckedExtrinsic,
 };
-use frame_support::{assert_err, assert_ok};
-use parachains_common::AccountId;
+use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo};
+use parachains_common::{AccountId, Balance};
 use parachains_runtimes_test_utils::GovernanceOrigin;
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::Either;
 use testnet_parachains_constants::westend::fee::WeightToFee;
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
+use sp_core::{Pair, Encode};
+use parachains_common::{Hash as PcHash, Signature as PcSignature};
+use frame_support::traits::fungible::Mutate as FungibleMutate;
+use sp_runtime::transaction_validity::InvalidTransaction;
 
 const ALICE: [u8; 32] = [1u8; 32];
+
+fn construct_extrinsic(
+	sender: sp_core::sr25519::Pair,
+	call: RuntimeCall,
+) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
+	let account_id = parachains_common::AccountId::from(sender.public());
+	// provide a known block hash for the immortal era check
+	frame_system::BlockHash::<Runtime>::insert(0, PcHash::default());
+	let inner = (
+		frame_system::AuthorizeCall::<Runtime>::new(),
+		frame_system::CheckNonZeroSender::<Runtime>::new(),
+		frame_system::CheckSpecVersion::<Runtime>::new(),
+		frame_system::CheckTxVersion::<Runtime>::new(),
+		frame_system::CheckGenesis::<Runtime>::new(),
+		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
+		frame_system::CheckNonce::<Runtime>::from(frame_system::Pallet::<Runtime>::account(&account_id).nonce),
+		frame_system::CheckWeight::<Runtime>::new(),
+		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
+		bulletin_westend_runtime::ValidateSigned,
+		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+	);
+	let tx_ext: TxExtension =
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
+	let payload = sp_runtime::generic::SignedPayload::new(call.clone(), tx_ext.clone())?;
+	let signature = payload.using_encoded(|e| sender.sign(e));
+	Ok(UncheckedExtrinsic::new_signed(
+		call,
+		account_id.into(),
+		PcSignature::Sr25519(signature),
+		tx_ext,
+	))
+}
+
+fn construct_and_apply_extrinsic(
+	account: sp_core::sr25519::Pair,
+	call: RuntimeCall,
+) -> sp_runtime::ApplyExtrinsicResult {
+	let dispatch_info = call.get_dispatch_info();
+	let xt = construct_extrinsic(account, call)?;
+	let xt_len = xt.encode().len();
+	tracing::info!(
+		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
+		dispatch_info.class,
+		dispatch_info.pays_fee,
+		dispatch_info.total_weight(),
+		xt_len
+	);
+	bulletin_westend_runtime::Executive::apply_extrinsic(xt)
+}
+
+#[test]
+fn transaction_storage_runtime_sizes() {
+	use bulletin_westend_runtime as runtime;
+	use bulletin_westend_runtime::BuildStorage;
+	use frame_support::assert_ok;
+	use pallet_transaction_storage::{AuthorizationExtent, Config as TxStorageConfig, Call as TxStorageCall};
+	use sp_keyring::Sr25519Keyring;
+
+	sp_io::TestExternalities::new(
+		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
+	)
+	.execute_with(|| {
+		// prepare data
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		#[allow(clippy::identity_op)]
+		let sizes: [usize; 5] = [
+			2000,                         // 2 KB
+			256 * 1024,                   // 256 KB
+			512 * 1024,                   // 512 KB
+			1 * 1024 * 1024,              // 1 MB
+			(3 * 1024 * 1024)/2,        // 1.5 MB
+		];
+		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
+
+		// fund Alice to cover length-based tx fees
+		let initial: Balance = 10_000_000_000_000_000_000u128;
+		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
+
+		// authorize
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			sizes.len() as u32,
+			total_bytes,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: sizes.len() as u32, bytes: total_bytes },
+		);
+
+		// store data via signed extrinsics (ValidateSigned consumes authorization)
+		for (index, size) in sizes.into_iter().enumerate() {
+			let res = construct_and_apply_extrinsic(
+				account.pair(),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; size],
+				}),
+			);
+			assert!(res.is_ok(), "Failed at index: {index} for size: {size}");
+		}
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+
+		// (MaxTransactionSize+1) should exceed MaxTransactionSize and fail
+		let oversized: u64 =
+			(<<Runtime as TxStorageConfig>::MaxTransactionSize as frame_support::traits::Get<u32>>::get()
+				+ 1)
+				.into();
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			oversized,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 1_u32, bytes: oversized },
+		);
+		let res = construct_and_apply_extrinsic(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: vec![0u8; oversized as usize]
+			})
+		);
+		// On Westend, very large extrinsics may be rejected earlier for exhausting resources
+		// (block length/weight) before reaching the pallet's BAD_DATA_SIZE check.
+		assert!(
+			res == Err(pallet_transaction_storage::BAD_DATA_SIZE.into())
+				|| res == Err(InvalidTransaction::ExhaustsResources.into()),
+			"unexpected error: {res:?}"
+		);
+	});
+}
 
 #[test]
 fn location_conversion_works() {
