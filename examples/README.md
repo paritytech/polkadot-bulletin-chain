@@ -106,6 +106,7 @@ xcode-select --install
 
 - Check the Active Developer Path: `xcode-select -p`. It should output one of: `/Applications/Xcode.app/Contents/Developer`, `/Library/Developer/CommandLineTools`
 - If it’s empty or incorrect, set it manually: `sudo xcode-select --switch /Library/Developer/CommandLineTools`
+- If none of the above helped, see the official Mac OS recommendations for [polkadot-sdk](https://docs.polkadot.com/develop/parachains/install-polkadot-sdk/#macos)
 
 ### dyld: Library not loaded: @rpath/libclang.dylib
 
