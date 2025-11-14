@@ -247,3 +247,56 @@ Run on the dedicated machine from the root directory:
 ```
 python3 scripts/cmd/cmd.py bench bulletin-polkadot
 ```
+
+## Troubleshooting
+
+### Build Bulletin Mac OS
+
+#### Algorithm file not found error
+
+If you encounter an error similar to:
+
+```
+warning: cxx@1.0.186: In file included from /Users/ndk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-1.0.186/src/cxx.cc:1:
+warning: cxx@1.0.186: /Users/ndk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-1.0.186/src/../include/cxx.h:2:10: fatal error: 'algorithm' file not found
+warning: cxx@1.0.186:     2 | #include <algorithm>
+warning: cxx@1.0.186:       |          ^~~~~~~~~~~
+warning: cxx@1.0.186: 1 error generated.
+error: failed to run custom build command for `cxx v1.0.186`
+```
+
+This typically means your C++ standard library headers can’t be found by the compiler. This is a toolchain setup issue.
+
+To fix:
+- Run `xcode-select --install`. 
+- If it says “already installed”, reinstall them (sometimes they break after OS updates):
+
+```bash
+sudo rm -rf /Library/Developer/CommandLineTools
+xcode-select --install
+```
+
+- Check the Active Developer Path: `xcode-select -p`. It should output one of: `/Applications/Xcode.app/Contents/Developer`, `/Library/Developer/CommandLineTools`
+- If it’s empty or incorrect, set it manually: `sudo xcode-select --switch /Library/Developer/CommandLineTools`
+- If none of the above helped, see the official Mac OS recommendations for [polkadot-sdk](https://docs.polkadot.com/develop/parachains/install-polkadot-sdk/#macos)
+
+#### dyld: Library not loaded: @rpath/libclang.dylib
+
+This means that your build script tried to use `libclang` (from LLVM) but couldn’t find it anywhere on your system or in the `DYLD_LIBRARY_PATH`.
+
+To fix:`brew install llvm` and 
+```
+export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
+export LD_LIBRARY_PATH="$LIBCLANG_PATH:$LD_LIBRARY_PATH"
+export DYLD_LIBRARY_PATH="$LIBCLANG_PATH:$DYLD_LIBRARY_PATH"
+export PATH="$(brew --prefix llvm)/bin:$PATH"
+```
+
+Now verify `libclang.dylib` exists:
+- `ls "$(brew --prefix llvm)/lib/libclang.dylib"`
+
+If that file exists all good, you can rebuild the project now: 
+```
+cargo clean
+cargo build --release
+```
