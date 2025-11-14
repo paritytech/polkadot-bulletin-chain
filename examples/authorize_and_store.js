@@ -12,6 +12,7 @@ import { cryptoWaitReady, blake2AsU8a } from '@polkadot/util-crypto';
 import { CID } from 'multiformats/cid';
 import * as multihash from 'multiformats/hashes/digest';
 import { create } from 'ipfs-http-client';
+import { waitForNewBlock } from './common.js';
 
 async function authorizeAccount(api, pair, who, transactions, bytes) {
     const tx = api.tx.transactionStorage.authorizeAccount(who, transactions, bytes);
@@ -73,7 +74,7 @@ async function main() {
 
     console.log('Doing authorization...');
     await authorizeAccount(api, sudo_pair, who, transactions, bytes);
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    await waitForNewBlock();
     console.log('Authorized!');
 
     const data = "Hello, Bulletin remote3 - " + new Date().toString();  
@@ -84,7 +85,7 @@ async function main() {
     const result = await tx.signAndSend(who_pair);
     console.log('Transaction store result:', result.toHuman());
     
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await waitForNewBlock();
     console.log('Reading content... cid: ', cid);
     let content = await read_from_ipfs(cid);
     console.log('Content as bytes:', content);
