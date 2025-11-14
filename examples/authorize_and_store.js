@@ -20,7 +20,7 @@ async function authorizeAccount(api, pair, who, transactions, bytes) {
     console.log('Transaction authorizeAccount result:', result.toHuman());
 }
 
-function hash_data(data) {
+function makeCIDfromData(data) {
     // 1️⃣ Hash the data using blake2b-256
     const hash = blake2AsU8a(data)
     // 2️⃣ Wrap the hash as a multihash
@@ -77,7 +77,7 @@ async function main() {
     console.log('Authorized!');
 
     const data = "Hello, Bulletin remote3 - " + new Date().toString();  
-    const cid = hash_data(data);
+    const cid = makeCIDfromData(data);
     console.log(`Storing data: ${data}\nCID: ${cid}`);
     
     const tx = api.tx.transactionStorage.store(data);
