@@ -12,7 +12,7 @@ import { cryptoWaitReady, blake2AsU8a } from '@polkadot/util-crypto';
 import { CID } from 'multiformats/cid';
 import * as multihash from 'multiformats/hashes/digest';
 import { create } from 'ipfs-http-client';
-import { waitForNewBlock } from './common.js';
+import { waitForNewBlock, cidFromBytes } from './common.js';
 
 async function authorizeAccount(api, pair, who, transactions, bytes) {
     const tx = api.tx.transactionStorage.authorizeAccount(who, transactions, bytes);
@@ -21,16 +21,16 @@ async function authorizeAccount(api, pair, who, transactions, bytes) {
     console.log('Transaction authorizeAccount result:', result.toHuman());
 }
 
-function makeCIDfromData(data) {
-    // 1️⃣ Hash the data using blake2b-256
-    const hash = blake2AsU8a(data)
-    // 2️⃣ Wrap the hash as a multihash
-    const mh = multihash.create(0xb220, hash); // 0xb220 = blake2b-256
-    // 3️⃣ Generate CID (CIDv1, raw codec)
-    const cid = CID.createV1(0x55, mh); // 0x55 = raw codec
-    return cid
-}
+async function store(api, pair, data) {
+    console.log('Storing data:', data);
+    const cid = cidFromBytes(data);
 
+    const tx = api.tx.transactionStorage.store(data);
+    const result = await tx.signAndSend(pair);
+    console.log('Transaction store result:', result.toHuman());
+    
+    return cid;
+}
 // Connect to a local IPFS gateway (e.g. Kubo)
 const ipfs = create({
     url: 'http://127.0.0.1:5001', // Local IPFS API
@@ -77,13 +77,9 @@ async function main() {
     await waitForNewBlock();
     console.log('Authorized!');
 
-    const data = "Hello, Bulletin remote3 - " + new Date().toString();  
-    const cid = makeCIDfromData(data);
-    console.log(`Storing data: ${data}\nCID: ${cid}`);
-    
-    const tx = api.tx.transactionStorage.store(data);
-    const result = await tx.signAndSend(who_pair);
-    console.log('Transaction store result:', result.toHuman());
+    console.log('Storing data ...');
+    let cid = await store(api, who_pair, "Hello, Bulletin remote3 - " + new Date().toString());
+    console.log('Stored data with CID: ', cid);
     
     await waitForNewBlock();
     console.log('Reading content... cid: ', cid);
