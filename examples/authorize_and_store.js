@@ -20,19 +20,13 @@ async function authorizeAccount(api, pair, who, transactions, bytes) {
     console.log('Transaction authorizeAccount result:', result.toHuman());
 }
 
-async function store(api, pair, data) {
-    console.log('Storing data:', data);
-
+function hash_data(data) {
     // 1️⃣ Hash the data using blake2b-256
     const hash = blake2AsU8a(data)
     // 2️⃣ Wrap the hash as a multihash
     const mh = multihash.create(0xb220, hash); // 0xb220 = blake2b-256
     // 3️⃣ Generate CID (CIDv1, raw codec)
     const cid = CID.createV1(0x55, mh); // 0x55 = raw codec
-
-    const tx = api.tx.transactionStorage.store(data);
-    const result = await tx.signAndSend(pair);
-    console.log('Transaction store result:', result.toHuman());
     return cid
 }
 
@@ -44,7 +38,7 @@ const ipfs = create({
 async function read_from_ipfs(cid) {
     // Fetch the block (downloads via Bitswap if not local)
     console.log('Trying to get cid: ', cid);
-    const block = await ipfs.block.get(cid);
+    const block = await ipfs.block.get(cid, {timeout: 10000});
     console.log('Received block: ', block);
     if (block.length !== 0) {
         return block
@@ -79,14 +73,18 @@ async function main() {
 
     console.log('Doing authorization...');
     await authorizeAccount(api, sudo_pair, who, transactions, bytes);
-    await new Promise(resolve => setTimeout(resolve, 8000));
+    await new Promise(resolve => setTimeout(resolve, 4000));
     console.log('Authorized!');
 
-    console.log('Storing data...');
-    let cid = await store(api, who_pair, "Hello, Bulletin remote3 - " + new Date().toString());
-    console.log('Stored data with CID: ', cid);
+    const data = "Hello, Bulletin remote3 - " + new Date().toString();  
+    const cid = hash_data(data);
+    console.log(`Storing data: ${data}\nCID: ${cid}`);
+    
+    const tx = api.tx.transactionStorage.store(data);
+    const result = await tx.signAndSend(who_pair);
+    console.log('Transaction store result:', result.toHuman());
+    
     await new Promise(resolve => setTimeout(resolve, 5000));
-
     console.log('Reading content... cid: ', cid);
     let content = await read_from_ipfs(cid);
     console.log('Content as bytes:', content);
