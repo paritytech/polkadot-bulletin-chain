@@ -697,6 +697,7 @@ pub type TxExtension = (
 	frame_system::CheckWeight<Runtime>,
 	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
+	pallet_transaction_storage::extension::ProvideCidCodec<Runtime>,
 );
 
 /// Unchecked extrinsic type as expected by this runtime.
