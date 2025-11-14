@@ -13,6 +13,8 @@ export async function waitForNewBlock() {
  */
 export function cidFromBytes(bytes) {
     const hash = blake2AsU8a(bytes)
+    // 0xb2 = the multihash algorithm family for BLAKE2b
+    // 0x20 = the digest length in bytes (32 bytes = 256 bits)
     const mh = multihash.create(0xb220, hash)
     return CID.createV1(0x55, mh) // 0x55 = raw
 }

@@ -80,8 +80,8 @@ async function main() {
     console.log('Storing data ...');
     let cid = await store(api, who_pair, "Hello, Bulletin remote3 - " + new Date().toString());
     console.log('Stored data with CID: ', cid);
-    
     await waitForNewBlock();
+
     console.log('Reading content... cid: ', cid);
     let content = await read_from_ipfs(cid);
     console.log('Content as bytes:', content);
