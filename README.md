@@ -248,11 +248,11 @@ Run on the dedicated machine from the root directory:
 python3 scripts/cmd/cmd.py bench bulletin-polkadot
 ```
 
-## Troubleshooting
+# Troubleshooting
 
-### Build Bulletin Mac OS
+## Build Bulletin Mac OS
 
-#### Algorithm file not found error
+### Algorithm file not found error
 
 If you encounter an error similar to:
 
