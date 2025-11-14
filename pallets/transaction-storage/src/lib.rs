@@ -25,6 +25,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod benchmarking;
+pub mod extension;
 pub mod weights;
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ mod mock;
 mod tests;
 
 use codec::{Decode, Encode, MaxEncodedLen};
+use extension::CidCodec;
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
@@ -255,6 +257,9 @@ pub mod pallet {
 				<ChunkCount<T>>::insert(n, total_chunks);
 				<Transactions<T>>::insert(n, transactions);
 			}
+
+			// Kill
+			CidCodecForStore::<T>::kill();
 		}
 
 		fn integrity_test() {
@@ -303,6 +308,10 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			// Handle custom CID codec.
+			if let Some(cid_codec) = CidCodecForStore::<T>::take() {
+				log::error!(target: LOG_TARGET, "TODO: handle cid/multihash processing with custom cid_codec: {cid_codec:?}");
+			}
 			let content_hash = sp_io::hashing::blake2_256(&data);
 			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, content_hash);
 
@@ -606,6 +615,12 @@ pub mod pallet {
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+	/// Ephemeral value killed on the block finalization. So it never ends up in the storage trie.
+	/// (Used by [`extension::ProvideCidCodec`])
+	#[pallet::storage]
+	#[pallet::whitelist_storage]
+	pub type CidCodecForStore<T: Config> = StorageValue<_, CidCodec, OptionQuery>;
 
 	#[pallet::inherent]
 	impl<T: Config> ProvideInherent for Pallet<T> {
