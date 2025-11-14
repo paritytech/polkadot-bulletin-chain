@@ -10,6 +10,7 @@ import * as sha256 from 'multiformats/hashes/sha2';
 import { UnixFS } from 'ipfs-unixfs'
 import { TextDecoder } from 'util'
 import assert from "assert";
+import { waitForNewBlock, cidFromBytes } from './common.js'
 
 // ---- CONFIG ----
 const WS_ENDPOINT = 'ws://127.0.0.1:10000' // Bulletin node
@@ -30,15 +31,6 @@ async function authorizeAccount(api, pair, who, transactions, bytes, nonceMgr) {
     const sudo_tx = api.tx.sudo.sudo(tx);
     const result = await sudo_tx.signAndSend(pair, {nonce: nonceMgr.getAndIncrement()});
     console.log('Transaction authorizeAccount result:', result.toHuman());
-}
-
-/**
- * helper: create CID for raw data
- */
-function cidFromBytes(bytes) {
-    const hash = blake2AsU8a(bytes)
-    const mh = multihash.create(0xb220, hash)
-    return CID.createV1(0x55, mh) // 0x55 = raw
 }
 
 /**
@@ -291,12 +283,6 @@ async function authorizeStorage(api, sudoPair, pair, nonceMgr) {
     const bytes = 64 * 1024 * 1024; // 64 MB
     await authorizeAccount(api, sudoPair, pair.address, transactions, bytes, nonceMgr);
     await waitForNewBlock();
-}
-
-async function waitForNewBlock() {
-    // TODO: wait for a new block.
-    console.log('🛰 Waiting for new block...')
-    return new Promise(resolve => setTimeout(resolve, 7000))
 }
 
 async function main() {
