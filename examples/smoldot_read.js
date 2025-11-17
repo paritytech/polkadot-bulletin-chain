@@ -8,8 +8,8 @@ async function main() {
 
     // Download the raw chain spec from an RPC node.
     // Note: The dApps or the actual application should not connect to any external RPC node,
-    //       but should instead use chain specs provided directly.    
-     // 12346 is Bob's validator rpc port, because Alice does not have `bootNodes`.
+    //       but should instead use chain specs provided directly.
+    // 12346 is Bob's validator rpc port, because Alice does not have `bootNodes`.
     const ws = new WsProvider('ws://localhost:12346');
     const api = await ApiPromise.create({ provider: ws });
     await api.isReady;
