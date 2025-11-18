@@ -32,6 +32,7 @@ pub mod fast_runtime_binary {
 mod genesis_config_presets;
 mod weights;
 pub mod xcm_config;
+pub mod storage;
 
 extern crate alloc;
 
@@ -69,7 +70,7 @@ use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{AsSystemOriginSigner, Block as BlockT, DispatchInfoOf, Implication, PostDispatchInfoOf},
 	transaction_validity::{
-		InvalidTransaction, TransactionLongevity, TransactionPriority, TransactionSource,
+		TransactionSource,
 		TransactionValidity, TransactionValidityError, ValidTransaction,
 	},
 	ApplyExtrinsicResult, MultiAddress, Perbill,
@@ -196,19 +197,6 @@ parameter_types! {
 	pub const SS58Prefix: u8 = 42;
 }
 
-parameter_types! {
-	// This currently must be set to DEFAULT_STORAGE_PERIOD.
-	pub const StoragePeriod: BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
-	pub const AuthorizationPeriod: BlockNumber = 7 * DAYS;
-	// Priorities and longevities used by the transaction storage pallet extrinsics.
-	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const SetPurgeKeysLongevity: TransactionLongevity = HOURS as TransactionLongevity;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = DAYS as TransactionLongevity;
-	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
-	pub const StoreRenewLongevity: TransactionLongevity = DAYS as TransactionLongevity;
-}
 
 // Configure FRAME pallets to include in runtime.
 #[derive_impl(frame_system::config_preludes::ParaChainDefaultConfig)]
@@ -334,21 +322,6 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 	) -> Result<Weight, TransactionValidityError> {
 		Ok(Weight::zero())
 	}
-}
-
-impl pallet_transaction_storage::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
-	type MaxBlockTransactions = ConstU32<512>;
-	/// Max transaction size per block needs to be aligned with `BlockLength`.
-	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
-	type StoragePeriod = StoragePeriod;
-	type AuthorizationPeriod = AuthorizationPeriod;
-	type Authorizer = EnsureRoot<Self::AccountId>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 }
 
 impl pallet_authorship::Config for Runtime {
