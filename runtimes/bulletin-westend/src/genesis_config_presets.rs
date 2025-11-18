@@ -20,6 +20,7 @@ use alloc::{vec, vec::Vec};
 use cumulus_primitives_core::ParaId;
 use frame_support::build_struct_json_patch;
 use parachains_common::{AccountId, AuraId};
+use sp_core::sr25519;
 use sp_genesis_builder::PresetId;
 use sp_keyring::Sr25519Keyring;
 use testnet_parachains_constants::westend::{
@@ -34,6 +35,7 @@ fn bulletin_westend_genesis(
 	endowed_accounts: Vec<AccountId>,
 	endowment: Balance,
 	id: ParaId,
+	sudo_account: Option<AccountId>,
 ) -> serde_json::Value {
 	build_struct_json_patch!(RuntimeGenesisConfig {
 		balances: BalancesConfig {
@@ -57,6 +59,7 @@ fn bulletin_westend_genesis(
 				.collect(),
 		},
 		polkadot_xcm: PolkadotXcmConfig { safe_xcm_version: Some(SAFE_XCM_VERSION) },
+		sudo: SudoConfig { key: sudo_account },
 	})
 }
 
@@ -72,6 +75,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			Sr25519Keyring::well_known().map(|k| k.to_account_id()).collect(),
 			WND * 1_000_000,
 			BULLETIN_PARA_ID,
+			// Sudo
+			Some(Sr25519Keyring::Alice.to_account_id()),
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
@@ -84,6 +89,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			],
 			WND * 1_000_000,
 			BULLETIN_PARA_ID,
+			// Sudo
+			Some(Sr25519Keyring::Alice.to_account_id()),
 		),
 		_ => return None,
 	};
