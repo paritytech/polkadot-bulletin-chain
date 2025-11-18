@@ -1,15 +1,31 @@
-use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-use frame_support::parameter_types;
+// Copyright (C) Parity Technologies (UK) Ltd.
+// This file is part of Cumulus.
+// SPDX-License-Identifier: Apache-2.0
 
-use super::{
-    Runtime, RuntimeEvent,
-};
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// 	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Storage-specific configurations.
+
+use frame_support::parameter_types;
+use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+
+use super::{Runtime, RuntimeEvent};
 
 parameter_types! {
-	// This currently must be set to DEFAULT_STORAGE_PERIOD.\	
-    pub const StoragePeriod: crate::BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
-    pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
-    // Priorities and longevities used by the transaction storage pallet extrinsics.
+	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
+	pub const StoragePeriod: crate::BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
+	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
+	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
 	pub const SetPurgeKeysLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
@@ -19,7 +35,7 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
-
+/// The main business of the Bulletin chain.
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
