@@ -73,11 +73,9 @@ pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
-	pallet_sudo::GenesisConfig::<Runtime> {
-		key: Some(sudo_relayer_signer().into()),
-	}
-	.assimilate_storage(&mut t)
-	.unwrap();
+	pallet_sudo::GenesisConfig::<Runtime> { key: Some(sudo_relayer_signer().into()) }
+		.assimilate_storage(&mut t)
+		.unwrap();
 
 	sp_io::TestExternalities::new(t).execute_with(test)
 }
@@ -91,12 +89,12 @@ enum HeaderType {
 	WithDeliveredMessages,
 }
 
-fn assert_ok_ok(apply_result: sp_runtime::ApplyExtrinsicResult) {
+fn assert_ok_ok(apply_result: ApplyExtrinsicResult) {
 	assert_ok!(apply_result);
 	assert_ok!(apply_result.unwrap());
 }
 
-fn assert_ok_err(res: sp_runtime::ApplyExtrinsicResult, expected: sp_runtime::DispatchError) {
+fn assert_ok_err(res: ApplyExtrinsicResult, expected: sp_runtime::DispatchError) {
 	match res {
 		Ok(Err(e)) => assert_eq!(e, expected),
 		Ok(Ok(_)) => panic!("expected dispatch error, but call succeeded"),
@@ -209,7 +207,7 @@ fn people_polkadot_message_storage_proof() -> (bp_people_polkadot::Hash, RawStor
 	)
 }
 
-fn initialize_polkadot_grandpa_pallet() -> sp_runtime::ApplyExtrinsicResult {
+fn initialize_polkadot_grandpa_pallet() -> ApplyExtrinsicResult {
 	construct_and_apply_extrinsic(
 		bridge_owner_signer().pair(),
 		RuntimeCall::BridgePolkadotGrandpa(pallet_bridge_grandpa::Call::initialize {
@@ -223,10 +221,7 @@ fn initialize_polkadot_grandpa_pallet() -> sp_runtime::ApplyExtrinsicResult {
 	)
 }
 
-fn submit_polkadot_header(
-	signer: AccountKeyring,
-	t: HeaderType,
-) -> sp_runtime::ApplyExtrinsicResult {
+fn submit_polkadot_header(signer: AccountKeyring, t: HeaderType) -> ApplyExtrinsicResult {
 	construct_and_apply_extrinsic(
 		signer.pair(),
 		RuntimeCall::BridgePolkadotGrandpa(pallet_bridge_grandpa::Call::submit_finality_proof {
@@ -239,7 +234,7 @@ fn submit_polkadot_header(
 fn submit_polkadot_people_hub_header(
 	signer: AccountKeyring,
 	t: HeaderType,
-) -> sp_runtime::ApplyExtrinsicResult {
+) -> ApplyExtrinsicResult {
 	construct_and_apply_extrinsic(
 		signer.pair(),
 		RuntimeCall::BridgePolkadotParachains(
@@ -349,6 +344,7 @@ fn transaction_storage_runtime_sizes() {
 
 		// store data
 		for (index, size) in sizes.into_iter().enumerate() {
+			log::info!("Storing data with size: {size} and index: {index}");
 			advance_block();
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
@@ -356,7 +352,7 @@ fn transaction_storage_runtime_sizes() {
 					data: vec![0u8; size],
 				}),
 			);
-			assert!(res.is_ok(), "Failed at index: {index} for size: {size}");
+			assert_ok_ok(res);
 		}
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),

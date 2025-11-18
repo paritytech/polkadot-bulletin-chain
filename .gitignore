@@ -10,3 +10,5 @@
 .envrc
 .direnv
 .idea
+
+**/node_modules/
