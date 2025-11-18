@@ -15,13 +15,13 @@
 // limitations under the License.
 
 use super::{
-    AccountId, AllPalletsWithSystem, Balance, Balances, BaseDeliveryFee, FeeAssetId, ParachainInfo,
-    ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
-    RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
+	AccountId, AllPalletsWithSystem, Balance, Balances, BaseDeliveryFee, FeeAssetId, ParachainInfo,
+	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
+	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
 use frame_support::{
-    parameter_types,
-    traits::{
+	parameter_types,
+	traits::{
 		fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
 		Everything, LinearStoragePrice, Nothing,
 	},
@@ -42,21 +42,21 @@ use sp_runtime::traits::AccountIdConversion;
 use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 use xcm::latest::{prelude::*, WESTEND_GENESIS_HASH};
 use xcm_builder::{
-    AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
-    AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
-    AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
-    DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
-    DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
-    HashedDescription, IsConcrete, LocationAsSuperuser, ParentAsSuperuser, ParentIsPreset,
-    RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
-    SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
-    TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
-    XcmFeeManagerFromComponents,
+	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
+	AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
+	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
+	DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
+	DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
+	HashedDescription, IsConcrete, LocationAsSuperuser, ParentAsSuperuser, ParentIsPreset,
+	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
+	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
+	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
+	XcmFeeManagerFromComponents,
 };
 use xcm_executor::XcmExecutor;
 
 // Re-export
-pub use testnet_parachains_constants::westend::locations::GovernanceLocation;
+pub use testnet_parachains_constants::westend::locations::{GovernanceLocation, PeopleLocation};
 
 parameter_types! {
 	pub const RootLocation: Location = Location::here();
@@ -165,6 +165,8 @@ pub type Barrier = TrailingSetTopicAsId<
 						ParentOrParentsPlurality,
 						FellowsPlurality,
 						Equals<GovernanceLocation>,
+						// Let's allow a People chain for PoP authorizations.
+						Equals<PeopleLocation>,
 					)>,
 					// Subscriptions for version tracking are OK.
 					AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,

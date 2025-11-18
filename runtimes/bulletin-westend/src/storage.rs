@@ -16,10 +16,14 @@
 
 //! Storage-specific configurations.
 
-use frame_support::parameter_types;
-use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-
 use super::{Runtime, RuntimeEvent};
+use frame_support::{
+	parameter_types,
+	traits::{EitherOfDiverse, Equals},
+};
+use pallet_xcm::EnsureXcm;
+use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+use testnet_parachains_constants::westend::locations::PeopleLocation;
 
 parameter_types! {
 	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
@@ -44,7 +48,12 @@ impl pallet_transaction_storage::Config for Runtime {
 	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
 	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
-	type Authorizer = crate::EnsureRoot<Self::AccountId>;
+	type Authorizer = EitherOfDiverse<
+		// Root can do whatever.
+		crate::EnsureRoot<Self::AccountId>,
+		// People chain can also handle authorizations.
+		EnsureXcm<Equals<PeopleLocation>>,
+	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;

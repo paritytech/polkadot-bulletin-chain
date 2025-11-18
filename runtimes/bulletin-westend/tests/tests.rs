@@ -18,16 +18,18 @@
 
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
-	Block, Runtime, RuntimeCall, RuntimeOrigin, TxExtension, UncheckedExtrinsic,
+	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
+	System, TxExtension, UncheckedExtrinsic,
 };
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, traits::fungible::Mutate as FungibleMutate,
 };
-use parachains_common::{AccountId, Balance, Hash as PcHash, Signature as PcSignature};
-use parachains_runtimes_test_utils::GovernanceOrigin;
+use parachains_common::{AccountId, AuraId, Balance, Hash as PcHash, Signature as PcSignature};
+use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
+use sp_keyring::Sr25519Keyring;
 use sp_runtime::{transaction_validity::InvalidTransaction, ApplyExtrinsicResult, Either};
-use testnet_parachains_constants::westend::fee::WeightToFee;
+use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -344,4 +346,45 @@ fn governance_authorize_upgrade_works() {
 		Runtime,
 		RuntimeOrigin,
 	>(GovernanceOrigin::Location(GovernanceLocation::get())));
+}
+
+#[test]
+fn people_chain_can_authorize_storage_with_transact() {
+	// Prepare call.
+	let account = Sr25519Keyring::Ferdie;
+	let authorize_call = RuntimeCall::TransactionStorage(pallet_transaction_storage::Call::<
+		Runtime,
+	>::authorize_account {
+		who: account.clone().to_account_id(),
+		transactions: 16,
+		bytes: 1024,
+	});
+
+	// Execute XCM as People chain origin would do with `Transact -> Origin::Xcm`.
+	ExtBuilder::<Runtime>::default()
+		.with_collators(vec![AccountId::from(ALICE)])
+		.with_session_keys(vec![(
+			AccountId::from(ALICE),
+			AccountId::from(ALICE),
+			SessionKeys { aura: AuraId::from(sp_core::sr25519::Public::from_raw(ALICE)) },
+		)])
+		.with_tracing()
+		.build()
+		.execute_with(|| {
+			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
+				(PeopleLocation::get(), OriginKind::Xcm),
+				authorize_call,
+				None
+			)
+			.ensure_complete());
+
+			// Check event.
+			System::assert_has_event(RuntimeEvent::TransactionStorage(
+				pallet_transaction_storage::Event::AccountAuthorized {
+					who: account.to_account_id(),
+					transactions: 16,
+					bytes: 1024,
+				},
+			));
+		})
 }
