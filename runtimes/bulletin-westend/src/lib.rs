@@ -159,10 +159,10 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_018_001,
-	impl_version: 0,
+	spec_version: 1_000_000,
+	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
-	transaction_version: 2,
+	transaction_version: 1,
 	system_version: 1,
 };
 
@@ -288,7 +288,7 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 
 		let validity = match call {
 			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(&who, inner_call),
+				TransactionStorage::validate_signed(who, inner_call),
 
 			_ => Ok(ValidTransaction::default()),
 		}?;
@@ -307,7 +307,7 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 		// Only enforce pre-dispatch for transaction storage calls; pass through others.
 		if let Some(who) = origin.as_system_origin_signer() {
 			if let RuntimeCall::TransactionStorage(inner_call) = call {
-				TransactionStorage::pre_dispatch_signed(&who, inner_call)?;
+				TransactionStorage::pre_dispatch_signed(who, inner_call)?;
 			}
 		}
 		Ok(())

@@ -26,12 +26,7 @@ curl -L -o zombienet-macos-arm64 https://github.com/paritytech/zombienet/release
 chmod +x zombienet-macos-arm64 
 ```
 
-### Run Bulletin nodes with `--ipfs-server`
-```
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./zombienet-linux-x64 -p native spawn ./zombienet/bulletin-polkadot-local.toml
-```
-
-### Run Kubo locally and connect Bulletin nodes
+### Run Kubo locally
 
 #### Either locally
 ```
@@ -42,12 +37,6 @@ sudo bash install.sh
 ipfs version
 ipfs init
 ipfs daemon & # run in background
-
-# Connect nodes
-ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-# connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
-ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-# connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
 ```
 
 #### Or use docker (uses 172.17.0.1 or host.docker.internal for swarm connect)
@@ -56,19 +45,36 @@ ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V
 docker pull ipfs/kubo:latest
 docker run -d --name ipfs-node   -v ipfs-data:/data/ipfs   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:latest
 docker logs -f ipfs-node
-# Connect nodes
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm && docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-
-# specific version
-# docker pull ipfs  /kubo:v0.35.0
-# docker run -d --name ipfs-node-v0.35.0   -v ipfs-data:/data/ipfs-v0.35   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:v0.35.0
-# docker logs -f ipfs-node-v0.35.0
-# Connect nodes
-# docker exec -it ipfs-node-v0.35.0 ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-# docker exec -it ipfs-node-v0.35.0 ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 ```
 
-### Trigger authorize, store and IPFS get
+## Run Bulletin solochain with `--ipfs-server`
+```
+# Bulletin Solochain
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./zombienet-linux-x64 -p native spawn ./zombienet/bulletin-polkadot-local.toml
+
+# Connect nodes
+ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+# connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
+ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+# connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
+
+# Or docker (change 127.0.0.1 -> 172.17.0.1)
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+```
+
+## Run Bulletin (Westend) parachain with `--ipfs-server`
+```
+# Bulletin parachain (Westend)
+./scripts/create_bulletin_westend_spec.sh
+POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain ./zombienet-linux-x64 -p native spawn ./zombienet/bulletin-westend-local.toml
+
+# For docker (change 127.0.0.1 -> 172.17.0.1)
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
+```
+
+## Trigger authorize, store and IPFS get
 ```
 # cd polkadot-bulletin-chain - make sure we are here
 cd examples

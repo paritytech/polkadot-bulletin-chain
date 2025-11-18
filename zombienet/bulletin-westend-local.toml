@@ -24,13 +24,6 @@ chain = "westend-local"
 	rpc_port = 9943
 	balance = 2000000000000
 
-	# not needed
-	[[relaychain.nodes]]
-	name = "charlie"
-	validator = true
-	rpc_port = 9944
-	balance = 2000000000000
-
 [[parachains]]
 id = 1006
 chain_spec_path = "./zombienet/bulletin-westend-spec.json"
@@ -40,7 +33,8 @@ cumulus_based = true
 	name = "bulletin-westend-collator-1"
 	command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
 	validator = true
-	rpc_port = 9930
+	p2p_port = 10001
+	rpc_port = 10000
 	args = [
 		"--ipfs-server", "-lparachain=debug,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace"
 	]
@@ -49,7 +43,8 @@ cumulus_based = true
 	name = "bulletin-westend-collator-2"
 	command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
 	validator = true
-	rpc_port = 9931
+	p2p_port = 12347
+	rpc_port = 12346
 	args = [
 		"--ipfs-server", "-lparachain=debug,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace"
 	]
