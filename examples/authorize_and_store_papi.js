@@ -31,7 +31,7 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     });
     
     const result = await sudoTx.signAndSubmit(sudoPair);
-    console.log('Transaction authorizeAccount submitted:', result.toHuman());
+    console.log('Transaction authorizeAccount submitted:', result);
     return result;
 }
 
