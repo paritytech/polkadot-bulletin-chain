@@ -1,4 +1,6 @@
 {
+  "name": "polkadot-bulletin-chain-examples",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "papi:generate": "papi add -w ws://localhost:10000 bulletin",
