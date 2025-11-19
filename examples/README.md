@@ -76,9 +76,22 @@ npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto @polkadot/util
 ```
 
 ### Example for simple authorizing and store
+
+**Using legacy @polkadot/api:**
 ```
 node authorize_and_store.js
 ```
+
+**Using modern PAPI (Polkadot API):**
+```bash
+# First, generate the PAPI descriptors
+npx papi add -w ws://localhost:10000 bulletin
+
+# Then run the PAPI version
+node authorize_and_store_papi.js
+```
+
+See [README_PAPI.md](./README_PAPI.md) for more details on using PAPI.
 
 ### Example for multipart / chunked content / big files
 The code stores one file, splits into chunks and then uploads those chunks to the Bulletin.

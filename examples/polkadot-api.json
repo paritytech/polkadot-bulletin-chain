@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "entries": {
+    "bulletin": {
+      "wsUrl": "ws://localhost:10000",
+      "metadata": {
+        "source": "file",
+        "filePath": "./.papi/metadata/bulletin.scale"
+      }
+    }
+  }
+}
+

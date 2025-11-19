@@ -1,4 +1,4 @@
-// npm install polkadot-api @polkadot-api/pjs-signer @polkadot/keyring @polkadot/util-crypto multiformats ipfs-http-client
+// npm install polkadot-api @polkadot-api/signer @polkadot/keyring @polkadot/util-crypto multiformats ipfs-http-client
 // npx papi add -w ws://localhost:10000 bulletin
 // ipfs daemon &
 // ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
@@ -8,13 +8,14 @@
 // ipfs block get /ipfs/bafk2bzacebcnty2x5l3jr2sk5rvn7engdfkugpsqfpggl4nzazpieyemw6xme
 
 import { createClient } from 'polkadot-api';
+import { Binary } from '@polkadot-api/substrate-bindings';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
-import { getPolkadotSignerFromPjs } from '@polkadot-api/pjs-signer';
+import { getPolkadotSigner } from '@polkadot-api/signer';
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { waitForNewBlock, cidFromBytes } from './common.js';
-import { bulletin } from '@polkadot-api/descriptors';
+import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
 async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     console.log('Creating authorizeAccount transaction...');
@@ -30,7 +31,7 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     });
     
     const result = await sudoTx.signAndSubmit(sudoPair);
-    console.log('Transaction authorizeAccount submitted:', result);
+    console.log('Transaction authorizeAccount submitted:', result.toHuman());
     return result;
 }
 
@@ -38,9 +39,14 @@ async function store(typedApi, pair, data) {
     console.log('Storing data:', data);
     const cid = cidFromBytes(data);
     
-    const tx = typedApi.tx.TransactionStorage.store({
-        data: Array.from(typeof data === 'string' ? Buffer.from(data) : data)
-    });
+    // Convert data to Uint8Array then wrap in Binary for PAPI typed API
+    const dataBytes = typeof data === 'string' ? 
+        new Uint8Array(Buffer.from(data)) : 
+        new Uint8Array(data);
+    
+    // Wrap in Binary object for typed API - pass as object with 'data' property
+    const binaryData = Binary.fromBytes(dataBytes);
+    const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
     
     const result = await tx.signAndSubmit(pair);
     console.log('Transaction store submitted:', result);
@@ -77,14 +83,16 @@ async function read_from_ipfs(cid) {
     return content;
 }
 
+// Global client reference for cleanup
+let client;
+
 async function main() {
     await cryptoWaitReady();
 
     // Create PAPI client with WebSocket provider
-    const wsProvider = getWsProvider('ws://localhost:10000');
-    const client = createClient(wsProvider);
+    client = createClient(getWsProvider('ws://localhost:10000'));
     
-    // Get typed API - requires generated descriptors
+    // Get typed API with generated descriptors
     const typedApi = client.getTypedApi(bulletin);
 
     // Create keyring and accounts
@@ -92,9 +100,18 @@ async function main() {
     const sudoAccount = keyring.addFromUri('//Alice');
     const whoAccount = keyring.addFromUri('//Alice');
 
-    // Create PAPI-compatible signers using pjs-signer
-    const sudoSigner = getPolkadotSignerFromPjs(sudoAccount);
-    const whoSigner = getPolkadotSignerFromPjs(whoAccount);
+    // Create PAPI-compatible signers using @polkadot-api/signer
+    // getPolkadotSigner expects (publicKey: Uint8Array, signingType, sign function)
+    const sudoSigner = getPolkadotSigner(
+        sudoAccount.publicKey,
+        'Sr25519',
+        (input) => sudoAccount.sign(input)
+    );
+    const whoSigner = getPolkadotSigner(
+        whoAccount.publicKey,
+        'Sr25519',
+        (input) => whoAccount.sign(input)
+    );
 
     // Data
     const who = whoAccount.address;
@@ -120,5 +137,7 @@ async function main() {
     client.destroy();
 }
 
-main().catch(console.error);
+main().catch(console.error).finally(() => {
+    if (client) client.destroy();
+});
 
