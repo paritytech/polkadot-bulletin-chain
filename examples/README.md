@@ -9,17 +9,11 @@ cargo build --release -p polkadot-bulletin-chain
 
 ### Download Zombienet
 ```
-cd polkadot-bulletin-chain - make sure we are within the folder
-```
-
-#### Linux
-```
-wget https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64
-chmod +x zombienet-linux-x64
+cd polkadot-bulletin-chain # make sure we are within the folder
 ```
 
 #### Mac OS
-`zombienet-macos-arm64` or `zombienet-macos-x64`
+`zombienet-macos-arm64`
 
 ```
 curl -L -o zombienet-macos-arm64 https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-macos-arm64
@@ -30,37 +24,27 @@ chmod +x zombienet-macos-arm64
 
 #### Either locally
 ```
-wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_linux-amd64.tar.gz
-tar -xvzf kubo_v0.38.1_linux-amd64.tar.gz
-cd kubo
-sudo bash install.sh
-ipfs version
-ipfs init
-ipfs daemon & # run in background
-```
-
-#### Or use docker (uses 172.17.0.1 or host.docker.internal for swarm connect)
-
-```
-docker pull ipfs/kubo:latest
-docker run -d --name ipfs-node   -v ipfs-data:/data/ipfs   -p 4001:4001   -p 8080:8080   -p 5001:5001   ipfs/kubo:latest
-docker logs -f ipfs-node
+wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_darwin-arm64.tar.gz
+tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
+# cd kubo
+# sudo bash install.sh
+./kubo/ipfs version
+./kubo/ipfs init
+./kubo/ipfs daemon & # run in background
 ```
 
 ## Run Bulletin solochain with `--ipfs-server`
 ```
 # Bulletin Solochain
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./zombienet-linux-x64 -p native spawn ./zombienet/bulletin-polkadot-local.toml
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./zombienet-macos-arm64 -p native spawn ./zombienet/bulletin-polkadot-local.toml
+```
 
+```
 # Connect nodes
-ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+# ./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 # connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
-ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+# ./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 # connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
-
-# Or docker (change 127.0.0.1 -> 172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 
 # Or run script which reconnects every 2 seconds
 ./scripts/ipfs-reconnect-solo.sh
@@ -68,14 +52,29 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 
 ## Run Bulletin (Westend) parachain with `--ipfs-server`
 ```
+mkdir -p ~/local_bridge_testing/bin
+cd ~/projects/polkadot-sdk
+
+cargo build -p polkadot -r
+ls -la target/release/polkadot
+cp target/release/polkadot ~/local_bridge_testing/bin
+~/local_bridge_testing/bin/polkadot --version
+
+cd ~/projects/polkadot-sdk
+cargo build -p polkadot-parachain-bin -r
+ls -la target/release/polkadot-parachain
+cp target/release/polkadot-parachain ~/local_bridge_testing/bin
+~/local_bridge_testing/bin/polkadot-parachain --version
+```
+
+```
 # Bulletin parachain (Westend)
+cd ~/projects/polkadot-bulletin-chain
 ./scripts/create_bulletin_westend_spec.sh
-POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain ./zombienet-linux-x64 -p native spawn ./zombienet/bulletin-westend-local.toml
+POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain ./zombienet-macos-arm64 -p native spawn ./zombienet/bulletin-westend-local.toml
+```
 
-# For docker (change 127.0.0.1 -> 172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-
+```
 # Or run script which reconnects every 2 seconds
 ./scripts/ipfs-reconnect-westend.sh
 ```
