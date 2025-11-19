@@ -22,8 +22,8 @@ use super::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
 	},
-	AuthorizationExtent, AuthorizationScope, Event, AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
+	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{
 	prelude::{frame_system::RawOrigin, *},
@@ -36,7 +36,6 @@ type Error = super::Error<Test>;
 
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
-type ChunkCount = super::ChunkCount<Test>;
 type Transactions = super::Transactions<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -63,10 +62,8 @@ fn discards_data() {
 		assert!(Transactions::get(1).is_some());
 		let transactions = Transactions::get(1).unwrap();
 		assert_eq!(transactions.len(), 2);
-		assert_eq!(ChunkCount::get(1), 16);
 		run_to_block(12, proof_provider);
 		assert!(Transactions::get(1).is_none());
-		assert_eq!(ChunkCount::get(1), 0);
 	});
 }
 
@@ -188,8 +185,8 @@ fn verify_chunk_proof_works() {
 		run_to_block(2, || None);
 
 		// Read all the block transactions metadata.
-		let total_chunks = ChunkCount::get(1);
 		let tx_infos = Transactions::get(1).unwrap();
+		let total_chunks: u32 = TransactionInfo::total_chunks(&tx_infos);
 		assert_eq!(expected_total_chunks, total_chunks);
 		assert_eq!(9, tx_infos.len());
 
@@ -208,7 +205,6 @@ fn verify_chunk_proof_works() {
 				proof,
 				random_hash.as_ref(),
 				tx_infos.to_vec(),
-				total_chunks
 			));
 		}
 	});

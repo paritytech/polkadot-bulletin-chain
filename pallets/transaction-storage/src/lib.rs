@@ -120,6 +120,15 @@ pub struct TransactionInfo {
 	block_chunks: u32,
 }
 
+impl TransactionInfo {
+	/// Get the number of total chunks.
+	///
+	/// See the `block_chunks` field of [`TransactionInfo`] for details.
+	pub fn total_chunks(txs: &[TransactionInfo]) -> u32 {
+		txs.last().map_or(0, |t| t.block_chunks)
+	}
+}
+
 /// Context of a `check_signed`/`check_unsigned` call.
 #[derive(Clone, Copy)]
 enum CheckContext {
@@ -228,7 +237,6 @@ pub mod pallet {
 			if obsolete > Zero::zero() {
 				weight.saturating_accrue(db_weight.writes(2));
 				<Transactions<T>>::remove(obsolete);
-				<ChunkCount<T>>::remove(obsolete);
 			}
 
 			// For `on_finalize`
@@ -244,7 +252,12 @@ pub mod pallet {
 					let number = <frame_system::Pallet<T>>::block_number();
 					let period = T::StoragePeriod::get();
 					let target_number = number.saturating_sub(period);
-					target_number.is_zero() || <ChunkCount<T>>::get(target_number) == 0
+
+					target_number.is_zero() || {
+						// An empty block means no transactions were stored, relying on the fact
+						// below that we store transactions only if they contain chunks.
+						!Transactions::<T>::contains_key(target_number)
+					}
 				},
 				"Storage proof must be checked once in the block"
 			);
@@ -253,7 +266,6 @@ pub mod pallet {
 			let transactions = <BlockTransactions<T>>::take();
 			let total_chunks = transactions.last().map_or(0, |t| t.block_chunks);
 			if total_chunks != 0 {
-				<ChunkCount<T>>::insert(n, total_chunks);
 				<Transactions<T>>::insert(n, transactions);
 			}
 		}
@@ -394,20 +406,12 @@ pub mod pallet {
 			let period = T::StoragePeriod::get();
 			let target_number = number.saturating_sub(period);
 			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
-			let total_chunks = <ChunkCount<T>>::get(target_number);
-			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
-			let total_chunks = ChunkCount::<T>::get(target_number);
 			let transactions =
 				Transactions::<T>::get(target_number).ok_or(Error::<T>::MissingStateData)?;
 
 			// Verify the proof with a "random" chunk (randomness is based on the parent hash).
 			let parent_hash = frame_system::Pallet::<T>::parent_hash();
-			Self::verify_chunk_proof(
-				proof,
-				parent_hash.as_ref(),
-				transactions.to_vec(),
-				total_chunks,
-			)?;
+			Self::verify_chunk_proof(proof, parent_hash.as_ref(), transactions.to_vec())?;
 			ProofChecked::<T>::put(true);
 			Self::deposit_event(Event::ProofChecked);
 			Ok(().into())
@@ -593,11 +597,6 @@ pub mod pallet {
 		BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 		OptionQuery,
 	>;
-
-	/// Count indexed chunks for each block.
-	#[pallet::storage]
-	pub(super) type ChunkCount<T: Config> =
-		StorageMap<_, Blake2_128Concat, BlockNumberFor<T>, u32, ValueQuery>;
 
 	// Intermediates
 	#[pallet::storage]
@@ -998,12 +997,11 @@ pub mod pallet {
 			proof: TransactionStorageProof,
 			random_hash: &[u8],
 			infos: Vec<TransactionInfo>,
-			total_chunks: u32,
 		) -> Result<(), Error<T>> {
+			// Get the random chunk index - from all transactions in the block = [0..total_chunks).
+			let total_chunks: u32 = TransactionInfo::total_chunks(&infos);
 			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
 			ensure!(!infos.is_empty(), Error::<T>::UnexpectedProof);
-
-			// Get the random chunk index (from all transactions in the block = 0..total_chunks).
 			let selected_block_chunk_index = random_chunk(random_hash, total_chunks);
 
 			// Let's find the corresponding transaction and its "local" chunk index for "global"
