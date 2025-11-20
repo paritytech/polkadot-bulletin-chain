@@ -248,7 +248,7 @@ Run on the dedicated machine from the root directory:
 python3 scripts/cmd/cmd.py bench bulletin-polkadot
 ```
 
-# JavaScript Examples
+# Examples (JavaScript-based)
 
 The `examples/` directory contains Node.js scripts demonstrating how to interact with the Bulletin chain. For detailed setup and usage instructions, see [examples/README.md](./examples/README.md).
 
