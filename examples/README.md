@@ -55,7 +55,6 @@ docker logs -f ipfs-node
 
 ```shell
 # Bulletin Solochain
-## Build Bulletin
 
 ```shell
 # cd polkadot-bulletin-chain   # make you are in this directory
