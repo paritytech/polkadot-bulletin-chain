@@ -1,12 +1,5 @@
 # How to Run
 
-## Build Bulletin
-
-```shell
-git clone https://github.com/paritytech/polkadot-bulletin-chain.git
-cd polkadot-bulletin-chain
-cargo build --release -p polkadot-bulletin-chain
-```
 
 ```shell
 cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
@@ -62,9 +55,14 @@ docker logs -f ipfs-node
 
 ```shell
 # Bulletin Solochain
+## Build Bulletin
+
+```shell
+# cd polkadot-bulletin-chain   # make you are in this directory
+cargo build --release -p polkadot-bulletin-chain
+
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
   ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
-```
 
 ### Connect IPFS Nodes
 
