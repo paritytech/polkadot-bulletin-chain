@@ -1,11 +1,5 @@
 // npm install polkadot-api @polkadot-api/signer @polkadot/keyring @polkadot/util-crypto multiformats ipfs-http-client
 // npx papi add -w ws://localhost:10000 bulletin
-// ipfs daemon &
-// ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-// ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKugpsqfpggl4nzazpieyemw6xme
-// ipfs swarm peers - should be there
-// ipfs bitswap stat
-// ipfs block get /ipfs/bafk2bzacebcnty2x5l3jr2sk5rvn7engdfkugpsqfpggl4nzazpieyemw6xme
 
 import { createClient } from 'polkadot-api';
 import { Binary } from '@polkadot-api/substrate-bindings';
