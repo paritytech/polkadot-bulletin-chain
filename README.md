@@ -246,6 +246,7 @@ or
 Run on the dedicated machine from the root directory:
 ```
 python3 scripts/cmd/cmd.py bench bulletin-polkadot
+python3 scripts/cmd/cmd.py bench bulletin-westend
 ```
 
 # Examples (JavaScript-based)
