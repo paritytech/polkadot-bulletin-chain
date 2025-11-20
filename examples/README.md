@@ -61,11 +61,9 @@ docker logs -f ipfs-node
 ## Run Bulletin Solochain with `--ipfs-server`
 
 ```shell
-zb_bin=$(ls zombienet-*-*)
-
 # Bulletin Solochain
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
-  ./"$zb_bin" -p native spawn ./zombienet/bulletin-polkadot-local.toml
+  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
 ```
 
 ### Connect IPFS Nodes
@@ -117,13 +115,11 @@ cp target/release/polkadot-parachain ~/local_bridge_testing/bin
 ### Launch Parachain
 
 ```shell
-zb_bin=$(ls zombienet-*-*)
-
 # Bulletin Parachain (Westend)
 ./scripts/create_bulletin_westend_spec.sh
 POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
   POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain \
-  ./"$zb_bin" -p native spawn ./zombienet/bulletin-westend-local.toml
+  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-westend-local.toml
 ```
 
 ### Connect IPFS Nodes
@@ -164,9 +160,9 @@ node authorize_and_store.js
 
 ### Example for Multipart / Chunked Content / Big Files
 
-The code stores one file, splits into chunks and then uploads those chunks to the Bulletin.
+The code stores one file, splits it into chunks, and then uploads those chunks to Bulletin.
 
-It collects all the partial CIDs for each chunk and saves them as a custom metadata JSON file in the Bulletin.
+It collects all the partial CIDs for each chunk and saves them as a custom metadata JSON file in Bulletin.
 
 Now we have two examples:
 1. **Manual reconstruction** — return the metadata and chunk CIDs, then reconstruct the original file manually.

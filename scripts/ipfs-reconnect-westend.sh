@@ -1,20 +1,29 @@
 #!/bin/bash
 
+# Detect whether Docker exists
+if command -v docker >/dev/null 2>&1; then
+    check_cmd="docker exec -i ipfs-node ipfs"
+    check_host="172.17.0.1"
+else
+    check_cmd="./kubo/ipfs"
+    check_host="127.0.0.1"
+fi
+
 # Peers to monitor
 PEERS_TO_CHECK=(
-    "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
-    "/ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
+    "/ip4/${check_host}/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
+    "/ip4/${check_host}/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 )
 
 while true; do
-    # Read all current connections once
-    PEERS=$(./kubo/ipfs swarm peers)
+    # Read all current peers once
+    PEERS="$($check_cmd swarm peers)"
 
     for PEER in "${PEERS_TO_CHECK[@]}"; do
         echo "$PEERS" | grep -q "$PEER"
         if [ $? -ne 0 ]; then
             echo "$(date) - $PEER disconnected. Reconnecting..."
-            ./kubo/ipfs swarm connect "$PEER"
+            $check_cmd swarm connect "$PEER"
         else
             echo "$(date) - $PEER connected."
         fi
