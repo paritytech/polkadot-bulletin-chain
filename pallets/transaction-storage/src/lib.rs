@@ -115,7 +115,8 @@ pub struct TransactionInfo {
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
 	///
-	/// Cumulative value of all previous transactions in the block; the last transaction holds the total chunk value.
+	/// Cumulative value of all previous transactions in the block; the last transaction holds the
+	/// total chunk value.
 	block_chunks: u32,
 }
 

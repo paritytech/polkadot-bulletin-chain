@@ -39,7 +39,7 @@ const ipfs = create({
 async function read_from_ipfs(cid) {
     // Fetch the block (downloads via Bitswap if not local)
     console.log('Trying to get cid: ', cid);
-    const block = await ipfs.block.get(cid, {timeout: 10000});
+    const block = await ipfs.block.get(cid, {timeout: 15000});
     console.log('Received block: ', block);
     if (block.length !== 0) {
         return block

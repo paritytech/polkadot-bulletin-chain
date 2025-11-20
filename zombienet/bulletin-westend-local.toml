@@ -1,0 +1,50 @@
+# To run the network, execute the following command:
+#
+# cd <root dir>
+# ./scripts/create_bulletin_westend_spec.sh
+# POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
+
+[settings]
+node_spawn_timeout = 240
+
+[relaychain]
+default_command = "{{POLKADOT_BINARY_PATH}}"
+default_args = ["-lruntime=debug,xcm=trace"]
+chain = "westend-local"
+
+	[[relaychain.nodes]]
+	name = "alice"
+	validator = true
+	rpc_port = 9942
+	balance = 2000000000000
+
+	[[relaychain.nodes]]
+	name = "bob"
+	validator = true
+	rpc_port = 9943
+	balance = 2000000000000
+
+[[parachains]]
+id = 1006
+chain_spec_path = "./zombienet/bulletin-westend-spec.json"
+cumulus_based = true
+
+	[[parachains.collators]]
+	name = "bulletin-westend-collator-1"
+	command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
+	validator = true
+	p2p_port = 10001
+	rpc_port = 10000
+	args = [
+		"--ipfs-server", "-lparachain=debug,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace"
+	]
+
+	[[parachains.collators]]
+	name = "bulletin-westend-collator-2"
+	command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
+	validator = true
+	p2p_port = 12347
+	rpc_port = 12346
+	args = [
+		"--ipfs-server", "-lparachain=debug,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace"
+	]

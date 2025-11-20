@@ -137,4 +137,8 @@ jobs:
         run: |
           cargo test -p bulletin-polkadot-runtime
 
+      - name: Run (Westend) runtime tests
+        run: |
+          cargo test -p bulletin-westend-runtime
+
       # TODO: check benchmarks
