@@ -38,7 +38,7 @@ async function store(typedApi, pair, data) {
         new Uint8Array(Buffer.from(data)) : 
         new Uint8Array(data);
     
-    // Wrap in Binary object for typed API - pass as object with 'data' property
+    // Wrap in Binary object for typed API - pass as an object with 'data' property
     const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
     
