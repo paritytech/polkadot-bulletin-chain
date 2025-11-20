@@ -149,16 +149,30 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 
 ## Trigger Authorize, Store and IPFS Get
 
-```shell
-# cd polkadot-bulletin-chain   # make you are in this directory
-cd examples
-npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto @polkadot/util multiformats ipfs-http-client ipfs-unixfs
-```
-
 ### Example for Simple Authorizing and Store
 
-```shell
+#### Using Legacy @polkadot/api (PJS)
+```
+cd examples
+npm install
+
 node authorize_and_store.js
+```
+
+#### Using Modern PAPI (Polkadot API)
+```bash
+cd examples
+npm install
+
+# First, generate the PAPI descriptors:
+#  (Generate TypeScript types in `.papi/descriptors/`)
+#  (Create metadata files in `.papi/metadata/bulletin.scale`)
+npm run papi:generate
+# or if you already have .papi folder you can always update it
+npm run papi:update
+
+# Then run the PAPI version (from the examples directory)
+node authorize_and_store_papi.js
 ```
 
 ### Example for Multipart / Chunked Content / Big Files
