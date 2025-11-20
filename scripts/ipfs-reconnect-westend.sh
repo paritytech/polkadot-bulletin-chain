@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Detect whether Docker exists
-if command -v docker >/dev/null 2>&1; then
+# Choose mode based on argument
+mode="${1:-docker}"
+if [ "$mode" = "docker" ]; then
     check_cmd="docker exec ipfs-node ipfs"
     check_host="172.17.0.1"
 else
