@@ -8,7 +8,7 @@ PEERS_TO_CHECK=(
 
 while true; do
     # Read all current connections once
-    PEERS=$(docker exec ipfs-node swarm peers)
+    PEERS=$(docker exec ipfs-node ipfs swarm peers)
 
     for PEER in "${PEERS_TO_CHECK[@]}"; do
         echo "$PEERS" | grep -q "$PEER"
