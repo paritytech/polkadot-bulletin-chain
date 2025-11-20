@@ -61,6 +61,9 @@ ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V
 # Or docker (change 127.0.0.1 -> 172.17.0.1)
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+
+# Or run script which reconnects every 2 seconds
+./scripts/ipfs-reconnect-solo.sh
 ```
 
 ## Run Bulletin (Westend) parachain with `--ipfs-server`
@@ -72,6 +75,9 @@ POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINA
 # For docker (change 127.0.0.1 -> 172.17.0.1)
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
+
+# Or run script which reconnects every 2 seconds
+./scripts/ipfs-reconnect-westend.sh
 ```
 
 ## Trigger authorize, store and IPFS get
