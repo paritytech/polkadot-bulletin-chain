@@ -9,7 +9,7 @@ cargo build --release -p polkadot-bulletin-chain
 ```
 
 ```shell
-cd polkadot-bulletin-chain   # ensure you are inside the project directory for the following steps
+cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
 ```
 
 ## Download Zombienet
@@ -95,7 +95,7 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ```shell
 mkdir -p ~/local_bridge_testing/bin
 
-# Ensure `polkadot` and `polkadot-parachain` exist
+# Ensures `polkadot` and `polkadot-parachain` exist
 git clone https://github.com/paritytech/polkadot-sdk.git
 cd polkadot-sdk
 
@@ -147,7 +147,7 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ## Trigger Authorize, Store and IPFS Get
 
 ```shell
-# cd polkadot-bulletin-chain   # ensure you are in this directory
+# cd polkadot-bulletin-chain   # make you are in this directory
 cd examples
 npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto @polkadot/util multiformats ipfs-http-client ipfs-unixfs
 ```

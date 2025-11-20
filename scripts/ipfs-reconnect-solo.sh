@@ -2,7 +2,7 @@
 
 # Detect whether Docker exists
 if command -v docker >/dev/null 2>&1; then
-    check_cmd="docker exec -i ipfs-node ipfs"
+    check_cmd="docker exec ipfs-node ipfs"
     check_host="172.17.0.1"
 else
     check_cmd="./kubo/ipfs"
@@ -16,7 +16,7 @@ PEERS_TO_CHECK=(
 )
 
 while true; do
-    # Read all current peers once
+    # Read all current connections once
     PEERS="$($check_cmd swarm peers)"
 
     for PEER in "${PEERS_TO_CHECK[@]}"; do
