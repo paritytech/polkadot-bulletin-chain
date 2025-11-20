@@ -175,8 +175,6 @@ npm run papi:update
 node authorize_and_store_papi.js
 ```
 
-See [README_PAPI.md](./README_PAPI.md) for more details on using PAPI.
-
 ### Example for Multipart / Chunked Content / Big Files
 
 The code stores one file, splits it into chunks, and then uploads those chunks to Bulletin.
