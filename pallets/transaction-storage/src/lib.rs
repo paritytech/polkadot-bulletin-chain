@@ -38,7 +38,7 @@ use polkadot_sdk_frame::{
 	prelude::*,
 };
 use sp_transaction_storage_proof::{
-	encode_index, random_chunk, InherentError, TransactionStorageProof, CHUNK_SIZE,
+	encode_index, random_chunk, ChunkIndex, InherentError, TransactionStorageProof, CHUNK_SIZE,
 	INHERENT_IDENTIFIER,
 };
 
@@ -117,14 +117,14 @@ pub struct TransactionInfo {
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
 	/// total chunk value.
-	block_chunks: u32,
+	block_chunks: ChunkIndex,
 }
 
 impl TransactionInfo {
 	/// Get the number of total chunks.
 	///
 	/// See the `block_chunks` field of [`TransactionInfo`] for details.
-	pub fn total_chunks(txs: &[TransactionInfo]) -> u32 {
+	pub fn total_chunks(txs: &[TransactionInfo]) -> ChunkIndex {
 		txs.last().map_or(0, |t| t.block_chunks)
 	}
 }
@@ -999,7 +999,7 @@ pub mod pallet {
 			infos: Vec<TransactionInfo>,
 		) -> Result<(), Error<T>> {
 			// Get the random chunk index - from all transactions in the block = [0..total_chunks).
-			let total_chunks: u32 = TransactionInfo::total_chunks(&infos);
+			let total_chunks: ChunkIndex = TransactionInfo::total_chunks(&infos);
 			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
 			ensure!(!infos.is_empty(), Error::<T>::UnexpectedProof);
 			let selected_block_chunk_index = random_chunk(random_hash, total_chunks);

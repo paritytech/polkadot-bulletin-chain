@@ -57,7 +57,7 @@ fn discards_data() {
 			} else {
 				None
 			}
-		};
+		}.unwrap();
 		run_to_block(11, proof_provider);
 		assert!(Transactions::get(1).is_some());
 		let transactions = Transactions::get(1).unwrap();
@@ -138,7 +138,7 @@ fn checks_proof() {
 		run_to_block(10, || None);
 		let parent_hash = System::parent_hash();
 		let proof =
-			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap();
+			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap().unwrap();
 		assert_noop!(
 			TransactionStorage::check_proof(RuntimeOrigin::none(), proof),
 			Error::UnexpectedProof,
@@ -146,14 +146,14 @@ fn checks_proof() {
 		run_to_block(11, || None);
 		let parent_hash = System::parent_hash();
 
-		let invalid_proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap();
+		let invalid_proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap().unwrap();
 		assert_noop!(
 			TransactionStorage::check_proof(RuntimeOrigin::none(), invalid_proof),
 			Error::InvalidProof,
 		);
 
 		let proof =
-			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap();
+			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap().unwrap();
 		assert_ok!(TransactionStorage::check_proof(RuntimeOrigin::none(), proof));
 	});
 }
@@ -186,7 +186,7 @@ fn verify_chunk_proof_works() {
 
 		// Read all the block transactions metadata.
 		let tx_infos = Transactions::get(1).unwrap();
-		let total_chunks: u32 = TransactionInfo::total_chunks(&tx_infos);
+		let total_chunks = TransactionInfo::total_chunks(&tx_infos);
 		assert_eq!(expected_total_chunks, total_chunks);
 		assert_eq!(9, tx_infos.len());
 
@@ -200,7 +200,7 @@ fn verify_chunk_proof_works() {
 
 			// build/check chunk proof roundtrip
 			let proof =
-				build_proof(random_hash.as_ref(), transactions.clone()).expect("valid proof");
+				build_proof(random_hash.as_ref(), transactions.clone()).expect("valid proof").unwrap();
 			assert_ok!(TransactionStorage::verify_chunk_proof(
 				proof,
 				random_hash.as_ref(),
@@ -230,7 +230,7 @@ fn renews_data() {
 			} else {
 				None
 			}
-		};
+		}.unwrap();
 		run_to_block(16, proof_provider);
 		assert!(Transactions::get(1).is_none());
 		assert_eq!(Transactions::get(6).unwrap().first(), Some(info).as_ref());
