@@ -228,16 +228,13 @@ fn renews_data() {
 			0, // transaction
 		));
 		let proof_provider = || {
-			{
-				let block_num = System::block_number();
-				if block_num == 11 || block_num == 16 {
-					let parent_hash = System::parent_hash();
-					Some(build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap())
-				} else {
-					None
-				}
+			let block_num = System::block_number();
+			if block_num == 11 || block_num == 16 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
 			}
-			.unwrap()
 		};
 		run_to_block(16, proof_provider);
 		assert!(Transactions::get(1).is_none());
