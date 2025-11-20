@@ -1,4 +1,4 @@
-# How to run
+# How to Run
 
 ## Build Bulletin
 
@@ -9,14 +9,12 @@ cargo build --release -p polkadot-bulletin-chain
 ```
 
 ```shell
-cd polkadot-bulletin-chain # make sure we are within the folder for the following steps
+cd polkadot-bulletin-chain   # ensure you are inside the project directory for the following steps
 ```
 
 ## Download Zombienet
 
 ```shell
-ZB_VER=v1.3.133
-
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -34,27 +32,27 @@ fi
 
 zb_bin="zombienet-${zb_os}-${zb_arch}"
 
-wget "https://github.com/paritytech/zombienet/releases/download/${ZB_VER}/${zb_bin}"
+wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/${zb_bin}"
 chmod +x "${zb_bin}"
 ```
 
 ## Run Kubo
 
-#### Locally
+#### Execute Locally
 
 ```shell
 wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_darwin-arm64.tar.gz
 tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
 ./kubo/ipfs version
 ./kubo/ipfs init
-./kubo/ipfs daemon & # run in background
+./kubo/ipfs daemon &   # run in the background
 ```
 
 #### Use Docker
 
-* Uses `172.17.0.1` or  `host.docker.internal` for swarm connect
+* Use `172.17.0.1` or  `host.docker.internal` for swarm connections
 
-```
+```shell
 docker pull ipfs/kubo:latest
 docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080 -p 5001:5001 ipfs/kubo:latest
 docker logs -f ipfs-node
@@ -66,7 +64,8 @@ docker logs -f ipfs-node
 zb_bin=$(ls zombienet-*-*)
 
 # Bulletin Solochain
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./"$zb_bin" -p native spawn ./zombienet/bulletin-polkadot-local.toml
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
+  ./"$zb_bin" -p native spawn ./zombienet/bulletin-polkadot-local.toml
 ```
 
 ### Connect IPFS Nodes
@@ -81,13 +80,13 @@ POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ./"$zb_bi
 ```
 
 ```shell
-# Use Docker (change 127.0.0.1 -> 172.17.0.1)
+# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 ```
 
 ```shell
-# Runs script which reconnects every 2 seconds
+# Runs a script that reconnects every 2 seconds
 ./scripts/ipfs-reconnect-solo.sh
 ```
 
@@ -98,9 +97,9 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ```shell
 mkdir -p ~/local_bridge_testing/bin
 
-# Ensures `polkadot` and `polkadot-parachain` existing
+# Ensure `polkadot` and `polkadot-parachain` exist
 git clone https://github.com/paritytech/polkadot-sdk.git
-cd ~/polkadot-sdk
+cd polkadot-sdk
 
 cargo build -p polkadot -r
 ls -la target/release/polkadot
@@ -115,36 +114,58 @@ cp target/release/polkadot-parachain ~/local_bridge_testing/bin
 # polkadot-parachain 1.20.2-165ba47dc91
 ```
 
+### Launch Parachain
+
 ```shell
 zb_bin=$(ls zombienet-*-*)
 
 # Bulletin Parachain (Westend)
-cd ~/projects/polkadot-bulletin-chain
 ./scripts/create_bulletin_westend_spec.sh
-POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain ./"$zb_bin" -p native spawn ./zombienet/bulletin-westend-local.toml
+POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
+  POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain \
+  ./"$zb_bin" -p native spawn ./zombienet/bulletin-westend-local.toml
+```
+
+### Connect IPFS Nodes
+
+```shell
+# Uses Kubo
+./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
+# connect 12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ success
+
+./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
+# connect 12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ success
 ```
 
 ```shell
-# Or run script which reconnects every 2 seconds
+# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
+docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
+```
+
+```shell
+# Runs a script that reconnects every 2 seconds
 ./scripts/ipfs-reconnect-westend.sh
 ```
 
-## Trigger authorize, store and IPFS get
+## Trigger Authorize, Store and IPFS Get
 
 ```shell
-# cd polkadot-bulletin-chain # make sure we are here
+# cd polkadot-bulletin-chain   # ensure you are in this directory
 cd examples
 npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto @polkadot/util multiformats ipfs-http-client ipfs-unixfs
 ```
 
-### Example for simple authorizing and store
+### Example for Simple Authorizing and Store
 
 ```shell
 node authorize_and_store.js
 ```
 
-### Example for multipart / chunked content / big files
+### Example for Multipart / Chunked Content / Big Files
+
 The code stores one file, splits into chunks and then uploads those chunks to the Bulletin.
+
 It collects all the partial CIDs for each chunk and saves them as a custom metadata JSON file in the Bulletin.
 
 Now we have two examples:
