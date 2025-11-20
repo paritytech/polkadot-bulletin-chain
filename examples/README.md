@@ -98,19 +98,23 @@ mkdir -p ~/local_bridge_testing/bin
 
 # Ensures `polkadot` and `polkadot-parachain` exist
 git clone https://github.com/paritytech/polkadot-sdk.git
+# TODO: unless not merged: https://github.com/paritytech/polkadot-sdk/pull/10370
+git reset --hard origin/bko-bulletin-para-support
 cd polkadot-sdk
 
 cargo build -p polkadot -r
 ls -la target/release/polkadot
 cp target/release/polkadot ~/local_bridge_testing/bin
+cp target/release/polkadot-prepare-worker ~/local_bridge_testing/bin
+cp target/release/polkadot-execute-worker ~/local_bridge_testing/bin
 ~/local_bridge_testing/bin/polkadot --version
-# polkadot 1.20.2-165ba47dc91
+# polkadot 1.20.2-165ba47dc91 or higher
 
 cargo build -p polkadot-parachain-bin -r
 ls -la target/release/polkadot-parachain
 cp target/release/polkadot-parachain ~/local_bridge_testing/bin
 ~/local_bridge_testing/bin/polkadot-parachain --version
-# polkadot-parachain 1.20.2-165ba47dc91
+# polkadot-parachain 1.20.2-165ba47dc91 or higher
 ```
 
 ### Launch Parachain
