@@ -1,5 +1,31 @@
 # How to run
 
+## Quick Test with Just (Recommended) ⚡
+
+The easiest way to test the complete PAPI workflow:
+
+```bash
+# Install just (if not already installed)
+brew install just
+
+# Run the complete test workflow (builds everything, starts all services, runs example)
+just
+
+# Cleanup when done
+just cleanup
+```
+
+**That's it!** This single `just` command handles everything:
+- ✅ Builds the bulletin chain
+- ✅ Installs npm dependencies  
+- ✅ Starts IPFS daemon
+- ✅ Starts zombienet with bulletin chain
+- ✅ Connects IPFS to bulletin nodes
+- ✅ Generates PAPI descriptors
+- ✅ Runs the authorize and store example
+
+## Manual Setup
+
 ### Build Bulletin
 ```
 git clone https://github.com/paritytech/polkadot-bulletin-chain.git
