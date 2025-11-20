@@ -1,15 +1,12 @@
-// npm install polkadot-api @polkadot-api/signer @polkadot/keyring @polkadot/util-crypto multiformats ipfs-http-client
-// npx papi add -w ws://localhost:10000 bulletin
-
 import { createClient } from 'polkadot-api';
 import { Binary } from '@polkadot-api/substrate-bindings';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws-provider';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { waitForNewBlock, cidFromBytes } from './common.js';
-import { bulletin } from '../.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     console.log('Creating authorizeAccount transaction...');
