@@ -78,6 +78,7 @@ npm install
 
 **Using legacy @polkadot/api:**
 ```
+cd examples
 node authorize_and_store.js
 ```
 
