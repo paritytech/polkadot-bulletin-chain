@@ -85,6 +85,8 @@ node authorize_and_store.js
 ```bash
 # First, generate the PAPI descriptors (from the root of the repository)
 npm run papi:generate
+# or if you already have .papi folder you can always update it
+npm run papi:update
 
 # Then run the PAPI version (from the examples directory)
 cd examples
