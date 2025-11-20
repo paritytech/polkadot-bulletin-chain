@@ -89,13 +89,13 @@ npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto @polkadot/util
 
 ### Example for simple authorizing and store
 
-**Using legacy @polkadot/api:**
+#### Using legacy @polkadot/api (PJS)
 ```
 cd examples
 node authorize_and_store.js
 ```
 
-**Using modern PAPI (Polkadot API):**
+#### Using modern PAPI (Polkadot API)
 ```bash
 # First, generate the PAPI descriptors (from the root of the repository)
 npm run papi:generate
