@@ -9,7 +9,7 @@ The easiest way to test the complete PAPI workflow:
 brew install just
 
 # Run the complete test workflow (builds everything, starts all services, runs example)
-just
+just test-papi-flow
 
 # Cleanup when done
 just cleanup
