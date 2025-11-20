@@ -250,31 +250,7 @@ python3 scripts/cmd/cmd.py bench bulletin-polkadot
 
 # Examples (JavaScript-based)
 
-The `examples/` directory contains Node.js scripts demonstrating how to interact with the Bulletin chain. For detailed setup and usage instructions, see [examples/README.md](./examples/README.md).
-
-## Quick Start
-
-1. **Install dependencies:**
-```bash
-npm install
-```
-
-2. **Generate PAPI descriptors (for type-safe API):**
-
-Make sure your Bulletin node is running, then:
-```bash
-npm run papi:generate
-```
-
-This generates TypeScript type definitions in `.papi/` based on your chain's metadata. The `.papi/` folder is generated and should not be committed to git (it's listed in `.gitignore`).
-
-3. **Run examples:**
-```bash
-cd examples
-node authorize_and_store_papi.js
-```
-
-For more details on PAPI (Polkadot API), see [examples/README_PAPI.md](./examples/README_PAPI.md).
+The `examples/` directory contains Node.js (PJS and/or PAPI) scripts demonstrating how to interact with the Bulletin chain. For detailed setup and usage instructions, see [examples/README.md](./examples/README.md).
 
 # Troubleshooting
 
