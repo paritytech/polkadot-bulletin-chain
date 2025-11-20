@@ -1,5 +1,9 @@
 {
   "type": "module",
+  "scripts": {
+    "papi:generate": "papi add -w ws://localhost:10000 bulletin",
+    "papi:update": "papi"
+  },
   "dependencies": {
     "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot-api/substrate-bindings": "^0.16.5",

@@ -10,3 +10,10 @@
 .envrc
 .direnv
 .idea
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Polkadot API generated files
+.papi/

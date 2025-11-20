@@ -2,9 +2,9 @@
 
 ## Setup
 
-1. **Install dependencies:**
+1. **Install dependencies (from the root of the repository):**
 ```bash
-npm install polkadot-api @polkadot-api/pjs-signer @polkadot/keyring @polkadot/util-crypto multiformats ipfs-http-client
+npm install
 ```
 
 2. **Generate PAPI descriptors:**
@@ -12,20 +12,21 @@ npm install polkadot-api @polkadot-api/pjs-signer @polkadot/keyring @polkadot/ut
 Make sure your Bulletin node is running, then generate the type-safe descriptors:
 
 ```bash
-npx papi add -w ws://localhost:10000 bulletin
+# From the root of the repository
+npm run papi:generate
 ```
 
 This will:
-- Connect to your local bulletin chain
+- Connect to your local bulletin chain at ws://localhost:10000
 - Download the metadata
-- Generate TypeScript types in `.papi/descriptors/bulletin.ts`
+- Generate TypeScript types in `.papi/descriptors/`
 - Create metadata files in `.papi/metadata/bulletin.scale`
 
-Alternatively, if you have issues connecting, you can use the pre-generated metadata from:
-https://github.com/paritytech/product-infrastructure/blob/main/apps/bulletin-example/.papi/metadata/bulletin.scale
+> **Note:** The `.papi/` folder is generated and should not be committed to git. It's listed in `.gitignore`.
 
 3. **Run the example:**
 ```bash
+cd examples
 node authorize_and_store_papi.js
 ```
 
@@ -92,11 +93,11 @@ const signer = getPolkadotSignerFromPjs(account);
 ## Troubleshooting
 
 ### Error: Cannot find module '@polkadot-api/descriptors'
-Run: `npx papi add -w ws://localhost:10000 bulletin`
+Run: `npm run papi:generate` from the root of the repository
 
 ### Connection issues
 Make sure your bulletin chain node is running on ws://localhost:10000
 
 ### Metadata errors
-If metadata changes, regenerate descriptors: `npx papi`
+If metadata changes, regenerate descriptors: `npm run papi:update` from the root of the repository
 
