@@ -51,10 +51,7 @@ fn discards_data() {
 			let block_num = System::block_number();
 			if block_num == 11 {
 				let parent_hash = System::parent_hash();
-				Some(
-					build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000], vec![0u8; 2000]])
-						.unwrap(),
-				)
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000], vec![0u8; 2000]]).unwrap()
 			} else {
 				None
 			}
@@ -140,8 +137,9 @@ fn checks_proof() {
 		));
 		run_to_block(10, || None);
 		let parent_hash = System::parent_hash();
-		let proof =
-			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap();
+		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
+			.unwrap()
+			.unwrap();
 		assert_noop!(
 			TransactionStorage::check_proof(RuntimeOrigin::none(), proof),
 			Error::UnexpectedProof,
@@ -149,14 +147,16 @@ fn checks_proof() {
 		run_to_block(11, || None);
 		let parent_hash = System::parent_hash();
 
-		let invalid_proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap();
+		let invalid_proof =
+			build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap().unwrap();
 		assert_noop!(
 			TransactionStorage::check_proof(RuntimeOrigin::none(), invalid_proof),
 			Error::InvalidProof,
 		);
 
-		let proof =
-			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap();
+		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
+			.unwrap()
+			.unwrap();
 		assert_ok!(TransactionStorage::check_proof(RuntimeOrigin::none(), proof));
 	});
 }
@@ -202,8 +202,9 @@ fn verify_chunk_proof_works() {
 			assert_eq!(selected_chunk_index, chunk_index);
 
 			// build/check chunk proof roundtrip
-			let proof =
-				build_proof(random_hash.as_ref(), transactions.clone()).expect("valid proof");
+			let proof = build_proof(random_hash.as_ref(), transactions.clone())
+				.expect("valid proof")
+				.unwrap();
 			assert_ok!(TransactionStorage::verify_chunk_proof(
 				proof,
 				random_hash.as_ref(),
@@ -230,7 +231,7 @@ fn renews_data() {
 			let block_num = System::block_number();
 			if block_num == 11 || block_num == 16 {
 				let parent_hash = System::parent_hash();
-				Some(build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap())
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
 			} else {
 				None
 			}
