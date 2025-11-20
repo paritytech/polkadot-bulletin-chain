@@ -5,7 +5,7 @@ import { getPolkadotSigner } from '@polkadot-api/signer';
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
-import { waitForNewBlock, cidFromBytes } from './common.js';
+import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
@@ -20,10 +20,29 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     const sudoTx = typedApi.tx.Sudo.sudo({
         call: authorizeTx.decodedCall
     });
-    
-    const result = await sudoTx.signAndSubmit(sudoPair);
-    console.log('Transaction authorizeAccount submitted:', result);
-    return result;
+
+    // Wait for a new block.
+    return new Promise((resolve, reject) => {
+        const sub = sudoTx
+            .signSubmitAndWatch(sudoPair)
+            .subscribe({
+                next: (ev) => {
+                    if (ev.type === "txBestBlocksState" && ev.found) {
+                        console.log("📦 Included in block:", ev.block.hash);
+                        sub.unsubscribe();
+                        resolve(ev);
+                    }
+                },
+                error: (err) => {
+                    console.log("Error:", err);
+                    sub.unsubscribe();
+                    reject(err);
+                },
+                complete: () => {
+                    console.log("Subscription complete");
+                }
+            });
+    })
 }
 
 async function store(typedApi, pair, data) {
@@ -38,11 +57,29 @@ async function store(typedApi, pair, data) {
     // Wrap in Binary object for typed API - pass as an object with 'data' property
     const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-    
-    const result = await tx.signAndSubmit(pair);
-    console.log('Transaction store submitted:', result);
-    
-    return cid;
+
+    // Wait for a new block.
+    return new Promise((resolve, reject) => {
+        const sub = tx
+            .signSubmitAndWatch(pair)
+            .subscribe({
+                next: (ev) => {
+                    if (ev.type === "txBestBlocksState" && ev.found) {
+                        console.log("📦 Included in block:", ev.block.hash);
+                        sub.unsubscribe();
+                        resolve(cid);
+                    }
+                },
+                error: (err) => {
+                    console.log("Error:", err);
+                    sub.unsubscribe();
+                    reject(err);
+                },
+                complete: () => {
+                    console.log("Subscription complete");
+                }
+            });
+    })
 }
 
 // Connect to a local IPFS gateway (e.g. Kubo)
@@ -111,14 +148,12 @@ async function main() {
 
     console.log('Doing authorization...');
     await authorizeAccount(typedApi, sudoSigner, who, transactions, bytes);
-    await waitForNewBlock();
     console.log('Authorized!');
 
     console.log('Storing data ...');
     const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
     let cid = await store(typedApi, whoSigner, dataToStore);
     console.log('Stored data with CID: ', cid);
-    await waitForNewBlock();
 
     console.log('Reading content... cid: ', cid);
     let content = await read_from_ipfs(cid);
