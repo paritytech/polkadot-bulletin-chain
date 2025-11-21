@@ -355,7 +355,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 	let authorize_call = RuntimeCall::TransactionStorage(pallet_transaction_storage::Call::<
 		Runtime,
 	>::authorize_account {
-		who: account.clone().to_account_id(),
+		who: account.to_account_id(),
 		transactions: 16,
 		bytes: 1024,
 	});

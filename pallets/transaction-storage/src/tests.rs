@@ -22,8 +22,8 @@ use super::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
 	},
-	AuthorizationExtent, AuthorizationScope, Event, AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
+	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{
 	prelude::{frame_system::RawOrigin, *},
@@ -36,7 +36,6 @@ type Error = super::Error<Test>;
 
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
-type ChunkCount = super::ChunkCount<Test>;
 type Transactions = super::Transactions<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -51,10 +50,7 @@ fn discards_data() {
 			let block_num = System::block_number();
 			if block_num == 11 {
 				let parent_hash = System::parent_hash();
-				Some(
-					build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000], vec![0u8; 2000]])
-						.unwrap(),
-				)
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000], vec![0u8; 2000]]).unwrap()
 			} else {
 				None
 			}
@@ -63,10 +59,8 @@ fn discards_data() {
 		assert!(Transactions::get(1).is_some());
 		let transactions = Transactions::get(1).unwrap();
 		assert_eq!(transactions.len(), 2);
-		assert_eq!(ChunkCount::get(1), 16);
 		run_to_block(12, proof_provider);
 		assert!(Transactions::get(1).is_none());
-		assert_eq!(ChunkCount::get(1), 0);
 	});
 }
 
@@ -140,8 +134,9 @@ fn checks_proof() {
 		));
 		run_to_block(10, || None);
 		let parent_hash = System::parent_hash();
-		let proof =
-			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap();
+		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
+			.unwrap()
+			.unwrap();
 		assert_noop!(
 			TransactionStorage::check_proof(RuntimeOrigin::none(), proof),
 			Error::UnexpectedProof,
@@ -149,14 +144,16 @@ fn checks_proof() {
 		run_to_block(11, || None);
 		let parent_hash = System::parent_hash();
 
-		let invalid_proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap();
+		let invalid_proof =
+			build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap().unwrap();
 		assert_noop!(
 			TransactionStorage::check_proof(RuntimeOrigin::none(), invalid_proof),
 			Error::InvalidProof,
 		);
 
-		let proof =
-			build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]]).unwrap();
+		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
+			.unwrap()
+			.unwrap();
 		assert_ok!(TransactionStorage::check_proof(RuntimeOrigin::none(), proof));
 	});
 }
@@ -188,8 +185,8 @@ fn verify_chunk_proof_works() {
 		run_to_block(2, || None);
 
 		// Read all the block transactions metadata.
-		let total_chunks = ChunkCount::get(1);
 		let tx_infos = Transactions::get(1).unwrap();
+		let total_chunks = TransactionInfo::total_chunks(&tx_infos);
 		assert_eq!(expected_total_chunks, total_chunks);
 		assert_eq!(9, tx_infos.len());
 
@@ -202,13 +199,13 @@ fn verify_chunk_proof_works() {
 			assert_eq!(selected_chunk_index, chunk_index);
 
 			// build/check chunk proof roundtrip
-			let proof =
-				build_proof(random_hash.as_ref(), transactions.clone()).expect("valid proof");
+			let proof = build_proof(random_hash.as_ref(), transactions.clone())
+				.expect("valid proof")
+				.unwrap();
 			assert_ok!(TransactionStorage::verify_chunk_proof(
 				proof,
 				random_hash.as_ref(),
 				tx_infos.to_vec(),
-				total_chunks
 			));
 		}
 	});
@@ -230,7 +227,7 @@ fn renews_data() {
 			let block_num = System::block_number();
 			if block_num == 11 || block_num == 16 {
 				let parent_hash = System::parent_hash();
-				Some(build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap())
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
 			} else {
 				None
 			}
