@@ -1,7 +1,10 @@
 [package]
 name = 'pallet-validator-set'
 version = '1.0.0'
-authors = ['Gautam Dhameja <quasijatt@outlook.com>', 'Parity Technologies <admin@parity.io>']
+authors = [
+	'Gautam Dhameja <quasijatt@outlook.com>',
+	'Parity Technologies <admin@parity.io>',
+]
 edition.workspace = true
 repository.workspace = true
 license = 'Apache-2.0'
@@ -11,17 +14,17 @@ codec = { workspace = true, features = ["derive"] }
 log = { workspace = true, default-features = true }
 scale-info = { features = ["derive"], workspace = true }
 
+pallet-session = { workspace = true, default-features = false, features = [
+	"historical",
+] }
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
 ] }
 sp-staking = { workspace = true, default-features = false }
-pallet-session = { workspace = true, default-features = false, features = [
-	"historical",
-] }
 
 [dev-dependencies]
-serde = { features = ["derive"], workspace = true }
 pallets-common = { workspace = true, default-features = false }
+serde = { features = ["derive"], workspace = true }
 
 [features]
 default = ['std']
