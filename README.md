@@ -2,6 +2,32 @@
 
 The Bulletin chain consists of a customized node implementation and a single runtime.
 
+## Quick Start with Just
+
+This project includes a `justfile` for testing the complete PAPI workflow. Install [just](https://github.com/casey/just#installation) with `brew install just`, then:
+
+```bash
+# Run the complete PAPI workflow test (default command)
+just
+
+# Or explicitly:
+just test-papi-flow
+
+# Cleanup background processes after test
+just cleanup
+```
+
+The `just` command automates the entire workflow:
+1. ✅ Builds the bulletin chain
+2. ✅ Installs npm dependencies
+3. ✅ Starts IPFS daemon
+4. ✅ Starts zombienet with the bulletin chain
+5. ✅ Runs IPFS reconnect script
+6. ✅ Generates PAPI descriptors
+7. ✅ Runs the authorize and store example
+
+This is perfect for testing the complete integration with a single command!
+
 ## Node implementation
 
 The Bulletin chain node implements IPFS support on top of a regular Substrate node. Only work with `litep2p` network backend is supported (enabled by default), and in order to use IPFS functionality `--ipfs-server` flag must be passed to the node binary.
