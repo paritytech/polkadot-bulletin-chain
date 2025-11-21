@@ -17,3 +17,9 @@ package-lock.json
 
 # Polkadot API generated files
 .papi/
+
+# Local test files
+examples/retrieved_picture.*
+kubo/
+zombienet-*
+zombienet/

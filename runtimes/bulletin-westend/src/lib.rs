@@ -30,9 +30,9 @@ pub mod fast_runtime_binary {
 }
 
 mod genesis_config_presets;
+pub mod storage;
 mod weights;
 pub mod xcm_config;
-pub mod storage;
 
 extern crate alloc;
 
@@ -44,9 +44,7 @@ use frame_support::{
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
-	traits::{
-		ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin,
-	},
+	traits::{ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin},
 	weights::{ConstantMultiplier, Weight},
 	PalletId,
 };
@@ -68,10 +66,11 @@ use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 pub use sp_runtime::BuildStorage;
 use sp_runtime::{
 	generic, impl_opaque_keys,
-	traits::{AsSystemOriginSigner, Block as BlockT, DispatchInfoOf, Implication, PostDispatchInfoOf},
+	traits::{
+		AsSystemOriginSigner, Block as BlockT, DispatchInfoOf, Implication, PostDispatchInfoOf,
+	},
 	transaction_validity::{
-		TransactionSource,
-		TransactionValidity, TransactionValidityError, ValidTransaction,
+		TransactionSource, TransactionValidity, TransactionValidityError, ValidTransaction,
 	},
 	ApplyExtrinsicResult, MultiAddress, Perbill,
 };
@@ -132,20 +131,20 @@ pub type Migrations = (
 		Runtime,
 		pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
 	>,
-    // permanent
-    pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
+	// permanent
+	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
 	cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 );
 
 /// Executive: handles dispatch to the various modules.
 #[allow(deprecated)]
 pub type Executive = frame_executive::Executive<
-    Runtime,
-    Block,
-    frame_system::ChainContext<Runtime>,
-    Runtime,
-    AllPalletsWithSystem,
-    (),
+	Runtime,
+	Block,
+	frame_system::ChainContext<Runtime>,
+	Runtime,
+	AllPalletsWithSystem,
+	(),
 >;
 
 impl_opaque_keys! {
@@ -196,7 +195,6 @@ parameter_types! {
 		.build_or_panic();
 	pub const SS58Prefix: u8 = 42;
 }
-
 
 // Configure FRAME pallets to include in runtime.
 #[derive_impl(frame_system::config_preludes::ParaChainDefaultConfig)]
@@ -536,13 +534,11 @@ parameter_types! {
 	pub const DepositFactor: Balance = deposit(0, 32);
 }
 
-
 impl pallet_sudo::Config for Runtime {
 	type RuntimeCall = RuntimeCall;
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
-
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
@@ -630,7 +626,7 @@ impl_runtime_apis! {
 			VERSION
 		}
 
-		fn execute_block(block: Block) {
+		fn execute_block(block: <Block as BlockT>::LazyBlock) {
 			Executive::execute_block(block)
 		}
 
@@ -667,7 +663,7 @@ impl_runtime_apis! {
 		}
 
 		fn check_inherents(
-			block: Block,
+			block: <Block as BlockT>::LazyBlock,
 			data: sp_inherents::InherentData,
 		) -> sp_inherents::CheckInherentsResult {
 			data.check_extrinsics(&block)
@@ -781,7 +777,7 @@ impl_runtime_apis! {
 		}
 
 		fn dry_run_xcm(origin_location: VersionedLocation, xcm: VersionedXcm<RuntimeCall>) -> Result<XcmDryRunEffects<RuntimeEvent>, XcmDryRunApiError> {
-			PolkadotXcm::dry_run_xcm::<Runtime, xcm_config::XcmRouter, RuntimeCall, xcm_config::XcmConfig>(origin_location, xcm)
+			PolkadotXcm::dry_run_xcm::<xcm_config::XcmRouter>(origin_location, xcm)
 		}
 	}
 
@@ -827,9 +823,24 @@ impl_runtime_apis! {
 		}
 	}
 
-    // Removed GetCoreSelectorApi implementation as it no longer exists in this SDK revision.
+	#[cfg(feature = "try-runtime")]
+	impl frame_try_runtime::TryRuntime<Block> for Runtime {
+		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
+			let weight = Executive::try_runtime_upgrade(checks).unwrap();
+			(weight, RuntimeBlockWeights::get().max_block)
+		}
 
-    // TryRuntime omitted to silence deprecation warnings; re-enable if needed.
+		fn execute_block(
+			block: <Block as BlockT>::LazyBlock,
+			state_root_check: bool,
+			signature_check: bool,
+			select: frame_try_runtime::TryStateSelect,
+		) -> Weight {
+			// NOTE: intentional unwrap: we don't want to propagate the error backwards, and want to
+			// have a backtrace here.
+			Executive::try_execute_block(block, state_root_check, signature_check, select).unwrap()
+		}
+	}
 
 	#[cfg(feature = "runtime-benchmarks")]
 	impl frame_benchmarking::Benchmark<Block> for Runtime {
@@ -913,9 +924,9 @@ impl_runtime_apis! {
 					))
 				}
 
-                fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
-                    None
-                }
+				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
+					None
+				}
 
 				fn set_up_complex_asset_transfer() -> Option<(Assets, u32, Location, alloc::boxed::Box<dyn FnOnce()>)> {
 					let native_location = Parent.into();
