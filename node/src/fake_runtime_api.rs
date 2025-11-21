@@ -217,7 +217,7 @@ sp_api::impl_runtime_apis! {
 		}
 
 		fn execute_block(
-			_: Block,
+			_: <Block as BlockT>::LazyBlock,
 			_: bool,
 			_: bool,
 			_: frame_try_runtime::TryStateSelect,
