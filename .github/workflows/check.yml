@@ -33,11 +33,33 @@ jobs:
       - id: set_image
         run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
+  check-fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cargo fmt
+        run: |
+          rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
+          cargo +nightly fmt --all -- --check
+
+      - name: Check TOML format
+        run: |
+          cargo install taplo-cli
+          if ! taplo format --check --config .config/taplo.toml; then
+            echo "Please run 'taplo format --config .config/taplo.toml' to fix any TOML formatting issues"
+            exit 1
+          fi
+
   check:
     name: Cargo check
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
-    needs: [set-image]
+    needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
@@ -57,7 +79,7 @@ jobs:
     name: Cargo check (benchmarking)
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
-    needs: [set-image]
+    needs: [set-image, check]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
@@ -78,7 +100,7 @@ jobs:
     name: Cargo clippy
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
-    needs: [set-image]
+    needs: [set-image, check]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
@@ -104,7 +126,7 @@ jobs:
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     timeout-minutes: 60
-    needs: [set-image]
+    needs: [set-image, check]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
