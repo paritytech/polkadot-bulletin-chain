@@ -59,7 +59,7 @@ jobs:
     name: Cargo check
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
-    needs: [set-image]
+    needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
@@ -79,7 +79,7 @@ jobs:
     name: Cargo check (benchmarking)
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
-    needs: [set-image]
+    needs: [set-image, check]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
@@ -100,7 +100,7 @@ jobs:
     name: Cargo clippy
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
-    needs: [set-image]
+    needs: [set-image, check]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
@@ -126,7 +126,7 @@ jobs:
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     timeout-minutes: 60
-    needs: [set-image]
+    needs: [set-image, check]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
