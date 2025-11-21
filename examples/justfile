@@ -13,10 +13,6 @@ build:
 npm-install:
     npm install
 
-# Clean build artifacts
-clean:
-    cargo clean
-
 # Test the complete workflow (builds, starts services, runs example, shuts down services)
 # Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
 authorize-and-store api="papi": build npm-install
