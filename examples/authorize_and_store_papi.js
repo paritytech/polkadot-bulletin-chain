@@ -8,6 +8,7 @@ import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
+import assert from "assert";
 
 async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     console.log('Creating authorizeAccount transaction...');
@@ -46,10 +47,9 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     })
 }
 
-async function store(typedApi, pair, data) {
-    console.log('Storing data:', data);
-    const cid = cidFromBytes(data);
-    
+async function store(typedApi, pair, data, cidCodec) {
+    console.log(`Storing (with cidCodec: ${cidCodec}) data: `, data);
+
     // Convert data to Uint8Array then wrap in Binary for PAPI typed API
     const dataBytes = typeof data === 'string' ? 
         new Uint8Array(Buffer.from(data)) : 
@@ -59,12 +59,20 @@ async function store(typedApi, pair, data) {
     const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
 
+    // Add custom `TransactionExtension` for codec, if specified.
+    const txOpts = {};
+    let cid;
+    if (cidCodec != null) {
+        txOpts.customSignedExtensions = { ProvideCidCodec: { value: BigInt(cidCodec) } };
+        cid = cidFromBytes(data, cidCodec);
+    } else {
+        cid = cidFromBytes(data);
+    }
+
     // Wait for a new block.
     return new Promise((resolve, reject) => {
         const sub = tx
-            .signSubmitAndWatch(pair, {
-                customSignedExtensions: { ProvideCidCodec: { value: 1234n } }
-            })
+            .signSubmitAndWatch(pair, txOpts)
             .subscribe({
                 next: (ev) => {
                     if (ev.type === "txBestBlocksState" && ev.found) {
@@ -153,17 +161,30 @@ async function main() {
     await authorizeAccount(typedApi, sudoSigner, who, transactions, bytes);
     console.log('Authorized!');
 
-    console.log('Storing data ...');
+    console.log('\n\nStoring data ...');
     const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
-    let cid = await store(typedApi, whoSigner, dataToStore);
-    console.log('Stored data with CID: ', cid);
+    // Regular raw CID without any codec.
+    let cidRaw = await store(typedApi, whoSigner, dataToStore, null);
+    console.log('Stored data with CID: ', cidRaw);
 
-    console.log('Reading content... cid: ', cid);
-    let content = await read_from_ipfs(cid);
-    console.log('Content as bytes:', content);
-    console.log('Content as string:', content.toString());
+    // CID with codec (e.g. DAG-PB / 112).
+    let cidWithCodec = await store(typedApi, whoSigner, dataToStore, 112);
+    console.log('Stored data with CID: ', cidWithCodec);
 
-    client.destroy();
+    console.log('Reading content... cid_raw: ', cidRaw);
+    let content1 = await read_from_ipfs(cidRaw);
+    let content2 = await read_from_ipfs(cidWithCodec);
+    assert.deepStrictEqual(
+        content1.buffer,
+        content2.buffer,
+        '❌ content1 does not match content2!'
+    );
+    assert.notDeepStrictEqual(
+        cidRaw,
+        cidWithCodec,
+        '❌ cidRaw can not match cidWithCodec!'
+    );
+    console.log(`✅ Verified contents and CIDs!`);
 }
 
 main().catch(console.error).finally(() => {
