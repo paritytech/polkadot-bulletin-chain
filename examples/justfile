@@ -57,7 +57,7 @@ authorize-and-store api="papi": build npm-install
     
     # Start zombienet in background
     echo "⚡ Starting Bulletin chain with zombienet..."
-    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ./zombienet-macos-arm64 -p native spawn ./zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
+    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Waiting for chain to start (15 seconds)..."
