@@ -38,29 +38,22 @@ jobs:
     timeout-minutes: 20
     needs: [set-image]
     container:
-      image: ${{ needs.preflight.outputs.IMAGE }}
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Cargo fmt
-        id: required
         run: |
           rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
           cargo +nightly fmt --all -- --check
 
-  check-toml-format:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [check-fmt]
-    container:
-      image: ${{ needs.preflight.outputs.IMAGE }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: check toml format
+      - name: Check TOML format
         run: |
-          rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
           cargo install taplo-cli
-          taplo format --check --config .config/taplo.toml
-          echo "Please run `taplo format --config .config/taplo.toml` to fix any toml formatting issues"
+          if ! taplo format --check --config .config/taplo.toml; then
+            echo "Please run 'taplo format --config .config/taplo.toml' to fix any TOML formatting issues"
+            exit 1
+          fi
 
   check:
     name: Cargo check
