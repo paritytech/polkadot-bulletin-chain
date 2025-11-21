@@ -63,7 +63,7 @@ async function store(typedApi, pair, data) {
     return new Promise((resolve, reject) => {
         const sub = tx
             .signSubmitAndWatch(pair, {
-                customSignedExtensions: { ProvideCidCodec: { value: 1234 } }
+                customSignedExtensions: { ProvideCidCodec: { value: 1234n } }
             })
             .subscribe({
                 next: (ev) => {
