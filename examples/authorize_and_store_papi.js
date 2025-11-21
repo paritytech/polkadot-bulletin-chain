@@ -7,6 +7,7 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 
 async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     console.log('Creating authorizeAccount transaction...');
@@ -61,7 +62,9 @@ async function store(typedApi, pair, data) {
     // Wait for a new block.
     return new Promise((resolve, reject) => {
         const sub = tx
-            .signSubmitAndWatch(pair)
+            .signSubmitAndWatch(pair, {
+                customSignedExtensions: { ProvideCidCodec: { value: 1234 } }
+            })
             .subscribe({
                 next: (ev) => {
                     if (ev.type === "txBestBlocksState" && ev.found) {
@@ -118,7 +121,7 @@ async function main() {
     await cryptoWaitReady();
 
     // Create PAPI client with WebSocket provider
-    client = createClient(getWsProvider('ws://localhost:10000'));
+    client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
     
     // Get typed API with generated descriptors
     const typedApi = client.getTypedApi(bulletin);
