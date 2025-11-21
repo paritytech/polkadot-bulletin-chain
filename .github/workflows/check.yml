@@ -33,6 +33,31 @@ jobs:
       - id: set_image
         run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
+  check-fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [set-image]
+    container:
+      image: ${{ needs.preflight.outputs.IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cargo fmt
+        id: required
+        run: cargo +nightly fmt --all -- --check
+
+  check-toml-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [check-fmt]
+    container:
+      image: ${{ needs.preflight.outputs.IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: check toml format
+        run: |
+          taplo format --check --config .config/taplo.toml
+          echo "Please run `taplo format --config .config/taplo.toml` to fix any toml formatting issues"
+
   check:
     name: Cargo check
     # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
