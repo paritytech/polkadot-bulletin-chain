@@ -17,7 +17,7 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{Call, CidCodecForStore, Config, LOG_TARGET};
+use crate::{cids::CidConfig, Call, CidConfigForStore, Config, LOG_TARGET};
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
 use polkadot_sdk_frame::{
@@ -26,32 +26,23 @@ use polkadot_sdk_frame::{
 	traits::Implication,
 };
 
-/// Type alias representing a CID codec.
-pub type CidCodec = u64;
-
-/// Temporarily tracks provided optional CID codec.
-#[derive(Default)]
-pub struct CidCodecContext {
-	pub codec: Option<CidCodec>,
-}
-
 /// `TransactionExtension` implementation that provides optional `CidCodec` for the `store`
 /// extrinsic.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
 #[scale_info(skip_type_params(T))]
-pub struct ProvideCidCodec<T>(pub Option<CidCodec>, PhantomData<T>);
+pub struct ProvideCidConfig<T>(pub Option<CidConfig>, PhantomData<T>);
 
-impl<T> ProvideCidCodec<T> {
-	/// Create a new `ProvideCidCodec` instance.
-	pub fn new(cid_codec: Option<CidCodec>) -> Self {
-		Self(cid_codec, Default::default())
+impl<T> ProvideCidConfig<T> {
+	/// Create a new `ProvideCidConfig` instance.
+	pub fn new(config: Option<CidConfig>) -> Self {
+		Self(config, Default::default())
 	}
 }
 
-impl<T: Config + Send + Sync> fmt::Debug for ProvideCidCodec<T> {
+impl<T: Config + Send + Sync> fmt::Debug for ProvideCidConfig<T> {
 	#[cfg(feature = "std")]
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ProvideCidCodec({:?})", self.0)
+		write!(f, "ProvideCidConfig({:?})", self.0)
 	}
 
 	#[cfg(not(feature = "std"))]
@@ -60,18 +51,18 @@ impl<T: Config + Send + Sync> fmt::Debug for ProvideCidCodec<T> {
 	}
 }
 
-impl<T: Config + Send + Sync> TransactionExtension<T::RuntimeCall> for ProvideCidCodec<T>
+impl<T: Config + Send + Sync> TransactionExtension<T::RuntimeCall> for ProvideCidConfig<T>
 where
 	<T as frame_system::Config>::RuntimeCall: IsSubType<Call<T>>,
 {
-	const IDENTIFIER: &'static str = "ProvideCidCodec";
+	const IDENTIFIER: &'static str = "ProvideCidConfig";
 
 	type Implicit = ();
 	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
 		Ok(())
 	}
 
-	type Val = Option<CidCodec>;
+	type Val = Option<CidConfig>;
 	type Pre = ();
 
 	fn weight(&self, _call: &T::RuntimeCall) -> Weight {
@@ -88,9 +79,9 @@ where
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> ValidateResult<Self::Val, T::RuntimeCall> {
-		match (self.0, call.is_sub_type()) {
-			(Some(cid_codec), Some(Call::store { .. })) =>
-				Ok((Default::default(), Some(cid_codec), origin)),
+		match (self.0.as_ref(), call.is_sub_type()) {
+			(Some(cid_config), Some(Call::store { .. })) =>
+				Ok((Default::default(), Some(cid_config.clone()), origin)),
 			(Some(_), _) => {
 				// All other calls are invalid with cid_codec.
 				Err(InvalidTransaction::Call.into())
@@ -108,10 +99,17 @@ where
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		log::error!(target: LOG_TARGET, "prepare: {val:?}");
-		if let Some(cid_codec) = val {
-			CidCodecForStore::<T>::set(Some(cid_codec));
+		if let Some(cid_config) = val {
+			// Let's store the codec in the intermediary storage, which will be cleared by the store
+			// extrinsic.
+			CidConfigForStore::<T>::set(Some(cid_config));
 
-			// TODO: just attempt, not working, will remove.
+			// TODO: just attempt with dispatch `with_context`, not working, will remove.
+			// /// Temporarily tracks provided optional CID codec.
+			// #[derive(Default)]
+			// pub struct CidCodecContext {
+			//	pub codec: Option<CidCodec>,
+			// }
 			// Put cid codec to the dispatch context
 			// with_context::<CidCodecContext, _>(|v| {
 			// 	let context = v.or_default();
