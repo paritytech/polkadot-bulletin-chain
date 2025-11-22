@@ -22,7 +22,8 @@ use pallet_bridge_messages::{
 };
 use pallet_bridge_parachains::ParachainHeaders;
 use pallet_transaction_storage::{
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
+	extension::CidCodec, AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
+	BAD_DATA_SIZE,
 };
 use runtime::{
 	bridge_config::bp_people_polkadot, BuildStorage, Executive, Hash, Header, Runtime, RuntimeCall,
@@ -262,10 +263,11 @@ fn emulate_sent_messages() {
 	);
 }
 
-fn construct_extrinsic(
+fn construct_extrinsic_with_codec(
 	sender: sp_core::sr25519::Pair,
 	call: RuntimeCall,
-) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
+	cid_codec: Option<CidCodec>,
+) -> Result<UncheckedExtrinsic, TransactionValidityError> {
 	let account_id = sp_runtime::AccountId32::from(sender.public());
 	frame_system::BlockHash::<Runtime>::insert(0, Hash::default());
 	let tx_ext: TxExtension = (
@@ -280,6 +282,7 @@ fn construct_extrinsic(
 		frame_system::CheckWeight::<Runtime>::new(),
 		runtime::ValidateSigned,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
+		pallet_transaction_storage::extension::ProvideCidCodec::<Runtime>::new(cid_codec),
 	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
 	let signature = payload.using_encoded(|e| sender.sign(e));
@@ -295,8 +298,15 @@ fn construct_and_apply_extrinsic(
 	account: sp_core::sr25519::Pair,
 	call: RuntimeCall,
 ) -> ApplyExtrinsicResult {
+	construct_and_apply_extrinsic_with_codec(account, call, None)
+}
+fn construct_and_apply_extrinsic_with_codec(
+	account: sp_core::sr25519::Pair,
+	call: RuntimeCall,
+	cid_codec: Option<CidCodec>,
+) -> ApplyExtrinsicResult {
 	let dispatch_info = call.get_dispatch_info();
-	let xt = construct_extrinsic(account, call)?;
+	let xt = construct_extrinsic_with_codec(account, call, cid_codec)?;
 	let xt_len = xt.encode().len();
 	log::info!(
 		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
@@ -383,6 +393,45 @@ fn transaction_storage_runtime_sizes() {
 			),
 			Err(BAD_DATA_SIZE.into())
 		);
+	});
+}
+
+#[test]
+fn provide_cid_codec_extension_works() {
+	run_test(|| {
+		// prepare data
+		let account = Sr25519Keyring::Alice;
+		let who: runtime::AccountId = account.to_account_id();
+		let data = vec![0u8; 4 * 1024];
+		let total_bytes: u64 = data.len() as u64;
+
+		// Authorize.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			2,
+			2 * total_bytes,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 2, bytes: 2 * total_bytes },
+		);
+
+		// Store data WITHOUT a custom codec.
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			None,
+		));
+		// TODO: check stored CIDs;
+
+		// Store data WITH a custom codec.
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
+			Some(70),
+		));
+		// TODO: check stored CIDs;
 	});
 }
 
