@@ -20,6 +20,7 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 array-bytes = { version = "6.1" }
 bp-test-utils = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "56e4b10bbbbcefcf9e4fe879c88c68902181fc4a" }
 cfg-if = { version = "1.0" }
+cid = { version = "0.11.1", default-features = false }
 clap = { version = "4.2.5" }
 codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false }
 futures = { version = "0.3.21" }
