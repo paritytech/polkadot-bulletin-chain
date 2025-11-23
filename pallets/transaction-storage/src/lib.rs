@@ -38,8 +38,8 @@ use polkadot_sdk_frame::{
 	prelude::*,
 };
 use sp_transaction_storage_proof::{
-	encode_index, random_chunk, ChunkIndex, InherentError, TransactionStorageProof, CHUNK_SIZE,
-	INHERENT_IDENTIFIER,
+	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
+	CHUNK_SIZE, INHERENT_IDENTIFIER,
 };
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
@@ -149,10 +149,6 @@ impl CheckContext {
 	fn want_valid_transaction(self) -> bool {
 		matches!(self, CheckContext::Validate)
 	}
-}
-
-fn num_chunks(bytes: u32) -> u32 {
-	(bytes as u64).div_ceil(CHUNK_SIZE as u64) as u32
 }
 
 #[polkadot_sdk_frame::pallet]
