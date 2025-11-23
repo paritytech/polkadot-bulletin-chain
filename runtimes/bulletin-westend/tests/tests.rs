@@ -23,16 +23,19 @@ use bulletin_westend_runtime::{
 	RuntimeOrigin, SessionKeys, System, TxExtension, UncheckedExtrinsic,
 };
 use frame_support::{
-	assert_err, assert_ok, dispatch::GetDispatchInfo, traits::fungible::Mutate as FungibleMutate,
+	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks,
+	traits::fungible::Mutate as FungibleMutate,
 };
 use pallet_transaction_storage::{
-	extension::CidCodec, AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
+	cids::{calculate_cid, CidConfig, HashingAlgorithm},
+	AuthorizationExtent, Call as TxStorageCall, CidConfigForStore, Config as TxStorageConfig,
 };
 use parachains_common::{AccountId, AuraId, Balance, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{transaction_validity::InvalidTransaction, ApplyExtrinsicResult, Either};
+use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
@@ -42,7 +45,7 @@ const ALICE: [u8; 32] = [1u8; 32];
 fn construct_extrinsic_with_codec(
 	sender: sp_core::sr25519::Pair,
 	call: RuntimeCall,
-	cid_codec: Option<CidCodec>,
+	cid_config: Option<CidConfig>,
 ) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
 	let account_id = parachains_common::AccountId::from(sender.public());
 	// provide a known block hash for the immortal era check
@@ -61,7 +64,7 @@ fn construct_extrinsic_with_codec(
 		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		bulletin_westend_runtime::ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-		pallet_transaction_storage::extension::ProvideCidCodec::<Runtime>::new(cid_codec),
+		pallet_transaction_storage::extension::ProvideCidConfig::<Runtime>::new(cid_config),
 	);
 	let tx_ext: TxExtension =
 		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
@@ -84,10 +87,10 @@ fn construct_and_apply_extrinsic(
 fn construct_and_apply_extrinsic_with_codec(
 	account: sp_core::sr25519::Pair,
 	call: RuntimeCall,
-	cid_codec: Option<CidCodec>,
+	cid_config: Option<CidConfig>,
 ) -> ApplyExtrinsicResult {
 	let dispatch_info = call.get_dispatch_info();
-	let xt = construct_extrinsic_with_codec(account, call, cid_codec)?;
+	let xt = construct_extrinsic_with_codec(account, call, cid_config)?;
 	let xt_len = xt.encode().len();
 	tracing::info!(
 		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
@@ -190,15 +193,13 @@ fn transaction_storage_runtime_sizes() {
 
 #[test]
 fn provide_cid_codec_extension_works() {
-	sp_io::TestExternalities::new(
-		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
-	)
-	.execute_with(|| {
+	ExtBuilder::<Runtime>::default().with_tracing().build().execute_with(|| {
 		// prepare data
 		let account = Sr25519Keyring::Alice;
 		let who: AccountId = account.to_account_id();
 		let data = vec![0u8; 4 * 1024];
 		let total_bytes: u64 = data.len() as u64;
+		let block_number = System::block_number();
 
 		// fund Alice to cover fees
 		let initial: Balance = 10_000_000_000_000_000_000u128;
@@ -208,29 +209,51 @@ fn provide_cid_codec_extension_works() {
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
-			2,
-			2 * total_bytes,
+			3,
+			3 * total_bytes,
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
-			AuthorizationExtent { transactions: 2, bytes: 2 * total_bytes },
+			AuthorizationExtent { transactions: 3, bytes: 3 * total_bytes },
 		);
 
-		// Store data WITHOUT a custom codec.
+		// 1. Store data WITHOUT a custom cid_config.
 		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
 			account.pair(),
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
 			None,
 		));
-		// TODO: check stored CIDs;
+		assert!(!CidConfigForStore::<Runtime>::exists());
 
-		// Store data WITH a custom codec.
+		// 2. Store data WITH a cid_config as the default codec for raw data.
+		// (Should produce the same result as above).
 		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
 			account.pair(),
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
-			Some(112),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 }),
 		));
-		// TODO: check stored CIDs;
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec).
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 }),
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// Check the content_hashes and CIDs.
+		runtime::TransactionStorage::on_finalize(block_number);
+		let stored_txs = runtime::TransactionStorage::transaction_roots(block_number)
+			.unwrap()
+			.into_iter()
+			.enumerate()
+			.map(|(idx, tx)| (idx, tx))
+			.collect::<HashMap<_, _>>();
+		assert_eq!(stored_txs.len(), 3);
+		assert_eq!(stored_txs[&0].content_hash, calculate_cid(&data, None).unwrap().content_hash);
+		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
+		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
 	});
 }
 

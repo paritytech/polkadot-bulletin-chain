@@ -115,7 +115,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 		pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
-		pallet_transaction_storage::extension::ProvideCidCodec<Runtime>,
+		pallet_transaction_storage::extension::ProvideCidConfig<Runtime>,
 	),
 >;
 

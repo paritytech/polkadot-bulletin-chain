@@ -24,6 +24,8 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 mod benchmarking;
 pub mod extension;
 pub mod weights;
@@ -34,6 +36,7 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+use alloc::vec::Vec;
 use cids::{calculate_cid, Cid, CidConfig, ContentHash};
 use codec::{Decode, Encode, MaxEncodedLen};
 use polkadot_sdk_frame::{
@@ -111,7 +114,7 @@ pub struct TransactionInfo {
 	chunk_root: <BlakeTwo256 as Hash>::Output,
 
 	/// Plain hash of indexed data.
-	content_hash: ContentHash,
+	pub content_hash: ContentHash,
 	/// Used hashing algorithm for `content_hash`.
 	hashing: HashingAlgorithm,
 	/// Requested codec for CIDs.
