@@ -90,4 +90,4 @@ async function test() {
     console.log("Matches!");
 }
 
-test().catch(console.error);
+// test().catch(console.error);
