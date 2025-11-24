@@ -1,4 +1,5 @@
 import {blake2AsU8a, keccak256AsU8a, sha256AsU8a} from '@polkadot/util-crypto'
+import { Enum } from '@polkadot-api/substrate-bindings';
 import * as multihash from 'multiformats/hashes/digest'
 import { CID } from 'multiformats/cid'
 import * as sha256 from "multiformats/hashes/sha2";
@@ -42,6 +43,20 @@ export async function cidFromBytes(bytes, cidCodec = 0x55, mhCode = 0xb220) {
     }
     console.log("Multihash:", mh);
     return CID.createV1(cidCodec, mh)
+}
+
+export function to_hashing_enum(hashing) {
+    switch (hashing) {
+        case 0xb220: // blake2b-256
+            return Enum("Blake2b256");
+        case 0x12:   // sha2-256
+            return Enum("Sha2_256");
+        case 0x1b:   // keccak-256
+            return Enum("Keccak256");
+            break;
+        default:
+            throw new Error("Unhandled multihash code: " + mhCode)
+    }
 }
 
 async function test() {

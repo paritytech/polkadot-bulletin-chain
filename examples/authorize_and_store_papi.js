@@ -5,7 +5,7 @@ import { getPolkadotSigner } from '@polkadot-api/signer';
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
-import { cidFromBytes } from './common.js';
+import { cidFromBytes, to_hashing_enum } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
@@ -47,7 +47,7 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     })
 }
 
-async function store(typedApi, pair, data, cidCodec) {
+async function store(typedApi, pair, data, cidCodec, mhCode) {
     console.log(`Storing (with cidCodec: ${cidCodec}) data: `, data);
 
     // Convert data to Uint8Array then wrap in Binary for PAPI typed API
@@ -61,12 +61,19 @@ async function store(typedApi, pair, data, cidCodec) {
 
     // Add custom `TransactionExtension` for codec, if specified.
     const txOpts = {};
-    let cid;
+    let expectedCid;
     if (cidCodec != null) {
-        txOpts.customSignedExtensions = { ProvideCidCodec: { value: BigInt(cidCodec) } };
-        cid = cidFromBytes(data, cidCodec);
+        txOpts.customSignedExtensions = {
+            ProvideCidConfig: {
+                value: {
+                    codec: BigInt(cidCodec),
+                    hashing: to_hashing_enum(mhCode),
+                }
+            }
+        };
+        expectedCid = cidFromBytes(data, cidCodec, mhCode);
     } else {
-        cid = cidFromBytes(data);
+        expectedCid = cidFromBytes(data);
     }
 
     // Wait for a new block.
@@ -78,7 +85,7 @@ async function store(typedApi, pair, data, cidCodec) {
                     if (ev.type === "txBestBlocksState" && ev.found) {
                         console.log("📦 Included in block:", ev.block.hash);
                         sub.unsubscribe();
-                        resolve(cid);
+                        resolve(expectedCid);
                     }
                 },
                 error: (err) => {
@@ -163,25 +170,25 @@ async function main() {
 
     console.log('\n\nStoring data ...');
     const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
-    // Regular raw CID without any codec.
-    let cidRaw = await store(typedApi, whoSigner, dataToStore, null);
-    console.log('Stored data with CID: ', cidRaw);
+    // Raw CID without any codec - defaults to 0x55 and Blake2b256.
+    let cidRawBlake2b256 = await store(typedApi, whoSigner, dataToStore);
+    console.log('Stored data with cidRawBlake2b256: ', cidRawBlake2b256);
 
-    // CID with codec (e.g. DAG-PB / 112).
-    let cidWithCodec = await store(typedApi, whoSigner, dataToStore, 112);
-    console.log('Stored data with CID: ', cidWithCodec);
+    // Raw CID without any codec - defaults to 0x55 but using Sha2_256.
+    let cidRawSha2_256 = await store(typedApi, whoSigner, dataToStore, 0x55, 0x12);
+    console.log('Stored data with CID: ', cidRawSha2_256);
 
-    console.log('Reading content... cid_raw: ', cidRaw);
-    let content1 = await read_from_ipfs(cidRaw);
-    let content2 = await read_from_ipfs(cidWithCodec);
+    console.log('Reading content... cid_raw: ', cidRawBlake2b256);
+    let content1 = await read_from_ipfs(cidRawBlake2b256);
+    let content2 = await read_from_ipfs(cidRawSha2_256);
     assert.deepStrictEqual(
         content1.buffer,
         content2.buffer,
         '❌ content1 does not match content2!'
     );
     assert.notDeepStrictEqual(
-        cidRaw,
-        cidWithCodec,
+        cidRawBlake2b256,
+        cidRawSha2_256,
         '❌ cidRaw can not match cidWithCodec!'
     );
     console.log(`✅ Verified contents and CIDs!`);
