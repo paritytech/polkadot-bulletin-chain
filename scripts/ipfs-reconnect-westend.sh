@@ -3,7 +3,7 @@
 THIS_DIR=$(cd $(dirname $0); pwd)
 
 # Choose mode based on argument
-mode="${1:-docker}"
+mode="${1:-local}"
 if [ "$mode" = "docker" ]; then
     check_cmd="docker exec ipfs-node ipfs"
     check_host="172.17.0.1"

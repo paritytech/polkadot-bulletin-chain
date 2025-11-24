@@ -82,7 +82,7 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 
 ```shell
 # Runs a script that reconnects every 2 seconds
-# Defaults to Docker; use 'local' to use the local Kubo instance
+# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
 ./scripts/ipfs-reconnect-solo.sh
 ```
 
@@ -143,7 +143,7 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 
 ```shell
 # Runs a script that reconnects every 2 seconds
-# Defaults to Docker; use 'local' to use the local Kubo instance
+# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
 ./scripts/ipfs-reconnect-westend.sh
 ```
 
