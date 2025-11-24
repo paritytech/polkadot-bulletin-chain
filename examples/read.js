@@ -6,16 +6,16 @@ import { WsProvider } from "@polkadot/api";
 
 
 async function main() {
-    // const ws = new WsProvider('ws://localhost:10000');
-    // const bobApi = await ApiPromise.create({ provider: ws });
-    // await bobApi.isReady;
-
+    const ws = new WsProvider('ws://localhost:12346');
+    const bobApi = await ApiPromise.create({ provider: ws });
+    await bobApi.isReady;
+    const chainSpec = (await bobApi.rpc.syncstate.genSyncSpec(true)).toString();
 
     // Bob's address
-    const provider = new WsProvider('ws://localhost:12346');
+    const provider = new WsProvider('ws://localhost:10000');
     const api = await ApiPromise.create({ provider });
     await api.isReady;
-    const chainSpec = (await api.rpc.syncstate.genSyncSpec(true)).toString();
+    
     
     // Check if chainSpec has bootnodes
     const chainSpecObj = JSON.parse(chainSpec);
@@ -46,7 +46,7 @@ async function main() {
 
     // Start smoldot with logging enabled
     const client = smoldot.start({
-        maxLogLevel: 5, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+        maxLogLevel: 4, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
         logCallback: (level, target, message) => {
             const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
             const levelName = levelNames[level - 1] || 'UNKNOWN';
