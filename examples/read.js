@@ -95,6 +95,8 @@ async function main() {
             const headerResponse = await chain.nextJsonRpcResponse();
             const headerParsed = JSON.parse(headerResponse);
             console.log("Current head block number:", parseInt(headerParsed.result.number, 16));
+
+            chain.sendJsonRpc(`{"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":["${signedTx.toHex()}"]}`);
             return chain;
         })
         .then(async (chain) => {
@@ -108,8 +110,8 @@ async function main() {
                 console.log("Transaction status:", parsed);
                 
                 // Check if transaction is finalized
-                if (parsed.params?.result?.Finalized) {
-                    console.log("✅ Transaction finalized in block:", parsed.params.result.Finalized);
+                if (parsed.params?.result?.inBlock) {
+                    console.log("✅ Transaction finalized in block:", parsed.params.result.inBlock);
                     break;
                 }
                 
