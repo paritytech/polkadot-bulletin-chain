@@ -17,16 +17,16 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{cids::CidConfig, Call, CidConfigForStore, Config, LOG_TARGET};
+use crate::{cids::CidConfig, Call, CidConfigForStore, Config};
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
-	traits::Implication,
+	traits::{Implication, PostDispatchInfoOf},
 };
 
-/// `TransactionExtension` implementation that provides optional `CidCodec` for the `store`
+/// `TransactionExtension` implementation that provides optional `CidConfig` for the `store`
 /// extrinsic.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
 #[scale_info(skip_type_params(T))]
@@ -63,7 +63,7 @@ where
 	}
 
 	type Val = Option<CidConfig>;
-	type Pre = ();
+	type Pre = bool;
 
 	fn weight(&self, _call: &T::RuntimeCall) -> Weight {
 		Weight::zero()
@@ -98,7 +98,6 @@ where
 		_info: &DispatchInfoOf<T::RuntimeCall>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
-		log::error!(target: LOG_TARGET, "prepare: {val:?}");
 		if let Some(cid_config) = val {
 			// Let's store the codec in the intermediary storage, which will be cleared by the store
 			// extrinsic.
@@ -116,7 +115,23 @@ where
 			// 	context.codec = Some(cid_codec);
 			// 	log::error!(target: LOG_TARGET, "prepare - setting: {cid_codec:?}!");
 			// });
+			Ok(true)
+		} else {
+			Ok(false)
 		}
-		Ok(())
+	}
+
+	fn post_dispatch_details(
+		pre: Self::Pre,
+		_info: &DispatchInfoOf<T::RuntimeCall>,
+		_post_info: &PostDispatchInfoOf<T::RuntimeCall>,
+		_len: usize,
+		_result: &DispatchResult,
+	) -> Result<Weight, TransactionValidityError> {
+		if pre {
+			// Let’s clean up after the dispatch.
+			CidConfigForStore::<T>::kill();
+		}
+		Ok(Weight::zero())
 	}
 }
