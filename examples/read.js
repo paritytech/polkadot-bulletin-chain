@@ -24,6 +24,14 @@ async function main() {
     if (!chainSpecObj.bootNodes || chainSpecObj.bootNodes.length === 0) {
         console.warn("⚠️  No bootnodes found! Smoldot won't be able to sync.");
     }
+    
+    // Set protocolId to null
+    console.log("Original protocolId:", chainSpecObj.protocolId);
+    chainSpecObj.protocolId = null;
+    console.log("Modified protocolId:", chainSpecObj.protocolId);
+    
+    // Convert back to string
+    const modifiedChainSpec = JSON.stringify(chainSpecObj);
 
     const keyring = new Keyring({ type: 'sr25519' });
     const sudo_pair = keyring.addFromUri('//Alice');
@@ -55,7 +63,7 @@ async function main() {
         }
     });
     await client
-        .addChain({ chainSpec })
+        .addChain({ chainSpec: modifiedChainSpec })
         .then(async (chain) => {
             // Give smoldot a moment to sync
             console.log("⏳ Waiting for smoldot to sync...");
@@ -87,15 +95,6 @@ async function main() {
             const headerResponse = await chain.nextJsonRpcResponse();
             const headerParsed = JSON.parse(headerResponse);
             console.log("Current head block number:", parseInt(headerParsed.result.number, 16));
-            
-            // Now try a simple balance transfer instead of sudo
-            console.log("Creating a simple balance transfer...");
-            const bob = keyring.addFromUri('//Bob');
-            const transferTx = api.tx.balances.transferKeepAlive(bob.address, 1000000000000);
-            const signedTransfer = await transferTx.signAsync(sudo_pair);
-            
-            console.log("Submitting transfer transaction...");
-            chain.sendJsonRpc(`{"jsonrpc":"2.0","id":2,"method":"author_submitAndWatchExtrinsic","params":["${signedTransfer.toHex()}"]}`);
             return chain;
         })
         .then(async (chain) => {
