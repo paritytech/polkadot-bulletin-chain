@@ -107,26 +107,10 @@ const ipfs = create({
 
 async function read_from_ipfs(cid) {
     // Fetch the block (downloads via Bitswap if not local)
-    console.log('Trying to get cid: ', cid);
-    try {
-        const block = await ipfs.block.get(cid, {timeout: 10000});
-        console.log('Received block: ', block);
-        if (block.length !== 0) {
-            return block;
-        }
-    } catch (error) {
-        console.log('Block not found directly, trying cat...', error.message);
-    }
-
-    // Fetch the content from IPFS
-    console.log('Trying to chunk cid: ', cid);
-    const chunks = [];
-    for await (const chunk of ipfs.cat(cid)) {
-        chunks.push(chunk);
-    }
-
-    const content = Buffer.concat(chunks);
-    return content;
+    console.log('Trying to ipfs.block.get cid: ', cid);
+    const block = await ipfs.block.get(cid, {timeout: 10000});
+    console.log('Received block: ', block);
+    return block;
 }
 
 // Global client reference for cleanup
@@ -170,26 +154,46 @@ async function main() {
 
     console.log('\n\nStoring data ...');
     const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
+
     // Raw CID without any codec - defaults to 0x55 and Blake2b256.
     let cidRawBlake2b256 = await store(typedApi, whoSigner, dataToStore);
     console.log('Stored data with cidRawBlake2b256: ', cidRawBlake2b256);
 
     // Raw CID without any codec - defaults to 0x55 but using Sha2_256.
     let cidRawSha2_256 = await store(typedApi, whoSigner, dataToStore, 0x55, 0x12);
-    console.log('Stored data with CID: ', cidRawSha2_256);
+    console.log('Stored data with cidRawSha2_256: ', cidRawSha2_256);
 
-    console.log('Reading content... cid_raw: ', cidRawBlake2b256);
+    // DAG-PB CID codec - using Sha2_256.
+    let cidDagPbSha2_256 = await store(typedApi, whoSigner, dataToStore, 0x70, 0x12);
+    console.log('Stored data with cidDagPbSha2_256: ', cidDagPbSha2_256);
+
     let content1 = await read_from_ipfs(cidRawBlake2b256);
     let content2 = await read_from_ipfs(cidRawSha2_256);
+    let content3 = await read_from_ipfs(cidDagPbSha2_256);
     assert.deepStrictEqual(
         content1.buffer,
         content2.buffer,
         '❌ content1 does not match content2!'
     );
+    assert.deepStrictEqual(
+        content1.buffer,
+        content3.buffer,
+        '❌ content1 does not match content3!'
+    );
     assert.notDeepStrictEqual(
         cidRawBlake2b256,
         cidRawSha2_256,
-        '❌ cidRaw can not match cidWithCodec!'
+        '❌ cidRawBlake2b256 can not match cidRawSha2_256!'
+    );
+    assert.notDeepStrictEqual(
+        cidRawBlake2b256,
+        cidDagPbSha2_256,
+        '❌ cidRawBlake2b256 can not match cidDagPbSha2_256!'
+    );
+    assert.notDeepStrictEqual(
+        cidRawSha2_256,
+        cidDagPbSha2_256,
+        '❌ cidRawSha2_256 can not match cidDagPbSha2_256!'
     );
     console.log(`✅ Verified contents and CIDs!`);
 }
@@ -197,4 +201,3 @@ async function main() {
 main().catch(console.error).finally(() => {
     if (client) client.destroy();
 });
-
