@@ -6,12 +6,13 @@ import { WsProvider } from "@polkadot/api";
 
 
 async function main() {
+    // Bob's address
     const ws = new WsProvider('ws://localhost:12346');
     const bobApi = await ApiPromise.create({ provider: ws });
     await bobApi.isReady;
     const chainSpec = (await bobApi.rpc.syncstate.genSyncSpec(true)).toString();
 
-    // Bob's address
+    // Alice's address
     const provider = new WsProvider('ws://localhost:10000');
     const api = await ApiPromise.create({ provider });
     await api.isReady;
