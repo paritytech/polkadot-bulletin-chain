@@ -24,14 +24,20 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 mod benchmarking;
+pub mod extension;
 pub mod weights;
 
+pub mod cids;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 mod tests;
 
+use alloc::vec::Vec;
+use cids::{calculate_cid, Cid, CidConfig, ContentHash};
 use codec::{Decode, Encode, MaxEncodedLen};
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
@@ -43,6 +49,7 @@ use sp_transaction_storage_proof::{
 };
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
+use crate::cids::{CidCodec, HashingAlgorithm};
 pub use pallet::*;
 pub use weights::WeightInfo;
 
@@ -76,9 +83,6 @@ pub struct AuthorizationExtent {
 	pub bytes: u64,
 }
 
-/// Hash of a stored blob of data.
-type ContentHash = [u8; 32];
-
 /// The scope of an authorization.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 enum AuthorizationScope<AccountId> {
@@ -108,8 +112,14 @@ type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 pub struct TransactionInfo {
 	/// Chunk trie root.
 	chunk_root: <BlakeTwo256 as Hash>::Output,
+
 	/// Plain hash of indexed data.
-	content_hash: <BlakeTwo256 as Hash>::Output,
+	pub content_hash: ContentHash,
+	/// Used hashing algorithm for `content_hash`.
+	hashing: HashingAlgorithm,
+	/// Requested codec for CIDs.
+	cid_codec: CidCodec,
+
 	/// Size of indexed data in bytes.
 	size: u32,
 	/// Total number of chunks added in the block with this transaction. This
@@ -214,6 +224,8 @@ pub mod pallet {
 		AuthorizationNotFound,
 		/// Authorization has not expired.
 		AuthorizationNotExpired,
+		/// Content hash was not calculated.
+		InvalidContentHash,
 	}
 
 	#[pallet::pallet]
@@ -264,6 +276,9 @@ pub mod pallet {
 			if total_chunks != 0 {
 				<Transactions<T>>::insert(n, transactions);
 			}
+
+			// Kill
+			CidConfigForStore::<T>::kill();
 		}
 
 		fn integrity_test() {
@@ -312,8 +327,9 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = sp_io::hashing::blake2_256(&data);
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, content_hash);
+			let cid = calculate_cid(&data, CidConfigForStore::<T>::take())
+				.map_err(|_| Error::<T>::InvalidContentHash)?;
+			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -324,12 +340,14 @@ pub mod pallet {
 					.try_push(TransactionInfo {
 						chunk_root: root,
 						size: data.len() as u32,
-						content_hash: content_hash.into(),
+						content_hash: cid.content_hash,
+						hashing: cid.hashing,
+						cid_codec: cid.codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index });
+			Self::deposit_event(Event::Stored { index, cid: cid.cid });
 			Ok(())
 		}
 
@@ -373,6 +391,8 @@ pub mod pallet {
 						chunk_root: info.chunk_root,
 						size: info.size,
 						content_hash: info.content_hash,
+						hashing: info.hashing,
+						cid_codec: info.cid_codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -558,7 +578,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32 },
+		Stored { index: u32, cid: Cid },
 		/// Renewed data under specified index.
 		Renewed { index: u32 },
 		/// Storage proof was successfully checked.
@@ -602,6 +622,12 @@ pub mod pallet {
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+	/// Ephemeral value killed on the block finalization. So it never ends up in the storage trie.
+	/// (Used by [`extension::ProvideCidConfig`])
+	#[pallet::storage]
+	#[pallet::whitelist_storage]
+	pub type CidConfigForStore<T: Config> = StorageValue<_, CidConfig, OptionQuery>;
 
 	#[pallet::inherent]
 	impl<T: Config> ProvideInherent for Pallet<T> {
