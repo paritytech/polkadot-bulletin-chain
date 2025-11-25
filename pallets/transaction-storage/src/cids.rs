@@ -126,12 +126,13 @@ pub struct CidData {
 /// Returns `Err(())` if multihash wrapping fails.
 pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, ()> {
 	// Determine hashing algorithm and codec
-	let (hashing, codec) = if let Some(config) = config {
-		(config.hashing, config.codec)
-	} else {
-		// Defaults: raw codec (0x55) and Blake2b-256 hash
-		(HashingAlgorithm::Blake2b256, 0x55)
-	};
+	let (hashing, codec) = config.map_or_else(
+		|| {
+			// Defaults: raw codec (0x55) and Blake2b-256 hash
+			(HashingAlgorithm::Blake2b256, 0x55)
+		},
+		|c| (c.hashing, c.codec),
+	);
 
 	// Hash the data
 	let content_hash = hashing.hash(data);
