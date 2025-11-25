@@ -4,19 +4,16 @@ import { getWsProvider } from 'polkadot-api/ws-provider';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { create } from 'ipfs-http-client';
-import {cidFromBytes, buildUnixFSDagPB, generateTextImage} from './common.js';
+import { cidFromBytes, buildUnixFSDagPB, generateTextImage, convertCid, fetchCid } from './common.js';
 import {authorizeAccount, store} from './authorize_and_store_papi.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
 
 import fs from 'fs'
+import * as dagPB from "@ipld/dag-pb";
 
 // ---- CONFIG ----
-const WS_ENDPOINT = 'ws://127.0.0.1:10000' // Bulletin node
-const IPFS_API = 'http://127.0.0.1:5001'   // Local IPFS daemon
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 const FILE_PATH = './random_picture.jpg'
 const OUT_PATH = './retrieved_random_picture.jpg'
 const CHUNK_SIZE = 4 * 1024 // 4 KB
@@ -142,9 +139,7 @@ async function main() {
         (input) => whoAccount.sign(input)
     );
 
-    const ipfs = create({ url: IPFS_API });
     console.log('✅ Connected to Bulletin node')
-
     let { nonce } = await typedApi.query.System.Account.getValue(whoAccount.address);
     const nonceMgr = new NonceManager(nonce);
     console.log(`💳 Using account: ${whoAccount.address}, nonce: ${nonce}`)
@@ -174,16 +169,20 @@ async function main() {
     console.log('\n🌐 Try opening in browser:')
     console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
     console.log('   (You’ll see binary content since this is an image)')
+    console.log('')
+    console.log(`   http://127.0.0.1:8080/ipfs/${convertCid(rootCid, 0x55)}`)
+    console.log('   (You’ll see the DAG file itself)')
 
-    // Download the content from IPFS HTTP gateway
-    const contentUrl = `${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`;
-    console.log('⬇️ Downloading the full content (no chunking) by rootCID from url: ', contentUrl);
-    const res = await fetch(contentUrl);
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    const fullBuffer = Buffer.from(await res.arrayBuffer());
+    // Download the content from IPFS HTTP gateway.
+    const fullBuffer = await fetchCid(rootCid);
     console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
     await fileToDisk(OUT_PATH, fullBuffer);
     filesAreEqual(FILE_PATH, OUT_PATH);
+
+    // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
+    const rootCidAsRaw = convertCid(rootCid, 0x55);
+    const storedDagNode = dagPB.decode(await fetchCid(rootCidAsRaw));
+    console.log("✅ Reconstructed DAG file: ", storedDagNode);
 
     console.log(`\n\n\n✅✅✅ Passed all tests ✅✅✅`);
 }

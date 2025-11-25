@@ -13,6 +13,10 @@ import * as dagPB from '@ipld/dag-pb'
 import { createCanvas } from "canvas";
 import fs from "fs";
 
+// ---- CONFIG ----
+const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
+// -----------------
+
 export async function waitForNewBlock() {
     // TODO: wait for a new block.
     console.log('🛰 Waiting for new block...')
@@ -51,6 +55,11 @@ export async function cidFromBytes(bytes, cidCodec = 0x55, mhCode = 0xb220) {
     }
     console.log("Multihash:", mh);
     return CID.createV1(cidCodec, mh)
+}
+
+export function convertCid(cid, cidCodec) {
+    const mh = cid.multihash;
+    return CID.createV1(cidCodec, mh);
 }
 
 export function to_hashing_enum(hashing) {
@@ -158,6 +167,14 @@ function randomColor() {
 
 function rand255() {
     return Math.floor(Math.random() * 256);
+}
+
+export async function fetchCid(cid) {
+    const contentUrl = `${HTTP_IPFS_API}/ipfs/${cid.toString()}`;
+    console.log('⬇️ Downloading the full content (no chunking) by cid from url: ', contentUrl);
+    const res = await fetch(contentUrl);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    return Buffer.from(await res.arrayBuffer())
 }
 
 async function test() {
