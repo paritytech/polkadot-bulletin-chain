@@ -10,7 +10,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
 
-async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
+export async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes, nonceMgr) {
     console.log('Creating authorizeAccount transaction...');
     
     const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
@@ -23,10 +23,15 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
         call: authorizeTx.decodedCall
     });
 
+    const txOpts = {};
+    if (nonceMgr != null) {
+        txOpts.nonce = BigInt(nonceMgr.getAndIncrement());
+    }
+
     // Wait for a new block.
     return new Promise((resolve, reject) => {
         const sub = sudoTx
-            .signSubmitAndWatch(sudoPair)
+            .signSubmitAndWatch(sudoPair, txOpts)
             .subscribe({
                 next: (ev) => {
                     if (ev.type === "txBestBlocksState" && ev.found) {
@@ -47,8 +52,8 @@ async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
     })
 }
 
-async function store(typedApi, pair, data, cidCodec, mhCode) {
-    console.log(`Storing (with cidCodec: ${cidCodec}) data: `, data);
+export async function store(typedApi, pair, data, cidCodec, mhCode, nonceMgr) {
+    console.log(`Storing (with cidCodec: ${cidCodec}, mhCode: ${mhCode}) - data.len(${data.length})`);
 
     // Convert data to Uint8Array then wrap in Binary for PAPI typed API
     const dataBytes = typeof data === 'string' ? 
@@ -74,6 +79,9 @@ async function store(typedApi, pair, data, cidCodec, mhCode) {
         expectedCid = cidFromBytes(data, cidCodec, mhCode);
     } else {
         expectedCid = cidFromBytes(data);
+    }
+    if (nonceMgr != null) {
+        txOpts.nonce = BigInt(nonceMgr.getAndIncrement());
     }
 
     // Wait for a new block.
