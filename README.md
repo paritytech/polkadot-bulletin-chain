@@ -220,6 +220,29 @@ cargo build --release -p polkadot-bulletin-chain
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
 ```
 
+### Run Bulletin Westend local chain
+
+```bash
+# 1. Build and create the chain spec
+cargo build --release -p bulletin-westend-runtime
+./scripts/create_bulletin_westend_spec.sh
+
+# 2. Spawn the zombienet
+POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
+POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain \
+zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
+```
+
+#### Assigning Cores (Multi-Core Block Production)
+
+After the zombienet is running, you need to assign cores to the bulletin parachain for block production. The relay chain is configured with 3 cores (`num_cores = 3`).
+
+```bash
+./scripts/assign_cores.sh ws://localhost:9942 1006 0 1
+```
+
+This uses sudo to submit a batch of `coretime.assignCore` extrinsics on the relay chain.
+
 ### Run a production chain (but only with Alice validator)
 You can override the Alice validator keys here: [adjust\_bp\_spec.sh](./zombienet/adjust_bp_spec.sh) (you should see finalized blocks in the logs).
 
