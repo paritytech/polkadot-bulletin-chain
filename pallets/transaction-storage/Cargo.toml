@@ -15,8 +15,8 @@ targets = ["x86_64-unknown-linux-gnu"]
 [dependencies]
 array-bytes = { optional = true, workspace = true }
 codec = { workspace = true }
-log = { workspace = true, default-features = true }
 scale-info = { features = ["derive"], workspace = true }
+tracing = { workspace = true }
 
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
@@ -31,10 +31,10 @@ runtime-benchmarks = [
 ]
 std = [
 	"codec/std",
-	"log/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-transaction-storage-proof/std",
+	"tracing/std",
 ]
 try-runtime = [
 	"polkadot-sdk-frame/try-runtime",
