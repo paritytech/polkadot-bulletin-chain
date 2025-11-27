@@ -124,7 +124,7 @@ mod benchmarks {
 	#[benchmark]
 	fn store(l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; l as usize];
-		let hash = sp_io::hashing::blake2_256(&data).into();
+		let hash = sp_io::hashing::blake2_256(&data);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
@@ -137,7 +137,7 @@ mod benchmarks {
 	#[benchmark]
 	fn renew() -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
-		let hash = sp_io::hashing::blake2_256(&data).into();
+		let hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
