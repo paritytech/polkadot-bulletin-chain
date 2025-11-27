@@ -668,10 +668,10 @@ pub mod pallet {
 					// enough lifetime for their store/renew transactions that they aren't at risk
 					// of replay when the account is next authorized.
 					if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
-						log::warn!(
+						tracing::warn!(
 							target: LOG_TARGET,
-							"Failed to decrement provider reference count for authorized account {who:?}, \
-							leaking reference: {err:?}"
+							error=?err, ?who,
+							"Failed to decrement provider reference count for authorized account leaking reference"
 						);
 					}
 				},

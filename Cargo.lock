@@ -7209,11 +7209,11 @@ name = "pallet-transaction-storage"
 version = "4.0.0-dev"
 dependencies = [
  "array-bytes 6.2.3",
- "log",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
  "sp-transaction-storage-proof",
+ "tracing",
 ]
 
 [[package]]
