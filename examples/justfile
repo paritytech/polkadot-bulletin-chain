@@ -1,6 +1,19 @@
 # Polkadot Bulletin Chain - Just Commands
 # Install just: brew install just
 # Run `just --list` to see all available commands
+# 
+# Usage:
+#   1. Run prerequisites (only needed once after checkout or when deps change):
+#        just build
+#        just npm-install
+#
+#   2. Run full workflow example (this builds the chain and installs npm deps if not yet done):
+#        just authorize-and-store papi
+#        just authorize-and-store pjs
+#
+#   (Use 'papi' for Polkadot API or 'pjs' for Polkadot JS)
+#   The 'authorize-and-store' recipe will build the chain and install npm dependencies as needed.
+
 
 # Default recipe - run the complete PAPI workflow test
 default: authorize-and-store
