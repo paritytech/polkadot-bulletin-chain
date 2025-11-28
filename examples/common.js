@@ -79,10 +79,12 @@ export function to_hashing_enum(hashing) {
 /**
  * Build a UnixFS DAG-PB file node from raw chunks.
  *
+ * (By default with SHA2 multihash)
+ *
  * @param {Array<{ cid: CID, length: number }>} chunks
  * @returns {Promise<{ rootCid: CID, dagBytes: Uint8Array }>}
  */
-export async function buildUnixFSDagPB(chunks) {
+export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
     if (!chunks?.length) {
         throw new Error('❌ buildUnixFSDag: chunks[] is empty')
     }
@@ -114,8 +116,7 @@ export async function buildUnixFSDagPB(chunks) {
     const dagBytes = dagPB.encode(dagNode)
 
     // Hash DAG to produce CIDv1
-    const dagHash = await sha256.sha256.digest(dagBytes)
-    const rootCid = CID.createV1(dagPB.code, dagHash)
+    const rootCid = await cidFromBytes(dagBytes, dagPB.code, mhCode)
 
     console.log(`✅ DAG root CID: ${rootCid.toString()}`)
 

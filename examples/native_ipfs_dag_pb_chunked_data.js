@@ -154,7 +154,7 @@ async function main() {
     // Example download picture by rootCID with IPFS DAG feature and HTTP gateway.
     // Demonstrates how to download chunked content by one root CID.
     // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
-    const { rootCid: expectedRootCid, dagBytes } = await buildUnixFSDagPB(chunks);
+    const { rootCid: expectedRootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0x12);
     let calculatedRootCid = await cidFromBytes(dagBytes, 0x70, 0x12);
     assert.deepStrictEqual(expectedRootCid, calculatedRootCid);
 
