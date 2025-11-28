@@ -11,9 +11,20 @@
 #        just authorize-and-store papi
 #        just authorize-and-store pjs
 #
+#   3. Run individual commands for manual testing:
+#        just ipfs-init          # Initialize IPFS (if needed)
+#        just ipfs-start         # Start IPFS daemon
+#        just ipfs-connect       # Connect to IPFS nodes
+#        just bulletin-zombienet-start    # Start zombienet
+#        just ipfs-reconnect-start  # Start IPFS reconnect script
+#        just papi-generate      # Generate PAPI descriptors
+#        just run-example papi   # Run example with PAPI or PJS
+#        just stop-services      # Stop all services
+#
 #   (Use 'papi' for Polkadot API or 'pjs' for Polkadot JS)
-#   The 'authorize-and-store' recipe will build the chain and install npm dependencies as needed.
 
+# PID file locations
+PID_DIR := "/tmp/bulletin-pids"
 
 # Default recipe - run the complete PAPI workflow test
 default: authorize-and-store
@@ -25,6 +36,160 @@ build:
 # Install JavaScript dependencies
 npm-install:
     npm install
+
+# Initialize IPFS if not already initialized
+ipfs-init:
+    #!/usr/bin/env bash
+    set -e
+    
+    # Check if IPFS is available
+    if ! command -v ipfs &> /dev/null; then
+        IPFS_CMD="./kubo/ipfs"
+        if [ ! -f "$IPFS_CMD" ]; then
+            echo "❌ Error: Neither system IPFS nor ./kubo/ipfs found."
+            echo "Please install IPFS or download kubo to ./kubo/"
+            exit 1
+        fi
+    else
+        IPFS_CMD="ipfs"
+    fi
+    
+    # Initialize IPFS if needed
+    if [ ! -d ~/.ipfs ]; then
+        echo "📦 Initializing IPFS..."
+        $IPFS_CMD init
+    else
+        echo "✅ IPFS already initialized"
+    fi
+
+# Start IPFS daemon in background
+ipfs-start:
+    #!/usr/bin/env bash
+    set -e
+    
+    mkdir -p {{ PID_DIR }}
+    
+    # Check if IPFS is available
+    if ! command -v ipfs &> /dev/null; then
+        IPFS_CMD="./kubo/ipfs"
+    else
+        IPFS_CMD="ipfs"
+    fi
+    
+    echo "📡 Starting IPFS daemon..."
+    $IPFS_CMD daemon > /tmp/ipfs-daemon.log 2>&1 &
+    IPFS_PID=$!
+    echo $IPFS_PID > {{ PID_DIR }}/ipfs.pid
+    echo "   IPFS PID: $IPFS_PID"
+    echo "   Log: /tmp/ipfs-daemon.log"
+    sleep 2
+
+# Connect to IPFS nodes
+ipfs-connect:
+    #!/usr/bin/env bash
+    set -e
+    
+    # Check if IPFS is available
+    if ! command -v ipfs &> /dev/null; then
+        IPFS_CMD="./kubo/ipfs"
+    else
+        IPFS_CMD="ipfs"
+    fi
+    
+    echo "🔗 Connecting IPFS nodes..."
+    $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
+
+# Start zombienet in background
+bulletin-zombienet-start:
+    #!/usr/bin/env bash
+    set -e
+    
+    mkdir -p {{ PID_DIR }}
+    
+    echo "⚡ Starting Bulletin chain with zombienet..."
+    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ../$(ls ../zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
+    ZOMBIENET_PID=$!
+    echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
+    echo "   Zombienet PID: $ZOMBIENET_PID"
+    echo "   Log: /tmp/zombienet.log"
+    echo "   Waiting for chain to start (15 seconds)..."
+    sleep 15
+
+# Start IPFS reconnect script in background
+ipfs-reconnect-start:
+    #!/usr/bin/env bash
+    set -e
+    
+    mkdir -p {{ PID_DIR }}
+    
+    echo "🔄 Starting IPFS reconnect script..."
+    ./scripts/ipfs-reconnect-solo.sh > /tmp/ipfs-reconnect.log 2>&1 &
+    RECONNECT_PID=$!
+    echo $RECONNECT_PID > {{ PID_DIR }}/ipfs-reconnect.pid
+    echo "   Reconnect PID: $RECONNECT_PID"
+    echo "   Log: /tmp/ipfs-reconnect.log"
+    sleep 2
+
+# Generate PAPI descriptors
+papi-generate:
+    #!/usr/bin/env bash
+    set -e
+    
+    echo "🔧 Generating PAPI descriptors..."
+    npm run papi:generate
+
+# Run the authorize-and-store example
+# Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
+run-example api="papi":
+    #!/usr/bin/env bash
+    set -e
+    
+    API_TYPE="{{ api }}"
+    
+    if [[ "$API_TYPE" != "papi" && "$API_TYPE" != "pjs" ]]; then
+        echo "❌ Error: api parameter must be 'papi' or 'pjs'"
+        exit 1
+    fi
+    
+    # Determine which example to run
+    if [ "$API_TYPE" == "papi" ]; then
+        EXAMPLE_FILE="authorize_and_store_papi.js"
+    else
+        EXAMPLE_FILE="authorize_and_store.js"
+    fi
+    
+    echo ""
+    echo "🎯 Running $EXAMPLE_FILE example..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    node $EXAMPLE_FILE
+
+# Stop all running services (IPFS, zombienet, reconnect script)
+stop-services:
+    #!/usr/bin/env bash
+    
+    echo "🧹 Stopping all services..."
+    
+    # Stop services by reading PIDs from files
+    if [ -d {{ PID_DIR }} ]; then
+        for pidfile in {{ PID_DIR }}/*.pid; do
+            if [ -f "$pidfile" ]; then
+                PID=$(cat "$pidfile")
+                SERVICE=$(basename "$pidfile" .pid)
+                if kill $PID 2>/dev/null; then
+                    echo "   ✓ Stopped $SERVICE (PID: $PID)"
+                else
+                    echo "   ⚠ $SERVICE (PID: $PID) not running or already stopped"
+                fi
+                rm "$pidfile"
+            fi
+        done
+        rmdir {{ PID_DIR }} 2>/dev/null || true
+    else
+        echo "   No running services found"
+    fi
+    
+    echo "✅ Services stopped"
 
 # Test the complete workflow (builds, starts services, runs example, shuts down services)
 # Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
@@ -42,69 +207,22 @@ authorize-and-store api="papi": build npm-install
     echo "🚀 Starting $API_TYPE workflow test..."
     echo ""
     
-    # Check if IPFS is available
-    if ! command -v ipfs &> /dev/null; then
-        echo "❌ IPFS not found. Using local kubo binary..."
-        IPFS_CMD="./kubo/ipfs"
-        if [ ! -f "$IPFS_CMD" ]; then
-            echo "❌ Error: Neither system IPFS nor ./kubo/ipfs found."
-            echo "Please install IPFS or download kubo to ./kubo/"
-            exit 1
-        fi
-    else
-        IPFS_CMD="ipfs"
-    fi
+    # Initialize IPFS
+    just ipfs-init
     
-    # Initialize IPFS if needed
-    if [ ! -d ~/.ipfs ]; then
-        echo "📦 Initializing IPFS..."
-        $IPFS_CMD init
-    fi
+    # Start services
+    just ipfs-start
+    just bulletin-zombienet-start
+    just ipfs-connect
+    just ipfs-reconnect-start
     
-    # Start IPFS daemon in background
-    echo "📡 Starting IPFS daemon..."
-    $IPFS_CMD daemon > /tmp/ipfs-daemon.log 2>&1 &
-    IPFS_PID=$!
-    echo "   IPFS PID: $IPFS_PID"
-    sleep 2
-
-    echo "🔗 Connecting IPFS nodes..."
-    $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
-    $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-    
-    # Start zombienet in background
-    echo "⚡ Starting Bulletin chain with zombienet..."
-    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
-    ZOMBIENET_PID=$!
-    echo "   Zombienet PID: $ZOMBIENET_PID"
-    echo "   Waiting for chain to start (15 seconds)..."
-    sleep 15
-    
-    # Start IPFS reconnect script in background
-    echo "🔄 Starting IPFS reconnect script..."
-    ./scripts/ipfs-reconnect-solo.sh > /tmp/ipfs-reconnect.log 2>&1 &
-    RECONNECT_PID=$!
-    echo "   Reconnect PID: $RECONNECT_PID"
-    sleep 2
-    
-    # Generate PAPI descriptors (only for papi)
+    # Generate PAPI descriptors if needed
     if [ "$API_TYPE" == "papi" ]; then
-        echo "🔧 Generating PAPI descriptors..."
-        npm run papi:generate
-    fi
-    
-    # Determine which example to run
-    if [ "$API_TYPE" == "papi" ]; then
-        EXAMPLE_FILE="authorize_and_store_papi.js"
-    else
-        EXAMPLE_FILE="authorize_and_store.js"
+        just papi-generate
     fi
     
     # Run the example
-    echo ""
-    echo "🎯 Running $EXAMPLE_FILE example..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    node $EXAMPLE_FILE
+    just run-example $API_TYPE
     EXAMPLE_EXIT=$?
     
     echo ""
@@ -122,8 +240,6 @@ authorize-and-store api="papi": build npm-install
     echo "   /tmp/ipfs-reconnect.log"
     
     # Clean up background processes
-    echo "🧹 Cleaning up background processes..."
-    kill $IPFS_PID $ZOMBIENET_PID $RECONNECT_PID 2>/dev/null || true
-    
+    just stop-services
     
     exit $EXAMPLE_EXIT
