@@ -67,6 +67,10 @@ authorize-and-store api="papi": build npm-install
     IPFS_PID=$!
     echo "   IPFS PID: $IPFS_PID"
     sleep 2
+
+    echo "🔗 Connecting IPFS nodes..."
+    $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
     
     # Start zombienet in background
     echo "⚡ Starting Bulletin chain with zombienet..."
