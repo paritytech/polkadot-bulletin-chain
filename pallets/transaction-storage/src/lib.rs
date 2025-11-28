@@ -38,8 +38,8 @@ use polkadot_sdk_frame::{
 	prelude::*,
 };
 use sp_transaction_storage_proof::{
-	encode_index, random_chunk, InherentError, TransactionStorageProof, CHUNK_SIZE,
-	INHERENT_IDENTIFIER,
+	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
+	CHUNK_SIZE, INHERENT_IDENTIFIER,
 };
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
@@ -117,7 +117,16 @@ pub struct TransactionInfo {
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
 	/// total chunk value.
-	block_chunks: u32,
+	block_chunks: ChunkIndex,
+}
+
+impl TransactionInfo {
+	/// Get the number of total chunks.
+	///
+	/// See the `block_chunks` field of [`TransactionInfo`] for details.
+	pub fn total_chunks(txs: &[TransactionInfo]) -> ChunkIndex {
+		txs.last().map_or(0, |t| t.block_chunks)
+	}
 }
 
 /// Context of a `check_signed`/`check_unsigned` call.
@@ -140,10 +149,6 @@ impl CheckContext {
 	fn want_valid_transaction(self) -> bool {
 		matches!(self, CheckContext::Validate)
 	}
-}
-
-fn num_chunks(bytes: u32) -> u32 {
-	(bytes as u64).div_ceil(CHUNK_SIZE as u64) as u32
 }
 
 #[polkadot_sdk_frame::pallet]
@@ -228,7 +233,6 @@ pub mod pallet {
 			if obsolete > Zero::zero() {
 				weight.saturating_accrue(db_weight.writes(2));
 				<Transactions<T>>::remove(obsolete);
-				<ChunkCount<T>>::remove(obsolete);
 			}
 
 			// For `on_finalize`
@@ -244,7 +248,12 @@ pub mod pallet {
 					let number = <frame_system::Pallet<T>>::block_number();
 					let period = T::StoragePeriod::get();
 					let target_number = number.saturating_sub(period);
-					target_number.is_zero() || <ChunkCount<T>>::get(target_number) == 0
+
+					target_number.is_zero() || {
+						// An empty block means no transactions were stored, relying on the fact
+						// below that we store transactions only if they contain chunks.
+						!Transactions::<T>::contains_key(target_number)
+					}
 				},
 				"Storage proof must be checked once in the block"
 			);
@@ -253,7 +262,6 @@ pub mod pallet {
 			let transactions = <BlockTransactions<T>>::take();
 			let total_chunks = transactions.last().map_or(0, |t| t.block_chunks);
 			if total_chunks != 0 {
-				<ChunkCount<T>>::insert(n, total_chunks);
 				<Transactions<T>>::insert(n, transactions);
 			}
 		}
@@ -321,7 +329,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index });
+			Self::deposit_event(Event::Stored { index, hash: content_hash });
 			Ok(())
 		}
 
@@ -353,7 +361,8 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::renew(extrinsic_index, info.content_hash.into());
+			let content_hash = info.content_hash.into();
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -369,7 +378,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Renewed { index });
+			Self::deposit_event(Event::Renewed { index, hash: content_hash });
 			Ok(().into())
 		}
 
@@ -394,20 +403,12 @@ pub mod pallet {
 			let period = T::StoragePeriod::get();
 			let target_number = number.saturating_sub(period);
 			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
-			let total_chunks = <ChunkCount<T>>::get(target_number);
-			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
-			let total_chunks = ChunkCount::<T>::get(target_number);
 			let transactions =
 				Transactions::<T>::get(target_number).ok_or(Error::<T>::MissingStateData)?;
 
 			// Verify the proof with a "random" chunk (randomness is based on the parent hash).
 			let parent_hash = frame_system::Pallet::<T>::parent_hash();
-			Self::verify_chunk_proof(
-				proof,
-				parent_hash.as_ref(),
-				transactions.to_vec(),
-				total_chunks,
-			)?;
+			Self::verify_chunk_proof(proof, parent_hash.as_ref(), transactions.to_vec())?;
 			ProofChecked::<T>::put(true);
 			Self::deposit_event(Event::ProofChecked);
 			Ok(().into())
@@ -558,9 +559,9 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32 },
+		Stored { index: u32, hash: ContentHash },
 		/// Renewed data under specified index.
-		Renewed { index: u32 },
+		Renewed { index: u32, hash: ContentHash },
 		/// Storage proof was successfully checked.
 		ProofChecked,
 		/// An account `who` was authorized to store `bytes` bytes in `transactions` transactions.
@@ -593,11 +594,6 @@ pub mod pallet {
 		BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 		OptionQuery,
 	>;
-
-	/// Count indexed chunks for each block.
-	#[pallet::storage]
-	pub(super) type ChunkCount<T: Config> =
-		StorageMap<_, Blake2_128Concat, BlockNumberFor<T>, u32, ValueQuery>;
 
 	// Intermediates
 	#[pallet::storage]
@@ -672,10 +668,10 @@ pub mod pallet {
 					// enough lifetime for their store/renew transactions that they aren't at risk
 					// of replay when the account is next authorized.
 					if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
-						log::warn!(
+						tracing::warn!(
 							target: LOG_TARGET,
-							"Failed to decrement provider reference count for authorized account {who:?}, \
-							leaking reference: {err:?}"
+							error=?err, ?who,
+							"Failed to decrement provider reference count for authorized account leaking reference"
 						);
 					}
 				},
@@ -998,12 +994,10 @@ pub mod pallet {
 			proof: TransactionStorageProof,
 			random_hash: &[u8],
 			infos: Vec<TransactionInfo>,
-			total_chunks: u32,
 		) -> Result<(), Error<T>> {
+			// Get the random chunk index - from all transactions in the block = [0..total_chunks).
+			let total_chunks: ChunkIndex = TransactionInfo::total_chunks(&infos);
 			ensure!(total_chunks != 0, Error::<T>::UnexpectedProof);
-			ensure!(!infos.is_empty(), Error::<T>::UnexpectedProof);
-
-			// Get the random chunk index (from all transactions in the block = 0..total_chunks).
 			let selected_block_chunk_index = random_chunk(random_hash, total_chunks);
 
 			// Let's find the corresponding transaction and its "local" chunk index for "global"
