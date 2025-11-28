@@ -282,7 +282,7 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Index and store data off chain. Minimum data size is 1 bytes, maximum is
+		/// Index and store data off chain. Minimum data size is 1 byte, maximum is
 		/// `MaxTransactionSize`. Data will be removed after `StoragePeriod` blocks, unless `renew`
 		/// is called.
 		///
@@ -306,8 +306,7 @@ pub mod pallet {
 
 			// Chunk data and compute storage root
 			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
-			let chunk_count = chunks.len();
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32) as usize);
+			let chunk_count = num_chunks(data.len() as u32);
 			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
 
 			let extrinsic_index =
