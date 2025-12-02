@@ -200,16 +200,26 @@ pub mod pallet {
 		BadDataSize,
 		/// Too many transactions in the block.
 		TooManyTransactions,
-		/// Renewed extrinsic not found.
+		/// Invalid configuration.
+		NotConfigured,
+		/// Renewed extrinsic is not found.
 		RenewedNotFound,
+		/// Attempting to store an empty transaction
+		EmptyTransaction,
 		/// Proof was not expected in this block.
 		UnexpectedProof,
 		/// Proof failed verification.
 		InvalidProof,
-		/// Unable to verify proof becasue state data is missing.
+		/// Missing storage proof.
+		MissingProof,
+		/// Unable to verify proof because state data is missing.
 		MissingStateData,
 		/// Double proof check in the block.
 		DoubleCheck,
+		/// Storage proof was not checked in the block.
+		ProofNotChecked,
+		/// Transaction is too large.
+		TransactionTooLarge,
 		/// Authorization was not found.
 		AuthorizationNotFound,
 		/// Authorization has not expired.
