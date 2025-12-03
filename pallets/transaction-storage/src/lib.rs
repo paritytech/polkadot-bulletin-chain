@@ -34,8 +34,15 @@ mod tests;
 
 use codec::{Decode, Encode, MaxEncodedLen};
 use polkadot_sdk_frame::{
-	deps::{sp_core::sp_std::prelude::*, *},
-	prelude::*,
+	deps::{
+		sp_core::sp_std::{marker::PhantomData, prelude::*},
+		*,
+	},
+	prelude::{
+		fungible::{Dust, InspectHold},
+		*,
+	},
+	traits::fungible::{hold::Balanced, Inspect, Mutate, MutateHold, Unbalanced},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
@@ -74,6 +81,88 @@ pub struct AuthorizationExtent {
 	pub transactions: u32,
 	/// Number of bytes.
 	pub bytes: u64,
+}
+
+/// A no-op fungible implementation for this pallet.
+///
+/// All balances are always zero and every mutation is accepted but ignored. This is useful for
+/// runtimes that do not want to charge any currency like Bulletin.
+pub struct NoopCurrency<Reason>(PhantomData<Reason>);
+
+impl<AccountId, Reason> Inspect<AccountId> for NoopCurrency<Reason> {
+	type Balance = u64;
+
+	fn total_issuance() -> Self::Balance {
+		0
+	}
+
+	fn minimum_balance() -> Self::Balance {
+		0
+	}
+
+	fn total_balance(_who: &AccountId) -> Self::Balance {
+		0
+	}
+
+	fn balance(_who: &AccountId) -> Self::Balance {
+		0
+	}
+
+	fn reducible_balance(
+		_who: &AccountId,
+		_preservation: Preservation,
+		_force: Fortitude,
+	) -> Self::Balance {
+		0
+	}
+
+	fn can_deposit(
+		_who: &AccountId,
+		_amount: Self::Balance,
+		_provenance: Provenance,
+	) -> DepositConsequence {
+		DepositConsequence::Blocked
+	}
+
+	fn can_withdraw(
+		_who: &AccountId,
+		_amount: Self::Balance,
+	) -> WithdrawConsequence<Self::Balance> {
+		WithdrawConsequence::Frozen
+	}
+}
+
+impl<AccountId, Reason> InspectHold<AccountId> for NoopCurrency<Reason>
+where
+	Reason: Encode + TypeInfo + 'static,
+{
+	type Reason = Reason;
+
+	fn total_balance_on_hold(_who: &AccountId) -> Self::Balance {
+		0
+	}
+
+	fn balance_on_hold(_reason: &Self::Reason, _who: &AccountId) -> Self::Balance {
+		0
+	}
+}
+
+impl<AccountId, Reason> Unbalanced<AccountId> for NoopCurrency<Reason> {
+	fn handle_dust(_dust: Dust<AccountId, Self>) {}
+
+	fn write_balance(
+		_who: &AccountId,
+		_amount: Self::Balance,
+	) -> Result<Option<Self::Balance>, DispatchError> {
+		Ok(Some(Zero::zero()))
+	}
+
+	fn set_total_issuance(_amount: Self::Balance) {}
+}
+
+impl<AccountId, Reason> MutateHold<AccountId> for NoopCurrency<Reason> where
+	Reason: Encode + TypeInfo + 'static
+{
 }
 
 /// Hash of a stored blob of data.
@@ -172,6 +261,10 @@ pub mod pallet {
 			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin>
 			+ GetDispatchInfo
 			+ From<frame_system::Call<Self>>;
+		/// The fungible type for this pallet.
+		type Currency: Mutate<Self::AccountId>
+			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>
+			+ Balanced<Self::AccountId>;
 		/// The overarching runtime hold reason.
 		type RuntimeHoldReason: From<HoldReason>;
 		/// Weight information for extrinsics in this pallet.
