@@ -462,7 +462,7 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -503,7 +503,7 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `hash`: The BLAKE2b hash that was authorized.
+		/// - `content_hash`: The BLAKE2b hash that was authorized.
 		///
 		/// Emits
 		/// [`ExpiredPreimageAuthorizationRemoved`](Event::ExpiredPreimageAuthorizationRemoved)
@@ -547,7 +547,7 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
 		/// [`PreimageAuthorizationRefreshed`](Event::PreimageAuthorizationRefreshed) when
@@ -578,10 +578,10 @@ pub mod pallet {
 		AccountAuthorized { who: T::AccountId, transactions: u32, bytes: u64 },
 		/// An authorization for account `who` was refreshed.
 		AccountAuthorizationRefreshed { who: T::AccountId },
-		/// Authorization was given for a preimage of `hash` (not exceeding `max_size`) to be
-		/// stored by anyone.
+		/// Authorization was given for a preimage of `content_hash` (not exceeding `max_size`) to
+		/// be stored by anyone.
 		PreimageAuthorized { content_hash: ContentHash, max_size: u64 },
-		/// An authorization for a preimage of `hash` was refreshed.
+		/// An authorization for a preimage of `content_hash` was refreshed.
 		PreimageAuthorizationRefreshed { content_hash: ContentHash },
 		/// An expired account authorization was removed.
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
@@ -753,7 +753,7 @@ pub mod pallet {
 			// In the case of a regular unsigned transaction, pre_dispatch should have checked that
 			// the authorization exists and has expired
 			let Some(authorization) = Authorizations::<T>::take(&scope) else {
-				return Err(Error::<T>::AuthorizationNotFound.into())
+				return Err(Error::<T>::AuthorizationNotFound.into());
 			};
 			ensure!(Self::expired(authorization.expiration), Error::<T>::AuthorizationNotExpired);
 			Self::authorization_removed(&scope);
@@ -762,7 +762,7 @@ pub mod pallet {
 
 		fn authorization_extent(scope: AuthorizationScopeFor<T>) -> AuthorizationExtent {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
-				return AuthorizationExtent { transactions: 0, bytes: 0 }
+				return AuthorizationExtent { transactions: 0, bytes: 0 };
 			};
 			if Self::expired(authorization.expiration) {
 				AuthorizationExtent { transactions: 0, bytes: 0 }
@@ -880,7 +880,7 @@ pub mod pallet {
 			scope: AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
-				return Err(AUTHORIZATION_NOT_FOUND.into())
+				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
 			if Self::expired(authorization.expiration) {
 				Ok(())
@@ -895,11 +895,11 @@ pub mod pallet {
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
-				return Err(BAD_DATA_SIZE.into())
+				return Err(BAD_DATA_SIZE.into());
 			}
 
 			if Self::block_transactions_full() {
-				return Err(InvalidTransaction::ExhaustsResources.into())
+				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
 			let hash = hash();
@@ -980,11 +980,11 @@ pub mod pallet {
 			};
 
 			if !Self::data_size_ok(size) {
-				return Err(BAD_DATA_SIZE.into())
+				return Err(BAD_DATA_SIZE.into());
 			}
 
 			if Self::block_transactions_full() {
-				return Err(InvalidTransaction::ExhaustsResources.into())
+				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
 			Self::check_authorization(
