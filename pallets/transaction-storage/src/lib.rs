@@ -471,12 +471,12 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::authorize_preimage())]
 		pub fn authorize_preimage(
 			origin: OriginFor<T>,
-			hash: ContentHash,
+			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
-			Self::authorize(AuthorizationScope::Preimage(hash), 1, max_size);
-			Self::deposit_event(Event::PreimageAuthorized { hash, max_size });
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
+			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
 
@@ -512,10 +512,10 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::remove_expired_preimage_authorization())]
 		pub fn remove_expired_preimage_authorization(
 			_origin: OriginFor<T>,
-			hash: ContentHash,
+			content_hash: ContentHash,
 		) -> DispatchResult {
-			Self::remove_expired_authorization(AuthorizationScope::Preimage(hash))?;
-			Self::deposit_event(Event::ExpiredPreimageAuthorizationRemoved { hash });
+			Self::remove_expired_authorization(AuthorizationScope::Preimage(content_hash))?;
+			Self::deposit_event(Event::ExpiredPreimageAuthorizationRemoved { content_hash });
 			Ok(())
 		}
 
@@ -556,11 +556,11 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::refresh_preimage_authorization())]
 		pub fn refresh_preimage_authorization(
 			origin: OriginFor<T>,
-			hash: ContentHash,
+			content_hash: ContentHash,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
-			Self::refresh_authorization(AuthorizationScope::Preimage(hash))?;
-			Self::deposit_event(Event::PreimageAuthorizationRefreshed { hash });
+			Self::refresh_authorization(AuthorizationScope::Preimage(content_hash))?;
+			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
 	}
@@ -580,13 +580,13 @@ pub mod pallet {
 		AccountAuthorizationRefreshed { who: T::AccountId },
 		/// Authorization was given for a preimage of `hash` (not exceeding `max_size`) to be
 		/// stored by anyone.
-		PreimageAuthorized { hash: ContentHash, max_size: u64 },
+		PreimageAuthorized { content_hash: ContentHash, max_size: u64 },
 		/// An authorization for a preimage of `hash` was refreshed.
-		PreimageAuthorizationRefreshed { hash: ContentHash },
+		PreimageAuthorizationRefreshed { content_hash: ContentHash },
 		/// An expired account authorization was removed.
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
 		/// An expired preimage authorization was removed.
-		ExpiredPreimageAuthorizationRemoved { hash: ContentHash },
+		ExpiredPreimageAuthorizationRemoved { content_hash: ContentHash },
 	}
 
 	/// Authorizations, keyed by scope.
@@ -949,13 +949,13 @@ pub mod pallet {
 						.into()
 					}))
 				},
-				Call::<T>::remove_expired_preimage_authorization { hash } => {
-					Self::check_authorization_expired(AuthorizationScope::Preimage(*hash))?;
+				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
+					Self::check_authorization_expired(AuthorizationScope::Preimage(*content_hash))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
 						)
-						.and_provides(hash)
+						.and_provides(content_hash)
 						.priority(T::RemoveExpiredAuthorizationPriority::get())
 						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 						.into()
