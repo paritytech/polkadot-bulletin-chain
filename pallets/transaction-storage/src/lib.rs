@@ -38,9 +38,13 @@ use polkadot_sdk_frame::{
 		sp_core::sp_std::{marker::PhantomData, prelude::*},
 		*,
 	},
-	prelude::{fungible::Dust, *},
+	prelude::{
+		fungible::{hold::DoneSlash, Dust},
+		*,
+	},
 	traits::fungible::{
-		hold::Balanced, Inspect, InspectHold, Mutate, MutateHold, Unbalanced, UnbalancedHold,
+		Balanced, BalancedHold, Inspect, InspectHold, Mutate, MutateHold, Unbalanced,
+		UnbalancedHold,
 	},
 };
 use sp_transaction_storage_proof::{
@@ -87,6 +91,26 @@ pub struct AuthorizationExtent {
 /// All balances are always zero and every mutation is accepted but ignored. This is useful for
 /// runtimes that do not want to charge any currency like Bulletin.
 pub struct NoopCurrency<Reason>(PhantomData<Reason>);
+
+impl<AccountId, Reason> Balanced<AccountId> for NoopCurrency<Reason>
+where
+	Reason: 'static + Encode + TypeInfo,
+{
+	type OnDropDebt = ();
+	type OnDropCredit = ();
+}
+
+impl<AccountId, Reason> BalancedHold<AccountId> for NoopCurrency<Reason> where
+	Reason: Encode + TypeInfo + 'static
+{
+}
+
+impl<AccountId, Reason, Balance> DoneSlash<Reason, AccountId, Balance> for NoopCurrency<Reason>
+where
+	Balance: Sized,
+	Reason: 'static + Encode + TypeInfo,
+{
+}
 
 impl<AccountId, Reason> Inspect<AccountId> for NoopCurrency<Reason> {
 	type Balance = u64;
@@ -170,6 +194,13 @@ where
 	) -> sp_runtime::DispatchResult {
 		Ok(())
 	}
+}
+
+impl<AccountId, Reason> Mutate<AccountId> for NoopCurrency<Reason>
+where
+	AccountId: Eq,
+	Reason: Encode + TypeInfo + 'static,
+{
 }
 
 impl<AccountId, Reason> MutateHold<AccountId> for NoopCurrency<Reason> where
