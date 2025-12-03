@@ -155,6 +155,13 @@ impl CheckContext {
 pub mod pallet {
 	use super::*;
 
+	/// A reason for this pallet placing a hold on funds.
+	#[pallet::composite_enum]
+	pub enum HoldReason {
+		/// The funds are held as deposit for the used storage.
+		StorageFeeHold,
+	}
+
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		/// The overarching event type.
@@ -162,7 +169,7 @@ pub mod pallet {
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		/// Weight information for extrinsics in this pallet.
 		type WeightInfo: WeightInfo;
-		/// Maximum number of indexed transactions in a block.
+		/// Maximum number of indexed transactions in the block.
 		#[pallet::constant]
 		type MaxBlockTransactions: Get<u32>;
 		/// Maximum data set in a single transaction in bytes.
