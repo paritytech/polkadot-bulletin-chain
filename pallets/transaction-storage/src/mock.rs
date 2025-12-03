@@ -30,6 +30,7 @@ construct_runtime!(
 	pub enum Test
 	{
 		System: frame_system,
+		Balances: pallet_balances,
 		TransactionStorage: pallet_transaction_storage,
 	}
 );
@@ -38,7 +39,13 @@ construct_runtime!(
 impl frame_system::Config for Test {
 	type Nonce = u64;
 	type Block = Block;
+	type AccountData = pallet_balances::AccountData<u64>;
 	type BlockHashCount = ConstU64<250>;
+}
+
+#[derive_impl(pallet_balances::config_preludes::TestDefaultConfig)]
+impl pallet_balances::Config for Test {
+	type AccountStore = System;
 }
 
 parameter_types! {
@@ -53,6 +60,7 @@ parameter_types! {
 impl pallet_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type Currency = Balances;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;

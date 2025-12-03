@@ -36,6 +36,7 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
+	traits::fungible::{hold::Balanced, Mutate, MutateHold},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
@@ -172,6 +173,10 @@ pub mod pallet {
 			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin>
 			+ GetDispatchInfo
 			+ From<frame_system::Call<Self>>;
+		/// The fungible type for this pallet.
+		type Currency: Mutate<Self::AccountId>
+			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>
+			+ Balanced<Self::AccountId>;
 		/// The overarching runtime hold reason.
 		type RuntimeHoldReason: From<HoldReason>;
 		/// Weight information for extrinsics in this pallet.

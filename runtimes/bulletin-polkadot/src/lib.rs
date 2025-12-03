@@ -344,6 +344,7 @@ impl pallet_timestamp::Config for Runtime {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type Currency = ();
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
