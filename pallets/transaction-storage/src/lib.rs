@@ -200,16 +200,26 @@ pub mod pallet {
 		BadDataSize,
 		/// Too many transactions in the block.
 		TooManyTransactions,
-		/// Renewed extrinsic not found.
+		/// Invalid configuration.
+		NotConfigured,
+		/// Renewed extrinsic is not found.
 		RenewedNotFound,
+		/// Attempting to store an empty transaction
+		EmptyTransaction,
 		/// Proof was not expected in this block.
 		UnexpectedProof,
 		/// Proof failed verification.
 		InvalidProof,
-		/// Unable to verify proof becasue state data is missing.
+		/// Missing storage proof.
+		MissingProof,
+		/// Unable to verify proof because state data is missing.
 		MissingStateData,
 		/// Double proof check in the block.
 		DoubleCheck,
+		/// Storage proof was not checked in the block.
+		ProofNotChecked,
+		/// Transaction is too large.
+		TransactionTooLarge,
 		/// Authorization was not found.
 		AuthorizationNotFound,
 		/// Authorization has not expired.
@@ -329,7 +339,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index });
+			Self::deposit_event(Event::Stored { index, content_hash });
 			Ok(())
 		}
 
@@ -361,7 +371,8 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::renew(extrinsic_index, info.content_hash.into());
+			let content_hash = info.content_hash.into();
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -377,7 +388,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Renewed { index });
+			Self::deposit_event(Event::Renewed { index, content_hash });
 			Ok(().into())
 		}
 
@@ -558,9 +569,9 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32 },
+		Stored { index: u32, content_hash: ContentHash },
 		/// Renewed data under specified index.
-		Renewed { index: u32 },
+		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.
 		ProofChecked,
 		/// An account `who` was authorized to store `bytes` bytes in `transactions` transactions.
@@ -667,10 +678,10 @@ pub mod pallet {
 					// enough lifetime for their store/renew transactions that they aren't at risk
 					// of replay when the account is next authorized.
 					if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
-						log::warn!(
+						tracing::warn!(
 							target: LOG_TARGET,
-							"Failed to decrement provider reference count for authorized account {who:?}, \
-							leaking reference: {err:?}"
+							error=?err, ?who,
+							"Failed to decrement provider reference count for authorized account leaking reference"
 						);
 					}
 				},
