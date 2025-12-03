@@ -57,6 +57,7 @@ use frame_support::{
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
 use pallet_transaction_payment::RuntimeDispatchInfo;
+use pallet_transaction_storage::NoopCurrency;
 
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -345,6 +346,7 @@ impl pallet_sudo::Config for Runtime {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type Currency = NoopCurrency<RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WeightInfo = pallet_transaction_storage::weights::SubstrateWeight<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
