@@ -38,11 +38,10 @@ use polkadot_sdk_frame::{
 		sp_core::sp_std::{marker::PhantomData, prelude::*},
 		*,
 	},
-	prelude::{
-		fungible::{Dust, InspectHold},
-		*,
+	prelude::{fungible::Dust, *},
+	traits::fungible::{
+		hold::Balanced, Inspect, InspectHold, Mutate, MutateHold, Unbalanced, UnbalancedHold,
 	},
-	traits::fungible::{hold::Balanced, Inspect, Mutate, MutateHold, Unbalanced},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
@@ -158,6 +157,19 @@ impl<AccountId, Reason> Unbalanced<AccountId> for NoopCurrency<Reason> {
 	}
 
 	fn set_total_issuance(_amount: Self::Balance) {}
+}
+
+impl<AccountId, Reason> UnbalancedHold<AccountId> for NoopCurrency<Reason>
+where
+	Reason: Encode + TypeInfo + 'static,
+{
+	fn set_balance_on_hold(
+		_reason: &Self::Reason,
+		_who: &AccountId,
+		_amount: Self::Balance,
+	) -> sp_runtime::DispatchResult {
+		Ok(())
+	}
 }
 
 impl<AccountId, Reason> MutateHold<AccountId> for NoopCurrency<Reason> where
