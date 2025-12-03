@@ -172,6 +172,8 @@ pub mod pallet {
 			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin>
 			+ GetDispatchInfo
 			+ From<frame_system::Call<Self>>;
+		/// The overarching runtime hold reason.
+		type RuntimeHoldReason: From<HoldReason>;
 		/// Weight information for extrinsics in this pallet.
 		type WeightInfo: WeightInfo;
 		/// Maximum number of indexed transactions in the block.

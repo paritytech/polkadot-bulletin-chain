@@ -16,7 +16,7 @@
 
 //! Storage-specific configurations.
 
-use super::{Runtime, RuntimeCall, RuntimeEvent};
+use super::{Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
 use frame_support::{
 	parameter_types,
 	traits::{EitherOfDiverse, Equals},
@@ -43,6 +43,7 @@ parameter_types! {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type RuntimeHoldReason = RuntimeHoldReason;
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.

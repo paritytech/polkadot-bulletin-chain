@@ -345,6 +345,7 @@ impl pallet_sudo::Config for Runtime {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type RuntimeHoldReason = RuntimeHoldReason;
 	type WeightInfo = pallet_transaction_storage::weights::SubstrateWeight<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
