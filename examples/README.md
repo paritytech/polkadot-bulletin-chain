@@ -15,8 +15,8 @@ It's only needed once after checkout or when dependencies change:
 #### Run individual commands for manual testing
 - `just ipfs-init` - Initialize IPFS (if needed),
 - `just ipfs-start` - Start IPFS daemon,
-- `just ipfs-connect` - Connect to IPFS nodes,
 - `just bulletin-zombienet-start` - Start zombienet,
+- `just ipfs-connect` - Connect to IPFS nodes,
 - `just ipfs-reconnect-start` - Start IPFS reconnect script,
 - `just papi-generate` - Generate PAPI descriptors,
 - `just run-example papi` - Run example with PAPI or PJS,

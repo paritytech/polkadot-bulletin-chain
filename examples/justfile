@@ -92,7 +92,7 @@ bulletin-zombienet-start:
     mkdir -p {{ PID_DIR }}
     
     echo "⚡ Starting Bulletin chain with zombienet..."
-    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ../$(ls ../zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
+    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ../$(ls ../zombienet-*-*) -p native spawn ../zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
