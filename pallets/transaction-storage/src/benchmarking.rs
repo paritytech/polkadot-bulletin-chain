@@ -33,8 +33,8 @@ use sp_transaction_storage_proof::TransactionStorageProof;
 // for _ in 0..DEFAULT_MAX_BLOCK_TRANSACTIONS {
 //   transactions.push(vec![0; tx_size]);
 // }
-// let hash = vec![0; 32];
-// build_proof(hash.as_slice(), transactions).unwrap().encode()
+// let content_hash = vec![0; 32];
+// build_proof(content_hash.as_slice(), transactions).unwrap().encode()
 // ```
 // while hardforcing target chunk key in `build_proof` to [22, 21, 1, 0].
 const PROOF: &str = "\
@@ -124,27 +124,27 @@ mod benchmarks {
 	#[benchmark]
 	fn store(l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; l as usize];
-		let hash = sp_io::hashing::blake2_256(&data);
+		let content_hash = sp_io::hashing::blake2_256(&data);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
 
 		assert!(!BlockTransactions::<T>::get().is_empty());
-		assert_last_event::<T>(Event::Stored { index: 0, hash }.into());
+		assert_last_event::<T>(Event::Stored { index: 0, content_hash }.into());
 		Ok(())
 	}
 
 	#[benchmark]
 	fn renew() -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
-		let hash = sp_io::hashing::blake2_256(&data);
+		let content_hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
 		#[extrinsic_call]
 		_(RawOrigin::None, BlockNumberFor::<T>::zero(), 0);
 
-		assert_last_event::<T>(Event::Renewed { index: 0, hash }.into());
+		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
 		Ok(())
 	}
 
@@ -210,13 +210,13 @@ mod benchmarks {
 	fn authorize_preimage() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let hash = [0u8; 32];
+		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, hash, max_size);
+		_(origin as T::RuntimeOrigin, content_hash, max_size);
 
-		assert_last_event::<T>(Event::PreimageAuthorized { hash, max_size }.into());
+		assert_last_event::<T>(Event::PreimageAuthorized { content_hash, max_size }.into());
 		Ok(())
 	}
 
@@ -224,16 +224,20 @@ mod benchmarks {
 	fn refresh_preimage_authorization() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let hash = [0u8; 32];
+		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
 		let origin2 = origin.clone();
-		TransactionStorage::<T>::authorize_preimage(origin2 as T::RuntimeOrigin, hash, max_size)
-			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		TransactionStorage::<T>::authorize_preimage(
+			origin2 as T::RuntimeOrigin,
+			content_hash,
+			max_size,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, hash);
+		_(origin as T::RuntimeOrigin, content_hash);
 
-		assert_last_event::<T>(Event::PreimageAuthorizationRefreshed { hash }.into());
+		assert_last_event::<T>(Event::PreimageAuthorizationRefreshed { content_hash }.into());
 		Ok(())
 	}
 
@@ -260,8 +264,8 @@ mod benchmarks {
 	fn remove_expired_preimage_authorization() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let hash = [0; 32];
-		TransactionStorage::<T>::authorize_preimage(origin, hash, 1)
+		let content_hash = [0; 32];
+		TransactionStorage::<T>::authorize_preimage(origin, content_hash, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize preimage"))?;
 
 		let period = T::AuthorizationPeriod::get();
@@ -269,9 +273,9 @@ mod benchmarks {
 		run_to_block::<T>(now + period);
 
 		#[extrinsic_call]
-		_(RawOrigin::None, hash);
+		_(RawOrigin::None, content_hash);
 
-		assert_last_event::<T>(Event::ExpiredPreimageAuthorizationRemoved { hash }.into());
+		assert_last_event::<T>(Event::ExpiredPreimageAuthorizationRemoved { content_hash }.into());
 		Ok(())
 	}
 
