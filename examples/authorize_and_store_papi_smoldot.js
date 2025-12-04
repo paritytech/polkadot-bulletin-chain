@@ -83,8 +83,8 @@ async function main() {
             
             return chain;
         })
+        // Cleanup and terminate the client
         .then(async () => {
-            // Cleanup
             await aliceApi.disconnect();
             await bobApi.disconnect();
         })
