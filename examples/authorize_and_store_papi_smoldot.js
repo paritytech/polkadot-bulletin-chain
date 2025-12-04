@@ -46,6 +46,8 @@ async function main() {
         }
     });
 
+    // Note: In real usage, this step is not required — the chain spec with bootNodes should be included as part of the dApp.
+    //       For local testing, we use this to fetch the actual chain spec from the local node.
     // Get chain spec from Bob node and remove protocolId to allow smoldot to sync with local chain.
     const chainSpec = (await bobApi.rpc.syncstate.genSyncSpec(true)).toString();
     const chainSpecObj = JSON.parse(chainSpec);
