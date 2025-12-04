@@ -21,17 +21,16 @@ ipfs-init:
     #!/usr/bin/env bash
     set -e
     
-    # Check if IPFS is available
-    if ! command -v ipfs &> /dev/null; then
-        IPFS_CMD="./kubo/ipfs"
-        if [ ! -f "$IPFS_CMD" ]; then
-            echo "❌ Error: Neither system IPFS nor ./kubo/ipfs found."
-            echo "Please install IPFS or download kubo to ./kubo/"
-            exit 1
-        fi
-    else
+    if [ -f "../kubo/ipfs" ]; then
+        IPFS_CMD="../kubo/ipfs"
+    elif command -v ipfs &> /dev/null; then
         IPFS_CMD="ipfs"
+    else
+        echo "❌ Error: IPFS not found."
+        exit 1
     fi
+    
+    echo "🔧 Using IPFS command: $IPFS_CMD"
     
     # Initialize IPFS if needed
     if [ ! -d ~/.ipfs ]; then
@@ -48,13 +47,16 @@ ipfs-start:
     
     mkdir -p {{ PID_DIR }}
     
-    # Check if IPFS is available
-    if ! command -v ipfs &> /dev/null; then
-        IPFS_CMD="./kubo/ipfs"
-    else
+    if [ -f "../kubo/ipfs" ]; then
+        IPFS_CMD="../kubo/ipfs"
+    elif command -v ipfs &> /dev/null; then
         IPFS_CMD="ipfs"
+    else
+        echo "❌ Error: IPFS not found."
+        exit 1
     fi
     
+    echo "🔧 Using IPFS command: $IPFS_CMD"
     echo "📡 Starting IPFS daemon..."
     $IPFS_CMD daemon > /tmp/ipfs-daemon.log 2>&1 &
     IPFS_PID=$!
@@ -68,13 +70,16 @@ ipfs-connect:
     #!/usr/bin/env bash
     set -e
     
-    # Check if IPFS is available
-    if ! command -v ipfs &> /dev/null; then
-        IPFS_CMD="./kubo/ipfs"
-    else
+    if [ -f "../kubo/ipfs" ]; then
+        IPFS_CMD="../kubo/ipfs"
+    elif command -v ipfs &> /dev/null; then
         IPFS_CMD="ipfs"
+    else
+        echo "❌ Error: IPFS not found."
+        exit 1
     fi
     
+    echo "🔧 Using IPFS command: $IPFS_CMD"
     echo "🔗 Connecting IPFS nodes..."
     $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
     $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
