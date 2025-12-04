@@ -87,7 +87,7 @@ cargo build --release -p polkadot-bulletin-chain
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
   ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
 
-#### Connect IPFS Nodes
+### Connect IPFS Nodes
 
 ```shell
 # Uses Kubo
