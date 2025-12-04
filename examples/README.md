@@ -1,11 +1,35 @@
 # How to Run
 
+## Using `just`
+
+### Run prerequisites
+
+It's only needed once after checkout or when dependencies change:
+- `just build`
+- `just npm-install`
+
+### Run full workflow example
+- `just authorize-and-store papi` - for PAPI,
+- `just authorize-and-store pjs` - for PJS.
+
+#### Run individual commands for manual testing
+- `just ipfs-init` - Initialize IPFS (if needed),
+- `just ipfs-start` - Start IPFS daemon,
+- `just ipfs-connect` - Connect to IPFS nodes,
+- `just bulletin-zombienet-start` - Start zombienet,
+- `just ipfs-reconnect-start` - Start IPFS reconnect script,
+- `just papi-generate` - Generate PAPI descriptors,
+- `just run-example papi` - Run example with PAPI or PJS,
+- `just stop-services` - Stop all services
+
+## Manually
+
 
 ```shell
 cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
 ```
 
-## Download Zombienet
+### Download Zombienet
 
 ```shell
 OS="$(uname -s)"
@@ -29,7 +53,7 @@ wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/${zb_bi
 chmod +x "${zb_bin}"
 ```
 
-## Run Kubo
+### Run Kubo
 
 #### Execute Locally
 
@@ -51,7 +75,7 @@ docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080
 docker logs -f ipfs-node
 ```
 
-## Run Bulletin Solochain with `--ipfs-server`
+### Run Bulletin Solochain with `--ipfs-server`
 
 ```shell
 # Bulletin Solochain
@@ -63,7 +87,7 @@ cargo build --release -p polkadot-bulletin-chain
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
   ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
 
-### Connect IPFS Nodes
+#### Connect IPFS Nodes
 
 ```shell
 # Uses Kubo
@@ -86,9 +110,9 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ./scripts/ipfs-reconnect-solo.sh
 ```
 
-## Run Bulletin (Westend) Parachain with `--ipfs-server`
+### Run Bulletin (Westend) Parachain with `--ipfs-server`
 
-### Prerequisites 
+#### Prerequisites 
 
 ```shell
 mkdir -p ~/local_bridge_testing/bin
@@ -114,7 +138,7 @@ cp target/release/polkadot-parachain ~/local_bridge_testing/bin
 # polkadot-parachain 1.20.2-165ba47dc91 or higher
 ```
 
-### Launch Parachain
+#### Launch Parachain
 
 ```shell
 # Bulletin Parachain (Westend)
@@ -124,7 +148,7 @@ POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
   ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-westend-local.toml
 ```
 
-### Connect IPFS Nodes
+#### Connect IPFS Nodes
 
 ```shell
 # Uses Kubo
@@ -147,11 +171,11 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ./scripts/ipfs-reconnect-westend.sh
 ```
 
-## Trigger Authorize, Store and IPFS Get
+### Trigger Authorize, Store and IPFS Get
 
-### Example for Simple Authorizing and Store
+#### Example for Simple Authorizing and Store
 
-#### Using Legacy @polkadot/api (PJS)
+##### Using Legacy @polkadot/api (PJS)
 ```
 cd examples
 npm install
@@ -159,7 +183,7 @@ npm install
 node authorize_and_store.js
 ```
 
-#### Using Modern PAPI (Polkadot API)
+##### Using Modern PAPI (Polkadot API)
 ```bash
 cd examples
 npm install
@@ -175,7 +199,7 @@ npm run papi:update
 node authorize_and_store_papi.js
 ```
 
-### Example for Multipart / Chunked Content / Big Files
+#### Example for Multipart / Chunked Content / Big Files
 
 The code stores one file, splits it into chunks, and then uploads those chunks to Bulletin.
 

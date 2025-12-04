@@ -1,27 +1,6 @@
 # Polkadot Bulletin Chain - Just Commands
-# Install just: brew install just
-# Run `just --list` to see all available commands
 # 
-# Usage:
-#   1. Run prerequisites (only needed once after checkout or when deps change):
-#        just build
-#        just npm-install
-#
-#   2. Run full workflow example (this builds the chain and installs npm deps if not yet done):
-#        just authorize-and-store papi
-#        just authorize-and-store pjs
-#
-#   3. Run individual commands for manual testing:
-#        just ipfs-init          # Initialize IPFS (if needed)
-#        just ipfs-start         # Start IPFS daemon
-#        just ipfs-connect       # Connect to IPFS nodes
-#        just bulletin-zombienet-start    # Start zombienet
-#        just ipfs-reconnect-start  # Start IPFS reconnect script
-#        just papi-generate      # Generate PAPI descriptors
-#        just run-example papi   # Run example with PAPI or PJS
-#        just stop-services      # Stop all services
-#
-#   (Use 'papi' for Polkadot API or 'pjs' for Polkadot JS)
+# See README.md for usage instructions.
 
 # PID file locations
 PID_DIR := "/tmp/bulletin-pids"
