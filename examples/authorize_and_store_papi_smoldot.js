@@ -11,12 +11,6 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 async function main() {
     await cryptoWaitReady();
-
-    // Alice's address - for transaction creation
-    console.log('Connecting to Alice node for transaction creation...');
-    const aliceWs = new WsProvider('ws://localhost:10000');
-    const aliceApi = await ApiPromise.create({ provider: aliceWs });
-    await aliceApi.isReady;
     
     // Bob's address - to get the chainspec
     console.log('Fetching chainspec from Bob node...');
