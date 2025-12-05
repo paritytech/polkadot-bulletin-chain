@@ -36,12 +36,17 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
-	traits::fungible::{Balanced, Mutate, MutateHold},
+	traits::fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
 	CHUNK_SIZE, INHERENT_IDENTIFIER,
 };
+
+/// A type alias for the balance type from this pallet's point of view.
+type BalanceOf<T> =
+	<<T as Config>::Currency as Inspect<<T as frame_system::Config>::AccountId>>::Balance;
+pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;
@@ -623,6 +628,14 @@ pub mod pallet {
 		BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 		OptionQuery,
 	>;
+
+	#[pallet::storage]
+	/// Storage fee per byte.
+	pub type ByteFee<T: Config> = StorageValue<_, BalanceOf<T>>;
+
+	#[pallet::storage]
+	/// Storage fee per transaction.
+	pub type EntryFee<T: Config> = StorageValue<_, BalanceOf<T>>;
 
 	// Intermediates
 	#[pallet::storage]
