@@ -32,17 +32,6 @@ async function main() {
     const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
     const cid = cidFromBytes(dataToStore);
 
-    // Start smoldot with logging enabled
-    // console.log('\n🚀 Starting smoldot...');
-    // const client = smoldot.start({
-    //     maxLogLevel: 0, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
-    //     logCallback: (level, target, message) => {
-    //         const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
-    //         const levelName = levelNames[level - 1] || 'UNKNOWN';
-    //         console.log(`[smoldot:${levelName}] ${target}: ${message}`);
-    //     }
-    // });
-
     // Note: In real usage, this step is not required — the chain spec with bootNodes should be included as part of the dApp.
     //       For local testing, we use this to fetch the actual chain spec from the local node.
     // Get chain spec from Bob node and remove protocolId to allow smoldot to sync with local chain.
@@ -57,18 +46,37 @@ async function main() {
 
     // Set up a client to connect to the Polkadot relay chain
     const client = createClient(getSmProvider(chain));
-
-    // Access the `TypedApi` to interact with all available chain calls and types
     const bulletinAPI = client.getTypedApi(bulletin);
-    // const version = await bulletinAPI.constants.System.Version();
-    // console.log('Version:', version);
 
-    const authorizeTx = await bulletinAPI.tx.transactionStorage.authorizeAccount(
+    // bulletinAPI.tx.Balances.transfer_keep_alive({
+    //     dest: MultiAddress.Id(dest),
+    //     // 1 WND -> 12 decimals
+    //     value: 10n ** 12n,
+    //   })
+    //     .signSubmitAndWatch(signer)
+    //     .subscribe({
+    //       next(value) {
+    //         console.log(value)
+    //       },
+    //       error(err) {
+    //         console.error(err)
+    //       },
+    //     })
+
+    bulletinAPI.tx.transactionStorage.authorizeAccount({
         who,
         transactions,
         bytes
-    );
-    console.log('Authorized!: ', authorizeTx);
+    }).signSubmitAndWatch(sudoAccount)
+    .subscribe({
+        next(value) {
+          console.log(value)
+        },
+        error(err) {
+          console.error(err)
+        },
+      })
+    console.log('✅ Authorized!');
 
     const storeTx = await bulletinAPI.tx.transactionStorage.store(dataToStore);
     console.log('Stored data!: ', storeTx);
