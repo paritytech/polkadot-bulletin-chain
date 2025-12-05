@@ -2,6 +2,8 @@
 
 ## Using `just`
 
+[`just`](https://github.com/casey/just) is a command runner (similar to `make`) that helps execute project tasks.
+
 Install just with: 
 - `cargo install just`, if you have cargo package manager,
 - `brew install just`, if you're on Mac OS and have `brew` package manager installed,
