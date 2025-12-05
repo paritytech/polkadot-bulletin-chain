@@ -346,6 +346,7 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeCall = RuntimeCall;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
+	type FeeDestination = ();
 	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].

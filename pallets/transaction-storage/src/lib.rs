@@ -184,6 +184,8 @@ pub mod pallet {
 			+ Balanced<Self::AccountId>;
 		/// The overarching runtime hold reason.
 		type RuntimeHoldReason: From<HoldReason>;
+		/// Handler for the unbalanced decrease when fees are burned.
+		type FeeDestination: OnUnbalanced<CreditOf<Self>>;
 		/// Weight information for extrinsics in this pallet.
 		type WeightInfo: WeightInfo;
 		/// Maximum number of indexed transactions in the block.
