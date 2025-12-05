@@ -8,7 +8,9 @@ import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-
+// Generate PAPI descriptors using local node:
+// npx papi add -w ws://localhost:10000 bulletin
+// npx papi
 async function main() {
     await cryptoWaitReady();
     
@@ -41,7 +43,15 @@ async function main() {
     const modifiedChainSpec = JSON.stringify(chainSpecObj);
 
     // Initialize Smoldot client
-    const chain = await smoldot.start().addChain({ chainSpec: modifiedChainSpec });
+    const sd = smoldot.start({
+        maxLogLevel: 4, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+        logCallback: (level, target, message) => {
+            const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+            const levelName = levelNames[level - 1] || 'UNKNOWN';
+            console.log(`[smoldot:${levelName}] ${target}: ${message}`);
+        }
+    });
+    const chain = await sd.addChain({ chainSpec: modifiedChainSpec });
     const client = createClient(getSmProvider(chain));
     const bulletinAPI = client.getTypedApi(bulletin);
 
