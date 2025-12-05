@@ -21,8 +21,8 @@ use frame_support::{
 	parameter_types,
 	traits::{EitherOfDiverse, Equals},
 };
-use pallet_transaction_storage::NoopCurrency;
 use pallet_xcm::EnsureXcm;
+use pallets_common::NoCurrency;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
 
@@ -44,7 +44,7 @@ parameter_types! {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
-	type Currency = NoopCurrency<RuntimeHoldReason>;
+	type Currency = NoCurrency<RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;

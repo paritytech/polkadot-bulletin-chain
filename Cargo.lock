@@ -1460,6 +1460,7 @@ dependencies = [
  "pallet-transaction-storage",
  "pallet-xcm",
  "pallet-xcm-benchmarks",
+ "pallets-common",
  "parachains-common",
  "parachains-runtimes-test-utils",
  "parity-scale-codec",
