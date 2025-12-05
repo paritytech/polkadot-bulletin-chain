@@ -2,6 +2,11 @@
 
 ## Using `just`
 
+Install just with: 
+- `cargo install just`, if you have cargo package manager,
+- `brew install just`, if you're on Mac OS and have `brew` package manager installed,
+- `sudo apt install just`, if you're using a Linux distribution.  
+
 ### Run prerequisites
 
 It's only needed once after checkout or when dependencies change:
