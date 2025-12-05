@@ -1,9 +1,12 @@
 import * as smoldot from 'smoldot';
 import { ApiPromise, WsProvider } from "@polkadot/api";
+import { createClient } from 'polkadot-api';
 import { Keyring } from "@polkadot/keyring";
+import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 
 async function main() {
@@ -36,15 +39,15 @@ async function main() {
     const cid = cidFromBytes(dataToStore);
 
     // Start smoldot with logging enabled
-    console.log('\n🚀 Starting smoldot...');
-    const client = smoldot.start({
-        maxLogLevel: 0, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
-        logCallback: (level, target, message) => {
-            const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
-            const levelName = levelNames[level - 1] || 'UNKNOWN';
-            console.log(`[smoldot:${levelName}] ${target}: ${message}`);
-        }
-    });
+    // console.log('\n🚀 Starting smoldot...');
+    // const client = smoldot.start({
+    //     maxLogLevel: 0, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+    //     logCallback: (level, target, message) => {
+    //         const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+    //         const levelName = levelNames[level - 1] || 'UNKNOWN';
+    //         console.log(`[smoldot:${levelName}] ${target}: ${message}`);
+    //     }
+    // });
 
     // Note: In real usage, this step is not required — the chain spec with bootNodes should be included as part of the dApp.
     //       For local testing, we use this to fetch the actual chain spec from the local node.
@@ -54,50 +57,76 @@ async function main() {
     chainSpecObj.protocolId = null;
     const modifiedChainSpec = JSON.stringify(chainSpecObj);
 
-    await client
-        .addChain({ chainSpec: modifiedChainSpec })
-        .then(async (chain) => {
-            // Give smoldot a moment to sync
-            console.log("⏳ Waiting for smoldot to sync...");
-            await new Promise(resolve => setTimeout(resolve, 12000));
+    // Initialize Smoldot client
+    const smoldotClient = smoldot.start();
+    const chain = await smoldotClient.addChain({ chainSpec: modifiedChainSpec });
+
+    // Set up a client to connect to the Polkadot relay chain
+    const client = createClient(getSmProvider(chain));
+
+    // Access the `TypedApi` to interact with all available chain calls and types
+    const bulletinAPI = client.getTypedApi(bulletin);
+    // const version = await bulletinAPI.constants.System.Version();
+    // console.log('Version:', version);
+
+    const authorizeTx = await bulletinAPI.tx.transactionStorage.authorizeAccount(
+        who,
+        transactions,
+        bytes
+    );
+    console.log('Authorized!: ', authorizeTx);
+
+    const storeTx = await bulletinAPI.tx.transactionStorage.store(dataToStore);
+    console.log('Stored data!: ', storeTx);
+    // await bulletinAPI.tx.transactionStorage.store(dataToStore);
+    // console.log('Stored data!');
+    // const content = await bulletinAPI.query.transactionStorage.get(cid);
+    // console.log('Content:', content);
+
+    // await client
+    //     .addChain({ chainSpec: modifiedChainSpec })
+    //     .then(async (chain) => {
+    //         // Give smoldot a moment to sync
+    //         console.log("⏳ Waiting for smoldot to sync...");
+    //         await new Promise(resolve => setTimeout(resolve, 12000));
             
-            const authorizeTx = aliceApi.tx.transactionStorage.authorizeAccount(
-                who,
-                transactions,
-                bytes
-            );
-            const sudoTx = aliceApi.tx.sudo.sudo(authorizeTx);
-            const signedAuthTx = await sudoTx.signAsync(sudoAccount);
+    //         const authorizeTx = aliceApi.tx.transactionStorage.authorizeAccount(
+    //             who,
+    //             transactions,
+    //             bytes
+    //         );
+    //         const sudoTx = aliceApi.tx.sudo.sudo(authorizeTx);
+    //         const signedAuthTx = await sudoTx.signAsync(sudoAccount);
             
-            const authBlockHash = await submitAndWatch(chain, signedAuthTx, 'authorizeAccount');
-            console.log('✅ Authorized in block:', authBlockHash);
+    //         const authBlockHash = await submitAndWatch(chain, signedAuthTx, 'authorizeAccount');
+    //         console.log('✅ Authorized in block:', authBlockHash);
             
-            return chain;
-        })
-        .then(async (chain) => {
-            const dataBytes = Buffer.from(dataToStore);
-            const storeTx = aliceApi.tx.transactionStorage.store(dataBytes);
-            const signedStoreTx = await storeTx.signAsync(whoAccount);
+    //         return chain;
+    //     })
+    //     .then(async (chain) => {
+    //         const dataBytes = Buffer.from(dataToStore);
+    //         const storeTx = aliceApi.tx.transactionStorage.store(dataBytes);
+    //         const signedStoreTx = await storeTx.signAsync(whoAccount);
             
-            const storeBlockHash = await submitAndWatch(chain, signedStoreTx, 'store');
-            console.log('✅ Stored data with CID:', cid);
-            console.log('   In block:', storeBlockHash);
+    //         const storeBlockHash = await submitAndWatch(chain, signedStoreTx, 'store');
+    //         console.log('✅ Stored data with CID:', cid);
+    //         console.log('   In block:', storeBlockHash);
             
-            return chain;
-        })
-        // Cleanup and terminate the client
-        .then(async () => {
-            await aliceApi.disconnect();
-            await bobApi.disconnect();
-        })
-        .then(() => client.terminate())
-        .catch(async (error) => {
-            console.error('Error while executing the example: ', error.message);
-            await aliceApi.disconnect();
-            await bobApi.disconnect();
-            client.terminate();
-            throw error;
-        });
+    //         return chain;
+    //     })
+    //     // Cleanup and terminate the client
+    //     .then(async () => {
+    //         await aliceApi.disconnect();
+    //         await bobApi.disconnect();
+    //     })
+    //     .then(() => client.terminate())
+    //     .catch(async (error) => {
+    //         console.error('Error while executing the example: ', error.message);
+    //         await aliceApi.disconnect();
+    //         await bobApi.disconnect();
+    //         client.terminate();
+    //         throw error;
+    //     });
 }
 
 async function submitAndWatch(chain, signedTx, description) {
