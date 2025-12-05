@@ -23,6 +23,9 @@ polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 ] }
 sp-transaction-storage-proof = { workspace = true, default-features = false }
 
+[dev-dependencies]
+pallets-common = { workspace = true }
+
 [features]
 default = ["std"]
 runtime-benchmarks = [
