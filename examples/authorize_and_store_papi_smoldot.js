@@ -3,6 +3,7 @@ import { ApiPromise, WsProvider } from "@polkadot/api";
 import { createClient } from 'polkadot-api';
 import { Keyring } from "@polkadot/keyring";
 import { getSmProvider } from 'polkadot-api/sm-provider';
+import { getPolkadotSigner } from '@polkadot-api/signer';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
@@ -28,15 +29,19 @@ async function main() {
     await bobApi.isReady;
 
     // Create keyring and accounts
-    const miniSecret = entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE))
-    const derive = sr25519CreateDerive(miniSecret)
-    const hdkdKeyPair = derive("//Alice")
- 
-    const aliceSigner = getPolkadotSigner(
-        hdkdKeyPair.publicKey,
-        "Sr25519",
-        hdkdKeyPair.sign,
-    )
+    const keyring = new Keyring({ type: 'sr25519' });
+    const sudoAccount = keyring.addFromUri('//Alice');
+    const whoAccount = keyring.addFromUri('//Alice');
+    const sudoSigner = getPolkadotSigner(
+        sudoAccount.publicKey,
+        'Sr25519',
+        (input) => sudoAccount.sign(input)
+    );
+    const whoSigner = getPolkadotSigner(
+        whoAccount.publicKey,
+        'Sr25519',
+        (input) => whoAccount.sign(input)
+    );
 
     // Data
     const who = aliceSigner.publicKey;
