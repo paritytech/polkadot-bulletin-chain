@@ -6,7 +6,7 @@
 PID_DIR := "/tmp/bulletin-pids"
 
 # Default recipe - run the complete PAPI workflow test
-default: authorize-and-store
+default: run-authorize-and-store
 
 # Build the bulletin chain node in release mode
 build:
@@ -148,6 +148,32 @@ run-example api="papi":
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     node $EXAMPLE_FILE
 
+# Setup all services needed for testing (IPFS, zombienet, IPFS reconnect, PAPI)
+# Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
+setup-services api="papi":
+    #!/usr/bin/env bash
+    set -e
+    
+    API_TYPE="{{ api }}"
+    
+    echo "🔧 Setting up services for $API_TYPE..."
+    
+    # Initialize IPFS
+    just ipfs-init
+    
+    # Start services
+    just ipfs-start
+    just bulletin-zombienet-start
+    just ipfs-connect
+    just ipfs-reconnect-start
+    
+    # Generate PAPI descriptors if needed
+    if [ "$API_TYPE" == "papi" ]; then
+        just papi-generate
+    fi
+    
+    echo "✅ Services setup complete"
+
 # Stop all running services (IPFS, zombienet, reconnect script)
 stop-services:
     #!/usr/bin/env bash
@@ -177,7 +203,7 @@ stop-services:
 
 # Test the complete workflow (builds, starts services, runs example, shuts down services)
 # Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
-authorize-and-store api="papi": build npm-install
+run-authorize-and-store api="papi": build npm-install
     #!/usr/bin/env bash
     set -e
     
@@ -191,19 +217,8 @@ authorize-and-store api="papi": build npm-install
     echo "🚀 Starting $API_TYPE workflow test..."
     echo ""
     
-    # Initialize IPFS
-    just ipfs-init
-    
-    # Start services
-    just ipfs-start
-    just bulletin-zombienet-start
-    just ipfs-connect
-    just ipfs-reconnect-start
-    
-    # Generate PAPI descriptors if needed
-    if [ "$API_TYPE" == "papi" ]; then
-        just papi-generate
-    fi
+    # Setup all services
+    just setup-services $API_TYPE
     
     # Run the example
     just run-example $API_TYPE

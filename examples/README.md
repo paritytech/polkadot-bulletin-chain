@@ -16,10 +16,11 @@ It's only needed once after checkout or when dependencies change:
 - `just npm-install`
 
 ### Run full workflow example
-- `just authorize-and-store papi` - for PAPI,
-- `just authorize-and-store pjs` - for PJS.
+- `just run-authorize-and-store papi` - for PAPI,
+- `just run-authorize-and-store pjs` - for PJS.
 
 #### Run individual commands for manual testing
+- `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
 - `just ipfs-init` - Initialize IPFS (if needed),
 - `just ipfs-start` - Start IPFS daemon,
 - `just bulletin-zombienet-start` - Start zombienet,
