@@ -202,6 +202,7 @@ run-authorize-and-store api="papi": build npm-install
         EXAMPLE_FILE="authorize_and_store.js"
     fi
     node $EXAMPLE_FILE
+    EXAMPLE_EXIT=$?
     
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
