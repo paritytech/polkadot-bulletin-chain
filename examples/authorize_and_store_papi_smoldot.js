@@ -57,11 +57,7 @@ async function main() {
 
     // Initialize Smoldot client
     const sd = smoldot.start({
-<<<<<<< HEAD
-        maxLogLevel: 3, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
-=======
         maxLogLevel: 4, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
->>>>>>> aac8a8b (new error - transaction not found)
         logCallback: (level, target, message) => {
             const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
             const levelName = levelNames[level - 1] || 'UNKNOWN';
@@ -70,7 +66,7 @@ async function main() {
     });
     const chain = await sd.addChain({ chainSpec: modifiedChainSpec });
     const client = createClient(getSmProvider(chain));
-    const typedApi = client.getTypedApi(bulletin);
+    const bulletinAPI = client.getTypedApi(bulletin);
 
     // console.log('⏭️ Waiting for 15 seconds for smoldot to sync...');
     // await new Promise(resolve => setTimeout(resolve, 15000));
@@ -81,7 +77,7 @@ async function main() {
         who: w,
         transactions,
         bytes
-    }).signAndSubmit(aliceSigner)
+    }).signAndSubmit(whoSigner)
         .then(() => console.log("✅ Authorized!"))
         .catch((err) => {
             console.error("❌ authorize error: ", err);
