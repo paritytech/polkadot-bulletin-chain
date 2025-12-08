@@ -7,6 +7,8 @@
   "dependencies": {
     "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot-api/substrate-bindings": "^0.16.5",
+    "@polkadot-labs/hdkd": "^0.0.25",
+    "@polkadot-labs/hdkd-helpers": "^0.0.26",
     "@polkadot/api": "^16.5.2",
     "@polkadot/keyring": "^13.5.8",
     "@polkadot/util": "^13.5.8",

@@ -7,6 +7,13 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
+import {
+  DEV_PHRASE,
+  entropyToMiniSecret,
+  mnemonicToEntropy,
+} from "@polkadot-labs/hdkd-helpers"
+import { getPolkadotSigner } from "polkadot-api/signer"
 
 // Generate PAPI descriptors using local node:
 // npx papi add -w ws://localhost:10000 bulletin
@@ -21,12 +28,18 @@ async function main() {
     await bobApi.isReady;
 
     // Create keyring and accounts
-    const keyring = new Keyring({ type: 'sr25519' });
-    const sudoAccount = keyring.addFromUri('//Alice');
-    const whoAccount = keyring.addFromUri('//Alice');
+    const miniSecret = entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE))
+    const derive = sr25519CreateDerive(miniSecret)
+    const hdkdKeyPair = derive("//Alice")
+ 
+    const aliceSigner = getPolkadotSigner(
+        hdkdKeyPair.publicKey,
+        "Sr25519",
+        hdkdKeyPair.sign,
+    )
 
     // Data
-    const who = whoAccount.address;
+    const who = aliceSigner.publicKey;
     const transactions = 32;
     const bytes = 64 * 1024 * 1024; // 64 MB
 
@@ -55,27 +68,30 @@ async function main() {
     const client = createClient(getSmProvider(chain));
     const bulletinAPI = client.getTypedApi(bulletin);
 
+    console.log('✅ who is who: ', who.toString());
+    const w = who.toString();
     bulletinAPI.tx.transactionStorage.authorizeAccount({
-        who,
+        w,
         transactions,
         bytes
-    }).signAndSubmit(sudoAccount)
+    }).signAndSubmit(aliceSigner)
         .then(() => console.log("✅ Authorized!"))
         .catch((err) => {
-            console.error("authorize error: ", err);
+            console.error("❌ authorize error: ", err);
             process.exit(1);
     });
 
-    bulletinAPI.tx.transactionStorage.store(dataToStore)
-        .signSubmitAndWatch(whoAccount).subscribe({
-            next: (ev) => {
-                console.log("⏭️ store next: ", ev);
-            },
-            error: (err) => {
-                console.error("❌ store error: ", err);
-                process.exit(1);
-            },
-        });
+    // console.log('✅ storing...');
+    // bulletinAPI.tx.transactionStorage.store(dataToStore)
+    //     .signSubmitAndWatch(aliceSigner).subscribe({
+    //         next: (ev) => {
+    //             console.log("⏭️ store next: ", ev);
+    //         },
+    //         error: (err) => {
+    //             console.error("❌ store error: ", err);
+    //             process.exit(1);
+    //         },
+    //     });
 }
 
 await main();
