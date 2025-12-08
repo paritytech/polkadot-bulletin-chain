@@ -11,8 +11,8 @@
 .direnv
 .idea
 
-# Node.js
 **/node_modules/
+**/kubo/
 package-lock.json
 
 # Polkadot API generated files
