@@ -84,6 +84,30 @@ ipfs-connect:
     $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
     $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
 
+# Shutdown IPFS daemon
+ipfs-shutdown:
+    #!/usr/bin/env bash
+    set -e
+    
+    if [ -f "../kubo/ipfs" ]; then
+        IPFS_CMD="../kubo/ipfs"
+    elif command -v ipfs &> /dev/null; then
+        IPFS_CMD="ipfs"
+    else
+        echo "❌ Error: IPFS not found."
+        exit 1
+    fi
+    
+    echo "🔧 Using IPFS command: $IPFS_CMD"
+    echo "🛑 Shutting down IPFS daemon..."
+    $IPFS_CMD shutdown || echo "   ⚠ IPFS not running or already stopped"
+    
+    # Clean up PID file if it exists
+    if [ -f "{{ PID_DIR }}/ipfs.pid" ]; then
+        rm "{{ PID_DIR }}/ipfs.pid"
+        echo "   ✓ Cleaned up PID file"
+    fi
+
 # Start start solo chain with zombienet in background
 bulletin-solo-zombienet-start:
     #!/usr/bin/env bash
@@ -132,7 +156,7 @@ setup-services api="papi":
     API_TYPE="{{ api }}"
 
     echo "🔧 Tearing down services if they are running..."
-    just teardown-services
+    just ipfs-shutdown
     
     echo "🔧 Setting up services for $API_TYPE..."
     
