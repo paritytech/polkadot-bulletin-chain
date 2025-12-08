@@ -16,23 +16,25 @@ build:
 npm-install:
     npm install
 
+# Helper function to get IPFS command (internal use)
+_ipfs-cmd:
+    #!/usr/bin/env bash
+    if [ -f "../kubo/ipfs" ]; then
+        echo "../kubo/ipfs"
+    elif command -v ipfs &> /dev/null; then
+        echo "ipfs"
+    else
+        echo "❌ Error: IPFS not found." >&2
+        exit 1
+    fi
+
 # Initialize IPFS if not already initialized
 ipfs-init:
     #!/usr/bin/env bash
     set -e
+    IPFS_CMD=$(just _ipfs-cmd)
+    echo "🔧 Using IPFS: $IPFS_CMD"
     
-    if [ -f "../kubo/ipfs" ]; then
-        IPFS_CMD="../kubo/ipfs"
-    elif command -v ipfs &> /dev/null; then
-        IPFS_CMD="ipfs"
-    else
-        echo "❌ Error: IPFS not found."
-        exit 1
-    fi
-    
-    echo "🔧 Using IPFS command: $IPFS_CMD"
-    
-    # Initialize IPFS if needed
     if [ ! -d ~/.ipfs ]; then
         echo "📦 Initializing IPFS..."
         $IPFS_CMD init
@@ -44,24 +46,14 @@ ipfs-init:
 ipfs-start:
     #!/usr/bin/env bash
     set -e
-    
     mkdir -p {{ PID_DIR }}
+    IPFS_CMD=$(just _ipfs-cmd)
     
-    if [ -f "../kubo/ipfs" ]; then
-        IPFS_CMD="../kubo/ipfs"
-    elif command -v ipfs &> /dev/null; then
-        IPFS_CMD="ipfs"
-    else
-        echo "❌ Error: IPFS not found."
-        exit 1
-    fi
-    
-    echo "🔧 Using IPFS command: $IPFS_CMD"
+    echo "🔧 Using IPFS: $IPFS_CMD"
     echo "📡 Starting IPFS daemon..."
     $IPFS_CMD daemon > /tmp/ipfs-daemon.log 2>&1 &
-    IPFS_PID=$!
-    echo $IPFS_PID > {{ PID_DIR }}/ipfs.pid
-    echo "   IPFS PID: $IPFS_PID"
+    echo $! > {{ PID_DIR }}/ipfs.pid
+    echo "   IPFS PID: $!"
     echo "   Log: /tmp/ipfs-daemon.log"
     sleep 2
 
@@ -69,17 +61,9 @@ ipfs-start:
 ipfs-connect:
     #!/usr/bin/env bash
     set -e
+    IPFS_CMD=$(just _ipfs-cmd)
     
-    if [ -f "../kubo/ipfs" ]; then
-        IPFS_CMD="../kubo/ipfs"
-    elif command -v ipfs &> /dev/null; then
-        IPFS_CMD="ipfs"
-    else
-        echo "❌ Error: IPFS not found."
-        exit 1
-    fi
-    
-    echo "🔧 Using IPFS command: $IPFS_CMD"
+    echo "🔧 Using IPFS: $IPFS_CMD"
     echo "🔗 Connecting IPFS nodes..."
     $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
     $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
@@ -87,26 +71,14 @@ ipfs-connect:
 # Shutdown IPFS daemon
 ipfs-shutdown:
     #!/usr/bin/env bash
-    set -e
+    IPFS_CMD=$(just _ipfs-cmd)
     
-    if [ -f "../kubo/ipfs" ]; then
-        IPFS_CMD="../kubo/ipfs"
-    elif command -v ipfs &> /dev/null; then
-        IPFS_CMD="ipfs"
-    else
-        echo "❌ Error: IPFS not found."
-        exit 1
-    fi
-    
-    echo "🔧 Using IPFS command: $IPFS_CMD"
+    echo "🔧 Using IPFS: $IPFS_CMD"
     echo "🛑 Shutting down IPFS daemon..."
-    $IPFS_CMD shutdown || echo "   ⚠ IPFS not running or already stopped"
+    $IPFS_CMD shutdown 2>/dev/null || echo "   ⚠ IPFS not running or already stopped"
     
     # Clean up PID file if it exists
-    if [ -f "{{ PID_DIR }}/ipfs.pid" ]; then
-        rm "{{ PID_DIR }}/ipfs.pid"
-        echo "   ✓ Cleaned up PID file"
-    fi
+    [ -f "{{ PID_DIR }}/ipfs.pid" ] && rm "{{ PID_DIR }}/ipfs.pid" && echo "   ✓ Cleaned up PID file" || true
 
 # Start start solo chain with zombienet in background
 bulletin-solo-zombienet-start:
