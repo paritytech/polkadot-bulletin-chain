@@ -23,7 +23,7 @@ It's only needed once after checkout or when dependencies change:
 - `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
 - `just ipfs-init` - Initialize IPFS (if needed),
 - `just ipfs-start` - Start IPFS daemon,
-- `just bulletin-zombienet-start` - Start zombienet,
+- `just bulletin-solo-zombienet-start` - Start zombienet,
 - `just ipfs-connect` - Connect to IPFS nodes,
 - `just ipfs-reconnect-start` - Start IPFS reconnect script,
 - `just papi-generate` - Generate PAPI descriptors,
