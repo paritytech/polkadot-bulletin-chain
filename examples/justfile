@@ -222,3 +222,15 @@ run-authorize-and-store api="papi": build npm-install
     just teardown-services
     
     exit $EXAMPLE_EXIT
+
+run-authorize-and-store-smoldot:
+    #!/usr/bin/env bash
+    set -e
+
+    just setup-services
+    node authorize_and_store_papi_smoldot.js
+    EXAMPLE_EXIT=$?
+
+    just teardown-services
+    
+    exit $EXAMPLE_EXIT
