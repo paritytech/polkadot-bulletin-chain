@@ -5,11 +5,9 @@ import { Keyring } from "@polkadot/keyring";
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
-import { authorizeAccount, store } from './api.js';
-import assert from "assert";
+import { Binary } from '@polkadot-api/substrate-bindings';
 
 // Generate PAPI descriptors using local node:
 // npx papi add -w ws://localhost:10000 bulletin
@@ -41,7 +39,7 @@ async function main() {
     // Data
     const who = whoAccount.publicKey;
     const transactions = 32;
-    const bytes = 64 * 1024 * 1024; // 64 MB
+    const bytes = 64n * 1024n * 1024n; // 64 MB
 
     // Prepare data for storage
     const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
@@ -50,6 +48,7 @@ async function main() {
     // Note: In real usage, this step is not required — the chain spec with bootNodes should be included as part of the dApp.
     //       For local testing, we use this to fetch the actual chain spec from the local node.
     // Get chain spec from Bob node and remove protocolId to allow smoldot to sync with local chain.
+    // Use false to get full genesis spec, not light sync spec starting at finalized block
     const chainSpec = (await bobApi.rpc.syncstate.genSyncSpec(true)).toString();
     const chainSpecObj = JSON.parse(chainSpec);
     chainSpecObj.protocolId = null;
@@ -68,33 +67,63 @@ async function main() {
     const client = createClient(getSmProvider(chain));
     const bulletinAPI = client.getTypedApi(bulletin);
 
-    // console.log('⏭️ Waiting for 15 seconds for smoldot to sync...');
-    // await new Promise(resolve => setTimeout(resolve, 15000));
+    console.log('⏭️ Waiting for 15 seconds for smoldot to sync...');
+    await new Promise(resolve => setTimeout(resolve, 15000));
 
-    const w = who.toString();
-    console.log('✅ who is who: ', w);
-    bulletinAPI.tx.transactionStorage.authorizeAccount({
-        who: w,
+    const ALICE = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
+    const authorizeTx = bulletinAPI.tx.TransactionStorage.authorize_account({
+        who: ALICE,
         transactions,
         bytes
-    }).signAndSubmit(whoSigner)
-        .then(() => console.log("✅ Authorized!"))
-        .catch((err) => {
-            console.error("❌ authorize error: ", err);
-            process.exit(1);
     });
-
-    // console.log('✅ storing...');
-    // bulletinAPI.tx.transactionStorage.store(dataToStore)
-    //     .signSubmitAndWatch(aliceSigner).subscribe({
-    //         next: (ev) => {
-    //             console.log("⏭️ store next: ", ev);
-    //         },
-    //         error: (err) => {
-    //             console.error("❌ store error: ", err);
-    //             process.exit(1);
-    //         },
-    //     });
+    const sudoTx = bulletinAPI.tx.Sudo.sudo({
+        call: authorizeTx.decodedCall
+    });
+    
+    sudoTx.signSubmitAndWatch(sudoSigner).subscribe({
+        next: (ev) => {
+            console.log("✅ Authorize event: ", ev.type)
+            if (ev.type === "txBestBlocksState" && ev.found) {
+                console.log("✅ Authorization included in block:", ev.block.hash)
+            }
+        },
+        error: (err) => {
+            console.error("❌ authorize error: ", err)
+            client.destroy()
+            sd.terminate()
+            process.exit(1);
+        },
+        complete() {
+            console.log("✅ Authorized! Now storing data...");
+            
+            // Convert data to Uint8Array then wrap in Binary for PAPI typed API
+            const dataBytes = new Uint8Array(Buffer.from(dataToStore));
+            const binaryData = Binary.fromBytes(dataBytes);
+            
+            bulletinAPI.tx.TransactionStorage.store({ data: binaryData })
+                .signSubmitAndWatch(whoSigner).subscribe({
+                    next: (ev) => {
+                        console.log("⏭️ Store event: ", ev.type);
+                        if (ev.type === "txBestBlocksState" && ev.found) {
+                            console.log("✅ Data stored in block:", ev.block.hash);
+                            console.log("✅ Expected CID:", expectedCid);
+                        }
+                    },
+                    error: (err) => {
+                        console.error("❌ store error: ", err);
+                        client.destroy();
+                        sd.terminate();
+                        process.exit(1);
+                    },
+                    complete() {
+                        console.log("✅ Complete! Data stored successfully.");
+                        client.destroy();
+                        sd.terminate();
+                        process.exit(0);
+                    },
+                });
+        },
+    });
 }
 
 await main();
