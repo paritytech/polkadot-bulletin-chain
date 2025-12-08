@@ -343,6 +343,10 @@ impl pallet_timestamp::Config for Runtime {
 
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
+	type RuntimeHoldReason = RuntimeHoldReason;
+	type FeeDestination = ();
 	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
@@ -840,6 +844,7 @@ mod benches {
 
 #[cfg(feature = "runtime-benchmarks")]
 use benches::*;
+use pallets_common::NoCurrency;
 
 impl_runtime_apis! {
 	impl sp_api::Core<Block> for Runtime {
