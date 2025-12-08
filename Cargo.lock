@@ -1460,6 +1460,7 @@ dependencies = [
  "pallet-transaction-storage",
  "pallet-xcm",
  "pallet-xcm-benchmarks",
+ "pallets-common",
  "parachains-common",
  "parachains-runtimes-test-utils",
  "parity-scale-codec",
@@ -7209,6 +7210,7 @@ name = "pallet-transaction-storage"
 version = "4.0.0-dev"
 dependencies = [
  "array-bytes 6.2.3",
+ "pallets-common",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
