@@ -67,7 +67,7 @@ where
 impl<AccountId, HoldReason: Encode + Decode + TypeInfo + 'static> Inspect<AccountId>
 	for NoCurrency<AccountId, HoldReason>
 {
-	type Balance = u64;
+	type Balance = u128;
 
 	fn total_issuance() -> Self::Balance {
 		Zero::zero()
