@@ -130,6 +130,9 @@ setup-services api="papi":
     set -e
     
     API_TYPE="{{ api }}"
+
+    echo "🔧 Tearing down services if they are running..."
+    just teardown-services
     
     echo "🔧 Setting up services for $API_TYPE..."
     
