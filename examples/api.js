@@ -1,8 +1,8 @@
-import {cidFromBytes} from "./common.js";
+import { cidFromBytes } from "./common.js";
 import { Binary } from '@polkadot-api/substrate-bindings';
 
-export async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes) {
-    console.log('Creating authorizeAccount transaction...');
+export async function authorizeAccount(typedApi, sudoSigner, who, transactions, bytes) {
+    console.log('Authorizing account...');
 
     const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
         who,
@@ -14,63 +14,45 @@ export async function authorizeAccount(typedApi, sudoPair, who, transactions, by
         call: authorizeTx.decodedCall
     });
 
-    // Wait for a new block.
-    return new Promise((resolve, reject) => {
-        const sub = sudoTx
-            .signSubmitAndWatch(sudoPair)
-            .subscribe({
-                next: (ev) => {
-                    if (ev.type === "txBestBlocksState" && ev.found) {
-                        console.log("📦 Included in block:", ev.block.hash);
-                        sub.unsubscribe();
-                        resolve(ev);
-                    }
-                },
-                error: (err) => {
-                    console.log("Error:", err);
-                    sub.unsubscribe();
-                    reject(err);
-                },
-                complete: () => {
-                    console.log("Subscription complete");
-                }
-            });
-    })
+    await waitForTransaction(sudoTx, sudoSigner, "Authorize");
 }
 
-export async function store(typedApi, pair, data) {
-    console.log('Storing data:', data);
+export async function store(typedApi, signer, data) {
+    console.log('Storing data...');
     const cid = cidFromBytes(data);
 
-    // Convert data to Uint8Array then wrap in Binary for PAPI typed API
     const dataBytes = typeof data === 'string' ?
         new Uint8Array(Buffer.from(data)) :
         new Uint8Array(data);
 
-    // Wrap in Binary object for typed API - pass as an object with 'data' property
     const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
 
-    // Wait for a new block.
+    await waitForTransaction(tx, signer, "Store");
+    
+    console.log("✅ Expected CID:", cid);
+    return cid;
+}
+
+function waitForTransaction(tx, signer, txName) {
     return new Promise((resolve, reject) => {
-        const sub = tx
-            .signSubmitAndWatch(pair)
-            .subscribe({
-                next: (ev) => {
-                    if (ev.type === "txBestBlocksState" && ev.found) {
-                        console.log("📦 Included in block:", ev.block.hash);
-                        sub.unsubscribe();
-                        resolve(cid);
-                    }
-                },
-                error: (err) => {
-                    console.log("Error:", err);
+        const sub = tx.signSubmitAndWatch(signer).subscribe({
+            next: (ev) => {
+                console.log(`✅ ${txName} event:`, ev.type);
+                if (ev.type === "txBestBlocksState" && ev.found) {
+                    console.log(`📦 ${txName} included in block:`, ev.block.hash);
                     sub.unsubscribe();
-                    reject(err);
-                },
-                complete: () => {
-                    console.log("Subscription complete");
+                    resolve(ev);
                 }
-            });
-    })
+            },
+            error: (err) => {
+                console.error(`❌ ${txName} error:`, err);
+                sub.unsubscribe();
+                reject(err);
+            },
+            complete: () => {
+                console.log(`✅ ${txName} complete!`);
+            }
+        });
+    });
 }
