@@ -123,31 +123,6 @@ papi-generate:
     echo "🔧 Generating PAPI descriptors..."
     npm run papi:generate
 
-# Run the authorize-and-store example
-# Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
-run-example api="papi":
-    #!/usr/bin/env bash
-    set -e
-    
-    API_TYPE="{{ api }}"
-    
-    if [[ "$API_TYPE" != "papi" && "$API_TYPE" != "pjs" ]]; then
-        echo "❌ Error: api parameter must be 'papi' or 'pjs'"
-        exit 1
-    fi
-    
-    # Determine which example to run
-    if [ "$API_TYPE" == "papi" ]; then
-        EXAMPLE_FILE="authorize_and_store_papi.js"
-    else
-        EXAMPLE_FILE="authorize_and_store.js"
-    fi
-    
-    echo ""
-    echo "🎯 Running $EXAMPLE_FILE example..."
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    node $EXAMPLE_FILE
-
 # Setup all services needed for testing (IPFS, zombienet, IPFS reconnect, PAPI)
 # Parameters: api=[papi|pjs] - choose between Polkadot API (papi) or Polkadot JS (pjs)
 setup-services api="papi":
@@ -221,8 +196,12 @@ run-authorize-and-store api="papi": build npm-install
     just setup-services $API_TYPE
     
     # Run the example
-    just run-example $API_TYPE
-    EXAMPLE_EXIT=$?
+    if [ "$API_TYPE" == "papi" ]; then
+        EXAMPLE_FILE="authorize_and_store_papi.js"
+    else
+        EXAMPLE_FILE="authorize_and_store.js"
+    fi
+    node $EXAMPLE_FILE
     
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
