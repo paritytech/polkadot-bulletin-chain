@@ -57,7 +57,11 @@ async function main() {
 
     // Initialize Smoldot client
     const sd = smoldot.start({
+<<<<<<< HEAD
         maxLogLevel: 3, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+=======
+        maxLogLevel: 4, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+>>>>>>> aac8a8b (new error - transaction not found)
         logCallback: (level, target, message) => {
             const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
             const levelName = levelNames[level - 1] || 'UNKNOWN';
@@ -68,15 +72,33 @@ async function main() {
     const client = createClient(getSmProvider(chain));
     const typedApi = client.getTypedApi(bulletin);
 
-    // authorize
-    await authorizeAccount(typedApi, sudoSigner, who, transactions, bytes);
-    // store
-    let cid = await store(typedApi, whoSigner, dataToStore);
-    assert.strictEqual(
-        cid.toString(),
-        expectedCid.toString(),
-        '❌ CID does not match expected root CID'
-    );
+    // console.log('⏭️ Waiting for 15 seconds for smoldot to sync...');
+    // await new Promise(resolve => setTimeout(resolve, 15000));
+
+    const w = who.toString();
+    console.log('✅ who is who: ', w);
+    bulletinAPI.tx.transactionStorage.authorizeAccount({
+        who: w,
+        transactions,
+        bytes
+    }).signAndSubmit(aliceSigner)
+        .then(() => console.log("✅ Authorized!"))
+        .catch((err) => {
+            console.error("❌ authorize error: ", err);
+            process.exit(1);
+    });
+
+    // console.log('✅ storing...');
+    // bulletinAPI.tx.transactionStorage.store(dataToStore)
+    //     .signSubmitAndWatch(aliceSigner).subscribe({
+    //         next: (ev) => {
+    //             console.log("⏭️ store next: ", ev);
+    //         },
+    //         error: (err) => {
+    //             console.error("❌ store error: ", err);
+    //             process.exit(1);
+    //         },
+    //     });
 }
 
 await main();
