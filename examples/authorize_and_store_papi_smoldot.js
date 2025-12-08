@@ -8,13 +8,8 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import { cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
-import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
-import {
-  DEV_PHRASE,
-  entropyToMiniSecret,
-  mnemonicToEntropy,
-} from "@polkadot-labs/hdkd-helpers"
-import { getPolkadotSigner } from "polkadot-api/signer"
+import { authorizeAccount, store } from './api.js';
+import assert from "assert";
 
 // Generate PAPI descriptors using local node:
 // npx papi add -w ws://localhost:10000 bulletin
@@ -44,13 +39,13 @@ async function main() {
     );
 
     // Data
-    const who = aliceSigner.publicKey;
+    const who = whoAccount.publicKey;
     const transactions = 32;
     const bytes = 64 * 1024 * 1024; // 64 MB
 
     // Prepare data for storage
     const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
-    const cid = cidFromBytes(dataToStore);
+    const expectedCid = cidFromBytes(dataToStore);
 
     // Note: In real usage, this step is not required — the chain spec with bootNodes should be included as part of the dApp.
     //       For local testing, we use this to fetch the actual chain spec from the local node.
@@ -62,7 +57,7 @@ async function main() {
 
     // Initialize Smoldot client
     const sd = smoldot.start({
-        maxLogLevel: 5, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+        maxLogLevel: 3, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
         logCallback: (level, target, message) => {
             const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
             const levelName = levelNames[level - 1] || 'UNKNOWN';
@@ -71,32 +66,17 @@ async function main() {
     });
     const chain = await sd.addChain({ chainSpec: modifiedChainSpec });
     const client = createClient(getSmProvider(chain));
-    const bulletinAPI = client.getTypedApi(bulletin);
+    const typedApi = client.getTypedApi(bulletin);
 
-    console.log('✅ who is who: ', who.toString());
-    const w = who.toString();
-    bulletinAPI.tx.transactionStorage.authorizeAccount({
-        w,
-        transactions,
-        bytes
-    }).signAndSubmit(aliceSigner)
-        .then(() => console.log("✅ Authorized!"))
-        .catch((err) => {
-            console.error("❌ authorize error: ", err);
-            process.exit(1);
-    });
-
-    // console.log('✅ storing...');
-    // bulletinAPI.tx.transactionStorage.store(dataToStore)
-    //     .signSubmitAndWatch(aliceSigner).subscribe({
-    //         next: (ev) => {
-    //             console.log("⏭️ store next: ", ev);
-    //         },
-    //         error: (err) => {
-    //             console.error("❌ store error: ", err);
-    //             process.exit(1);
-    //         },
-    //     });
+    // authorize
+    await authorizeAccount(typedApi, sudoSigner, who, transactions, bytes);
+    // store
+    let cid = await store(typedApi, whoSigner, dataToStore);
+    assert.strictEqual(
+        cid.toString(),
+        expectedCid.toString(),
+        '❌ CID does not match expected root CID'
+    );
 }
 
 await main();
