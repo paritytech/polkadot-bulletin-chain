@@ -57,7 +57,7 @@ async function main() {
 
     // Initialize Smoldot client
     const sd = smoldot.start({
-        maxLogLevel: 4, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+        maxLogLevel: 5, // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
         logCallback: (level, target, message) => {
             const levelNames = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
             const levelName = levelNames[level - 1] || 'UNKNOWN';
