@@ -28,7 +28,7 @@ It's only needed once after checkout or when dependencies change:
 - `just ipfs-reconnect-start` - Start IPFS reconnect script,
 - `just papi-generate` - Generate PAPI descriptors,
 - `just run-example papi` - Run example with PAPI or PJS,
-- `just stop-services` - Stop all services
+- `just teardown-services` - Stop all services
 
 ## Manually
 

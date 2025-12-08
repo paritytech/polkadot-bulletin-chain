@@ -150,7 +150,7 @@ setup-services api="papi":
     echo "✅ Services setup complete"
 
 # Stop all running services (IPFS, zombienet, reconnect script)
-stop-services:
+teardown-services:
     #!/usr/bin/env bash
     
     echo "🧹 Stopping all services..."
@@ -218,6 +218,6 @@ run-authorize-and-store api="papi": build npm-install
     echo "   /tmp/ipfs-reconnect.log"
     
     # Clean up background processes
-    just stop-services
+    just teardown-services
     
     exit $EXAMPLE_EXIT
