@@ -230,7 +230,6 @@ run-authorize-and-store-smoldot:
     just setup-services
     node authorize_and_store_papi_smoldot.js
     EXAMPLE_EXIT=$?
-
     just teardown-services
     
     exit $EXAMPLE_EXIT
