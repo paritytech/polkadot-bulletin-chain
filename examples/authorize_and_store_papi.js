@@ -63,10 +63,10 @@ async function main() {
         const cid = await store(bulletinAPI, whoSigner, dataToStore);
         console.log("✅ Data stored successfully with CID:", cid);
 
-        // Read back from IPFS
-        const content = await readFromIPFS(cid);
-        console.log('Content as bytes:', content);
-        console.log('Content as string:', content.toString());
+        // // Read back from IPFS
+        // const content = await readFromIPFS(cid);
+        // console.log('Content as bytes:', content);
+        // console.log('Content as string:', content.toString());
         
     } catch (error) {
         console.error("❌ Error:", error);
