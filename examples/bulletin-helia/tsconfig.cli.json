@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-cli",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "skipLibCheck": true,
+    "declaration": true
+  },
+  "include": [
+    "src/cli.ts",
+    "src/ipfs.ts",
+    "src/logger-base.ts",
+    "src/logger-cli.ts"
+  ],
+  "exclude": [
+    "src/main.ts",
+    "src/logger.ts",
+    "src/style.css"
+  ]
+}
