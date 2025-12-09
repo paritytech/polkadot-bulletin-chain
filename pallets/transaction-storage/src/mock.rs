@@ -81,15 +81,13 @@ pub fn new_test_ext() -> TestExternalities {
 	t.into()
 }
 
-pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof>) {
-	while System::block_number() < n {
-		if let Some(proof) = f() {
-			TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-		}
-		TransactionStorage::on_finalize(System::block_number());
-		System::on_finalize(System::block_number());
-		System::set_block_number(System::block_number() + 1);
-		System::on_initialize(System::block_number());
-		TransactionStorage::on_initialize(System::block_number());
-	}
+pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 'static) {
+	System::run_to_block_with::<AllPalletsWithSystem>(
+		n,
+		RunToBlockHooks::default().before_finalize(|_| {
+			if let Some(proof) = f() {
+				TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
+			}
+		}),
+	);
 }
