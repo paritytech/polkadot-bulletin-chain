@@ -6,10 +6,6 @@ import { authorizeAccount, store } from './api.js';
 import { setupKeyringAndSigners, AUTH_TRANSACTIONS, AUTH_BYTES, ALICE_ADDRESS } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Generate PAPI descriptors using local node:
-// npx papi add -w ws://localhost:10000 bulletin
-// npx papi
-
 const NODE_WS = 'ws://localhost:10000';
 
 // Connect to a local IPFS gateway (e.g. Kubo)
