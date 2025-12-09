@@ -43,7 +43,6 @@ impl frame_system::Config for Test {
 }
 
 parameter_types! {
-	pub const StoragePeriod: BlockNumberFor<Test> = 10;
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
@@ -60,7 +59,6 @@ impl pallet_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
@@ -70,7 +68,16 @@ impl pallet_transaction_storage::Config for Test {
 }
 
 pub fn new_test_ext() -> TestExternalities {
-	let t = RuntimeGenesisConfig { system: Default::default() }.build_storage().unwrap();
+	let t = RuntimeGenesisConfig {
+		system: Default::default(),
+		transaction_storage: pallet_transaction_storage::GenesisConfig::<Test> {
+			storage_period: 10,
+			byte_fee: 2,
+			entry_fee: 200,
+		},
+	}
+	.build_storage()
+	.unwrap();
 	t.into()
 }
 
