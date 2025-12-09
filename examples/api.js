@@ -18,7 +18,7 @@ export async function authorizeAccount(typedApi, sudoSigner, who, transactions, 
 }
 
 export async function store(typedApi, signer, data) {
-    console.log('⬆️ Storing data...');
+    console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
     const dataBytes = typeof data === 'string' ?

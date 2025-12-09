@@ -4,11 +4,6 @@ import { CID } from 'multiformats/cid'
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 
-// Authorization constants
-export const AUTH_TRANSACTIONS = 32;
-export const AUTH_BYTES = 64n * 1024n * 1024n; // 64 MB
-export const ALICE_ADDRESS = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
-
 export async function waitForNewBlock() {
     // TODO: wait for a new block.
     console.log('🛰 Waiting for new block...')
@@ -55,10 +50,10 @@ export function createSigner(account) {
     );
 }
 
-export function setupKeyringAndSigners() {
+export function setupKeyringAndSigners(sudoSeed, accountSeed) {
     const keyring = new Keyring({ type: 'sr25519' });
-    const sudoAccount = keyring.addFromUri('//Alice');
-    const whoAccount = keyring.addFromUri('//Alice');
+    const sudoAccount = keyring.addFromUri(sudoSeed);
+    const whoAccount = keyring.addFromUri(accountSeed);
     
     const sudoSigner = createSigner(sudoAccount);
     const whoSigner = createSigner(whoAccount);

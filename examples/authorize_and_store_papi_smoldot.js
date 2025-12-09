@@ -5,13 +5,7 @@ import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store } from './api.js';
-import {
-    setupKeyringAndSigners,
-    AUTH_TRANSACTIONS,
-    AUTH_BYTES,
-    ALICE_ADDRESS,
-    cidFromBytes
-} from './common.js';
+import { setupKeyringAndSigners, cidFromBytes } from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
@@ -60,25 +54,29 @@ async function main() {
     
     let sd, client, resultCode;
     try {
+        // Init Smoldot PAPI client and typed api.
         ({ client, sd } = await createSmoldotClient());
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
-        
         const bulletinAPI = client.getTypedApi(bulletin);
 
-        const { sudoSigner, whoSigner } = setupKeyringAndSigners();
+        // Signers.
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
 
+        // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
         let expectedCid = await cidFromBytes(dataToStore);
 
+        // Authorize an account.
         await authorizeAccount(
             bulletinAPI,
             sudoSigner,
-            ALICE_ADDRESS,
-            AUTH_TRANSACTIONS,
-            AUTH_BYTES
+            whoAddress,
+            1,
+            BigInt(dataToStore.length)
         );
-        
+
+        // Store data.
         const cid = await store(bulletinAPI, whoSigner, dataToStore);
         console.log("✅ Data stored successfully with CID:", cid);
 
