@@ -18,8 +18,7 @@ const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 async function main() {
     await cryptoWaitReady();
     
-    let client;
-    
+    let client, resultCode;
     try {
         client = createClient(getWsProvider(NODE_WS));
         
@@ -55,13 +54,13 @@ async function main() {
             '❌ dataToStore does not match downloadedContent!'
         );
         console.log(`✅ Verified content - test passed!`);
+        resultCode = 0;
     } catch (error) {
         console.error("❌ Error:", error);
-        process.exit(1);
+        resultCode = 1;
     } finally {
-        // Cleanup
         if (client) client.destroy();
-        process.exit(0);
+        process.exit(resultCode);
     }
 }
 

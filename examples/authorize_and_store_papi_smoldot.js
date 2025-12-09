@@ -58,8 +58,7 @@ async function createSmoldotClient() {
 async function main() {
     await cryptoWaitReady();
     
-    let sd, client;
-    
+    let sd, client, resultCode;
     try {
         ({ client, sd } = await createSmoldotClient());
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
@@ -97,13 +96,14 @@ async function main() {
             '❌ dataToStore does not match downloadedContent!'
         );
         console.log(`✅ Verified content - test passed!`);
+        resultCode = 0;
     } catch (error) {
         console.error("❌ Error:", error);
-        process.exit(1);
+        resultCode = 1;
     } finally {
         if (client) client.destroy();
         if (sd) sd.terminate();
-        process.exit(0);
+        process.exit(resultCode);
     }
 }
 
