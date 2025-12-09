@@ -351,7 +351,6 @@ impl pallet_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;

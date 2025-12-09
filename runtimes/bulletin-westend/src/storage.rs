@@ -51,7 +51,6 @@ impl pallet_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		// Root can do whatever.
