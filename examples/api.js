@@ -1,5 +1,7 @@
 import { cidFromBytes } from "./common.js";
 import { Binary } from '@polkadot-api/substrate-bindings';
+import * as multihash from "multiformats/hashes/digest";
+import {blake2AsU8a} from "@polkadot/util-crypto";
 
 export async function authorizeAccount(typedApi, sudoSigner, who, transactions, bytes) {
     console.log('Authorizing account...');
@@ -32,15 +34,40 @@ export async function store(typedApi, signer, data) {
     return cid;
 }
 
-function waitForTransaction(tx, signer, txName) {
+export const TX_MODE_IN_BLOCK = "in-block";
+export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
+export const TX_MODE_IN_POOL = "in-tx-pool";
+
+function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK) {
     return new Promise((resolve, reject) => {
         const sub = tx.signSubmitAndWatch(signer).subscribe({
             next: (ev) => {
                 console.log(`✅ ${txName} event:`, ev.type);
-                if (ev.type === "txBestBlocksState" && ev.found) {
-                    console.log(`📦 ${txName} included in block:`, ev.block.hash);
-                    sub.unsubscribe();
-                    resolve(ev);
+                switch (txMode) {
+                    case TX_MODE_IN_BLOCK:
+                        if (ev.type === "txBestBlocksState" && ev.found) {
+                            console.log(`📦 ${txName} included in block:`, ev.block.hash);
+                            sub.unsubscribe();
+                            resolve(ev);
+                        }
+                        break;
+                    case TX_MODE_IN_POOL:
+                        if (ev.type === "broadcasted") {
+                            console.log(`📦 ${txName} broadcasted with txHash:`, ev.txHash);
+                            sub.unsubscribe();
+                            resolve(ev);
+                        }
+                        break;
+                    case TX_MODE_FINALIZED_BLOCK:
+                        if (ev.type === "finalized") {
+                            console.log(`📦 ${txName} included in finalized block:`, ev.block.hash);
+                            sub.unsubscribe();
+                            resolve(ev);
+                        }
+                        break;
+
+                    default:
+                        throw new Error("Unhandled txMode: " + txMode)
                 }
             },
             error: (err) => {
