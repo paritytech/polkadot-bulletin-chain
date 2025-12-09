@@ -57,6 +57,7 @@ async function main() {
         // Init Smoldot PAPI client and typed api.
         ({ client, sd } = await createSmoldotClient());
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
+        // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?        
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
         const bulletinAPI = client.getTypedApi(bulletin);
 
