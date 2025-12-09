@@ -304,7 +304,8 @@ pub mod pallet {
 				"Not useful if data cannot be stored"
 			);
 			assert!(!T::MaxTransactionSize::get().is_zero(), "Not useful if data cannot be stored");
-			let default_period = GenesisConfig::<T>::default().storage_period;
+			let default_period: BlockNumberFor<T> =
+				sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD.into();
 			assert!(!default_period.is_zero(), "Not useful if data is not stored");
 			assert!(
 				!T::AuthorizationPeriod::get().is_zero(),
