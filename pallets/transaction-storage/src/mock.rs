@@ -70,7 +70,7 @@ impl pallet_transaction_storage::Config for Test {
 pub fn new_test_ext() -> TestExternalities {
 	let t = RuntimeGenesisConfig {
 		system: Default::default(),
-		transaction_storage: Default::default(),
+		transaction_storage: pallet_transaction_storage::GenesisConfig::<Test>::default(),
 	}
 	.build_storage()
 	.unwrap();
