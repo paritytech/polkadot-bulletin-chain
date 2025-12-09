@@ -18,8 +18,8 @@ export async function authorizeAccount(typedApi, sudoSigner, who, transactions, 
 }
 
 export async function store(typedApi, signer, data) {
-    console.log('Storing data...');
-    const cid = cidFromBytes(data);
+    console.log('⬆️ Storing data...');
+    const cid = await cidFromBytes(data);
 
     const dataBytes = typeof data === 'string' ?
         new Uint8Array(Buffer.from(data)) :
@@ -29,8 +29,6 @@ export async function store(typedApi, signer, data) {
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
 
     await waitForTransaction(tx, signer, "Store");
-    
-    console.log("✅ Expected CID:", cid);
     return cid;
 }
 
@@ -55,4 +53,12 @@ function waitForTransaction(tx, signer, txName) {
             }
         });
     });
+}
+
+export async function fetchCid(httpIpfsApi, cid) {
+    const contentUrl = `${httpIpfsApi}/ipfs/${cid.toString()}`;
+    console.log('⬇️ Downloading the full content (no chunking) by cid from url: ', contentUrl);
+    const res = await fetch(contentUrl);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    return Buffer.from(await res.arrayBuffer())
 }

@@ -1,38 +1,19 @@
+import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { create } from 'ipfs-http-client';
-import { authorizeAccount, store } from './api.js';
-import { setupKeyringAndSigners, AUTH_TRANSACTIONS, AUTH_BYTES, ALICE_ADDRESS } from './common.js';
+import {authorizeAccount, fetchCid, store} from './api.js';
+import {
+    setupKeyringAndSigners,
+    AUTH_TRANSACTIONS,
+    AUTH_BYTES,
+    ALICE_ADDRESS,
+    cidFromBytes
+} from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 const NODE_WS = 'ws://localhost:10000';
-
-// Connect to a local IPFS gateway (e.g. Kubo)
-const ipfs = create({
-    url: 'http://127.0.0.1:5001', // Local IPFS API
-});
-
-async function readFromIPFS(cid) {
-    console.log('Reading from IPFS, CID:', cid);
-    try {
-        const block = await ipfs.block.get(cid, { timeout: 10000 });
-        console.log('Received block:', block);
-        if (block.length !== 0) {
-            return block;
-        }
-    } catch (error) {
-        console.log('Block not found directly, trying cat...', error.message);
-    }
-
-    console.log('Trying to chunk CID:', cid);
-    const chunks = [];
-    for await (const chunk of ipfs.cat(cid)) {
-        chunks.push(chunk);
-    }
-
-    return Buffer.concat(chunks);
-}
+const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function main() {
     await cryptoWaitReady();
@@ -47,6 +28,7 @@ async function main() {
         const { sudoSigner, whoSigner } = setupKeyringAndSigners();
 
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
+        let expectedCid = await cidFromBytes(dataToStore);
 
         await authorizeAccount(
             bulletinAPI,
@@ -59,11 +41,20 @@ async function main() {
         const cid = await store(bulletinAPI, whoSigner, dataToStore);
         console.log("✅ Data stored successfully with CID:", cid);
 
-        // // Read back from IPFS
-        // const content = await readFromIPFS(cid);
-        // console.log('Content as bytes:', content);
-        // console.log('Content as string:', content.toString());
-        
+        // Read back from IPFS
+        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        console.log("✅ Downloaded content:", downloadedContent.toString());
+        assert.deepStrictEqual(
+            cid,
+            expectedCid,
+            '❌ expectedCid does not match cid!'
+        );
+        assert.deepStrictEqual(
+            dataToStore,
+            downloadedContent.toString(),
+            '❌ dataToStore does not match downloadedContent!'
+        );
+        console.log(`✅ Verified content - test passed!`);
     } catch (error) {
         console.error("❌ Error:", error);
         process.exit(1);

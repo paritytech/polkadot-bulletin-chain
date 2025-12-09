@@ -15,12 +15,33 @@ export async function waitForNewBlock() {
     return new Promise(resolve => setTimeout(resolve, 7000))
 }
 
-export function cidFromBytes(bytes) {
-    const hash = blake2AsU8a(bytes)
-    // 0xb2 = the multihash algorithm family for BLAKE2b
-    // 0x20 = the digest length in bytes (32 bytes = 256 bits)
-    const mh = multihash.create(0xb220, hash)
-    return CID.createV1(0x55, mh) // 0x55 = raw
+/**
+ * Create CID for data.
+ * Default to `0x55 (raw)` with blake2b_256 hash.
+ *
+ * 0xb220:
+ * - 0xb2 = the multihash algorithm family for BLAKE2b
+ * - 0x20 = the digest length in bytes (32 bytes = 256 bits)
+ *
+ * See: https://github.com/multiformats/multicodec/blob/master/table.csv
+ */
+export async function cidFromBytes(bytes, cidCodec = 0x55, mhCode = 0xb220) {
+    console.log(`[CID]: Using cidCodec: ${cidCodec} and mhCode: ${mhCode}`);
+    let mh;
+    switch (mhCode) {
+        case 0xb220: // blake2b-256
+            mh = multihash.create(mhCode, blake2AsU8a(bytes));
+            break;
+
+        default:
+            throw new Error("Unhandled multihash code: " + mhCode)
+    }
+    return CID.createV1(cidCodec, mh)
+}
+
+export function convertCid(cid, cidCodec) {
+    const mh = cid.multihash;
+    return CID.createV1(cidCodec, mh);
 }
 
 /**
