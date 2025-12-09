@@ -671,9 +671,9 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
 		fn build(&self) {
-			ByteFee::<T>::put(&self.byte_fee);
-			EntryFee::<T>::put(&self.entry_fee);
-			StoragePeriod::<T>::put(&self.storage_period);
+			ByteFee::<T>::put(self.byte_fee);
+			EntryFee::<T>::put(self.entry_fee);
+			StoragePeriod::<T>::put(self.storage_period);
 		}
 	}
 
