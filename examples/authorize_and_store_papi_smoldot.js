@@ -1,20 +1,24 @@
+import assert from "assert";
 import * as smoldot from 'smoldot';
 import { ApiPromise, WsProvider } from "@polkadot/api";
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, store } from './api.js';
-import { setupKeyringAndSigners, AUTH_TRANSACTIONS, AUTH_BYTES, ALICE_ADDRESS } from './common.js';
+import { authorizeAccount, fetchCid, store } from './api.js';
+import {
+    setupKeyringAndSigners,
+    AUTH_TRANSACTIONS,
+    AUTH_BYTES,
+    ALICE_ADDRESS,
+    cidFromBytes
+} from './common.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
-
-// Generate PAPI descriptors using local node:
-// npx papi add -w ws://localhost:10000 bulletin
-// npx papi
 
 // Constants
 const BOB_NODE_WS = 'ws://localhost:12346';
 const SYNC_WAIT_SEC = 15;
-const SMOLDOT_LOG_LEVEL = 1; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
+const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function fetchChainSpec(nodeWs) {
     console.log('Fetching chainspec from node...');
@@ -66,6 +70,7 @@ async function main() {
         const { sudoSigner, whoSigner } = setupKeyringAndSigners();
 
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
+        let expectedCid = await cidFromBytes(dataToStore);
 
         await authorizeAccount(
             bulletinAPI,
@@ -77,7 +82,21 @@ async function main() {
         
         const cid = await store(bulletinAPI, whoSigner, dataToStore);
         console.log("✅ Data stored successfully with CID:", cid);
-        
+
+        // Read back from IPFS
+        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        console.log("✅ Downloaded content:", downloadedContent.toString());
+        assert.deepStrictEqual(
+            cid,
+            expectedCid,
+            '❌ expectedCid does not match cid!'
+        );
+        assert.deepStrictEqual(
+            dataToStore,
+            downloadedContent.toString(),
+            '❌ dataToStore does not match downloadedContent!'
+        );
+        console.log(`✅ Verified content - test passed!`);
     } catch (error) {
         console.error("❌ Error:", error);
         process.exit(1);
