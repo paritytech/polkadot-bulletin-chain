@@ -55,7 +55,7 @@ pub use weights::WeightInfo;
 
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
-// TODO: https://github.com/paritytech/polkadot-sdk/issues/10591 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
+// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
 // Setting higher limit also requires raising the allocator limit.
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
