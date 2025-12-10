@@ -266,7 +266,6 @@ pub mod pallet {
 
 			// For `on_finalize`
 			weight.saturating_accrue(db_weight.reads_writes(2, 2));
-
 			weight
 		}
 
