@@ -19,12 +19,13 @@ jobs:
     name: Smoldot Docker Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    container:
-      image: paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -41,6 +42,11 @@ jobs:
 
       - name: Install just
         run: cargo install just --locked || true
+
+      - name: Download zombienet
+        run: |
+          wget -q "https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64"
+          chmod +x zombienet-linux-x64
 
       - name: Run smoldot workflow test
         working-directory: examples
