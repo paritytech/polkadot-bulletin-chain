@@ -39,40 +39,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: examples/package.json
 
-      - name: Build bulletin chain
-        run: cargo build --release -p polkadot-bulletin-chain
-
-      - name: Install npm dependencies
-        working-directory: examples
-        run: npm install
-
       - name: Install just
         run: cargo install just --locked || true
 
       - name: Run smoldot workflow test
         working-directory: examples
-        run: |
-          set -e
-          echo "🚀 Starting smoldot workflow test with Docker..."
-          
-          # Setup services
-          just setup-services-docker
-          
-          # Run the test
-          node authorize_and_store_papi_smoldot.js
-          EXAMPLE_EXIT=$?
-          
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          if [ $EXAMPLE_EXIT -eq 0 ]; then
-              echo "✅ Example completed successfully!"
-          else
-              echo "❌ Example failed with exit code $EXAMPLE_EXIT"
-          fi
-          
-          exit $EXAMPLE_EXIT
-
-      - name: Teardown services
-        if: always()
-        working-directory: examples
-        run: just teardown-services-docker || true
+        run: just run-authorize-and-store-smoldot-docker
