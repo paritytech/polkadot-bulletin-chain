@@ -18,7 +18,7 @@ jobs:
   smoldot-docker-test:
     name: Smoldot Docker Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     container:
       image: paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050
 
