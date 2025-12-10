@@ -33,6 +33,7 @@ mod mock;
 mod tests;
 
 use codec::{Decode, Encode, MaxEncodedLen};
+use core::fmt::Debug;
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
@@ -54,12 +55,10 @@ pub use weights::WeightInfo;
 
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
+// TODO: https://github.com/paritytech/polkadot-sdk/issues/10591 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// TODO: find out what is "allocator" and "allocator limit"
 // Setting higher limit also requires raising the allocator limit.
-// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
-// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
@@ -74,7 +73,7 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
 /// Number of transactions and bytes covered by an authorization.
-#[derive(PartialEq, Eq, RuntimeDebug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[derive(PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct AuthorizationExtent {
 	/// Number of transactions.
 	pub transactions: u32,
@@ -108,9 +107,7 @@ struct Authorization<BlockNumber> {
 type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 
 /// State data for a stored transaction.
-#[derive(
-	Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen,
-)]
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct TransactionInfo {
 	/// Chunk trie root.
 	chunk_root: <BlakeTwo256 as Hash>::Output,
