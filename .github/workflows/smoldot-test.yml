@@ -48,16 +48,11 @@ jobs:
           wget -q "https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
 
-      - name: Setup Docker
+      - name: Verify Docker is working
         run: |
-          # Ensure Docker daemon is running
-          sudo systemctl start docker || true
-          sudo systemctl status docker || true
-          # Add current user to docker group (shouldn't be needed but just in case)
-          sudo usermod -aG docker $USER || true
-          # Verify Docker is working
           docker --version
-          docker info
+          docker ps
+          docker run hello-world
 
       - name: Run smoldot workflow test
         working-directory: examples
