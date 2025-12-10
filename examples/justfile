@@ -261,8 +261,17 @@ ipfs-docker-start: _check-docker
     # Pull latest kubo image if not present
     docker pull ipfs/kubo:latest
     
+    # Determine network mode based on OS
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS - use port mapping
+        NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
+    else
+        # Linux (including CI) - use host networking for direct access
+        NETWORK_ARGS="--network host"
+    fi
+    
     # Start Docker container
-    docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080 -p 5001:5001 ipfs/kubo:latest
+    docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
     echo "   Container: ipfs-node"
     echo "   Waiting for container to start..."
     sleep 5
