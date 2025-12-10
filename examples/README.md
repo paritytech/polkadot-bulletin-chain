@@ -199,6 +199,10 @@ npm install
 # First, generate the PAPI descriptors:
 #  (Generate TypeScript types in `.papi/descriptors/`)
 #  (Create metadata files in `.papi/metadata/bulletin.scale`)
+# Generate PAPI descriptors using local node:
+#   npx papi add -w ws://localhost:10000 bulletin
+#   npx papi
+# or:
 npm run papi:generate
 # or if you already have .papi folder you can always update it
 npm run papi:update
