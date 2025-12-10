@@ -2,7 +2,7 @@ name: Smoldot Workflow Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci_cd]
   pull_request:
     branches: [main]
   workflow_dispatch:
