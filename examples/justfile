@@ -288,7 +288,7 @@ ipfs-docker-start: _check-docker
         NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
     else
         # Linux (including CI) - use host networking for direct access
-        NETWORK_ARGS="--network host"
+        NETWORK_ARGS="--network host -p 4001:4001 -p 8080:8080 -p 5001:5001"
     fi
     
     # Start Docker container
