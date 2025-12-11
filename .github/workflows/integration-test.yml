@@ -60,3 +60,7 @@ jobs:
       - name: Run authorize and store (PAPI, smoldot)
         working-directory: examples
         run: just run-authorize-and-store-smoldot-docker
+
+      - name: Run authorize and store (PAPI, RPC node)
+        working-directory: examples
+        run: just run-authorize-and-store
