@@ -57,12 +57,6 @@ jobs:
           chmod +x zombienet-linux-x64
           echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
 
-      - name: Verify Docker is working
-        run: |
-          docker --version
-          docker ps
-          docker run hello-world
-
       - name: Run smoldot workflow test
         working-directory: examples
         run: just run-authorize-and-store-smoldot-docker
