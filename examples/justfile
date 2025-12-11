@@ -88,7 +88,28 @@ bulletin-solo-zombienet-start:
     mkdir -p {{ PID_DIR }}
     
     echo "⚡ Starting Bulletin chain with zombienet..."
-    POLKADOT_BULLETIN_BINARY_PATH=../target/release/polkadot-bulletin-chain ../$(ls ../zombienet-*-*) -p native spawn ../zombienet/bulletin-polkadot-local.toml > /tmp/zombienet.log 2>&1 &
+    
+    # Find zombienet binary (use env var if set, otherwise search)
+    if [ -n "$ZOMBIENET_BINARY" ]; then
+        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+    else
+        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
+    fi
+    
+    if [ -z "$ZOMBIENET_BIN" ] || [ ! -f "$ZOMBIENET_BIN" ]; then
+        echo "❌ Error: Zombienet binary not found"
+        echo "   Tried: $ZOMBIENET_BIN"
+        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
+        exit 1
+    fi
+    
+    echo "   Using zombienet: $ZOMBIENET_BIN"
+    
+    # Get absolute paths for bulletin binary and config
+    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
+    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
+    
+    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
