@@ -408,6 +408,29 @@ teardown-services-docker:
     
     echo "✅ Docker services stopped"
 
+# Run RPC node example with Docker IPFS
+run-authorize-and-store-docker: build npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting RPC node workflow test with Docker..."
+    echo ""
+    
+    just setup-services-docker
+    node authorize_and_store_papi.js
+    EXAMPLE_EXIT=$?
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+    
+    just teardown-services-docker    
+    exit $EXAMPLE_EXIT
+
 # Run smoldot example with Docker IPFS
 run-authorize-and-store-smoldot-docker: build npm-install
     #!/usr/bin/env bash

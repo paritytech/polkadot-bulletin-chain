@@ -62,4 +62,4 @@ jobs:
 
       - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
-        run: just run-authorize-and-store
+        run: just run-authorize-and-store-docker
