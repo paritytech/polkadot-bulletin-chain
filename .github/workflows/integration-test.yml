@@ -57,6 +57,6 @@ jobs:
           chmod +x zombienet-linux-x64
           echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
 
-      - name: Run smoldot workflow test
+      - name: Run authorize and store (PAPI, smoldot)
         working-directory: examples
         run: just run-authorize-and-store-smoldot-docker
