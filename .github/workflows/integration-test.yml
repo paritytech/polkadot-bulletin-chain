@@ -52,7 +52,7 @@ jobs:
 
       - name: Download zombienet
         run: |
-          wget -q "https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64"
+          wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/zombienet-linux-x64" || exit 1
           chmod +x zombienet-linux-x64
           echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
 
