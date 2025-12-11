@@ -292,9 +292,9 @@ ipfs-docker-connect:
         PROTOCOL="dns4"
         DOCKER_HOST="host.docker.internal"
     else
-        # Linux - use ip4/172.17.0.1
+        # Linux (with host networking) - use ip4/127.0.0.1
         PROTOCOL="ip4"
-        DOCKER_HOST="172.17.0.1"
+        DOCKER_HOST="127.0.0.1"
     fi
     
     echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
@@ -340,6 +340,15 @@ setup-services-docker:
     # Start services with Docker
     just ipfs-docker-start
     just bulletin-solo-zombienet-start
+    
+    # Wait a bit longer and verify zombienet is running
+    echo "🔍 Verifying zombienet is ready..."
+    sleep 10
+    echo "   Zombienet process check:"
+    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
+    echo "   Checking zombienet log:"
+    tail -20 /tmp/zombienet.log || echo "   ⚠ Could not read zombienet log"
+    
     just ipfs-docker-connect
     just ipfs-reconnect-docker-start
     just papi-generate
