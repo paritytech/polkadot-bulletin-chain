@@ -230,16 +230,27 @@ teardown-services:
     
     echo "✅ Docker services stopped"
 
-# Run RPC node example with Docker IPFS
-run-authorize-and-store: build npm-install
+# Run authorize and store example with Docker IPFS
+# Parameters:
+#   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
+run-authorize-and-store mode="ws": build npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting RPC node workflow test with Docker..."
+    if [ "{{ mode }}" = "smoldot" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot)..."
+        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
+    elif [ "{{ mode }}" = "ws" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: ws)..."
+        SCRIPT_NAME="authorize_and_store_papi.js"
+    else
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
+    fi
     echo ""
     
     just setup-services
-    node authorize_and_store_papi.js
+    node $SCRIPT_NAME
     EXAMPLE_EXIT=$?
     
     echo ""
@@ -253,25 +264,8 @@ run-authorize-and-store: build npm-install
     just teardown-services    
     exit $EXAMPLE_EXIT
 
-# Run smoldot example with Docker IPFS
-run-authorize-and-store-smoldot: build npm-install
-    #!/usr/bin/env bash
-    set -e
+# Alias: Run with WebSocket RPC node
+run-authorize-and-store-ws: (run-authorize-and-store "ws")
 
-    echo "🚀 Starting smoldot workflow test with Docker..."
-    echo ""
-    
-    just setup-services
-    node authorize_and_store_papi_smoldot.js
-    EXAMPLE_EXIT=$?
-    
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    if [ $EXAMPLE_EXIT -eq 0 ]; then
-        echo "✅ Example completed successfully!"
-    else
-        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
-    fi
-    
-    just teardown-services    
-    exit $EXAMPLE_EXIT
+# Alias: Run with smoldot light client
+run-authorize-and-store-smoldot: (run-authorize-and-store "smoldot")
