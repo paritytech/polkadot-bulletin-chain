@@ -12,6 +12,7 @@ concurrency:
 
 env:
   CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+  NODE_VERSION: 22
 
 jobs:
   integration-tests:
@@ -43,7 +44,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: examples/package.json
 
