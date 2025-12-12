@@ -33,6 +33,7 @@ mod mock;
 mod tests;
 
 use codec::{Decode, Encode, MaxEncodedLen};
+use core::fmt::Debug;
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
@@ -54,12 +55,10 @@ pub use weights::WeightInfo;
 
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
+// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// TODO: find out what is "allocator" and "allocator limit"
 // Setting higher limit also requires raising the allocator limit.
-// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
-// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
@@ -74,7 +73,7 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
 /// Number of transactions and bytes covered by an authorization.
-#[derive(PartialEq, Eq, RuntimeDebug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[derive(PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct AuthorizationExtent {
 	/// Number of transactions.
 	pub transactions: u32,
@@ -108,9 +107,7 @@ struct Authorization<BlockNumber> {
 type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 
 /// State data for a stored transaction.
-#[derive(
-	Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen,
-)]
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct TransactionInfo {
 	/// Chunk trie root.
 	chunk_root: <BlakeTwo256 as Hash>::Output,
@@ -122,7 +119,7 @@ pub struct TransactionInfo {
 	/// is used to find transaction info by block chunk index using binary search.
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
-	/// total chunk value.
+	/// total chunks.
 	block_chunks: ChunkIndex,
 }
 
@@ -194,11 +191,6 @@ pub mod pallet {
 		/// Maximum data set in a single transaction in bytes.
 		#[pallet::constant]
 		type MaxTransactionSize: Get<u32>;
-		/// Storage period for data in blocks. Should match
-		/// [`DEFAULT_STORAGE_PERIOD`](sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD) for
-		/// block authoring.
-		#[pallet::constant]
-		type StoragePeriod: Get<BlockNumberFor<Self>>;
 		/// Authorizations expire after this many blocks.
 		#[pallet::constant]
 		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;
@@ -258,13 +250,14 @@ pub mod pallet {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+			// TODO: https://github.com/paritytech/polkadot-sdk/issues/10203 - Replace this with benchmarked weights.
 			let mut weight = Weight::zero();
 			let db_weight = T::DbWeight::get();
 
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
 			weight.saturating_accrue(db_weight.reads(1));
-			let period = T::StoragePeriod::get();
+			let period = StoragePeriod::<T>::get();
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
 			if obsolete > Zero::zero() {
 				weight.saturating_accrue(db_weight.writes(2));
@@ -282,7 +275,7 @@ pub mod pallet {
 				<ProofChecked<T>>::take() || {
 					// Proof is not required for early or empty blocks.
 					let number = <frame_system::Pallet<T>>::block_number();
-					let period = T::StoragePeriod::get();
+					let period = StoragePeriod::<T>::get();
 					let target_number = number.saturating_sub(period);
 
 					target_number.is_zero() || {
@@ -294,7 +287,7 @@ pub mod pallet {
 				"Storage proof must be checked once in the block"
 			);
 
-			// Insert new transactions
+			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
 			let total_chunks = transactions.last().map_or(0, |t| t.block_chunks);
 			if total_chunks != 0 {
@@ -305,20 +298,28 @@ pub mod pallet {
 		fn integrity_test() {
 			assert!(
 				!T::MaxBlockTransactions::get().is_zero(),
-				"Not useful if data cannot be stored"
+				"MaxTransactionSize must be greater than zero"
 			);
-			assert!(!T::MaxTransactionSize::get().is_zero(), "Not useful if data cannot be stored");
-			assert!(!T::StoragePeriod::get().is_zero(), "Not useful if data is not stored");
+			assert!(
+				!T::MaxTransactionSize::get().is_zero(),
+				"MaxTransactionSize must be greater than zero"
+			);
+			let default_period = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD.into();
+			let storage_period = GenesisConfig::<T>::default().storage_period;
+			assert_eq!(
+				storage_period, default_period,
+				"GenesisConfig.storage_period must match DEFAULT_STORAGE_PERIOD"
+			);
 			assert!(
 				!T::AuthorizationPeriod::get().is_zero(),
-				"Not useful if authorizations are never valid"
+				"AuthorizationPeriod must be greater than zero"
 			);
 		}
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Index and store data off chain. Minimum data size is 1 bytes, maximum is
+		/// Index and store data off chain. Minimum data size is 1 byte, maximum is
 		/// `MaxTransactionSize`. Data will be removed after `StoragePeriod` blocks, unless `renew`
 		/// is called.
 		///
@@ -346,9 +347,9 @@ pub mod pallet {
 			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32) as usize);
 			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
 
+			let content_hash = sp_io::hashing::blake2_256(&data);
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = sp_io::hashing::blake2_256(&data);
 			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, content_hash);
 
 			let mut index = 0;
@@ -436,7 +437,7 @@ pub mod pallet {
 
 			// Get the target block metadata.
 			let number = <frame_system::Pallet<T>>::block_number();
-			let period = T::StoragePeriod::get();
+			let period = StoragePeriod::<T>::get();
 			let target_number = number.saturating_sub(period);
 			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
 			let transactions =
@@ -639,6 +640,11 @@ pub mod pallet {
 	/// Storage fee per transaction.
 	pub type EntryFee<T: Config> = StorageValue<_, BalanceOf<T>>;
 
+	/// Storage period for data in blocks. Should match `sp_storage_proof::DEFAULT_STORAGE_PERIOD`
+	/// for block authoring.
+	#[pallet::storage]
+	pub type StoragePeriod<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
+
 	// Intermediates
 	#[pallet::storage]
 	pub(super) type BlockTransactions<T: Config> =
@@ -647,6 +653,32 @@ pub mod pallet {
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+	#[pallet::genesis_config]
+	pub struct GenesisConfig<T: Config> {
+		pub byte_fee: BalanceOf<T>,
+		pub entry_fee: BalanceOf<T>,
+		pub storage_period: BlockNumberFor<T>,
+	}
+
+	impl<T: Config> Default for GenesisConfig<T> {
+		fn default() -> Self {
+			Self {
+				byte_fee: 10u32.into(),
+				entry_fee: 1000u32.into(),
+				storage_period: sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD.into(),
+			}
+		}
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+		fn build(&self) {
+			ByteFee::<T>::put(self.byte_fee);
+			EntryFee::<T>::put(self.entry_fee);
+			StoragePeriod::<T>::put(self.storage_period);
+		}
+	}
 
 	#[pallet::inherent]
 	impl<T: Config> ProvideInherent for Pallet<T> {
