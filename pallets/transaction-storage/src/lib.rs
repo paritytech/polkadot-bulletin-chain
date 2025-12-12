@@ -222,8 +222,6 @@ pub mod pallet {
 		NotConfigured,
 		/// Renewed extrinsic is not found.
 		RenewedNotFound,
-		/// Attempting to store an empty transaction
-		EmptyTransaction,
 		/// Proof was not expected in this block.
 		UnexpectedProof,
 		/// Proof failed verification.
