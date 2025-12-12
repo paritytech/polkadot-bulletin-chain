@@ -236,8 +236,6 @@ pub mod pallet {
 		DoubleCheck,
 		/// Storage proof was not checked in the block.
 		ProofNotChecked,
-		/// Transaction is too large.
-		TransactionTooLarge,
 		/// Authorization was not found.
 		AuthorizationNotFound,
 		/// Authorization has not expired.
@@ -289,7 +287,7 @@ pub mod pallet {
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
-			let total_chunks = transactions.last().map_or(0, |t| t.block_chunks);
+			let total_chunks = TransactionInfo::total_chunks(&transactions);
 			if total_chunks != 0 {
 				<Transactions<T>>::insert(n, transactions);
 			}
@@ -339,12 +337,12 @@ pub mod pallet {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
-			ensure!(Self::data_size_ok(data.len()), Error::<T>::BadDataSize);
+			Self::ensure_data_size_ok(data.len())?;
 
 			// Chunk data and compute storage root
 			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
-			let chunk_count = chunks.len();
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32) as usize);
+			let chunk_count = chunks.len() as u32;
+			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
 			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
 
 			let content_hash = sp_io::hashing::blake2_256(&data);
@@ -354,8 +352,10 @@ pub mod pallet {
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
-				let total_chunks =
-					transactions.last().map_or(0, |t| t.block_chunks) + (chunk_count as u32);
+				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
+					return Err(Error::<T>::TooManyTransactions);
+				}
+				let total_chunks = TransactionInfo::total_chunks(&transactions) + chunk_count;
 				index = transactions.len() as u32;
 				transactions
 					.try_push(TransactionInfo {
@@ -394,7 +394,7 @@ pub mod pallet {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
-			ensure!(Self::data_size_ok(info.size as usize), Error::<T>::BadDataSize);
+			Self::ensure_data_size_ok(info.size as usize)?;
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
@@ -403,8 +403,11 @@ pub mod pallet {
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
+				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
+					return Err(Error::<T>::TooManyTransactions);
+				}
 				let chunks = num_chunks(info.size);
-				let total_chunks = transactions.last().map_or(0, |t| t.block_chunks) + chunks;
+				let total_chunks = TransactionInfo::total_chunks(&transactions) + chunks;
 				index = transactions.len() as u32;
 				transactions
 					.try_push(TransactionInfo {
@@ -870,6 +873,12 @@ pub mod pallet {
 		/// Returns `true` if a blob of the given size can be stored.
 		fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)
+		}
+
+		/// Ensures that the given data size is valid for storage.
+		fn ensure_data_size_ok(size: usize) -> Result<(), Error<T>> {
+			ensure!(Self::data_size_ok(size), Error::<T>::BadDataSize);
+			Ok(())
 		}
 
 		/// Returns the [`TransactionInfo`] for the specified store/renew transaction.
