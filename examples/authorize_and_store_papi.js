@@ -1,6 +1,6 @@
 import assert from "assert";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store} from './api.js';
 import { setupKeyringAndSigners, cidFromBytes } from './common.js';
