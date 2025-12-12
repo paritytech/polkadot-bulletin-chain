@@ -16,35 +16,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Parity CI image to use
-# Common variable is defined in the workflow
-# Repo env variable doesn't work for PRs from forks
 env:
-  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
   NODE_VERSION: 22
 
 jobs:
-  set-image:
-    # This workaround sets the container image for each job using 'set-image' job output.
-    # env variables don't work for PRs from forks, so we need to use outputs.
-    runs-on: ubuntu-latest
-    outputs:
-      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
-    steps:
-      - id: set_image
-        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
-
   integration-tests:
     name: Integration Tests
-    runs-on: parity-default
+    runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [ set-image ]
-    container:
-      image: ${{ needs.set-image.outputs.CI_IMAGE }}
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libclang-dev
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
