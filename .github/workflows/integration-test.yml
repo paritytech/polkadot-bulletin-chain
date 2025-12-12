@@ -36,7 +36,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    runs-on: parity-default
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [ set-image ]
     container:
@@ -51,11 +51,6 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
-
-      - name: Install Docker
-        run: |
-          curl -fsSL https://get.docker.com | sh
-          sudo usermod -aG docker $USER
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
