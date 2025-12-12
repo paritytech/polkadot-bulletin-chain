@@ -60,7 +60,7 @@ jobs:
           cache-dependency-path: examples/package.json
 
       - name: Install just
-        run: sudo apt-get update && sudo apt-get install -y just
+        run: apt-get update && apt-get install -y just
 
       - name: Download zombienet
         run: |
