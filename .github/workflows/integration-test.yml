@@ -52,6 +52,11 @@ jobs:
           cache-on-failure: true
           cache-all-crates: true
 
+      - name: Install Docker
+        run: |
+          curl -fsSL https://get.docker.com | sh
+          sudo usermod -aG docker $USER
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -60,7 +65,7 @@ jobs:
           cache-dependency-path: examples/package.json
 
       - name: Install just
-        run: cargo install just --locked || true
+        run: sudo apt-get update && sudo apt-get install -y just
 
       - name: Download zombienet
         run: |
