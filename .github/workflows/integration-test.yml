@@ -58,6 +58,6 @@ jobs:
         working-directory: examples
         run: just run-authorize-and-store "smoldot"
 
-      - name: Run authorize and store (PAPI, RPC  node)
+      - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
         run: just run-authorize-and-store "ws"
