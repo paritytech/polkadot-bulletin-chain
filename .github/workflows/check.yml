@@ -34,7 +34,7 @@ jobs:
         run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
   check-fmt:
-    runs-on: ubuntu-latest
+    runs-on: parity-default
     timeout-minutes: 20
     needs: [set-image]
     container:
@@ -57,7 +57,6 @@ jobs:
 
   check:
     name: Cargo check
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     needs: [set-image, check-fmt]
     container:
@@ -77,7 +76,6 @@ jobs:
 
   check-benchmarking:
     name: Cargo check (benchmarking)
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     needs: [set-image, check]
     container:
@@ -98,7 +96,6 @@ jobs:
 
   clippy:
     name: Cargo clippy
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     needs: [set-image, check]
     container:
@@ -123,7 +120,6 @@ jobs:
 
   test:
     name: Test
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     timeout-minutes: 60
     needs: [set-image, check]

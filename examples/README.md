@@ -75,7 +75,7 @@ tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
 
 #### Use Docker
 
-* Use `172.17.0.1` or  `host.docker.internal` for swarm connections
+* Use `host.docker.internal` (macOS/Windows) or `172.17.0.1` (Linux) for swarm connections
 
 ```shell
 docker pull ipfs/kubo:latest
@@ -107,7 +107,11 @@ POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
 ```
 
 ```shell
-# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
+# Uses Docker on macOS/Windows (use dns4/host.docker.internal)
+docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+
+# Uses Docker on Linux (use ip4/172.17.0.1)
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 ```
