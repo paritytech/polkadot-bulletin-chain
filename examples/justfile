@@ -158,6 +158,14 @@ ipfs-reconnect-start:
     echo "   Log: /tmp/ipfs-reconnect-docker.log"
     sleep 2
 
+# Generate PAPI descriptors
+papi-generate:
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🔧 Generating PAPI descriptors..."
+    npm run papi:generate
+
 # Setup all services using Docker for IPFS
 setup-services:
     #!/usr/bin/env bash
