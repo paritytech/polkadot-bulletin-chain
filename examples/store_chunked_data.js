@@ -333,6 +333,7 @@ async function main() {
         console.log('📄 Decoded DAG node:', dagNode);
 
         console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        resultCode = 0;
     } catch (error) {
         console.error("❌ Error:", error);
         resultCode = 1;

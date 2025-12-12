@@ -52,6 +52,7 @@ async function main() {
             '❌ dataToStore does not match downloadedContent!'
         );
         console.log(`✅ Verified content!`);
+
         console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
         resultCode = 0;
     } catch (error) {
