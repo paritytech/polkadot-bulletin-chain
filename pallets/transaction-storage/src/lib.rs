@@ -353,7 +353,7 @@ pub mod pallet {
 				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
 					return Err(Error::<T>::TooManyTransactions);
 				}
-				let total_chunks = TransactionInfo::total_chunks(&transactions) + chunk_count;
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
 				index = transactions.len() as u32;
 				transactions
 					.try_push(TransactionInfo {
