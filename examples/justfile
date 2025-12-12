@@ -252,8 +252,3 @@ run-authorize-and-store mode="ws": build npm-install
     just teardown-services    
     exit $EXAMPLE_EXIT
 
-# Alias: Run with WebSocket RPC node
-run-authorize-and-store-ws: (run-authorize-and-store "ws")
-
-# Alias: Run with smoldot light client
-run-authorize-and-store-smoldot: (run-authorize-and-store "smoldot")
