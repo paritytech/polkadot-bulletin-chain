@@ -405,7 +405,7 @@ pub mod pallet {
 					return Err(Error::<T>::TooManyTransactions);
 				}
 				let chunks = num_chunks(info.size);
-				let total_chunks = TransactionInfo::total_chunks(&transactions) + chunks;
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
 				index = transactions.len() as u32;
 				transactions
 					.try_push(TransactionInfo {
