@@ -232,14 +232,3 @@ run-authorize-and-store-smoldot:
     just teardown-services
     
     exit $EXAMPLE_EXIT
-
-run-store-chunked-data:
-    #!/usr/bin/env bash
-    set -e
-
-    just setup-services
-    node store_chunked_data.js
-    EXAMPLE_EXIT=$?
-    just teardown-services
-
-    exit $EXAMPLE_EXIT
