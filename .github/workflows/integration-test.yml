@@ -60,7 +60,7 @@ jobs:
           cache-dependency-path: examples/package.json
 
       - name: Install just
-        run: cargo install just
+        run: cargo install just --locked || true
 
       - name: Download zombienet
         run: |
