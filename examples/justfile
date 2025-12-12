@@ -65,18 +65,6 @@ bulletin-solo-zombienet-start:
     echo "   Waiting for chain to start (15 seconds)..."
     sleep 15
 
-# Run smoldot example with local Kubo
-run-authorize-and-store-smoldot: build npm-install
-    #!/usr/bin/env bash
-    set -e
-
-    just setup-services
-    node authorize_and_store_papi_smoldot.js
-    EXAMPLE_EXIT=$?
-    just teardown-services
-    
-    exit $EXAMPLE_EXIT
-
 # Check if Docker is available and running
 _check-docker:
     #!/usr/bin/env bash
