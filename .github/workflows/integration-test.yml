@@ -1,24 +1,46 @@
 name: Integration Tests
 
+# Controls when the action will run.
 on:
+  # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: ["main", "release-*"]
+    branches: [main]
   pull_request:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+# Cancel previous runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Parity CI image to use
+# Common variable is defined in the workflow
+# Repo env variable doesn't work for PRs from forks
 env:
   CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
   NODE_VERSION: 22
 
 jobs:
+  set-image:
+    # This workaround sets the container image for each job using 'set-image' job output.
+    # env variables don't work for PRs from forks, so we need to use outputs.
+    runs-on: ubuntu-latest
+    outputs:
+      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
+    steps:
+      - id: set_image
+        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
+
   integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: parity-default
     timeout-minutes: 60
+    needs: [ set-image ]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
 
     steps:
       - name: Checkout sources
