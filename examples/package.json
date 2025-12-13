@@ -19,6 +19,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@acala-network/chopsticks": "^1.2.5",
     "@polkadot-api/cli": "^0.13.3"
   }
 }
