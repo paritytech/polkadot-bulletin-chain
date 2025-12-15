@@ -83,7 +83,7 @@ export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
     // UnixFS blockSizes = sizes of child blocks
     const blockSizes = chunks.map(c => c.len)
 
-    console.log(`\n🧩 Building UnixFS DAG from chunks:
+    console.log(`🧩 Building UnixFS DAG from chunks:
   • totalChunks: ${chunks.length}
   • blockSizes: ${blockSizes.join(', ')}`)
 
