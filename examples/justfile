@@ -6,13 +6,11 @@
 PID_DIR := "/tmp/bulletin-pids"
 
 # Default recipe - run the complete PAPI workflow test
-default: (run-authorize-and-store "smoldot" "bulletin-polkadot-runtime")
+default: run-authorize-and-store
 
 # Build the bulletin chain node in release mode
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
-build runtime="bulletin-polkadot-runtime":
-    cargo build --release -p {{ runtime }}
+build:
+    cargo build --release -p polkadot-bulletin-chain
 
 # Install JavaScript dependencies
 npm-install:
@@ -30,35 +28,14 @@ _ipfs-cmd:
         exit 1
     fi
 
-# Helper function to map runtime package name to zombienet config filename (toml file)
-_zombienet-config-name runtime:
-    #!/usr/bin/env bash
-    case "{{ runtime }}" in
-        "bulletin-polkadot-runtime")
-            echo "bulletin-polkadot-local.toml"
-            ;;
-        "bulletin-westend-runtime")
-            echo "bulletin-westend-local.toml"
-            ;;
-        "polkadot-bulletin-chain-runtime")
-            echo "bulletin-polkadot.toml"
-            ;;
-        *)
-            echo "❌ Error: Unknown runtime '{{ runtime }}'" >&2
-            exit 1
-            ;;
-    esac
-
 # Start start solo chain with zombienet in background
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
+bulletin-solo-zombienet-start:
     #!/usr/bin/env bash
     set -e
     
     mkdir -p {{ PID_DIR }}
     
-    echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
+    echo "⚡ Starting Bulletin chain with zombienet..."
     
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
@@ -77,11 +54,8 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     echo "   Using zombienet: $ZOMBIENET_BIN"
     
     # Get absolute paths for bulletin binary and config
-    BULLETIN_BINARY=$(cd .. && pwd)/target/release/{{ runtime }}
-    ZOMBIENET_TOML=$(just _zombienet-config-name {{ runtime }})
-    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/$ZOMBIENET_TOML
-    
-    echo "   Using config: $ZOMBIENET_CONFIG"
+    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
+    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
     
     POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
@@ -193,20 +167,18 @@ papi-generate:
     npm run papi:generate
 
 # Setup all services using Docker for IPFS
-# Parameters:
-#   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
-setup-services runtime="bulletin-polkadot-runtime":
+setup-services:
     #!/usr/bin/env bash
     set -e
     
     echo "🔧 Tearing down Docker services if they are running..."
     just ipfs-shutdown
     
-    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
+    echo "🐳 Setting up services with Docker IPFS..."
     
     # Start services with Docker
     just ipfs-start
-    just bulletin-solo-zombienet-start "{{ runtime }}"
+    just bulletin-solo-zombienet-start
     
     # Wait a bit longer and verify zombienet is running
     echo "🔍 Verifying zombienet is ready..."
@@ -257,16 +229,15 @@ teardown-services:
 # Run authorize and store example with Docker IPFS
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   runtime - Runtime name (e.g., "bulletin-polkado-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
-run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": (build runtime) npm-install
+run-authorize-and-store mode="ws": build npm-install
     #!/usr/bin/env bash
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }})..."
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot)..."
         SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
     elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }})..."
+        echo "🚀 Starting authorize and store workflow test (mode: ws)..."
         SCRIPT_NAME="authorize_and_store_papi.js"
     else
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
@@ -274,7 +245,7 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": (build ru
     fi
     echo ""
     
-    just setup-services "{{ runtime }}"
+    just setup-services
     node $SCRIPT_NAME
     EXAMPLE_EXIT=$?
     
