@@ -30,6 +30,25 @@ _ipfs-cmd:
         exit 1
     fi
 
+# Helper function to map runtime package name to zombienet config filename (toml file)
+_zombienet-config-name runtime:
+    #!/usr/bin/env bash
+    case "{{ runtime }}" in
+        "bulletin-polkadot-runtime")
+            echo "bulletin-polkadot-local.toml"
+            ;;
+        "bulletin-westend-runtime")
+            echo "bulletin-westend-local.toml"
+            ;;
+        "polkadot-bulletin-chain-runtime")
+            echo "bulletin-polkadot.toml"
+            ;;
+        *)
+            echo "❌ Error: Unknown runtime '{{ runtime }}'" >&2
+            exit 1
+            ;;
+    esac
+
 # Start solo chain or parachain with zombienet in background
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
