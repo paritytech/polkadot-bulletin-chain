@@ -30,7 +30,7 @@ _ipfs-cmd:
         exit 1
     fi
 
-# Helper function to map runtime package name to zombienet config filename (internal use)
+# Helper function to map runtime package name to zombienet config filename (toml file)
 _zombienet-config-name runtime:
     #!/usr/bin/env bash
     case "{{ runtime }}" in
