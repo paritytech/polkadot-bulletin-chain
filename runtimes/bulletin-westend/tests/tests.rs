@@ -35,6 +35,26 @@ use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
 const ALICE: [u8; 32] = [1u8; 32];
 
+/// Advance to the next block for testing transaction storage.
+fn advance_block() {
+	use bulletin_westend_runtime::TransactionStorage;
+	use frame_support::traits::{OnFinalize, OnInitialize};
+
+	let current = frame_system::Pallet::<Runtime>::block_number();
+
+	TransactionStorage::on_finalize(current);
+	System::on_finalize(current);
+
+	let next = current + 1;
+	System::set_block_number(next);
+
+	frame_system::BlockWeight::<Runtime>::kill();
+	frame_system::AllExtrinsicsLen::<Runtime>::kill();
+
+	System::on_initialize(next);
+	TransactionStorage::on_initialize(next);
+}
+
 fn construct_extrinsic(
 	sender: sp_core::sr25519::Pair,
 	call: RuntimeCall,
@@ -105,11 +125,11 @@ fn transaction_storage_runtime_sizes() {
 		let who: AccountId = account.to_account_id();
 		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
-			2000,                  // 2 KB
-			256 * 1024,            // 256 KB
-			512 * 1024,            // 512 KB
-			1 * 1024 * 1024,       // 1 MB
-			(3 * 1024 * 1024) / 2, // 1.5 MB
+			2000,            // 2 KB
+			1 * 1024 * 1024, // 1 MB
+			4 * 1024 * 1024, // 4 MB
+			6 * 1024 * 1024, // 6 MB
+			8 * 1024 * 1024, // 8 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
@@ -131,6 +151,9 @@ fn transaction_storage_runtime_sizes() {
 
 		// store data via signed extrinsics (ValidateSigned consumes authorization)
 		for (index, size) in sizes.into_iter().enumerate() {
+			// Advance to a new block for each store
+			advance_block();
+
 			tracing::info!("Storing data with size: {size} and index: {index}");
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
