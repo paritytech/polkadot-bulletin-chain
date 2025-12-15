@@ -89,4 +89,8 @@ jobs:
 
       - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
-        run: just run-authorize-and-store "ws" "${{ matrix.runtime.package }}"
+        run: just run-authorize-and-store "ws"
+
+      - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
+        working-directory: examples
+        run: just run-store-chunked-data
