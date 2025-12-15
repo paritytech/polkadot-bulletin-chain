@@ -20,10 +20,28 @@ env:
   NODE_VERSION: 22
 
 jobs:
+  # This generates a matrix with all the required runtimes which will be run in the next step
+  runtime-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
+    name: Extract runtimes from matrix
+    steps:
+      - uses: actions/checkout@v4
+      - id: runtime
+        run: |
+          TASKS=$(echo $(cat scripts/runtimes-matrix.json) | sed 's/ //g' )
+          echo $TASKS
+          echo "runtime=$TASKS" >> $GITHUB_OUTPUT
+
   integration-tests:
-    name: Integration Tests
+    needs: [runtime-matrix]
+    name: Integration Tests - ${{ matrix.runtime.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      matrix:
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
 
     steps:
       - name: Checkout sources
@@ -67,8 +85,8 @@ jobs:
 
       - name: Run authorize and store (PAPI, smoldot)
         working-directory: examples
-        run: just run-authorize-and-store "smoldot"
+        run: just run-authorize-and-store "smoldot" "${{ matrix.runtime.package }}"
 
       - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
-        run: just run-authorize-and-store "ws"
+        run: just run-authorize-and-store "ws" "${{ matrix.runtime.package }}"
