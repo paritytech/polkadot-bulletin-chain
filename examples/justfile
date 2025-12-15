@@ -6,7 +6,7 @@
 PID_DIR := "/tmp/bulletin-pids"
 
 # Default recipe - run the complete PAPI workflow test
-default: (run-authorize-and-store "smoldot" "bulletin-polkadot")
+default: (run-authorize-and-store "smoldot" "bulletin-polkadot-runtime")
 
 # Build the bulletin chain node in release mode
 # Parameters:
