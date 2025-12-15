@@ -51,8 +51,8 @@ _zombienet-config-name runtime:
 
 # Start start solo chain with zombienet in background
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot"), taken from ../scripts/runtimes-matrix.json
-bulletin-solo-zombienet-start runtime="bulletin-polkadot":
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
@@ -195,7 +195,7 @@ papi-generate:
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
-setup-services runtime="bulletin-polkadot":
+setup-services runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
@@ -257,8 +257,8 @@ teardown-services:
 # Run authorize and store example with Docker IPFS
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   runtime - Runtime name (e.g., "bulletin-polkadot", "bulletin-westend", "bulletin-rococo")
-run-authorize-and-store mode="ws" runtime="bulletin-polkadot": (build runtime) npm-install
+#   runtime - Runtime name (e.g., "bulletin-polkado-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
+run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": (build runtime) npm-install
     #!/usr/bin/env bash
     set -e
 
