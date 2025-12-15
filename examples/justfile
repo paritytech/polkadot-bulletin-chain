@@ -6,11 +6,13 @@
 PID_DIR := "/tmp/bulletin-pids"
 
 # Default recipe - run the complete PAPI workflow test
-default: run-authorize-and-store
+default: (run-authorize-and-store "smoldot" "bulletin-polkadot-runtime")
 
 # Build the bulletin chain node in release mode
-build:
-    cargo build --release -p polkadot-bulletin-chain
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+build runtime="bulletin-polkadot-runtime":
+    cargo build --release -p {{ runtime }}
 
 # Install JavaScript dependencies
 npm-install:
@@ -28,14 +30,16 @@ _ipfs-cmd:
         exit 1
     fi
 
-# Start start solo chain with zombienet in background
-bulletin-solo-zombienet-start:
+# Start solo chain or parachain with zombienet in background
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
     mkdir -p {{ PID_DIR }}
     
-    echo "⚡ Starting Bulletin chain with zombienet..."
+    echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
     
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
@@ -53,11 +57,43 @@ bulletin-solo-zombienet-start:
     
     echo "   Using zombienet: $ZOMBIENET_BIN"
     
-    # Get absolute paths for bulletin binary and config
-    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
-    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
+    # Handle westend parachain setup differently
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        echo "   Setting up Bulletin Westend Parachain..."
+        
+        # Check for required binaries
+        if [ -z "$POLKADOT_BINARY_PATH" ]; then
+            echo "❌ Error: POLKADOT_BINARY_PATH not set"
+            echo "   Please set environment variable or ensure polkadot binary is available"
+            exit 1
+        fi
+        
+        if [ -z "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
+            echo "❌ Error: POLKADOT_PARACHAIN_BINARY_PATH not set"
+            echo "   Please set environment variable or ensure polkadot-parachain binary is available"
+            exit 1
+        fi
+        
+        # Generate westend spec
+        echo "   Generating Westend spec..."
+        (cd .. && ./scripts/create_bulletin_westend_spec.sh)
+        
+        ZOMBIENET_TOML=$(just _zombienet-config-name {{ runtime }})
+        ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/$ZOMBIENET_TOML
+        
+        POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+        POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
+        $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+    else
+        # Solo chain (bulletin-polkadot-runtime)
+        echo "   Setting up Bulletin Solo Chain..."
+        BULLETIN_BINARY=$(cd .. && pwd)/target/release/{{ runtime }}
+        ZOMBIENET_TOML=$(just _zombienet-config-name {{ runtime }})
+        ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/$ZOMBIENET_TOML
+        
+        POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+    fi
     
-    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
@@ -111,11 +147,11 @@ ipfs-start: _check-docker
     echo "ipfs-node" > {{ PID_DIR }}/ipfs-docker.container
 
 # Connect to IPFS nodes using Docker
-ipfs-connect:
+ipfs-connect runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
-    echo "🔗 Connecting IPFS nodes (Docker)..."
+    echo "🔗 Connecting IPFS nodes (Docker, runtime: {{ runtime }})..."
     
     # Detect the correct host and protocol for Docker
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -129,8 +165,17 @@ ipfs-connect:
     fi
     
     echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
-    docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-    docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    
+    # Different peer IDs for different runtimes
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        # Westend parachain peer IDs
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
+    else
+        # Polkadot solo chain peer IDs
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    fi
 
 # Shutdown IPFS Docker container
 ipfs-shutdown:
@@ -144,14 +189,21 @@ ipfs-shutdown:
     [ -f "{{ PID_DIR }}/ipfs-docker.container" ] && rm "{{ PID_DIR }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
 
 # Start IPFS reconnect script in background (Docker mode)
-ipfs-reconnect-start:
+ipfs-reconnect-start runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
     mkdir -p {{ PID_DIR }}
     
-    echo "🔄 Starting IPFS reconnect script (Docker mode)..."
-    ./scripts/ipfs-reconnect-solo.sh docker > /tmp/ipfs-reconnect-docker.log 2>&1 &
+    echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
+    
+    # Use different reconnect script for westend
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        ./scripts/ipfs-reconnect-westend.sh docker > /tmp/ipfs-reconnect-docker.log 2>&1 &
+    else
+        ./scripts/ipfs-reconnect-solo.sh docker > /tmp/ipfs-reconnect-docker.log 2>&1 &
+    fi
+    
     RECONNECT_PID=$!
     echo $RECONNECT_PID > {{ PID_DIR }}/ipfs-reconnect-docker.pid
     echo "   Reconnect PID: $RECONNECT_PID"
@@ -167,18 +219,20 @@ papi-generate:
     npm run papi:generate
 
 # Setup all services using Docker for IPFS
-setup-services:
+# Parameters:
+#   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+setup-services runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
     echo "🔧 Tearing down Docker services if they are running..."
     just ipfs-shutdown
     
-    echo "🐳 Setting up services with Docker IPFS..."
+    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
     
     # Start services with Docker
     just ipfs-start
-    just bulletin-solo-zombienet-start
+    just bulletin-solo-zombienet-start {{ runtime }}
     
     # Wait a bit longer and verify zombienet is running
     echo "🔍 Verifying zombienet is ready..."
@@ -188,8 +242,8 @@ setup-services:
     echo "   Checking zombienet log:"
     tail -20 /tmp/zombienet.log || echo "   ⚠ Could not read zombienet log"
     
-    just ipfs-connect
-    just ipfs-reconnect-start
+    just ipfs-connect {{ runtime }}
+    just ipfs-reconnect-start {{ runtime }}
     just papi-generate
     
     echo "✅ Services setup complete (Docker mode)"
@@ -229,15 +283,16 @@ teardown-services:
 # Run authorize and store example with Docker IPFS
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-run-authorize-and-store mode="ws": build npm-install
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
+run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": (build runtime) npm-install
     #!/usr/bin/env bash
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot)..."
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }})..."
         SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
     elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws)..."
+        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }})..."
         SCRIPT_NAME="authorize_and_store_papi.js"
     else
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
@@ -245,7 +300,7 @@ run-authorize-and-store mode="ws": build npm-install
     fi
     echo ""
     
-    just setup-services
+    just setup-services {{ runtime }}
     node $SCRIPT_NAME
     EXAMPLE_EXIT=$?
     
@@ -261,14 +316,16 @@ run-authorize-and-store mode="ws": build npm-install
     exit $EXAMPLE_EXIT
 
 # Run store chunked data example with Docker IPFS
-run-store-chunked-data: build npm-install
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+run-store-chunked-data runtime="bulletin-polkadot-runtime": (build runtime) npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting store chunked data + DAG-PB workflow test ..."
+    echo "🚀 Starting store chunked data + DAG-PB workflow test (runtime: {{ runtime }})..."
     echo ""
 
-    just setup-services
+    just setup-services {{ runtime }}
     node store_chunked_data.js
     EXAMPLE_EXIT=$?
 
