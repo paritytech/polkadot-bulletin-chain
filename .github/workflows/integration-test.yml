@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: runtime
         run: |
-          TASKS=$(cat scripts/runtimes-matrix.json | jq -c 'map(select(.name != "bulletin-rococo"))')
+          TASKS=$(cat scripts/runtimes-matrix.json | jq -c 'map(select(.excludeFromCi != true))')
           echo $TASKS
           echo "runtime=$TASKS" >> $GITHUB_OUTPUT
 
