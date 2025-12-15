@@ -11,7 +11,7 @@ default: (run-authorize-and-store "smoldot" "bulletin-polkadot-runtime")
 # Build the bulletin chain node in release mode
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot"), taken from ../scripts/runtimes-matrix.json
-build runtime="bulletin-polkadot":
+build runtime="bulletin-polkadot-runtime":
     cargo build --release -p {{ runtime }}
 
 # Install JavaScript dependencies
