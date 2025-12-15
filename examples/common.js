@@ -114,6 +114,9 @@ export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
     return { rootCid, dagBytes }
 }
 
+/**
+ * Generates (dynamic) images based on the input text.
+ */
 export function generateTextImage(file, text, width = 800, height = 600) {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext("2d");
