@@ -36,6 +36,7 @@ setup-westend-prerequisites:
     # Check out the required branch
     echo "   Checking out branch bko-bulletin-para-support..."
     git fetch origin
+    # TODO: later, before merging, switch to the `bko-bulletin-support` https://github.com/paritytech/polkadot-sdk/pull/10662 (not now)
     git reset --hard origin/bko-bulletin-para-support
     
     # Build polkadot binary
