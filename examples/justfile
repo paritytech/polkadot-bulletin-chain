@@ -142,7 +142,8 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
           $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     else # bulletin-polkadot-runtime
         echo "   Setting up Polkadot runtime..."
-        cargo build --release -p {{ runtime }}
+        # Build the node binary (which will build the runtime as a dependency)
+        cargo build --release -p polkadot-bulletin-chain
         BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
         ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
         POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
