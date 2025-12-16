@@ -8,12 +8,6 @@ PID_DIR := "/tmp/bulletin-pids"
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "smoldot" "bulletin-polkadot-runtime")
 
-# Build the bulletin chain node in release mode
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
-build runtime="bulletin-polkadot-runtime":
-    cargo build --release -p {{ runtime }}
-
 # Setup prerequisites for Westend runtime (polkadot and polkadot-parachain binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bridge_testing/bin
 setup-westend-prerequisites:
@@ -116,9 +110,6 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     
     echo "   Using zombienet: $ZOMBIENET_BIN"
 
-    # Get absolute paths for bulletin binary and config
-    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
-    
     # Handle different runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         echo "   Setting up Westend runtime..."
@@ -149,9 +140,10 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
           POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
           $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
-    else
-        # Default: bulletin-polkadot-runtime
+    else # bulletin-polkadot-runtime
         echo "   Setting up Polkadot runtime..."
+        cargo build --release -p {{ runtime }}
+        BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
         ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
         POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     fi
@@ -346,7 +338,7 @@ teardown-services:
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
-run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": (build runtime) npm-install
+run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -380,7 +372,7 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": (build ru
 # Run store chunked data example with Docker IPFS
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-store-chunked-data runtime="bulletin-polkadot-runtime": (build runtime) npm-install
+run-store-chunked-data runtime="bulletin-polkadot-runtime": npm-install
     #!/usr/bin/env bash
     set -e
 
