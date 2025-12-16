@@ -75,43 +75,12 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     fi
     
     echo "   Using zombienet: $ZOMBIENET_BIN"
-    
-    # Handle westend parachain setup differently
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        echo "   Setting up Bulletin Westend Parachain..."
-        
-        # Check for required binaries
-        if [ -z "$POLKADOT_BINARY_PATH" ]; then
-            echo "❌ Error: POLKADOT_BINARY_PATH not set"
-            echo "   Please set environment variable or ensure polkadot binary is available"
-            exit 1
-        fi
-        
-        if [ -z "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
-            echo "❌ Error: POLKADOT_PARACHAIN_BINARY_PATH not set"
-            echo "   Please set environment variable or ensure polkadot-parachain binary is available"
-            exit 1
-        fi
-        
-        # Generate westend spec
-        echo "   Generating Westend spec..."
-        (cd .. && ./scripts/create_bulletin_westend_spec.sh)
-        
-        ZOMBIENET_TOML=$(just _zombienet-config-name {{ runtime }})
-        ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/$ZOMBIENET_TOML
-        
-        POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
-        POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
-    else
-        # Solo chain (bulletin-polkadot-runtime)
-        echo "   Setting up Bulletin Solo Chain..."
-        BULLETIN_BINARY=$(cd .. && pwd)/target/release/{{ runtime }}
-        ZOMBIENET_TOML=$(just _zombienet-config-name {{ runtime }})
-        ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/$ZOMBIENET_TOML
-        
-        POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
-    fi
+
+    # Get absolute paths for bulletin binary and config
+    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
+    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
+
+    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
