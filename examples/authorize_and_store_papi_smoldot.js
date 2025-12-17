@@ -5,7 +5,8 @@ import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store } from './api.js';
-import { setupKeyringAndSigners, cidFromBytes } from './common.js';
+import { setupKeyringAndSigners } from './common.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
