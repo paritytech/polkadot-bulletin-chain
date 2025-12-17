@@ -21,6 +21,7 @@ use crate::{
 	self as pallet_transaction_storage, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
+use pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
 
 type Block = MockBlock<Test>;
@@ -52,6 +53,10 @@ parameter_types! {
 
 impl pallet_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
+	type RuntimeHoldReason = RuntimeHoldReason;
+	type FeeDestination = ();
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;

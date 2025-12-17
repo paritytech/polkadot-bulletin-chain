@@ -1,0 +1,78 @@
+name: Integration Tests
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Cancel previous runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: examples/package.json
+
+      - name: Install just
+        run: cargo install just --locked || true
+
+      - name: Download zombienet
+        run: |
+          curl -L \
+            -H "Authorization: token ${{ github.token }}" \
+            -o zombienet-linux-x64 \
+            "https://github.com/paritytech/zombienet/releases/download/v1.3.138/zombienet-linux-x64"
+          chmod +x zombienet-linux-x64
+          echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
+
+      - name: Run authorize and store (PAPI, smoldot)
+        working-directory: examples
+        run: just run-authorize-and-store "smoldot"
+
+      - name: Run authorize and store (PAPI, RPC node)
+        working-directory: examples
+        run: just run-authorize-and-store "ws"
+
+      - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
+        working-directory: examples
+        run: just run-store-chunked-data

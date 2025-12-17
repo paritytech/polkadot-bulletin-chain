@@ -36,11 +36,17 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
+	traits::fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
 	CHUNK_SIZE, INHERENT_IDENTIFIER,
 };
+
+/// A type alias for the balance type from this pallet's point of view.
+type BalanceOf<T> =
+	<<T as Config>::Currency as Inspect<<T as frame_system::Config>::AccountId>>::Balance;
+pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;
@@ -155,14 +161,34 @@ impl CheckContext {
 pub mod pallet {
 	use super::*;
 
+	/// A reason for this pallet placing a hold on funds.
+	#[pallet::composite_enum]
+	pub enum HoldReason {
+		/// The funds are held as deposit for the used storage.
+		StorageFeeHold,
+	}
+
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
 		/// The overarching event type.
 		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+		/// A dispatchable call.
+		type RuntimeCall: Parameter
+			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin>
+			+ GetDispatchInfo
+			+ From<frame_system::Call<Self>>;
+		/// The fungible type for this pallet.
+		type Currency: Mutate<Self::AccountId>
+			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>
+			+ Balanced<Self::AccountId>;
+		/// The overarching runtime hold reason.
+		type RuntimeHoldReason: From<HoldReason>;
+		/// Handler for the unbalanced decrease when fees are burned.
+		type FeeDestination: OnUnbalanced<CreditOf<Self>>;
 		/// Weight information for extrinsics in this pallet.
 		type WeightInfo: WeightInfo;
-		/// Maximum number of indexed transactions in a block.
+		/// Maximum number of indexed transactions in the block.
 		#[pallet::constant]
 		type MaxBlockTransactions: Get<u32>;
 		/// Maximum data set in a single transaction in bytes.
@@ -200,16 +226,26 @@ pub mod pallet {
 		BadDataSize,
 		/// Too many transactions in the block.
 		TooManyTransactions,
-		/// Renewed extrinsic not found.
+		/// Invalid configuration.
+		NotConfigured,
+		/// Renewed extrinsic is not found.
 		RenewedNotFound,
+		/// Attempting to store an empty transaction
+		EmptyTransaction,
 		/// Proof was not expected in this block.
 		UnexpectedProof,
 		/// Proof failed verification.
 		InvalidProof,
-		/// Unable to verify proof becasue state data is missing.
+		/// Missing storage proof.
+		MissingProof,
+		/// Unable to verify proof because state data is missing.
 		MissingStateData,
 		/// Double proof check in the block.
 		DoubleCheck,
+		/// Storage proof was not checked in the block.
+		ProofNotChecked,
+		/// Transaction is too large.
+		TransactionTooLarge,
 		/// Authorization was not found.
 		AuthorizationNotFound,
 		/// Authorization has not expired.
@@ -329,7 +365,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index });
+			Self::deposit_event(Event::Stored { index, content_hash });
 			Ok(())
 		}
 
@@ -361,7 +397,8 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::renew(extrinsic_index, info.content_hash.into());
+			let content_hash = info.content_hash.into();
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -377,7 +414,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Renewed { index });
+			Self::deposit_event(Event::Renewed { index, content_hash });
 			Ok(().into())
 		}
 
@@ -451,7 +488,7 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -460,12 +497,12 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::authorize_preimage())]
 		pub fn authorize_preimage(
 			origin: OriginFor<T>,
-			hash: ContentHash,
+			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
-			Self::authorize(AuthorizationScope::Preimage(hash), 1, max_size);
-			Self::deposit_event(Event::PreimageAuthorized { hash, max_size });
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
+			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
 
@@ -492,7 +529,7 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `hash`: The BLAKE2b hash that was authorized.
+		/// - `content_hash`: The BLAKE2b hash that was authorized.
 		///
 		/// Emits
 		/// [`ExpiredPreimageAuthorizationRemoved`](Event::ExpiredPreimageAuthorizationRemoved)
@@ -501,10 +538,10 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::remove_expired_preimage_authorization())]
 		pub fn remove_expired_preimage_authorization(
 			_origin: OriginFor<T>,
-			hash: ContentHash,
+			content_hash: ContentHash,
 		) -> DispatchResult {
-			Self::remove_expired_authorization(AuthorizationScope::Preimage(hash))?;
-			Self::deposit_event(Event::ExpiredPreimageAuthorizationRemoved { hash });
+			Self::remove_expired_authorization(AuthorizationScope::Preimage(content_hash))?;
+			Self::deposit_event(Event::ExpiredPreimageAuthorizationRemoved { content_hash });
 			Ok(())
 		}
 
@@ -536,7 +573,7 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
 		/// [`PreimageAuthorizationRefreshed`](Event::PreimageAuthorizationRefreshed) when
@@ -545,11 +582,11 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::refresh_preimage_authorization())]
 		pub fn refresh_preimage_authorization(
 			origin: OriginFor<T>,
-			hash: ContentHash,
+			content_hash: ContentHash,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
-			Self::refresh_authorization(AuthorizationScope::Preimage(hash))?;
-			Self::deposit_event(Event::PreimageAuthorizationRefreshed { hash });
+			Self::refresh_authorization(AuthorizationScope::Preimage(content_hash))?;
+			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
 	}
@@ -558,24 +595,24 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32 },
+		Stored { index: u32, content_hash: ContentHash },
 		/// Renewed data under specified index.
-		Renewed { index: u32 },
+		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.
 		ProofChecked,
 		/// An account `who` was authorized to store `bytes` bytes in `transactions` transactions.
 		AccountAuthorized { who: T::AccountId, transactions: u32, bytes: u64 },
 		/// An authorization for account `who` was refreshed.
 		AccountAuthorizationRefreshed { who: T::AccountId },
-		/// Authorization was given for a preimage of `hash` (not exceeding `max_size`) to be
-		/// stored by anyone.
-		PreimageAuthorized { hash: ContentHash, max_size: u64 },
-		/// An authorization for a preimage of `hash` was refreshed.
-		PreimageAuthorizationRefreshed { hash: ContentHash },
+		/// Authorization was given for a preimage of `content_hash` (not exceeding `max_size`) to
+		/// be stored by anyone.
+		PreimageAuthorized { content_hash: ContentHash, max_size: u64 },
+		/// An authorization for a preimage of `content_hash` was refreshed.
+		PreimageAuthorizationRefreshed { content_hash: ContentHash },
 		/// An expired account authorization was removed.
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
 		/// An expired preimage authorization was removed.
-		ExpiredPreimageAuthorizationRemoved { hash: ContentHash },
+		ExpiredPreimageAuthorizationRemoved { content_hash: ContentHash },
 	}
 
 	/// Authorizations, keyed by scope.
@@ -593,6 +630,14 @@ pub mod pallet {
 		BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 		OptionQuery,
 	>;
+
+	#[pallet::storage]
+	/// Storage fee per byte.
+	pub type ByteFee<T: Config> = StorageValue<_, BalanceOf<T>>;
+
+	#[pallet::storage]
+	/// Storage fee per transaction.
+	pub type EntryFee<T: Config> = StorageValue<_, BalanceOf<T>>;
 
 	// Intermediates
 	#[pallet::storage]
@@ -667,10 +712,10 @@ pub mod pallet {
 					// enough lifetime for their store/renew transactions that they aren't at risk
 					// of replay when the account is next authorized.
 					if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
-						log::warn!(
+						tracing::warn!(
 							target: LOG_TARGET,
-							"Failed to decrement provider reference count for authorized account {who:?}, \
-							leaking reference: {err:?}"
+							error=?err, ?who,
+							"Failed to decrement provider reference count for authorized account leaking reference"
 						);
 					}
 				},
@@ -742,7 +787,7 @@ pub mod pallet {
 			// In the case of a regular unsigned transaction, pre_dispatch should have checked that
 			// the authorization exists and has expired
 			let Some(authorization) = Authorizations::<T>::take(&scope) else {
-				return Err(Error::<T>::AuthorizationNotFound.into())
+				return Err(Error::<T>::AuthorizationNotFound.into());
 			};
 			ensure!(Self::expired(authorization.expiration), Error::<T>::AuthorizationNotExpired);
 			Self::authorization_removed(&scope);
@@ -751,7 +796,7 @@ pub mod pallet {
 
 		fn authorization_extent(scope: AuthorizationScopeFor<T>) -> AuthorizationExtent {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
-				return AuthorizationExtent { transactions: 0, bytes: 0 }
+				return AuthorizationExtent { transactions: 0, bytes: 0 };
 			};
 			if Self::expired(authorization.expiration) {
 				AuthorizationExtent { transactions: 0, bytes: 0 }
@@ -869,7 +914,7 @@ pub mod pallet {
 			scope: AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
-				return Err(AUTHORIZATION_NOT_FOUND.into())
+				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
 			if Self::expired(authorization.expiration) {
 				Ok(())
@@ -884,11 +929,11 @@ pub mod pallet {
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
-				return Err(BAD_DATA_SIZE.into())
+				return Err(BAD_DATA_SIZE.into());
 			}
 
 			if Self::block_transactions_full() {
-				return Err(InvalidTransaction::ExhaustsResources.into())
+				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
 			let hash = hash();
@@ -938,13 +983,13 @@ pub mod pallet {
 						.into()
 					}))
 				},
-				Call::<T>::remove_expired_preimage_authorization { hash } => {
-					Self::check_authorization_expired(AuthorizationScope::Preimage(*hash))?;
+				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
+					Self::check_authorization_expired(AuthorizationScope::Preimage(*content_hash))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
 						)
-						.and_provides(hash)
+						.and_provides(content_hash)
 						.priority(T::RemoveExpiredAuthorizationPriority::get())
 						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 						.into()
@@ -969,11 +1014,11 @@ pub mod pallet {
 			};
 
 			if !Self::data_size_ok(size) {
-				return Err(BAD_DATA_SIZE.into())
+				return Err(BAD_DATA_SIZE.into());
 			}
 
 			if Self::block_transactions_full() {
-				return Err(InvalidTransaction::ExhaustsResources.into())
+				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
 			Self::check_authorization(
