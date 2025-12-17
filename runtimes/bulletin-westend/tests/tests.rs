@@ -211,7 +211,7 @@ fn transaction_storage_max_throughput() {
 	use sp_keyring::Sr25519Keyring;
 
 	const NUM_TRANSACTIONS: u32 = 8;
-	const TRANSACTION_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
+	const TRANSACTION_SIZE: usize = 1024 * 1024; // 1 MiB
 	const TOTAL_BYTES: u64 = (NUM_TRANSACTIONS as u64) * (TRANSACTION_SIZE as u64); // 8 MiB
 
 	sp_io::TestExternalities::new(
