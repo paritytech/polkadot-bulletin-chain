@@ -176,8 +176,8 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: /tmp/zombienet.log"
-    echo "   Waiting for chain to start (15 seconds)..."
-    sleep 15
+    echo "   Waiting for chain to start (120 seconds)..."
+    sleep 120
 
 # Check if Docker is available and running
 _check-docker:
