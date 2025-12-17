@@ -16,3 +16,7 @@ chain-spec-builder create \
 
 mv chain_spec.json bulletin-westend-spec.json
 cp bulletin-westend-spec.json ./zombienet/bulletin-westend-spec.json
+
+# Also copy to examples/zombienet/ for CI tests that run from examples directory
+mkdir -p ./examples/zombienet
+cp bulletin-westend-spec.json ./examples/zombienet/bulletin-westend-spec.json
