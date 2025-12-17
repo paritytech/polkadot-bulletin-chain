@@ -203,7 +203,7 @@ fn transaction_storage_runtime_sizes() {
 
 /// Test maximum write throughput: 8 transactions of 1 MiB each in a single block (8 MiB total).
 #[test]
-fn transaction_storage_max_throughput() {
+fn transaction_storage_max_throughput_per_block() {
 	use bulletin_westend_runtime as runtime;
 	use bulletin_westend_runtime::BuildStorage;
 	use frame_support::assert_ok;
