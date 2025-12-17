@@ -258,13 +258,6 @@ fn transaction_storage_max_throughput() {
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 		);
-
-		tracing::info!(
-			"Successfully stored {} transactions of {} bytes each ({} MiB total) in a single block",
-			NUM_TRANSACTIONS,
-			TRANSACTION_SIZE,
-			TOTAL_BYTES / (1024 * 1024)
-		);
 	});
 }
 
