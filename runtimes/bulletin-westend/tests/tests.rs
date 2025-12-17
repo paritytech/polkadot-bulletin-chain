@@ -201,6 +201,73 @@ fn transaction_storage_runtime_sizes() {
 	});
 }
 
+/// Test maximum write throughput: 8 transactions of 1 MiB each in a single block (8 MiB total).
+#[test]
+fn transaction_storage_max_throughput() {
+	use bulletin_westend_runtime as runtime;
+	use bulletin_westend_runtime::BuildStorage;
+	use frame_support::assert_ok;
+	use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+	use sp_keyring::Sr25519Keyring;
+
+	const NUM_TRANSACTIONS: u32 = 8;
+	const TRANSACTION_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
+	const TOTAL_BYTES: u64 = (NUM_TRANSACTIONS as u64) * (TRANSACTION_SIZE as u64); // 8 MiB
+
+	sp_io::TestExternalities::new(
+		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
+	)
+	.execute_with(|| {
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+
+		// fund Alice to cover length-based tx fees
+		let initial: Balance = 10_000_000_000_000_000_000u128;
+		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
+
+		// authorize 8 transactions of 1 MiB each
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			NUM_TRANSACTIONS,
+			TOTAL_BYTES,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: NUM_TRANSACTIONS, bytes: TOTAL_BYTES },
+		);
+
+		// Advance to a fresh block
+		advance_block();
+
+		// Store all 8 transactions in the same block (no advance_block between them)
+		for index in 0..NUM_TRANSACTIONS {
+			tracing::info!("Storing 1 MiB transaction {}/{}", index + 1, NUM_TRANSACTIONS);
+			let res = construct_and_apply_extrinsic(
+				account.pair(),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; TRANSACTION_SIZE],
+				}),
+			);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+		}
+
+		// Verify all authorizations were consumed
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+
+		tracing::info!(
+			"Successfully stored {} transactions of {} bytes each ({} MiB total) in a single block",
+			NUM_TRANSACTIONS,
+			TRANSACTION_SIZE,
+			TOTAL_BYTES / (1024 * 1024)
+		);
+	});
+}
+
 #[test]
 fn location_conversion_works() {
 	// the purpose of hardcoded values is to catch an unintended location conversion logic change.
