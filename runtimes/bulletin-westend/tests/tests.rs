@@ -242,7 +242,6 @@ fn transaction_storage_max_throughput() {
 
 		// Store all 8 transactions in the same block (no advance_block between them)
 		for index in 0..NUM_TRANSACTIONS {
-			tracing::info!("Storing 1 MiB transaction {}/{}", index + 1, NUM_TRANSACTIONS);
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
