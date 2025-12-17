@@ -3,7 +3,8 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store} from './api.js';
-import { setupKeyringAndSigners, cidFromBytes } from './common.js';
+import { setupKeyringAndSigners } from './common.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 const NODE_WS = 'ws://localhost:10000';
