@@ -7,8 +7,9 @@ import { create } from 'ipfs-http-client'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { waitForNewBlock, cidFromBytes, buildUnixFSDagPB, convertCid, generateTextImage, filesAreEqual } from './common.js'
+import { waitForNewBlock, generateTextImage, filesAreEqual, fileToDisk, NonceManager } from './common.js'
 import { fetchCid } from "./api.js";
+import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 
 // ---- CONFIG ----
 const WS_ENDPOINT = 'ws://127.0.0.1:10000' // Bulletin node
@@ -70,17 +71,6 @@ async function retrieveMetadata(ipfs, metadataCid) {
     const metadataJson = JSON.parse(new TextDecoder().decode(metadataBlock));
     console.log(`📜 Loaded metadata:`, metadataJson);
     return metadataJson;
-}
-
-async function fileToDisk(outputPath, fullBuffer) {
-    await new Promise((resolve, reject) => {
-        const ws = fs.createWriteStream(outputPath);
-        ws.write(fullBuffer);
-        ws.end();
-        ws.on('finish', resolve);
-        ws.on('error', reject);
-    });
-    console.log(`💾 File saved to: ${outputPath}`);
 }
 
 /**
@@ -208,18 +198,6 @@ async function storeProof(api, sudoPair, pair, rootCID, dagFileBytes, nonceMgr, 
     const proofResult = await sudoTx.signAndSend(sudoPair, { nonce: sudoNonceMgr.getAndIncrement()});
     console.log(`📤 DAG proof - "${proof}" - stored in Bulletin:`, proofResult.toHuman?.())
     return { rawDagCid }
-}
-
-class NonceManager {
-    constructor(initialNonce) {
-        this.nonce = initialNonce; // BN instance from api.query.system.account
-    }
-
-    getAndIncrement() {
-        const current = this.nonce;
-        this.nonce = this.nonce.addn(1); // increment BN
-        return current;
-    }
 }
 
 async function authorizeStorage(api, sudoPair, pair, nonceMgr) {

@@ -1,4 +1,4 @@
-import { cidFromBytes } from "./common.js";
+import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary } from '@polkadot-api/substrate-bindings';
 
 export async function authorizeAccount(typedApi, sudoSigner, who, transactions, bytes) {
