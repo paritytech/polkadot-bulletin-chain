@@ -65,6 +65,21 @@ setup-westend-prerequisites:
     # Verify polkadot-parachain version
     $BIN_DIR/polkadot-parachain --version
     
+    # Build and install chain-spec-builder
+    echo "   Building chain-spec-builder..."
+    cargo build -p staging-chain-spec-builder -r
+    
+    # Verify and copy chain-spec-builder binary
+    echo "   Copying chain-spec-builder binary..."
+    ls -la target/release/chain-spec-builder
+    cp target/release/chain-spec-builder $BIN_DIR/
+    
+    # Verify chain-spec-builder
+    $BIN_DIR/chain-spec-builder --version
+    
+    # Add BIN_DIR to PATH for subsequent scripts
+    export PATH="$BIN_DIR:$PATH"
+    
     echo "✅ Westend prerequisites setup complete!"
     echo "   Binaries installed in: $BIN_DIR"
 
@@ -135,7 +150,9 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         
         # Create chain spec
         echo "   Creating Westend chain spec..."
-        (cd .. && ./scripts/create_bulletin_westend_spec.sh)
+        # Ensure binaries are in PATH for the script
+        export PATH="~/local_bridge_testing/bin:$PATH"
+        (cd .. && PATH="$HOME/local_bridge_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh)
         
         ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-westend-local.toml
         POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
