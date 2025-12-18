@@ -81,10 +81,40 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK) {
     });
 }
 
-export async function fetchCid(httpIpfsApi, cid) {
+export async function fetchCid(httpIpfsApi, cid, maxRetries = 10, initialDelay = 2000) {
     const contentUrl = `${httpIpfsApi}/ipfs/${cid.toString()}`;
     console.log('⬇️ Downloading the full content (no chunking) by cid from url: ', contentUrl);
-    const res = await fetch(contentUrl);
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-    return Buffer.from(await res.arrayBuffer())
+    
+    let lastError;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const res = await fetch(contentUrl);
+            if (res.ok) {
+                console.log(`✅ Content fetched successfully on attempt ${attempt + 1}`);
+                return Buffer.from(await res.arrayBuffer());
+            }
+            
+            // If we get a 404 or 504, retry (content might not be available yet)
+            if (res.status === 404 || res.status === 504 || res.status === 502) {
+                lastError = new Error(`HTTP error ${res.status}`);
+                const delay = initialDelay * Math.pow(1.5, attempt);
+                console.log(`⏳ Attempt ${attempt + 1}/${maxRetries} failed with status ${res.status}, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+            
+            // For other errors, throw immediately
+            throw new Error(`HTTP error ${res.status}`);
+        } catch (error) {
+            // Network errors, timeouts, etc.
+            lastError = error;
+            if (attempt < maxRetries - 1) {
+                const delay = initialDelay * Math.pow(1.5, attempt);
+                console.log(`⏳ Attempt ${attempt + 1}/${maxRetries} failed with error: ${error.message}, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    
+    throw new Error(`Failed to fetch CID after ${maxRetries} attempts. Last error: ${lastError?.message}`);
 }
