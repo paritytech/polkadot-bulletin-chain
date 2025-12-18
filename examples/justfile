@@ -18,7 +18,7 @@ setup-westend-prerequisites:
     POLKADOT_SDK_DIR=~/local_bulletin_testing/polkadot-sdk
 
     if [[ "$OSTYPE" == "darwin"* ]]; then
-      export DYLD_FALLBACK_LIBRARY_PATH=/Library/Developer/CommandLineTools/usr/lib
+      export DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib
     fi
     
     echo "🔧 Setting up Westend runtime prerequisites..."
@@ -45,7 +45,7 @@ setup-westend-prerequisites:
     
     # Build polkadot binary
     echo "   Building polkadot binary (this may take a while)..."
-    DYLD_FALLBACK_LIBRARY_PATH=/Library/Developer/CommandLineTools/usr/lib cargo build -p polkadot -r
+    cargo build -p polkadot -r
     
     # Verify and copy polkadot binaries
     echo "   Copying polkadot binaries..."
@@ -59,7 +59,7 @@ setup-westend-prerequisites:
     
     # Build polkadot-parachain binary
     echo "   Building polkadot-parachain binary (this may take a while)..."
-    DYLD_FALLBACK_LIBRARY_PATH=/Library/Developer/CommandLineTools/usr/lib cargo build -p polkadot-parachain-bin -r
+    cargo build -p polkadot-parachain-bin -r
     
     # Verify and copy polkadot-parachain binary
     echo "   Copying polkadot-parachain binary..."
@@ -71,7 +71,7 @@ setup-westend-prerequisites:
     
     # Build and install chain-spec-builder
     echo "   Building chain-spec-builder..."
-    DYLD_FALLBACK_LIBRARY_PATH=/Library/Developer/CommandLineTools/usr/lib cargo build -p staging-chain-spec-builder -r
+    cargo build -p staging-chain-spec-builder -r
     
     # Verify and copy chain-spec-builder binary
     echo "   Copying chain-spec-builder binary..."
@@ -168,7 +168,7 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     else # bulletin-polkadot-runtime
         echo "   Setting up Polkadot runtime..."
         # Build the node binary (which will build the runtime as a dependency)
-        DYLD_FALLBACK_LIBRARY_PATH=/Library/Developer/CommandLineTools/usr/lib cargo build --release -p polkadot-bulletin-chain
+        cargo build --release -p polkadot-bulletin-chain
         BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
         ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
         cd ..
