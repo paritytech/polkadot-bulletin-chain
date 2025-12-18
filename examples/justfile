@@ -380,7 +380,6 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-insta
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
         exit 1
     fi
-    echo ""
     
     just setup-services {{ runtime }}
     node $SCRIPT_NAME
