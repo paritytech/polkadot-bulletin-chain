@@ -6,7 +6,7 @@
 PID_DIR := "/tmp/bulletin-pids"
 
 # Default recipe - run the complete PAPI workflow test
-default: (run-authorize-and-store "smoldot" "bulletin-polkadot-runtime")
+default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 
 # Setup prerequisites for Westend runtime (polkadot and polkadot-parachain binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
