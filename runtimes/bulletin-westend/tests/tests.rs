@@ -19,7 +19,7 @@
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
-	System, TxExtension, UncheckedExtrinsic,
+	System, SystemConfig, TxExtension, UncheckedExtrinsic,
 };
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, traits::fungible::Mutate as FungibleMutate,
@@ -28,7 +28,9 @@ use parachains_common::{AccountId, AuraId, Balance, Hash as PcHash, Signature as
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
-use sp_runtime::{transaction_validity::InvalidTransaction, ApplyExtrinsicResult, Either};
+use sp_runtime::{
+	transaction_validity, transaction_validity::InvalidTransaction, ApplyExtrinsicResult, Either,
+};
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
@@ -211,8 +213,7 @@ fn transaction_storage_max_throughput_per_block() {
 	use sp_keyring::Sr25519Keyring;
 
 	const NUM_TRANSACTIONS: u32 = 8;
-	const TRANSACTION_SIZE: usize = 1024 * 1024; // 1 MiB
-	const TOTAL_BYTES: u64 = (NUM_TRANSACTIONS as u64) * (TRANSACTION_SIZE as u64); // 8 MiB
+	const TRANSACTION_SIZE: u64 = 1024 * 1024; // 1 MiB
 
 	sp_io::TestExternalities::new(
 		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
@@ -225,16 +226,19 @@ fn transaction_storage_max_throughput_per_block() {
 		let initial: Balance = 10_000_000_000_000_000_000u128;
 		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
 
-		// authorize 8 transactions of 1 MiB each
+		// authorize 8+1 transactions of 1 MiB each
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
-			NUM_TRANSACTIONS,
-			TOTAL_BYTES,
+			NUM_TRANSACTIONS + 1,
+			(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
-			AuthorizationExtent { transactions: NUM_TRANSACTIONS, bytes: TOTAL_BYTES },
+			AuthorizationExtent {
+				transactions: NUM_TRANSACTIONS + 1,
+				bytes: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE
+			},
 		);
 
 		// Advance to a fresh block
@@ -245,17 +249,30 @@ fn transaction_storage_max_throughput_per_block() {
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-					data: vec![0u8; TRANSACTION_SIZE],
+					data: vec![0u8; TRANSACTION_SIZE as _],
 				}),
 			);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
 		}
 
-		// Verify all authorizations were consumed
+		// 9th should fail.
+		assert_err!(
+			construct_and_apply_extrinsic(
+				account.pair(),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; TRANSACTION_SIZE as _],
+				}),
+			),
+			transaction_validity::TransactionValidityError::Invalid(
+				InvalidTransaction::ExhaustsResources
+			)
+		);
+
+		// Verify just 8 authorizations were consumed
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
+			AuthorizationExtent { transactions: 1, bytes: TRANSACTION_SIZE },
 		);
 	});
 }
