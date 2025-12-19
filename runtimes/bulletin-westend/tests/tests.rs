@@ -19,7 +19,7 @@
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
-	System, SystemConfig, TxExtension, UncheckedExtrinsic,
+	System, TxExtension, UncheckedExtrinsic,
 };
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, traits::fungible::Mutate as FungibleMutate,
@@ -249,7 +249,7 @@ fn transaction_storage_max_throughput_per_block() {
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-					data: vec![0u8; TRANSACTION_SIZE as _],
+					data: vec![index as u8; TRANSACTION_SIZE as _],
 				}),
 			);
 			assert_ok!(res);
