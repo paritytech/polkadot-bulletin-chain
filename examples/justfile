@@ -4,6 +4,7 @@
 
 # PID file locations
 PID_DIR := "/tmp/bulletin-pids"
+ZOMBIENET_DIR := "/tmp/bulletin-tests-run"
 
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
@@ -58,9 +59,7 @@ setup-westend-prerequisites:
     cp target/release/polkadot $BIN_DIR/
     cp target/release/polkadot-prepare-worker $BIN_DIR/
     cp target/release/polkadot-execute-worker $BIN_DIR/
-    
-    # Verify polkadot version
-    $BIN_DIR/polkadot --version
+    echo "   ✓ Polkadot binaries copied"
     
     # Build polkadot-parachain binary
     echo "   Building polkadot-parachain binary (this may take a while)..."
@@ -70,9 +69,7 @@ setup-westend-prerequisites:
     echo "   Copying polkadot-parachain binary..."
     ls -la target/release/polkadot-parachain
     cp target/release/polkadot-parachain $BIN_DIR/
-    
-    # Verify polkadot-parachain version
-    $BIN_DIR/polkadot-parachain --version
+    echo "   ✓ Polkadot-parachain binary copied"
     
     # Build and install chain-spec-builder
     echo "   Building chain-spec-builder..."
@@ -82,9 +79,7 @@ setup-westend-prerequisites:
     echo "   Copying chain-spec-builder binary..."
     ls -la target/release/chain-spec-builder
     cp target/release/chain-spec-builder $BIN_DIR/
-    
-    # Verify chain-spec-builder
-    $BIN_DIR/chain-spec-builder --version
+    echo "   ✓ Chain-spec-builder binary copied"
     
     # Add BIN_DIR to PATH for subsequent scripts
     export PATH="$BIN_DIR:$PATH"
@@ -116,6 +111,23 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     set -e
     
     mkdir -p {{ PID_DIR }}
+    
+    # Kill any existing zombienet processes to prevent conflicts
+    echo "🔍 Checking for existing zombienet processes..."
+    ZOMBIE_PIDS=$(pgrep -f "zombienet.*spawn" || true)
+    if [ -n "$ZOMBIE_PIDS" ]; then
+        echo "   Found existing zombienet processes: $ZOMBIE_PIDS"
+        echo "   Killing existing zombienet processes..."
+        pkill -9 -f "zombienet.*spawn" || true
+        # Also kill any polkadot/polkadot-parachain processes from previous runs
+        pkill -9 -f "polkadot.*--chain.*bulletin" || true
+        pkill -9 -f "polkadot-parachain.*--chain.*bulletin" || true
+        pkill -9 -f "polkadot-bulletin-chain" || true
+        echo "   ✓ Cleaned up existing processes"
+    fi
+    
+    # Clean up stale PID file
+    [ -f "{{ PID_DIR }}/zombienet.pid" ] && rm "{{ PID_DIR }}/zombienet.pid"
     
     echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
     
@@ -168,7 +180,7 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         cd ..
         POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
           POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-          $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
         cd examples
     else # bulletin-polkadot-runtime
         echo "   Setting up Polkadot runtime..."
@@ -177,7 +189,7 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
         ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
         cd ..
-        POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+        POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
         cd examples
     fi
     
@@ -387,7 +399,19 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-insta
     fi
     
     just setup-services {{ runtime }}
-    node $SCRIPT_NAME
+    
+    # Run the script with chainspec_path parameter only for smoldot mode
+    if [ "{{ mode }}" = "smoldot" ]; then
+        # Set chainspec path based on runtime
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            CHAINSPEC_PATH="{{ ZOMBIENET_DIR }}/bob/cfg/westend-local.json"
+        else # bulletin-polkadot-runtime
+            CHAINSPEC_PATH="{{ ZOMBIENET_DIR }}/bob/cfg/bulletin-polkadot-local.json"
+        fi
+        node $SCRIPT_NAME "$CHAINSPEC_PATH"
+    else
+        node $SCRIPT_NAME
+    fi
     EXAMPLE_EXIT=$?
     
     echo ""
