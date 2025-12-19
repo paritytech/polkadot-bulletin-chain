@@ -59,7 +59,10 @@ setup-westend-prerequisites:
     cp target/release/polkadot $BIN_DIR/
     cp target/release/polkadot-prepare-worker $BIN_DIR/
     cp target/release/polkadot-execute-worker $BIN_DIR/
-    echo "   ✓ Polkadot binaries copied"
+    
+    # Verify polkadot version (optional check, may fail on macOS due to security/signing)
+    echo "   Verifying polkadot version..."
+    $BIN_DIR/polkadot --version || echo "   ⚠ Version check failed (this is OK, binary will still work)"
     
     # Build polkadot-parachain binary
     echo "   Building polkadot-parachain binary (this may take a while)..."
@@ -69,7 +72,10 @@ setup-westend-prerequisites:
     echo "   Copying polkadot-parachain binary..."
     ls -la target/release/polkadot-parachain
     cp target/release/polkadot-parachain $BIN_DIR/
-    echo "   ✓ Polkadot-parachain binary copied"
+    
+    # Verify polkadot-parachain version (optional check, may fail on macOS due to security/signing)
+    echo "   Verifying polkadot-parachain version..."
+    $BIN_DIR/polkadot-parachain --version || echo "   ⚠ Version check failed (this is OK, binary will still work)"
     
     # Build and install chain-spec-builder
     echo "   Building chain-spec-builder..."
@@ -79,7 +85,10 @@ setup-westend-prerequisites:
     echo "   Copying chain-spec-builder binary..."
     ls -la target/release/chain-spec-builder
     cp target/release/chain-spec-builder $BIN_DIR/
-    echo "   ✓ Chain-spec-builder binary copied"
+    
+    # Verify chain-spec-builder (optional check, may fail on macOS due to security/signing)
+    echo "   Verifying chain-spec-builder version..."
+    $BIN_DIR/chain-spec-builder --version || echo "   ⚠ Version check failed (this is OK, binary will still work)"
     
     # Add BIN_DIR to PATH for subsequent scripts
     export PATH="$BIN_DIR:$PATH"
