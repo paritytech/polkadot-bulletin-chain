@@ -58,11 +58,11 @@ fn advance_block() {
 	TransactionStorage::on_initialize(next);
 }
 
+/// Constructs an unsigned extrinsic when `sender` is `None`.
 fn construct_extrinsic(
-	sender: sp_core::sr25519::Pair,
+	sender: Option<sp_core::sr25519::Pair>,
 	call: RuntimeCall,
-) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
-	let account_id = parachains_common::AccountId::from(sender.public());
+) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
 	// provide a known block hash for the immortal era check
 	frame_system::BlockHash::<Runtime>::insert(0, PcHash::default());
 	let inner = (
@@ -72,9 +72,12 @@ fn construct_extrinsic(
 		frame_system::CheckTxVersion::<Runtime>::new(),
 		frame_system::CheckGenesis::<Runtime>::new(),
 		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
-		frame_system::CheckNonce::<Runtime>::from(
-			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
-		),
+		frame_system::CheckNonce::<Runtime>::from(if let Some(s) = sender.as_ref() {
+			let account_id = AccountId::from(s.public());
+			frame_system::Pallet::<Runtime>::account(&account_id).nonce
+		} else {
+			0
+		}),
 		frame_system::CheckWeight::<Runtime>::new(),
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
@@ -84,18 +87,26 @@ fn construct_extrinsic(
 	);
 	let tx_ext: TxExtension =
 		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
-	let payload = sp_runtime::generic::SignedPayload::new(call.clone(), tx_ext.clone())?;
-	let signature = payload.using_encoded(|e| sender.sign(e));
-	Ok(UncheckedExtrinsic::new_signed(
-		call,
-		account_id.into(),
-		PcSignature::Sr25519(signature),
-		tx_ext,
-	))
+
+	if let Some(s) = sender.as_ref() {
+		// Signed call.
+		let account_id = AccountId::from(s.public());
+		let payload = sp_runtime::generic::SignedPayload::new(call.clone(), tx_ext.clone())?;
+		let signature = payload.using_encoded(|e| s.sign(e));
+		Ok(UncheckedExtrinsic::new_signed(
+			call,
+			account_id.into(),
+			PcSignature::Sr25519(signature),
+			tx_ext,
+		))
+	} else {
+		// Unsigned call.
+		Ok(UncheckedExtrinsic::new_transaction(call, tx_ext))
+	}
 }
 
 fn construct_and_apply_extrinsic(
-	account: sp_core::sr25519::Pair,
+	account: Option<sp_core::sr25519::Pair>,
 	call: RuntimeCall,
 ) -> ApplyExtrinsicResult {
 	let dispatch_info = call.get_dispatch_info();
@@ -147,7 +158,7 @@ fn transaction_storage_runtime_sizes() {
 
 				tracing::info!("Storing data with size: {size} and index: {index}");
 				let res = construct_and_apply_extrinsic(
-					account.pair(),
+					Some(account.pair()),
 					RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 						data: vec![0u8; size],
 					}),
@@ -177,7 +188,7 @@ fn transaction_storage_runtime_sizes() {
 				AuthorizationExtent { transactions: 1_u32, bytes: oversized },
 			);
 			let res = construct_and_apply_extrinsic(
-				account.pair(),
+				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: vec![0u8; oversized as usize],
 				}),
@@ -224,7 +235,7 @@ fn transaction_storage_max_throughput_per_block() {
 			// Store all 8 transactions in the same block (no advance_block between them)
 			for index in 0..NUM_TRANSACTIONS {
 				let res = construct_and_apply_extrinsic(
-					account.pair(),
+					Some(account.pair()),
 					RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 						data: vec![index as u8; TRANSACTION_SIZE as _],
 					}),
@@ -236,7 +247,7 @@ fn transaction_storage_max_throughput_per_block() {
 			// 9th should fail.
 			assert_err!(
 				construct_and_apply_extrinsic(
-					account.pair(),
+					Some(account.pair()),
 					RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 						data: vec![0u8; TRANSACTION_SIZE as _],
 					}),
@@ -258,6 +269,7 @@ fn transaction_storage_max_throughput_per_block() {
 fn authorized_storage_transactions_are_for_free() {
 	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
 		.execute_with(|| {
+			// 1. user authorization flow.
 			let account = Sr25519Keyring::Eve;
 			let who: AccountId = account.to_account_id();
 			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -266,7 +278,7 @@ fn authorized_storage_transactions_are_for_free() {
 
 			// Not authorized account should fail to store.
 			assert_err!(
-				construct_and_apply_extrinsic(account.pair(), call.clone()),
+				construct_and_apply_extrinsic(Some(account.pair()), call.clone()),
 				transaction_validity::TransactionValidityError::Invalid(
 					InvalidTransaction::Payment
 				)
@@ -279,7 +291,7 @@ fn authorized_storage_transactions_are_for_free() {
 				24,
 			));
 			// Now should work.
-			let res = construct_and_apply_extrinsic(account.pair(), call);
+			let res = construct_and_apply_extrinsic(Some(account.pair()), call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
 		});
