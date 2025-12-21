@@ -9,6 +9,7 @@ default_command = "{{POLKADOT_BULLETIN_BINARY_PATH}}"
 [[relaychain.nodes]]
 name = "alice"
 rpc_port = 10000
+p2p_port = 37999
 validator = true
 args = ["--ipfs-server", "-lruntime=trace", "-lxcm=trace"]
 
