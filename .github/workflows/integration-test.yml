@@ -23,9 +23,15 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 200
 
     steps:
+      - name: Free Disk Space (Ubuntu)
+        if: ${{ runner.environment == 'github-hosted' }}
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+
       - name: Checkout sources
         uses: actions/checkout@v4
 
@@ -65,14 +71,14 @@ jobs:
           chmod +x zombienet-linux-x64
           echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
 
-      - name: Run authorize and store (PAPI, smoldot)
+      - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
         working-directory: examples
-        run: just run-authorize-and-store "smoldot"
+        run: just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
 
-      - name: Run authorize and store (PAPI, RPC node)
+      - name: Run authorize and store (PAPI, RPC node, Westend parachain)
         working-directory: examples
-        run: just run-authorize-and-store "ws"
+        run: just run-authorize-and-store "ws" "bulletin-westend-runtime"
 
-      - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
+      - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
-        run: just run-store-chunked-data
+        run: just run-store-chunked-data "bulletin-polkadot-runtime"

@@ -1,6 +1,6 @@
 import assert from "assert";
 import * as smoldot from 'smoldot';
-import { ApiPromise, WsProvider } from "@polkadot/api";
+import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
@@ -10,22 +10,14 @@ import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
-const BOB_NODE_WS = 'ws://localhost:12346';
 const SYNC_WAIT_SEC = 15;
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
-async function fetchChainSpec(nodeWs) {
-    console.log('Fetching chainspec from node...');
-    const provider = new WsProvider(nodeWs);
-    const api = await ApiPromise.create({ provider });
-    await api.isReady;
-
-    const chainSpec = (await api.rpc.syncstate.genSyncSpec(true)).toString();
-    const chainSpecObj = JSON.parse(chainSpec);
-    chainSpecObj.protocolId = null; // Allow smoldot to sync with local chain
-    
-    await api.disconnect();
+function readChainSpec(chainspecPath) {
+    const chainSpecContent = readFileSync(chainspecPath, 'utf8');
+    const chainSpecObj = JSON.parse(chainSpecContent);
+    chainSpecObj.protocolId = null;
     return JSON.stringify(chainSpecObj);
 }
 
@@ -41,8 +33,8 @@ function initSmoldot() {
     return sd;
 }
 
-async function createSmoldotClient() {
-    const chainSpec = await fetchChainSpec(BOB_NODE_WS);
+async function createSmoldotClient(chainspecPath) {
+    const chainSpec = readChainSpec(chainspecPath);
     const sd = initSmoldot();
     const chain = await sd.addChain({ chainSpec });
     const client = createClient(getSmProvider(chain));
@@ -53,10 +45,18 @@ async function createSmoldotClient() {
 async function main() {
     await cryptoWaitReady();
     
+    // Get chainspec path from command line argument
+    const chainspecPath = process.argv[2];
+    if (!chainspecPath) {
+        console.error('❌ Error: Chainspec path is required as first argument');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chainspec-path>');
+        process.exit(1);
+    }
+    
     let sd, client, resultCode;
     try {
         // Init Smoldot PAPI client and typed api.
-        ({ client, sd } = await createSmoldotClient());
+        ({ client, sd } = await createSmoldotClient(chainspecPath));
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
         // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?        
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
