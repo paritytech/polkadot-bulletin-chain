@@ -52,10 +52,9 @@ async function main() {
         const { metadataCid } = await storeMetadata(api, pair, chunks, nonceMgr);
         await waitForNewBlock();
 
-        /*
         ////////////////////////////////////////////////////////////////////////////////////
         // 1. example manually retrieve the picture (no IPFS DAG feature)
-        const metadataJson = await retrieveMetadata(ipfs, metadataCid)
+        const metadataJson = await retrieveMetadata(ipfs, metadataCid);
         await retrieveFileForMetadata(ipfs, metadataJson, OUT_1_PATH);
         filesAreEqual(FILE_PATH, OUT_1_PATH);
 
@@ -96,7 +95,6 @@ async function main() {
         assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
         const dagNode = dagPB.decode(downloadedDagBytes);
         console.log('📄 Decoded DAG node:', dagNode);
-        */
 
         console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
         resultCode = 0;

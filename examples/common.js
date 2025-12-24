@@ -1,6 +1,5 @@
 import { CID } from 'multiformats/cid';
 import * as dagPB from '@ipld/dag-pb';
-import * as sha256 from 'multiformats/hashes/sha2';
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { createCanvas } from "canvas";
@@ -13,7 +12,7 @@ import { cidFromBytes, buildUnixFSDagPB } from "./cid_dag_metadata.js";
 export const WS_ENDPOINT = 'ws://127.0.0.1:10000'; // Bulletin node
 export const IPFS_API = 'http://127.0.0.1:5001';   // Local IPFS daemon
 export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
-export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MB
+export const CHUNK_SIZE = 2 * 1024 * 512; // less than 2 MB
 // -----------------
 
 function to_hex(input) {
@@ -45,6 +44,7 @@ export async function storeChunkedFile(api, pair, filePath, nonceMgr) {
   console.log(`✂️ Split into ${chunks.length} chunks`)
 
   // ---- 2️⃣ Store chunks in Bulletin (expecting just one block) ----
+  let maxRetries = 10;
   for (let i = 0; i < chunks.length; i++) {
     const { cid, bytes } = chunks[i]
     console.log(`📤 Storing chunk #${i + 1} CID: ${cid}`)
@@ -53,12 +53,18 @@ export async function storeChunkedFile(api, pair, filePath, nonceMgr) {
       const result = await tx.signAndSend(pair, { nonce: nonceMgr.getAndIncrement() });
       console.log(`✅ Stored chunk #${i + 1}, result:`, result.toHuman?.());
     } catch (err) {
-      if (err.stack.includes("Immediately Dropped: The transaction couldn't enter the pool because of the limit")) {
+      if (maxRetries === 0) {
+        throw "Max retries exceeded!";
+      }
+      --maxRetries;
+      if (err.stack.includes("Priority is too low") || err.stack.includes("Immediately Dropped") || err.stack.includes("Invalid Transaction")) {
         await waitForNewBlock();
         --i;
         continue;
       }
     }
+    // Reset retries if next chunk is successful
+    maxRetries = 10;
   }
   return { chunks };
 }
@@ -90,11 +96,18 @@ export async function retrieveFileForMetadata(ipfs, metadataJson, outputPath) {
 
   // 2️⃣ Fetch each chunk by CID
   const buffers = [];
+  console.log(`📦 Fetching ${metadataJson.chunks.length} chunks...`);
+
   for (const chunk of metadataJson.chunks) {
     const chunkCid = CID.parse(chunk.cid);
-    console.log(`⬇️  Fetching chunk: ${chunkCid.toString()} (len: ${chunk.len})`);
-    const block = await ipfs.block.get(chunkCid);
-    buffers.push(block);
+    const cidStr = chunkCid.toString();
+    try {
+      console.log(`⬇️  Fetching chunk: ${cidStr} (len: ${chunk.len})`);
+      const block = await ipfs.block.get(chunkCid);
+      buffers.push(block);
+    } catch (error) {
+      console.log(`❌ Chunk ${chunkCid.toString()} failed: ${error}`);
+    }
   }
 
   // 3️⃣ Concatenate into a single buffer
@@ -230,7 +243,7 @@ export async function authorizeStorage(api, sudoPair, pair, nonceMgr) {
 export async function waitForNewBlock() {
   // TODO: wait for a new block.
   console.log('🛰 Waiting for new block...')
-  return new Promise(resolve => setTimeout(resolve, 7000))
+  return new Promise(resolve => setTimeout(resolve, 8000))
 }
 
 /**
