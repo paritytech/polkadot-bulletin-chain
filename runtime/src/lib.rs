@@ -453,7 +453,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	Clone,
 	PartialEq,
 	Eq,
-	sp_runtime::RuntimeDebug,
+	Debug,
 	codec::Encode,
 	codec::Decode,
 	codec::DecodeWithMemTracking,

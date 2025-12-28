@@ -383,7 +383,7 @@ impl pallet_sudo::Config for Runtime {
 	codec::Encode,
 	codec::Decode,
 	codec::DecodeWithMemTracking,
-	sp_runtime::RuntimeDebug,
+	Debug,
 	codec::MaxEncodedLen,
 	scale_info::TypeInfo,
 )]
@@ -496,7 +496,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	Clone,
 	PartialEq,
 	Eq,
-	sp_runtime::RuntimeDebug,
+	Debug,
 	codec::Encode,
 	codec::Decode,
 	codec::DecodeWithMemTracking,
