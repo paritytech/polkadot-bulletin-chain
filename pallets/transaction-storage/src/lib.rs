@@ -111,9 +111,7 @@ struct Authorization<BlockNumber> {
 type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 
 /// State data for a stored transaction.
-#[derive(
-	Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen,
-)]
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct TransactionInfo {
 	/// Chunk trie root.
 	chunk_root: <BlakeTwo256 as Hash>::Output,
