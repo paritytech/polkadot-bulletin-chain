@@ -3,7 +3,8 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store} from './api.js';
-import { setupKeyringAndSigners, cidFromBytes } from './common.js';
+import { setupKeyringAndSigners } from './common.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 const NODE_WS = 'ws://localhost:10000';
@@ -51,7 +52,9 @@ async function main() {
             downloadedContent.toString(),
             '❌ dataToStore does not match downloadedContent!'
         );
-        console.log(`✅ Verified content - test passed!`);
+        console.log(`✅ Verified content!`);
+
+        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
         resultCode = 0;
     } catch (error) {
         console.error("❌ Error:", error);
