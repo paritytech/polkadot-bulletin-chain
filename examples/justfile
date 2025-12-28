@@ -50,14 +50,15 @@ bulletin-solo-zombienet-start:
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
         exit 1
     fi
-    
-    echo "   Using zombienet: $ZOMBIENET_BIN"
-    
+
+    TEST_DIR="${TEST_DIR:-$(mktemp -d /tmp/bulletin-tests-run-XXXXX)}"
+    echo "   Using zombienet: $ZOMBIENET_BIN, working directory: $TEST_DIR"
+
     # Get absolute paths for bulletin binary and config
     BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
     ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
-    
-    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+
+    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn --dir {{ TEST_DIR }} $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
