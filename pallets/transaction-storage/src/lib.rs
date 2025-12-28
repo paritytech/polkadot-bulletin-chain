@@ -54,6 +54,9 @@ pub use weights::WeightInfo;
 
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
+/// Default retention period for data (in blocks).
+pub const DEFAULT_RETENTION_PERIOD: u32 = 100800;
+
 /// Maximum bytes that can be stored in one transaction.
 // TODO: find out what is "allocator" and "allocator limit"
 // Setting higher limit also requires raising the allocator limit.

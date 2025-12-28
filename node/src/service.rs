@@ -7,7 +7,9 @@ use sc_consensus_grandpa::SharedVoterState;
 use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
+use sp_api::ProvideRuntimeApi;
 use sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
+use sp_transaction_storage_proof::runtime_api::TransactionStorageApi;
 use std::{sync::Arc, time::Duration};
 
 pub(crate) type FullClient = sc_service::TFullClient<
@@ -310,6 +312,7 @@ pub fn new_full<
 						sp_transaction_storage_proof::registration::new_data_provider(
 							&*client_clone,
 							&parent,
+							client_clone.runtime_api().retention_period(parent)?,
 						)?;
 
 					Ok((slot, timestamp, storage_proof))
