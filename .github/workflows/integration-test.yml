@@ -65,14 +65,21 @@ jobs:
           chmod +x zombienet-linux-x64
           echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
 
-      - name: Run authorize and store (PAPI, smoldot)
-        working-directory: examples
-        run: just run-authorize-and-store "smoldot"
-
       - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
         run: just run-authorize-and-store "ws"
 
+      - name: Run authorize and store (PAPI, smoldot)
+        working-directory: examples
+        run: just run-authorize-and-store "smoldot"
+
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
         working-directory: examples
         run: just run-store-chunked-data
+
+      - name: Upload Zombienet logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zombienet-logs
+          path: /tmp/zombienet.log
