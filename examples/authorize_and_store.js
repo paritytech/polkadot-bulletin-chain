@@ -2,7 +2,8 @@ import { ApiPromise, WsProvider } from '@polkadot/api';
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
-import { waitForNewBlock, cidFromBytes } from './common.js';
+import { waitForNewBlock } from './common.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
 
 async function authorizeAccount(api, pair, who, transactions, bytes) {
     const tx = api.tx.transactionStorage.authorizeAccount(who, transactions, bytes);

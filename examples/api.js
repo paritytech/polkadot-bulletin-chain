@@ -1,7 +1,5 @@
-import { cidFromBytes } from "./common.js";
+import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary } from '@polkadot-api/substrate-bindings';
-import * as multihash from "multiformats/hashes/digest";
-import {blake2AsU8a} from "@polkadot/util-crypto";
 
 export async function authorizeAccount(typedApi, sudoSigner, who, transactions, bytes) {
     console.log('Authorizing account...');
@@ -23,6 +21,7 @@ export async function store(typedApi, signer, data) {
     console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
+    // Convert data to Uint8Array then wrap in Binary for PAPI typed API
     const dataBytes = typeof data === 'string' ?
         new Uint8Array(Buffer.from(data)) :
         new Uint8Array(data);
