@@ -16,8 +16,9 @@
 
 #![cfg(test)]
 
-use bulletin_westend_runtime::{
-	xcm_config::{GovernanceLocation, LocationToAccountId},
+use bulletin_polkadot_parachain_runtime::{
+	polkadot_constants::fee::WeightToFee,
+	xcm_config::{polkadot_system_parachain, GovernanceLocation, LocationToAccountId, PeopleLocation},
 	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
 	System, TxExtension, UncheckedExtrinsic,
 };
@@ -29,7 +30,6 @@ use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{transaction_validity::InvalidTransaction, ApplyExtrinsicResult, Either};
-use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -37,7 +37,7 @@ const ALICE: [u8; 32] = [1u8; 32];
 
 /// Advance to the next block for testing transaction storage.
 fn advance_block() {
-	use bulletin_westend_runtime::TransactionStorage;
+	use bulletin_polkadot_parachain_runtime::TransactionStorage;
 	use frame_support::traits::{OnFinalize, OnInitialize};
 
 	let current = frame_system::Pallet::<Runtime>::block_number();
@@ -74,7 +74,7 @@ fn construct_extrinsic(
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
 		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
-		bulletin_westend_runtime::ValidateSigned,
+		bulletin_polkadot_parachain_runtime::ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
 	let tx_ext: TxExtension =
@@ -103,13 +103,13 @@ fn construct_and_apply_extrinsic(
 		dispatch_info.total_weight(),
 		xt_len
 	);
-	bulletin_westend_runtime::Executive::apply_extrinsic(xt)
+	bulletin_polkadot_parachain_runtime::Executive::apply_extrinsic(xt)
 }
 
 #[test]
 fn transaction_storage_runtime_sizes() {
-	use bulletin_westend_runtime as runtime;
-	use bulletin_westend_runtime::BuildStorage;
+	use bulletin_polkadot_parachain_runtime as runtime;
+	use bulletin_polkadot_parachain_runtime::BuildStorage;
 	use frame_support::assert_ok;
 	use pallet_transaction_storage::{
 		AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
@@ -191,7 +191,7 @@ fn transaction_storage_runtime_sizes() {
 				data: vec![0u8; oversized as usize],
 			}),
 		);
-		// On Westend, very large extrinsics may be rejected earlier for exhausting resources
+		// On Polkadot, very large extrinsics may be rejected earlier for exhausting resources
 		// (block length/weight) before reaching the pallet's BAD_DATA_SIZE check.
 		assert!(
 			res == Err(pallet_transaction_storage::BAD_DATA_SIZE.into()) ||
@@ -205,8 +205,8 @@ fn transaction_storage_runtime_sizes() {
 /// A 9th transaction should fail with ExhaustsResources due to overhead on the 8 transactions pushing the 9th above 9 MiB.
 #[test]
 fn transaction_storage_max_throughput() {
-	use bulletin_westend_runtime as runtime;
-	use bulletin_westend_runtime::BuildStorage;
+	use bulletin_polkadot_parachain_runtime as runtime;
+	use bulletin_polkadot_parachain_runtime::BuildStorage;
 	use frame_support::assert_ok;
 	use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
 	use sp_keyring::Sr25519Keyring;
@@ -392,7 +392,7 @@ fn xcm_payment_api_works() {
 
 #[test]
 fn governance_authorize_upgrade_works() {
-	use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+	use polkadot_system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 
 	// no - random para
 	assert_err!(

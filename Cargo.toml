@@ -23,17 +23,22 @@ hex = { version = "0.4" }
 jsonrpsee = { version = "0.24.3" }
 log = { version = "0.4.17", default-features = false }
 parachain-info = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "staging-parachain-info", rev = "41bc46f27067c243d1c0fb7f83260d61c1f97c75", default-features = false }
+polkadot-core-primitives = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "41bc46f27067c243d1c0fb7f83260d61c1f97c75", default-features = false }
 polkadot-parachain-primitives = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "41bc46f27067c243d1c0fb7f83260d61c1f97c75", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
+smallvec = { version = "1.11.0", default-features = false }
 serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
 static_assertions = { version = "1.1" }
 testnet-parachains-constants = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "testnet-parachains-constants", rev = "41bc46f27067c243d1c0fb7f83260d61c1f97c75", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "westend-runtime-constants", rev = "41bc46f27067c243d1c0fb7f83260d61c1f97c75", default-features = false }
+polkadot-runtime-constants = { path = "../runtimes/relay/polkadot/constants", default-features = false }
+system-parachains-constants = { path = "../runtimes/system-parachains/constants", default-features = false }
 
 # Local workspace members
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
+bulletin-polkadot-parachain-runtime = { path = "runtimes/bulletin-polkadot-parachain" }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
@@ -169,6 +174,7 @@ members = [
 	"pallets/validator-set",
 	"runtime",
 	"runtimes/bulletin-polkadot",
+	"runtimes/bulletin-polkadot-parachain",
 	"runtimes/bulletin-westend",
 ]
 [profile.release]
