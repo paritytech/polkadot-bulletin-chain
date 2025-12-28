@@ -58,7 +58,7 @@ bulletin-solo-zombienet-start:
     BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
     ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
 
-    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn --dir {{ TEST_DIR }} $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn --dir $TEST_DIR $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
