@@ -22,6 +22,7 @@ use pallet_grandpa::AuthorityId as GrandpaId;
 use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
+use sp_session::OpaqueGeneratedSessionKeys;
 use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{
@@ -919,8 +920,8 @@ impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(seed: Option<Vec<u8>>) -> Vec<u8> {
-			opaque::SessionKeys::generate(seed)
+		fn generate_session_keys(owner: Vec<u8>, seed: Option<Vec<u8>>) -> OpaqueGeneratedSessionKeys {
+			opaque::SessionKeys::generate(&owner, seed).into()
 		}
 
 		fn decode_session_keys(
