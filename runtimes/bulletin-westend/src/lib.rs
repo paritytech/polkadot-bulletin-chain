@@ -64,7 +64,6 @@ use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
-use sp_session::OpaqueGeneratedSessionKeys;
 use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{
@@ -75,6 +74,7 @@ use sp_runtime::{
 	},
 	ApplyExtrinsicResult, MultiAddress, Perbill,
 };
+use sp_session::OpaqueGeneratedSessionKeys;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;

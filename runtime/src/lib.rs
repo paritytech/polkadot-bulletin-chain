@@ -18,7 +18,6 @@ use pallet_grandpa::AuthorityId as GrandpaId;
 use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
-use sp_session::OpaqueGeneratedSessionKeys;
 use sp_runtime::{
 	generic, impl_opaque_keys,
 	traits::{
@@ -32,6 +31,7 @@ use sp_runtime::{
 	},
 	ApplyExtrinsicResult, DispatchResult, MultiSignature,
 };
+use sp_session::OpaqueGeneratedSessionKeys;
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
