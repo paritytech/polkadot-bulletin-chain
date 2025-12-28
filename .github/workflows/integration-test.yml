@@ -74,19 +74,22 @@ jobs:
       - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
         run: |
-          echo "TEST_DIR=$(mktemp -d /tmp/bulletin-tests-run-XXXXX)" >> $GITHUB_ENV
+          export TEST_DIR=$(mktemp -d /tmp/bulletin-tests-run-XXXXX)
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-authorize-and-store "ws"
 
       - name: Run authorize and store (PAPI, smoldot)
         working-directory: examples
         run: |
-          echo "TEST_DIR=$(mktemp -d /tmp/bulletin-tests-run-XXXXX)" >> $GITHUB_ENV
+          export TEST_DIR=$(mktemp -d /tmp/bulletin-tests-run-XXXXX)
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-authorize-and-store "smoldot"
 
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
         working-directory: examples
         run: |
-          echo "TEST_DIR=$(mktemp -d /tmp/bulletin-tests-run-XXXXX)" >> $GITHUB_ENV
+          export TEST_DIR=$(mktemp -d /tmp/bulletin-tests-run-XXXXX)
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-store-chunked-data
 
       # Collects logs from the last failed zombienet run.
