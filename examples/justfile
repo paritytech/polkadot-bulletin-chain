@@ -50,14 +50,19 @@ bulletin-solo-zombienet-start:
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
         exit 1
     fi
-    
-    echo "   Using zombienet: $ZOMBIENET_BIN"
-    
-    # Get absolute paths for bulletin binary and config
+
+    # Get absolute paths, base dir, bulletin binary and config
+    if [ -n "$TEST_DIR" ]; then
+        TEST_DIR="$TEST_DIR"
+    else
+        # TEST_DIR is not set, create a new temp directory
+        TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test"
+    fi
     BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
     ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
-    
-    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+    echo "   Using zombienet: $ZOMBIENET_BIN, working directory: $TEST_DIR, zombienet config: $ZOMBIENET_CONFIG"
+
+    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN --dir $TEST_DIR -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
@@ -185,9 +190,7 @@ setup-services:
     sleep 10
     echo "   Zombienet process check:"
     ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
-    echo "   Checking zombienet log:"
-    tail -20 /tmp/zombienet.log || echo "   ⚠ Could not read zombienet log"
-    
+
     just ipfs-connect
     just ipfs-reconnect-start
     just papi-generate
