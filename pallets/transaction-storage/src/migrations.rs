@@ -38,11 +38,24 @@ impl<T: Config, NewValue: Get<BlockNumberFor<T>>> OnRuntimeUpgrade
 
 			tracing::warn!(
 				target: LOG_TARGET,
-				"[SetRetentionPeriodIfZero] RetentionPeriod was zero; set to {:?}",
-				NewValue::get()
+				new_value = ?NewValue::get(),
+				"[SetRetentionPeriodIfZero] RetentionPeriod was zero, resetting to:",
 			);
 		}
 
 		weight
+	}
+
+	#[cfg(feature = "try-runtime")]
+	fn post_upgrade(
+		_state: alloc::vec::Vec<u8>,
+	) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::DispatchError> {
+		polkadot_sdk_frame::prelude::ensure!(
+			!RetentionPeriod::<T>::get().is_zero(),
+			"must be migrate to the `NewValue`."
+		);
+
+		tracing::info!(target: LOG_TARGET, "SetRetentionPeriodIfZero is OK!");
+		Ok(())
 	}
 }
