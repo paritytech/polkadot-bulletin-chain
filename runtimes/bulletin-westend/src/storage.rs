@@ -27,8 +27,6 @@ use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority
 use testnet_parachains_constants::westend::locations::PeopleLocation;
 
 parameter_types! {
-	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
-	pub const StoragePeriod: crate::BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
 	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
