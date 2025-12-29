@@ -140,7 +140,13 @@ pub mod migrations {
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
-	pub type Permanent = (pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,);
+	pub type Permanent = (
+		pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
+		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+			Runtime,
+			pallet_transaction_storage::DefaultRetentionPeriod,
+		>,
+	);
 
 	/// All single block migrations that will run on the next runtime upgrade.
 	pub type SingleBlockMigrations = (Unreleased, Permanent);

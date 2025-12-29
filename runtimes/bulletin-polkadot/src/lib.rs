@@ -724,7 +724,12 @@ pub mod migrations {
 	pub type Unreleased = ();
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
-	pub type Permanent = ();
+	pub type Permanent = (
+		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+			crate::Runtime,
+			pallet_transaction_storage::DefaultRetentionPeriod,
+		>,
+	);
 
 	/// All single block migrations that will run on the next runtime upgrade.
 	pub type SingleBlockMigrations = (Unreleased, Permanent);

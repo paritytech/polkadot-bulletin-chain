@@ -27,6 +27,7 @@
 mod benchmarking;
 pub mod weights;
 
+pub mod migrations;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -37,7 +38,10 @@ use core::fmt::Debug;
 use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
-	traits::fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
+	traits::{
+		fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
+		parameter_types,
+	},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
@@ -57,6 +61,9 @@ const LOG_TARGET: &str = "runtime::transaction-storage";
 
 /// Default retention period for data (in blocks).
 pub const DEFAULT_RETENTION_PERIOD: u32 = 100800;
+parameter_types! {
+	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
+}
 
 // TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
