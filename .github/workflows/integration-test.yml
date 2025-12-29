@@ -74,21 +74,21 @@ jobs:
       - name: Run authorize and store (PAPI, RPC node)
         working-directory: examples
         run: |
-          export TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test"
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-authorize-and-store "ws"
 
       - name: Run authorize and store (PAPI, smoldot)
         working-directory: examples
         run: |
-          export TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test"
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-authorize-and-store "smoldot"
 
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
         working-directory: examples
         run: |
-          export TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test"
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-store-chunked-data
 

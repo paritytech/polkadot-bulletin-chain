@@ -190,9 +190,7 @@ setup-services:
     sleep 10
     echo "   Zombienet process check:"
     ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
-    echo "   Checking zombienet log:"
-    tail -20 /tmp/zombienet.log || echo "   ⚠ Could not read zombienet log"
-    
+
     just ipfs-connect
     just ipfs-reconnect-start
     just papi-generate
