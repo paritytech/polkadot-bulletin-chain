@@ -51,8 +51,13 @@ bulletin-solo-zombienet-start:
         exit 1
     fi
 
-    # Get absolute paths for bulletin binary and config
-    TEST_DIR="${TEST_DIR:-$(mktemp -d /tmp/bulletin-tests-run-XXXXX/test)}"
+    # Get absolute paths, base dir, bulletin binary and config
+    if [ -n "$TEST_DIR" ]; then
+        TEST_DIR="$TEST_DIR"
+    else
+        # TEST_DIR is not set, create a new temp directory
+        TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test"
+    fi
     BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
     ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
     echo "   Using zombienet: $ZOMBIENET_BIN, working directory: $TEST_DIR, zombienet config: $ZOMBIENET_CONFIG"
