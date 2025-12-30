@@ -123,19 +123,38 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 pub type UncheckedExtrinsic =
 	generic::UncheckedExtrinsic<Address, RuntimeCall, Signature, TxExtension>;
 
-/// Migrations to apply on runtime upgrade.
-pub type Migrations = (
-	pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
-	cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
-	cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
-	pallet_session::migrations::v1::MigrateV0ToV1<
-		Runtime,
-		pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
-	>,
-	// permanent
-	pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
-	cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-);
+/// The runtime migrations per release.
+#[allow(deprecated, missing_docs)]
+pub mod migrations {
+	use super::*;
+
+	/// Unreleased migrations. Add new ones here:
+	pub type Unreleased = (
+		pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
+		cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
+		cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
+		pallet_session::migrations::v1::MigrateV0ToV1<
+			Runtime,
+			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
+		>,
+		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
+	);
+
+	/// Migrations/checks that do not need to be versioned and can run on every update.
+	pub type Permanent = (
+		pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
+		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+			Runtime,
+			pallet_transaction_storage::DefaultRetentionPeriod,
+		>,
+	);
+
+	/// All single block migrations that will run on the next runtime upgrade.
+	pub type SingleBlockMigrations = (Unreleased, Permanent);
+
+	/// MBM migrations to apply on runtime upgrade.
+	pub type MbmMigrations = ();
+}
 
 /// Executive: handles dispatch to the various modules.
 #[allow(deprecated)]
@@ -228,6 +247,9 @@ impl frame_system::Config for Runtime {
 	/// The action to take on a Runtime Upgrade
 	type OnSetCode = cumulus_pallet_parachain_system::ParachainSetCode<Self>;
 	type MaxConsumers = ConstU32<16>;
+
+	type SingleBlockMigrations = migrations::SingleBlockMigrations;
+	type MultiBlockMigrator = migrations::MbmMigrations;
 }
 
 impl cumulus_pallet_weight_reclaim::Config for Runtime {

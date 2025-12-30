@@ -192,9 +192,6 @@ parameter_types! {
 	pub const EquivocationReportPeriodInBlocks: u64 =
 		EquivocationReportPeriodInEpochs::get() * (EPOCH_DURATION_IN_BLOCKS as u64);
 
-
-	// This currently _must_ be set to DEFAULT_RETENTION_PERIOD
-	pub const StoragePeriod: BlockNumber = pallet_transaction_storage::DEFAULT_RETENTION_PERIOD;
 	pub const AuthorizationPeriod: BlockNumber = 7 * DAYS;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = DAYS as TransactionLongevity;
@@ -251,6 +248,9 @@ impl frame_system::Config for Runtime {
 	/// This is used as an identifier of the chain. 42 is the generic substrate prefix.
 	type SS58Prefix = SS58Prefix;
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
+
+	type SingleBlockMigrations = migrations::SingleBlockMigrations;
+	type MultiBlockMigrator = migrations::MbmMigrations;
 }
 
 impl pallet_validator_set::Config for Runtime {
@@ -353,7 +353,6 @@ impl pallet_transaction_storage::Config for Runtime {
 	type WeightInfo = pallet_transaction_storage::weights::SubstrateWeight<Runtime>;
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
@@ -641,6 +640,27 @@ pub type Executive = frame_executive::Executive<
 	Runtime,
 	AllPalletsWithSystem,
 >;
+
+/// The runtime migrations per release.
+#[allow(deprecated, missing_docs)]
+pub mod migrations {
+	/// Unreleased migrations. Add new ones here:
+	pub type Unreleased = ();
+
+	/// Migrations/checks that do not need to be versioned and can run on every update.
+	pub type Permanent = (
+		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+			crate::Runtime,
+			pallet_transaction_storage::DefaultRetentionPeriod,
+		>,
+	);
+
+	/// All single block migrations that will run on the next runtime upgrade.
+	pub type SingleBlockMigrations = (Unreleased, Permanent);
+
+	/// MBM migrations to apply on runtime upgrade.
+	pub type MbmMigrations = ();
+}
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
