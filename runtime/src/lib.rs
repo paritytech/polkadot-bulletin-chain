@@ -452,7 +452,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	Clone,
 	PartialEq,
 	Eq,
-	sp_runtime::RuntimeDebug,
+	Debug,
 	codec::Encode,
 	codec::Decode,
 	codec::DecodeWithMemTracking,
@@ -752,8 +752,8 @@ impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(seed: Option<Vec<u8>>) -> Vec<u8> {
-			opaque::SessionKeys::generate(seed)
+		fn generate_session_keys(owner: Vec<u8>, seed: Option<Vec<u8>>) -> sp_session::OpaqueGeneratedSessionKeys {
+			opaque::SessionKeys::generate(&owner, seed).into()
 		}
 
 		fn decode_session_keys(
@@ -914,6 +914,12 @@ impl_runtime_apis! {
 
 		fn preset_names() -> Vec<sp_genesis_builder::PresetId> {
 			genesis_config_presets::preset_names()
+		}
+	}
+
+	impl sp_transaction_storage_proof::runtime_api::TransactionStorageApi<Block> for Runtime {
+		fn retention_period() -> NumberFor<Block> {
+			TransactionStorage::retention_period()
 		}
 	}
 
