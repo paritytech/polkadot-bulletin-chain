@@ -35,7 +35,6 @@ use sp_runtime::{
 	},
 	ApplyExtrinsicResult, DispatchResult, MultiSignature,
 };
-use sp_session::OpaqueGeneratedSessionKeys;
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
@@ -941,7 +940,7 @@ impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(owner: Vec<u8>, seed: Option<Vec<u8>>) -> OpaqueGeneratedSessionKeys {
+		fn generate_session_keys(owner: Vec<u8>, seed: Option<Vec<u8>>) -> sp_session::OpaqueGeneratedSessionKeys {
 			opaque::SessionKeys::generate(&owner, seed).into()
 		}
 
