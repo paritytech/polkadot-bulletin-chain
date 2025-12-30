@@ -321,7 +321,7 @@ pub fn new_full<
 							// storage API. TODO: remove once bulletin-polkadot is upgraded
 							// with the TX storage runtime API. TODO: also remove the
 							// pallet_transaction_storage dependency.
-							pallet_transaction_storage::DEFAULT_RETENTION_PERIOD.into()
+							pallet_transaction_storage::DEFAULT_RETENTION_PERIOD
 						}
 					};
 					let storage_proof =
