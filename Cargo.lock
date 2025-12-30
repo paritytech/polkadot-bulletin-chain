@@ -7783,6 +7783,7 @@ dependencies = [
  "jsonrpsee",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
+ "pallet-transaction-storage",
  "polkadot-bulletin-chain-runtime",
  "polkadot-primitives",
  "sc-basic-authorship",

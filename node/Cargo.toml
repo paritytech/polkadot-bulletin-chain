@@ -79,6 +79,9 @@ polkadot-bulletin-chain-runtime = { workspace = true }
 # Polkadot production
 bulletin-polkadot-runtime = { workspace = true }
 
+# TODO: remove when bulletin-polkadot is upgraded live with TX storage runtime API
+pallet-transaction-storage = { workspace = true }
+
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
 
