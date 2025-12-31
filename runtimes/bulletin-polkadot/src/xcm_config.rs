@@ -159,7 +159,7 @@ impl<Execute: ExecuteXcm<Call>, Call, AsOrigin: Get<Location>> SendXcm
 				Ok((Xcm::<Call>::from(msg), Assets::new()))
 			},
 			_ => {
-				log::trace!(
+				tracing::trace!(
 					target: "xcm::execute::validate",
 					"ImmediateExecutingXcmRouter unsupported destination: {dest:?}",
 				);
@@ -186,7 +186,7 @@ impl<Execute: ExecuteXcm<Call>, Call, AsOrigin: Get<Location>> SendXcm
 		.ensure_complete()
 		.map(|_| message_hash)
 		.map_err(|e| {
-			log::trace!(
+			tracing::trace!(
 				target: "xcm::execute::deliver",
 				"XCM message from {:?} was dispatched with an error: {:?}",
 				AsOrigin::get(),

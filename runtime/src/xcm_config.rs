@@ -99,7 +99,7 @@ impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
 		kind: OriginKind,
 	) -> Result<RuntimeOrigin, Location> {
 		let origin = origin.into();
-		log::trace!(
+		tracing::trace!(
 			target: "xcm::origin_conversion",
 			"KawabungaParachainAsRoot origin: {origin:?}, kind: {kind:?}",
 		);
@@ -148,7 +148,7 @@ impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 		max_weight: Weight,
 		_properties: &mut xcm_executor::traits::Properties,
 	) -> Result<(), ProcessMessageError> {
-		log::trace!(
+		tracing::trace!(
 			target: "xcm::barriers",
 			"AllowUnpaidTransactsFrom origin: {origin:?}, instructions: {instructions:?}, max_weight: {max_weight:?}, properties:
 		{_properties:?}",
@@ -247,7 +247,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		let message: Xcm<RuntimeCall> =
 			message.try_into().map_err(|_| DispatchBlobError::UnsupportedXcmVersion)?;
 
-		log::trace!(
+		tracing::trace!(
 			target: "runtime::xcm",
 			"Going to dispatch XCM message from {:?}: {:?}",
 			KawabungaLocation::get(),
@@ -270,7 +270,7 @@ impl DispatchBlob for ImmediateXcmDispatcher {
 		)
 		.ensure_complete()
 		.map_err(|e| {
-			log::trace!(
+			tracing::trace!(
 				target: "runtime::xcm",
 				"XCM message from {:?} was dispatched with an error: {:?}",
 				KawabungaLocation::get(),
