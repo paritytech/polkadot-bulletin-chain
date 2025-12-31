@@ -1,6 +1,6 @@
 [package]
 name = "polkadot-bulletin-chain"
-version = "1.0.0"
+version = "1.1.0"
 description = "Polkadot Bulletin Chain node"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true
@@ -78,6 +78,9 @@ frame-benchmarking = { optional = true, workspace = true, default-features = tru
 polkadot-bulletin-chain-runtime = { workspace = true }
 # Polkadot production
 bulletin-polkadot-runtime = { workspace = true }
+
+# TODO: remove when bulletin-polkadot is upgraded live with TX storage runtime API
+pallet-transaction-storage = { workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
