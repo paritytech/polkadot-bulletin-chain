@@ -343,6 +343,7 @@ pub mod pallet {
 		/// O(n*log(n)) of data size, as all data is pushed to an in-memory trie.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { /*TODO: add here correct validation */ true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been

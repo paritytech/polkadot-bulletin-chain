@@ -57,7 +57,7 @@ use parachains_common::{
 	impls::DealWithFees,
 	message_queue::{NarrowOriginToSibling, ParaIdToSibling},
 	AccountId, AuraId, Balance, BlockNumber, Hash, Header, Nonce, Signature,
-	AVERAGE_ON_INITIALIZE_RATIO, NORMAL_DISPATCH_RATIO,
+	AVERAGE_ON_INITIALIZE_RATIO,
 };
 use polkadot_runtime_common::{BlockHashCount, SlowAdjustingFeeUpdate};
 use sp_api::impl_runtime_apis;
@@ -113,7 +113,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 		frame_system::CheckEra<Runtime>,
 		frame_system::CheckNonce<Runtime>,
 		frame_system::CheckWeight<Runtime>,
-		pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
+		pallet_skip_feeless_payment::SkipCheckIfFeeless<
+			Runtime,
+			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
+		>,
 		ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
@@ -191,10 +194,14 @@ pub fn native_version() -> NativeVersion {
 	NativeVersion { runtime_version: VERSION, can_author_with: Default::default() }
 }
 
+/// We allow for 90% of the block to be consumed by normal transactions.
+const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
+
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
+	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
-		BlockLength::max_with_normal_ratio(5 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+		BlockLength::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
 	pub RuntimeBlockWeights: BlockWeights = BlockWeights::builder()
 		.base_block(BlockExecutionWeight::get())
 		.for_class(DispatchClass::all(), |weights| {
@@ -550,11 +557,8 @@ impl pallet_collator_selection::Config for Runtime {
 	type WeightInfo = weights::pallet_collator_selection::WeightInfo<Runtime>;
 }
 
-parameter_types! {
-	/// One storage item; key size is 32; value is size 4+4+16+32 bytes = 56 bytes.
-	pub const DepositBase: Balance = deposit(1, 88);
-	/// Additional storage item size of 32 bytes.
-	pub const DepositFactor: Balance = deposit(0, 32);
+impl pallet_skip_feeless_payment::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
 }
 
 impl pallet_sudo::Config for Runtime {
@@ -577,6 +581,7 @@ construct_runtime!(
 		// Monetary stuff.
 		Balances: pallet_balances = 10,
 		TransactionPayment: pallet_transaction_payment = 11,
+		SkipFeelessPayment: pallet_skip_feeless_payment = 12,
 
 		// Storage
 		TransactionStorage: pallet_transaction_storage = 40,

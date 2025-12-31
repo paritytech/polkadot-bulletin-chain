@@ -1437,6 +1437,7 @@ dependencies = [
  "pallet-collator-selection",
  "pallet-message-queue",
  "pallet-session",
+ "pallet-skip-feeless-payment",
  "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
@@ -7156,6 +7157,18 @@ dependencies = [
  "rand 0.8.5",
  "sp-runtime",
  "sp-session",
+]
+
+[[package]]
+name = "pallet-skip-feeless-payment"
+version = "3.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-runtime",
 ]
 
 [[package]]
