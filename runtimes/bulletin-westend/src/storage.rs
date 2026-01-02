@@ -19,7 +19,7 @@
 use super::{Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, Equals},
+	traits::{ConstBool, EitherOfDiverse, Equals},
 };
 use pallet_xcm::EnsureXcm;
 use pallets_common::NoCurrency;
@@ -42,6 +42,7 @@ parameter_types! {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type ChargeStorageFee = ConstBool<false>;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();

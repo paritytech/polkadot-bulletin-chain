@@ -41,7 +41,7 @@ use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
 	traits::{
-		fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
+		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
 		parameter_types,
 	},
 };
@@ -187,6 +187,9 @@ pub mod pallet {
 			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin>
 			+ GetDispatchInfo
 			+ From<frame_system::Call<Self>>;
+		/// Whether storage-related extrinsics charge a storage fee.
+		#[pallet::constant]
+		type ChargeStorageFee: Get<bool>;
 		/// The fungible type for this pallet.
 		type Currency: Mutate<Self::AccountId>
 			+ MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>
@@ -344,11 +347,15 @@ pub mod pallet {
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { /*TODO: add here correct validation */ true })]
-		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
+		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
 			Self::ensure_data_size_ok(data.len())?;
+			if T::ChargeStorageFee::get() {
+				let sender = ensure_signed(origin)?;
+				Self::apply_fee(sender, data.len() as u32)?;
+			}
 
 			// Chunk data and compute storage root
 			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
@@ -887,6 +894,18 @@ pub mod pallet {
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
+		}
+
+		fn apply_fee(sender: T::AccountId, size: u32) -> DispatchResult {
+			let byte_fee = ByteFee::<T>::get().ok_or(Error::<T>::NotConfigured)?;
+			let entry_fee = EntryFee::<T>::get().ok_or(Error::<T>::NotConfigured)?;
+			let fee = byte_fee.saturating_mul(size.into()).saturating_add(entry_fee);
+			T::Currency::hold(&HoldReason::StorageFeeHold.into(), &sender, fee)?;
+			let (credit, _remainder) =
+				T::Currency::slash(&HoldReason::StorageFeeHold.into(), &sender, fee);
+			debug_assert!(_remainder.is_zero());
+			T::FeeDestination::on_unbalanced(credit);
+			Ok(())
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.
