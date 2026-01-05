@@ -201,7 +201,6 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
         cd examples
     fi
-    
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
