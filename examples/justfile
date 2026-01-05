@@ -149,6 +149,12 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     # Clean up stale PID file
     [ -f "{{ PID_DIR }}/zombienet.pid" ] && rm "{{ PID_DIR }}/zombienet.pid"
     
+    # Clean up zombienet directory to prevent "Directory already exists" prompt
+    if [ -d "{{ ZOMBIENET_DIR }}" ]; then
+        echo "   Cleaning up existing zombienet directory: {{ ZOMBIENET_DIR }}"
+        rm -rf "{{ ZOMBIENET_DIR }}"
+    fi
+    
     echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
     
     # Find zombienet binary (use env var if set, otherwise search)
