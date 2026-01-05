@@ -1,0 +1,287 @@
+# Polkadot Bulletin Chain - Just Commands
+# 
+# See README.md for usage instructions.
+
+# PID file locations
+PID_DIR := "/tmp/bulletin-pids"
+
+# Default recipe - run the complete PAPI workflow test
+default: run-authorize-and-store
+
+# Build the bulletin chain node in release mode
+build:
+    cargo build --release -p polkadot-bulletin-chain
+
+# Install JavaScript dependencies
+npm-install:
+    npm install
+
+# Helper function to get IPFS command (internal use)
+_ipfs-cmd:
+    #!/usr/bin/env bash
+    if [ -f "../kubo/ipfs" ]; then
+        echo "../kubo/ipfs"
+    elif command -v ipfs &> /dev/null; then
+        echo "ipfs"
+    else
+        echo "❌ Error: IPFS not found." >&2
+        exit 1
+    fi
+
+# Start start solo chain with zombienet in background
+bulletin-solo-zombienet-start:
+    #!/usr/bin/env bash
+    set -e
+    
+    mkdir -p {{ PID_DIR }}
+    
+    echo "⚡ Starting Bulletin chain with zombienet..."
+    
+    # Find zombienet binary (use env var if set, otherwise search)
+    if [ -n "$ZOMBIENET_BINARY" ]; then
+        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+    else
+        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
+    fi
+    
+    if [ -z "$ZOMBIENET_BIN" ] || [ ! -f "$ZOMBIENET_BIN" ]; then
+        echo "❌ Error: Zombienet binary not found"
+        echo "   Tried: $ZOMBIENET_BIN"
+        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
+        exit 1
+    fi
+
+    # Get absolute paths, base dir, bulletin binary and config
+    if [ -n "$TEST_DIR" ]; then
+        TEST_DIR="$TEST_DIR"
+    else
+        # TEST_DIR is not set, create a new temp directory
+        TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test"
+    fi
+    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
+    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
+    echo "   Using zombienet: $ZOMBIENET_BIN, working directory: $TEST_DIR, zombienet config: $ZOMBIENET_CONFIG"
+
+    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN --dir $TEST_DIR -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+    ZOMBIENET_PID=$!
+    echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
+    echo "   Zombienet PID: $ZOMBIENET_PID"
+    echo "   Log: /tmp/zombienet.log"
+    echo "   Waiting for chain to start (15 seconds)..."
+    sleep 15
+
+# Check if Docker is available and running
+_check-docker:
+    #!/usr/bin/env bash
+    if ! command -v docker &> /dev/null; then
+        echo "❌ Error: Docker is not installed."
+        echo "   Please install Docker Desktop from: https://www.docker.com/products/docker-desktop"
+        exit 1
+    fi
+    
+    if ! docker ps &> /dev/null; then
+        echo "❌ Error: Docker is not running."
+        echo "   Please start Docker Desktop and try again."
+        echo "   On macOS: Open Docker Desktop from Applications"
+        exit 1
+    fi
+
+# Start IPFS Docker container
+ipfs-start: _check-docker
+    #!/usr/bin/env bash
+    set -e
+    mkdir -p {{ PID_DIR }}
+    
+    echo "🐳 Starting IPFS Docker container..."
+    
+    # Pull latest kubo image if not present
+    docker pull ipfs/kubo:latest
+    
+    # Determine network mode based on OS
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS - use port mapping
+        NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
+    else
+        # Linux (including CI) - use host networking for direct access
+        NETWORK_ARGS="--network host -p 4001:4001 -p 8080:8080 -p 5001:5001"
+    fi
+    
+    # Start Docker container
+    docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
+    echo "   Container: ipfs-node"
+    echo "   Waiting for container to start..."
+    sleep 5
+    
+    # Store container name in PID directory for cleanup
+    echo "ipfs-node" > {{ PID_DIR }}/ipfs-docker.container
+
+# Connect to IPFS nodes using Docker
+ipfs-connect:
+    #!/usr/bin/env bash
+    set -e
+    
+    echo "🔗 Connecting IPFS nodes (Docker)..."
+    
+    # Detect the correct host and protocol for Docker
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS - use dns4/host.docker.internal
+        PROTOCOL="dns4"
+        DOCKER_HOST="host.docker.internal"
+    else
+        # Linux (with host networking) - use ip4/127.0.0.1
+        PROTOCOL="ip4"
+        DOCKER_HOST="127.0.0.1"
+    fi
+    
+    echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
+    docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
+    docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+
+# Shutdown IPFS Docker container
+ipfs-shutdown:
+    #!/usr/bin/env bash
+    
+    echo "🛑 Shutting down IPFS Docker container..."
+    docker stop ipfs-node 2>/dev/null || echo "   ⚠ Container not running or already stopped"
+    docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
+    
+    # Clean up container file if it exists
+    [ -f "{{ PID_DIR }}/ipfs-docker.container" ] && rm "{{ PID_DIR }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
+
+# Start IPFS reconnect script in background (Docker mode)
+ipfs-reconnect-start:
+    #!/usr/bin/env bash
+    set -e
+    
+    mkdir -p {{ PID_DIR }}
+    
+    echo "🔄 Starting IPFS reconnect script (Docker mode)..."
+    ./scripts/ipfs-reconnect-solo.sh docker > /tmp/ipfs-reconnect-docker.log 2>&1 &
+    RECONNECT_PID=$!
+    echo $RECONNECT_PID > {{ PID_DIR }}/ipfs-reconnect-docker.pid
+    echo "   Reconnect PID: $RECONNECT_PID"
+    echo "   Log: /tmp/ipfs-reconnect-docker.log"
+    sleep 2
+
+# Generate PAPI descriptors
+papi-generate:
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🔧 Generating PAPI descriptors..."
+    npm run papi:generate
+
+# Setup all services using Docker for IPFS
+setup-services:
+    #!/usr/bin/env bash
+    set -e
+    
+    echo "🔧 Tearing down Docker services if they are running..."
+    just ipfs-shutdown
+    
+    echo "🐳 Setting up services with Docker IPFS..."
+    
+    # Start services with Docker
+    just ipfs-start
+    just bulletin-solo-zombienet-start
+    
+    # Wait a bit longer and verify zombienet is running
+    echo "🔍 Verifying zombienet is ready..."
+    sleep 10
+    echo "   Zombienet process check:"
+    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
+
+    just ipfs-connect
+    just ipfs-reconnect-start
+    just papi-generate
+    
+    echo "✅ Services setup complete (Docker mode)"
+
+# Stop all Docker services
+teardown-services:
+    #!/usr/bin/env bash
+    
+    echo "🧹 Stopping all Docker services..."
+    
+    # Stop reconnect script
+    if [ -d {{ PID_DIR }} ]; then
+        for pidfile in {{ PID_DIR }}/*.pid; do
+            if [ -f "$pidfile" ]; then
+                PID=$(cat "$pidfile")
+                SERVICE=$(basename "$pidfile" .pid)
+                if kill $PID 2>/dev/null; then
+                    echo "   ✓ Stopped $SERVICE (PID: $PID)"
+                else
+                    echo "   ⚠ $SERVICE (PID: $PID) not running or already stopped"
+                fi
+                rm "$pidfile"
+            fi
+        done
+    fi
+    
+    # Stop Docker container
+    just ipfs-shutdown
+    
+    # Clean up PID directory
+    if [ -d {{ PID_DIR }} ]; then
+        rmdir {{ PID_DIR }} 2>/dev/null || true
+    fi
+    
+    echo "✅ Docker services stopped"
+
+# Run authorize and store example with Docker IPFS
+# Parameters:
+#   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
+run-authorize-and-store mode="ws": build npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    if [ "{{ mode }}" = "smoldot" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot)..."
+        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
+    elif [ "{{ mode }}" = "ws" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: ws)..."
+        SCRIPT_NAME="authorize_and_store_papi.js"
+    else
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
+    fi
+    echo ""
+    
+    just setup-services
+    node $SCRIPT_NAME
+    EXAMPLE_EXIT=$?
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+    
+    just teardown-services    
+    exit $EXAMPLE_EXIT
+
+# Run store chunked data example with Docker IPFS
+run-store-chunked-data: build npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting store chunked data + DAG-PB workflow test ..."
+    echo ""
+
+    just setup-services
+    node store_chunked_data.js
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services
+    exit $EXAMPLE_EXIT
