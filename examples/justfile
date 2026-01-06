@@ -43,21 +43,11 @@ setup-westend-prerequisites:
     
     cd $POLKADOT_SDK_DIR
     
-    # Check out the required branch or commit
+    # Check out latest master
     echo "   Fetching latest changes from polkadot-sdk..."
     git fetch origin
-    
-    # Try to check out the branch, fall back to latest master if branch doesn't exist
-    BRANCH_NAME="bko-bulletin-para-support"
-    
-    if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
-        echo "   Checking out branch $BRANCH_NAME..."
-        git reset --hard origin/$BRANCH_NAME
-    else
-        echo "   ⚠ Branch $BRANCH_NAME not found, using latest master instead..."
-        echo "   TODO: later, before merging, switch to the \`bko-bulletin-support\` https://github.com/paritytech/polkadot-sdk/pull/10662 (not now)"
-        git reset --hard origin/master
-    fi
+    echo "   Checking out latest master..."
+    git reset --hard origin/master
     
     # Build polkadot binary
     echo "   Building polkadot binary (this may take a while)..."
