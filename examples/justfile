@@ -110,24 +110,23 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         
         # Create chain spec
         echo "   Creating Westend chain spec..."
+        ROOT_DIR="{{ justfile_directory() }}/.."
         # Ensure binaries are in PATH for the script
-        export PATH="~/local_bulletin_testing/bin:$PATH"
-        (cd .. && PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh)
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" $ROOT_DIR/scripts/create_bulletin_westend_spec.sh
         
         # Run zombienet from root directory so relative paths in config work correctly
-        ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-westend-local.toml
         mkdir -p {{ ZOMBIENET_DIR }}
-        (cd .. && POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+        (cd "$ROOT_DIR" && POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
           POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} $ZOMBIENET_CONFIG > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
     else # bulletin-polkadot-runtime
         echo "   Setting up Polkadot runtime..."
+        ROOT_DIR="{{ justfile_directory() }}/.."
         # Build the node binary (which will build the runtime as a dependency)
         cargo build --release -p polkadot-bulletin-chain
-        BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
-        ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
         mkdir -p {{ ZOMBIENET_DIR }}
-        (cd .. && POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} $ZOMBIENET_CONFIG > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+        (cd "$ROOT_DIR" && POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
+          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
     fi
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
