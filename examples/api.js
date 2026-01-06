@@ -81,7 +81,7 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK) {
     });
 }
 
-export async function fetchCid(httpIpfsApi, cid, maxRetries = 10, initialDelay = 2000) {
+export async function fetchCid(httpIpfsApi, cid) {
     const contentUrl = `${httpIpfsApi}/ipfs/${cid.toString()}`;
     console.log('⬇️ Downloading the full content (no chunking) by cid from url: ', contentUrl);
     const res = await fetch(contentUrl);
