@@ -20,11 +20,7 @@ setup-westend-prerequisites:
 
     # Common setup issue on macOS is that libclang.dylib is not found.
     if [[ "$OSTYPE" == "darwin"* ]]; then
-      # Fix libclang.dylib symlink for macOS if needed
-      if [ ! -L "$(brew --prefix)/lib/libclang.dylib" ]; then
-        echo "   Creating libclang.dylib symlink..."
-        ln -s "$(brew --prefix llvm)/lib/libclang.dylib" "$(brew --prefix)/lib/libclang.dylib"
-      fi
+      export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix llvm)/lib"
     fi
     
     echo "🔧 Setting up Westend runtime prerequisites..."
