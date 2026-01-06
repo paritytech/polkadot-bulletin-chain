@@ -47,17 +47,16 @@ setup-westend-prerequisites:
     echo "   Fetching latest changes from polkadot-sdk..."
     git fetch origin
     
-    # Try to check out the branch, fall back to commit hash if branch doesn't exist
+    # Try to check out the branch, fall back to latest master if branch doesn't exist
     BRANCH_NAME="bko-bulletin-para-support"
-    FALLBACK_COMMIT="b2bcb74b13f1a1e082f701e3e05ce1be44d16790"  # From Cargo.toml
     
     if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
         echo "   Checking out branch $BRANCH_NAME..."
         git reset --hard origin/$BRANCH_NAME
     else
-        echo "   ⚠ Branch $BRANCH_NAME not found, using commit $FALLBACK_COMMIT instead..."
+        echo "   ⚠ Branch $BRANCH_NAME not found, using latest master instead..."
         echo "   TODO: later, before merging, switch to the \`bko-bulletin-support\` https://github.com/paritytech/polkadot-sdk/pull/10662 (not now)"
-        git reset --hard $FALLBACK_COMMIT
+        git reset --hard origin/master
     fi
     
     # Build polkadot binary
