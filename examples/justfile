@@ -116,17 +116,21 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         
         # Run zombienet from root directory so relative paths in config work correctly
         mkdir -p {{ ZOMBIENET_DIR }}
-        (cd "$ROOT_DIR" && POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+        cd "$ROOT_DIR"
+        POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
           POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1 &
+        cd -
     else # bulletin-polkadot-runtime
         echo "   Setting up Polkadot runtime..."
         ROOT_DIR="{{ justfile_directory() }}/.."
         # Build the node binary (which will build the runtime as a dependency)
         cargo build --release -p polkadot-bulletin-chain
         mkdir -p {{ ZOMBIENET_DIR }}
-        (cd "$ROOT_DIR" && POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
-          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+        cd "$ROOT_DIR"
+        POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
+          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1 &
+        cd -
     fi
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
