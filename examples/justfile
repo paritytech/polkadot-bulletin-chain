@@ -39,22 +39,24 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     
     mkdir -p {{ PID_DIR }}
     
-    # Kill any existing zombienet processes to prevent conflicts
-    echo "🔍 Checking for existing zombienet processes..."
-    ZOMBIE_PIDS=$(pgrep -f "zombienet.*spawn" || true)
-    if [ -n "$ZOMBIE_PIDS" ]; then
-        echo "   Found existing zombienet processes: $ZOMBIE_PIDS"
-        echo "   Killing existing zombienet processes..."
-        pkill -9 -f "zombienet.*spawn" || true
-        # Also kill any polkadot/polkadot-parachain processes from previous runs
-        pkill -9 -f "polkadot.*--chain.*bulletin" || true
-        pkill -9 -f "polkadot-parachain.*--chain.*bulletin" || true
-        pkill -9 -f "polkadot-bulletin-chain" || true
-        echo "   ✓ Cleaned up existing processes"
+    # Kill any existing zombienet process using stored PID
+    echo "🔍 Checking for existing zombienet process..."
+    if [ -f "{{ PID_DIR }}/zombienet.pid" ]; then
+        ZOMBIE_PID=$(cat "{{ PID_DIR }}/zombienet.pid")
+        if kill -0 $ZOMBIE_PID 2>/dev/null; then
+            echo "   Found existing zombienet process (PID: $ZOMBIE_PID)"
+            echo "   Killing zombienet and its child processes..."
+            # Kill the process group to ensure all child processes are terminated
+            pkill -9 -P $ZOMBIE_PID || true
+            kill -9 $ZOMBIE_PID 2>/dev/null || true
+            echo "   ✓ Cleaned up zombienet process"
+        else
+            echo "   Stale PID file found (process not running)"
+        fi
+        rm "{{ PID_DIR }}/zombienet.pid"
+    else
+        echo "   No previous zombienet process found"
     fi
-    
-    # Clean up stale PID file
-    [ -f "{{ PID_DIR }}/zombienet.pid" ] && rm "{{ PID_DIR }}/zombienet.pid"
     
     # Clean up zombienet directory to prevent "Directory already exists" prompt
     if [ -d "{{ ZOMBIENET_DIR }}" ]; then
