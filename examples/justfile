@@ -135,6 +135,14 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     echo "   Log: {{ ZOMBIENET_DIR }}/zombienet.log"
     echo "   Waiting for chain to start (120 seconds)..."
     sleep 120
+    
+    # Verify zombienet is running
+    echo "🔍 Verifying zombienet is ready..."
+    sleep 10
+    echo "   Zombienet process check:"
+    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
+    echo "   Checking zombienet log:"
+    tail -20 {{ ZOMBIENET_DIR }}/zombienet.log || echo "   ⚠ Could not read zombienet log"
 
 # Check if Docker is available and running
 _check-docker:
@@ -269,15 +277,6 @@ setup-services runtime="bulletin-polkadot-runtime":
     # Start services with Docker
     just ipfs-start
     just bulletin-solo-zombienet-start {{ runtime }}
-    
-    # Wait a bit longer and verify zombienet is running
-    echo "🔍 Verifying zombienet is ready..."
-    sleep 10
-    echo "   Zombienet process check:"
-    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
-    echo "   Checking zombienet log:"
-    tail -20 {{ ZOMBIENET_DIR }}/zombienet.log || echo "   ⚠ Could not read zombienet log"
-    
     just ipfs-connect {{ runtime }}
     just ipfs-reconnect-start {{ runtime }}
     just papi-generate
