@@ -39,23 +39,27 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     
     mkdir -p {{ PID_DIR }}
     
-    # Kill any existing zombienet process using stored PID
-    echo "🔍 Checking for existing zombienet process..."
-    if [ -f "{{ PID_DIR }}/zombienet.pid" ]; then
-        ZOMBIE_PID=$(cat "{{ PID_DIR }}/zombienet.pid")
-        if kill -0 $ZOMBIE_PID 2>/dev/null; then
-            echo "   Found existing zombienet process (PID: $ZOMBIE_PID)"
-            echo "   Killing zombienet and its child processes..."
-            # Kill the process group to ensure all child processes are terminated
-            pkill -9 -P $ZOMBIE_PID || true
-            kill -9 $ZOMBIE_PID 2>/dev/null || true
-            echo "   ✓ Cleaned up zombienet process"
-        else
-            echo "   Stale PID file found (process not running)"
-        fi
-        rm "{{ PID_DIR }}/zombienet.pid"
+    # Kill any existing background processes using stored PIDs
+    echo "🔍 Checking for existing background processes..."
+    if [ -d "{{ PID_DIR }}" ]; then
+        for pidfile in {{ PID_DIR }}/*.pid; do
+            if [ -f "$pidfile" ]; then
+                PID=$(cat "$pidfile")
+                SERVICE=$(basename "$pidfile" .pid)
+                if kill -0 $PID 2>/dev/null; then
+                    echo "   Found existing $SERVICE process (PID: $PID)"
+                    # Kill the process and its children
+                    pkill -9 -P $PID 2>/dev/null || true
+                    kill -9 $PID 2>/dev/null || true
+                    echo "   ✓ Cleaned up $SERVICE process"
+                else
+                    echo "   Stale $SERVICE PID file found (process not running)"
+                fi
+                rm "$pidfile"
+            fi
+        done
     else
-        echo "   No previous zombienet process found"
+        echo "   No previous processes found"
     fi
     
     # Clean up zombienet directory to prevent "Directory already exists" prompt
@@ -287,14 +291,18 @@ teardown-services:
     
     echo "🧹 Stopping all Docker services..."
     
-    # Stop reconnect script
+    # Stop all background processes
     if [ -d {{ PID_DIR }} ]; then
         for pidfile in {{ PID_DIR }}/*.pid; do
             if [ -f "$pidfile" ]; then
                 PID=$(cat "$pidfile")
                 SERVICE=$(basename "$pidfile" .pid)
-                if kill $PID 2>/dev/null; then
-                    echo "   ✓ Stopped $SERVICE (PID: $PID)"
+                if kill -0 $PID 2>/dev/null; then
+                    echo "   Stopping $SERVICE (PID: $PID)..."
+                    # Kill the process and its children
+                    pkill -9 -P $PID 2>/dev/null || true
+                    kill -9 $PID 2>/dev/null || true
+                    echo "   ✓ Stopped $SERVICE"
                 else
                     echo "   ⚠ $SERVICE (PID: $PID) not running or already stopped"
                 fi
