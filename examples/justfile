@@ -12,7 +12,7 @@ default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 # Setup prerequisites for parachain runtime (polkadot and polkadot-parachain binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
 setup-parachain-prerequisites:
-    ../scripts/setup_westend_prerequisites.sh
+    ../scripts/setup_parachain_prerequisites.sh
 
 # Install JavaScript dependencies
 npm-install:
