@@ -84,15 +84,24 @@ jobs:
 
       - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
         working-directory: examples
-        run: just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
 
       - name: Run authorize and store (PAPI, RPC node, Westend parachain)
         working-directory: examples
-        run: just run-authorize-and-store "ws" "bulletin-westend-runtime"
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          just run-authorize-and-store "ws" "bulletin-westend-runtime"
 
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
-        run: just run-store-chunked-data "bulletin-polkadot-runtime"
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          just run-store-chunked-data "bulletin-polkadot-runtime"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
@@ -101,4 +110,4 @@ jobs:
         with:
           name: failed-zombienet-logs
           path: |
-            /tmp/bulletin-tests-run/*.log
+            ${{ env.TEST_DIR }}/*.log
