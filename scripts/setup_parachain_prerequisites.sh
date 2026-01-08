@@ -49,18 +49,18 @@ cp target/release/polkadot-execute-worker $BIN_DIR/
 echo "   Verifying polkadot version..."
 $BIN_DIR/polkadot --version || echo "   ⚠ Version check failed (this is OK, binary will still work)"
 
-# Build polkadot-parachain binary
-echo "   Building polkadot-parachain binary (this may take a while)..."
-cargo build -p polkadot-parachain-bin -r
+# Build polkadot-omni-node binary
+echo "   Building polkadot-omni-node binary (this may take a while)..."
+cargo build -p polkadot-omni-node -r
 
-# Verify and copy polkadot-parachain binary
-echo "   Copying polkadot-parachain binary..."
-ls -la target/release/polkadot-parachain
-cp target/release/polkadot-parachain $BIN_DIR/
+# Verify and copy polkadot-omni-node binary
+echo "   Copying polkadot-omni-node binary..."
+ls -la target/release/polkadot-omni-node
+cp target/release/polkadot-omni-node $BIN_DIR/
 
-# Verify polkadot-parachain version (optional check, may fail on macOS due to security/signing)
-echo "   Verifying polkadot-parachain version..."
-$BIN_DIR/polkadot-parachain --version || echo "   ⚠ Version check failed (this is OK, binary will still work)"
+# Verify polkadot-omni-node version (optional check, may fail on macOS due to security/signing)
+echo "   Verifying polkadot-omni-node version..."
+$BIN_DIR/polkadot-omni-node --version || echo "   ⚠ Version check failed (this is OK, binary will still work)"
 
 # Build and install chain-spec-builder
 echo "   Building chain-spec-builder..."

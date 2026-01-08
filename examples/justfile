@@ -9,7 +9,7 @@ ZOMBIENET_DIR := "/tmp/bulletin-tests-run"
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 
-# Setup prerequisites for parachain runtime (polkadot and polkadot-parachain binaries)
+# Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
 setup-parachain-prerequisites:
     ../scripts/setup_parachain_prerequisites.sh
@@ -95,8 +95,8 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         
         # Set paths to binaries
         POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-parachain
-        
+        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+
         # Verify binaries exist after setup
         if [ ! -f "$POLKADOT_BINARY_PATH" ] || [ ! -f "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
             echo "❌ Error: Prerequisites setup completed but binaries still not found"
