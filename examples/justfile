@@ -60,7 +60,7 @@ kill-pids:
 
 # Start solo chain or parachain with zombienet in background
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
 bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
@@ -92,64 +92,112 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     
     echo "   Using zombienet: $ZOMBIENET_BIN"
 
-    # Handle different runtimes
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        echo "   Setting up Westend runtime..."
-        
-        # Run prerequisites setup first
-        just setup-parachain-prerequisites
-        
-        # Set paths to binaries
-        # TODO: fix the PATH, for CI this is part of ENV path
-        POLKADOT_BINARY_PATH=polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
+    echo "   Setting up Polkadot runtime..."
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    # Build the node binary (which will build the runtime as a dependency)
+    cargo build --release -p polkadot-bulletin-chain
+    rm -rf {{ ZOMBIENET_DIR }}
+    mkdir -p {{ ZOMBIENET_DIR }}
+    cd "$ROOT_DIR"
+    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
+        $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+    cd -
 
-        # Verify binaries exist after setup
-        if [ ! -f "$POLKADOT_BINARY_PATH" ] || [ ! -f "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
-            echo "❌ Error: Prerequisites setup completed but binaries still not found"
-            echo "   Expected POLKADOT_BINARY_PATH: $POLKADOT_BINARY_PATH"
-            echo "   Expected POLKADOT_PARACHAIN_BINARY_PATH: $POLKADOT_PARACHAIN_BINARY_PATH"
-            exit 1
-        fi
-        
-        echo "   Using POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH"
-        echo "   Using POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH"
-        
-        # Create chain spec
-        echo "   Creating Westend chain spec..."
-        ROOT_DIR="{{ justfile_directory() }}/.."
-        # Ensure binaries are in PATH and run from root directory
-        cd "$ROOT_DIR"
-        PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh
-        cd -
-        
-        # Run zombienet from root directory so relative paths in config work correctly
-        rm -rf {{ ZOMBIENET_DIR }}
-        mkdir -p {{ ZOMBIENET_DIR }}
-        cd "$ROOT_DIR"
-        (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
-          POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
-        cd -
-    else # bulletin-polkadot-runtime
-        echo "   Setting up Polkadot runtime..."
-        ROOT_DIR="{{ justfile_directory() }}/.."
-        # Build the node binary (which will build the runtime as a dependency)
-        cargo build --release -p polkadot-bulletin-chain
-        rm -rf {{ ZOMBIENET_DIR }}
-        mkdir -p {{ ZOMBIENET_DIR }}
-        cd "$ROOT_DIR"
-        (yes y | POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
-          $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
-        cd -
-    fi
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ ZOMBIENET_DIR }}/zombienet.log"
     echo "   Waiting for chain to start (120 seconds)..."
     sleep 120
-    
+
+    # Verify zombienet is running
+    echo "🔍 Verifying zombienet is ready..."
+    sleep 10
+    echo "   Zombienet process check:"
+    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
+    echo "   Checking zombienet log:"
+    tail -20 {{ ZOMBIENET_DIR }}/zombienet.log || echo "   ⚠ Could not read zombienet log"
+
+# Start westend parachain with zombienet in background
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-parachain-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
+    #!/usr/bin/env bash
+    set -e
+
+    mkdir -p {{ PID_DIR }}
+    just kill-pids
+
+    # Clean up zombienet directory to prevent "Directory already exists" prompt
+    if [ -d "{{ ZOMBIENET_DIR }}" ]; then
+        echo "   Cleaning up existing zombienet directory: {{ ZOMBIENET_DIR }}"
+        rm -rf "{{ ZOMBIENET_DIR }}"
+    fi
+
+    echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
+
+    # Find zombienet binary (use env var if set, otherwise search)
+    if [ -n "$ZOMBIENET_BINARY" ]; then
+        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+    else
+        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
+    fi
+
+    if [ -z "$ZOMBIENET_BIN" ] || [ ! -f "$ZOMBIENET_BIN" ]; then
+        echo "❌ Error: Zombienet binary not found"
+        echo "   Tried: $ZOMBIENET_BIN"
+        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
+        exit 1
+    fi
+
+    echo "   Using zombienet: $ZOMBIENET_BIN"
+
+    # Handle different runtimes
+    echo "   Setting up Westend runtime..."
+
+    # Run prerequisites setup first
+    just setup-parachain-prerequisites
+
+    # Set paths to binaries
+    # TODO: fix the PATH, for CI this is part of ENV path
+    POLKADOT_BINARY_PATH=polkadot
+    POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
+
+    # Verify binaries exist after setup
+    if [ ! -f "$POLKADOT_BINARY_PATH" ] || [ ! -f "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
+        echo "❌ Error: Prerequisites setup completed but binaries still not found"
+        echo "   Expected POLKADOT_BINARY_PATH: $POLKADOT_BINARY_PATH"
+        echo "   Expected POLKADOT_PARACHAIN_BINARY_PATH: $POLKADOT_PARACHAIN_BINARY_PATH"
+        exit 1
+    fi
+
+    echo "   Using POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH"
+    echo "   Using POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH"
+
+    # Create chain spec
+    echo "   Creating Westend chain spec..."
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    # Ensure binaries are in PATH and run from root directory
+    cd "$ROOT_DIR"
+    PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh
+    cd -
+
+    # Run zombienet from root directory so relative paths in config work correctly
+    rm -rf {{ ZOMBIENET_DIR }}
+    mkdir -p {{ ZOMBIENET_DIR }}
+    cd "$ROOT_DIR"
+    (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+        POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
+        $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+    cd -
+
+    ZOMBIENET_PID=$!
+    echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
+    echo "   Zombienet PID: $ZOMBIENET_PID"
+    echo "   Log: {{ ZOMBIENET_DIR }}/zombienet.log"
+    echo "   Waiting for chain to start (120 seconds)..."
+    sleep 120
+
     # Verify zombienet is running
     echo "🔍 Verifying zombienet is ready..."
     sleep 10
@@ -290,7 +338,16 @@ setup-services runtime="bulletin-polkadot-runtime":
     
     # Start services with Docker
     just ipfs-start
-    just bulletin-solo-zombienet-start {{ runtime }}
+
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        just bulletin-westend-parachain-zombienet-start "{{ runtime }}"
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        just bulletin-solo-zombienet-start "{{ runtime }}"
+    else
+        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        exit 1
+    fi
+
     just ipfs-connect {{ runtime }}
     just ipfs-reconnect-start {{ runtime }}
     just papi-generate
