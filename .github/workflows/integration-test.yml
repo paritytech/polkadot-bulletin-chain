@@ -133,13 +133,7 @@ jobs:
           chmod +x zombienet-linux-x64
           echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
 
-      - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
-        working-directory: examples
-        run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
-
+      # Westend parachain
       - name: Run authorize and store (PAPI, RPC node, Westend parachain)
         working-directory: examples
         run: |
@@ -147,6 +141,22 @@ jobs:
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           just run-authorize-and-store "ws" "bulletin-westend-runtime"
 
+      # TODO: add all tests-cases
+      # TODO: Polkadot parachain
+
+      # Polkadot solochain
+      - name: Run authorize and store (PAPI, RPC node, Polkadot solochain)
+        working-directory: examples
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          just run-authorize-and-store "ws" "bulletin-polkadot-runtime"
+      - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
+        working-directory: examples
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
         run: |
