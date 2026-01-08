@@ -29,7 +29,10 @@ cd $POLKADOT_SDK_DIR
 echo "   Fetching latest changes from polkadot-sdk..."
 git fetch origin
 echo "   Checking out latest master..."
-git reset --hard origin/master
+# TODO:
+# git reset --hard origin/master
+# Let's use the same commit as Cargo.toml to avoid moving Polkadot-SDK
+git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
 
 # Build polkadot binary
 echo "   Building polkadot binary (this may take a while)..."

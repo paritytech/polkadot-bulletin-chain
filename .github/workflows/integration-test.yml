@@ -53,6 +53,15 @@ jobs:
           shared-key: "bulletin-cache-bulletin-integration-tests"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Rust cache (Polkadot-SDK)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ~/local_bulletin_testing/polkadot-sdk
+          shared-key: "bulletin-cache-polkadot-sdk-integration-tests"
+          save-if: true
+          # TODO: change before merging to main
+          # save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
