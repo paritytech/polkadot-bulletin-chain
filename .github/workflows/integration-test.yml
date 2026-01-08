@@ -55,16 +55,6 @@ jobs:
           shared-key: "bulletin-cache-bulletin-integration-tests"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Rust cache (Polkadot-SDK)
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ~/local_bulletin_testing/polkadot-sdk
-          shared-key: "bulletin-cache-polkadot-sdk-integration-tests"
-          save-if: true
-          add-job-id-key: false
-          # TODO: change before merging to main
-          # save-if: ${{ github.ref == 'refs/heads/main' }}
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -81,7 +71,7 @@ jobs:
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
-          key: polkadot-sdk-${{ env.SDK_VERSION }}-binaries
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
       # Download and extract binaries if cache missed
       - name: Download Polkadot SDK binaries
         # TODO: remove in next commit
