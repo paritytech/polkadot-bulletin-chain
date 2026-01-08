@@ -84,7 +84,8 @@ jobs:
           key: polkadot-sdk-${{ env.SDK_VERSION }}-binaries
       # Download and extract binaries if cache missed
       - name: Download Polkadot SDK binaries
-        if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
+        # TODO: remove in next commit
+        # if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p $POLKADOT_SDK_BIN_DIR
           cd $POLKADOT_SDK_BIN_DIR
@@ -93,12 +94,22 @@ jobs:
           curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
           curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
           curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
-          # TODO: when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
           # curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node
           chmod +x *
+          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          git clone https://github.com/paritytech/polkadot-sdk.git
+          cd polkadot-sdk
+          git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
+          cargo build -p polkadot-omni-node -r
+          cd ..
+          cp polkadot-sdk/target/release/polkadot-omni-node .
+          rm -R polkadot-sdk
       # Add binaries to PATH
       - name: Add Polkadot SDK binaries to PATH
-        run: echo "${POLKADOT_SDK_BIN_DIR}" >> $GITHUB_PATH
+        run: |
+          ls -lrt "${POLKADOT_SDK_BIN_DIR}"
+          echo "${POLKADOT_SDK_BIN_DIR}" >> $GITHUB_PATH
 
       - name: Download zombienet
         run: |

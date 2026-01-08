@@ -12,7 +12,8 @@ default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 # Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
 setup-parachain-prerequisites:
-    ../scripts/setup_parachain_prerequisites.sh
+    # TODO: temporary skip for CI
+    # ../scripts/setup_parachain_prerequisites.sh
 
 # Install JavaScript dependencies
 npm-install:
@@ -94,8 +95,9 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         just setup-parachain-prerequisites
         
         # Set paths to binaries
-        POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+        # TODO: fix the PATH, for CI this is part of ENV path
+        POLKADOT_BINARY_PATH=polkadot
+        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
 
         # Verify binaries exist after setup
         if [ ! -f "$POLKADOT_BINARY_PATH" ] || [ ! -f "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
