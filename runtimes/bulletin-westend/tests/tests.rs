@@ -221,6 +221,10 @@ fn transaction_storage_max_throughput() {
 	.execute_with(|| {
 		let account = Sr25519Keyring::Alice;
 		let who: AccountId = account.to_account_id();
+		// fund Alice to cover length-based tx fees
+		let initial: Balance = 10_000_000_000_000_000_000u128;
+		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
+
 
 		// Authorize 8 + 1 transactions (one extra for the overflow test)
 		assert_ok!(runtime::TransactionStorage::authorize_account(
