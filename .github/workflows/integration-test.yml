@@ -59,6 +59,7 @@ jobs:
           workspaces: ~/local_bulletin_testing/polkadot-sdk
           shared-key: "bulletin-cache-polkadot-sdk-integration-tests"
           save-if: true
+          add-job-id-key: false
           # TODO: change before merging to main
           # save-if: ${{ github.ref == 'refs/heads/main' }}
 
