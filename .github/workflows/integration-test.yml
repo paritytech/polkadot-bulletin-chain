@@ -22,11 +22,9 @@ env:
   POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
 
 jobs:
-  integration-tests:
-    name: Integration Tests
+  setup:
+    name: Setup
     runs-on: ubuntu-latest
-    timeout-minutes: 200
-
     steps:
       - name: Free Disk Space (Ubuntu)
         if: ${{ runner.environment == 'github-hosted' }}
@@ -34,6 +32,54 @@ jobs:
         with:
           tool-cache: false
 
+      # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libclang-dev
+
+      # Cache the Polkadot SDK binaries
+      - name: Cache Polkadot SDK binaries
+        uses: actions/cache@v3
+        id: polkadot-sdk-cache
+        with:
+          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
+      # Download and extract binaries if cache missed
+      - name: Download Polkadot SDK binaries
+        if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $POLKADOT_SDK_BIN_DIR
+          cd $POLKADOT_SDK_BIN_DIR
+          echo "Downloading Polkadot SDK binaries..."
+          curl -L -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
+          curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
+          curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
+          curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
+          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          # curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node
+          chmod +x *
+          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          git clone https://github.com/paritytech/polkadot-sdk.git
+          cd polkadot-sdk
+          git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
+          cargo build -p polkadot-omni-node -r
+          cd ..
+          cp polkadot-sdk/target/release/polkadot-omni-node .
+          rm -R polkadot-sdk
+
+  integration-tests:
+    needs: [setup]
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+
+    steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
@@ -72,29 +118,6 @@ jobs:
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
           key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
-      # Download and extract binaries if cache missed
-      - name: Download Polkadot SDK binaries
-        # TODO: remove in next commit
-        # if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p $POLKADOT_SDK_BIN_DIR
-          cd $POLKADOT_SDK_BIN_DIR
-          echo "Downloading Polkadot SDK binaries..."
-          curl -L -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
-          curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
-          curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
-          curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
-          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-          # curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node
-          chmod +x *
-          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-          git clone https://github.com/paritytech/polkadot-sdk.git
-          cd polkadot-sdk
-          git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
-          cargo build -p polkadot-omni-node -r
-          cd ..
-          cp polkadot-sdk/target/release/polkadot-omni-node .
-          rm -R polkadot-sdk
       # Add binaries to PATH
       - name: Add Polkadot SDK binaries to PATH
         run: |
