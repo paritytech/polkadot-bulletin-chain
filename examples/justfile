@@ -9,9 +9,9 @@ ZOMBIENET_DIR := "/tmp/bulletin-tests-run"
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 
-# Setup prerequisites for Westend runtime (polkadot and polkadot-parachain binaries)
+# Setup prerequisites for parachain runtime (polkadot and polkadot-parachain binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
-setup-westend-prerequisites:
+setup-parachain-prerequisites:
     ../scripts/setup_westend_prerequisites.sh
 
 # Install JavaScript dependencies
@@ -91,7 +91,7 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         echo "   Setting up Westend runtime..."
         
         # Run prerequisites setup first
-        just setup-westend-prerequisites
+        just setup-parachain-prerequisites
         
         # Set paths to binaries
         POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot

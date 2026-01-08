@@ -9,7 +9,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix llvm)/lib"
 fi
 
-echo "🔧 Setting up Westend runtime prerequisites..."
+echo "🔧 Setting up parachain prerequisites..."
 echo "   Target directory: $BIN_DIR"
 
 # Create bin directory
@@ -75,5 +75,5 @@ $BIN_DIR/chain-spec-builder --version || echo "   ⚠ Version check failed (this
 # Add BIN_DIR to PATH for subsequent scripts
 export PATH="$BIN_DIR:$PATH"
 
-echo "✅ Westend prerequisites setup complete!"
+echo "✅ Parachain prerequisites setup complete!"
 echo "   Binaries installed in: $BIN_DIR"
