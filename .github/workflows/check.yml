@@ -42,16 +42,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install nightly toolchain
+        run: rustup toolchain install nightly-x86_64-unknown-linux-gnu
+
       - name: Cargo fmt
-        run: |
-          rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
-          cargo +nightly fmt --all -- --check
+        run: cargo +nightly fmt --all -- --check
 
       - name: Check TOML format
         run: |
-          cargo install taplo-cli
+          cargo install taplo-cli && taplo --version
           if ! taplo format --check --config .config/taplo.toml; then
             echo "Please run 'taplo format --config .config/taplo.toml' to fix any TOML formatting issues"
+            exit 1
+          fi
+          cargo install --locked zepter && zepter --version
+          if ! zepter run check --config .config/zepter.yaml; then
+            echo "Please run 'zepter run --config .config/zepter.yaml' to fix any TOML formatting issues"
             exit 1
           fi
 
