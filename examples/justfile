@@ -31,15 +31,10 @@ _ipfs-cmd:
         exit 1
     fi
 
-# Start solo chain or parachain with zombienet in background
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
+kill-pids:
     #!/usr/bin/env bash
     set -e
-    
-    mkdir -p {{ PID_DIR }}
-    
+
     # Kill any existing background processes using stored PIDs
     echo "🔍 Checking for existing background processes..."
     if [ -d "{{ PID_DIR }}" ]; then
@@ -62,7 +57,17 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
     else
         echo "   No previous processes found"
     fi
+
+# Start solo chain or parachain with zombienet in background
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
+    #!/usr/bin/env bash
+    set -e
     
+    mkdir -p {{ PID_DIR }}
+    just kill-pids
+
     # Clean up zombienet directory to prevent "Directory already exists" prompt
     if [ -d "{{ ZOMBIENET_DIR }}" ]; then
         echo "   Cleaning up existing zombienet directory: {{ ZOMBIENET_DIR }}"
@@ -299,25 +304,8 @@ teardown-services:
     echo "🧹 Stopping all Docker services..."
     
     # Stop all background processes
-    if [ -d {{ PID_DIR }} ]; then
-        for pidfile in {{ PID_DIR }}/*.pid; do
-            if [ -f "$pidfile" ]; then
-                PID=$(cat "$pidfile")
-                SERVICE=$(basename "$pidfile" .pid)
-                if kill -0 $PID 2>/dev/null; then
-                    echo "   Stopping $SERVICE (PID: $PID)..."
-                    # Kill the process and its children
-                    pkill -9 -P $PID 2>/dev/null || true
-                    kill -9 $PID 2>/dev/null || true
-                    echo "   ✓ Stopped $SERVICE"
-                else
-                    echo "   ⚠ $SERVICE (PID: $PID) not running or already stopped"
-                fi
-                rm "$pidfile"
-            fi
-        done
-    fi
-    
+    just kill-pids
+
     # Stop Docker container
     just ipfs-shutdown
     
