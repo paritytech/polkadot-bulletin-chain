@@ -28,7 +28,7 @@ use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority
 parameter_types! {
 	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
 	pub const StoragePeriod: crate::BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
-	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
+	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
@@ -45,7 +45,8 @@ impl pallet_transaction_storage::Config for Runtime {
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
-	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
+	/// Set to 1 MB for now to match BitSwap's recommended max
+	type MaxTransactionSize = crate::ConstU32<{ 1 * 1024 * 1024 }>;
 	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
@@ -53,6 +54,8 @@ impl pallet_transaction_storage::Config for Runtime {
 		crate::EnsureRoot<Self::AccountId>,
 		// People chain can also handle authorizations.
 		EnsureXcm<Equals<PeopleLocation>>,
+		// TODO: Open this to other origins or locations (e.g., a smart contract on AH). 
+		// First we need to determine the proper incentives
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
