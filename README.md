@@ -1,164 +1,307 @@
-# Substrate Node Template
+# Polkadot Bulletin chain
 
-A fresh [Substrate](https://substrate.io/) node, ready for hacking :rocket:
+The Bulletin chain consists of a customized node implementation and a single runtime.
 
-A standalone version of this template is available for each release of Polkadot in the [Substrate Developer Hub Parachain Template](https://github.com/substrate-developer-hub/substrate-parachain-template/) repository.
-The parachain template is generated directly at each Polkadot release branch from the [Node Template in Substrate](https://github.com/paritytech/substrate/tree/master/bin/node-template) upstream
+## Node implementation
 
-It is usually best to use the stand-alone version to start a new project.
-All bugs, suggestions, and feature requests should be made upstream in the [Substrate](https://github.com/paritytech/substrate/tree/master/bin/node-template) repository.
+The Bulletin chain node implements IPFS support on top of a regular Substrate node. Only work with `litep2p` network backend is supported (enabled by default), and in order to use IPFS functionality `--ipfs-server` flag must be passed to the node binary.
 
-## Getting Started
+IPFS support comes in two parts:
 
-Depending on your operating system and Rust version, there might be additional packages required to compile this template.
-Check the [Install](https://docs.substrate.io/install/) instructions for your platform for the most common dependencies.
-Alternatively, you can use one of the [alternative installation](#alternatives-installations) options.
+1. Bitswap protocol implementation. Wire protocol for transferring chunks stored in transaction storage to IPFS clients. This is implemented in `litep2p` networking library and `litep2p` network backend in `sc-network` crate.
+2. IPFS Kademlia DHT support. We publish content provider records for our node for CIDs (content identifiers) of transactions stored in transaction storage. Content provider records are only kept for transactions included in the chain during last two weeks, what should agree with block pruning period of the Bulletin nodes. DHT support is provided by `litep2p` networking library and `sc-network` crate. The implementation in the Bulletin node ensures we register as content providers for transactions during the last two weeks.
 
-### Build
+Bulletin node also has an idle connection timeout set to 1 hour instead of the default 10 seconds to allow manually adding the node to the swarm of an IPFS client and ensuring we don't disconnect the IPFS client. This is done to allow IPFS clients to query data over Bitswap protocol before IPFS Kademlia DHT support is implemented (DHT support is planned to be ready by the end of August 2025).
 
-Use the following command to build the node without launching it:
+TODO: clarify if we need to store transactions for two weeks or another period.
 
-```sh
-cargo build --release
-```
+## Runtime functionality
 
-### Embedded Docs
+The Bulletin chain runtime is a standard BaBE + GRANDPA chain with a custom validator set pallet which is (currently) controlled by root call (TODO: clarify whether this should be sudo, governance, etc).
+It functions to store transactions for a given period of time (currently set at 2 weeks) and provide proof of storage.
 
-After you build the project, you can use the following command to explore its parameters and subcommands:
+### Core functionality
 
-```sh
-./target/release/node-template -h
-```
+The main purpose of the Bulletin chain is to provide storage for the People Chain over the bridge.
 
-You can generate and view the [Rust Docs](https://doc.rust-lang.org/cargo/commands/cargo-doc.html) for this template with this command:
+#### Storage
+The core functionality of the bulletin chain is in the transaction-storage pallet, which indexes transactions and manages storage proofs for arbitrary data. 
 
-```sh
-cargo +nightly doc --open
-```
+Data is added via the `transactionStorage.store` extrinsic, provided the storage of the data is authorized by root call. Authorization is granted either for a specific account via authorize_account or for data with a specific preimage via authorize_preimage. Once data is stored, it can be retrieved from IPFS with the Blake2B hash of the data.
 
-### Single-Node Development Chain
+#### Bridge to PeopleChain
+For Rococo, we have a PeopleRococo → BridgeHubRococo → Bulletin connection.
 
-The following command starts a single-node development chain that doesn't persist state:
+For Polkadot, the bulletin chain is bridged to directly from the proof-of-personhood chain (instead of through BridgeHub, for ease of upgrade), allowing the PoP chain to authorize preimages for storage and allowing accounts to store data.
 
-```sh
-./target/release/node-template --dev
-```
-
-To purge the development chain's state, run the following command:
-
-```sh
-./target/release/node-template purge-chain --dev
-```
-
-To start the development chain with detailed logging, run the following command:
-
-```sh
-RUST_BACKTRACE=1 ./target/release/node-template -ldebug --dev
-```
-
-Development chains:
-
-- Maintain state in a `tmp` folder while the node is running.
-- Use the **Alice** and **Bob** accounts as default validator authorities.
-- Use the **Alice** account as the default `sudo` account.
-- Are preconfigured with a genesis state (`/node/src/chain_spec.rs`) that includes several prefunded development accounts.
-
-
-To persist chain state between runs, specify a base path by running a command similar to the following:
-
-```sh
-// Create a folder to use as the db base path
-$ mkdir my-chain-state
-
-// Use of that folder to store the chain state
-$ ./target/release/node-template --dev --base-path ./my-chain-state/
-
-// Check the folder structure created inside the base path after running the chain
-$ ls ./my-chain-state
-chains
-$ ls ./my-chain-state/chains/
-dev
-$ ls ./my-chain-state/chains/dev
-db keystore network
-```
-
-### Connect with Polkadot-JS Apps Front-End
-
-After you start the node template locally, you can interact with it using the hosted version of the [Polkadot/Substrate Portal](https://polkadot.js.org/apps/#/explorer?rpc=ws://localhost:9944) front-end by connecting to the local node endpoint.
-A hosted version is also available on [IPFS (redirect) here](https://dotapps.io/) or [IPNS (direct) here](ipns://dotapps.io/?rpc=ws%3A%2F%2F127.0.0.1%3A9944#/explorer).
-You can also find the source code and instructions for hosting your own instance on the [polkadot-js/apps](https://github.com/polkadot-js/apps) repository.
-
-### Multi-Node Local Testnet
-
-If you want to see the multi-node consensus algorithm in action, see [Simulate a network](https://docs.substrate.io/tutorials/build-a-blockchain/simulate-network/).
-
-## Template Structure
-
-A Substrate project such as this consists of a number of components that are spread across a few directories.
-
-### Node
-
-A blockchain node is an application that allows users to participate in a blockchain network.
-Substrate-based blockchain nodes expose a number of capabilities:
-
-- Networking: Substrate nodes use the [`libp2p`](https://libp2p.io/) networking stack to allow the
-  nodes in the network to communicate with one another.
-- Consensus: Blockchains must have a way to come to [consensus](https://docs.substrate.io/fundamentals/consensus/) on the state of the network.
-  Substrate makes it possible to supply custom consensus engines and also ships with several consensus mechanisms that have been built on top of [Web3 Foundation research](https://research.web3.foundation/en/latest/polkadot/NPoS/index.html).
-- RPC Server: A remote procedure call (RPC) server is used to interact with Substrate nodes.
-
-There are several files in the `node` directory.
-Take special note of the following:
-
-- [`chain_spec.rs`](./node/src/chain_spec.rs): A [chain specification](https://docs.substrate.io/build/chain-spec/) is a source code file that defines a Substrate chain's initial (genesis) state.
-  Chain specifications are useful for development and testing, and critical when architecting the launch of a production chain.
-  Take note of the `development_config` and `testnet_genesis` functions,.
-  These functions are used to define the genesis state for the local development chain configuration.
-  These functions identify some [well-known accounts](https://docs.substrate.io/reference/command-line-tools/subkey/) and use them to configure the blockchain's initial state.
-- [`service.rs`](./node/src/service.rs): This file defines the node implementation.
-  Take note of the libraries that this file imports and the names of the functions it invokes.
-  In particular, there are references to consensus-related topics, such as the [block finalization and forks](https://docs.substrate.io/fundamentals/consensus/#finalization-and-forks) and other [consensus mechanisms](https://docs.substrate.io/fundamentals/consensus/#default-consensus-models) such as Aura for block authoring and GRANDPA for finality.
-
-
-
-### Runtime
-
-In Substrate, the terms "runtime" and "state transition function" are analogous.
-Both terms refer to the core logic of the blockchain that is responsible for validating blocks and executing the state changes they define.
-The Substrate project in this repository uses [FRAME](https://docs.substrate.io/learn/runtime-development/#frame) to construct a blockchain runtime.
-FRAME allows runtime developers to declare domain-specific logic in modules called "pallets".
-At the heart of FRAME is a helpful [macro language](https://docs.substrate.io/reference/frame-macros/) that makes it easy to create pallets and flexibly compose them to create blockchains that can address [a variety of needs](https://substrate.io/ecosystem/projects/).
-
-Review the [FRAME runtime implementation](./runtime/src/lib.rs) included in this template and note the following:
-
-- This file configures several pallets to include in the runtime.
-  Each pallet configuration is defined by a code block that begins with `impl $PALLET_NAME::Config for Runtime`.
-- The pallets are composed into a single runtime by way of the [`construct_runtime!`](https://paritytech.github.io/substrate/master/frame_support/macro.construct_runtime.html) macro, which is part of the [core FRAME pallet library](https://docs.substrate.io/reference/frame-pallets/#system-pallets).
+#### PeopleChain integration
+The PeopleChain root will call `transactionStorage.authorize_preimage` (over the bridge) to prime Bulletin to expect data with that hash, after which a user account will submit the data via `transactionStorage.store` (over the bridge).
 
 ### Pallets
 
-The runtime in this project is constructed using many FRAME pallets that ship with [the Substrate repository](https://github.com/paritytech/substrate/tree/master/frame) and a template pallet that is [defined in the `pallets`](./pallets/template/src/lib.rs) directory.
+#### polkadot-bulletin-chain/pallets/relayer-set
+Controls the authorized relayers between Bulletin and PoP-polkadot.
 
-A FRAME pallet is comprised of a number of blockchain primitives, including:
+####  polkadot-bulletin-chain/pallets/validator-set
+Controls the validator set. Currently set in genesis and validators can be added and removed by root.
 
-- Storage: FRAME defines a rich set of powerful [storage abstractions](https://docs.substrate.io/build/runtime-storage/) that makes it easy to use Substrate's efficient key-value database to manage the evolving state of a blockchain.
-- Dispatchables: FRAME pallets define special types of functions that can be invoked (dispatched) from outside of the runtime in order to update its state.
-- Events: Substrate uses [events](https://docs.substrate.io/build/events-and-errors/) to notify users of significant state changes.
-- Errors: When a dispatchable fails, it returns an error.
+####  polkadot-bulletin-chain/pallets/transaction-storage
+Stores arbitrary data on IPFS via the `store` extrinsic, provided that either the signer or the preimage of the data are pre-authorized. Stored data can be retrieved from IPFS or directly from the node via the transaction index or hash.
 
-Each pallet has its own `Config` trait which serves as a configuration interface to generically define the types and parameters it depends on.
+# Polkadot Bulletin production/live runtime
 
-## Alternatives Installations
+## Prepare for a production
 
-Instead of installing dependencies and building this source directly, consider the following alternatives.
+### Requirements
 
-### Nix
+#### Validator node args
 
-Install [nix](https://nixos.org/) and
-[nix-direnv](https://github.com/nix-community/nix-direnv) for a fully plug-and-play
-experience for setting up the development environment.
-To get all the correct dependencies, activate direnv `direnv allow`.
+The validator node should be started with the following arguments:
+* `--ipfs-server` - enables IPFS support.
+* `--network-backend=litep2p` - enables Bitswap support, which is only available with the litep2p network backend, but this is Substrate’s default.
 
-### Docker
+#### Storage
 
-Please follow the [Substrate Docker instructions here](https://github.com/paritytech/substrate/blob/master/docker/README.md) to build the Docker container with the Substrate Node Template binary.
+There are no special requirements for the production runtime (just as the usual [validator/node](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator)), except those related to IPFS support.
+With the current configuration, the maximum storage requirement is estimated as follows:
+
+* Storing data for up to 2 weeks:
+
+  $$
+  2 \times 7 \times 24 \times 60 \times 60 = 1,209,600 \, \text{seconds}
+  $$
+
+  divided by a 6-second block time = **201,600 blocks**
+
+* Each block can contain up to 8–10 MiB (based on `MaxTransactionSize = 8 MiB` and `BlockLength = 10 MiB`)
+* Total = **1,612,800–2,016,000 MiB ≈ 1,575–1,968 GiB of storage (maximum)**
+
+But this is the maximum limit, assuming full utilization of every block for two weeks, which we are unlikely to reach.
+
+TODO: @georgepisaltu Can we provide a more realistic estimate based on the testnet data?
+
+TODO: @georgepisaltu Is this still valid that we need to keep 2-week data?
+
+### Prepare keys for a production chain
+
+This chapter provides a one-time example setup. For more details about running a validator and key management, see: [https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator](https://docs.polkadot.com/infrastructure/running-a-validator/#running-a-validator.”).
+
+**Prerequisites:**
+```
+# Build the node
+cargo build --release -p polkadot-bulletin-chain
+
+# Working dir (can be customized)
+mkdir /tmp/bulletin
+```
+
+#### Generate a validator account
+```
+./target/release/polkadot-bulletin-chain key generate --scheme sr25519 --output-type json
+{
+  "accountId": "0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b",
+  "networkId": "substrate",
+  "publicKey": "0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b",
+  "secretPhrase": "arm glove mutual frequent melt world bicycle bean later donor clown choice",
+  "secretSeed": "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646",
+  "ss58Address": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9",
+  "ss58PublicKey": "5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9"
+}
+```
+
+#### Generate node-key (used for networking and peerId)
+```
+./target/release/polkadot-bulletin-chain key generate-node-key --chain bulletin-polkadot --base-path /tmp/bulletin
+(example output)
+Generating key in "/tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519" (secret key)
+12D3KooWMTpYuDPNHoapmkfgJDCRe9XRcUuNzLYTgf82itZv4PZr (public key)
+
+# Validate node key
+./target/release/polkadot-bulletin-chain key inspect-node-key --file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+(should print the same public key as above)
+```
+
+#### Generate initial session keys for genesis chain spec
+```
+# Babe (suri is `secretSeed`)
+./target/release/polkadot-bulletin-chain key insert --chain bulletin-polkadot --base-path /tmp/bulletin --scheme sr25519 --key-type babe --suri 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+# (check the generate file name, starts with babe / 62616265, e.g.: 626162654026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b)
+# (contains the secret key)
+cat /tmp/bulletin/chains/bulletin-polkadot/keystore/626162654026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+# "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646"
+
+# Grandpa (suri is `secretSeed`)
+./target/release/polkadot-bulletin-chain key insert --chain bulletin-polkadot --base-path /tmp/bulletin --scheme ed25519 --key-type gran --suri 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+# (check the generate file name, starts with granpa / 6772616e, e.g.: 6772616e4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b)
+# (contains the secret key)
+cat /tmp/bulletin/chains/bulletin-polkadot/keystore/6772616eddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+# "0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646"
+
+# Two files should be generated here:
+./scripts/keystore-dump.sh /tmp/bulletin/chains/bulletin-polkadot/keystore
+(example output)
+Seed: 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+=== babe (sr25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Account ID:        0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Public key (SS58): 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+  SS58 Address:      5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+=== babe (ed25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Account ID:        0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Public key (SS58): 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+  SS58 Address:      5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+
+Seed: 0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+=== gran (sr25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Account ID:        0x4026e944eb9c6dabc42ba6155f5a6728b1f25c93b905b082450dffc64f4b6b7b
+  Public key (SS58): 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+  SS58 Address:      5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9
+=== gran (ed25519)===
+Secret Key URI `0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646` is account:
+  Network ID:        substrate
+  Secret seed:       0x749a0904471df8d128b49dfeedf4081af0846b839c6eb69c536cf500e3886646
+  Public key (hex):  0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Account ID:        0xddf71d1605421edfa311b8321e203b3d7cff1405eaeb891176638539e85a3d5b
+  Public key (SS58): 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+  SS58 Address:      5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w
+```
+
+#### Update genesis chain spec script
+
+_Note: This is relevant only for the initial launch; after that, we expect Polkadot OpenGov to manage the validator set._
+
+* File `./scripts/create_bulletin_polkadot_spec.sh`
+* Update `.genesis.runtimeGenesis.patch.validatorSet.initialValidators` with a validator account public key (example above: `5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9`)
+* Update `genesis.runtimeGenesis.patch.session.keys` (and new element)
+  * validator account public key
+  * validator account public key
+    * babe: <Babe public key (sr25519), e.g. 5DWpUqkKHHCaRHVqgocGMnJhuvNtCfm7xvqtSd23Mu6kEVQ9>
+    * grandpa: <Grandpa public key (ed25519), e.g. 5H5jr87N42Bpt36LKZxZcWS7P1ppgH5Yyf31C4LGb6PFFz9w>
+* Update `.bootNodes` (if needed) - format: `"/dns/bulletin-polkadot-node-todo.w3f.node.io/tcp/443/ws(s)/p2p/12D3KooWCF1eA2Gap69zgXD7Df3e9DqDUsGoByocggTGejoHjK23"`
+* Generate new chain spec:
+   ```
+   ./scripts/create_bulletin_polkadot_spec.sh ./target/production/wbuild/bulletin-polkadot-runtime/bulletin_polkadot_runtime.compact.compressed.wasm
+   ```
+* Run node
+   ```
+   # point to updated chain spec
+   ./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain ./node/chain-specs/bulletin-polkadot.json --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   or
+   # rebuild because of updated chain spec
+   cargo build --release -p polkadot-bulletin-chain
+   ./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot --base-path /tmp/bulletin --node-key-file /tmp/bulletin/chains/bulletin-polkadot/network/secret_ed25519
+   ```
+* **You should see finalized blocks in the logs.**
+* **!!! Push changes `./scripts/create_bulletin_polkadot_spec.sh` !!!**
+
+## Run node
+
+### Run production chain
+```
+# You can omit `--validator` if you are not part of the active validator set.
+./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot <other-relevant-params: ./target/release/polkadot-bulletin-chain --help>
+```
+
+### Run local chain
+```
+cargo build --release -p polkadot-bulletin-chain
+
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
+```
+
+### Run a production chain (but only with Alice validator)
+You can override the Alice validator keys here: [adjust\_bp\_spec.sh](./zombienet/adjust_bp_spec.sh) (you should see finalized blocks in the logs).
+
+```
+cargo build --release -p polkadot-bulletin-chain
+
+POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain ENV_PATH=<path-to-zombienet-dir-in-bulletin-repo> zombienet -p native spawn ./zombienet/bulletin-polkadot.toml
+```
+
+## Initial genesis chain spec
+
+[bulletin-polkadot-genesis.json](./node/chain-specs/bulletin-polkadot.json)
+
+```
+cargo build --release -p polkadot-bulletin-chain
+
+./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot
+or
+./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot --raw
+```
+
+## Fresh benchmarks
+
+Run on the dedicated machine from the root directory:
+```
+python3 scripts/cmd/cmd.py bench bulletin-polkadot
+python3 scripts/cmd/cmd.py bench bulletin-westend
+```
+
+# Examples (JavaScript-based)
+
+The `examples/` directory contains Node.js (PJS and/or PAPI) scripts demonstrating how to interact with the Bulletin chain. For detailed setup and usage instructions, see [examples/README.md](./examples/README.md).
+
+# Troubleshooting
+
+## Build Bulletin Mac OS
+
+### Algorithm file not found error
+
+If you encounter an error similar to:
+
+```
+warning: cxx@1.0.186: In file included from /Users/ndk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-1.0.186/src/cxx.cc:1:
+warning: cxx@1.0.186: /Users/ndk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cxx-1.0.186/src/../include/cxx.h:2:10: fatal error: 'algorithm' file not found
+warning: cxx@1.0.186:     2 | #include <algorithm>
+warning: cxx@1.0.186:       |          ^~~~~~~~~~~
+warning: cxx@1.0.186: 1 error generated.
+error: failed to run custom build command for `cxx v1.0.186`
+```
+
+This typically means your C++ standard library headers can’t be found by the compiler. This is a toolchain setup issue.
+
+To fix:
+- Run `xcode-select --install`. 
+- If it says “already installed”, reinstall them (sometimes they break after OS updates):
+
+```bash
+sudo rm -rf /Library/Developer/CommandLineTools
+xcode-select --install
+```
+
+- Check the Active Developer Path: `xcode-select -p`. It should output one of: `/Applications/Xcode.app/Contents/Developer`, `/Library/Developer/CommandLineTools`
+- If it’s empty or incorrect, set it manually: `sudo xcode-select --switch /Library/Developer/CommandLineTools`
+- If none of the above helped, see the official Mac OS recommendations for [polkadot-sdk](https://docs.polkadot.com/develop/parachains/install-polkadot-sdk/#macos)
+
+### dyld: Library not loaded: @rpath/libclang.dylib
+
+This means that your build script tried to use `libclang` (from LLVM) but couldn’t find it anywhere on your system or in the `DYLD_LIBRARY_PATH`.
+
+To fix:`brew install llvm` and 
+```
+export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
+export LD_LIBRARY_PATH="$LIBCLANG_PATH:$LD_LIBRARY_PATH"
+export DYLD_LIBRARY_PATH="$LIBCLANG_PATH:$DYLD_LIBRARY_PATH"
+export PATH="$(brew --prefix llvm)/bin:$PATH"
+```
+
+Now verify `libclang.dylib` exists:
+- `ls "$(brew --prefix llvm)/lib/libclang.dylib"`
+
+If that file exists all good, you can rebuild the project now: 
+```
+cargo clean
+cargo build --release
+```

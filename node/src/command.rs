@@ -1,20 +1,20 @@
 use crate::{
-	benchmarking::{inherent_benchmark_data, RemarkBuilder},
+	benchmarking::inherent_benchmark_data,
 	chain_spec,
 	cli::{Cli, Subcommand},
+	node_primitives::Block,
 	service,
 };
-use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE};
-use polkadot_bulletin_chain_runtime::Block;
-use sc_cli::SubstrateCli;
-use sc_service::PartialComponents;
-use std::sync::Arc;
-
-#[cfg(feature = "try-runtime")]
-use {
-	polkadot_bulletin_chain_runtime::SLOT_DURATION,
-	try_runtime_cli::block_building_info::timestamp_with_babe_info,
+use frame_benchmarking_cli::{
+	BenchmarkCmd, ExtrinsicFactory, SubstrateRemarkBuilder, SUBSTRATE_REFERENCE_HARDWARE,
 };
+use sc_cli::SubstrateCli;
+use sc_network::config::NetworkBackendType;
+use sc_service::PartialComponents;
+use std::{sync::Arc, time::Duration};
+
+/// Log target for this file.
+const LOG_TARGET: &str = "command";
 
 impl SubstrateCli for Cli {
 	fn impl_name() -> String {
@@ -43,8 +43,19 @@ impl SubstrateCli for Cli {
 
 	fn load_spec(&self, id: &str) -> Result<Box<dyn sc_service::ChainSpec>, String> {
 		Ok(match id {
-			"dev" => Box::new(chain_spec::development_config()?),
-			"" | "local" => Box::new(chain_spec::local_testnet_config()?),
+			// TODO: put behind feature and remove dependencies
+			"dev" | "rococo-dev" => Box::new(chain_spec::rococo_development_config()?),
+			"local" | "rococo-local" => Box::new(chain_spec::rococo_local_testnet_config()?),
+			"polkadot-dev" | "bulletin-polkadot-dev" => Box::new(chain_spec::bulletin_polkadot_development_config()?),
+			"polkadot-local" | "bulletin-polkadot-local" => Box::new(chain_spec::bulletin_polkadot_local_testnet_config()?),
+			"bulletin-polkadot" => Box::new(chain_spec::bulletin_polkadot_config()?),
+			"" => return Err(
+				"No chain_id or path specified! Either provide a path to the chain spec or specify chain_id: \
+				Polkadot Live (bulletin-polkadot) \
+				or Polkadot Dev/Local (bulletin-polkadot-dev, bulletin-polkadot-local) \
+				or Rococo (dev, local, rococo-dev, rococo-local)"
+					.into(),
+			),
 			path =>
 				Box::new(chain_spec::ChainSpec::from_json_file(std::path::PathBuf::from(path))?),
 		})
@@ -52,6 +63,7 @@ impl SubstrateCli for Cli {
 }
 
 /// Parse and run command line arguments
+#[allow(clippy::result_large_err)]
 pub fn run() -> sc_cli::Result<()> {
 	let cli = Cli::from_args();
 
@@ -143,27 +155,28 @@ pub fn run() -> sc_cli::Result<()> {
 							service::new_partial(&config)?;
 						let db = backend.expose_db();
 						let storage = backend.expose_storage();
+						let shared_cache = backend.expose_shared_trie_cache();
 
-						cmd.run(config, client, db, storage)
+						cmd.run(config, client, db, storage, shared_cache)
 					},
 					BenchmarkCmd::Overhead(cmd) => {
-						let PartialComponents { client, .. } = service::new_partial(&config)?;
-						let ext_builder = RemarkBuilder::new(client.clone());
+						if cmd.params.runtime.is_some() {
+							return Err(sc_cli::Error::Input(
+								"Bulletin binary does not support `--runtime` flag for `benchmark overhead`. Please provide a chain spec or use the `frame-omni-bencher`."
+									.into(),
+							))
+						}
 
-						cmd.run(
-							config.chain_spec.name().into(),
-							client,
-							inherent_benchmark_data()?,
-							Vec::new(),
-							&ext_builder,
-							false,
+						cmd.run_with_default_builder_and_spec::<Block, ()>(
+							Some(config.chain_spec),
 						)
 					},
 					BenchmarkCmd::Extrinsic(cmd) => {
 						let PartialComponents { client, .. } = service::new_partial(&config)?;
-						// Register the *Remark* builder.
-						let ext_factory =
-							ExtrinsicFactory(vec![Box::new(RemarkBuilder::new(client.clone()))]);
+						// Register the *Remark* and *TKA* builders.
+						let ext_factory = ExtrinsicFactory(vec![
+							Box::new(SubstrateRemarkBuilder::new_from_client(client.clone())?),
+						]);
 
 						cmd.run(client, inherent_benchmark_data()?, Vec::new(), &ext_factory)
 					},
@@ -172,40 +185,43 @@ pub fn run() -> sc_cli::Result<()> {
 				}
 			})
 		},
-		#[cfg(feature = "try-runtime")]
-		Some(Subcommand::TryRuntime(cmd)) => {
-			use crate::service::ExecutorDispatch;
-			use sc_executor::{sp_wasm_interface::ExtendedHostFunctions, NativeExecutionDispatch};
-			let runner = cli.create_runner(cmd)?;
-			runner.async_run(|config| {
-				// we don't need any of the components of new_partial, just a runtime, or a task
-				// manager to do `async_run`.
-				let registry = config.prometheus_config.as_ref().map(|cfg| &cfg.registry);
-				let task_manager =
-					sc_service::TaskManager::new(config.tokio_handle.clone(), registry)
-						.map_err(|e| sc_cli::Error::Service(sc_service::Error::Prometheus(e)))?;
-				let info_provider = timestamp_with_babe_info(SLOT_DURATION);
-
-				Ok((
-					cmd.run::<Block, ExtendedHostFunctions<
-						sp_io::SubstrateHostFunctions,
-						<ExecutorDispatch as NativeExecutionDispatch>::ExtendHostFunctions,
-					>, _>(Some(info_provider)),
-					task_manager,
-				))
-			})
-		},
-		#[cfg(not(feature = "try-runtime"))]
-		Some(Subcommand::TryRuntime) => Err("TryRuntime wasn't enabled when building the node. \
-				You can enable it with `--features try-runtime`."
-			.into()),
 		Some(Subcommand::ChainInfo(cmd)) => {
 			let runner = cli.create_runner(cmd)?;
 			runner.sync_run(|config| cmd.run::<Block>(&config))
 		},
 		None => {
 			let runner = cli.create_runner(&cli.run)?;
-			runner.run_node_until_exit(|config| async move {
+			runner.run_node_until_exit(|mut config| async move {
+				// Override default idle connection timeout of 10 seconds to give IPFS clients more
+				// time to query data over Bitswap. This is needed when manually adding our node
+				// to a swarm of an IPFS node, because the IPFS node doesn't keep any active
+				// substreams with us and our node closes a connection after
+				// `idle_connection_timeout`.
+				const IPFS_WORKAROUND_TIMEOUT: Duration = Duration::from_secs(3600);
+
+				if config.network.idle_connection_timeout < IPFS_WORKAROUND_TIMEOUT {
+					tracing::info!(
+						target: LOG_TARGET,
+						old = ?config.network.idle_connection_timeout,
+						overriden_with = ?IPFS_WORKAROUND_TIMEOUT,
+						"Overriding `config.network.idle_connection_timeout` to allow long-lived connections with IPFS nodes",
+
+					);
+					config.network.idle_connection_timeout = IPFS_WORKAROUND_TIMEOUT;
+				}
+
+				if config.network.ipfs_server {
+					match config.network.network_backend {
+						NetworkBackendType::Litep2p => (),
+						NetworkBackendType::Libp2p => {
+							return Err(
+								"For `ipfs-server`, we expect only the `config.network.network_backend=litep2p` (`--network-backend=litep2p`) setting, because Bitswap support requires it!"
+									.into(),
+							)
+						}
+					}
+				}
+
 				service::new_full::<sc_network::Litep2pNetworkBackend>(config)
 					.map_err(sc_cli::Error::Service)
 			})

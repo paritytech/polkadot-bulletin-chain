@@ -56,7 +56,9 @@ pub trait WeightInfo {
 	fn renew() -> Weight;
 	fn check_proof() -> Weight;
 	fn authorize_account() -> Weight;
+	fn refresh_account_authorization() -> Weight;
 	fn authorize_preimage() -> Weight;
+	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
 }
@@ -121,7 +123,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn authorize_account() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
+	fn refresh_account_authorization() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
 	fn authorize_preimage() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
+	fn refresh_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn remove_expired_account_authorization() -> Weight {
@@ -191,7 +199,13 @@ impl WeightInfo for () {
 	fn authorize_account() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
+	fn refresh_account_authorization() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
 	fn authorize_preimage() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
+	fn refresh_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn remove_expired_account_authorization() -> Weight {

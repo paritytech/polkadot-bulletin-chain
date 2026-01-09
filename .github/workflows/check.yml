@@ -1,4 +1,4 @@
-name: Check Set-Up & Build
+name: CI
 
 # Controls when the action will run.
 on:
@@ -11,35 +11,156 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+# Cancel previous runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Parity CI image to use
+# Common variable is defined in the workflow
+# Repo env variable doesn't work for PRs from forks
+env:
+  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+
 jobs:
-  check:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-22.04
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+  set-image:
+    # This workaround sets the container image for each job using 'set-image' job output.
+    # env variables don't work for PRs from forks, so we need to use outputs.
+    runs-on: ubuntu-latest
+    outputs:
+      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - id: set_image
+        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
-      - name: Install linux dependencies
+  check-fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cargo fmt
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang libssl-dev llvm libudev-dev protobuf-compiler
+          rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
+          cargo +nightly fmt --all -- --check
 
-      - name: Install Rust
+      - name: Check TOML format
         run: |
-          rustup update stable --no-self-update
-          rustup target add wasm32-unknown-unknown
+          cargo install taplo-cli
+          if ! taplo format --check --config .config/taplo.toml; then
+            echo "Please run 'taplo format --config .config/taplo.toml' to fix any TOML formatting issues"
+            exit 1
+          fi
 
-      # Rust cache
-      - uses: Swatinem/rust-cache@v2
+  check:
+    name: Cargo check
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    needs: [set-image, check-fmt]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
-      - name: Check Build
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Cargo check
+        run: cargo check --workspace
+
+  check-benchmarking:
+    name: Cargo check (benchmarking)
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    needs: [set-image, check]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Cargo check benchmarking
         run: |
-          SKIP_WASM_BUILD=1 cargo check --release
+          cargo check --workspace --features=runtime-benchmarks
 
-      - name: Check Build for Benchmarking
-        run: >
-          pushd node &&
-          cargo check --features=runtime-benchmarks --release
+  clippy:
+    name: Cargo clippy
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    needs: [set-image, check]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    env:
+      RUSTFLAGS: "-D warnings"
+      SKIP_WASM_BUILD: 1
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Cargo clippy
+        run: |
+          cargo clippy --all-targets --locked --workspace --quiet
+          cargo clippy --all-targets --all-features --locked --workspace --quiet
+
+  test:
+    name: Test
+    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
+    runs-on: parity-default
+    timeout-minutes: 60
+    needs: [set-image, check]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    env:
+      SKIP_WASM_BUILD: 1
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          cache-all-crates: true
+
+      - name: Run pallets tests
+        run: |
+          cargo test -p pallet-relayer-set
+          cargo test -p pallet-relayer-set --features=runtime-benchmarks
+          cargo test -p pallet-validator-set
+          cargo test -p pallet-validator-set --features=runtime-benchmarks
+          cargo test -p pallet-transaction-storage
+          # Bench test is skipped intentionally (running too long and anyway, we are doing fresh weights)
+          cargo test -p pallet-transaction-storage --features=runtime-benchmarks -- --skip bench_check_proof
+
+      - name: Run (Rococo) runtime tests
+        run: |
+          cargo test -p polkadot-bulletin-chain-runtime
+
+      - name: Run (Polkadot) runtime tests
+        run: |
+          cargo test -p bulletin-polkadot-runtime
+
+      - name: Run (Westend) runtime tests
+        run: |
+          cargo test -p bulletin-westend-runtime
+
+      # TODO: check benchmarks

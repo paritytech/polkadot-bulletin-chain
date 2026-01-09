@@ -1,4 +1,4 @@
-//! With Polkadot Bridge Hub bridge configuration.
+//! With Rococo Bridge Hub bridge configuration.
 
 use crate::{
 	xcm_config::{decode_bridge_message, XcmConfig},
@@ -11,7 +11,7 @@ use bp_messages::{
 };
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_runtime::messages::MessageDispatchResult;
-use codec::{Decode, Encode};
+use codec::{Decode, DecodeWithMemTracking, Encode};
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
@@ -40,8 +40,6 @@ parameter_types! {
 	/// A name of parachains pallet at Pokadot.
 	pub const AtRococoParasPalletName: &'static str = bp_rococo::PARAS_PALLET_NAME;
 
-// 	/// Chain identifier of Polkadot Bridge Hub.
-// 	pub const BridgeHubPolkadotChainId: ChainId = bp_runtime::BRIDGE_HUB_POLKADOT_CHAIN_ID;
 	/// A number of Polkadot Bridge Hub head digests that we keep in the storage.
 	pub const BridgeHubRococoHeadsToKeep: u32 = 1024;
 	/// A maximal size of Polkadot Bridge Hub head digest.
@@ -97,12 +95,22 @@ impl pallet_bridge_parachains::Config<WithRococoBridgeParachainsInstance> for Ru
 		SingleParaStoredHeaderDataBuilder<bp_bridge_hub_rococo::BridgeHubRococo>;
 	type HeadsToKeep = BridgeHubRococoHeadsToKeep;
 	type MaxParaHeadDataSize = MaxBridgeHubRococoHeadSize;
+	type OnNewHead = ();
 }
 
 const LOG_TARGET_BRIDGE_DISPATCH: &str = "runtime::bridge-dispatch";
 
 /// Message dispatch result type for single message.
-#[derive(CloneNoBound, EqNoBound, PartialEqNoBound, Encode, Decode, Debug, TypeInfo)]
+#[derive(
+	CloneNoBound,
+	EqNoBound,
+	PartialEqNoBound,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Debug,
+	TypeInfo,
+)]
 pub enum XcmBlobMessageDispatchResult {
 	/// We've been unable to decode message payload.
 	InvalidPayload,
@@ -154,7 +162,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 				return MessageDispatchResult {
 					unspent_weight: Weight::zero(),
 					dispatch_level_result: XcmBlobMessageDispatchResult::InvalidPayload,
-				}
+				};
 			},
 		};
 		let dispatch_level_result = match BlobDispatcher::dispatch_blob(payload) {
@@ -233,7 +241,9 @@ where
 			.map_err(drop)
 			.and_then(|payload| decode_bridge_message(payload).map(|(_, xcm)| xcm).map_err(drop))
 			.and_then(|xcm| xcm.try_into().map_err(drop))
-			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm).map_err(drop))
+			// TODO: FAIL-CI Weight::MAX maybe change for something else, hard-coded or
+			// Weight::MAX/4... TODO: (real weights) https://github.com/paritytech/polkadot-bulletin-chain/issues/22
+			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
 			.map(|weighed_xcm| weighed_xcm.weight_of())
 			.unwrap_or(Weight::zero())
 	}
@@ -271,9 +281,7 @@ where
 			.map_err(|e| {
 				log::error!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
-					"haul_blob result - error: {:?} on lane: {:?}",
-					e,
-					XCM_LANE,
+					"haul_blob result - error: {e:?} on lane: {XCM_LANE:?}",
 				);
 				HaulBlobError::Transport("MessageSenderError")
 			})?;
@@ -292,11 +300,11 @@ where
 	}
 }
 
-/// Export XCM messages to be relayed to the Polkadot Bridge Hub chain.
-pub type ToBridgeHubRococoHaulBlobExporter = HaulBlobExporter<
+/// Export XCM messages to be relayed to the Rococo Bridge Hub chain.
+pub type ToBridgeHaulBlobExporter = HaulBlobExporter<
 	XcmBlobHauler<Runtime, WithBridgeHubRococoMessagesInstance>,
 	RococoGlobalConsensusNetworkLocation,
-	AlwaysV4,
+	AlwaysV5,
 	(),
 >;
 

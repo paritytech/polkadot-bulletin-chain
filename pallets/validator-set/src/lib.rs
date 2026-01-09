@@ -78,6 +78,7 @@ pub mod pallet {
 		>
 	{
 		/// The overarching event type.
+		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// Weight information for extrinsics in this pallet.
@@ -295,7 +296,9 @@ impl<T: Config> SessionManager<T::AccountId> for Pallet<T> {
 
 	fn start_session(_start_index: SessionIndex) {
 		for (who, _) in NextDisabledValidators::<T>::drain() {
-			pallet_session::Pallet::<T>::disable(&who);
+			if let Some(i) = pallet_session::Pallet::<T>::validator_id_to_index(&who) {
+				pallet_session::Pallet::<T>::disable_index(i);
+			}
 		}
 	}
 }

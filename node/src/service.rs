@@ -1,13 +1,13 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
+use crate::{fake_runtime_api::RuntimeApi, node_primitives::Block};
 use futures::FutureExt;
-use polkadot_bulletin_chain_runtime as runtime;
-use runtime::{opaque::Block, RuntimeApi};
 use sc_client_api::{Backend, BlockBackend};
 use sc_consensus_grandpa::SharedVoterState;
 use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
+use sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
 use std::{sync::Arc, time::Duration};
 
 pub(crate) type FullClient = sc_service::TFullClient<
@@ -25,6 +25,7 @@ type FullGrandpaBlockImport =
 const GRANDPA_JUSTIFICATION_PERIOD: u32 = 512;
 
 #[allow(clippy::type_complexity)]
+#[allow(clippy::result_large_err)]
 pub fn new_partial(
 	config: &Configuration,
 ) -> Result<
@@ -35,9 +36,16 @@ pub fn new_partial(
 		sc_consensus::DefaultImportQueue<Block>,
 		sc_transaction_pool::TransactionPoolHandle<Block, FullClient>,
 		(
-			sc_consensus_babe::BabeBlockImport<Block, FullClient, FullGrandpaBlockImport>,
+			sc_consensus_babe::BabeBlockImport<
+				Block,
+				FullClient,
+				FullGrandpaBlockImport,
+				BabeCreateInherentDataProviders<Block>,
+				FullSelectChain,
+			>,
 			sc_consensus_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
 			sc_consensus_babe::BabeLink<Block>,
+			sc_consensus_babe::BabeWorkerHandle<Block>,
 			Option<Telemetry>,
 		),
 	>,
@@ -90,10 +98,22 @@ pub fn new_partial(
 	)?;
 	let justification_import = grandpa_block_import.clone();
 
+	let babe_config = sc_consensus_babe::configuration(&*client)?;
+	let slot_duration = babe_config.slot_duration();
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
-		sc_consensus_babe::configuration(&*client)?,
+		babe_config,
 		grandpa_block_import,
 		client.clone(),
+		Arc::new(move |_, _| async move {
+			let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
+			let slot = sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
+				*timestamp,
+				slot_duration,
+			);
+			Ok((slot, timestamp))
+		}) as BabeCreateInherentDataProviders<Block>,
+		select_chain.clone(),
+		OffchainTransactionPoolFactory::new(transaction_pool.clone()),
 	)?;
 
 	let slot_duration = babe_link.config().slot_duration();
@@ -103,26 +123,11 @@ pub fn new_partial(
 			block_import: block_import.clone(),
 			justification_import: Some(Box::new(justification_import)),
 			client: client.clone(),
-			select_chain: select_chain.clone(),
-			create_inherent_data_providers: move |_, ()| async move {
-				let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
-
-				let slot =
-					sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
-						*timestamp,
-						slot_duration,
-					);
-
-				Ok((slot, timestamp))
-			},
+			slot_duration,
 			spawner: &task_manager.spawn_essential_handle(),
 			registry: config.prometheus_registry(),
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
-			offchain_tx_pool_factory: OffchainTransactionPoolFactory::new(transaction_pool.clone()),
 		})?;
-
-	// TODO Wire up to RPC
-	std::mem::forget(babe_worker_handle);
 
 	Ok(sc_service::PartialComponents {
 		client,
@@ -132,11 +137,12 @@ pub fn new_partial(
 		keystore_container,
 		select_chain,
 		transaction_pool,
-		other: (block_import, grandpa_link, babe_link, telemetry),
+		other: (block_import, grandpa_link, babe_link, babe_worker_handle, telemetry),
 	})
 }
 
 /// Builds a new service for a full client.
+#[allow(clippy::result_large_err)]
 pub fn new_full<
 	N: sc_network::NetworkBackend<Block, <Block as sp_runtime::traits::Block>::Hash>,
 >(
@@ -150,7 +156,7 @@ pub fn new_full<
 		keystore_container,
 		select_chain,
 		transaction_pool,
-		other: (block_import, grandpa_link, babe_link, mut telemetry),
+		other: (block_import, grandpa_link, babe_link, babe_worker_handle, mut telemetry),
 	} = new_partial(&config)?;
 
 	let mut net_config = sc_network::config::FullNetworkConfiguration::<_, _, N>::new(
@@ -207,7 +213,7 @@ pub fn new_full<
 		);
 	}
 
-	let role = config.role.clone();
+	let role = config.role;
 	let force_authoring = config.force_authoring;
 	let backoff_authoring_blocks: Option<()> = None;
 	let name = config.network.node_name.clone();
@@ -219,6 +225,9 @@ pub fn new_full<
 	let rpc_extensions_builder = {
 		let client = client.clone();
 		let pool = transaction_pool.clone();
+		let keystore = keystore_container.keystore();
+		let select_chain = select_chain.clone();
+		let chain_spec = config.chain_spec.cloned_box();
 
 		let justification_stream = grandpa_link.justification_stream();
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
@@ -233,6 +242,12 @@ pub fn new_full<
 			let deps = crate::rpc::FullDeps {
 				client: client.clone(),
 				pool: pool.clone(),
+				select_chain: select_chain.clone(),
+				chain_spec: chain_spec.cloned_box(),
+				babe: crate::rpc::BabeDeps {
+					babe_worker_handle: babe_worker_handle.clone(),
+					keystore: keystore.clone(),
+				},
 				grandpa: crate::rpc::GrandpaDeps {
 					subscription_executor,
 					shared_authority_set: shared_authority_set.clone(),
@@ -258,6 +273,7 @@ pub fn new_full<
 		sync_service: sync_service.clone(),
 		config,
 		telemetry: telemetry.as_mut(),
+		tracing_execute_block: None,
 	})?;
 
 	if role.is_authority() {

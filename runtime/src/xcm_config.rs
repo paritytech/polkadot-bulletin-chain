@@ -17,7 +17,7 @@
 //! XCM configuration for Polkadot Bulletin chain.
 
 use crate::{
-	bridge_config::{BridgedNetwork, ToBridgeHubRococoHaulBlobExporter},
+	bridge_config::{BridgedNetwork, ToBridgeHaulBlobExporter},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
 
@@ -32,8 +32,8 @@ use sp_core::ConstU32;
 use sp_io::hashing::blake2_256;
 use xcm::{latest::prelude::*, VersionedInteriorLocation, VersionedXcm, MAX_XCM_DECODE_DEPTH};
 use xcm_builder::{
-	DispatchBlob, DispatchBlobError, FixedWeightBounds, FrameTransactionalProcessor,
-	TrailingSetTopicAsId, UnpaidLocalExporter, WithComputedOrigin,
+	DispatchBlob, DispatchBlobError, FixedWeightBounds, FrameTransactionalProcessor, LocalExporter,
+	TrailingSetTopicAsId, WithComputedOrigin,
 };
 use xcm_executor::{
 	traits::{ConvertOrigin, ShouldExecute, WeightTrader, WithOriginFilter},
@@ -52,6 +52,7 @@ parameter_types! {
 	/// Our location in the universe of consensus systems.
 	pub UniversalLocation: InteriorLocation = ThisNetwork::get().into();
 
+	/// TODO: (Kawabunga = People Chain) - rename somehow :)
 	/// Location of the Kawabunga parachain, relative to this runtime.
 	pub KawabungaLocation: Location = Location::new(1, [
 		GlobalConsensus(BridgedNetwork::get()),
@@ -100,8 +101,7 @@ impl ConvertOrigin<RuntimeOrigin> for KawabungaParachainAsRoot {
 		let origin = origin.into();
 		log::trace!(
 			target: "xcm::origin_conversion",
-			"KawabungaParachainAsRoot origin: {:?}, kind: {:?}",
-			origin, kind,
+			"KawabungaParachainAsRoot origin: {origin:?}, kind: {kind:?}",
 		);
 		match (kind, origin.unpack()) {
 			(
@@ -150,8 +150,8 @@ impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
 	) -> Result<(), ProcessMessageError> {
 		log::trace!(
 			target: "xcm::barriers",
-			"AllowUnpaidTransactsFrom origin: {:?}, instructions: {:?}, max_weight: {:?}, properties:
-		{:?}", 			origin, instructions, max_weight, _properties,
+			"AllowUnpaidTransactsFrom origin: {origin:?}, instructions: {instructions:?}, max_weight: {max_weight:?}, properties:
+		{_properties:?}",
 		);
 
 		// we only allow from configured origins
@@ -171,7 +171,7 @@ type LocalOriginConverter = (
 );
 
 /// Only bridged destination is supported.
-pub type XcmRouter = UnpaidLocalExporter<ToBridgeHubRococoHaulBlobExporter, UniversalLocation>;
+pub type XcmRouter = LocalExporter<ToBridgeHaulBlobExporter, UniversalLocation>;
 
 /// The barriers one of which must be passed for an XCM message to be executed.
 pub type Barrier = TrailingSetTopicAsId<
@@ -208,7 +208,7 @@ impl xcm_executor::Config for XcmConfig {
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = ConstU32<0>;
 	type FeeManager = ();
-	type MessageExporter = ToBridgeHubRococoHaulBlobExporter;
+	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
 	type SafeCallFilter = Everything;
@@ -218,6 +218,7 @@ impl xcm_executor::Config for XcmConfig {
 	type HrmpChannelAcceptedHandler = ();
 	type HrmpChannelClosingHandler = ();
 	type XcmRecorder = ();
+	type XcmEventEmitter = ();
 }
 
 /// XCM blob dispatcher that executes XCM message at this chain.

@@ -7,26 +7,44 @@
 
 use std::sync::Arc;
 
+use crate::node_primitives::{AccountId, Block, BlockNumber, Hash, Nonce};
 use jsonrpsee::RpcModule;
-use polkadot_bulletin_chain_runtime::{opaque::Block, AccountId, BlockNumber, Hash, Nonce};
+use sc_consensus_babe::{BabeApi, BabeWorkerHandle};
 use sc_consensus_grandpa::{
 	FinalityProofProvider, GrandpaJustificationStream, SharedAuthoritySet, SharedVoterState,
 };
 use sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer};
 use sc_rpc::SubscriptionTaskExecutor;
+use sc_sync_state_rpc::{SyncState, SyncStateApiServer};
 use sc_transaction_pool_api::TransactionPool;
 use sp_api::ProvideRuntimeApi;
 use sp_block_builder::BlockBuilder;
 use sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata};
+use sp_consensus::SelectChain;
+use sp_keystore::KeystorePtr;
 
 /// Full client dependencies.
-pub struct FullDeps<C, P, B> {
+pub struct FullDeps<C, P, SC, B> {
 	/// The client instance to use.
 	pub client: Arc<C>,
 	/// Transaction pool instance.
 	pub pool: Arc<P>,
+	/// The chain selection strategy.
+	pub select_chain: SC,
+	/// A copy of the chain spec.
+	pub chain_spec: Box<dyn sc_chain_spec::ChainSpec>,
+	/// BABE RPC dependencies.
+	pub babe: BabeDeps,
 	/// GRANDPA RPC dependencies.
 	pub grandpa: GrandpaDeps<B>,
+}
+
+/// BABE RPC dependencies.
+pub struct BabeDeps {
+	/// A handle to the BABE worker for issuing requests.
+	pub babe_worker_handle: BabeWorkerHandle<Block>,
+	/// The keystore that manages the keys of the node.
+	pub keystore: KeystorePtr,
 }
 
 /// GRANDPA RPC dependncies.
@@ -44,33 +62,44 @@ pub struct GrandpaDeps<B> {
 }
 
 /// Instantiate all full RPC extensions.
-pub fn create_full<C, P, B>(
-	deps: FullDeps<C, P, B>,
+pub fn create_full<C, P, SC, B>(
+	deps: FullDeps<C, P, SC, B>,
 ) -> Result<RpcModule<()>, Box<dyn std::error::Error + Send + Sync>>
 where
 	C: ProvideRuntimeApi<Block>,
 	C: HeaderBackend<Block> + HeaderMetadata<Block, Error = BlockChainError> + 'static,
-	C: Send + Sync + 'static,
+	C: Send + Sync + 'static + sc_client_api::AuxStore,
 	C::Api: substrate_frame_rpc_system::AccountNonceApi<Block, AccountId, Nonce>,
 	C::Api: BlockBuilder<Block>,
+	C::Api: BabeApi<Block>,
 	P: TransactionPool + 'static,
+	SC: SelectChain<Block> + 'static,
 	B: sc_client_api::Backend<Block> + Send + Sync + 'static,
 {
+	use sc_consensus_babe_rpc::{Babe, BabeApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
 	let mut module = RpcModule::new(());
-	let FullDeps { client, pool, grandpa } = deps;
+	let FullDeps { client, pool, select_chain, chain_spec, babe, grandpa } = deps;
+	let BabeDeps { babe_worker_handle, keystore } = babe;
 
-	module.merge(System::new(client, pool).into_rpc())?;
+	module.merge(System::new(client.clone(), pool).into_rpc())?;
+	module.merge(
+		Babe::new(client.clone(), babe_worker_handle.clone(), keystore, select_chain).into_rpc(),
+	)?;
 	module.merge(
 		Grandpa::new(
 			grandpa.subscription_executor,
-			grandpa.shared_authority_set,
+			grandpa.shared_authority_set.clone(),
 			grandpa.shared_voter_state,
 			grandpa.justification_stream,
 			grandpa.finality_proof_provider,
 		)
 		.into_rpc(),
+	)?;
+	module.merge(
+		SyncState::new(chain_spec, client, grandpa.shared_authority_set, babe_worker_handle)?
+			.into_rpc(),
 	)?;
 
 	// Extend this RPC with a custom API by using the following syntax.

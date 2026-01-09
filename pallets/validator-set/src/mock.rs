@@ -37,6 +37,7 @@ construct_runtime!(
 		System: frame_system,
 		ValidatorSet: pallet_validator_set,
 		Session: pallet_session,
+		Historical: pallet_session::historical,
 	}
 );
 
@@ -45,13 +46,13 @@ pub struct MockSessionHandler;
 impl OneSessionHandler<AccountId> for MockSessionHandler {
 	type Key = UintAuthorityId;
 
-	fn on_genesis_session<'a, I: 'a>(_validators: I)
+	fn on_genesis_session<'a, I>(_validators: I)
 	where
 		I: Iterator<Item = (&'a AccountId, Self::Key)>,
 	{
 	}
 
-	fn on_new_session<'a, I: 'a>(_changed: bool, _validators: I, _queued_validators: I)
+	fn on_new_session<'a, I>(_changed: bool, _validators: I, _queued_validators: I)
 	where
 		I: Iterator<Item = (&'a AccountId, Self::Key)>,
 	{
@@ -77,7 +78,7 @@ impl From<AccountId> for MockSessionKeys {
 }
 
 thread_local! {
-	static END_SESSION: Cell<bool> = Cell::new(false);
+	static END_SESSION: Cell<bool> = const { Cell::new(false) };
 }
 
 pub struct MockShouldEndSession;
@@ -143,9 +144,13 @@ impl pallet_session::Config for Test {
 	type Keys = MockSessionKeys;
 	type WeightInfo = ();
 	type RuntimeEvent = RuntimeEvent;
+	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
+	type KeyDeposit = ();
+	type DisablingStrategy = ();
 }
 
 impl pallet_session::historical::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }

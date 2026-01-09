@@ -19,10 +19,11 @@ use pallet_session::Call as SessionCall;
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 use sp_runtime::{
-	generic, impl_opaque_keys, impl_tx_ext_default,
+	generic, impl_opaque_keys,
 	traits::{
-		AccountIdLookup, BlakeTwo256, Block as BlockT, ConvertInto, DispatchInfoOf,
-		IdentifyAccount, NumberFor, OpaqueKeys, PostDispatchInfoOf, SignedExtension, Verify,
+		AccountIdLookup, AsSystemOriginSigner, BlakeTwo256, Block as BlockT, ConvertInto,
+		DispatchInfoOf, IdentifyAccount, Implication, NumberFor, OpaqueKeys, PostDispatchInfoOf,
+		TransactionExtension, Verify,
 	},
 	transaction_validity::{
 		InvalidTransaction, TransactionLongevity, TransactionPriority, TransactionSource,
@@ -35,7 +36,6 @@ use sp_std::prelude::*;
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
-// A few exports that help ease life for downstream crates.
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
@@ -51,13 +51,13 @@ pub use frame_support::{
 	StorageValue,
 };
 use frame_support::{
-	dispatch::{DispatchInfo, GetDispatchInfo},
+	dispatch::GetDispatchInfo,
 	genesis_builder_helper::{build_state, get_preset},
 };
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
 use pallet_transaction_payment::RuntimeDispatchInfo;
-use sp_runtime::traits::transaction_extension::AsTransactionExtension;
+
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
@@ -199,7 +199,7 @@ parameter_types! {
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = DAYS as TransactionLongevity;
 
-	pub const SudoPriority: TransactionPriority = TransactionPriority::max_value();
+	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 
 	pub const SetKeysCooldownBlocks: BlockNumber = 5 * MINUTES;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
@@ -269,9 +269,14 @@ impl pallet_session::Config for Runtime {
 	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = opaque::SessionKeys;
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
+	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
+	type KeyDeposit = ();
+	// TODO: check it later
+	type DisablingStrategy = ();
 }
 
 impl pallet_session::historical::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
 	type FullIdentification = Self::ValidatorId;
 	type FullIdentificationOf = Self::ValidatorIdOf;
 }
@@ -330,6 +335,7 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = ();
 }
 
+// TODO: remove sudo before go live
 impl pallet_sudo::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -365,40 +371,40 @@ where
 	type RuntimeCall = RuntimeCall;
 }
 
-impl<C> frame_system::offchain::CreateInherent<C> for Runtime
+impl<C> frame_system::offchain::CreateBare<C> for Runtime
 where
 	RuntimeCall: From<C>,
 {
-	fn create_inherent(call: RuntimeCall) -> UncheckedExtrinsic {
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
 		UncheckedExtrinsic::new_bare(call)
 	}
 }
 
 construct_runtime!(
 	pub struct Runtime {
-		System: frame_system::{Pallet, Call, Storage, Config<T>, Event<T>} = 0,
+		System: frame_system = 0,
 		// Babe must be called before Session
-		Babe: pallet_babe::{Pallet, Call, Storage, Config<T>, ValidateUnsigned} = 1,
-		Timestamp: pallet_timestamp::{Pallet, Call, Storage, Inherent} = 2,
+		Babe: pallet_babe = 1,
+		Timestamp: pallet_timestamp = 2,
 		// Authorship must be before session in order to note author in the correct session.
-		Authorship: pallet_authorship::{Pallet, Storage} = 10,
-		Offences: pallet_offences::{Pallet, Storage, Event} = 11,
-		Historical: pallet_session::historical::{Pallet} = 12,
-		ValidatorSet: pallet_validator_set::{Pallet, Storage, Event<T>, Config<T>} = 13,
-		Session: pallet_session::{Pallet, Call, Storage, Event, Config<T>} = 14,
-		Grandpa: pallet_grandpa::{Pallet, Call, Storage, Config<T>, Event, ValidateUnsigned} = 15,
+		Authorship: pallet_authorship = 10,
+		Offences: pallet_offences = 11,
+		Historical: pallet_session::historical = 12,
+		ValidatorSet: pallet_validator_set = 13,
+		Session: pallet_session = 14,
+		Grandpa: pallet_grandpa = 15,
 
 		// Storage
-		TransactionStorage: pallet_transaction_storage::{Pallet, Call, Storage, Event<T>} = 40,
+		TransactionStorage: pallet_transaction_storage = 40,
 
-		// Bridge
-		RelayerSet: pallet_relayer_set::{Pallet, Storage, Event<T>, Config<T>} = 50,
-		BridgeRococoGrandpa: pallet_bridge_grandpa::{Pallet, Call, Storage, Event<T>, Config<T>} = 51,
-		BridgeRococoParachains: pallet_bridge_parachains::{Pallet, Call, Storage, Event<T>, Config<T>} = 52,
-		BridgeRococoMessages: pallet_bridge_messages::{Pallet, Call, Storage, Event<T>, Config<T>} = 53,
+		// Bridge (over BridgeHubRococo)
+		RelayerSet: pallet_relayer_set = 50,
+		BridgeRococoGrandpa: pallet_bridge_grandpa = 51,
+		BridgeRococoParachains: pallet_bridge_parachains = 52,
+		BridgeRococoMessages: pallet_bridge_messages = 53,
 
 		// sudo
-		Sudo: pallet_sudo::{Pallet, Call, Storage, Event<T>, Config<T>} = 255,
+		Sudo: pallet_sudo = 255,
 	}
 );
 
@@ -437,8 +443,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 /// `ValidateUnsigned` equivalent for signed transactions.
 ///
 /// This chain has no transaction fees, so we require checks equivalent to those performed by
-/// `ValidateUnsigned` for all signed transactions. Substrate has no built-in mechanism for this;
-/// it is handled by this `SignedExtension`.
+/// `ValidateUnsigned` for all signed transactions.
 #[derive(
 	Clone,
 	PartialEq,
@@ -446,109 +451,154 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	sp_runtime::RuntimeDebug,
 	codec::Encode,
 	codec::Decode,
+	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
 pub struct ValidateSigned;
 
-impl SignedExtension for ValidateSigned {
-	type AccountId = AccountId;
-	type Call = RuntimeCall;
-	type AdditionalSigned = ();
-	/// `Some(who)` if the transaction is a bridge transaction.
-	type Pre = Option<AccountId>;
-
+impl TransactionExtension<RuntimeCall> for ValidateSigned {
 	const IDENTIFIER: &'static str = "ValidateSigned";
 
-	fn additional_signed(&self) -> Result<Self::AdditionalSigned, TransactionValidityError> {
+	type Implicit = ();
+	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
 		Ok(())
 	}
 
-	fn pre_dispatch(
-		self,
-		who: &Self::AccountId,
-		call: &Self::Call,
-		_info: &DispatchInfoOf<Self::Call>,
-		_len: usize,
-	) -> Result<Self::Pre, TransactionValidityError> {
-		match call {
-			Self::Call::TransactionStorage(call) =>
-				TransactionStorage::pre_dispatch_signed(who, call).map(|()| None),
-			Self::Call::Sudo(_) => validate_sudo(who).map(|_| None),
-			Self::Call::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
-			Self::Call::Session(SessionCall::purge_keys {}) =>
-				validate_purge_keys(who).map(|_| None),
-			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
-				..
-			}) |
-			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			Self::Call::BridgeRococoMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
-			_ => Err(InvalidTransaction::Call.into()),
-		}
+	type Val = ();
+	/// `Some(who)` if the transaction is a bridge transaction.
+	type Pre = Option<AccountId>;
+
+	fn weight(&self, _call: &RuntimeCall) -> Weight {
+		Weight::zero()
 	}
 
 	fn validate(
 		&self,
-		who: &Self::AccountId,
-		call: &Self::Call,
-		_info: &DispatchInfoOf<Self::Call>,
+		origin: RuntimeOrigin,
+		call: &RuntimeCall,
+		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
-	) -> TransactionValidity {
-		match call {
-			Self::Call::TransactionStorage(call) => TransactionStorage::validate_signed(who, call),
-			Self::Call::Sudo(_) => validate_sudo(who),
-			Self::Call::Session(SessionCall::set_keys { .. }) =>
+		_self_implicit: Self::Implicit,
+		_inherited_implication: &impl Implication,
+		_source: TransactionSource,
+	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
+		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+
+		let validity = match call {
+			// Transaction storage call
+			RuntimeCall::TransactionStorage(inner_call) =>
+				TransactionStorage::validate_signed(who, inner_call),
+
+			// Sudo call
+			RuntimeCall::Sudo(_) => validate_sudo(who),
+
+			// Session key management
+			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
 				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
 				}),
-			Self::Call::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
-			Self::Call::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
+
+			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+
+			// Bridge-related calls
+			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
 			}) |
-			Self::Call::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
+			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
 			}) |
-			Self::Call::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+			RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
 			}) |
-			Self::Call::BridgeRococoMessages(
+			RuntimeCall::BridgeRococoParachains(
+				BridgeParachainsCall::submit_parachain_heads_ex { .. },
+			) |
+			RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			RuntimeCall::BridgeRococoMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
 				priority: BridgeTxPriority::get(),
 				longevity: BridgeTxLongevity::get(),
 				..Default::default()
 			}),
+
+			// All other calls are invalid
+			_ => Err(InvalidTransaction::Call.into()),
+		}?;
+
+		Ok((validity, (), origin))
+	}
+
+	fn prepare(
+		self,
+		_val: Self::Val,
+		origin: &RuntimeOrigin,
+		call: &RuntimeCall,
+		_info: &DispatchInfoOf<RuntimeCall>,
+		_len: usize,
+	) -> Result<Self::Pre, TransactionValidityError> {
+		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		match call {
+			// Transaction storage validation
+			RuntimeCall::TransactionStorage(inner_call) =>
+				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+
+			// Sudo validation
+			RuntimeCall::Sudo(_) => validate_sudo(who).map(|_| None),
+
+			// Session key management
+			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
+				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
+			RuntimeCall::Session(SessionCall::purge_keys {}) =>
+				validate_purge_keys(who).map(|_| None),
+
+			// Bridge-related calls
+			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
+				..
+			}) |
+			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+				..
+			}) |
+			RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
+				..
+			}) |
+			RuntimeCall::BridgeRococoParachains(
+				BridgeParachainsCall::submit_parachain_heads_ex { .. },
+			) |
+			RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+				..
+			}) |
+			RuntimeCall::BridgeRococoMessages(
+				BridgeMessagesCall::receive_messages_delivery_proof { .. },
+			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+
+			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
 		}
 	}
 
-	fn post_dispatch(
-		pre: Option<Self::Pre>,
-		_info: &DispatchInfoOf<Self::Call>,
-		_post_info: &PostDispatchInfoOf<Self::Call>,
+	fn post_dispatch_details(
+		pre: Self::Pre,
+		_info: &DispatchInfoOf<RuntimeCall>,
+		_post_info: &PostDispatchInfoOf<RuntimeCall>,
 		_len: usize,
 		result: &DispatchResult,
-	) -> Result<(), TransactionValidityError> {
+	) -> Result<Weight, TransactionValidityError> {
 		if result.is_err() {
-			if let Some(Some(who)) = pre {
+			if let Some(who) = pre {
 				RelayerSet::post_dispatch_failed_bridge_tx(&who);
 			}
 		}
-		Ok(())
+		Ok(Weight::zero())
 	}
 }
 
-// it'll generate signed extensions to invalidate obsolete bridge transactions before
-// they'll be included into block
+// It'll generate signed extensions to invalidate obsolete bridge transactions before
+// they'll be included in the block
 generate_bridge_reject_obsolete_headers_and_messages! {
 	RuntimeCall, AccountId,
 	// Grandpa
@@ -568,7 +618,7 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	AsTransactionExtension<ValidateSigned>,
+	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
 
@@ -587,22 +637,20 @@ pub type Executive = frame_executive::Executive<
 >;
 
 #[cfg(feature = "runtime-benchmarks")]
-#[macro_use]
-extern crate frame_benchmarking;
-
-#[cfg(feature = "runtime-benchmarks")]
 mod benches {
-	define_benchmarks!(
+	frame_benchmarking::define_benchmarks!(
 		[frame_benchmarking, BaselineBench::<Runtime>]
 		[frame_system, SystemBench::<Runtime>]
 		[pallet_timestamp, Timestamp]
 		[pallet_sudo, Sudo]
 		[pallet_transaction_storage, TransactionStorage]
 		[pallet_validator_set, ValidatorSet]
-		[pallet_bridge_grandpa, BridgePolkadotGrandpa]
-		[pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithPolkadotBridgeParachainsInstance>]
-		[pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubPolkadotMessagesInstance>]
 		[pallet_relayer_set, RelayerSet]
+
+		[pallet_bridge_grandpa, BridgeRococoGrandpa]
+		// TODO: finish benchmarking
+		// [pallet_bridge_parachains, BridgeParachainsBench::<Runtime, bridge_config::WithRococoBridgeParachainsInstance>]
+		// [pallet_bridge_messages, BridgeMessagesBench::<Runtime, bridge_config::WithBridgeHubRococoMessagesInstance>]
 	);
 }
 
@@ -612,7 +660,7 @@ impl_runtime_apis! {
 			VERSION
 		}
 
-		fn execute_block(block: Block) {
+		fn execute_block(block: <Block as BlockT>::LazyBlock) {
 			Executive::execute_block(block);
 		}
 
@@ -635,6 +683,12 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl frame_support::view_functions::runtime_api::RuntimeViewFunction<Block> for Runtime {
+		fn execute_view_function(id: frame_support::view_functions::ViewFunctionId, input: Vec<u8>) -> Result<Vec<u8>, frame_support::view_functions::ViewFunctionDispatchError> {
+			Runtime::execute_view_function(id, input)
+		}
+	}
+
 	impl sp_block_builder::BlockBuilder<Block> for Runtime {
 		fn apply_extrinsic(extrinsic: <Block as BlockT>::Extrinsic) -> ApplyExtrinsicResult {
 			Executive::apply_extrinsic(extrinsic)
@@ -649,7 +703,7 @@ impl_runtime_apis! {
 		}
 
 		fn check_inherents(
-			block: Block,
+			block: <Block as BlockT>::LazyBlock,
 			data: sp_inherents::InherentData,
 		) -> sp_inherents::CheckInherentsResult {
 			data.check_extrinsics(&block)
@@ -844,13 +898,13 @@ impl_runtime_apis! {
 			Vec<frame_benchmarking::BenchmarkList>,
 			Vec<frame_support::traits::StorageInfo>,
 		) {
-			use frame_benchmarking::{baseline, Benchmarking, BenchmarkList};
+			use frame_benchmarking::{baseline, BenchmarkList};
 			use frame_support::traits::StorageInfoTrait;
 			use frame_system_benchmarking::Pallet as SystemBench;
 			use baseline::Pallet as BaselineBench;
 
-			use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
-			use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
+			// use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
+			// use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
 
 			let mut list = Vec::<BenchmarkList>::new();
 			list_benchmarks!(list, extra);
@@ -860,16 +914,18 @@ impl_runtime_apis! {
 			(list, storage_info)
 		}
 
+		#[allow(non_local_definitions)]
 		fn dispatch_benchmark(
 			config: frame_benchmarking::BenchmarkConfig
-		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, sp_runtime::RuntimeString> {
-			use frame_benchmarking::{baseline, Benchmarking, BenchmarkBatch, TrackedStorageKey};
+		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
+			use sp_storage::TrackedStorageKey;
+			use frame_benchmarking::{baseline, BenchmarkBatch};
 
 			use frame_system_benchmarking::Pallet as SystemBench;
 			use baseline::Pallet as BaselineBench;
 
-			use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
-			use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
+			// use pallet_bridge_parachains::benchmarking::Pallet as BridgeParachainsBench;
+			// use pallet_bridge_messages::benchmarking::Pallet as BridgeMessagesBench;
 
 			impl frame_system_benchmarking::Config for Runtime {}
 			impl baseline::Config for Runtime {}
@@ -896,7 +952,7 @@ impl_runtime_apis! {
 		}
 
 		fn execute_block(
-			block: Block,
+			block: <Block as BlockT>::LazyBlock,
 			state_root_check: bool,
 			signature_check: bool,
 			select: frame_try_runtime::TryStateSelect
