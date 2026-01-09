@@ -120,9 +120,7 @@ jobs:
         with:
           workspaces: .
           shared-key: "bulletin-cache-bulletin-integration-tests"
-          # TODO: uncomment before merging to main
-          save-if: true
-          # save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
