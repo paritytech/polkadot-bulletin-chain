@@ -164,9 +164,14 @@ bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
     just setup-parachain-prerequisites
 
     # Set paths to binaries
-    # TODO: fix the PATH, for CI this is part of ENV path
-    POLKADOT_BINARY_PATH=polkadot
-    POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
+    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
+        # Expect in the PATH
+        POLKADOT_BINARY_PATH=polkadot
+        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
+    else
+        POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
+        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+    fi
 
     # Verify binaries exist after setup
     if ! command -v "$POLKADOT_BINARY_PATH"; then
