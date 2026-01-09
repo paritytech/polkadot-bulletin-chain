@@ -88,7 +88,7 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
     
-    if [ -z "$ZOMBIENET_BIN" ] || [ ! -f "$ZOMBIENET_BIN" ]; then
+    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
@@ -148,7 +148,7 @@ bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
 
-    if [ -z "$ZOMBIENET_BIN" ] || [ ! -f "$ZOMBIENET_BIN" ]; then
+    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
