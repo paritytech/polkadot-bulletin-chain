@@ -12,7 +12,7 @@ import { cidFromBytes, buildUnixFSDagPB } from "./cid_dag_metadata.js";
 export const WS_ENDPOINT = 'ws://127.0.0.1:10000'; // Bulletin node
 export const IPFS_API = 'http://127.0.0.1:5001';   // Local IPFS daemon
 export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
-export const CHUNK_SIZE = 2 * 1024 * 512; // less than 2 MB
+export const CHUNK_SIZE = 1 * 1024 * 1024; // less than 2 MB
 // -----------------
 
 function to_hex(input) {
