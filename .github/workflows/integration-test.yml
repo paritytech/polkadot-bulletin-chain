@@ -76,3 +76,7 @@ jobs:
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
         working-directory: examples
         run: just run-store-chunked-data
+
+      - name: Run store big data + DAG-PB (PJS-API, RPC node)
+        working-directory: examples
+        run: just run-store-big-data

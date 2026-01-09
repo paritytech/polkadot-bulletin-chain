@@ -282,3 +282,26 @@ run-store-chunked-data: build npm-install
 
     just teardown-services
     exit $EXAMPLE_EXIT
+
+# Run store big data example with Docker IPFS
+run-store-big-data: build npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting store big data + DAG-PB workflow test ..."
+    echo ""
+
+    just setup-services
+    node store_big_data.js
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services
+    exit $EXAMPLE_EXIT
