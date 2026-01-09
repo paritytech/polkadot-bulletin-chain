@@ -122,7 +122,8 @@ jobs:
       - name: Add Polkadot SDK binaries to PATH
         run: |
           ls -lrt "${POLKADOT_SDK_BIN_DIR}"
-          echo "${POLKADOT_SDK_BIN_DIR}" >> $GITHUB_PATH
+          echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
+          echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
 
       - name: Download zombienet
         run: |

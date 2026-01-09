@@ -12,8 +12,13 @@ default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 # Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
 setup-parachain-prerequisites:
-    # TODO: temporary skip for CI
-    # ../scripts/setup_parachain_prerequisites.sh
+    #!/usr/bin/env bash
+    set -e
+    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
+        echo "⏭️  Skipping parachain prerequisites (SKIP_PARACHAIN_SETUP set)"
+    else
+        ../scripts/setup_parachain_prerequisites.sh
+    fi
 
 # Install JavaScript dependencies
 npm-install:
