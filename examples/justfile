@@ -164,9 +164,13 @@ bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
     POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
 
     # Verify binaries exist after setup
-    if [ ! -f "$POLKADOT_BINARY_PATH" ] || [ ! -f "$POLKADOT_PARACHAIN_BINARY_PATH" ]; then
+    if ! command -v "$POLKADOT_BINARY_PATH"; then
         echo "❌ Error: Prerequisites setup completed but binaries still not found"
         echo "   Expected POLKADOT_BINARY_PATH: $POLKADOT_BINARY_PATH"
+        exit 1
+    fi
+    if ! command -v "$POLKADOT_PARACHAIN_BINARY_PATH"; then
+        echo "❌ Error: Prerequisites setup completed but binaries still not found"
         echo "   Expected POLKADOT_PARACHAIN_BINARY_PATH: $POLKADOT_PARACHAIN_BINARY_PATH"
         exit 1
     fi
