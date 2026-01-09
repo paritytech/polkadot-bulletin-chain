@@ -6,8 +6,8 @@ import * as dagPB from '@ipld/dag-pb'
 import fs from 'fs'
 import assert from "assert";
 import { fetchCid } from "./api.js";
-import { authorizeStorage, storeChunkedFile, storeMetadata, retrieveMetadata, retrieveFileForMetadata, buildUnixFSDag, waitForNewBlock, generateTextImage, filesAreEqual, storeProof, reconstructDagFromProof, fileToDisk, NonceManager, WS_ENDPOINT, IPFS_API, HTTP_IPFS_API } from "./common";
-import { convertCid } from "./cid_dag_metadata";
+import { convertCid } from "./cid_dag_metadata.js";
+import { authorizeStorage, storeChunkedFile, storeMetadata, retrieveMetadata, retrieveFileForMetadata, buildUnixFSDag, waitForNewBlock, filesAreEqual, storeProof, reconstructDagFromProof, fileToDisk, NonceManager, WS_ENDPOINT, IPFS_API, HTTP_IPFS_API } from "./common.js";
 
 // ---- CONFIG ----
 const FILE_PATH = './images/32mb-sample.jpg'
