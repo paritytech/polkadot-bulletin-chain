@@ -30,15 +30,18 @@ pallets-common = { workspace = true }
 default = ["std"]
 runtime-benchmarks = [
 	"array-bytes",
+	"pallets-common/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
 	"codec/std",
+	"pallets-common/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-transaction-storage-proof/std",
 	"tracing/std",
 ]
 try-runtime = [
+	"pallets-common/try-runtime",
 	"polkadot-sdk-frame/try-runtime",
 ]
