@@ -20,6 +20,8 @@ env:
   NODE_VERSION: 22
   POLKADOT_SDK_VERSION: polkadot-stable2512
   POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
+  ZOMBIENET_VERSION: v1.3.138
+  ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
 
 jobs:
   setup:
@@ -73,6 +75,25 @@ jobs:
           cp polkadot-sdk/target/release/polkadot-omni-node .
           rm -R polkadot-sdk
 
+      # Cache the Zombienet binaries
+      - name: Cache Zombienet
+        uses: actions/cache@v3
+        id: zombienet-cache
+        with:
+          path: ${{ env.ZOMBIENET_BIN_DIR }}
+          key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      # Download and extract binaries if cache missed
+      - name: Download Zombienet binaries
+        if: steps.zombienet-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $ZOMBIENET_BIN_DIR
+          cd $ZOMBIENET_BIN_DIR
+          curl -L \
+            -H "Authorization: token ${{ github.token }}" \
+            -o zombienet-linux-x64 \
+            "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
+          chmod +x zombienet-linux-x64
+
   integration-tests:
     needs: [setup]
     name: Integration Tests
@@ -111,28 +132,26 @@ jobs:
       - name: Install just
         run: cargo install just --locked || true
 
-      # Cache the Polkadot SDK binaries
       - name: Cache Polkadot SDK binaries
         uses: actions/cache@v3
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
           key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
-      # Add binaries to PATH
-      - name: Add Polkadot SDK binaries to PATH
+      - name: Cache Zombienet
+        uses: actions/cache@v3
+        id: zombienet-cache
+        with:
+          path: ${{ env.ZOMBIENET_BIN_DIR }}
+          key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      - name: Add binaries to PATH
         run: |
           ls -lrt "${POLKADOT_SDK_BIN_DIR}"
+          ls -lrt "${ZOMBIENET_BIN_DIR}"
           echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
           echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
-
-      - name: Download zombienet
-        run: |
-          curl -L \
-            -H "Authorization: token ${{ github.token }}" \
-            -o zombienet-linux-x64 \
-            "https://github.com/paritytech/zombienet/releases/download/v1.3.138/zombienet-linux-x64"
-          chmod +x zombienet-linux-x64
-          echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> "$GITHUB_ENV"
+          echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
+          echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
       # Westend parachain
       - name: Run authorize and store (PAPI, RPC node, Westend parachain)
