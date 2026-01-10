@@ -18,13 +18,15 @@ concurrency:
 
 env:
   NODE_VERSION: 22
+  POLKADOT_SDK_VERSION: polkadot-stable2512
+  POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
+  ZOMBIENET_VERSION: v1.3.138
+  ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
 
 jobs:
-  integration-tests:
-    name: Integration Tests
+  setup:
+    name: Setup
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
     steps:
       - name: Free Disk Space (Ubuntu)
         if: ${{ runner.environment == 'github-hosted' }}
@@ -32,6 +34,73 @@ jobs:
         with:
           tool-cache: false
 
+      # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libclang-dev
+
+      # Cache the Polkadot SDK binaries
+      - name: Cache Polkadot SDK binaries
+        uses: actions/cache@v3
+        id: polkadot-sdk-cache
+        with:
+          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
+      # Download and extract binaries if cache missed
+      - name: Download Polkadot SDK binaries
+        if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $POLKADOT_SDK_BIN_DIR
+          cd $POLKADOT_SDK_BIN_DIR
+          echo "Downloading Polkadot SDK binaries..."
+          curl -L -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
+          curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
+          curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
+          curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
+          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          # curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node
+          chmod +x *
+          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          git clone https://github.com/paritytech/polkadot-sdk.git
+          cd polkadot-sdk
+          git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
+          cargo build -p polkadot-omni-node -r
+          cd ..
+          cp polkadot-sdk/target/release/polkadot-omni-node .
+          rm -R polkadot-sdk
+
+      # Cache the Zombienet binaries
+      - name: Cache Zombienet
+        uses: actions/cache@v3
+        id: zombienet-cache
+        with:
+          path: ${{ env.ZOMBIENET_BIN_DIR }}
+          key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      # Download and extract binaries if cache missed
+      - name: Download Zombienet binaries
+        if: steps.zombienet-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $ZOMBIENET_BIN_DIR
+          cd $ZOMBIENET_BIN_DIR
+          curl -L \
+            -H "Authorization: token ${{ github.token }}" \
+            -o zombienet-linux-x64 \
+            "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
+          chmod +x zombienet-linux-x64
+
+  integration-tests:
+    needs: [setup]
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+
+    steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
@@ -63,35 +132,78 @@ jobs:
       - name: Install just
         run: cargo install just --locked || true
 
-      - name: Download zombienet
+      - name: Cache Polkadot SDK binaries
+        uses: actions/cache@v3
+        id: polkadot-sdk-cache
+        with:
+          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
+      - name: Cache Zombienet
+        uses: actions/cache@v3
+        id: zombienet-cache
+        with:
+          path: ${{ env.ZOMBIENET_BIN_DIR }}
+          key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      - name: Add binaries to PATH
         run: |
-          curl -L \
-            -H "Authorization: token ${{ github.token }}" \
-            -o zombienet-linux-x64 \
-            "https://github.com/paritytech/zombienet/releases/download/v1.3.138/zombienet-linux-x64"
-          chmod +x zombienet-linux-x64
-          echo "ZOMBIENET_BINARY=$GITHUB_WORKSPACE/zombienet-linux-x64" >> $GITHUB_ENV
+          ls -lrt "${POLKADOT_SDK_BIN_DIR}"
+          ls -lrt "${ZOMBIENET_BIN_DIR}"
+          echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
+          echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
+          echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
+          echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
-      - name: Run authorize and store (PAPI, RPC node)
+      # Westend parachain
+      - name: Run authorize and store (PAPI, RPC node, Westend parachain)
         working-directory: examples
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          just run-authorize-and-store "ws"
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-authorize-and-store "bulletin-westend-runtime" "ws"
+      - name: Run authorize and store (PAPI, smoldot, Westend parachain)
+        working-directory: examples
+        # TODO: remove when smoldot for para is fixed
+        continue-on-error: true
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-authorize-and-store "bulletin-westend-runtime" "smoldot"
+      - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Westend parachain)
+        working-directory: examples
+        # TODO: tmp
+        continue-on-error: true
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-store-chunked-data "bulletin-westend-runtime"
 
-      - name: Run authorize and store (PAPI, smoldot)
+#      TODO: Polkadot parachain
+
+      # Polkadot solochain
+      - name: Run authorize and store (PAPI, RPC node, Polkadot solochain)
         working-directory: examples
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          just run-authorize-and-store "smoldot"
-
-      - name: Run store chunked data + DAG-PB (PJS-API, RPC node)
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-authorize-and-store "bulletin-polkadot-runtime" "ws"
+      - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
         working-directory: examples
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          just run-store-chunked-data
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-authorize-and-store "bulletin-polkadot-runtime" "smoldot"
+      - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
+        working-directory: examples
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-store-chunked-data "bulletin-polkadot-runtime"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
