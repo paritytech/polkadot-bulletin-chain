@@ -36,7 +36,7 @@ git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
 
 # Build polkadot binary
 echo "   Building polkadot binary (this may take a while)..."
-cargo build -p polkadot -r
+cargo build -p polkadot -r --features fast-runtime
 
 # Verify and copy polkadot binaries
 echo "   Copying polkadot binaries..."
