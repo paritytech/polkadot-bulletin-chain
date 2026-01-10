@@ -163,6 +163,8 @@ jobs:
           just run-authorize-and-store "bulletin-westend-runtime" "ws"
       - name: Run authorize and store (PAPI, smoldot, Westend parachain)
         working-directory: examples
+        # TODO: remove when smoldot for para is fixed
+        continue-on-error: true
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
