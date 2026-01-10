@@ -381,7 +381,8 @@ run-authorize-and-store runtime mode="ws": npm-install
 
     TEST_DIR="$(just compute-test-dir)"
     just setup-services "$TEST_DIR" "{{ runtime }}"
-    
+
+    set +e
     # Run the script with chainspec_path parameter only for smoldot mode
     if [ "{{ mode }}" = "smoldot" ]; then
         # Set chainspec path based on runtime
@@ -419,6 +420,7 @@ run-store-chunked-data runtime: npm-install
     TEST_DIR="$(just compute-test-dir)"
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
+    set +e
     node store_chunked_data.js
     EXAMPLE_EXIT=$?
 
