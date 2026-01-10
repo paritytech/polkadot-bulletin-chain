@@ -115,8 +115,8 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
     echo "   Waiting for chain to start (120 seconds)..."
-    # TODO: replace with better check for produced block 1 with timeout 120s
-    sleep 120
+    # TODO: replace with better check for produced block 1 with timeout 60s
+    sleep 60
 
 # Start westend parachain with zombienet in background
 # Parameters:
@@ -192,8 +192,8 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
     echo "   Waiting for chain to start (120 seconds)..."
-    # TODO: replace with better check for produced block 1 with timeout 120s
-    sleep 120
+    # TODO: replace with better check for produced/finalized block 1 with timeout 180s
+    sleep 180
 
 # Check if Docker is available and running
 _check-docker:
