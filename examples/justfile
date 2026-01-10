@@ -386,7 +386,7 @@ run-authorize-and-store runtime mode="ws": npm-install
     if [ "{{ mode }}" = "smoldot" ]; then
         # Set chainspec path based on runtime
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
+            CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-1/cfg/westend-local-1006.json"
         else # bulletin-polkadot-runtime
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
         fi
