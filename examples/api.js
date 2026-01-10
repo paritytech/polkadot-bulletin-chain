@@ -2,7 +2,7 @@ import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary } from '@polkadot-api/substrate-bindings';
 
 export async function authorizeAccount(typedApi, sudoSigner, who, transactions, bytes, txMode = TX_MODE_IN_BLOCK) {
-    console.log('Authorizing account...');
+    console.log(`⬆️ Authorizing account: ${who} for transactions: ${transactions} and bytes: ${bytes}...`);
 
     const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
         who,

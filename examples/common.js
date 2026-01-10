@@ -12,7 +12,7 @@ import { cidFromBytes, buildUnixFSDagPB } from "./cid_dag_metadata.js";
 export const WS_ENDPOINT = 'ws://127.0.0.1:10000'; // Bulletin node
 export const IPFS_API = 'http://127.0.0.1:5001';   // Local IPFS daemon
 export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
-export const CHUNK_SIZE = 1 * 1024 * 1024; // less than 2 MB
+export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
 
 function to_hex(input) {
@@ -214,30 +214,6 @@ export async function storeProof(api, sudoPair, pair, rootCID, dagFileBytes, non
   const proofResult = await sudoTx.signAndSend(sudoPair, { nonce: sudoNonceMgr.getAndIncrement() });
   console.log(`📤 DAG proof - "${proof}" - stored in Bulletin:`, proofResult.toHuman?.())
   return { rawDagCid }
-}
-
-export async function authorizeStorage(api, sudoPair, pair, nonceMgr) {
-  // Ensure enough quota.
-  const auth = await api.query.transactionStorage.authorizations({ "Account": pair.address });
-  console.log('Authorization info:', auth.toHuman());
-
-  if (!auth.isSome) {
-    console.log('ℹ️ No existing authorization found — requesting new one...');
-  } else {
-    const authValue = auth.unwrap().extent;
-    const transactions = authValue.transactions.toNumber();
-    const bytes = authValue.bytes.toNumber();
-
-    if (transactions > 10 && bytes > 24 * CHUNK_SIZE) {
-      console.log('✅ Account authorization is sufficient.');
-      return;
-    }
-  }
-
-  const transactions = 128;
-  const bytes = 64 * 1024 * 1024; // 64 MB
-  await authorizeAccount(api, sudoPair, pair.address, transactions, bytes, nonceMgr);
-  await waitForNewBlock();
 }
 
 export async function waitForNewBlock() {

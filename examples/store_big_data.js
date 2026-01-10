@@ -5,11 +5,31 @@ import { create } from 'ipfs-http-client';
 import * as dagPB from '@ipld/dag-pb'
 import fs from 'fs'
 import assert from "assert";
-import { fetchCid } from "./api.js";
+import {authorizeAccount, fetchCid, TX_MODE_FINALIZED_BLOCK} from "./api.js";
 import { convertCid } from "./cid_dag_metadata.js";
-import { authorizeStorage, storeChunkedFile, storeMetadata, retrieveMetadata, retrieveFileForMetadata, buildUnixFSDag, waitForNewBlock, filesAreEqual, storeProof, reconstructDagFromProof, fileToDisk, NonceManager, WS_ENDPOINT, IPFS_API, HTTP_IPFS_API } from "./common.js";
+import {
+    storeChunkedFile,
+    storeMetadata,
+    retrieveMetadata,
+    retrieveFileForMetadata,
+    buildUnixFSDag,
+    waitForNewBlock,
+    filesAreEqual,
+    storeProof,
+    reconstructDagFromProof,
+    fileToDisk,
+    NonceManager,
+    WS_ENDPOINT,
+    IPFS_API,
+    HTTP_IPFS_API,
+    setupKeyringAndSigners
+} from "./common.js";
+import { createClient } from 'polkadot-api';
+import {getWsProvider} from "polkadot-api/ws-provider";
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // ---- CONFIG ----
+const NODE_WS = 'ws://localhost:10000';
 const FILE_PATH = './images/32mb-sample.jpg'
 const OUT_1_PATH = './download/retrieved_picture.bin'
 const OUT_2_PATH = './download/retrieved_picture.bin2'
@@ -18,7 +38,7 @@ const OUT_2_PATH = './download/retrieved_picture.bin2'
 async function main() {
     await cryptoWaitReady()
 
-    let api, resultCode;
+    let client, api, resultCode;
     try {
         if (fs.existsSync(OUT_1_PATH)) {
             fs.unlinkSync(OUT_1_PATH);
@@ -28,6 +48,21 @@ async function main() {
             fs.unlinkSync(OUT_2_PATH);
             console.log(`File ${OUT_2_PATH} removed.`);
         }
+
+        // Init WS PAPI client and typed api.
+        client = createClient(getWsProvider(NODE_WS));
+        const bulletinAPI = client.getTypedApi(bulletin);
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+
+        // Authorize an account.
+        await authorizeAccount(
+            bulletinAPI,
+            sudoSigner,
+            whoAddress,
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK
+        );
 
         console.log('🛰 Connecting to Bulletin node...')
         const provider = new WsProvider(WS_ENDPOINT)
@@ -42,9 +77,6 @@ async function main() {
         let { nonce } = await api.query.system.account(pair.address);
         const nonceMgr = new NonceManager(nonce);
         console.log(`💳 Using account: ${pair.address}, nonce: ${nonce}`)
-
-        // Make sure an account can store data.
-        await authorizeStorage(api, sudoPair, pair, nonceMgr);
 
         // Read the file, chunk it, store in Bulletin and return CIDs.
         let { chunks } = await storeChunkedFile(api, pair, FILE_PATH, nonceMgr);
@@ -103,6 +135,7 @@ async function main() {
         resultCode = 1;
     } finally {
         if (api) api.disconnect();
+        if (client) client.destroy();
         process.exit(resultCode);
     }
 }
