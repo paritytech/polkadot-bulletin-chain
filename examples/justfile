@@ -3,7 +3,7 @@
 # See README.md for usage instructions.
 
 # Default recipe - run the complete PAPI workflow test
-default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
+default: (run-authorize-and-store "bulletin-westend-runtime" "ws")
 
 # Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
@@ -239,7 +239,7 @@ ipfs-start test_dir: _check-docker
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
 # Connect to IPFS nodes using Docker
-ipfs-connect runtime="bulletin-polkadot-runtime":
+ipfs-connect runtime:
     #!/usr/bin/env bash
     set -e
     
@@ -257,16 +257,20 @@ ipfs-connect runtime="bulletin-polkadot-runtime":
     fi
     
     echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
-    
+
+    # TODO: improve this for multiple runtimes
     # Different peer IDs for different runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         # Westend parachain peer IDs
         docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
         docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
-    else
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         # Polkadot solo chain peer IDs
         docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
         docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    else
+        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        exit 1
     fi
 
 # Shutdown IPFS Docker container
@@ -281,7 +285,7 @@ ipfs-shutdown test_dir:
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
 
 # Start IPFS reconnect script in background (Docker mode)
-ipfs-reconnect-start test_dir runtime="bulletin-polkadot-runtime":
+ipfs-reconnect-start test_dir runtime:
     #!/usr/bin/env bash
     set -e
     echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
@@ -289,10 +293,14 @@ ipfs-reconnect-start test_dir runtime="bulletin-polkadot-runtime":
     # Use different reconnect script for westend
     ROOT_DIR="{{ justfile_directory() }}/.."
     cd "$ROOT_DIR"
+    # TODO: improve this for multiple runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         ./scripts/ipfs-reconnect-westend.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    else
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         ./scripts/ipfs-reconnect-solo.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+    else
+        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        exit 1
     fi
     cd -
     
@@ -313,10 +321,11 @@ papi-generate:
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-setup-services test_dir runtime="bulletin-polkadot-runtime":
+setup-services test_dir runtime:
     #!/usr/bin/env bash
     set -e
-    
+
+    # TODO: improve this for multiple runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
@@ -355,7 +364,7 @@ teardown-services test_dir:
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
-run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-install
+run-authorize-and-store runtime mode="ws": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -401,7 +410,7 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-insta
 # Run store chunked data example with Docker IPFS
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-store-chunked-data runtime="bulletin-polkadot-runtime": npm-install
+run-store-chunked-data runtime: npm-install
     #!/usr/bin/env bash
     set -e
 

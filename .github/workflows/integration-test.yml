@@ -160,7 +160,7 @@ jobs:
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           mkdir -p "$TEST_DIR"
-          just run-authorize-and-store "ws" "bulletin-westend-runtime"
+          just run-authorize-and-store "bulletin-westend-runtime" "ws"
 
       # TODO: add all tests-cases
       # TODO: Polkadot parachain
@@ -172,14 +172,14 @@ jobs:
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           mkdir -p "$TEST_DIR"
-          just run-authorize-and-store "ws" "bulletin-polkadot-runtime"
+          just run-authorize-and-store "bulletin-polkadot-runtime" "ws"
       - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
         working-directory: examples
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           mkdir -p "$TEST_DIR"
-          just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
+          just run-authorize-and-store "bulletin-polkadot-runtime" "smoldot"
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
         run: |
