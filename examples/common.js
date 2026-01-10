@@ -19,13 +19,6 @@ function to_hex(input) {
   return '0x' + input.toString('hex');
 }
 
-async function authorizeAccount(api, pair, who, transactions, bytes, nonceMgr) {
-  const tx = api.tx.transactionStorage.authorizeAccount(who, transactions, bytes);
-  const sudo_tx = api.tx.sudo.sudo(tx);
-  const result = await sudo_tx.signAndSend(pair, { nonce: nonceMgr.getAndIncrement() });
-  console.log('Transaction authorizeAccount result:', result.toHuman());
-}
-
 /**
  * Read the file, chunk it, store in Bulletin and return CIDs.
  * Returns { chunks }
