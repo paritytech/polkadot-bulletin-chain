@@ -2,10 +2,6 @@
 # 
 # See README.md for usage instructions.
 
-# PID file locations
-PID_DIR := "/tmp/bulletin-pids"
-ZOMBIENET_DIR := "/tmp/bulletin-tests-run"
-
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "ws" "bulletin-westend-runtime")
 
@@ -17,7 +13,20 @@ setup-parachain-prerequisites:
     if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
         echo "⏭️  Skipping parachain prerequisites (SKIP_PARACHAIN_SETUP set)"
     else
-        ../scripts/setup_parachain_prerequisites.sh
+        ROOT_DIR="{{ justfile_directory() }}/.."
+        cd "$ROOT_DIR"
+        ./scripts/setup_parachain_prerequisites.sh
+        cd -
+    fi
+
+compute-test-dir:
+    #!/usr/bin/env bash
+    if [ -n "$TEST_DIR" ]; then
+        echo "$TEST_DIR";
+    else
+        TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test";
+        mkdir -p "$TEST_DIR";
+        echo "$TEST_DIR";
     fi
 
 # Install JavaScript dependencies
@@ -36,51 +45,39 @@ _ipfs-cmd:
         exit 1
     fi
 
-kill-pids:
+kill-pids test_dir:
     #!/usr/bin/env bash
     set -e
 
     # Kill any existing background processes using stored PIDs
-    echo "🔍 Checking for existing background processes..."
-    if [ -d "{{ PID_DIR }}" ]; then
-        for pidfile in {{ PID_DIR }}/*.pid; do
-            if [ -f "$pidfile" ]; then
-                PID=$(cat "$pidfile")
-                SERVICE=$(basename "$pidfile" .pid)
-                if kill -0 $PID 2>/dev/null; then
-                    echo "   Found existing $SERVICE process (PID: $PID)"
-                    # Kill the process and its children
-                    pkill -9 -P $PID 2>/dev/null || true
-                    kill -9 $PID 2>/dev/null || true
-                    echo "   ✓ Cleaned up $SERVICE process"
-                else
-                    echo "   Stale $SERVICE PID file found (process not running)"
-                fi
-                rm "$pidfile"
+    echo "🔍 Checking for existing background processes - PIDs stored in {{ test_dir }}..."
+    for pidfile in {{ test_dir }}/*.pid; do
+        if [ -f "$pidfile" ]; then
+            PID=$(cat "$pidfile")
+            SERVICE=$(basename "$pidfile" .pid)
+            if kill -0 $PID 2>/dev/null; then
+                echo "   Found existing $SERVICE process (PID: $PID), pidfile: $pidfile"
+                # Kill the process and its children
+                pkill -TERM -P $PID 2>/dev/null || true
+                sleep 2
+                pkill -9 -P $PID 2>/dev/null || true
+                sleep 2
+                kill -9 $PID 2>/dev/null || true
+                echo "   ✓ Cleaned up $SERVICE process"
+            else
+                echo "   Stale $SERVICE PID file: $pidfile found (process not running)"
             fi
-        done
-    else
-        echo "   No previous processes found"
-    fi
+            rm "$pidfile"
+        fi
+    done
 
 # Start solo chain or parachain with zombienet in background
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
+bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
-    
-    mkdir -p {{ PID_DIR }}
-    just kill-pids
 
-    # Clean up zombienet directory to prevent "Directory already exists" prompt
-    if [ -d "{{ ZOMBIENET_DIR }}" ]; then
-        echo "   Cleaning up existing zombienet directory: {{ ZOMBIENET_DIR }}"
-        rm -rf "{{ ZOMBIENET_DIR }}"
-    fi
-    
-    echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
-    
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
         ZOMBIENET_BIN="$ZOMBIENET_BINARY"
@@ -94,52 +91,39 @@ bulletin-solo-zombienet-start runtime="bulletin-polkadot-runtime":
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
         exit 1
     fi
-    
-    echo "   Using zombienet: $ZOMBIENET_BIN"
 
     echo "   Setting up Polkadot runtime..."
     ROOT_DIR="{{ justfile_directory() }}/.."
     # Build the node binary (which will build the runtime as a dependency)
     cargo build --release -p polkadot-bulletin-chain
-    rm -rf {{ ZOMBIENET_DIR }}
-    mkdir -p {{ ZOMBIENET_DIR }}
+
+    cat <<EOF
+    ⚡ Starting Bulletin chain with zombienet
+        runtime   : {{ runtime }}
+        test_dir  : {{ test_dir }}
+        zombienet : $ZOMBIENET_BIN
+        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
+        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+    EOF
     cd "$ROOT_DIR"
     (yes y | POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
-        $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
     cd -
 
     ZOMBIENET_PID=$!
-    echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
+    echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
-    echo "   Log: {{ ZOMBIENET_DIR }}/zombienet.log"
+    echo "   Log: {{ test_dir }}/zombienet.log"
     echo "   Waiting for chain to start (120 seconds)..."
+    # TODO: replace with better check for produced block 1 with timeout 120s
     sleep 120
-
-    # Verify zombienet is running
-    echo "🔍 Verifying zombienet is ready..."
-    sleep 10
-    echo "   Zombienet process check:"
-    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
-    echo "   Checking zombienet log:"
-    tail -20 {{ ZOMBIENET_DIR }}/zombienet.log || echo "   ⚠ Could not read zombienet log"
 
 # Start westend parachain with zombienet in background
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-parachain-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
+bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     #!/usr/bin/env bash
     set -e
-
-    mkdir -p {{ PID_DIR }}
-    just kill-pids
-
-    # Clean up zombienet directory to prevent "Directory already exists" prompt
-    if [ -d "{{ ZOMBIENET_DIR }}" ]; then
-        echo "   Cleaning up existing zombienet directory: {{ ZOMBIENET_DIR }}"
-        rm -rf "{{ ZOMBIENET_DIR }}"
-    fi
-
-    echo "⚡ Starting Bulletin chain with zombienet (runtime: {{ runtime }})..."
 
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
@@ -154,11 +138,6 @@ bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
         exit 1
     fi
-
-    echo "   Using zombienet: $ZOMBIENET_BIN"
-
-    # Handle different runtimes
-    echo "   Setting up Westend runtime..."
 
     # Run prerequisites setup first
     just setup-parachain-prerequisites
@@ -185,40 +164,36 @@ bulletin-westend-parachain-zombienet-start runtime="bulletin-westend-runtime":
         exit 1
     fi
 
-    echo "   Using POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH"
-    echo "   Using POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH"
-
     # Create chain spec
     echo "   Creating Westend chain spec..."
-    ROOT_DIR="{{ justfile_directory() }}/.."
     # Ensure binaries are in PATH and run from root directory
+    ROOT_DIR="{{ justfile_directory() }}/.."
     cd "$ROOT_DIR"
     PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh
     cd -
 
     # Run zombienet from root directory so relative paths in config work correctly
-    rm -rf {{ ZOMBIENET_DIR }}
-    mkdir -p {{ ZOMBIENET_DIR }}
+    cat <<EOF
+    ⚡ Starting Bulletin chain with zombienet
+        runtime   : {{ runtime }}
+        test_dir  : {{ test_dir }}
+        zombienet : $ZOMBIENET_BIN
+        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
+        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+    EOF
     cd "$ROOT_DIR"
     (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn --dir {{ ZOMBIENET_DIR }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ ZOMBIENET_DIR }}/zombienet.log 2>&1) &
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
     cd -
 
     ZOMBIENET_PID=$!
-    echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
+    echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
-    echo "   Log: {{ ZOMBIENET_DIR }}/zombienet.log"
+    echo "   Log: {{ test_dir }}/zombienet.log"
     echo "   Waiting for chain to start (120 seconds)..."
+    # TODO: replace with better check for produced block 1 with timeout 120s
     sleep 120
-
-    # Verify zombienet is running
-    echo "🔍 Verifying zombienet is ready..."
-    sleep 10
-    echo "   Zombienet process check:"
-    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
-    echo "   Checking zombienet log:"
-    tail -20 {{ ZOMBIENET_DIR }}/zombienet.log || echo "   ⚠ Could not read zombienet log"
 
 # Check if Docker is available and running
 _check-docker:
@@ -237,11 +212,9 @@ _check-docker:
     fi
 
 # Start IPFS Docker container
-ipfs-start: _check-docker
+ipfs-start test_dir: _check-docker
     #!/usr/bin/env bash
     set -e
-    mkdir -p {{ PID_DIR }}
-    
     echo "🐳 Starting IPFS Docker container..."
     
     # Pull latest kubo image if not present
@@ -263,7 +236,7 @@ ipfs-start: _check-docker
     sleep 5
     
     # Store container name in PID directory for cleanup
-    echo "ipfs-node" > {{ PID_DIR }}/ipfs-docker.container
+    echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
 # Connect to IPFS nodes using Docker
 ipfs-connect runtime="bulletin-polkadot-runtime":
@@ -297,7 +270,7 @@ ipfs-connect runtime="bulletin-polkadot-runtime":
     fi
 
 # Shutdown IPFS Docker container
-ipfs-shutdown:
+ipfs-shutdown test_dir:
     #!/usr/bin/env bash
     
     echo "🛑 Shutting down IPFS Docker container..."
@@ -305,29 +278,28 @@ ipfs-shutdown:
     docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
     
     # Clean up container file if it exists
-    [ -f "{{ PID_DIR }}/ipfs-docker.container" ] && rm "{{ PID_DIR }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
+    [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
 
 # Start IPFS reconnect script in background (Docker mode)
-ipfs-reconnect-start runtime="bulletin-polkadot-runtime":
+ipfs-reconnect-start test_dir runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
-    
-    mkdir -p {{ PID_DIR }}
-    
     echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
     
     # Use different reconnect script for westend
-    mkdir -p {{ ZOMBIENET_DIR }}
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    cd "$ROOT_DIR"
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        ./scripts/ipfs-reconnect-westend.sh docker > {{ ZOMBIENET_DIR }}/ipfs-reconnect.log 2>&1 &
+        ./scripts/ipfs-reconnect-westend.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     else
-        ./scripts/ipfs-reconnect-solo.sh docker > {{ ZOMBIENET_DIR }}/ipfs-reconnect.log 2>&1 &
+        ./scripts/ipfs-reconnect-solo.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     fi
+    cd -
     
     RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ PID_DIR }}/ipfs-reconnect-docker.pid
+    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
     echo "   Reconnect PID: $RECONNECT_PID"
-    echo "   Log: {{ ZOMBIENET_DIR }}/ipfs-reconnect.log"
+    echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
     sleep 2
 
 # Generate PAPI descriptors
@@ -341,50 +313,42 @@ papi-generate:
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-setup-services runtime="bulletin-polkadot-runtime":
+setup-services test_dir runtime="bulletin-polkadot-runtime":
     #!/usr/bin/env bash
     set -e
     
-    echo "🔧 Tearing down Docker services if they are running..."
-    just ipfs-shutdown
-    
-    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
-    
-    # Start services with Docker
-    just ipfs-start
-
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        just bulletin-westend-parachain-zombienet-start "{{ runtime }}"
+        just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        just bulletin-solo-zombienet-start "{{ runtime }}"
+        just bulletin-solo-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     else
         echo "🐳 Unhandled runtime: {{ runtime }} specified!"
         exit 1
     fi
 
-    just ipfs-connect {{ runtime }}
-    just ipfs-reconnect-start {{ runtime }}
+    # Generate PAPI descriptors from running node.
     just papi-generate
-    
+
+    # Start IPFS
+    echo "🔧 Tearing down Docker services if they are running..."
+    just ipfs-shutdown "{{ test_dir }}"
+    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
+    just ipfs-start "{{ test_dir }}"
+    just ipfs-connect "{{ runtime }}"
+    just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+
     echo "✅ Services setup complete (Docker mode)"
 
 # Stop all Docker services
-teardown-services:
+teardown-services test_dir:
     #!/usr/bin/env bash
-    
-    echo "🧹 Stopping all Docker services..."
-    
+
     # Stop all background processes
-    just kill-pids
+    just kill-pids "{{ test_dir }}"
 
     # Stop Docker container
-    just ipfs-shutdown
-    
-    # Clean up PID directory
-    if [ -d {{ PID_DIR }} ]; then
-        rmdir {{ PID_DIR }} 2>/dev/null || true
-    fi
-    
+    echo "🧹 Stopping all Docker services..."
+    just ipfs-shutdown "{{ test_dir }}"
     echo "✅ Docker services stopped"
 
 # Run authorize and store example with Docker IPFS
@@ -405,16 +369,17 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-insta
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
         exit 1
     fi
-    
-    just setup-services {{ runtime }}
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
     
     # Run the script with chainspec_path parameter only for smoldot mode
     if [ "{{ mode }}" = "smoldot" ]; then
         # Set chainspec path based on runtime
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            CHAINSPEC_PATH="{{ ZOMBIENET_DIR }}/bob/cfg/westend-local.json"
+            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
         else # bulletin-polkadot-runtime
-            CHAINSPEC_PATH="{{ ZOMBIENET_DIR }}/bob/cfg/bulletin-polkadot-local.json"
+            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
         fi
         node $SCRIPT_NAME "$CHAINSPEC_PATH"
     else
@@ -430,7 +395,7 @@ run-authorize-and-store mode="ws" runtime="bulletin-polkadot-runtime": npm-insta
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
     
-    just teardown-services    
+    just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
 
 # Run store chunked data example with Docker IPFS
@@ -441,9 +406,10 @@ run-store-chunked-data runtime="bulletin-polkadot-runtime": npm-install
     set -e
 
     echo "🚀 Starting store chunked data + DAG-PB workflow test (runtime: {{ runtime }})..."
-    echo ""
 
-    just setup-services {{ runtime }}
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
     node store_chunked_data.js
     EXAMPLE_EXIT=$?
 
@@ -455,5 +421,5 @@ run-store-chunked-data runtime="bulletin-polkadot-runtime": npm-install
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
 
-    just teardown-services
+    just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT

@@ -159,6 +159,7 @@ jobs:
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
           just run-authorize-and-store "ws" "bulletin-westend-runtime"
 
       # TODO: add all tests-cases
@@ -170,18 +171,21 @@ jobs:
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
           just run-authorize-and-store "ws" "bulletin-polkadot-runtime"
       - name: Run authorize and store (PAPI, smoldot, Polkadot solochain)
         working-directory: examples
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
           just run-authorize-and-store "smoldot" "bulletin-polkadot-runtime"
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
         run: |
           export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
           just run-store-chunked-data "bulletin-polkadot-runtime"
 
       # Collects logs from the last failed zombienet run.
