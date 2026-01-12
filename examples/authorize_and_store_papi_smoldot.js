@@ -33,48 +33,51 @@ function initSmoldot() {
     return sd;
 }
 
-async function createSmoldotClient(chainspecPath, relayChainSpecPath = null) {
+async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
-    let relayChain = null;
     
-    if (relayChainSpecPath) {
-        const relayChainSpec = readChainSpec(relayChainSpecPath);
-        relayChain = await sd.addChain({ chainSpec: relayChainSpec });
-        console.log(`✅ Added relay chain: ${relayChainSpecPath}`);
+    // Always add the main chain first (relay chain for parachains, or solochain)
+    const chainSpec = readChainSpec(chainSpecPath);
+    const mainChain = await sd.addChain({ chainSpec });
+    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    
+    // If parachain spec is provided, add it as a parachain with the main chain as relay
+    if (parachainSpecPath) {
+        const parachainSpec = readChainSpec(parachainSpecPath);
+        const parachain = await sd.addChain({
+            chainSpec: parachainSpec,
+            potentialRelayChains: [mainChain]
+        });
+        console.log(`✅ Added parachain: ${parachainSpecPath}`);
+        const client = createClient(getSmProvider(parachain));
+        return { client, sd };
     }
     
-    // Add the main chain (parachain or solochain)
-    const chainSpec = readChainSpec(chainspecPath);
-    const chainOptions = { chainSpec };
-    
-    if (relayChain) {
-        chainOptions.potentialRelayChains = [relayChain];
-    }
-    
-    const chain = await sd.addChain(chainOptions);
-    const client = createClient(getSmProvider(chain));
-    
+    // For solochains, use the main chain directly
+    const client = createClient(getSmProvider(mainChain));
     return { client, sd };
 }
 
 async function main() {
     await cryptoWaitReady();
     
-    // Get chainspec path from command line argument
-    const chainspecPath = process.argv[2];
-    if (!chainspecPath) {
-        console.error('❌ Error: Chainspec path is required as first argument');
-        console.error('Usage: node authorize_and_store_papi_smoldot.js <chainspec-path> [relay-chain-chainspec-path]');
+    // Get chainspec path from command line argument (required - main chain: relay for para, or solo)
+    const chainSpecPath = process.argv[2];
+    if (!chainSpecPath) {
+        console.error('❌ Error: Chain spec path is required as first argument');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path]');
+        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path>');
+        console.error('  For solochains: <solo-chain-spec-path>');
         process.exit(1);
     }
     
-    // Optional relay chain chainspec path (required for parachains)
-    const relayChainSpecPath = process.argv[3] || null;
+    // Optional parachain chainspec path (only needed for parachains)
+    const parachainSpecPath = process.argv[3] || null;
     
     let sd, client, resultCode;
     try {
         // Init Smoldot PAPI client and typed api.
-        ({ client, sd } = await createSmoldotClient(chainspecPath, relayChainSpecPath));
+        ({ client, sd } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
         // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?        
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));

@@ -387,10 +387,11 @@ run-authorize-and-store runtime mode="ws": npm-install
     if [ "{{ mode }}" = "smoldot" ]; then
         # Set chainspec path based on runtime
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            # Parachain: relay chain (required) + parachain spec (optional)
             RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-            CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-1/cfg/westend-local-1006.json"
-            node $SCRIPT_NAME "$CHAINSPEC_PATH" "$RELAY_CHAINSPEC_PATH"
-        else # bulletin-polkadot-runtime (solochain, no relay chain needed)
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-1/cfg/westend-local-1006.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH"
+        else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
             node $SCRIPT_NAME "$CHAINSPEC_PATH"
         fi
