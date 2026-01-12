@@ -36,12 +36,10 @@ function initSmoldot() {
 async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
     
-    // Always add the main chain first (relay chain for parachains, or solochain)
     const chainSpec = readChainSpec(chainSpecPath);
     const mainChain = await sd.addChain({ chainSpec });
     console.log(`✅ Added main chain: ${chainSpecPath}`);
     
-    // If parachain spec is provided, add it as a parachain with the main chain as relay
     if (parachainSpecPath) {
         const parachainSpec = readChainSpec(parachainSpecPath);
         const parachain = await sd.addChain({
@@ -53,7 +51,6 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
         return { client, sd };
     }
     
-    // For solochains, use the main chain directly
     const client = createClient(getSmProvider(mainChain));
     return { client, sd };
 }
