@@ -13,6 +13,8 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 const SYNC_WAIT_SEC = 30; // Increased for parachain sync (relay chain + parachain)
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
+const CHAIN_READY_MAX_RETRIES = 10; // Maximum retries for chain readiness check
+const CHAIN_READY_RETRY_DELAY_MS = 2000; // Delay between retries (2 seconds)
 
 function readChainSpec(chainspecPath) {
     const chainSpecContent = readFileSync(chainspecPath, 'utf8');
@@ -37,7 +39,6 @@ async function createSmoldotClient(chainspecPath, relayChainSpecPath = null) {
     const sd = initSmoldot();
     let relayChain = null;
     
-    // If relay chain chainspec is provided, add it first (required for parachains)
     if (relayChainSpecPath) {
         const relayChainSpec = readChainSpec(relayChainSpecPath);
         relayChain = await sd.addChain({ chainSpec: relayChainSpec });
@@ -48,7 +49,6 @@ async function createSmoldotClient(chainspecPath, relayChainSpecPath = null) {
     const chainSpec = readChainSpec(chainspecPath);
     const chainOptions = { chainSpec };
     
-    // For parachains, specify the relay chain
     if (relayChain) {
         chainOptions.potentialRelayChains = [relayChain];
     }
@@ -57,6 +57,36 @@ async function createSmoldotClient(chainspecPath, relayChainSpecPath = null) {
     const client = createClient(getSmProvider(chain));
     
     return { client, sd };
+}
+
+/**
+ * Wait for the chain to be ready by checking if we can query chain state.
+ * Retries with fixed delay until the chain is ready or max retries reached.
+ * Checks both runtime version and block number to ensure chain is fully synced.
+ */
+async function waitForChainReady(bulletinAPI, maxRetries = CHAIN_READY_MAX_RETRIES, retryDelay = CHAIN_READY_RETRY_DELAY_MS) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Try multiple queries to ensure chain is fully synced
+            const [runtimeVersion, blockNumber] = await Promise.all([
+                bulletinAPI.query.System.LastRuntimeUpgrade(),
+                bulletinAPI.query.System.Number()
+            ]);
+            
+            const blockNum = blockNumber ?? 0;
+            console.log(`✅ Chain is ready! Block #${blockNum}, Runtime: ${runtimeVersion ? 'available' : 'checking...'}`);
+            return true;
+        } catch (error) {
+            if (attempt < maxRetries) {
+                console.log(`⏳ Chain not ready yet (attempt ${attempt}/${maxRetries}), retrying in ${retryDelay/1000}s... Error: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+            } else {
+                console.log(`⚠️ Chain readiness check failed after ${maxRetries} attempts. Proceeding anyway... Error: ${error.message}`);
+                return false;
+            }
+        }
+    }
+    return false;
 }
 
 async function main() {
@@ -81,17 +111,11 @@ async function main() {
         // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?        
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
         
-        // Wait for the chain to be ready by checking if we can get the runtime version
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
         
-        // Try to get chain info to verify sync status
-        try {
-            const runtimeVersion = await bulletinAPI.query.System.LastRuntimeUpgrade();
-            console.log(`✅ Chain is ready! Runtime version: ${runtimeVersion ? 'available' : 'checking...'}`);
-        } catch (error) {
-            console.log(`⚠️ Chain might still be syncing, but proceeding anyway... Error: ${error.message}`);
-        }
+        // Wait for chain to be ready with retries
+        await waitForChainReady(bulletinAPI);
 
         // Signers.
         const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
