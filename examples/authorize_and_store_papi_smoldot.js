@@ -81,8 +81,6 @@ async function main() {
         
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
-        
-        // Wait for chain to be ready with retries
         await waitForChainReady(bulletinAPI);
 
         // Signers.
