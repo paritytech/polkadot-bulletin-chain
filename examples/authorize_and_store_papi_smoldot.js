@@ -10,7 +10,7 @@ import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
-const SYNC_WAIT_SEC = 30; // Increased for parachain sync (relay chain + parachain)
+const SYNC_WAIT_SEC = 15;
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
