@@ -154,13 +154,6 @@ jobs:
           echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
       # Westend parachain
-      - name: Run authorize and store (PAPI, RPC node, Westend parachain)
-        working-directory: examples
-        run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          mkdir -p "$TEST_DIR"
-          just run-authorize-and-store "bulletin-westend-runtime" "ws"
       - name: Run authorize and store (PAPI, smoldot, Westend parachain)
         working-directory: examples
         run: |
@@ -168,6 +161,13 @@ jobs:
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           mkdir -p "$TEST_DIR"
           just run-authorize-and-store "bulletin-westend-runtime" "smoldot"
+      - name: Run authorize and store (PAPI, RPC node, Westend parachain)
+        working-directory: examples
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$TEST_DIR"
+          just run-authorize-and-store "bulletin-westend-runtime" "ws"
       - name: Run store chunked data + DAG-PB (PJS-API, RPC node, Westend parachain)
         working-directory: examples
         run: |
