@@ -129,7 +129,6 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
         try {
             // Try multiple queries to ensure chain is fully synced
             const [runtimeVersion, blockNumber] = await Promise.all([
-                typedApi.query.System.LastRuntimeUpgrade(),
                 typedApi.query.System.Number()
             ]);
             
