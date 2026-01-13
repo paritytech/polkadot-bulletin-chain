@@ -37,17 +37,42 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 120_000; // 2 minutes default timeout
+const DEFAULT_TX_TIMEOUT_MS = 60_000; // 60 seconds or 10 blocks
+
+const TX_MODE_CONFIG = {
+    [TX_MODE_IN_BLOCK]: {
+        match: (ev) => ev.type === "txBestBlocksState" && ev.found,
+        log: (txName, ev) => `📦 ${txName} included in block: ${ev.block.hash}`,
+    },
+    [TX_MODE_IN_POOL]: {
+        match: (ev) => ev.type === "broadcasted",
+        log: (txName, ev) => `📦 ${txName} broadcasted with txHash: ${ev.txHash}`,
+    },
+    [TX_MODE_FINALIZED_BLOCK]: {
+        match: (ev) => ev.type === "finalized",
+        log: (txName, ev) => `📦 ${txName} included in finalized block: ${ev.block.hash}`,
+    },
+};
 
 function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS) {
+    const config = TX_MODE_CONFIG[txMode];
+    if (!config) {
+        return Promise.reject(new Error(`Unhandled txMode: ${txMode}`));
+    }
+
     return new Promise((resolve, reject) => {
         let sub;
         let resolved = false;
 
+        const cleanup = () => {
+            resolved = true;
+            clearTimeout(timeoutId);
+            if (sub) sub.unsubscribe();
+        };
+
         const timeoutId = setTimeout(() => {
             if (!resolved) {
-                resolved = true;
-                if (sub) sub.unsubscribe();
+                cleanup();
                 reject(new Error(`${txName} transaction timed out after ${timeoutMs}ms waiting for ${txMode}`));
             }
         }, timeoutMs);
@@ -55,51 +80,16 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeo
         sub = tx.signSubmitAndWatch(signer).subscribe({
             next: (ev) => {
                 console.log(`✅ ${txName} event:`, ev.type);
-                switch (txMode) {
-                    case TX_MODE_IN_BLOCK:
-                        if (ev.type === "txBestBlocksState" && ev.found) {
-                            console.log(`📦 ${txName} included in block:`, ev.block.hash);
-                            if (!resolved) {
-                                resolved = true;
-                                clearTimeout(timeoutId);
-                                sub.unsubscribe();
-                                resolve(ev);
-                            }
-                        }
-                        break;
-                    case TX_MODE_IN_POOL:
-                        if (ev.type === "broadcasted") {
-                            console.log(`📦 ${txName} broadcasted with txHash:`, ev.txHash);
-                            if (!resolved) {
-                                resolved = true;
-                                clearTimeout(timeoutId);
-                                sub.unsubscribe();
-                                resolve(ev);
-                            }
-                        }
-                        break;
-                    case TX_MODE_FINALIZED_BLOCK:
-                        if (ev.type === "finalized") {
-                            console.log(`📦 ${txName} included in finalized block:`, ev.block.hash);
-                            if (!resolved) {
-                                resolved = true;
-                                clearTimeout(timeoutId);
-                                sub.unsubscribe();
-                                resolve(ev);
-                            }
-                        }
-                        break;
-
-                    default:
-                        throw new Error("Unhandled txMode: " + txMode)
+                if (!resolved && config.match(ev)) {
+                    console.log(config.log(txName, ev));
+                    cleanup();
+                    resolve(ev);
                 }
             },
             error: (err) => {
                 console.error(`❌ ${txName} error:`, err);
                 if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeoutId);
-                    sub.unsubscribe();
+                    cleanup();
                     reject(err);
                 }
             },
