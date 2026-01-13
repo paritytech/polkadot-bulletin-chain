@@ -14,7 +14,6 @@ const SYNC_WAIT_SEC = 15;
 const SMOLDOT_LOG_LEVEL = 4; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
-const SMOLDOT_LOG_LEVELS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
 const TCP_BOOTNODE_REGEX = /^(\/ip[46]\/[^/]+)\/tcp\/(\d+)\/p2p\/(.+)$/;
 const WS_BOOTNODE_REGEX = /\/tcp\/\d+\/ws\/p2p\//;
 
@@ -69,7 +68,8 @@ function initSmoldot() {
     return smoldot.start({
         maxLogLevel: SMOLDOT_LOG_LEVEL,
         logCallback: (level, target, message) => {
-            console.log(`[smoldot:${SMOLDOT_LOG_LEVELS[level - 1] || 'UNKNOWN'}] ${target}: ${message}`);
+            const levelName = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'][level - 1] || 'UNKNOWN';
+            console.log(`[smoldot:${levelName}] ${target}: ${message}`);
         }
     });
 }
