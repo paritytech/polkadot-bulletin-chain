@@ -120,20 +120,16 @@ export class NonceManager {
 }
 
 /**
- * Wait for a PAPI typed API chain to be ready by checking if we can query chain state.
+ * Wait for a PAPI typed API chain to be ready by checking runtime constants.
  * Retries until the chain is ready or max retries reached.
  */
 export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs = 2000) {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            // Try multiple queries to ensure chain is fully synced
-            const [runtimeVersion, blockNumber] = await Promise.all([
-                typedApi.query.System.Number()
-            ]);
-            
-            const blockNum = blockNumber ?? 0;
-            console.log(`✅ Chain is ready! Block #${blockNum}, Runtime: ${runtimeVersion ? 'available' : 'checking...'}`);
+            // Check runtime constants to verify chain is accessible
+            const version = typedApi.constants.System.Version;
+            console.log(`✅ Chain is ready! Runtime: ${version.spec_name} v${version.spec_version}`);
             return true;
         } catch (error) {
             if (attempt < maxRetries) {
