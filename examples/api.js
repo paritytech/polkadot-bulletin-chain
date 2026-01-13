@@ -37,31 +37,56 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK) {
+const DEFAULT_TX_TIMEOUT_MS = 120_000; // 2 minutes default timeout
+
+function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
-        const sub = tx.signSubmitAndWatch(signer).subscribe({
+        let sub;
+        let resolved = false;
+
+        const timeoutId = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                if (sub) sub.unsubscribe();
+                reject(new Error(`${txName} transaction timed out after ${timeoutMs}ms waiting for ${txMode}`));
+            }
+        }, timeoutMs);
+
+        sub = tx.signSubmitAndWatch(signer).subscribe({
             next: (ev) => {
                 console.log(`✅ ${txName} event:`, ev.type);
                 switch (txMode) {
                     case TX_MODE_IN_BLOCK:
                         if (ev.type === "txBestBlocksState" && ev.found) {
                             console.log(`📦 ${txName} included in block:`, ev.block.hash);
-                            sub.unsubscribe();
-                            resolve(ev);
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                sub.unsubscribe();
+                                resolve(ev);
+                            }
                         }
                         break;
                     case TX_MODE_IN_POOL:
                         if (ev.type === "broadcasted") {
                             console.log(`📦 ${txName} broadcasted with txHash:`, ev.txHash);
-                            sub.unsubscribe();
-                            resolve(ev);
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                sub.unsubscribe();
+                                resolve(ev);
+                            }
                         }
                         break;
                     case TX_MODE_FINALIZED_BLOCK:
                         if (ev.type === "finalized") {
                             console.log(`📦 ${txName} included in finalized block:`, ev.block.hash);
-                            sub.unsubscribe();
-                            resolve(ev);
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                sub.unsubscribe();
+                                resolve(ev);
+                            }
                         }
                         break;
 
@@ -71,8 +96,12 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK) {
             },
             error: (err) => {
                 console.error(`❌ ${txName} error:`, err);
-                sub.unsubscribe();
-                reject(err);
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timeoutId);
+                    sub.unsubscribe();
+                    reject(err);
+                }
             },
             complete: () => {
                 console.log(`✅ ${txName} complete!`);
