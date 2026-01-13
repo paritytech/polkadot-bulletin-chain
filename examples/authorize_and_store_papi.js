@@ -1,211 +1,68 @@
-import { createClient } from 'polkadot-api';
-import { Binary } from '@polkadot-api/substrate-bindings';
-import { getWsProvider } from 'polkadot-api/ws-provider';
-import { getPolkadotSigner } from '@polkadot-api/signer';
-import { Keyring } from '@polkadot/keyring';
-import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { create } from 'ipfs-http-client';
-import { cidFromBytes, to_hashing_enum } from './common.js';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
-import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider';
+import { cryptoWaitReady } from '@polkadot/util-crypto';
+import { authorizeAccount, fetchCid, store} from './api.js';
+import { setupKeyringAndSigners } from './common.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-export async function authorizeAccount(typedApi, sudoPair, who, transactions, bytes, nonceMgr) {
-    console.log('Creating authorizeAccount transaction...');
-    
-    const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
-        who,
-        transactions,
-        bytes
-    });
-    
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: authorizeTx.decodedCall
-    });
-
-    const txOpts = {};
-    if (nonceMgr != null) {
-        txOpts.nonce = BigInt(nonceMgr.getAndIncrement());
-    }
-
-    // Wait for a new block.
-    return new Promise((resolve, reject) => {
-        const sub = sudoTx
-            .signSubmitAndWatch(sudoPair, txOpts)
-            .subscribe({
-                next: (ev) => {
-                    if (ev.type === "txBestBlocksState" && ev.found) {
-                        console.log("📦 Included in block:", ev.block.hash);
-                        sub.unsubscribe();
-                        resolve(ev);
-                    }
-                },
-                error: (err) => {
-                    console.log("Error:", err);
-                    sub.unsubscribe();
-                    reject(err);
-                },
-                complete: () => {
-                    console.log("Subscription complete");
-                }
-            });
-    })
-}
-
-export async function store(typedApi, pair, data, cidCodec, mhCode, nonceMgr) {
-    console.log(`Storing (with cidCodec: ${cidCodec}, mhCode: ${mhCode}) - data.len(${data.length})`);
-
-    // Convert data to Uint8Array then wrap in Binary for PAPI typed API
-    const dataBytes = typeof data === 'string' ? 
-        new Uint8Array(Buffer.from(data)) : 
-        new Uint8Array(data);
-    
-    // Wrap in Binary object for typed API - pass as an object with 'data' property
-    const binaryData = Binary.fromBytes(dataBytes);
-    const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-
-    // Add custom `TransactionExtension` for codec, if specified.
-    const txOpts = {};
-    let expectedCid;
-    if (cidCodec != null) {
-        txOpts.customSignedExtensions = {
-            ProvideCidConfig: {
-                value: {
-                    codec: BigInt(cidCodec),
-                    hashing: to_hashing_enum(mhCode),
-                }
-            }
-        };
-        expectedCid = cidFromBytes(data, cidCodec, mhCode);
-    } else {
-        expectedCid = cidFromBytes(data);
-    }
-    if (nonceMgr != null) {
-        txOpts.nonce = BigInt(nonceMgr.getAndIncrement());
-    }
-
-    // Wait for a new block.
-    return new Promise((resolve, reject) => {
-        const sub = tx
-            .signSubmitAndWatch(pair, txOpts)
-            .subscribe({
-                next: (ev) => {
-                    if (ev.type === "txBestBlocksState" && ev.found) {
-                        console.log("📦 Included in block:", ev.block.hash);
-                        sub.unsubscribe();
-                        resolve(expectedCid);
-                    }
-                },
-                error: (err) => {
-                    console.log("Error:", err);
-                    sub.unsubscribe();
-                    reject(err);
-                },
-                complete: () => {
-                    console.log("Subscription complete");
-                }
-            });
-    })
-}
-
-// Connect to a local IPFS gateway (e.g. Kubo)
-const ipfs = create({
-    url: 'http://127.0.0.1:5001', // Local IPFS API
-});
-
-async function read_from_ipfs(cid) {
-    // Fetch the block (downloads via Bitswap if not local)
-    console.log('Trying to ipfs.block.get cid: ', cid);
-    const block = await ipfs.block.get(cid, {timeout: 10000});
-    console.log('Received block: ', block);
-    return block;
-}
-
-// Global client reference for cleanup
-let client;
+const NODE_WS = 'ws://localhost:10000';
+const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function main() {
     await cryptoWaitReady();
 
-    // Create PAPI client with WebSocket provider
-    client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
-    
-    // Get typed API with generated descriptors
-    const typedApi = client.getTypedApi(bulletin);
+    let client, resultCode;
+    try {
+        // Init WS PAPI client and typed api.
+        client = createClient(getWsProvider(NODE_WS));
+        const bulletinAPI = client.getTypedApi(bulletin);
 
-    // Create keyring and accounts
-    const keyring = new Keyring({ type: 'sr25519' });
-    const sudoAccount = keyring.addFromUri('//Alice');
-    const whoAccount = keyring.addFromUri('//Alice');
+        // Signers.
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
 
-    // Create PAPI-compatible signers using @polkadot-api/signer
-    // getPolkadotSigner expects (publicKey: Uint8Array, signingType, sign function)
-    const sudoSigner = getPolkadotSigner(
-        sudoAccount.publicKey,
-        'Sr25519',
-        (input) => sudoAccount.sign(input)
-    );
-    const whoSigner = getPolkadotSigner(
-        whoAccount.publicKey,
-        'Sr25519',
-        (input) => whoAccount.sign(input)
-    );
+        // Data to store.
+        const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
+        let expectedCid = await cidFromBytes(dataToStore);
 
-    // Data
-    const who = whoAccount.address;
-    const transactions = 32; // u32 - regular number
-    const bytes = 64n * 1024n * 1024n; // u64 - BigInt for large numbers
+        // Authorize an account.
+        await authorizeAccount(
+            bulletinAPI,
+            sudoSigner,
+            whoAddress,
+            1,
+            BigInt(dataToStore.length)
+        );
 
-    console.log('Doing authorization...');
-    await authorizeAccount(typedApi, sudoSigner, who, transactions, bytes);
-    console.log('Authorized!');
+        // Store data.
+        const cid = await store(bulletinAPI, whoSigner, dataToStore);
+        console.log("✅ Data stored successfully with CID:", cid);
 
-    console.log('\n\nStoring data ...');
-    const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
+        // Read back from IPFS
+        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        console.log("✅ Downloaded content:", downloadedContent.toString());
+        assert.deepStrictEqual(
+            cid,
+            expectedCid,
+            '❌ expectedCid does not match cid!'
+        );
+        assert.deepStrictEqual(
+            dataToStore,
+            downloadedContent.toString(),
+            '❌ dataToStore does not match downloadedContent!'
+        );
+        console.log(`✅ Verified content!`);
 
-    // Raw CID without any codec - defaults to 0x55 and Blake2b256.
-    let cidRawBlake2b256 = await store(typedApi, whoSigner, dataToStore);
-    console.log('Stored data with cidRawBlake2b256: ', cidRawBlake2b256);
-
-    // Raw CID without any codec - defaults to 0x55 but using Sha2_256.
-    let cidRawSha2_256 = await store(typedApi, whoSigner, dataToStore, 0x55, 0x12);
-    console.log('Stored data with cidRawSha2_256: ', cidRawSha2_256);
-
-    // DAG-PB CID codec - using Sha2_256.
-    let cidDagPbSha2_256 = await store(typedApi, whoSigner, dataToStore, 0x70, 0x12);
-    console.log('Stored data with cidDagPbSha2_256: ', cidDagPbSha2_256);
-
-    let content1 = await read_from_ipfs(cidRawBlake2b256);
-    let content2 = await read_from_ipfs(cidRawSha2_256);
-    let content3 = await read_from_ipfs(cidDagPbSha2_256);
-    assert.deepStrictEqual(
-        content1.buffer,
-        content2.buffer,
-        '❌ content1 does not match content2!'
-    );
-    assert.deepStrictEqual(
-        content1.buffer,
-        content3.buffer,
-        '❌ content1 does not match content3!'
-    );
-    assert.notDeepStrictEqual(
-        cidRawBlake2b256,
-        cidRawSha2_256,
-        '❌ cidRawBlake2b256 can not match cidRawSha2_256!'
-    );
-    assert.notDeepStrictEqual(
-        cidRawBlake2b256,
-        cidDagPbSha2_256,
-        '❌ cidRawBlake2b256 can not match cidDagPbSha2_256!'
-    );
-    assert.notDeepStrictEqual(
-        cidRawSha2_256,
-        cidDagPbSha2_256,
-        '❌ cidRawSha2_256 can not match cidDagPbSha2_256!'
-    );
-    console.log(`✅ Verified contents and CIDs!`);
+        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        resultCode = 0;
+    } catch (error) {
+        console.error("❌ Error:", error);
+        resultCode = 1;
+    } finally {
+        if (client) client.destroy();
+        process.exit(resultCode);
+    }
 }
 
-main().catch(console.error).finally(() => {
-    if (client) client.destroy();
-});
+await main();

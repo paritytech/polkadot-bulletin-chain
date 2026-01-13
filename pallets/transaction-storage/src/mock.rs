@@ -21,6 +21,7 @@ use crate::{
 	self as pallet_transaction_storage, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
+use pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
 
 type Block = MockBlock<Test>;
@@ -42,7 +43,6 @@ impl frame_system::Config for Test {
 }
 
 parameter_types! {
-	pub const StoragePeriod: BlockNumberFor<Test> = 10;
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
@@ -52,10 +52,13 @@ parameter_types! {
 
 impl pallet_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
+	type RuntimeHoldReason = RuntimeHoldReason;
+	type FeeDestination = ();
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
@@ -65,19 +68,26 @@ impl pallet_transaction_storage::Config for Test {
 }
 
 pub fn new_test_ext() -> TestExternalities {
-	let t = RuntimeGenesisConfig { system: Default::default() }.build_storage().unwrap();
+	let t = RuntimeGenesisConfig {
+		system: Default::default(),
+		transaction_storage: pallet_transaction_storage::GenesisConfig::<Test> {
+			retention_period: 10,
+			byte_fee: 2,
+			entry_fee: 200,
+		},
+	}
+	.build_storage()
+	.unwrap();
 	t.into()
 }
 
-pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof>) {
-	while System::block_number() < n {
-		if let Some(proof) = f() {
-			TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-		}
-		TransactionStorage::on_finalize(System::block_number());
-		System::on_finalize(System::block_number());
-		System::set_block_number(System::block_number() + 1);
-		System::on_initialize(System::block_number());
-		TransactionStorage::on_initialize(System::block_number());
-	}
+pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 'static) {
+	System::run_to_block_with::<AllPalletsWithSystem>(
+		n,
+		RunToBlockHooks::default().before_finalize(|_| {
+			if let Some(proof) = f() {
+				TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
+			}
+		}),
+	);
 }

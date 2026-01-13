@@ -34,7 +34,7 @@ jobs:
         run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
   check-fmt:
-    runs-on: ubuntu-latest
+    runs-on: parity-default
     timeout-minutes: 20
     needs: [set-image]
     container:
@@ -49,15 +49,19 @@ jobs:
 
       - name: Check TOML format
         run: |
-          cargo install taplo-cli
+          cargo install taplo-cli && taplo --version
           if ! taplo format --check --config .config/taplo.toml; then
             echo "Please run 'taplo format --config .config/taplo.toml' to fix any TOML formatting issues"
+            exit 1
+          fi
+          cargo install --locked zepter && zepter --version
+          if ! zepter run check --config .config/zepter.yaml; then
+            echo "Please run 'zepter run --config .config/zepter.yaml' to fix any TOML formatting issues"
             exit 1
           fi
 
   check:
     name: Cargo check
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     needs: [set-image, check-fmt]
     container:
@@ -69,36 +73,16 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
-          cache-all-crates: true
+          shared-key: "bulletin-cache-check"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cargo check
-        run: cargo check --workspace
-
-  check-benchmarking:
-    name: Cargo check (benchmarking)
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
-    runs-on: parity-default
-    needs: [set-image, check]
-    container:
-      image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          cache-all-crates: true
-
-      - name: Cargo check benchmarking
         run: |
+          cargo check --workspace
           cargo check --workspace --features=runtime-benchmarks
 
   clippy:
     name: Cargo clippy
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     needs: [set-image, check]
     container:
@@ -113,8 +97,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
-          cache-all-crates: true
+          shared-key: "bulletin-cache-clippy"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cargo clippy
         run: |
@@ -123,7 +107,6 @@ jobs:
 
   test:
     name: Test
-    # TODO: replace `parity-default` with `ubuntu-latest` when the repo becomes public.
     runs-on: parity-default
     timeout-minutes: 60
     needs: [set-image, check]
@@ -138,8 +121,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          cache-on-failure: true
-          cache-all-crates: true
+          shared-key: "bulletin-cache-tests"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run pallets tests
         run: |

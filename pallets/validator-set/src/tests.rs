@@ -19,11 +19,14 @@
 #![cfg(test)]
 
 use super::mock::{
-	new_test_ext, next_block, next_session, AccountId, RuntimeOrigin, Session, System, Test,
-	ValidatorSet,
+	new_test_ext, next_block, next_session, AccountId, MockSessionKeys, RuntimeOrigin, Session,
+	System, Test, ValidatorSet,
 };
 use polkadot_sdk_frame::{
-	deps::sp_runtime::Perbill, prelude::*, testing_prelude::*, traits::ValidatorRegistration,
+	deps::sp_runtime::{testing::UintAuthorityId, Perbill},
+	prelude::*,
+	testing_prelude::*,
+	traits::ValidatorRegistration,
 };
 use sp_staking::offence::{OffenceDetails, OnOffenceHandler};
 use std::collections::HashSet;
@@ -55,7 +58,13 @@ fn add_validator_updates_validators_list() {
 
 		// add_validator should take effect in the session after next, provided the keys have been
 		// set
-		assert_ok!(Session::set_keys(RuntimeOrigin::signed(4), 4.into(), vec![]));
+		let val = 4;
+		let mut key = MockSessionKeys { mock: UintAuthorityId(val) };
+		assert_ok!(Session::set_keys(
+			RuntimeOrigin::signed(val),
+			key.clone(),
+			key.create_ownership_proof(&val.encode()).unwrap().encode(),
+		));
 		assert_eq!(active_validators(), HashSet::from([1, 2, 3]));
 		next_session();
 		assert_eq!(active_validators(), HashSet::from([1, 2, 3]));

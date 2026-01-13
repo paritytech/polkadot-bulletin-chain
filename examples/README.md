@@ -1,11 +1,43 @@
 # How to Run
 
+## Using `just`
+
+[`just`](https://github.com/casey/just) is a command runner (similar to `make`) that helps execute project tasks.
+
+Install just with: 
+- `cargo install just`, if you have cargo package manager,
+- `brew install just`, if you're on Mac OS and have `brew` package manager installed,
+- `sudo apt install just`, if you're using a Linux distribution.  
+
+### Run prerequisites
+
+It's only needed once after checkout or when dependencies change:
+- `just build`
+- `just npm-install`
+
+### Run full workflow example
+- `just run-authorize-and-store papi` - for PAPI,
+- `just run-authorize-and-store pjs` - for PJS.
+
+#### Run individual commands for manual testing
+- `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
+- `just ipfs-init` - Initialize IPFS (if needed),
+- `just ipfs-start` - Start IPFS daemon,
+- `just bulletin-solo-zombienet-start` - Start zombienet,
+- `just ipfs-connect` - Connect to IPFS nodes,
+- `just ipfs-reconnect-start` - Start IPFS reconnect script,
+- `just papi-generate` - Generate PAPI descriptors,
+- `just run-example papi` - Run example with PAPI or PJS,
+- `just teardown-services` - Stop all services
+
+## Manually
+
 
 ```shell
 cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
 ```
 
-## Download Zombienet
+### Download Zombienet
 
 ```shell
 OS="$(uname -s)"
@@ -29,7 +61,7 @@ wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/${zb_bi
 chmod +x "${zb_bin}"
 ```
 
-## Run Kubo
+### Run Kubo
 
 #### Execute Locally
 
@@ -43,7 +75,7 @@ tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
 
 #### Use Docker
 
-* Use `172.17.0.1` or  `host.docker.internal` for swarm connections
+* Use `host.docker.internal` (macOS/Windows) or `172.17.0.1` (Linux) for swarm connections
 
 ```shell
 docker pull ipfs/kubo:latest
@@ -51,7 +83,7 @@ docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080
 docker logs -f ipfs-node
 ```
 
-## Run Bulletin Solochain with `--ipfs-server`
+### Run Bulletin Solochain with `--ipfs-server`
 
 ```shell
 # Bulletin Solochain
@@ -75,7 +107,11 @@ POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
 ```
 
 ```shell
-# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
+# Uses Docker on macOS/Windows (use dns4/host.docker.internal)
+docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
+docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+
+# Uses Docker on Linux (use ip4/172.17.0.1)
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
 docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
 ```
@@ -86,9 +122,9 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ./scripts/ipfs-reconnect-solo.sh
 ```
 
-## Run Bulletin (Westend) Parachain with `--ipfs-server`
+### Run Bulletin (Westend) Parachain with `--ipfs-server`
 
-### Prerequisites 
+#### Prerequisites 
 
 ```shell
 mkdir -p ~/local_bridge_testing/bin
@@ -114,7 +150,7 @@ cp target/release/polkadot-parachain ~/local_bridge_testing/bin
 # polkadot-parachain 1.20.2-165ba47dc91 or higher
 ```
 
-### Launch Parachain
+#### Launch Parachain
 
 ```shell
 # Bulletin Parachain (Westend)
@@ -124,7 +160,7 @@ POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
   ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-westend-local.toml
 ```
 
-### Connect IPFS Nodes
+#### Connect IPFS Nodes
 
 ```shell
 # Uses Kubo
@@ -147,11 +183,11 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 ./scripts/ipfs-reconnect-westend.sh
 ```
 
-## Trigger Authorize, Store and IPFS Get
+### Trigger Authorize, Store and IPFS Get
 
-### Example for Simple Authorizing and Store
+#### Example for Simple Authorizing and Store
 
-#### Using Legacy @polkadot/api (PJS)
+##### Using Legacy @polkadot/api (PJS)
 ```
 cd examples
 npm install
@@ -159,7 +195,7 @@ npm install
 node authorize_and_store.js
 ```
 
-#### Using Modern PAPI (Polkadot API)
+##### Using Modern PAPI (Polkadot API)
 ```bash
 cd examples
 npm install
@@ -167,6 +203,10 @@ npm install
 # First, generate the PAPI descriptors:
 #  (Generate TypeScript types in `.papi/descriptors/`)
 #  (Create metadata files in `.papi/metadata/bulletin.scale`)
+# Generate PAPI descriptors using local node:
+#   npx papi add -w ws://localhost:10000 bulletin
+#   npx papi
+# or:
 npm run papi:generate
 # or if you already have .papi folder you can always update it
 npm run papi:update
@@ -175,7 +215,7 @@ npm run papi:update
 node authorize_and_store_papi.js
 ```
 
-### Example for Multipart / Chunked Content / Big Files
+#### Example for Multipart / Chunked Content / Big Files
 
 The code stores one file, splits it into chunks, and then uploads those chunks to Bulletin.
 
