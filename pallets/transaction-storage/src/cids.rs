@@ -140,7 +140,7 @@ pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, 
 	// Wrap hash into a multihash
 	let multihash_code = hashing.multihash_code();
 	let mh = Multihash::<32>::wrap(multihash_code, &content_hash).map_err(|e| {
-		log::warn!(
+		tracing::warn!(
 			target: LOG_TARGET,
 			"Failed to create Multihash for content_hash: {content_hash:?}, multihash_code: {multihash_code:?}, error: {e:?}"
 		);

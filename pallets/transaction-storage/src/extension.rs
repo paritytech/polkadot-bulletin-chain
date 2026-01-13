@@ -26,6 +26,8 @@ use polkadot_sdk_frame::{
 	traits::{Implication, PostDispatchInfoOf},
 };
 
+type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
+
 /// `TransactionExtension` implementation that provides optional `CidConfig` for the `store`
 /// extrinsic.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
@@ -51,9 +53,9 @@ impl<T: Config + Send + Sync> fmt::Debug for ProvideCidConfig<T> {
 	}
 }
 
-impl<T: Config + Send + Sync> TransactionExtension<T::RuntimeCall> for ProvideCidConfig<T>
+impl<T: Config + Send + Sync> TransactionExtension<RuntimeCallOf<T>> for ProvideCidConfig<T>
 where
-	<T as frame_system::Config>::RuntimeCall: IsSubType<Call<T>>,
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
 {
 	const IDENTIFIER: &'static str = "ProvideCidConfig";
 
@@ -65,20 +67,20 @@ where
 	type Val = Option<CidConfig>;
 	type Pre = bool;
 
-	fn weight(&self, _call: &T::RuntimeCall) -> Weight {
+	fn weight(&self, _call: &RuntimeCallOf<T>) -> Weight {
 		Weight::zero()
 	}
 
 	fn validate(
 		&self,
 		origin: T::RuntimeOrigin,
-		call: &T::RuntimeCall,
-		_info: &DispatchInfoOf<T::RuntimeCall>,
+		call: &RuntimeCallOf<T>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
 		_len: usize,
 		_self_implicit: Self::Implicit,
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
-	) -> ValidateResult<Self::Val, T::RuntimeCall> {
+	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
 		match (self.0.as_ref(), call.is_sub_type()) {
 			(Some(cid_config), Some(Call::store { .. })) =>
 				Ok((Default::default(), Some(cid_config.clone()), origin)),
@@ -94,8 +96,8 @@ where
 		self,
 		val: Self::Val,
 		_: &T::RuntimeOrigin,
-		_: &T::RuntimeCall,
-		_info: &DispatchInfoOf<T::RuntimeCall>,
+		_: &RuntimeCallOf<T>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		if let Some(cid_config) = val {
@@ -123,13 +125,13 @@ where
 
 	fn post_dispatch_details(
 		pre: Self::Pre,
-		_info: &DispatchInfoOf<T::RuntimeCall>,
-		_post_info: &PostDispatchInfoOf<T::RuntimeCall>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		_post_info: &PostDispatchInfoOf<RuntimeCallOf<T>>,
 		_len: usize,
 		_result: &DispatchResult,
 	) -> Result<Weight, TransactionValidityError> {
 		if pre {
-			// Let’s clean up after the dispatch.
+			// Let's clean up after the dispatch.
 			CidConfigForStore::<T>::kill();
 		}
 		Ok(Weight::zero())
