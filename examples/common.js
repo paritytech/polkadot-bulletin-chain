@@ -20,49 +20,6 @@ function to_hex(input) {
 }
 
 /**
- * Read the file, chunk it, store in Bulletin and return CIDs.
- * Returns { chunks }
- */
-export async function storeChunkedFile(api, pair, filePath, nonceMgr) {
-  // ---- 1️⃣ Read and split a file ----
-  const fileData = fs.readFileSync(filePath)
-  console.log(`📁 Read ${filePath}, size ${fileData.length} bytes`)
-
-  const chunks = []
-  for (let i = 0; i < fileData.length; i += CHUNK_SIZE) {
-    const chunk = fileData.subarray(i, i + CHUNK_SIZE)
-    const cid = await cidFromBytes(chunk)
-    chunks.push({ cid, bytes: to_hex(chunk), len: chunk.length })
-  }
-  console.log(`✂️ Split into ${chunks.length} chunks`)
-
-  // ---- 2️⃣ Store chunks in Bulletin (expecting just one block) ----
-  let maxRetries = 10;
-  for (let i = 0; i < chunks.length; i++) {
-    const { cid, bytes } = chunks[i]
-    console.log(`📤 Storing chunk #${i + 1} CID: ${cid}`)
-    try {
-      const tx = api.tx.transactionStorage.store(bytes);
-      const result = await tx.signAndSend(pair, { nonce: nonceMgr.getAndIncrement() });
-      console.log(`✅ Stored chunk #${i + 1}, result:`, result.toHuman?.());
-    } catch (err) {
-      if (maxRetries === 0) {
-        throw "Max retries exceeded!";
-      }
-      --maxRetries;
-      if (err.stack.includes("Priority is too low") || err.stack.includes("Immediately Dropped") || err.stack.includes("Invalid Transaction")) {
-        await waitForNewBlock();
-        --i;
-        continue;
-      }
-    }
-    // Reset retries if next chunk is successful
-    maxRetries = 10;
-  }
-  return { chunks };
-}
-
-/**
  * Reads metadata JSON from IPFS by metadataCid.
  */
 export async function retrieveMetadata(ipfs, metadataCid) {
@@ -227,18 +184,24 @@ export function createSigner(account) {
 }
 
 export function setupKeyringAndSigners(sudoSeed, accountSeed) {
-  const keyring = new Keyring({ type: 'sr25519' });
-  const sudoAccount = keyring.addFromUri(sudoSeed);
-  const whoAccount = keyring.addFromUri(accountSeed);
-
-  const sudoSigner = createSigner(sudoAccount);
-  const whoSigner = createSigner(whoAccount);
+  const { signer: sudoSigner, _ } = newSigner(sudoSeed);
+  const { signer: whoSigner, address: whoAddress } = newSigner(accountSeed);
 
   return {
     sudoSigner,
     whoSigner,
-    whoAddress: whoAccount.address
+    whoAddress
   };
+}
+
+export function newSigner(seed) {
+  const keyring = new Keyring({ type: 'sr25519' });
+  const account = keyring.addFromUri(seed);
+  const signer = createSigner(account);
+  return {
+    signer,
+    address: account.address
+  }
 }
 
 /**
@@ -314,12 +277,12 @@ export async function fileToDisk(outputPath, fullBuffer) {
 
 export class NonceManager {
   constructor(initialNonce) {
-    this.nonce = initialNonce; // BN instance from api.query.system.account
+    this.nonce = BigInt(initialNonce);
   }
 
   getAndIncrement() {
     const current = this.nonce;
-    this.nonce = this.nonce.addn(1); // increment BN
+    this.nonce += 1n;
     return current;
   }
 }
