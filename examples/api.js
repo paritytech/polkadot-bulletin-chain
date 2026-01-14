@@ -14,8 +14,12 @@ export async function authorizeAccount(typedApi, sudoSigner, who, transactions, 
         call: authorizeTx.decodedCall
     });
 
-    // Wait for finalization to ensure nonce is updated for subsequent transactions
-    await waitForTransaction(sudoTx, sudoSigner, "Authorize", TX_MODE_FINALIZED_BLOCK);
+    // Wait for inclusion in best block (finalization can be unreliable with light clients)
+    await waitForTransaction(sudoTx, sudoSigner, "Authorize", TX_MODE_IN_BLOCK);
+    
+    // Wait for nonce to update (give time for state to propagate)
+    console.log('⏳ Waiting 6 seconds for state to propagate...');
+    await new Promise(resolve => setTimeout(resolve, 6000));
 }
 
 export async function store(typedApi, signer, data) {
@@ -30,8 +34,13 @@ export async function store(typedApi, signer, data) {
     const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
 
-    // Wait for finalization to ensure data is committed before fetching from IPFS
-    await waitForTransaction(tx, signer, "Store", TX_MODE_FINALIZED_BLOCK);
+    // Wait for inclusion in best block (finalization can be unreliable with light clients)
+    await waitForTransaction(tx, signer, "Store", TX_MODE_IN_BLOCK);
+    
+    // Wait for data to propagate to IPFS nodes
+    console.log('⏳ Waiting 6 seconds for data to propagate to IPFS...');
+    await new Promise(resolve => setTimeout(resolve, 6000));
+    
     return cid;
 }
 
@@ -39,7 +48,7 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds (3 minutes) - increased for smoldot/light client sync delays
+const DEFAULT_TX_TIMEOUT_MS = 90_000; // 90 seconds - sufficient for in-block inclusion with light clients
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
