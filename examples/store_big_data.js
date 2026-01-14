@@ -5,17 +5,16 @@ import assert from "assert";
 import {authorizeAccount, store, } from "./api.js";
 import {cidFromBytes} from "./cid_dag_metadata.js";
 import {
-    setupKeyringAndSigners, CHUNK_SIZE, newSigner
+    setupKeyringAndSigners, CHUNK_SIZE, newSigner, fileToDisk, filesAreEqual
 } from "./common.js";
 import { createClient } from 'polkadot-api';
-import {getWsProvider} from "polkadot-api/ws-provider";
+import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // ---- CONFIG ----
 const NODE_WS = 'ws://localhost:10000';
 const FILE_PATH = './images/32mb-sample.jpg'
 const OUT_1_PATH = './download/retrieved_picture.bin'
-const OUT_2_PATH = './download/retrieved_picture.bin2'
 // ----
 
 // -------------------- queue --------------------
@@ -124,15 +123,11 @@ async function readFromIpfs(cid) {
 async function main() {
     await cryptoWaitReady()
 
-    let client, api, resultCode;
+    let client, resultCode;
     try {
         if (fs.existsSync(OUT_1_PATH)) {
             fs.unlinkSync(OUT_1_PATH);
             console.log(`File ${OUT_1_PATH} removed.`);
-        }
-        if (fs.existsSync(OUT_2_PATH)) {
-            fs.unlinkSync(OUT_2_PATH);
-            console.log(`File ${OUT_2_PATH} removed.`);
         }
 
         // Init WS PAPI client and typed api.
@@ -174,14 +169,19 @@ async function main() {
         }
 
         // Check all chunks are there.
-        let downloaded = 0;
+        let downloadedChunks = [];
         for (const chunk of chunks) {
+            // Download the chunk from IPFS.
             let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
-            downloaded += block.length;
+            downloadedChunks.push(block);
         }
+        let fullBuffer = Buffer.concat(downloadedChunks);
+        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+        await fileToDisk(OUT_1_PATH, fullBuffer);
+        filesAreEqual(FILE_PATH, OUT_1_PATH);
         assert.strictEqual(
-            downloaded,
             dataSize,
+            fullBuffer.length,
             '❌ Failed to download all the data!'
         );
 
@@ -191,7 +191,6 @@ async function main() {
         console.error("❌ Error:", error);
         resultCode = 1;
     } finally {
-        if (api) api.disconnect();
         if (client) client.destroy();
         process.exit(resultCode);
     }
