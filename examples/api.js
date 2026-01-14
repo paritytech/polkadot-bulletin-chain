@@ -14,7 +14,8 @@ export async function authorizeAccount(typedApi, sudoSigner, who, transactions, 
         call: authorizeTx.decodedCall
     });
 
-    await waitForTransaction(sudoTx, sudoSigner, "Authorize");
+    // Wait for finalization to ensure nonce is updated for subsequent transactions
+    await waitForTransaction(sudoTx, sudoSigner, "Authorize", TX_MODE_FINALIZED_BLOCK);
 }
 
 export async function store(typedApi, signer, data) {
@@ -29,7 +30,8 @@ export async function store(typedApi, signer, data) {
     const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
 
-    await waitForTransaction(tx, signer, "Store");
+    // Wait for finalization to ensure data is committed before fetching from IPFS
+    await waitForTransaction(tx, signer, "Store", TX_MODE_FINALIZED_BLOCK);
     return cid;
 }
 
