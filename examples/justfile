@@ -2,8 +2,28 @@
 # 
 # See README.md for usage instructions.
 
-# Default recipe - run the complete PAPI workflow test
-default: (run-authorize-and-store "bulletin-westend-runtime" "ws")
+# Default recipe - show available commands
+default:
+    @echo "Polkadot Bulletin Chain - Just Commands"
+    @echo ""
+    @echo "Start environment and run tests:"
+    @echo "  just start-services <runtime>          - Start services (westend/polkadot)"
+    @echo "  just test-authorize-and-store <runtime> <mode> - Run auth test (ws/smoldot)"
+    @echo "  just test-store-chunked-data <runtime> - Run chunked data test"
+    @echo "  just stop-services                     - Stop all services"
+    @echo ""
+    @echo "Available runtimes:"
+    @echo "  bulletin-westend-runtime   - Westend parachain"
+    @echo "  bulletin-polkadot-runtime  - Polkadot solochain"
+    @echo ""
+    @echo "Example workflow:"
+    @echo "  just start-services bulletin-westend-runtime"
+    @echo "  just test-authorize-and-store bulletin-westend-runtime ws"
+    @echo "  just test-store-chunked-data bulletin-westend-runtime"
+    @echo "  just stop-services"
+
+# Test directory state file for persisting TEST_DIR between recipe calls
+TEST_DIR_FILE := justfile_directory() + "/.test-dir"
 
 # Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
@@ -28,6 +48,22 @@ compute-test-dir:
         mkdir -p "$TEST_DIR";
         echo "$TEST_DIR";
     fi
+
+# Save TEST_DIR to file for use across multiple recipe invocations
+save-test-dir test_dir:
+    #!/usr/bin/env bash
+    echo "{{ test_dir }}" > {{ TEST_DIR_FILE }}
+    echo "   Saved TEST_DIR to {{ TEST_DIR_FILE }}"
+
+# Load TEST_DIR from file
+load-test-dir:
+    #!/usr/bin/env bash
+    if [ ! -f "{{ TEST_DIR_FILE }}" ]; then
+        echo "❌ Error: No active test environment found"
+        echo "   Please run 'just start-services <runtime>' first"
+        exit 1
+    fi
+    cat "{{ TEST_DIR_FILE }}"
 
 # Install JavaScript dependencies
 npm-install:
@@ -360,27 +396,65 @@ teardown-services test_dir:
     just ipfs-shutdown "{{ test_dir }}"
     echo "✅ Docker services stopped"
 
-# Run authorize and store example with Docker IPFS
+# Start services and save TEST_DIR for subsequent test runs
 # Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+start-services runtime: npm-install
+    #!/usr/bin/env bash
+    set -e
+    
+    echo "🚀 Starting services for runtime: {{ runtime }}"
+    
+    TEST_DIR="$(just compute-test-dir)"
+    echo "   Using TEST_DIR: $TEST_DIR"
+    
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+    just save-test-dir "$TEST_DIR"
+    
+    echo ""
+    echo "✅ Services started successfully!"
+    echo "   TEST_DIR: $TEST_DIR"
+    echo "   You can now run tests with: just test-authorize-and-store {{ runtime }} <mode>"
+
+# Stop services (uses saved TEST_DIR)
+stop-services:
+    #!/usr/bin/env bash
+    set -e
+    
+    echo "🛑 Stopping services..."
+    
+    TEST_DIR="$(just load-test-dir)"
+    echo "   Using TEST_DIR: $TEST_DIR"
+    
+    just teardown-services "$TEST_DIR"
+    
+    # Remove the saved TEST_DIR file
+    rm -f "{{ TEST_DIR_FILE }}"
+    echo "   Removed {{ TEST_DIR_FILE }}"
+    
+    echo "✅ Services stopped successfully!"
+
+# Run authorize and store test (without setup/teardown, uses saved TEST_DIR)
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
-run-authorize-and-store runtime mode="ws": npm-install
+test-authorize-and-store runtime mode="ws":
     #!/usr/bin/env bash
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }})..."
+        echo "🧪 Running authorize and store test (mode: smoldot, runtime: {{ runtime }})..."
         SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
     elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }})..."
+        echo "🧪 Running authorize and store test (mode: ws, runtime: {{ runtime }})..."
         SCRIPT_NAME="authorize_and_store_papi.js"
     else
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
         exit 1
     fi
 
-    TEST_DIR="$(just compute-test-dir)"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    TEST_DIR="$(just load-test-dir)"
+    echo "   Using TEST_DIR: $TEST_DIR"
 
     set +e
     # Run the script with chainspec_path parameter only for smoldot mode
@@ -403,25 +477,24 @@ run-authorize-and-store runtime mode="ws": npm-install
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     if [ $EXAMPLE_EXIT -eq 0 ]; then
-        echo "✅ Example completed successfully!"
+        echo "✅ Test completed successfully!"
     else
-        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+        echo "❌ Test failed with exit code $EXAMPLE_EXIT"
     fi
     
-    just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
 
-# Run store chunked data example with Docker IPFS
+# Run store chunked data test (without setup/teardown, uses saved TEST_DIR)
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-store-chunked-data runtime: npm-install
+test-store-chunked-data runtime:
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting store chunked data + DAG-PB workflow test (runtime: {{ runtime }})..."
+    echo "🧪 Running store chunked data + DAG-PB test (runtime: {{ runtime }})..."
 
-    TEST_DIR="$(just compute-test-dir)"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    TEST_DIR="$(just load-test-dir)"
+    echo "   Using TEST_DIR: $TEST_DIR"
 
     set +e
     node store_chunked_data.js
@@ -430,10 +503,9 @@ run-store-chunked-data runtime: npm-install
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     if [ $EXAMPLE_EXIT -eq 0 ]; then
-        echo "✅ Example completed successfully!"
+        echo "✅ Test completed successfully!"
     else
-        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+        echo "❌ Test failed with exit code $EXAMPLE_EXIT"
     fi
 
-    just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT

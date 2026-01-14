@@ -9,26 +9,52 @@ Install just with:
 - `brew install just`, if you're on Mac OS and have `brew` package manager installed,
 - `sudo apt install just`, if you're using a Linux distribution.  
 
-### Run prerequisites
+### Quick Start - Run Tests
 
-It's only needed once after checkout or when dependencies change:
-- `just build`
-- `just npm-install`
+Start services once, run tests, then tear down:
 
-### Run full workflow example
-- `just run-authorize-and-store papi` - for PAPI,
-- `just run-authorize-and-store pjs` - for PJS.
+```bash
+# 1. Start services for your runtime (only needed once)
+just start-services bulletin-westend-runtime
+# or
+just start-services bulletin-polkadot-runtime
 
-#### Run individual commands for manual testing
-- `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
-- `just ipfs-init` - Initialize IPFS (if needed),
-- `just ipfs-start` - Start IPFS daemon,
-- `just bulletin-solo-zombienet-start` - Start zombienet,
-- `just ipfs-connect` - Connect to IPFS nodes,
-- `just ipfs-reconnect-start` - Start IPFS reconnect script,
-- `just papi-generate` - Generate PAPI descriptors,
-- `just run-example papi` - Run example with PAPI or PJS,
-- `just teardown-services` - Stop all services
+# 2. Run tests (as many as you want)
+just test-authorize-and-store bulletin-westend-runtime ws
+just test-authorize-and-store bulletin-westend-runtime smoldot
+just test-store-chunked-data bulletin-westend-runtime
+
+# 3. Stop services when done
+just stop-services
+```
+
+**Performance:**
+- Environment startup: ~60-180 seconds (once)
+- Each test run: ~30-60 seconds
+- Total time for 3 tests: ~3-5 minutes (vs ~10-15 minutes if restarting environment each time)
+
+### Available Runtimes
+
+- `bulletin-westend-runtime` - Westend parachain configuration
+- `bulletin-polkadot-runtime` - Polkadot solochain configuration
+
+### Available Test Commands
+
+- `test-authorize-and-store <runtime> <mode>` - Test authorization and storage workflow
+  - `mode` can be: `ws` (WebSocket RPC) or `smoldot` (light client)
+- `test-store-chunked-data <runtime>` - Test chunked data storage with DAG-PB
+
+### Individual Service Commands (Advanced)
+
+- `setup-parachain-prerequisites` - Install polkadot and polkadot-omni-node binaries
+- `bulletin-solo-zombienet-start <test_dir> <runtime>` - Start Polkadot solochain
+- `bulletin-westend-parachain-zombienet-start <test_dir> <runtime>` - Start Westend parachain
+- `ipfs-start <test_dir>` - Start IPFS Docker container
+- `ipfs-connect <runtime>` - Connect IPFS nodes
+- `ipfs-reconnect-start <test_dir> <runtime>` - Start IPFS reconnect script
+- `ipfs-shutdown <test_dir>` - Stop IPFS Docker container
+- `papi-generate` - Generate PAPI descriptors
+- `kill-pids <test_dir>` - Kill all background processes
 
 ## Manually
 
