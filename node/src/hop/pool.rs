@@ -16,13 +16,19 @@
 
 //! HOP data pool implementation.
 
-use crate::node_primitives::{BlockNumber, Hash};
-use crate::hop::types::{
-	HopError, HopPoolEntry, PoolStatus, MAX_DATA_SIZE,
+use crate::{
+	hop::types::{HopError, HopPoolEntry, PoolStatus, MAX_DATA_SIZE},
+	node_primitives::{BlockNumber, Hash},
 };
 use parking_lot::RwLock;
-use sp_core::{H256, hashing::blake2_256};
-use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc}};
+use sp_core::{hashing::blake2_256, H256};
+use std::{
+	collections::HashMap,
+	sync::{
+		atomic::{AtomicU64, Ordering},
+		Arc,
+	},
+};
 
 /// HOP data pool
 pub struct HopDataPool {
@@ -38,10 +44,7 @@ pub struct HopDataPool {
 
 impl HopDataPool {
 	/// Create a new data pool
-	pub fn new(
-		max_size: u64,
-		retention_blocks: u32,
-	) -> Result<Self, HopError> {
+	pub fn new(max_size: u64, retention_blocks: u32) -> Result<Self, HopError> {
 		Ok(Self {
 			entries: Arc::new(RwLock::new(HashMap::new())),
 			max_size,

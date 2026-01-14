@@ -16,8 +16,8 @@
 
 //! HOP CLI parameters.
 
+use crate::hop::types::{DEFAULT_RETENTION_BLOCKS, MAX_DATA_SIZE};
 use clap::Parser;
-use crate::hop::types::{MAX_DATA_SIZE, DEFAULT_RETENTION_BLOCKS};
 
 /// HOP (Hand-Off Protocol) configuration parameters
 #[derive(Debug, Clone, Parser)]
@@ -43,9 +43,9 @@ impl Default for HopParams {
 	fn default() -> Self {
 		Self {
 			enable_hop: false,
-			hop_max_pool_size: MAX_DATA_SIZE,      // 10 GiB
-			hop_retention_blocks: DEFAULT_RETENTION_BLOCKS,   // 24 hours
-			hop_check_interval: 60,        // 1 minute
+			hop_max_pool_size: MAX_DATA_SIZE,               // 10 GiB
+			hop_retention_blocks: DEFAULT_RETENTION_BLOCKS, // 24 hours
+			hop_check_interval: 60,                         // 1 minute
 		}
 	}
 }

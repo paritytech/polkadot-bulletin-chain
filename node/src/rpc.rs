@@ -100,8 +100,13 @@ where
 		.into_rpc(),
 	)?;
 	module.merge(
-		SyncState::new(chain_spec, client.clone(), grandpa.shared_authority_set, babe_worker_handle)?
-			.into_rpc(),
+		SyncState::new(
+			chain_spec,
+			client.clone(),
+			grandpa.shared_authority_set,
+			babe_worker_handle,
+		)?
+		.into_rpc(),
 	)?;
 
 	// HOP (Hand-Off Protocol) RPC

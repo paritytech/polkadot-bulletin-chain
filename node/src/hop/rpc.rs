@@ -16,8 +16,10 @@
 
 //! HOP (Hand-Off protocol) RPC interface implementation.
 
-use crate::node_primitives::Hash;
-use crate::hop::{HopDataPool, PoolStatus};
+use crate::{
+	hop::{HopDataPool, PoolStatus},
+	node_primitives::Hash,
+};
 use jsonrpsee::{
 	core::{async_trait, RpcResult},
 	proc_macros::rpc,
