@@ -191,6 +191,7 @@ pub fn run() -> sc_cli::Result<()> {
 		},
 		None => {
 			let runner = cli.create_runner(&cli.run)?;
+			let hop_params = cli.hop.clone();
 			runner.run_node_until_exit(|mut config| async move {
 				// Override default idle connection timeout of 10 seconds to give IPFS clients more
 				// time to query data over Bitswap. This is needed when manually adding our node
@@ -222,7 +223,7 @@ pub fn run() -> sc_cli::Result<()> {
 					}
 				}
 
-				service::new_full::<sc_network::Litep2pNetworkBackend>(config)
+				service::new_full::<sc_network::Litep2pNetworkBackend>(config, hop_params)
 					.map_err(sc_cli::Error::Service)
 			})
 		},

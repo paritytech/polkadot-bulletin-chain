@@ -37,6 +37,8 @@ pub struct FullDeps<C, P, SC, B> {
 	pub babe: BabeDeps,
 	/// GRANDPA RPC dependencies.
 	pub grandpa: GrandpaDeps<B>,
+	/// HOP data pool.
+	pub hop_pool: Option<Arc<crate::hop::HopDataPool>>,
 }
 
 /// BABE RPC dependencies.
@@ -80,7 +82,7 @@ where
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
 	let mut module = RpcModule::new(());
-	let FullDeps { client, pool, select_chain, chain_spec, babe, grandpa } = deps;
+	let FullDeps { client, pool, select_chain, chain_spec, babe, grandpa, hop_pool } = deps;
 	let BabeDeps { babe_worker_handle, keystore } = babe;
 
 	module.merge(System::new(client.clone(), pool).into_rpc())?;
@@ -98,14 +100,15 @@ where
 		.into_rpc(),
 	)?;
 	module.merge(
-		SyncState::new(chain_spec, client, grandpa.shared_authority_set, babe_worker_handle)?
+		SyncState::new(chain_spec, client.clone(), grandpa.shared_authority_set, babe_worker_handle)?
 			.into_rpc(),
 	)?;
 
-	// Extend this RPC with a custom API by using the following syntax.
-	// `YourRpcStruct` should have a reference to a client, which is needed
-	// to call into the runtime.
-	// `module.merge(YourRpcTrait::into_rpc(YourRpcStruct::new(ReferenceToClient, ...)))?;`
+	// HOP (Hand-Off Protocol) RPC
+	if let Some(hop_pool) = hop_pool {
+		use crate::hop::rpc::{HopApiServer, HopRpcServer};
+		module.merge(HopRpcServer::new(hop_pool, client.clone()).into_rpc())?;
+	}
 
 	Ok(module)
 }

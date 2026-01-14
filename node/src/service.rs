@@ -149,6 +149,7 @@ pub fn new_full<
 	N: sc_network::NetworkBackend<Block, <Block as sp_runtime::traits::Block>::Hash>,
 >(
 	config: Configuration,
+	hop_params: crate::hop::HopParams,
 ) -> Result<TaskManager, ServiceError> {
 	let sc_service::PartialComponents {
 		client,
@@ -160,6 +161,26 @@ pub fn new_full<
 		transaction_pool,
 		other: (block_import, grandpa_link, babe_link, babe_worker_handle, mut telemetry),
 	} = new_partial(&config)?;
+
+	// Initialize HOP data pool if enabled
+	let hop_pool = if hop_params.enable_hop {
+		tracing::info!(
+			target: "hop",
+			max_size_mib = hop_params.hop_max_pool_size,
+			retention_blocks = hop_params.hop_retention_blocks,
+			"Initializing HOP data pool (in-memory)"
+		);
+
+		Some(Arc::new(
+			crate::hop::HopDataPool::new(
+				hop_params.hop_max_pool_size * 1024 * 1024, // MiB to bytes
+				hop_params.hop_retention_blocks,
+			)
+			.map_err(|e| ServiceError::Other(format!("Failed to create HOP pool: {}", e)))?,
+		))
+	} else {
+		None
+	};
 
 	let mut net_config = sc_network::config::FullNetworkConfiguration::<_, _, N>::new(
 		&config.network,
@@ -230,6 +251,7 @@ pub fn new_full<
 		let keystore = keystore_container.keystore();
 		let select_chain = select_chain.clone();
 		let chain_spec = config.chain_spec.cloned_box();
+		let hop_pool_rpc = hop_pool.clone();
 
 		let justification_stream = grandpa_link.justification_stream();
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
@@ -257,6 +279,7 @@ pub fn new_full<
 					justification_stream: justification_stream.clone(),
 					finality_proof_provider: finality_proof_provider.clone(),
 				},
+				hop_pool: hop_pool_rpc.clone(),
 			};
 			crate::rpc::create_full(deps).map_err(Into::into)
 		})

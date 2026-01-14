@@ -7793,10 +7793,13 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "futures",
+ "hex",
  "jsonrpsee",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-transaction-storage",
+ "parity-scale-codec",
+ "parking_lot 0.12.5",
  "polkadot-bulletin-chain-runtime",
  "polkadot-primitives",
  "sc-basic-authorship",
@@ -7839,6 +7842,7 @@ dependencies = [
  "sp-weights",
  "substrate-build-script-utils",
  "substrate-frame-rpc-system",
+ "thiserror 2.0.17",
  "tracing",
 ]
 

@@ -9,6 +9,7 @@ mod benchmarking;
 mod cli;
 mod command;
 mod fake_runtime_api;
+mod hop;
 mod node_primitives;
 mod rpc;
 
