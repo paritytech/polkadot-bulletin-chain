@@ -16,10 +16,6 @@ export async function authorizeAccount(typedApi, sudoSigner, who, transactions, 
 
     // Wait for inclusion in best block (finalization can be unreliable with light clients)
     await waitForTransaction(sudoTx, sudoSigner, "Authorize", TX_MODE_IN_BLOCK);
-    
-    // Wait for nonce to update (give time for state to propagate)
-    console.log('⏳ Waiting 6 seconds for state to propagate...');
-    await new Promise(resolve => setTimeout(resolve, 6000));
 }
 
 export async function store(typedApi, signer, data) {
@@ -36,11 +32,6 @@ export async function store(typedApi, signer, data) {
 
     // Wait for inclusion in best block (finalization can be unreliable with light clients)
     await waitForTransaction(tx, signer, "Store", TX_MODE_IN_BLOCK);
-    
-    // Wait for data to propagate to IPFS nodes
-    console.log('⏳ Waiting 6 seconds for data to propagate to IPFS...');
-    await new Promise(resolve => setTimeout(resolve, 6000));
-    
     return cid;
 }
 
