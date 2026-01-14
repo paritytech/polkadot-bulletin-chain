@@ -39,7 +39,7 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 60_000; // 60 seconds or 10 blocks
+const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds (3 minutes) - increased for smoldot/light client sync delays
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
