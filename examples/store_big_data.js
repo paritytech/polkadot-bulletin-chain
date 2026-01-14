@@ -1,26 +1,10 @@
-import { ApiPromise, WsProvider } from '@polkadot/api';
-import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
-import * as dagPB from '@ipld/dag-pb'
 import fs from 'fs'
 import assert from "assert";
-import {authorizeAccount, fetchCid, store, TX_MODE_IN_BLOCK, TX_MODE_IN_POOL} from "./api.js";
-import {buildUnixFSDagPB, cidFromBytes, convertCid} from "./cid_dag_metadata.js";
+import {authorizeAccount, store, } from "./api.js";
+import {cidFromBytes} from "./cid_dag_metadata.js";
 import {
-    storeMetadata,
-    retrieveMetadata,
-    retrieveFileForMetadata,
-    buildUnixFSDag,
-    waitForNewBlock,
-    filesAreEqual,
-    storeProof,
-    reconstructDagFromProof,
-    fileToDisk,
-    NonceManager,
-    WS_ENDPOINT,
-    IPFS_API,
-    HTTP_IPFS_API,
     setupKeyringAndSigners, CHUNK_SIZE, newSigner
 } from "./common.js";
 import { createClient } from 'polkadot-api';
@@ -190,13 +174,13 @@ async function main() {
         }
 
         // Check all chunks are there.
-        let downlaoded = 0;
+        let downloaded = 0;
         for (const chunk of chunks) {
             let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
-            downlaoded += block.length;
+            downloaded += block.length;
         }
         assert.strictEqual(
-            downlaoded,
+            downloaded,
             dataSize,
             '❌ Failed to download all the data!'
         );
