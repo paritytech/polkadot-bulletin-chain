@@ -1,6 +1,8 @@
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
 import fs from 'fs'
+import os from "os";
+import path from "path";
 import assert from "assert";
 import {authorizeAccount, store, } from "./api.js";
 import {cidFromBytes} from "./cid_dag_metadata.js";
@@ -18,8 +20,6 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // ---- CONFIG ----
 const NODE_WS = 'ws://localhost:10000';
-const FILE_PATH = './images/32mb-sample.jpg'
-const OUT_1_PATH = './download/retrieved_picture.bin'
 // ----
 
 // -------------------- queue --------------------
@@ -130,15 +130,10 @@ async function main() {
 
     let client, resultCode;
     try {
-        if (fs.existsSync(OUT_1_PATH)) {
-            fs.unlinkSync(OUT_1_PATH);
-            console.log(`File ${OUT_1_PATH} removed.`);
-        }
-        if (fs.existsSync(FILE_PATH)) {
-            fs.unlinkSync(FILE_PATH);
-            console.log(`File ${FILE_PATH} removed.`);
-        }
-        generateTextImage(FILE_PATH, "Hello, Bulletin - " + new Date().toString(), "big");
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletinimggen-"));
+        const filePath = path.join(tmpDir, "image.jpeg");
+        const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
+        generateTextImage(filePath, "Hello, Bulletin - " + new Date().toString(), "big");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
@@ -166,7 +161,7 @@ async function main() {
 
         // push data to queue
         // Read the file, chunk it, store in Bulletin and return CIDs.
-        let { chunks, dataSize } = await storeChunkedFile(bulletinAPI, FILE_PATH);
+        let { chunks, dataSize } = await storeChunkedFile(bulletinAPI, filePath);
 
         // wait for all chunks are stored
         try {
@@ -187,8 +182,8 @@ async function main() {
         }
         let fullBuffer = Buffer.concat(downloadedChunks);
         console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(OUT_1_PATH, fullBuffer);
-        filesAreEqual(FILE_PATH, OUT_1_PATH);
+        await fileToDisk(downloadedFilePath, fullBuffer);
+        filesAreEqual(filePath, downloadedFilePath);
         assert.strictEqual(
             dataSize,
             fullBuffer.length,
