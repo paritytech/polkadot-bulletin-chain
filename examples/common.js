@@ -51,49 +51,119 @@ export function newSigner(seed) {
 }
 
 /**
- * Generates (dynamic) images based on the input text.
+ * Generates images with predefined file size targets.
+ *
+ * @param {string} file
+ * @param {string} text
+ * @param {"small" | "big"} size
  */
-export function generateTextImage(file, text, width = 800, height = 600) {
-  const canvas = createCanvas(width, height);
-  const ctx = canvas.getContext("2d");
+export function generateTextImage(file, text, size = "small") {
+    console.log(`Generating ${size} image with text: ${text} to the file: ${file}...`);
+    const presets = {
+        small: {
+            width: 200,
+            height: 100,
+            quality: 0.6,          // few KB
+            shapes: 100,
+            noise: 1,
+        },
+        // ~33 MiB
+        big: {
+            width: 6500,
+            height: 5500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 32 * 1024 * 1024,
+        },
+    };
 
-  // 🎨 Background
-  ctx.fillStyle = randomColor();
-  ctx.fillRect(0, 0, width, height);
+    const cfg = presets[size];
+    if (!cfg) {
+        throw new Error(`Unknown size preset: ${size}`);
+    }
 
-  // 🟠 Random shapes
-  for (let i = 0; i < 15; i++) {
-    ctx.beginPath();
+    const canvas = createCanvas(cfg.width, cfg.height);
+    const ctx = canvas.getContext("2d");
+
+    // 🎨 Background
     ctx.fillStyle = randomColor();
-    ctx.arc(
-      Math.random() * width,
-      Math.random() * height,
-      Math.random() * 120,
-      0,
-      Math.PI * 2
+    ctx.fillRect(0, 0, cfg.width, cfg.height);
+
+    // 🟠 Random shapes (adds entropy)
+    for (let i = 0; i < cfg.shapes; i++) {
+        ctx.beginPath();
+        ctx.fillStyle = randomColor();
+        ctx.arc(
+            Math.random() * cfg.width,
+            Math.random() * cfg.height,
+            Math.random() * (cfg.width / 10),
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+    }
+
+    // ✍️ Text
+    ctx.font = `bold ${Math.floor(cfg.width / 20)}px Sans`;
+    ctx.fillStyle = randomColor();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = randomColor();
+    ctx.shadowBlur = 10;
+    ctx.fillText(text, cfg.width / 2, cfg.height / 2);
+    addNoise(ctx, cfg.width, cfg.height, cfg.noise);
+
+    // 🔧 Big images: tune quality to hit target size
+    let imageBytes;
+    if (size === "big" && cfg.targetBytes) {
+        let quality = cfg.quality;
+
+        do {
+            imageBytes = canvas.toBuffer("image/jpeg", {
+                quality,
+                chromaSubsampling: false,
+            });
+            quality -= 0.02;
+        } while (
+            imageBytes.length > cfg.targetBytes &&
+            quality > 0.6
+        );
+    } else {
+        // Small images: single pass
+        imageBytes = canvas.toBuffer("image/jpeg", {
+            quality: cfg.quality,
+            chromaSubsampling: false,
+        });
+    }
+
+    fs.writeFileSync(file, imageBytes);
+    console.log(
+        `Saved ${size} image:`,
+        (imageBytes.length / 1024 / 1024).toFixed(2),
+        "MiB"
     );
-    ctx.fill();
-  }
+}
 
-  // ✍️ Draw your text
-  ctx.font = "bold 40px Sans";
-  ctx.fillStyle = "white";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+function addNoise(ctx, width, height) {
+    const img = ctx.getImageData(0, 0, width, height);
+    const data = img.data;
 
-  // Add text with shadow for readability
-  ctx.shadowColor = "black";
-  ctx.shadowBlur = 8;
+    for (let i = 0; i < data.length; i += 4) {
+        data[i]     = rand255(); // R
+        data[i + 1] = rand255(); // G
+        data[i + 2] = rand255(); // B
+    }
 
-  ctx.fillText(text, width / 2, height / 2);
-
-  let jpegBytes = canvas.toBuffer("image/jpeg");
-  fs.writeFileSync(file, jpegBytes);
-  console.log("Saved to file:", file);
+    ctx.putImageData(img, 0, 0);
 }
 
 function randomColor() {
   return `rgb(${rand255()}, ${rand255()}, ${rand255()})`;
+}
+
+function rand(intensity) {
+    return (Math.random() * intensity - intensity / 2) | 0;
 }
 
 function rand255() {
@@ -157,3 +227,23 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
     }
     return false;
 }
+
+// // Try uncoment and: node common.js generateTextImage "B4" big
+//
+// const [, , command, ...args] = process.argv;
+//
+// switch (command) {
+//     case "generateTextImage": {
+//         const [text, size = "small"] = args;
+//         generateTextImage(text + "-" + size + "output.jpeg", text, size);
+//         break;
+//     }
+//
+//     default:
+//         console.error("Unknown command:", command);
+//         console.error("Usage:");
+//         console.error(
+//             '  node common.js generateTextImage "TEXT" [small|big]'
+//         );
+//         process.exit(1);
+// }

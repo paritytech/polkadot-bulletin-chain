@@ -214,7 +214,7 @@ async function main() {
             fs.unlinkSync(FILE_PATH);
             console.log(`File ${FILE_PATH} removed.`);
         }
-        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString(), 250, 250);
+        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString(), "small");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));

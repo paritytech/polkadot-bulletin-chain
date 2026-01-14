@@ -5,7 +5,12 @@ import assert from "assert";
 import {authorizeAccount, store, } from "./api.js";
 import {cidFromBytes} from "./cid_dag_metadata.js";
 import {
-    setupKeyringAndSigners, CHUNK_SIZE, newSigner, fileToDisk, filesAreEqual
+    setupKeyringAndSigners,
+    CHUNK_SIZE,
+    newSigner,
+    fileToDisk,
+    filesAreEqual,
+    generateTextImage
 } from "./common.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
@@ -129,6 +134,11 @@ async function main() {
             fs.unlinkSync(OUT_1_PATH);
             console.log(`File ${OUT_1_PATH} removed.`);
         }
+        if (fs.existsSync(FILE_PATH)) {
+            fs.unlinkSync(FILE_PATH);
+            console.log(`File ${FILE_PATH} removed.`);
+        }
+        generateTextImage(FILE_PATH, "Hello, Bulletin - " + new Date().toString(), "big");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
