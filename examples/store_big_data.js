@@ -125,6 +125,10 @@ async function readFromIpfs(cid) {
     return fullData
 }
 
+// Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
+// E.g.: node store_big_data.js --signer-disc=BB
+const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
+
 async function main() {
     await cryptoWaitReady()
 
@@ -141,9 +145,14 @@ async function main() {
         const { sudoSigner, _ } = setupKeyringAndSigners('//Alice', '//Alice');
 
         // Let's do parallelism with multiple accounts
-        const signers = Array.from({ length: 8 }, (_, i) =>
-            newSigner(`//Signer${i + 1}`)
-        );
+        const signers = Array.from({ length: 8 }, (_, i) => {
+            if (!signerDiscriminator) {
+                return newSigner(`//Signer${i + 1}`)
+            } else {
+                console.log(`Using signerDiscriminator: "//Signer${signerDiscriminator}${i + 1}"`);
+                return newSigner(`//Signer${signerDiscriminator}${i + 1}`)
+            }
+        });
 
         // Authorize accounts.
         await authorizeAccount(
@@ -166,7 +175,7 @@ async function main() {
         // wait for all chunks are stored
         try {
             console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
-            await waitForQueueLength(chunks.length, 120_000);
+            await waitForQueueLength(chunks.length, 180_000);
             console.log(`All chunks ${chunks.length} are stored!`);
         } catch (err) {
             console.error(err.message);
