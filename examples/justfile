@@ -413,8 +413,6 @@ start-services runtime: npm-install
     
     echo ""
     echo "✅ Services started successfully!"
-    echo "   TEST_DIR: $TEST_DIR"
-    echo "   You can now run tests with: just test-authorize-and-store {{ runtime }} <mode>"
 
 # Stop services (uses saved TEST_DIR)
 stop-services:
@@ -428,7 +426,6 @@ stop-services:
     
     just teardown-services "$TEST_DIR"
     
-    # Remove the saved TEST_DIR file
     rm -f "{{ TEST_DIR_FILE }}"
     echo "   Removed {{ TEST_DIR_FILE }}"
     

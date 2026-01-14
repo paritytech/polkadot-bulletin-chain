@@ -28,11 +28,6 @@ just test-store-chunked-data bulletin-westend-runtime
 just stop-services
 ```
 
-**Performance:**
-- Environment startup: ~60-180 seconds (once)
-- Each test run: ~30-60 seconds
-- Total time for 3 tests: ~3-5 minutes (vs ~10-15 minutes if restarting environment each time)
-
 ### Available Runtimes
 
 - `bulletin-westend-runtime` - Westend parachain configuration
@@ -43,18 +38,6 @@ just stop-services
 - `test-authorize-and-store <runtime> <mode>` - Test authorization and storage workflow
   - `mode` can be: `ws` (WebSocket RPC) or `smoldot` (light client)
 - `test-store-chunked-data <runtime>` - Test chunked data storage with DAG-PB
-
-### Individual Service Commands (Advanced)
-
-- `setup-parachain-prerequisites` - Install polkadot and polkadot-omni-node binaries
-- `bulletin-solo-zombienet-start <test_dir> <runtime>` - Start Polkadot solochain
-- `bulletin-westend-parachain-zombienet-start <test_dir> <runtime>` - Start Westend parachain
-- `ipfs-start <test_dir>` - Start IPFS Docker container
-- `ipfs-connect <runtime>` - Connect IPFS nodes
-- `ipfs-reconnect-start <test_dir> <runtime>` - Start IPFS reconnect script
-- `ipfs-shutdown <test_dir>` - Stop IPFS Docker container
-- `papi-generate` - Generate PAPI descriptors
-- `kill-pids <test_dir>` - Kill all background processes
 
 ## Manually
 
