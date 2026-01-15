@@ -172,9 +172,6 @@ jobs:
       - name: Test store chunked data + DAG-PB (PJS-API, RPC node, Westend parachain)
         working-directory: examples
         run: just test-store-chunked-data "bulletin-westend-runtime"
-      - name: Run store chunked data (PJS-API, RPC node, Westend parachain)
-        working-directory: examples
-        run: just run-store-chunked-data "bulletin-westend-runtime"
       - name: Run store big data (PJS-API, RPC node, Westend parachain)
         working-directory: examples
         run: just run-store-big-data "bulletin-westend-runtime"
@@ -209,9 +206,6 @@ jobs:
       - name: Test store chunked data + DAG-PB (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
         run: just test-store-chunked-data "bulletin-polkadot-runtime"
-      - name: Run store chunked data (PJS-API, RPC node, Polkadot solochain)
-        working-directory: examples
-        run: just run-store-chunked-data "bulletin-polkadot-runtime"
       - name: Run store big data (PJS-API, RPC node, Polkadot solochain)
         working-directory: examples
         run: just run-store-big-data "bulletin-polkadot-runtime"
