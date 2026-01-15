@@ -39,12 +39,13 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 90_000; // 90 seconds - sufficient for in-block inclusion with light clients
+const DEFAULT_TX_TIMEOUT_MS = 120_000; // 120 seconds - includes time for in-block inclusion + stability delay
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
         match: (ev) => ev.type === "txBestBlocksState" && ev.found,
         log: (txName, ev) => `📦 ${txName} included in block: ${ev.block.hash}`,
+        stabilityDelayMs: 6000, // Wait 6s for block to stabilize (helps with light client reorgs)
     },
     [TX_MODE_IN_POOL]: {
         match: (ev) => ev.type === "broadcasted",
@@ -84,8 +85,24 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeo
                 console.log(`✅ ${txName} event:`, ev.type);
                 if (!resolved && config.match(ev)) {
                     console.log(config.log(txName, ev));
-                    cleanup();
-                    resolve(ev);
+                    
+                    // Mark as resolved immediately to prevent error handler from rejecting
+                    resolved = true;
+                    
+                    // Unsubscribe to stop receiving events
+                    if (sub) sub.unsubscribe();
+                    
+                    // If config specifies a stability delay, wait before resolving
+                    if (config.stabilityDelayMs) {
+                        console.log(`⏳ Waiting ${config.stabilityDelayMs}ms for block stability...`);
+                        setTimeout(() => {
+                            clearTimeout(timeoutId);
+                            resolve(ev);
+                        }, config.stabilityDelayMs);
+                    } else {
+                        clearTimeout(timeoutId);
+                        resolve(ev);
+                    }
                 }
             },
             error: (err) => {
