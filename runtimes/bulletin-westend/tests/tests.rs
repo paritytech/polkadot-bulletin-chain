@@ -308,7 +308,9 @@ fn authorized_storage_transactions_are_for_free() {
 			// Not authorized account should fail to store.
 			assert_err!(
 				construct_and_apply_extrinsic(Some(account.pair()), call.clone()),
-				transaction_validity::TransactionValidityError::Invalid(InvalidTransaction::Payment)
+				transaction_validity::TransactionValidityError::Invalid(
+					InvalidTransaction::Payment
+				)
 			);
 			// Authorize user.
 			assert_ok!(TransactionStorage::authorize_account(
