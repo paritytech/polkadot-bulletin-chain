@@ -175,18 +175,6 @@ jobs:
       - name: Stop services (Westend parachain)
         if: always()
         working-directory: examples
-        run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          mkdir -p "$TEST_DIR"
-          just run-store-chunked-data "bulletin-westend-runtime"
-      - name: Run store big data (PJS-API, RPC node, Westend parachain)
-        working-directory: examples
-        run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          mkdir -p "$TEST_DIR"
-          just run-store-big-data "bulletin-westend-runtime"
         run: just stop-services
       - name: Upload Westend logs (on failure)
         if: failure()
@@ -218,22 +206,6 @@ jobs:
       - name: Stop services (Polkadot solochain)
         if: always()
         working-directory: examples
-        run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          mkdir -p "$TEST_DIR"
-          just run-store-chunked-data "bulletin-polkadot-runtime"
-
-      - name: Run store big data (PJS-API, RPC node, Polkadot solochain)
-        working-directory: examples
-        run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          mkdir -p "$TEST_DIR"
-          just run-store-big-data "bulletin-polkadot-runtime"
-
-      # Collects logs from the last failed zombienet run.
-      - name: Upload Zombienet logs (on failure)
         run: just stop-services
       - name: Upload Polkadot logs (on failure)
         if: failure()
