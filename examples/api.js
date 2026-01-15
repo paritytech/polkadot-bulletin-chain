@@ -1,37 +1,66 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { Binary } from '@polkadot-api/substrate-bindings';
+import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 
-export async function authorizeAccount(typedApi, sudoSigner, who, transactions, bytes) {
-    console.log('Authorizing account...');
+export async function authorizeAccount(
+    typedApi,
+    sudoSigner,
+    whos,
+    transactions,
+    bytes,
+    txMode = TX_MODE_IN_BLOCK
+) {
+    const accounts = Array.isArray(whos) ? whos : [whos];
 
-    const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
-        who,
-        transactions,
-        bytes
-    });
+    console.log(
+        `⬆️ Authorizing accounts: ${accounts.join(', ')} ` +
+        `for transactions: ${transactions} and bytes: ${bytes}...`
+    );
 
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: authorizeTx.decodedCall
-    });
+    // TODO: rewrite with batch
+    for (const who of accounts) {
+        const auth = await typedApi.query.TransactionStorage.Authorizations.getValue(Enum("Account", who));
+        console.log(`ℹ Account: ${who} Authorization info: `, auth);
+        if (auth != null) {
+            const authValue = auth.extent;
+            const accountTransactions = authValue.transactions;
+            const accountBytes = authValue.bytes;
 
-    // Wait for inclusion in best block (finalization can be unreliable with light clients)
-    await waitForTransaction(sudoTx, sudoSigner, "Authorize", TX_MODE_IN_BLOCK);
+            if (accountTransactions > transactions && accountBytes > bytes) {
+                console.log('✅ Account authorization is sufficient.');
+                continue;
+            }
+        } else {
+            console.log('ℹ️ No existing authorization found — requesting new one...');
+        }
+
+        const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
+            who,
+            transactions,
+            bytes
+        });
+        const sudoTx = typedApi.tx.Sudo.sudo({
+            call: authorizeTx.decodedCall
+        });
+
+        await waitForTransaction(sudoTx, sudoSigner, "Authorize", txMode);
+    }
 }
 
-export async function store(typedApi, signer, data) {
+export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
     console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
     // Convert data to Uint8Array then wrap in Binary for PAPI typed API
-    const dataBytes = typeof data === 'string' ?
-        new Uint8Array(Buffer.from(data)) :
-        new Uint8Array(data);
+    const bytes =
+        typeof data === 'string'
+            ? new Uint8Array(Buffer.from(data))
+            : data instanceof Uint8Array
+                ? data
+                : new Uint8Array(data);
+    const binaryData = new Binary(bytes);
 
-    const binaryData = Binary.fromBytes(dataBytes);
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-
-    // Wait for inclusion in best block (finalization can be unreliable with light clients)
-    await waitForTransaction(tx, signer, "Store", TX_MODE_IN_BLOCK);
+    await waitForTransaction(tx, signer, "Store", txMode);
     return cid;
 }
 
