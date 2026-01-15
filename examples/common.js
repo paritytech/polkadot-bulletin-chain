@@ -4,119 +4,203 @@ import { createCanvas } from "canvas";
 import fs from "fs";
 import assert from "assert";
 
+// ---- CONFIG ----
+export const WS_ENDPOINT = 'ws://127.0.0.1:10000'; // Bulletin node
+export const IPFS_API = 'http://127.0.0.1:5001';   // Local IPFS daemon
+export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
+export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
+// -----------------
+
+// TODO: replace with PAPI
 export async function waitForNewBlock() {
-    // TODO: wait for a new block.
-    console.log('🛰 Waiting for new block...')
-    return new Promise(resolve => setTimeout(resolve, 7000))
+  // TODO: wait for a new block.
+  console.log('🛰 Waiting for new block...')
+  return new Promise(resolve => setTimeout(resolve, 8000))
 }
 
 /**
  * Creates a PAPI-compatible signer from a Keyring account
  */
 export function createSigner(account) {
-    return getPolkadotSigner(
-        account.publicKey,
-        'Sr25519',
-        (input) => account.sign(input)
-    );
+  return getPolkadotSigner(
+    account.publicKey,
+    'Sr25519',
+    (input) => account.sign(input)
+  );
 }
 
 export function setupKeyringAndSigners(sudoSeed, accountSeed) {
-    const keyring = new Keyring({ type: 'sr25519' });
-    const sudoAccount = keyring.addFromUri(sudoSeed);
-    const whoAccount = keyring.addFromUri(accountSeed);
-    
-    const sudoSigner = createSigner(sudoAccount);
-    const whoSigner = createSigner(whoAccount);
-    
-    return {
-        sudoSigner,
-        whoSigner,
-        whoAddress: whoAccount.address
-    };
+  const { signer: sudoSigner, _ } = newSigner(sudoSeed);
+  const { signer: whoSigner, address: whoAddress } = newSigner(accountSeed);
+
+  return {
+    sudoSigner,
+    whoSigner,
+    whoAddress
+  };
+}
+
+export function newSigner(seed) {
+  const keyring = new Keyring({ type: 'sr25519' });
+  const account = keyring.addFromUri(seed);
+  const signer = createSigner(account);
+  return {
+    signer,
+    address: account.address
+  }
 }
 
 /**
- * Generates (dynamic) images based on the input text.
+ * Generates images with predefined file size targets.
+ *
+ * @param {string} file
+ * @param {string} text
+ * @param {"small" | "big"} size
  */
-export function generateTextImage(file, text, width = 800, height = 600) {
-    const canvas = createCanvas(width, height);
+export function generateTextImage(file, text, size = "small") {
+    console.log(`Generating ${size} image with text: ${text} to the file: ${file}...`);
+    const presets = {
+        small: {
+            width: 200,
+            height: 100,
+            quality: 0.6,          // few KB
+            shapes: 100,
+            noise: 1,
+        },
+        // ~33 MiB
+        big: {
+            width: 6500,
+            height: 5500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 32 * 1024 * 1024,
+        },
+    };
+
+    const cfg = presets[size];
+    if (!cfg) {
+        throw new Error(`Unknown size preset: ${size}`);
+    }
+
+    const canvas = createCanvas(cfg.width, cfg.height);
     const ctx = canvas.getContext("2d");
 
     // 🎨 Background
     ctx.fillStyle = randomColor();
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, cfg.width, cfg.height);
 
-    // 🟠 Random shapes
-    for (let i = 0; i < 15; i++) {
+    // 🟠 Random shapes (adds entropy)
+    for (let i = 0; i < cfg.shapes; i++) {
         ctx.beginPath();
         ctx.fillStyle = randomColor();
         ctx.arc(
-            Math.random() * width,
-            Math.random() * height,
-            Math.random() * 120,
+            Math.random() * cfg.width,
+            Math.random() * cfg.height,
+            Math.random() * (cfg.width / 10),
             0,
             Math.PI * 2
         );
         ctx.fill();
     }
 
-    // ✍️ Draw your text
-    ctx.font = "bold 40px Sans";
-    ctx.fillStyle = "white";
+    // ✍️ Text
+    ctx.font = `bold ${Math.floor(cfg.width / 20)}px Sans`;
+    ctx.fillStyle = randomColor();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    ctx.shadowColor = randomColor();
+    ctx.shadowBlur = 10;
+    ctx.fillText(text, cfg.width / 2, cfg.height / 2);
+    addNoise(ctx, cfg.width, cfg.height, cfg.noise);
 
-    // Add text with shadow for readability
-    ctx.shadowColor = "black";
-    ctx.shadowBlur = 8;
+    // 🔧 Big images: tune quality to hit target size
+    let imageBytes;
+    if (size === "big" && cfg.targetBytes) {
+        let quality = cfg.quality;
 
-    ctx.fillText(text, width / 2, height / 2);
+        do {
+            imageBytes = canvas.toBuffer("image/jpeg", {
+                quality,
+                chromaSubsampling: false,
+            });
+            quality -= 0.02;
+        } while (
+            imageBytes.length > cfg.targetBytes &&
+            quality > 0.6
+        );
+    } else {
+        // Small images: single pass
+        imageBytes = canvas.toBuffer("image/jpeg", {
+            quality: cfg.quality,
+            chromaSubsampling: false,
+        });
+    }
 
-    let jpegBytes = canvas.toBuffer("image/jpeg");
-    fs.writeFileSync(file, jpegBytes);
-    console.log("Saved to file:", file);
+    fs.writeFileSync(file, imageBytes);
+    console.log(
+        `Saved ${size} image:`,
+        (imageBytes.length / 1024 / 1024).toFixed(2),
+        "MiB"
+    );
+}
+
+function addNoise(ctx, width, height) {
+    const img = ctx.getImageData(0, 0, width, height);
+    const data = img.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+        data[i]     = rand255(); // R
+        data[i + 1] = rand255(); // G
+        data[i + 2] = rand255(); // B
+    }
+
+    ctx.putImageData(img, 0, 0);
 }
 
 function randomColor() {
-    return `rgb(${rand255()}, ${rand255()}, ${rand255()})`;
+  return `rgb(${rand255()}, ${rand255()}, ${rand255()})`;
+}
+
+function rand(intensity) {
+    return (Math.random() * intensity - intensity / 2) | 0;
 }
 
 function rand255() {
-    return Math.floor(Math.random() * 256);
+  return Math.floor(Math.random() * 256);
 }
 
 export function filesAreEqual(path1, path2) {
-    const data1 = fs.readFileSync(path1);
-    const data2 = fs.readFileSync(path2);
-    assert.deepStrictEqual(data1.length, data2.length)
+  const data1 = fs.readFileSync(path1);
+  const data2 = fs.readFileSync(path2);
+  assert.deepStrictEqual(data1.length, data2.length)
 
-    for (let i = 0; i < data1.length; i++) {
-        assert.deepStrictEqual(data1[i], data2[i])
-    }
+  for (let i = 0; i < data1.length; i++) {
+    assert.deepStrictEqual(data1[i], data2[i])
+  }
 }
 
 export async function fileToDisk(outputPath, fullBuffer) {
-    await new Promise((resolve, reject) => {
-        const ws = fs.createWriteStream(outputPath);
-        ws.write(fullBuffer);
-        ws.end();
-        ws.on('finish', resolve);
-        ws.on('error', reject);
-    });
-    console.log(`💾 File saved to: ${outputPath}`);
+  await new Promise((resolve, reject) => {
+    const ws = fs.createWriteStream(outputPath);
+    ws.write(fullBuffer);
+    ws.end();
+    ws.on('finish', resolve);
+    ws.on('error', reject);
+  });
+  console.log(`💾 File saved to: ${outputPath}`);
 }
 
 export class NonceManager {
-    constructor(initialNonce) {
-        this.nonce = initialNonce; // BN instance from api.query.system.account
-    }
+  constructor(initialNonce) {
+    this.nonce = BigInt(initialNonce);
+  }
 
-    getAndIncrement() {
-        const current = this.nonce;
-        this.nonce = this.nonce.addn(1); // increment BN
-        return current;
-    }
+  getAndIncrement() {
+    const current = this.nonce;
+    this.nonce += 1n;
+    return current;
+  }
 }
 
 /**
@@ -143,3 +227,23 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
     }
     return false;
 }
+
+// // Try uncoment and: node common.js generateTextImage "B4" big
+//
+// const [, , command, ...args] = process.argv;
+//
+// switch (command) {
+//     case "generateTextImage": {
+//         const [text, size = "small"] = args;
+//         generateTextImage(text + "-" + size + "output.jpeg", text, size);
+//         break;
+//     }
+//
+//     default:
+//         console.error("Unknown command:", command);
+//         console.error("Usage:");
+//         console.error(
+//             '  node common.js generateTextImage "TEXT" [small|big]'
+//         );
+//         process.exit(1);
+// }

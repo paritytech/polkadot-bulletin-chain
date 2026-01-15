@@ -437,3 +437,28 @@ run-store-chunked-data runtime: npm-install
 
     just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
+
+# Run store big data example.
+run-store-big-data runtime: npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting store big data workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node store_big_data.js
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT

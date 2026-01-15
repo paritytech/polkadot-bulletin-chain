@@ -7,11 +7,15 @@ import { create } from 'ipfs-http-client'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { waitForNewBlock, generateTextImage, filesAreEqual, fileToDisk, NonceManager } from './common.js'
-import { fetchCid } from "./api.js";
+import { waitForNewBlock, generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, NonceManager } from './common.js'
+import { authorizeAccount, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
+import { createClient } from 'polkadot-api';
+import {getWsProvider} from "polkadot-api/ws-provider";
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // ---- CONFIG ----
+const NODE_WS = 'ws://localhost:10000';
 const WS_ENDPOINT = 'ws://127.0.0.1:10000' // Bulletin node
 const IPFS_API = 'http://127.0.0.1:5001'   // Local IPFS daemon
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
@@ -23,13 +27,6 @@ const CHUNK_SIZE = 4 * 1024 // 4 KB
 
 function to_hex(input) {
     return '0x' + input.toString('hex');
-}
-
-async function authorizeAccount(api, pair, who, transactions, bytes, nonceMgr) {
-    const tx = api.tx.transactionStorage.authorizeAccount(who, transactions, bytes);
-    const sudo_tx = api.tx.sudo.sudo(tx);
-    const result = await sudo_tx.signAndSend(pair, {nonce: nonceMgr.getAndIncrement()});
-    console.log('Transaction authorizeAccount result:', result.toHuman());
 }
 
 /**
@@ -200,34 +197,10 @@ async function storeProof(api, sudoPair, pair, rootCID, dagFileBytes, nonceMgr, 
     return { rawDagCid }
 }
 
-async function authorizeStorage(api, sudoPair, pair, nonceMgr) {
-    // Ensure enough quota.
-    const auth = await api.query.transactionStorage.authorizations({ "Account": pair.address});
-    console.log('Authorization info:', auth.toHuman())
-
-    if (!auth.isSome) {
-        console.log('ℹ️ No existing authorization found — requesting new one...');
-    } else {
-        const authValue = auth.unwrap().extent;
-        const transactions = authValue.transactions.toNumber();
-        const bytes = authValue.bytes.toNumber();
-
-        if (transactions > 10 && bytes > 24 * CHUNK_SIZE) {
-            console.log('✅ Account authorization is sufficient.');
-            return;
-        }
-    }
-
-    const transactions = 128;
-    const bytes = 64 * 1024 * 1024; // 64 MB
-    await authorizeAccount(api, sudoPair, pair.address, transactions, bytes, nonceMgr);
-    await waitForNewBlock();
-}
-
 async function main() {
     await cryptoWaitReady()
 
-    let api, resultCode;
+    let client, api, resultCode;
     try {
         if (fs.existsSync(OUT_1_PATH)) {
             fs.unlinkSync(OUT_1_PATH);
@@ -241,7 +214,22 @@ async function main() {
             fs.unlinkSync(FILE_PATH);
             console.log(`File ${FILE_PATH} removed.`);
         }
-        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString(), 250, 250);
+        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString(), "small");
+
+        // Init WS PAPI client and typed api.
+        client = createClient(getWsProvider(NODE_WS));
+        const bulletinAPI = client.getTypedApi(bulletin);
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+
+        // Authorize an account.
+        await authorizeAccount(
+            bulletinAPI,
+            sudoSigner,
+            whoAddress,
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK
+        );
 
         console.log('🛰 Connecting to Bulletin node...')
         const provider = new WsProvider(WS_ENDPOINT)
@@ -256,9 +244,6 @@ async function main() {
         let { nonce } = await api.query.system.account(pair.address);
         const nonceMgr = new NonceManager(nonce);
         console.log(`💳 Using account: ${pair.address}, nonce: ${nonce}`)
-
-        // Make sure an account can store data.
-        await authorizeStorage(api, sudoPair, pair, nonceMgr);
 
         // Read the file, chunk it, store in Bulletin and return CIDs.
         let { chunks} = await storeChunkedFile(api, pair, FILE_PATH, nonceMgr);
@@ -317,6 +302,7 @@ async function main() {
         resultCode = 1;
     } finally {
         if (api) api.disconnect();
+        if (client) client.destroy();
         process.exit(resultCode);
     }
 }
