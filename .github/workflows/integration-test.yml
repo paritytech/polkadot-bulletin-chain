@@ -155,7 +155,7 @@ jobs:
           echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
           echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
-      # Westend parachain tests
+      # Westend parachain tests.
       - name: Start services (Westend parachain)
         working-directory: examples
         run: |
