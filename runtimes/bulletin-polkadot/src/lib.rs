@@ -345,6 +345,7 @@ impl pallet_timestamp::Config for Runtime {
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
+	type ChargeStorageFee = ConstBool<false>;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
