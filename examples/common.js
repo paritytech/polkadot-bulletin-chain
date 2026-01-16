@@ -207,12 +207,18 @@ export class NonceManager {
  * Wait for a PAPI typed API chain to be ready by checking runtime constants.
  * Retries until the chain is ready or max retries reached.
  */
-export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs = 2000) {
+export async function waitForChainReady(typedApi, maxRetries = 20, retryDelayMs = 2000) {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             // Check runtime constants to verify chain is accessible
             const version = typedApi.constants.System.Version;
+            
+            // Validate that we got real values, not undefined
+            if (!version || !version.spec_name || !version.spec_version) {
+                throw new Error(`Invalid version data: spec_name=${version?.spec_name}, spec_version=${version?.spec_version}`);
+            }
+            
             console.log(`✅ Chain is ready! Runtime: ${version.spec_name} v${version.spec_version}`);
             return true;
         } catch (error) {
@@ -220,7 +226,7 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
                 console.log(`⏳ Chain not ready yet (attempt ${attempt}/${maxRetries}), retrying in ${retryDelayMs/1000}s... Error: ${error.message}`);
                 await new Promise(resolve => setTimeout(resolve, retryDelayMs));
             } else {
-                console.log(`⚠️ Chain readiness check failed after ${maxRetries} attempts. Proceeding anyway... Error: ${error.message}`);
+                console.error(`❌ Chain readiness check failed after ${maxRetries} attempts (${maxRetries * retryDelayMs / 1000}s total). Error: ${error.message}`);
                 return false;
             }
         }

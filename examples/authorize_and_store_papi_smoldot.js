@@ -10,7 +10,8 @@ import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
-const SYNC_WAIT_SEC = 15;
+const SYNC_WAIT_SEC = 30;
+const OVERALL_TIMEOUT_SEC = 180; // 3 minutes total timeout for the test
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
@@ -92,7 +93,7 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     return { client: createClient(getSmProvider(targetChain)), sd };
 }
 
-async function main() {
+async function runTestWithTimeout() {
     await cryptoWaitReady();
     
     // Get chainspec path from command line argument (required - main chain: relay for para, or solo)
@@ -118,7 +119,11 @@ async function main() {
         
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
-        await waitForChainReady(bulletinAPI);
+        const isReady = await waitForChainReady(bulletinAPI);
+        
+        if (!isReady) {
+            throw new Error('Chain failed to become ready after maximum retries');
+        }
 
         // Signers.
         const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
@@ -164,6 +169,21 @@ async function main() {
         if (client) client.destroy();
         if (sd) sd.terminate();
         process.exit(resultCode);
+    }
+}
+
+async function main() {
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+            reject(new Error(`❌ Test timeout: exceeded ${OVERALL_TIMEOUT_SEC} seconds`));
+        }, OVERALL_TIMEOUT_SEC * 1000);
+    });
+
+    try {
+        await Promise.race([runTestWithTimeout(), timeoutPromise]);
+    } catch (error) {
+        console.error(error.message || error);
+        process.exit(1);
     }
 }
 
