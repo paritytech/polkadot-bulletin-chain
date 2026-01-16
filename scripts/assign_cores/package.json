@@ -1,0 +1,15 @@
+{
+  "name": "bulletin-cmd",
+  "version": "1.0.0",
+  "description": "Command scripts for Bulletin Chain setup and management",
+  "main": "assign_cores.js",
+  "scripts": {
+    "assign-cores": "node assign_cores.js"
+  },
+  "dependencies": {
+    "@polkadot/api": "^16.5.2",
+    "@polkadot/keyring": "^13.5.8",
+    "@polkadot/util": "^13.5.8"
+  }
+}
+
