@@ -41,7 +41,7 @@ use polkadot_sdk_frame::{
 	deps::{sp_core::sp_std::prelude::*, *},
 	prelude::*,
 	traits::{
-		fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
+		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
 		parameter_types,
 	},
 };
@@ -884,6 +884,16 @@ pub mod pallet {
 			Self::check_signed(who, call, CheckContext::PreDispatch).map(|_| ())
 		}
 
+		/// Get ByteFee storage information from the outside of this pallet.
+		pub fn byte_fee() -> Option<BalanceOf<T>> {
+			ByteFee::<T>::get()
+		}
+
+		/// Get EntryFee storage information from the outside of this pallet.
+		pub fn entry_fee() -> Option<BalanceOf<T>> {
+			EntryFee::<T>::get()
+		}
+
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
@@ -1094,6 +1104,8 @@ pub mod pallet {
 			}))
 		}
 
+		/// Verifies that the provided proof corresponds to a randomly selected chunk from a list of
+		/// transactions.
 		pub(crate) fn verify_chunk_proof(
 			proof: TransactionStorageProof,
 			random_hash: &[u8],
