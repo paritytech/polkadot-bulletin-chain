@@ -1,4 +1,5 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
+import { blake2AsU8a } from '@polkadot/util-crypto';
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 
 export async function authorizeAccount(
@@ -59,6 +60,32 @@ export async function authorizeAccount(
     });
 
     await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
+}
+
+export async function authorizePreimage(
+    typedApi,
+    sudoSigner,
+    bytes,
+    txMode = TX_MODE_IN_BLOCK
+) {
+
+    const contentHash = blake2AsU8a(bytes);
+    const maxSize = bytes.length;
+    console.log(
+        `⬆️ Authorizing preimage with bytes: ${bytes}...`
+    );
+    console.log(`Content hash: ${contentHash}`);
+    console.log(`Max size: ${maxSize}`);
+
+    const authorizeTx = typedApi.tx.TransactionStorage.authorize_preimage({
+        contentHash,
+        maxSize
+    });
+    const sudoTx = typedApi.tx.Sudo.sudo({
+        call: authorizeTx.decodedCall
+    });
+
+    await waitForTransaction(sudoTx, sudoSigner, "Authorize", txMode);
 }
 
 export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {

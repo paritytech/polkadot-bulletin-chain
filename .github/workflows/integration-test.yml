@@ -217,6 +217,14 @@ jobs:
         working-directory: examples
         run: just stop-services "${{ env.TEST_DIR }}"
 
+      - name: Run authorize preimage and store with PAPI (PJS-API, RPC node, Polkadot solochain)
+        working-directory: examples
+        run: |
+          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          mkdir -p "$TEST_DIR"
+          just run-authorize-preimage-and-store-papi "bulletin-polkadot-runtime"
+
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
         if: failure()

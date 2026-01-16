@@ -543,6 +543,31 @@ run-store-big-data runtime: npm-install
     just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
 
+# Run authorize preimage and store with PAPI example.
+run-authorize-preimage-and-store-papi runtime: npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting authorize preimage and store with PAPI workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node authorize_preimage_and_store_papi.js
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
 # ============================================================================
 # Run tests against external environments
 # ============================================================================
