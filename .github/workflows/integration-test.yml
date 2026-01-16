@@ -161,10 +161,9 @@ jobs:
       - name: Start services (Westend parachain)
         working-directory: examples
         run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          mkdir -p "$TEST_DIR"
-          just start-services "bulletin-westend-runtime"
+          just start-services "$TEST_DIR" "bulletin-westend-runtime"
 
       - name: Test authorize-and-store ws (Westend parachain)
         working-directory: examples
@@ -193,10 +192,9 @@ jobs:
       - name: Start services (Polkadot solochain)
         working-directory: examples
         run: |
-          export TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          mkdir -p "$TEST_DIR"
-          just start-services "bulletin-polkadot-runtime"
+          just start-services "$TEST_DIR" "bulletin-polkadot-runtime"
 
       - name: Test authorize-and-store ws (Polkadot solochain)
         working-directory: examples

@@ -364,14 +364,14 @@ teardown-services test_dir:
 _test-dir-file := "/tmp/bulletin-test-dir"
 
 # Start all services for a runtime (use with run-test-* recipes)
-# Usage: just start-services bulletin-polkadot-runtime
-start-services runtime: npm-install
+# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
+start-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
-    TEST_DIR="$(just compute-test-dir)"
-    echo "$TEST_DIR" > {{ _test-dir-file }}
-    echo "📁 Test directory: $TEST_DIR (stored in {{ _test-dir-file }})"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    mkdir -p "{{ test_dir }}"
+    echo "{{ test_dir }}" > {{ _test-dir-file }}
+    echo "📁 Test directory: {{ test_dir }} (stored in {{ _test-dir-file }})"
+    just setup-services "{{ test_dir }}" "{{ runtime }}"
 
 # Stop all services (reads test_dir from stored file)
 stop-services:
