@@ -11,11 +11,22 @@ name = "alice"
 p2p_port = 10001
 rpc_port = 10000
 validator = true
-args = ["--ipfs-server", "-lruntime=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace"]
+args = [
+	"--ipfs-server",
+	"-lruntime=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
+	# WebSocket P2P on p2p_port + 1 for smoldot light client support
+	"--listen-addr",
+	"/ip4/0.0.0.0/tcp/10002/ws",
+]
 
 [[relaychain.nodes]]
 name = "bob"
 p2p_port = 12347
 rpc_port = 12346
 validator = true
-args = ["-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace"]
+args = [
+	"-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
+	# WebSocket P2P on p2p_port + 1 for smoldot light client support
+	"--listen-addr",
+	"/ip4/0.0.0.0/tcp/12348/ws",
+]
