@@ -1,0 +1,47 @@
+{
+  "name": "bulletin-helia",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "bulletin-helia": "./dist-cli/cli.js"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:cli": "tsx src/cli.ts",
+    "build": "npm run build:web && npm run build:cli",
+    "build:web": "tsc && vite build",
+    "build:cli": "tsc --project tsconfig.cli.json",
+    "preview": "vite preview",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
+    "format": "prettier --write 'src/**/*.{ts,tsx,json,css}' 'index.html'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,json,css}' 'index.html'"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@typescript-eslint/eslint-plugin": "^8.49.0",
+    "@typescript-eslint/parser": "^8.49.0",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "prettier": "^3.7.4",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@helia/json": "^5.0.3",
+    "@helia/unixfs": "^6.0.3",
+    "@helia/verified-fetch": "^4.1.1",
+    "@libp2p/bootstrap": "^12.0.10",
+    "@libp2p/websockets": "^10.1.2",
+    "@multiformats/blake2": "^2.0.2",
+    "@multiformats/multiaddr": "^13.0.1",
+    "helia": "^6.0.11",
+    "kubo-rpc-client": "^6.0.2",
+    "multiformats": "^13.4.1"
+  }
+}
