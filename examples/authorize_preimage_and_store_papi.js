@@ -30,7 +30,7 @@ async function main() {
         await authorizePreimage(
             bulletinAPI,
             sudoSigner,
-            BigInt(dataToStore.length)
+            dataToStore
         );
 
         // Store data.
