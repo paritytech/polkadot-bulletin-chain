@@ -12,7 +12,7 @@ const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function main() {
     await cryptoWaitReady();
-    
+
     let client, resultCode;
     try {
         // Init WS PAPI client and typed api.
@@ -66,4 +66,3 @@ async function main() {
 }
 
 await main();
-
