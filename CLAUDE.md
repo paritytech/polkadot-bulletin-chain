@@ -4,6 +4,10 @@
 
 Polkadot Bulletin Chain is a specialized blockchain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It serves as a storage solution primarily for the People/Proof-of-Personhood chain, functioning as a bridge-connected parachain with integrated IPFS support.
 
+**Deployment Modes**:
+- **Solochain**: Run with the custom `node/` binary which includes BABE + GRANDPA consensus and integrated IPFS support
+- **Parachain**: Run with Polkadot SDK's `polkadot-omni-node` for parachain deployments
+
 **Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable period (currently 2 weeks).
 
 ## Build Commands
