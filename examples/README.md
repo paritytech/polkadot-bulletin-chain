@@ -4,16 +4,17 @@
 
 [`just`](https://github.com/casey/just) is a command runner (similar to `make`) that helps execute project tasks.
 
-Install just with: 
+Install just with:
 - `cargo install just`, if you have cargo package manager,
 - `brew install just`, if you're on Mac OS and have `brew` package manager installed,
-- `sudo apt install just`, if you're using a Linux distribution.  
+- `sudo apt install just`, if you're using a Linux distribution.
 
 ### Run prerequisites
 
 It's only needed once after checkout or when dependencies change:
 - `just build`
 - `just npm-install`
+- Make sure to manually build `canvas` if you have `ignore-scripts=true` in your `.npmrc`: `cd node_modules/canvas && npx node-gyp rebuild`.
 
 ### Run full workflow example
 - `just run-authorize-and-store papi` - for PAPI,
@@ -124,7 +125,7 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 
 ### Run Bulletin (Westend) Parachain with `--ipfs-server`
 
-#### Prerequisites 
+#### Prerequisites
 
 ```shell
 mkdir -p ~/local_bridge_testing/bin
