@@ -65,7 +65,7 @@ cargo fmt --check
 
 ```
 polkadot-bulletin-chain/
-├── node/                     # Off-chain node implementation (CLI, service, RPC)
+├── node/                     # Off-chain solochain node implementation (CLI, service, RPC)
 ├── runtime/                  # Rococo testnet runtime (WASM)
 ├── runtimes/
 │   ├── bulletin-polkadot/    # Production Polkadot runtime
@@ -93,25 +93,6 @@ polkadot-bulletin-chain/
 - `pallet-transaction-storage` - Stores data, manages 2-week retention, provides storage proofs
 - `pallet-validator-set` - Dynamic validator set management (PoA)
 - `pallet-relayer-set` - Manages bridge relayers between Bulletin and PoP chain
-
-### Bridge Architecture
-
-- **Rococo**: `Bulletin ← BridgeHub ← PeopleRococo` (3 hops)
-- **Polkadot**: `Bulletin ← PeopleChain` (direct)
-
-Uses Polkadot SDK bridge pallets: `pallet-bridge-grandpa`, `pallet-bridge-messages`, `pallet-bridge-parachains`, `pallet-xcm-bridge-hub`.
-
-## Important Files
-
-| File | Purpose |
-|------|---------|
-| `node/src/service.rs` | Core node service setup, consensus engines |
-| `node/src/rpc.rs` | RPC server configuration |
-| `node/src/chain_spec.rs` | Chain specification and genesis |
-| `runtime/src/lib.rs` | Rococo runtime configuration |
-| `runtimes/bulletin-polkadot/src/lib.rs` | Production runtime |
-| `pallets/transaction-storage/src/lib.rs` | Storage pallet implementation |
-| `pallets/validator-set/src/lib.rs` | Validator set pallet |
 
 ## Development Workflow
 
@@ -153,7 +134,6 @@ The Polkadot SDK provides:
 
 - **Polkadot SDK**: See `Cargo.toml` for the pinned revision
 - **Rust**: Nightly toolchain for WASM compilation
-- **litep2p**: Networking backend (v0.12.3, patched)
 
 ## Feature Flags
 
@@ -166,5 +146,5 @@ The Polkadot SDK provides:
 - Storage retention is 2 weeks (~201,600 blocks)
 - Maximum storage requirement: 1.5-2TB
 - IPFS idle connection timeout: 1 hour
-- Node supports both libp2p and litep2p backends
-- Validators need BABE and GRANDPA session keys
+- Node supports litep2p/Bitswap
+- Solochain validators need BABE and GRANDPA session keys
