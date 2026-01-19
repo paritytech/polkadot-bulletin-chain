@@ -584,6 +584,7 @@ construct_runtime!(
 		Timestamp: pallet_timestamp = 3,
 		ParachainInfo: parachain_info = 4,
 		WeightReclaim: cumulus_pallet_weight_reclaim = 5,
+		Utility: pallet_utility = 6,
 
 		// Monetary stuff.
 		Balances: pallet_balances = 10,
