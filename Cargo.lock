@@ -77,7 +77,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
 dependencies = [
- "getrandom 0.2.16",
+ "getrandom 0.2.17",
  "once_cell",
  "version_check",
 ]
@@ -195,7 +195,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -346,7 +346,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60"
 dependencies = [
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -372,7 +372,7 @@ dependencies = [
  "num-traits",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -447,7 +447,7 @@ checksum = "213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -516,7 +516,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27d55334c98d756b32dcceb60248647ab34f027690f87f9a362fd292676ee927"
 dependencies = [
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -568,7 +568,7 @@ dependencies = [
  "nom 7.1.3",
  "num-traits",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
 ]
 
@@ -580,7 +580,7 @@ checksum = "965c2d33e53cb6b267e148a4cb0760bc01f4904c1cd4bb4002a085bb016d1490"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
  "synstructure 0.13.2",
 ]
 
@@ -592,7 +592,7 @@ checksum = "3109e49b1e4909e9db6515a30c633684d68cdeaa252f215214cb4fa1a5bfee2c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
  "synstructure 0.13.2",
 ]
 
@@ -604,7 +604,7 @@ checksum = "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -745,7 +745,7 @@ checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -854,14 +854,14 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64ct"
-version = "1.8.1"
+version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e050f626429857a27ddccb31e0aca21356bfa709c04041aefddac081a8f068a"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "binary-merkle-tree"
 version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "hash-db",
  "log",
@@ -883,7 +883,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.1",
  "shlex",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -990,26 +990,27 @@ dependencies = [
 
 [[package]]
 name = "blake2b_simd"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06e903a20b159e944f91ec8499fe1e55651480c541ea0a584f5d967c49ad9d99"
+checksum = "b79834656f71332577234b50bfc009996f7449e0c056884e6a02492ded0ca2f3"
 dependencies = [
  "arrayref",
  "arrayvec 0.7.6",
- "constant_time_eq 0.3.1",
+ "constant_time_eq 0.4.2",
 ]
 
 [[package]]
 name = "blake3"
-version = "1.8.2"
+version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3888aaa89e4b2a40fca9848e400f6a658a5a3978de7be858e209cafa8be9a4a0"
+checksum = "2468ef7d57b3fb7e16b576e8377cdbde2320c60e1491e961d11da40fc4f02a2d"
 dependencies = [
  "arrayref",
  "arrayvec 0.7.6",
  "cc",
  "cfg-if",
- "constant_time_eq 0.3.1",
+ "constant_time_eq 0.4.2",
+ "cpufeatures",
 ]
 
 [[package]]
@@ -1068,7 +1069,7 @@ dependencies = [
 [[package]]
 name = "bp-bridge-hub-cumulus"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-messages",
  "bp-polkadot-core",
@@ -1084,7 +1085,7 @@ dependencies = [
 [[package]]
 name = "bp-bridge-hub-rococo"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-bridge-hub-cumulus",
  "bp-messages",
@@ -1100,7 +1101,7 @@ dependencies = [
 [[package]]
 name = "bp-header-chain"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-runtime",
  "finality-grandpa",
@@ -1117,7 +1118,7 @@ dependencies = [
 [[package]]
 name = "bp-messages"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-runtime",
@@ -1133,7 +1134,7 @@ dependencies = [
 [[package]]
 name = "bp-parachains"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-polkadot-core",
@@ -1150,7 +1151,7 @@ dependencies = [
 [[package]]
 name = "bp-polkadot-bulletin"
 version = "0.4.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-messages",
@@ -1168,7 +1169,7 @@ dependencies = [
 [[package]]
 name = "bp-polkadot-core"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-messages",
  "bp-runtime",
@@ -1185,7 +1186,7 @@ dependencies = [
 [[package]]
 name = "bp-relayers"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-messages",
@@ -1203,7 +1204,7 @@ dependencies = [
 [[package]]
 name = "bp-rococo"
 version = "0.6.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-polkadot-core",
@@ -1216,7 +1217,7 @@ dependencies = [
 [[package]]
 name = "bp-runtime"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -1239,7 +1240,7 @@ dependencies = [
 [[package]]
 name = "bp-test-utils"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-parachains",
@@ -1259,7 +1260,7 @@ dependencies = [
 [[package]]
 name = "bp-xcm-bridge-hub"
 version = "0.2.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-messages",
  "bp-runtime",
@@ -1276,7 +1277,7 @@ dependencies = [
 [[package]]
 name = "bp-xcm-bridge-hub-router"
 version = "0.6.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -1288,7 +1289,7 @@ dependencies = [
 [[package]]
 name = "bridge-runtime-common"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-messages",
@@ -1573,9 +1574,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.51"
+version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a0aeaff4ff1a90589618835a598e545176939b97874f7abc7851caa0618f203"
+checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1661,9 +1662,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.42"
+version = "0.4.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
+checksum = "fac4744fb15ae8337dc853fee7fb3f4e48c0fbaa23d0afe49c447b4fab126118"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -1717,9 +1718,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.53"
+version = "4.5.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9e340e012a1bf4935f5282ed1436d1489548e8f72308207ea5df0e23d2d03f8"
+checksum = "c6e6ff9dcd79cff5cd969a17a545d79e84ab086e444102a591e288a8aa3ce394"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1727,9 +1728,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.53"
+version = "4.5.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d76b5d13eaa18c901fd2f7fca939fefe3a0727a953561fefdf3b2922b8569d00"
+checksum = "fa42cf4d2b7a41bc8f663a7cab4031ebafa1bf3875705bfaf8466dc60ab52c00"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1747,20 +1748,20 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "clap_lex"
-version = "0.7.6"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
+checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 
 [[package]]
 name = "coarsetime"
-version = "0.1.36"
+version = "0.1.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91849686042de1b41cd81490edc83afbcb0abe5a9b6f2c4114f23ce8cca1bcf4"
+checksum = "e58eb270476aa4fc7843849f8a35063e8743b4dbcdf6dd0f8ea0886980c204c2"
 dependencies = [
  "libc",
  "wasix",
@@ -1773,7 +1774,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1805,9 +1806,9 @@ dependencies = [
 
 [[package]]
 name = "comfy-table"
-version = "7.2.1"
+version = "7.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b03b7db8e0b4b2fdad6c551e634134e99ec000e5c8c3b6856c65e8bbaded7a3b"
+checksum = "958c5d6ecf1f214b4c2bbbbf6ab9523a864bd136dcf71a7e8904799acfe1ad47"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -1874,7 +1875,7 @@ version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
 dependencies = [
- "getrandom 0.2.16",
+ "getrandom 0.2.17",
  "once_cell",
  "tiny-keccak",
 ]
@@ -1913,9 +1914,9 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "constant_time_eq"
-version = "0.3.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "convert_case"
@@ -2265,7 +2266,7 @@ dependencies = [
 [[package]]
 name = "cumulus-client-parachain-inherent"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "cumulus-primitives-core",
@@ -2276,7 +2277,7 @@ dependencies = [
  "sc-client-api",
  "sc-consensus-babe",
  "sc-network-types",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-inherents",
  "sp-runtime",
  "sp-state-machine",
@@ -2287,7 +2288,7 @@ dependencies = [
 [[package]]
 name = "cumulus-pallet-aura-ext"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-pallet-parachain-system",
  "frame-support",
@@ -2304,7 +2305,7 @@ dependencies = [
 [[package]]
 name = "cumulus-pallet-parachain-system"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "bytes",
@@ -2342,18 +2343,18 @@ dependencies = [
 [[package]]
 name = "cumulus-pallet-parachain-system-proc-macro"
 version = "0.6.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "cumulus-pallet-session-benchmarking"
 version = "9.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -2366,7 +2367,7 @@ dependencies = [
 [[package]]
 name = "cumulus-pallet-weight-reclaim"
 version = "1.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-storage-weight-reclaim",
  "derive-where",
@@ -2385,7 +2386,7 @@ dependencies = [
 [[package]]
 name = "cumulus-pallet-xcm"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "frame-support",
@@ -2400,7 +2401,7 @@ dependencies = [
 [[package]]
 name = "cumulus-pallet-xcmp-queue"
 version = "0.7.1"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "approx",
  "bounded-collections",
@@ -2426,7 +2427,7 @@ dependencies = [
 [[package]]
 name = "cumulus-primitives-aura"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-api",
  "sp-consensus-aura",
@@ -2435,7 +2436,7 @@ dependencies = [
 [[package]]
 name = "cumulus-primitives-core"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "polkadot-core-primitives",
@@ -2452,7 +2453,7 @@ dependencies = [
 [[package]]
 name = "cumulus-primitives-parachain-inherent"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "cumulus-primitives-core",
@@ -2466,7 +2467,7 @@ dependencies = [
 [[package]]
 name = "cumulus-primitives-proof-size-hostfunction"
 version = "0.2.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-externalities",
  "sp-runtime-interface",
@@ -2476,7 +2477,7 @@ dependencies = [
 [[package]]
 name = "cumulus-primitives-storage-weight-reclaim"
 version = "1.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "cumulus-primitives-proof-size-hostfunction",
@@ -2493,7 +2494,7 @@ dependencies = [
 [[package]]
 name = "cumulus-primitives-utility"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "frame-support",
@@ -2510,7 +2511,7 @@ dependencies = [
 [[package]]
 name = "cumulus-relay-chain-interface"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "cumulus-primitives-core",
@@ -2530,7 +2531,7 @@ dependencies = [
 [[package]]
 name = "cumulus-test-relay-sproof-builder"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "parity-scale-codec",
@@ -2566,7 +2567,7 @@ checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2596,7 +2597,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "scratch",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2610,7 +2611,7 @@ dependencies = [
  "indexmap",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2628,7 +2629,7 @@ dependencies = [
  "indexmap",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2662,7 +2663,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2676,7 +2677,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2687,7 +2688,7 @@ checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
  "darling_core 0.20.11",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2698,7 +2699,7 @@ checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
 dependencies = [
  "darling_core 0.21.3",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2716,15 +2717,15 @@ dependencies = [
 
 [[package]]
 name = "data-encoding"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
+checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "data-encoding-macro"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47ce6c96ea0102f01122a185683611bd5ac8d99e62bc59dd12e6bda344ee673d"
+checksum = "8142a83c17aa9461d637e649271eae18bf2edd00e91f2e105df36c3c16355bdb"
 dependencies = [
  "data-encoding",
  "data-encoding-macro-internal",
@@ -2732,12 +2733,12 @@ dependencies = [
 
 [[package]]
 name = "data-encoding-macro-internal"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
+checksum = "7ab67060fc6b8ef687992d439ca0fa36e7ed17e9a0b16b25b601e8757df720de"
 dependencies = [
  "data-encoding",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2816,7 +2817,7 @@ checksum = "d65d7ce8132b7c0e54497a4d9a55a1c2a0912a0d786cf894472ba818fba45762"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2827,7 +2828,7 @@ checksum = "ef941ded77d15ca19b40374869ac6000af1c9f2a4c0f3d4c70926287e6364a8f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2840,7 +2841,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustc_version",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2869,7 +2870,7 @@ checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2882,7 +2883,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustc_version",
- "syn 2.0.111",
+ "syn 2.0.114",
  "unicode-xid",
 ]
 
@@ -2975,7 +2976,7 @@ checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -2999,7 +3000,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "syn 2.0.111",
+ "syn 2.0.114",
  "termcolor",
  "toml 0.8.23",
  "walkdir",
@@ -3041,7 +3042,7 @@ checksum = "7e8671d54058979a37a26f3511fbf8d198ba1aa35ffb202c42587d918d77213a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3115,7 +3116,7 @@ dependencies = [
  "enum-ordinalize",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3171,7 +3172,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3211,7 +3212,7 @@ checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3231,7 +3232,7 @@ checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3242,7 +3243,7 @@ checksum = "2f9ed6b3789237c8a0c1c505af1c7eb2c560df6186f01b098c3a1064ea532f38"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3325,7 +3326,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3361,7 +3362,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -3402,14 +3403,13 @@ dependencies = [
 
 [[package]]
 name = "filetime"
-version = "0.2.26"
+version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0505cd1b6fa6580283f6bdf70a73fcf4aba1184038c90902b92b3dd0df63ed"
+checksum = "f98844151eee8917efc50bd9e8318cb963ae8b297431495d3f758616ea5c57db"
 dependencies = [
  "cfg-if",
  "libc",
  "libredox",
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3430,9 +3430,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.6"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "645cbb3a84e60b7531617d5ae4e57f7e27308f6445f5abf653209ea76dec8dff"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "fixed-hash"
@@ -3479,7 +3479,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "fork-tree"
 version = "12.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
 ]
@@ -3512,7 +3512,7 @@ checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
 [[package]]
 name = "frame-benchmarking"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-support-procedural",
@@ -3536,7 +3536,7 @@ dependencies = [
 [[package]]
 name = "frame-benchmarking-cli"
 version = "32.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "Inflector",
  "array-bytes 6.2.3",
@@ -3615,18 +3615,18 @@ dependencies = [
 [[package]]
 name = "frame-election-provider-solution-type"
 version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "frame-election-provider-support"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-election-provider-solution-type",
  "frame-support",
@@ -3643,7 +3643,7 @@ dependencies = [
 [[package]]
 name = "frame-executive"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "aquamarine",
  "frame-support",
@@ -3673,7 +3673,7 @@ dependencies = [
 [[package]]
 name = "frame-metadata-hash-extension"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "const-hex",
@@ -3689,7 +3689,7 @@ dependencies = [
 [[package]]
 name = "frame-storage-access-test-runtime"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-pallet-parachain-system",
  "parity-scale-codec",
@@ -3703,7 +3703,7 @@ dependencies = [
 [[package]]
 name = "frame-support"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "aquamarine",
  "array-bytes 6.2.3",
@@ -3744,7 +3744,7 @@ dependencies = [
 [[package]]
 name = "frame-support-procedural"
 version = "23.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "Inflector",
  "cfg-expr",
@@ -3757,36 +3757,36 @@ dependencies = [
  "proc-macro-warning",
  "proc-macro2",
  "quote",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
- "syn 2.0.111",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "frame-support-procedural-tools"
 version = "10.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support-procedural-tools-derive",
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "frame-support-procedural-tools-derive"
 version = "11.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "frame-system"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cfg-if",
  "docify",
@@ -3805,7 +3805,7 @@ dependencies = [
 [[package]]
 name = "frame-system-benchmarking"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -3819,7 +3819,7 @@ dependencies = [
 [[package]]
 name = "frame-system-rpc-runtime-api"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "parity-scale-codec",
@@ -3829,7 +3829,7 @@ dependencies = [
 [[package]]
 name = "frame-try-runtime"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "parity-scale-codec",
@@ -3942,7 +3942,7 @@ checksum = "162ee34ebcb7c64a8abebc059ce0fee27c2262618d7b60ed8faf72fef13c3650"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -4046,9 +4046,9 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592"
+checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
  "js-sys",
@@ -4166,9 +4166,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c0b69cfcb4e1b9f1bf2f53f95f766e4661169728ec61cd3fe5a0166f2d1386"
+checksum = "2f44da3a8150a6703ed5d34e164b875fd14c2cdab9af1252a9a1020bde2bdc54"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -4349,7 +4349,7 @@ dependencies = [
  "once_cell",
  "rand 0.9.2",
  "ring 0.17.14",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tinyvec",
  "tokio",
  "tracing",
@@ -4393,7 +4393,7 @@ dependencies = [
  "rand 0.9.2",
  "resolv-conf",
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -4538,7 +4538,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.12",
+ "h2 0.4.13",
  "http 1.4.0",
  "http-body 1.0.1",
  "httparse",
@@ -4811,7 +4811,7 @@ checksum = "a0eb5a3343abf848c0984fe4604b2b105da9539376e24fc0a3b0007411ae4fd9"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -4835,9 +4835,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.12.1"
+version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
+checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
@@ -5009,7 +5009,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -5046,9 +5046,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.83"
+version = "0.3.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "464a3709c7f55f1f721e5389aa6ea4e3bc6aba669353300af094b29ffbdde1d8"
+checksum = "8c942ebf8e95485ca0d52d97da7c5a2c387d0e7f0ba4c35e93bfcaee045955b3"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
@@ -5129,7 +5129,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -5269,9 +5269,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.178"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "libm"
@@ -5289,7 +5289,7 @@ dependencies = [
  "either",
  "futures",
  "futures-timer",
- "getrandom 0.2.16",
+ "getrandom 0.2.17",
  "libp2p-allow-block-list",
  "libp2p-connection-limits",
  "libp2p-core",
@@ -5418,7 +5418,7 @@ dependencies = [
  "quick-protobuf",
  "rand 0.8.5",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
  "zeroize",
 ]
@@ -5612,7 +5612,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -5846,8 +5846,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "litep2p"
 version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d903b21d57fae0e8d184c6ea0107fb5303fcab7cd2acaf5d2d9beb2807194b4a"
+source = "git+https://github.com/paritytech/litep2p.git?branch=dm-bitswap-batch#6aa634e529d46de51e80d5a7e56d10de04199528"
 dependencies = [
  "async-trait",
  "bs58",
@@ -5867,7 +5866,7 @@ dependencies = [
  "parking_lot 0.12.5",
  "pin-project",
  "prost 0.13.5",
- "prost-build 0.14.1",
+ "prost-build 0.14.3",
  "rand 0.8.5",
  "ring 0.17.14",
  "serde",
@@ -5876,7 +5875,7 @@ dependencies = [
  "smallvec",
  "snow",
  "socket2 0.5.10",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -5977,7 +5976,7 @@ dependencies = [
  "macro_magic_core",
  "macro_magic_macros",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -5991,7 +5990,7 @@ dependencies = [
  "macro_magic_core_macros",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -6002,7 +6001,7 @@ checksum = "b02abfe41815b5bd98dbd4260173db2c116dda171dc0fe7838cb206333b83308"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -6013,18 +6012,18 @@ checksum = "73ea28ee64b88876bf45277ed9a5817c1817df061a74f2b988971a12570e5869"
 dependencies = [
  "macro_magic_core",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "match-lookup"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1265724d8cb29dbbc2b0f06fffb8bf1a8c0cf73a78eede9ba73a4a66c52a981e"
+checksum = "757aee279b8bdbb9f9e676796fd459e4207a1f986e87886700abf589f5abf771"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -6190,7 +6189,7 @@ dependencies = [
  "cfg-if",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -6277,6 +6276,7 @@ dependencies = [
  "digest 0.10.7",
  "multihash-derive",
  "sha2 0.10.9",
+ "sha3",
  "unsigned-varint 0.7.2",
 ]
 
@@ -6402,7 +6402,7 @@ dependencies = [
  "log",
  "netlink-packet-core",
  "netlink-sys",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -6420,13 +6420,13 @@ dependencies = [
 
 [[package]]
 name = "network-interface"
-version = "2.0.4"
+version = "2.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e79101e6efcffacab279462884a7eebf65ea5f4ac2cc727b60c715a9aa04722"
+checksum = "4ddcb8865ad3d9950f22f42ffa0ef0aecbfbf191867b3122413602b0a360b2a6"
 dependencies = [
  "cc",
  "libc",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "winapi",
 ]
 
@@ -6652,9 +6652,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openssl-probe"
-version = "0.1.6"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+checksum = "9f50d9b3dabb09ecd771ad0aa242ca6894994c130308ca3d7684634df8037391"
 
 [[package]]
 name = "option-ext"
@@ -6698,7 +6698,7 @@ dependencies = [
 [[package]]
 name = "pallet-asset-conversion"
 version = "10.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -6716,7 +6716,7 @@ dependencies = [
 [[package]]
 name = "pallet-asset-rate"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -6730,7 +6730,7 @@ dependencies = [
 [[package]]
 name = "pallet-asset-tx-payment"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -6746,7 +6746,7 @@ dependencies = [
 [[package]]
 name = "pallet-assets"
 version = "29.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -6762,7 +6762,7 @@ dependencies = [
 [[package]]
 name = "pallet-aura"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -6778,7 +6778,7 @@ dependencies = [
 [[package]]
 name = "pallet-authority-discovery"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -6793,7 +6793,7 @@ dependencies = [
 [[package]]
 name = "pallet-authorship"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -6806,7 +6806,7 @@ dependencies = [
 [[package]]
 name = "pallet-babe"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -6829,7 +6829,7 @@ dependencies = [
 [[package]]
 name = "pallet-balances"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -6845,7 +6845,7 @@ dependencies = [
 [[package]]
 name = "pallet-bridge-grandpa"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-runtime",
@@ -6864,7 +6864,7 @@ dependencies = [
 [[package]]
 name = "pallet-bridge-messages"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-messages",
@@ -6883,7 +6883,7 @@ dependencies = [
 [[package]]
 name = "pallet-bridge-parachains"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-parachains",
@@ -6903,7 +6903,7 @@ dependencies = [
 [[package]]
 name = "pallet-bridge-relayers"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-header-chain",
  "bp-messages",
@@ -6926,7 +6926,7 @@ dependencies = [
 [[package]]
 name = "pallet-broker"
 version = "0.6.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bitvec",
  "frame-benchmarking",
@@ -6944,7 +6944,7 @@ dependencies = [
 [[package]]
 name = "pallet-collator-selection"
 version = "9.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-pallet-session-benchmarking",
  "frame-benchmarking",
@@ -6964,7 +6964,7 @@ dependencies = [
 [[package]]
 name = "pallet-election-provider-multi-phase"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-election-provider-support",
@@ -6985,7 +6985,7 @@ dependencies = [
 [[package]]
 name = "pallet-fast-unstake"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -7003,7 +7003,7 @@ dependencies = [
 [[package]]
 name = "pallet-grandpa"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7025,7 +7025,7 @@ dependencies = [
 [[package]]
 name = "pallet-identity"
 version = "29.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "enumflags2",
  "frame-benchmarking",
@@ -7041,7 +7041,7 @@ dependencies = [
 [[package]]
 name = "pallet-message-queue"
 version = "31.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "environmental",
  "frame-benchmarking",
@@ -7060,7 +7060,7 @@ dependencies = [
 [[package]]
 name = "pallet-mmr"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "parity-scale-codec",
@@ -7072,7 +7072,7 @@ dependencies = [
 [[package]]
 name = "pallet-multi-asset-bounties"
 version = "1.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -7089,7 +7089,7 @@ dependencies = [
 [[package]]
 name = "pallet-offences"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -7104,7 +7104,7 @@ dependencies = [
 [[package]]
 name = "pallet-proxy"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "polkadot-sdk-frame",
@@ -7124,7 +7124,7 @@ dependencies = [
 [[package]]
 name = "pallet-session"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -7146,7 +7146,7 @@ dependencies = [
 [[package]]
 name = "pallet-session-benchmarking"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7162,7 +7162,7 @@ dependencies = [
 [[package]]
 name = "pallet-skip-feeless-payment"
 version = "3.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -7174,7 +7174,7 @@ dependencies = [
 [[package]]
 name = "pallet-staking"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-election-provider-support",
@@ -7196,7 +7196,7 @@ dependencies = [
 [[package]]
 name = "pallet-staking-reward-fn"
 version = "19.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "sp-arithmetic",
@@ -7205,7 +7205,7 @@ dependencies = [
 [[package]]
 name = "pallet-sudo"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -7220,7 +7220,7 @@ dependencies = [
 [[package]]
 name = "pallet-timestamp"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -7238,7 +7238,7 @@ dependencies = [
 [[package]]
 name = "pallet-transaction-payment"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7254,7 +7254,7 @@ dependencies = [
 [[package]]
 name = "pallet-transaction-payment-rpc-runtime-api"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "pallet-transaction-payment",
  "parity-scale-codec",
@@ -7280,7 +7280,7 @@ dependencies = [
 [[package]]
 name = "pallet-treasury"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -7299,7 +7299,7 @@ dependencies = [
 [[package]]
 name = "pallet-utility"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7328,7 +7328,7 @@ dependencies = [
 [[package]]
 name = "pallet-vesting"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7342,7 +7342,7 @@ dependencies = [
 [[package]]
 name = "pallet-xcm"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bounded-collections",
  "frame-benchmarking",
@@ -7366,7 +7366,7 @@ dependencies = [
 [[package]]
 name = "pallet-xcm-benchmarks"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -7383,7 +7383,7 @@ dependencies = [
 [[package]]
 name = "pallet-xcm-bridge-hub"
 version = "0.2.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bp-messages",
  "bp-runtime",
@@ -7414,7 +7414,7 @@ dependencies = [
 [[package]]
 name = "parachains-common"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "cumulus-primitives-utility",
@@ -7447,7 +7447,7 @@ dependencies = [
 [[package]]
 name = "parachains-common-types"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-consensus-aura",
  "sp-core",
@@ -7457,7 +7457,7 @@ dependencies = [
 [[package]]
 name = "parachains-runtimes-test-utils"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-pallet-parachain-system",
  "cumulus-pallet-xcmp-queue",
@@ -7532,7 +7532,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -7656,9 +7656,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pest"
-version = "2.8.4"
+version = "2.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbcfd20a6d4eeba40179f05735784ad32bdaef05ce8e8af05f180d45bb3e7e22"
+checksum = "2c9eb05c21a464ea704b53158d358a31e6425db2f63a1a7312268b05fe2b75f7"
 dependencies = [
  "memchr",
  "ucd-trie",
@@ -7666,9 +7666,9 @@ dependencies = [
 
 [[package]]
 name = "pest_derive"
-version = "2.8.4"
+version = "2.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51f72981ade67b1ca6adc26ec221be9f463f2b5839c7508998daa17c23d94d7f"
+checksum = "68f9dbced329c441fa79d80472764b1a2c7e57123553b8519b36663a2fb234ed"
 dependencies = [
  "pest",
  "pest_generator",
@@ -7676,22 +7676,22 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.8.4"
+version = "2.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dee9efd8cdb50d719a80088b76f81aec7c41ed6d522ee750178f83883d271625"
+checksum = "3bb96d5051a78f44f43c8f712d8e810adb0ebf923fc9ed2655a7f66f63ba8ee5"
 dependencies = [
  "pest",
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "pest_meta"
-version = "2.8.4"
+version = "2.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf1d70880e76bdc13ba52eafa6239ce793d85c8e43896507e43dd8984ff05b82"
+checksum = "602113b5b5e8621770cfd490cfd90b9f84ab29bd2b0e49ad83eb6d186cef2365"
 dependencies = [
  "pest",
  "sha2 0.10.9",
@@ -7718,6 +7718,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
+dependencies = [
+ "fixedbitset 0.5.7",
+ "hashbrown 0.15.5",
+ "indexmap",
+]
+
+[[package]]
 name = "picosimd"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7740,7 +7751,7 @@ checksum = "6e918e4ff8c4549eb882f14b3a4bc8c8bc93de829416eacf579f1207a8fbf861"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -7930,7 +7941,7 @@ dependencies = [
 [[package]]
 name = "polkadot-core-primitives"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -7941,7 +7952,7 @@ dependencies = [
 [[package]]
 name = "polkadot-node-metrics"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bs58",
  "futures",
@@ -7958,7 +7969,7 @@ dependencies = [
 [[package]]
 name = "polkadot-node-network-protocol"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7983,7 +7994,7 @@ dependencies = [
 [[package]]
 name = "polkadot-node-primitives"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bitvec",
  "bounded-vec",
@@ -8007,7 +8018,7 @@ dependencies = [
 [[package]]
 name = "polkadot-node-subsystem-types"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "derive_more 0.99.20",
@@ -8035,7 +8046,7 @@ dependencies = [
 [[package]]
 name = "polkadot-overseer"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -8055,7 +8066,7 @@ dependencies = [
 [[package]]
 name = "polkadot-parachain-primitives"
 version = "6.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "bounded-collections",
@@ -8072,7 +8083,7 @@ dependencies = [
 [[package]]
 name = "polkadot-primitives"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bitvec",
  "bounded-collections",
@@ -8101,7 +8112,7 @@ dependencies = [
 [[package]]
 name = "polkadot-runtime-common"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bitvec",
  "frame-benchmarking",
@@ -8151,7 +8162,7 @@ dependencies = [
 [[package]]
 name = "polkadot-runtime-metrics"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bs58",
  "frame-benchmarking",
@@ -8163,7 +8174,7 @@ dependencies = [
 [[package]]
 name = "polkadot-runtime-parachains"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bitflags 1.3.2",
  "bitvec",
@@ -8212,7 +8223,7 @@ dependencies = [
 [[package]]
 name = "polkadot-sdk-frame"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-benchmarking",
@@ -8247,7 +8258,7 @@ dependencies = [
 [[package]]
 name = "polkadot-statement-table"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "polkadot-primitives",
@@ -8306,7 +8317,7 @@ dependencies = [
  "polkavm-common",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8316,7 +8327,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a4f5352e13c1ca5f0e4d7b4a804fbb85b0e02c45cae435d101fe71081bc8ed8"
 dependencies = [
  "polkavm-derive-impl",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8453,7 +8464,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8548,7 +8559,7 @@ dependencies = [
  "proc-macro-error-attr2",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8559,14 +8570,14 @@ checksum = "75eea531cfcd120e0851a3f8aed42c4841f78c889eefafd96339c72677ae42c3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.104"
+version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9695f8df41bb4f3d222c95a67532365f569318332d03d5f3f67f37b20e6ebdf0"
+checksum = "535d180e0ecab6268a3e718bb9fd44db66bbbc256257165fc699dadf70d16fe7"
 dependencies = [
  "unicode-ident",
 ]
@@ -8605,7 +8616,7 @@ checksum = "440f724eba9f6996b75d63681b0a92b06947f1457076d503a4d2e2c8f56442b8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8645,12 +8656,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.14.1"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7231bd9b3d3d33c86b58adbac74b5ec0ad9f496b19d22801d773636feaa95f3d"
+checksum = "d2ea70524a2f82d518bce41317d0fae74151505651af45faf1ffbd6fd33f0568"
 dependencies = [
  "bytes",
- "prost-derive 0.14.1",
+ "prost-derive 0.14.3",
 ]
 
 [[package]]
@@ -8669,27 +8680,26 @@ dependencies = [
  "prost 0.13.5",
  "prost-types 0.13.5",
  "regex",
- "syn 2.0.111",
+ "syn 2.0.114",
  "tempfile",
 ]
 
 [[package]]
 name = "prost-build"
-version = "0.14.1"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac6c3320f9abac597dcbc668774ef006702672474aad53c6d596b62e487b40b1"
+checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
- "once_cell",
- "petgraph 0.7.1",
+ "petgraph 0.8.3",
  "prettyplease",
- "prost 0.14.1",
- "prost-types 0.14.1",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "regex",
- "syn 2.0.111",
+ "syn 2.0.114",
  "tempfile",
 ]
 
@@ -8703,7 +8713,7 @@ dependencies = [
  "itertools 0.12.1",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8716,20 +8726,20 @@ dependencies = [
  "itertools 0.14.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "prost-derive"
-version = "0.14.1"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
+checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
  "itertools 0.14.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8743,11 +8753,11 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.14.1"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9b4db3d6da204ed77bb26ba83b6122a73aeb2e87e25fbf7ad2e84c4ccbf8f72"
+checksum = "8991c4cbdb8bc5b11f0b074ffe286c30e523de90fee5ba8132f1399f23cb3dd7"
 dependencies = [
- "prost 0.14.1",
+ "prost 0.14.3",
 ]
 
 [[package]]
@@ -8770,7 +8780,7 @@ checksum = "938543690519c20c3a480d20a8efcc8e69abeb44093ab1df4e7c1f81f26c677a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -8825,7 +8835,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustls",
  "socket2 0.6.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "web-time",
@@ -8846,7 +8856,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tinyvec",
  "tracing",
  "web-time",
@@ -8868,9 +8878,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.42"
+version = "1.0.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a338cc41d27e6cc6dce6cefc13a0729dfbb81c262b1f519331575dd80ef3067f"
+checksum = "dc74d9a594b72ae6656596548f56f667211f8a97b3d4c3d467150794690dc40a"
 dependencies = [
  "proc-macro2",
 ]
@@ -8905,7 +8915,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha 0.9.0",
- "rand_core 0.9.3",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -8925,7 +8935,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.9.3",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -8934,14 +8944,14 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom 0.2.16",
+ "getrandom 0.2.17",
 ]
 
 [[package]]
 name = "rand_core"
-version = "0.9.3"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
@@ -8971,7 +8981,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
- "rand_core 0.9.3",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -9054,7 +9064,7 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
- "getrandom 0.2.16",
+ "getrandom 0.2.17",
  "libredox",
  "thiserror 1.0.69",
 ]
@@ -9076,7 +9086,7 @@ checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -9174,7 +9184,7 @@ checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom 0.2.16",
+ "getrandom 0.2.17",
  "libc",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
@@ -9202,7 +9212,7 @@ dependencies = [
 [[package]]
 name = "rococo-runtime-constants"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "polkadot-primitives",
@@ -9262,9 +9272,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
+checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
 
 [[package]]
 name = "rustc-hash"
@@ -9317,24 +9327,24 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.35"
+version = "0.23.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "533f54bc6a7d4f647e46ad909549eda97bf5afc1585190ef692b4286b198bd8f"
+checksum = "c665f33d38cea657d9614f766881e4d510e0eda4239891eea56b4cadcf01801b"
 dependencies = [
  "log",
  "once_cell",
  "ring 0.17.14",
  "rustls-pki-types",
- "rustls-webpki 0.103.8",
+ "rustls-webpki 0.103.9",
  "subtle 2.6.1",
  "zeroize",
 ]
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9980d917ebb0c0536119ba501e90834767bffc3d60641457fd84a1f3fd337923"
+checksum = "612460d5f7bea540c490b2b6395d8e34a953e52b491accd6c86c8164c5932a63"
 dependencies = [
  "openssl-probe",
  "rustls-pki-types",
@@ -9344,9 +9354,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.13.2"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e6f2ab2928ca4291b86736a8bd920a277a399bba1589409d72154ff87c1282"
+checksum = "be040f8b0a225e40375822a563fa9524378b9d63112f53e19ffff34df5d33fdd"
 dependencies = [
  "web-time",
  "zeroize",
@@ -9366,7 +9376,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-platform-verifier-android",
- "rustls-webpki 0.103.8",
+ "rustls-webpki 0.103.9",
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
@@ -9391,9 +9401,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.8"
+version = "0.103.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ffdfa2f5286e2247234e03f680868ac2815974dc39e00ea15adc445d0aafe52"
+checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
 dependencies = [
  "ring 0.17.14",
  "rustls-pki-types",
@@ -9453,7 +9463,7 @@ dependencies = [
 [[package]]
 name = "sc-allocator"
 version = "23.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "sp-core",
@@ -9464,7 +9474,7 @@ dependencies = [
 [[package]]
 name = "sc-authority-discovery"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -9496,7 +9506,7 @@ dependencies = [
 [[package]]
 name = "sc-basic-authorship"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "futures",
  "log",
@@ -9519,7 +9529,7 @@ dependencies = [
 [[package]]
 name = "sc-block-builder"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "sp-api",
@@ -9534,7 +9544,7 @@ dependencies = [
 [[package]]
 name = "sc-chain-spec"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "docify",
@@ -9549,7 +9559,7 @@ dependencies = [
  "serde_json",
  "sp-blockchain",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-genesis-builder",
  "sp-io",
  "sp-runtime",
@@ -9560,18 +9570,18 @@ dependencies = [
 [[package]]
 name = "sc-chain-spec-derive"
 version = "11.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sc-cli"
 version = "0.36.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "bip39",
@@ -9613,7 +9623,7 @@ dependencies = [
 [[package]]
 name = "sc-client-api"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "fnv",
  "futures",
@@ -9639,7 +9649,7 @@ dependencies = [
 [[package]]
 name = "sc-client-db"
 version = "0.35.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "hash-db",
  "kvdb",
@@ -9667,7 +9677,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -9690,7 +9700,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus-babe"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "fork-tree",
@@ -9715,7 +9725,7 @@ dependencies = [
  "sp-consensus-babe",
  "sp-consensus-slots",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-inherents",
  "sp-keystore",
  "sp-runtime",
@@ -9727,7 +9737,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus-babe-rpc"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "futures",
  "jsonrpsee",
@@ -9749,7 +9759,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus-epochs"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "fork-tree",
  "parity-scale-codec",
@@ -9762,7 +9772,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus-grandpa"
 version = "0.19.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "ahash 0.8.12",
  "array-bytes 6.2.3",
@@ -9796,7 +9806,7 @@ dependencies = [
  "sp-consensus",
  "sp-consensus-grandpa",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-keystore",
  "sp-runtime",
  "substrate-prometheus-endpoint",
@@ -9806,7 +9816,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus-grandpa-rpc"
 version = "0.19.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "finality-grandpa",
  "futures",
@@ -9826,7 +9836,7 @@ dependencies = [
 [[package]]
 name = "sc-consensus-slots"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -9850,7 +9860,7 @@ dependencies = [
 [[package]]
 name = "sc-executor"
 version = "0.32.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "parking_lot 0.12.5",
@@ -9873,7 +9883,7 @@ dependencies = [
 [[package]]
 name = "sc-executor-common"
 version = "0.29.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "polkavm",
  "sc-allocator",
@@ -9886,7 +9896,7 @@ dependencies = [
 [[package]]
 name = "sc-executor-polkavm"
 version = "0.29.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "polkavm",
@@ -9897,7 +9907,7 @@ dependencies = [
 [[package]]
 name = "sc-executor-wasmtime"
 version = "0.29.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "anyhow",
  "log",
@@ -9913,7 +9923,7 @@ dependencies = [
 [[package]]
 name = "sc-informant"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "console",
  "futures",
@@ -9929,7 +9939,7 @@ dependencies = [
 [[package]]
 name = "sc-keystore"
 version = "25.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "parking_lot 0.12.5",
@@ -9943,7 +9953,7 @@ dependencies = [
 [[package]]
 name = "sc-mixnet"
 version = "0.4.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "arrayvec 0.7.6",
@@ -9971,7 +9981,7 @@ dependencies = [
 [[package]]
 name = "sc-network"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "async-channel 1.9.0",
@@ -10020,7 +10030,7 @@ dependencies = [
 [[package]]
 name = "sc-network-common"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bitflags 1.3.2",
  "parity-scale-codec",
@@ -10030,7 +10040,7 @@ dependencies = [
 [[package]]
 name = "sc-network-gossip"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "ahash 0.8.12",
  "futures",
@@ -10049,7 +10059,7 @@ dependencies = [
 [[package]]
 name = "sc-network-light"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "async-channel 1.9.0",
@@ -10070,7 +10080,7 @@ dependencies = [
 [[package]]
 name = "sc-network-sync"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "async-channel 1.9.0",
@@ -10104,7 +10114,7 @@ dependencies = [
 [[package]]
 name = "sc-network-transactions"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "futures",
@@ -10123,7 +10133,7 @@ dependencies = [
 [[package]]
 name = "sc-network-types"
 version = "0.10.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bs58",
  "bytes",
@@ -10144,7 +10154,7 @@ dependencies = [
 [[package]]
 name = "sc-offchain"
 version = "29.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bytes",
  "fnv",
@@ -10178,7 +10188,7 @@ dependencies = [
 [[package]]
 name = "sc-proposer-metrics"
 version = "0.17.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "substrate-prometheus-endpoint",
@@ -10187,7 +10197,7 @@ dependencies = [
 [[package]]
 name = "sc-rpc"
 version = "29.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "futures",
  "jsonrpsee",
@@ -10219,7 +10229,7 @@ dependencies = [
 [[package]]
 name = "sc-rpc-api"
 version = "0.33.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "jsonrpsee",
  "parity-scale-codec",
@@ -10240,7 +10250,7 @@ dependencies = [
 [[package]]
 name = "sc-rpc-server"
 version = "11.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "dyn-clone",
  "forwarded-header-value",
@@ -10264,7 +10274,7 @@ dependencies = [
 [[package]]
 name = "sc-rpc-spec-v2"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "futures",
@@ -10297,13 +10307,13 @@ dependencies = [
 [[package]]
 name = "sc-runtime-utilities"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "sc-executor",
  "sc-executor-common",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-state-machine",
  "sp-wasm-interface",
  "thiserror 1.0.69",
@@ -10312,7 +10322,7 @@ dependencies = [
 [[package]]
 name = "sc-service"
 version = "0.35.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "directories",
@@ -10376,7 +10386,7 @@ dependencies = [
 [[package]]
 name = "sc-state-db"
 version = "0.30.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "parity-scale-codec",
@@ -10387,7 +10397,7 @@ dependencies = [
 [[package]]
 name = "sc-sync-state-rpc"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "jsonrpsee",
  "parity-scale-codec",
@@ -10406,7 +10416,7 @@ dependencies = [
 [[package]]
 name = "sc-sysinfo"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "derive_more 0.99.20",
  "futures",
@@ -10419,14 +10429,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-io",
 ]
 
 [[package]]
 name = "sc-telemetry"
 version = "15.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "chrono",
  "futures",
@@ -10445,7 +10455,7 @@ dependencies = [
 [[package]]
 name = "sc-tracing"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "chrono",
  "console",
@@ -10473,18 +10483,18 @@ dependencies = [
 [[package]]
 name = "sc-tracing-proc-macro"
 version = "11.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sc-transaction-pool"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -10501,7 +10511,7 @@ dependencies = [
  "sp-api",
  "sp-blockchain",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-runtime",
  "sp-tracing",
  "sp-transaction-pool",
@@ -10516,7 +10526,7 @@ dependencies = [
 [[package]]
 name = "sc-transaction-pool-api"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -10534,7 +10544,7 @@ dependencies = [
 [[package]]
 name = "sc-utils"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-channel 1.9.0",
  "futures",
@@ -10569,7 +10579,7 @@ dependencies = [
  "scale-decode-derive",
  "scale-type-resolver",
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -10581,7 +10591,7 @@ dependencies = [
  "darling 0.20.11",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -10596,7 +10606,7 @@ dependencies = [
  "scale-encode-derive",
  "scale-type-resolver",
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -10609,7 +10619,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -10635,7 +10645,7 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -10657,8 +10667,8 @@ dependencies = [
  "proc-macro2",
  "quote",
  "scale-info",
- "syn 2.0.111",
- "thiserror 2.0.17",
+ "syn 2.0.114",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -10676,7 +10686,7 @@ dependencies = [
  "scale-encode",
  "scale-type-resolver",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "yap",
 ]
 
@@ -10917,14 +10927,14 @@ checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.148"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3084b546a1dd6289475996f182a22aba973866ea8e8b02c51d9f46b1336a22da"
+checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
  "itoa",
  "memchr",
@@ -10966,7 +10976,7 @@ dependencies = [
  "darling 0.21.3",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -11074,9 +11084,9 @@ dependencies = [
 
 [[package]]
 name = "simple-dns"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c806187d495d29bb401c3b71086ade6ffdd3129d25733b16fa0887ac095125e5"
+checksum = "df350943049174c4ae8ced56c604e28270258faec12a6a48637a7655287c9ce0"
 dependencies = [
  "bitflags 2.10.0",
 ]
@@ -11114,7 +11124,7 @@ checksum = "826167069c09b99d56f31e9ae5c99049e932a98c9dc2dac47645b08dbbf76ba7"
 [[package]]
 name = "slot-range-helper"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "enumn",
  "parity-scale-codec",
@@ -11300,7 +11310,7 @@ dependencies = [
 [[package]]
 name = "sp-api"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "hash-db",
@@ -11322,7 +11332,7 @@ dependencies = [
 [[package]]
 name = "sp-api-proc-macro"
 version = "15.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "Inflector",
  "blake2 0.10.6",
@@ -11330,13 +11340,13 @@ dependencies = [
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sp-application-crypto"
 version = "30.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11348,7 +11358,7 @@ dependencies = [
 [[package]]
 name = "sp-arithmetic"
 version = "23.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "integer-sqrt",
@@ -11362,7 +11372,7 @@ dependencies = [
 [[package]]
 name = "sp-authority-discovery"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11374,7 +11384,7 @@ dependencies = [
 [[package]]
 name = "sp-block-builder"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-api",
  "sp-inherents",
@@ -11384,7 +11394,7 @@ dependencies = [
 [[package]]
 name = "sp-blockchain"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "futures",
  "parity-scale-codec",
@@ -11403,7 +11413,7 @@ dependencies = [
 [[package]]
 name = "sp-consensus"
 version = "0.32.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "futures",
@@ -11420,7 +11430,7 @@ dependencies = [
 [[package]]
 name = "sp-consensus-aura"
 version = "0.32.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "parity-scale-codec",
@@ -11436,7 +11446,7 @@ dependencies = [
 [[package]]
 name = "sp-consensus-babe"
 version = "0.32.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "parity-scale-codec",
@@ -11454,7 +11464,7 @@ dependencies = [
 [[package]]
 name = "sp-consensus-grandpa"
 version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "finality-grandpa",
  "log",
@@ -11471,7 +11481,7 @@ dependencies = [
 [[package]]
 name = "sp-consensus-slots"
 version = "0.32.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11482,7 +11492,7 @@ dependencies = [
 [[package]]
 name = "sp-core"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "ark-vrf",
  "array-bytes 6.2.3",
@@ -11513,7 +11523,7 @@ dependencies = [
  "secrecy 0.8.0",
  "serde",
  "sha2 0.10.9",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-debug-derive",
  "sp-externalities",
  "sp-std",
@@ -11543,7 +11553,7 @@ dependencies = [
 [[package]]
 name = "sp-crypto-hashing"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -11556,17 +11566,17 @@ dependencies = [
 [[package]]
 name = "sp-crypto-hashing-proc-macro"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "quote",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
- "syn 2.0.111",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sp-database"
 version = "10.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "kvdb",
  "kvdb-rocksdb",
@@ -11576,18 +11586,18 @@ dependencies = [
 [[package]]
 name = "sp-debug-derive"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "proc-macro-warning",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sp-externalities"
 version = "0.25.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "environmental",
  "parity-scale-codec",
@@ -11597,7 +11607,7 @@ dependencies = [
 [[package]]
 name = "sp-genesis-builder"
 version = "0.8.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11609,7 +11619,7 @@ dependencies = [
 [[package]]
 name = "sp-inherents"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "impl-trait-for-tuples",
@@ -11622,7 +11632,7 @@ dependencies = [
 [[package]]
 name = "sp-io"
 version = "30.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bytes",
  "docify",
@@ -11634,7 +11644,7 @@ dependencies = [
  "rustversion",
  "secp256k1 0.28.2",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-externalities",
  "sp-keystore",
  "sp-runtime-interface",
@@ -11648,7 +11658,7 @@ dependencies = [
 [[package]]
 name = "sp-keyring"
 version = "31.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-core",
  "sp-runtime",
@@ -11658,7 +11668,7 @@ dependencies = [
 [[package]]
 name = "sp-keystore"
 version = "0.34.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "parking_lot 0.12.5",
@@ -11669,7 +11679,7 @@ dependencies = [
 [[package]]
 name = "sp-maybe-compressed-blob"
 version = "11.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "thiserror 1.0.69",
  "zstd 0.12.4",
@@ -11678,7 +11688,7 @@ dependencies = [
 [[package]]
 name = "sp-metadata-ir"
 version = "0.6.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-metadata",
  "parity-scale-codec",
@@ -11688,7 +11698,7 @@ dependencies = [
 [[package]]
 name = "sp-mixnet"
 version = "0.4.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11699,7 +11709,7 @@ dependencies = [
 [[package]]
 name = "sp-mmr-primitives"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "log",
  "parity-scale-codec",
@@ -11716,7 +11726,7 @@ dependencies = [
 [[package]]
 name = "sp-npos-elections"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11729,7 +11739,7 @@ dependencies = [
 [[package]]
 name = "sp-offchain"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-api",
  "sp-core",
@@ -11739,7 +11749,7 @@ dependencies = [
 [[package]]
 name = "sp-panic-handler"
 version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "backtrace",
  "regex",
@@ -11748,7 +11758,7 @@ dependencies = [
 [[package]]
 name = "sp-rpc"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "rustc-hash 1.1.0",
  "serde",
@@ -11758,7 +11768,7 @@ dependencies = [
 [[package]]
 name = "sp-runtime"
 version = "31.0.1"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "binary-merkle-tree",
  "bytes",
@@ -11789,7 +11799,7 @@ dependencies = [
 [[package]]
 name = "sp-runtime-interface"
 version = "24.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bytes",
  "impl-trait-for-tuples",
@@ -11807,20 +11817,20 @@ dependencies = [
 [[package]]
 name = "sp-runtime-interface-proc-macro"
 version = "17.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "Inflector",
  "expander",
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sp-session"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "scale-info",
@@ -11834,7 +11844,7 @@ dependencies = [
 [[package]]
 name = "sp-staking"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "impl-trait-for-tuples",
  "parity-scale-codec",
@@ -11847,7 +11857,7 @@ dependencies = [
 [[package]]
 name = "sp-state-machine"
 version = "0.35.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "hash-db",
  "log",
@@ -11867,7 +11877,7 @@ dependencies = [
 [[package]]
 name = "sp-statement-store"
 version = "10.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "aes-gcm",
  "curve25519-dalek",
@@ -11881,7 +11891,7 @@ dependencies = [
  "sp-api",
  "sp-application-crypto",
  "sp-core",
- "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790)",
+ "sp-crypto-hashing 0.1.0 (git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch)",
  "sp-externalities",
  "sp-runtime",
  "sp-runtime-interface",
@@ -11892,12 +11902,12 @@ dependencies = [
 [[package]]
 name = "sp-std"
 version = "14.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 
 [[package]]
 name = "sp-storage"
 version = "19.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "impl-serde",
  "parity-scale-codec",
@@ -11909,7 +11919,7 @@ dependencies = [
 [[package]]
 name = "sp-timestamp"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "parity-scale-codec",
@@ -11921,7 +11931,7 @@ dependencies = [
 [[package]]
 name = "sp-tracing"
 version = "16.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "regex",
@@ -11933,7 +11943,7 @@ dependencies = [
 [[package]]
 name = "sp-transaction-pool"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "sp-api",
  "sp-runtime",
@@ -11942,7 +11952,7 @@ dependencies = [
 [[package]]
 name = "sp-transaction-storage-proof"
 version = "26.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "async-trait",
  "parity-scale-codec",
@@ -11957,7 +11967,7 @@ dependencies = [
 [[package]]
 name = "sp-trie"
 version = "29.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "ahash 0.8.12",
  "foldhash 0.1.5",
@@ -11982,7 +11992,7 @@ dependencies = [
 [[package]]
 name = "sp-version"
 version = "29.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "impl-serde",
  "parity-scale-codec",
@@ -11999,19 +12009,19 @@ dependencies = [
 [[package]]
 name = "sp-version-proc-macro"
 version = "13.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "parity-scale-codec",
  "proc-macro-warning",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "sp-wasm-interface"
 version = "20.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "anyhow",
  "impl-trait-for-tuples",
@@ -12023,7 +12033,7 @@ dependencies = [
 [[package]]
 name = "sp-weights"
 version = "27.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "bounded-collections",
  "parity-scale-codec",
@@ -12089,7 +12099,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "staging-parachain-info"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "frame-support",
@@ -12102,7 +12112,7 @@ dependencies = [
 [[package]]
 name = "staging-xcm"
 version = "7.0.1"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "bounded-collections",
@@ -12123,7 +12133,7 @@ dependencies = [
 [[package]]
 name = "staging-xcm-builder"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "environmental",
  "frame-support",
@@ -12147,7 +12157,7 @@ dependencies = [
 [[package]]
 name = "staging-xcm-executor"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "environmental",
  "frame-benchmarking",
@@ -12242,13 +12252,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "substrate-bip39"
 version = "0.4.7"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "hmac 0.12.1",
  "pbkdf2",
@@ -12260,12 +12270,12 @@ dependencies = [
 [[package]]
 name = "substrate-build-script-utils"
 version = "11.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 
 [[package]]
 name = "substrate-frame-rpc-system"
 version = "28.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "docify",
  "frame-system-rpc-runtime-api",
@@ -12285,7 +12295,7 @@ dependencies = [
 [[package]]
 name = "substrate-prometheus-endpoint"
 version = "0.17.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "http-body-util",
  "hyper 1.8.1",
@@ -12299,7 +12309,7 @@ dependencies = [
 [[package]]
 name = "substrate-wasm-builder"
 version = "17.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "array-bytes 6.2.3",
  "build-helper",
@@ -12365,7 +12375,7 @@ dependencies = [
  "subxt-macro",
  "subxt-metadata",
  "subxt-rpcs",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -12386,8 +12396,8 @@ dependencies = [
  "scale-info",
  "scale-typegen",
  "subxt-metadata",
- "syn 2.0.111",
- "thiserror 2.0.17",
+ "syn 2.0.114",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -12416,7 +12426,7 @@ dependencies = [
  "serde_json",
  "sp-crypto-hashing 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "subxt-metadata",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -12431,7 +12441,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smoldot-light",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -12451,7 +12461,7 @@ dependencies = [
  "subxt-codegen",
  "subxt-metadata",
  "subxt-utils-fetchmetadata",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -12466,7 +12476,7 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-crypto-hashing 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -12487,7 +12497,7 @@ dependencies = [
  "serde_json",
  "subxt-core",
  "subxt-lightclient",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
  "url",
 ]
@@ -12518,7 +12528,7 @@ dependencies = [
  "sha2 0.10.9",
  "sp-crypto-hashing 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "subxt-core",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "zeroize",
 ]
 
@@ -12530,7 +12540,7 @@ checksum = "8c4fb8fd6b16ecd3537a29d70699f329a68c1e47f70ed1a46d64f76719146563"
 dependencies = [
  "hex",
  "parity-scale-codec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -12546,9 +12556,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.111"
+version = "2.0.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "390cc9a294ab71bdb1aa2e99d13be9c753cd2d7bd6560c77118597410c4d2e87"
+checksum = "d4d107df263a3013ef9b1879b0df87d706ff80f65a86ea879bd9c31f9b307c2a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12575,7 +12585,7 @@ checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -12673,7 +12683,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 [[package]]
 name = "testnet-parachains-constants"
 version = "1.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "cumulus-primitives-core",
  "frame-support",
@@ -12696,11 +12706,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.17",
+ "thiserror-impl 2.0.18",
 ]
 
 [[package]]
@@ -12711,18 +12721,18 @@ checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -12772,30 +12782,30 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.44"
+version = "0.3.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e7d9e3bb61134e77bde20dd4825b97c010155709965fedf0f49bb138e52a9d"
+checksum = "f9e442fc33d7fdb45aa9bfeb312c095964abdf596f7567261062b2a7107aaabd"
 dependencies = [
  "deranged",
  "itoa",
  "num-conv",
  "powerfmt",
- "serde",
+ "serde_core",
  "time-core",
  "time-macros",
 ]
 
 [[package]]
 name = "time-core"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40868e7c1d2f0b8d73e4a8c7f0ff63af4f6d19be117e90bd73eb1d62cf831c6b"
+checksum = "8b36ee98fd31ec7426d599183e8fe26932a8dc1fb76ddb6214d05493377d34ca"
 
 [[package]]
 name = "time-macros"
-version = "0.2.24"
+version = "0.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30cfb0125f12d9c277f35663a0a33f8c30190f4e4574868a330595412d34ebf3"
+checksum = "71e552d1249bf61ac2a52db88179fd0673def1e1ad8243a00d9ec9ed71fee3dd"
 dependencies = [
  "num-conv",
  "time-core",
@@ -12837,9 +12847,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.48.0"
+version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
+checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
 dependencies = [
  "bytes",
  "libc",
@@ -12860,7 +12870,7 @@ checksum = "af407857209536a95c8e56f8231ef2c2e2aff839b22e07a1ffcbc617e9db9fa5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -12875,9 +12885,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.17"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
+checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -12903,9 +12913,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.17"
+version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2efa149fe76073d6e8fd97ef4f4eca7b67f599660115591483572e406e165594"
+checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",
@@ -13058,7 +13068,7 @@ checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -13084,7 +13094,7 @@ dependencies = [
 [[package]]
 name = "tracing-gum"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "coarsetime",
  "polkadot-primitives",
@@ -13095,13 +13105,13 @@ dependencies = [
 [[package]]
 name = "tracing-gum-proc-macro"
 version = "5.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "expander",
  "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -13185,7 +13195,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "sha1",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "url",
  "utf-8",
 ]
@@ -13335,9 +13345,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.7"
+version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b"
+checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -13493,27 +13503,27 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
 
 [[package]]
 name = "wasix"
-version = "0.12.21"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1fbb4ef9bbca0c1170e0b00dd28abc9e3b68669821600cad1caaed606583c6d"
+checksum = "1757e0d1f8456693c7e5c6c629bdb54884e032aa0bb53c155f6a39f94440d332"
 dependencies = [
  "wasi",
 ]
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.106"
+version = "0.2.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d759f433fa64a2d763d1340820e46e111a7a5ab75f993d1852d70b03dbb80fd"
+checksum = "64024a30ec1e37399cf85a7ffefebdb72205ca1c972291c51512360d90bd8566"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -13524,11 +13534,12 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.56"
+version = "0.4.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "836d9622d604feee9e5de25ac10e3ea5f2d65b41eac0d9ce72eb5deae707ce7c"
+checksum = "70a6e77fd0ae8029c9ea0063f87c46fde723e7d887703d74ad2616d792e51e6f"
 dependencies = [
  "cfg-if",
+ "futures-util",
  "js-sys",
  "once_cell",
  "wasm-bindgen",
@@ -13537,9 +13548,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.106"
+version = "0.2.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48cb0d2638f8baedbc542ed444afc0644a29166f1595371af4fecf8ce1e7eeb3"
+checksum = "008b239d9c740232e71bd39e8ef6429d27097518b6b30bdf9086833bd5b6d608"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -13547,22 +13558,22 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.106"
+version = "0.2.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cefb59d5cd5f92d9dcf80e4683949f15ca4b511f4ac0a6e14d4e1ac60c6ecd40"
+checksum = "5256bae2d58f54820e6490f9839c49780dff84c65aeab9e772f15d5f0e913a55"
 dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
  "wasm-bindgen-shared",
 ]
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.106"
+version = "0.2.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbc538057e648b67f72a982e708d485b2efa771e1ac05fec311f9f63e5800db4"
+checksum = "1f01b580c9ac74c8d8f0c0e4afb04eeef2acf145458e52c03845ee9cd23e3d12"
 dependencies = [
  "unicode-ident",
 ]
@@ -13837,7 +13848,7 @@ dependencies = [
  "pulley-interpreter",
  "smallvec",
  "target-lexicon",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "wasmparser 0.235.0",
  "wasmtime-environ",
  "wasmtime-internal-math",
@@ -13920,7 +13931,7 @@ checksum = "342b0466f92b7217a4de9e114175fedee1907028567d2548bcd42f71a8b5b016"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -13942,9 +13953,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.83"
+version = "0.3.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b32828d774c412041098d182a8b38b16ea816958e07cf40eec2bc080ae137ac"
+checksum = "312e32e551d92129218ea9a2452120f4aabc03529ef03e4d0d82fb2780608598"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -13966,14 +13977,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75c7f0ef91146ebfb530314f5f1d24528d7f0767efbfd31dce919275413e393e"
 dependencies = [
- "webpki-root-certs 1.0.4",
+ "webpki-root-certs 1.0.5",
 ]
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee3e3b5f5e80bc89f30ce8d0343bf4e5f12341c51f3e26cbeecbc7c85443e85b"
+checksum = "36a29fc0408b113f68cf32637857ab740edfafdf460c326cd2afaa2d84cc05dc"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -13987,7 +13998,7 @@ checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 [[package]]
 name = "westend-runtime-constants"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "polkadot-primitives",
@@ -14060,7 +14071,7 @@ dependencies = [
  "regalloc2 0.12.2",
  "smallvec",
  "target-lexicon",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "wasmparser 0.235.0",
  "wasmtime-environ",
  "wasmtime-internal-cranelift",
@@ -14127,7 +14138,7 @@ checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -14138,7 +14149,7 @@ checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -14492,9 +14503,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "writeable"
@@ -14553,25 +14564,25 @@ dependencies = [
  "nom 7.1.3",
  "oid-registry 0.8.1",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "time",
 ]
 
 [[package]]
 name = "xcm-procedural"
 version = "7.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "Inflector",
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "xcm-runtime-apis"
 version = "0.1.1"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=b2bcb74b13f1a1e082f701e3e05ce1be44d16790#b2bcb74b13f1a1e082f701e3e05ce1be44d16790"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=tiago-litep2p-bitswap-batch#9f7d9951ed6d852c33e4183d9e6de88dfbfce00f"
 dependencies = [
  "frame-support",
  "parity-scale-codec",
@@ -14662,28 +14673,28 @@ checksum = "b659052874eb698efe5b9e8cf382204678a0086ebf46982b79d6ca3182927e5d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
  "synstructure 0.13.2",
 ]
 
 [[package]]
 name = "zerocopy"
-version = "0.8.31"
+version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd74ec98b9250adb3ca554bdde269adf631549f51d8a8f8f0a10b50f1cb298c3"
+checksum = "668f5168d10b9ee831de31933dc111a459c97ec93225beb307aed970d1372dfd"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.31"
+version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8a8d209fdf45cf5138cbb5a506f6b52522a25afccc534d1475dad8e31105c6a"
+checksum = "2c7962b26b0a8685668b671ee4b54d007a67d4eaf05fda79ac0ecf41e32270f1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -14703,7 +14714,7 @@ checksum = "d71e5d6e06ab090c67b5e44993ec16b72dcbaabc526db883a360057678b48502"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
  "synstructure 0.13.2",
 ]
 
@@ -14718,13 +14729,13 @@ dependencies = [
 
 [[package]]
 name = "zeroize_derive"
-version = "1.4.2"
+version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+checksum = "85a5b4158499876c763cb03bc4e49185d3cccbabb15b33c627f7884f43db852e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
@@ -14757,14 +14768,14 @@ checksum = "eadce39539ca5cb3985590102671f2567e659fca9666581ad3411d59207951f3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.114",
 ]
 
 [[package]]
 name = "zmij"
-version = "1.0.0"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d6085d62852e35540689d1f97ad663e3971fc19cf5eceab364d62c646ea167"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
 
 [[package]]
 name = "zstd"

@@ -1,3 +1,0 @@
-# .cargo/config.toml
-[env]
-SKIP_PALLET_REVIVE_FIXTURES = "1"
