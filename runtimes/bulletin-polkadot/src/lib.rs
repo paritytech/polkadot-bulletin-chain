@@ -472,7 +472,7 @@ construct_runtime!(
 		// Local Root
 		Sudo: pallet_sudo = 61,
 		Proxy: pallet_proxy = 62,
-		Utility: pallet_utility = 63,
+		Utility: pallet_utility = 3,
 	}
 );
 
