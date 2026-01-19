@@ -366,14 +366,12 @@ start-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
     mkdir -p "{{ test_dir }}"
-    echo "📁 Test directory: {{ test_dir }}"
     just setup-services "{{ test_dir }}" "{{ runtime }}"
 
 # Stop all services
 # Usage: just stop-services /tmp/my-test-dir
 stop-services test_dir:
     #!/usr/bin/env bash
-    echo "📁 Using test directory: {{ test_dir }}"
     just teardown-services "{{ test_dir }}"
     echo "✅ Services stopped"
 
