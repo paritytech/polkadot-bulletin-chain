@@ -452,6 +452,7 @@ construct_runtime!(
 		// Babe must be called before Session
 		Babe: pallet_babe = 1,
 		Timestamp: pallet_timestamp = 2,
+		Utility: pallet_utility = 3,
 		// Authorship must be before session in order to note author in the correct session.
 		Authorship: pallet_authorship = 10,
 		Offences: pallet_offences = 11,
@@ -472,7 +473,6 @@ construct_runtime!(
 		// Local Root
 		Sudo: pallet_sudo = 61,
 		Proxy: pallet_proxy = 62,
-		Utility: pallet_utility = 3,
 	}
 );
 
