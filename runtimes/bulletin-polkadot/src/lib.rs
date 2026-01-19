@@ -426,7 +426,7 @@ impl pallet_utility::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type PalletsOrigin = OriginCaller;
-	type WeightInfo = pallet_utility::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
 }
 
 impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
