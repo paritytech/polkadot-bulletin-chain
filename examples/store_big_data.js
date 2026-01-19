@@ -145,7 +145,7 @@ async function main() {
         const { sudoSigner, _ } = setupKeyringAndSigners('//Alice', '//Alice');
 
         // Let's do parallelism with multiple accounts
-        const signers = Array.from({ length: 8 }, (_, i) => {
+        const signers = Array.from({ length: 12 }, (_, i) => {
             if (!signerDiscriminator) {
                 return newSigner(`//Signer${i + 1}`)
             } else {
