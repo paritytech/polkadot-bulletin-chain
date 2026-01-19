@@ -234,12 +234,7 @@ ipfs-start test_dir: _check-docker
     echo "   Container: ipfs-node"
     echo "   Waiting for container to start..."
     sleep 5
-
-    # Bitswap logging
-    docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
-    docker exec ipfs-node ipfs log level bitswap debug
-    docker exec ipfs-node ipfs log level bitswap/client debug
-
+    
     # Store container name in PID directory for cleanup
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
@@ -365,50 +360,31 @@ teardown-services test_dir:
     just ipfs-shutdown "{{ test_dir }}"
     echo "✅ Docker services stopped"
 
-# File to store current test directory path for multi-test runs
-_test-dir-file := "/tmp/bulletin-test-dir"
-
 # Start all services for a runtime (use with run-test-* recipes)
 # Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
 start-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
     mkdir -p "{{ test_dir }}"
-    echo "{{ test_dir }}" > {{ _test-dir-file }}
-    echo "📁 Test directory: {{ test_dir }} (stored in {{ _test-dir-file }})"
+    echo "📁 Test directory: {{ test_dir }}"
     just setup-services "{{ test_dir }}" "{{ runtime }}"
 
-# Stop all services (reads test_dir from stored file)
-stop-services:
+# Stop all services
+# Usage: just stop-services /tmp/my-test-dir
+stop-services test_dir:
     #!/usr/bin/env bash
-    if [ ! -f "{{ _test-dir-file }}" ]; then
-        echo "❌ Error: No test directory file found at {{ _test-dir-file }}"
-        echo "   Did you run 'just start-services <runtime>' first?"
-        exit 1
-    fi
-    TEST_DIR="$(cat {{ _test-dir-file }})"
-    echo "📁 Using test directory: $TEST_DIR"
-    just teardown-services "$TEST_DIR"
-    rm -f "{{ _test-dir-file }}"
-    echo "✅ Services stopped and test directory file cleaned up"
-
-# Get current test directory (helper for test recipes)
-_get-test-dir:
-    #!/usr/bin/env bash
-    if [ ! -f "{{ _test-dir-file }}" ]; then
-        echo "❌ Error: No test directory file found. Run 'just start-services <runtime>' first." >&2
-        exit 1
-    fi
-    cat "{{ _test-dir-file }}"
+    echo "📁 Using test directory: {{ test_dir }}"
+    just teardown-services "{{ test_dir }}"
+    echo "✅ Services stopped"
 
 # Run authorize-and-store test only (services must already be running via start-services)
 # Parameters:
+#   test_dir - Test directory where services are running
 #   runtime - Runtime name for smoldot chainspec path resolution
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-run-test-authorize-and-store runtime mode="ws":
+run-test-authorize-and-store test_dir runtime mode="ws":
     #!/usr/bin/env bash
     set -e
-    TEST_DIR="$(just _get-test-dir)"
 
     if [ "{{ mode }}" = "smoldot" ]; then
         echo "🧪 Running authorize and store test (mode: smoldot, runtime: {{ runtime }})..."
@@ -424,11 +400,11 @@ run-test-authorize-and-store runtime mode="ws":
     # Run the script with chainspec_path parameter only for smoldot mode
     if [ "{{ mode }}" = "smoldot" ]; then
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1006.json"
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1006.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH"
         else
-            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
+            CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
             node $SCRIPT_NAME "$CHAINSPEC_PATH"
         fi
     else
@@ -436,19 +412,21 @@ run-test-authorize-and-store runtime mode="ws":
     fi
 
 # Run store-chunked-data test only (services must already be running via start-services)
-run-test-store-chunked-data:
+# Parameters:
+#   test_dir - Test directory where services are running
+run-test-store-chunked-data test_dir:
     #!/usr/bin/env bash
     set -e
-    just _get-test-dir > /dev/null  # Verify services are running
-    echo "🧪 Running store chunked data test..."
+    echo "🧪 Running store chunked data test (test_dir: {{ test_dir }})..."
     node store_chunked_data.js
 
 # Run store-big-data test only (services must already be running via start-services)
-run-test-store-big-data:
+# Parameters:
+#   test_dir - Test directory where services are running
+run-test-store-big-data test_dir:
     #!/usr/bin/env bash
     set -e
-    just _get-test-dir > /dev/null  # Verify services are running
-    echo "🧪 Running store big data test..."
+    echo "🧪 Running store big data test (test_dir: {{ test_dir }})..."
     node store_big_data.js
 
 # ============================================================================
