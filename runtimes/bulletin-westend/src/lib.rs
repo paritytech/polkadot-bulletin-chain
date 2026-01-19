@@ -567,6 +567,13 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
+impl pallet_utility::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type PalletsOrigin = OriginCaller;
+	type WeightInfo = pallet_utility::weights::SubstrateWeight<Runtime>;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime
@@ -601,6 +608,9 @@ construct_runtime!(
 
 		// Sudo
 		Sudo: pallet_sudo = 100,
+
+		// Utility
+		Utility: pallet_utility = 101,
 	}
 );
 
@@ -620,6 +630,7 @@ mod benches {
 		[pallet_xcm_benchmarks::fungible, XcmBalances]
 		[pallet_xcm_benchmarks::generic, XcmGeneric]
 		[cumulus_pallet_weight_reclaim, WeightReclaim]
+		[pallet_utility, Utility]
 	);
 }
 

@@ -422,6 +422,13 @@ impl pallet_proxy::Config for Runtime {
 	type BlockNumberProvider = frame_system::Pallet<Runtime>;
 }
 
+impl pallet_utility::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type PalletsOrigin = OriginCaller;
+	type WeightInfo = pallet_utility::weights::SubstrateWeight<Runtime>;
+}
+
 impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
 where
 	RuntimeCall: From<C>,
@@ -465,6 +472,7 @@ construct_runtime!(
 		// Local Root
 		Sudo: pallet_sudo = 61,
 		Proxy: pallet_proxy = 62,
+		Utility: pallet_utility = 63,
 	}
 );
 
@@ -591,6 +599,11 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				longevity: BridgeTxLongevity::get(),
 				..Default::default()
 			}),
+			RuntimeCall::Utility(_call) => Ok(ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			}),
 			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
 				Ok(ValidTransaction {
 					priority: SudoPriority::get(),
@@ -654,6 +667,7 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			// Sudo calls
 			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
 			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
+			RuntimeCall::Utility(_) => Ok(Some(who.clone())),
 			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
 				Ok(Some(who.clone())),
 
@@ -757,6 +771,7 @@ mod benches {
 
 		[pallet_sudo, Sudo]
 		[pallet_proxy, Proxy]
+		[pallet_utility, Utility]
 	);
 
 	pub use frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList};
