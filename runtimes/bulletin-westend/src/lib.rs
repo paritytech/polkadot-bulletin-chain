@@ -609,9 +609,6 @@ construct_runtime!(
 
 		// Sudo
 		Sudo: pallet_sudo = 100,
-
-		// Utility
-		Utility: pallet_utility = 101,
 	}
 );
 
