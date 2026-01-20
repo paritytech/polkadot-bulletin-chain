@@ -20,7 +20,7 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papisigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();

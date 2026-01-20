@@ -142,7 +142,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, _ } = setupKeyringAndSigners('//Alice', '//Alice');
+        const { sudoSigner, _ } = setupKeyringAndSigners('//Alice', '//Bigdatasigner');
 
         // Let's do parallelism with multiple accounts
         const signers = Array.from({ length: 12 }, (_, i) => {
