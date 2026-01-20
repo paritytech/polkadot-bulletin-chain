@@ -4,9 +4,6 @@ on:
   push:
     tags:
       - v*
-  pull_request:
-    paths:
-      - '.github/workflows/release.yml'
 
 permissions:
   contents: write
@@ -149,8 +146,6 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'pull_request' && 'v0.0.2-bw' || github.ref_name }}
-          prerelease: ${{ github.event_name == 'pull_request' }}
           files: |
             release-assets/*.wasm
             release-assets/polkadot-bulletin-chain-linux
