@@ -62,7 +62,7 @@ jobs:
 
   check:
     name: Cargo check
-    runs-on: parity-default
+    runs-on: parity-large
     needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -107,7 +107,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: parity-default
+    runs-on: parity-large-test
     timeout-minutes: 60
     needs: [set-image, check]
     container:
