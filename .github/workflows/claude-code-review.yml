@@ -1,31 +1,12 @@
-name: Claude Code Review Bot
+name: Claude Code
 
 on:
-  # Respond to @claude mentions in issues and PRs
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
-
-  # Handle issue assignments and labels
-  issues:
-    types: [opened, assigned, labeled]
-
-  # Respond to PR reviews
-  pull_request_review:
-    types: [submitted]
-
-  # Automatic PR review on open/update
   pull_request:
     types: [opened, synchronize]
-
-  # Allow manual triggering
-  workflow_dispatch:
-    inputs:
-      prompt:
-        description: 'Custom prompt for Claude'
-        required: false
-        type: string
 
 # Cancel previous runs for the same PR/issue
 concurrency:
@@ -39,102 +20,31 @@ permissions:
 
 jobs:
   # Interactive assistant - responds to @claude mentions
-  claude-assistant:
+  claude:
     if: |
+      github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && github.event.action == 'assigned' && github.event.assignee.login == 'claude[bot]') ||
-      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude')
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Run Claude Assistant
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          trigger_phrase: "@claude"
-          assignee_trigger: "claude[bot]"
-          label_trigger: "claude"
-          allowed_bots: "dependabot[bot],renovate[bot]"
-          include_fix_links: true
-          claude_args: |
-            --max-turns 20
-            --model claude-sonnet-4-20250514
-
-  # Automatic PR review for Parity standards
-  pr-review:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Claude PR Review
+      - name: Run Claude
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            Review this pull request against Parity standards and the Polkadot Bulletin Chain codebase.
+            ${{ github.event_name == 'pull_request' && 'Review this pull request against Parity standards for the Polkadot Bulletin Chain.
 
-            ## Review Checklist
+            Focus on:
+            - Security: integer overflow, no panics in runtime, proper weight annotations
+            - Rust/FRAME patterns: storage types, events, error handling
+            - No unwrap()/expect() in production code
+            - Tests for new functionality
 
-            ### Code Quality
-            - [ ] Code follows Rust idioms and best practices
-            - [ ] No unnecessary complexity or over-engineering
-            - [ ] Proper error handling with meaningful error types
-            - [ ] No unwrap() or expect() in production code paths (only in tests)
-
-            ### Security
-            - [ ] No integer overflow vulnerabilities (use checked/saturating arithmetic)
-            - [ ] Safe handling of user-provided data
-            - [ ] Proper weight annotations for extrinsics
-            - [ ] No panics in runtime code
-
-            ### Substrate/FRAME Patterns
-            - [ ] Correct use of storage types (StorageValue, StorageMap, etc.)
-            - [ ] Proper event emission for state changes
-            - [ ] Appropriate use of origins and permissions
-            - [ ] Benchmarks updated if weights might change
-
-            ### Testing
-            - [ ] New functionality has corresponding tests
-            - [ ] Edge cases and error conditions are tested
-            - [ ] Tests are meaningful and not just for coverage
-
-            ### Documentation
-            - [ ] Public APIs have rustdoc comments
-            - [ ] Complex logic has inline comments explaining "why"
-            - [ ] CHANGELOG updated if needed
-
-            Provide specific, actionable feedback. If issues are found, explain the problem and suggest a fix.
-            Be concise - only comment on actual issues, not style preferences already handled by rustfmt/clippy.
+            Be concise - only flag actual issues, not style (rustfmt/clippy handle that).' || '' }}
           claude_args: |
-            --max-turns 15
-            --model claude-sonnet-4-20250514
-          include_fix_links: true
-
-  # Manual workflow dispatch
-  manual-review:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Claude with Custom Prompt
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: ${{ inputs.prompt || 'Analyze the codebase and provide suggestions for improvements.' }}
-          claude_args: |
-            --max-turns 25
-            --model claude-sonnet-4-20250514
+            --max-turns 10
