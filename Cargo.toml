@@ -35,6 +35,7 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 # Local workspace members
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
+hop-service = { path = "hop-service" }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
 pallet-validator-set = { path = "pallets/validator-set", default-features = false }
@@ -163,6 +164,7 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [workspace]
 resolver = "2"
 members = [
+	"hop-service",
 	"node",
 	"pallets/common",
 	"pallets/relayer-set",

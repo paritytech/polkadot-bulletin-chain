@@ -15,8 +15,24 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 //! HOP CLI parameters.
+//!
+//! ## Usage
+//!
+//! To integrate HOP into your Substrate node CLI, flatten these parameters:
+//!
+//! ```rust,ignore
+//! use hop_service::HopParams;
+//!
+//! #[derive(Debug, clap::Parser)]
+//! pub struct Cli {
+//!     // ... your other CLI fields ...
+//!
+//!     #[clap(flatten)]
+//!     pub hop: HopParams,
+//! }
+//! ```
 
-use crate::hop::types::{DEFAULT_RETENTION_BLOCKS, MAX_DATA_SIZE};
+use crate::types::{DEFAULT_MAX_POOL_SIZE, DEFAULT_RETENTION_BLOCKS};
 use clap::Parser;
 
 /// HOP (Hand-Off Protocol) configuration parameters
@@ -43,9 +59,9 @@ impl Default for HopParams {
 	fn default() -> Self {
 		Self {
 			enable_hop: false,
-			hop_max_pool_size: MAX_DATA_SIZE,               // 10 GiB
-			hop_retention_blocks: DEFAULT_RETENTION_BLOCKS, // 24 hours
-			hop_check_interval: 60,                         // 1 minute
+			hop_max_pool_size: (DEFAULT_MAX_POOL_SIZE / (1024 * 1024)), // Convert to MiB
+			hop_retention_blocks: DEFAULT_RETENTION_BLOCKS,             // 24 hours
+			hop_check_interval: 60,                                     // 1 minute
 		}
 	}
 }

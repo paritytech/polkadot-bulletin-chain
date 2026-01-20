@@ -17,8 +17,8 @@
 //! HOP data pool implementation.
 
 use crate::{
-	hop::types::{HopError, HopPoolEntry, PoolStatus, MAX_DATA_SIZE},
-	node_primitives::{BlockNumber, Hash},
+	primitives::{HopBlockNumber, HopHash},
+	types::{HopError, HopPoolEntry, PoolStatus, MAX_DATA_SIZE},
 };
 use parking_lot::RwLock;
 use sp_core::{hashing::blake2_256, H256};
@@ -33,7 +33,7 @@ use std::{
 /// HOP data pool
 pub struct HopDataPool {
 	/// The actual data
-	entries: Arc<RwLock<HashMap<Hash, HopPoolEntry>>>,
+	entries: Arc<RwLock<HashMap<HopHash, HopPoolEntry>>>,
 	/// Maximum pool size in bytes
 	max_size: u64,
 	/// Current pool size in bytes
@@ -56,7 +56,7 @@ impl HopDataPool {
 	/// Insert data into the pool
 	///
 	/// Returns the hash of the data
-	pub fn insert(&self, data: Vec<u8>, current_block: BlockNumber) -> Result<Hash, HopError> {
+	pub fn insert(&self, data: Vec<u8>, current_block: HopBlockNumber) -> Result<HopHash, HopError> {
 		// Validate data size
 		if data.is_empty() {
 			return Err(HopError::EmptyData);
@@ -105,19 +105,19 @@ impl HopDataPool {
 	}
 
 	/// Get data from the pool by content hash
-	pub fn get(&self, hash: &Hash) -> Option<Vec<u8>> {
+	pub fn get(&self, hash: &HopHash) -> Option<Vec<u8>> {
 		let entries = self.entries.read();
 		entries.get(hash).map(|entry| entry.data.clone())
 	}
 
 	/// Check if data exists in the pool
-	pub fn has(&self, hash: &Hash) -> bool {
+	pub fn has(&self, hash: &HopHash) -> bool {
 		let entries = self.entries.read();
 		entries.contains_key(hash)
 	}
 
 	/// Remove data from the pool
-	pub fn remove(&self, hash: &Hash) -> Result<(), HopError> {
+	pub fn remove(&self, hash: &HopHash) -> Result<(), HopError> {
 		let entry = {
 			let mut entries = self.entries.write();
 			entries.remove(hash)

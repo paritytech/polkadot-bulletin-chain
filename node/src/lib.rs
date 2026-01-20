@@ -1,6 +1,5 @@
 pub mod chain_spec;
 pub mod fake_runtime_api;
-pub mod hop;
 pub mod node_primitives;
 pub mod rpc;
 pub mod service;

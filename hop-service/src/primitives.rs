@@ -14,17 +14,15 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! HOP (Hand-Off Protocol) implementation.
+//! Type definitions for HOP service
 //!
-//! Provides ephemeral short-term data storage for 24 hours with RPC upload and Bitswap retrieval.
-//! Data is automatically promoted to Bulletin Chain middle-term storage on timeout,
-//! or dropped if user doesn't have enough allowance.
+//! These type aliases allow flexibility for different chains while maintaining
+//! compatibility with the Bulletin Chain.
 
-pub mod cli;
-pub mod pool;
-pub mod rpc;
-pub mod types;
+pub use polkadot_primitives::{BlockNumber, Hash};
 
-pub use cli::HopParams;
-pub use pool::HopDataPool;
-pub use types::PoolStatus;
+/// Block number type used by HOP
+pub type HopBlockNumber = BlockNumber;
+
+/// Hash type used by HOP
+pub type HopHash = Hash;

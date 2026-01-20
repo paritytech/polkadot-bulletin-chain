@@ -61,11 +61,8 @@ sp-version = { workspace = true }
 sp-session = { workspace = true }
 sp-offchain = { workspace = true }
 
-# HOP (Hand-Off Protocol) dependencies
-codec = { features = ["derive"], workspace = true }
-parking_lot = { version = "0.12.0" }
-thiserror = { version = "2.0.9" }
-hex = { workspace = true }
+# HOP (Hand-Off Protocol) service
+hop-service = { workspace = true }
 
 # These dependencies are used for the node's RPCs
 jsonrpsee = { features = ["server"], workspace = true }

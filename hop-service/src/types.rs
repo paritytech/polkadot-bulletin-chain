@@ -16,7 +16,7 @@
 
 //! HOP types and data structures.
 
-use crate::node_primitives::BlockNumber;
+use crate::primitives::HopBlockNumber;
 use codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -26,16 +26,16 @@ pub struct HopPoolEntry {
 	/// The actual data blob
 	pub data: Vec<u8>,
 	/// Block number when this was added
-	pub added_at: BlockNumber,
+	pub added_at: HopBlockNumber,
 	/// Block number when this expires (added_at + retention_period)
-	pub expires_at: BlockNumber,
+	pub expires_at: HopBlockNumber,
 	/// Size in bytes
 	pub size: u64,
 }
 
 impl HopPoolEntry {
 	/// Create a new pool entry
-	pub fn new(data: Vec<u8>, added_at: BlockNumber, retention_blocks: u32) -> Self {
+	pub fn new(data: Vec<u8>, added_at: HopBlockNumber, retention_blocks: u32) -> Self {
 		let size = data.len() as u64;
 		let expires_at = added_at.saturating_add(retention_blocks);
 

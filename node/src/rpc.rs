@@ -38,7 +38,7 @@ pub struct FullDeps<C, P, SC, B> {
 	/// GRANDPA RPC dependencies.
 	pub grandpa: GrandpaDeps<B>,
 	/// HOP data pool.
-	pub hop_pool: Option<Arc<crate::hop::HopDataPool>>,
+	pub hop_pool: Option<Arc<hop_service::HopDataPool>>,
 }
 
 /// BABE RPC dependencies.
@@ -111,7 +111,7 @@ where
 
 	// HOP (Hand-Off Protocol) RPC
 	if let Some(hop_pool) = hop_pool {
-		use crate::hop::rpc::{HopApiServer, HopRpcServer};
+		use hop_service::{HopApiServer, HopRpcServer};
 		module.merge(HopRpcServer::new(hop_pool, client.clone()).into_rpc())?;
 	}
 

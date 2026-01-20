@@ -149,7 +149,7 @@ pub fn new_full<
 	N: sc_network::NetworkBackend<Block, <Block as sp_runtime::traits::Block>::Hash>,
 >(
 	config: Configuration,
-	hop_params: crate::hop::HopParams,
+	hop_params: hop_service::HopParams,
 ) -> Result<TaskManager, ServiceError> {
 	let sc_service::PartialComponents {
 		client,
@@ -172,7 +172,7 @@ pub fn new_full<
 		);
 
 		Some(Arc::new(
-			crate::hop::HopDataPool::new(
+			hop_service::HopDataPool::new(
 				hop_params.hop_max_pool_size * 1024 * 1024, // MiB to bytes
 				hop_params.hop_retention_blocks,
 			)

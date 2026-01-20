@@ -17,8 +17,9 @@
 //! HOP (Hand-Off protocol) RPC interface implementation.
 
 use crate::{
-	hop::{HopDataPool, PoolStatus},
-	node_primitives::Hash,
+	pool::HopDataPool,
+	primitives::HopHash,
+	types::PoolStatus,
 };
 use jsonrpsee::{
 	core::{async_trait, RpcResult},
@@ -86,7 +87,7 @@ impl<C, Block> HopRpcServer<C, Block> {
 	}
 
 	/// Convert Bytes to Hash with validation
-	fn bytes_to_hash(bytes: Bytes) -> RpcResult<Hash> {
+	fn bytes_to_hash(bytes: Bytes) -> RpcResult<HopHash> {
 		let hash_bytes: [u8; 32] = bytes.0.as_slice().try_into().map_err(|_| {
 			ErrorObjectOwned::owned(
 				1008,
@@ -94,7 +95,7 @@ impl<C, Block> HopRpcServer<C, Block> {
 				None::<()>,
 			)
 		})?;
-		Ok(Hash::from(hash_bytes))
+		Ok(HopHash::from(hash_bytes))
 	}
 }
 
