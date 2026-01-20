@@ -107,7 +107,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: parity-large-test
+    runs-on: parity-large
     timeout-minutes: 60
     needs: [set-image, check-fmt]
     container:
