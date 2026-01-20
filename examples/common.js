@@ -1,5 +1,6 @@
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
+import { blake2AsU8a } from '@polkadot/util-crypto';
 import { createCanvas } from "canvas";
 import fs from "fs";
 import assert from "assert";
@@ -224,6 +225,10 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
         }
     }
     return false;
+}
+
+export function contentHash(bytes) {
+  return blake2AsU8a(bytes);
 }
 
 // // Try uncoment and: node common.js generateTextImage "B4" big
