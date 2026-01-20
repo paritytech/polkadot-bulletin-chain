@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-runtimes:
-    runs-on: parity-large
+    runs-on: parity-default
     strategy:
       matrix:
         include:
