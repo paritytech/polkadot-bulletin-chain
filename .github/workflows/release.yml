@@ -1,154 +1,102 @@
-# This is an example GitHub action that will build and publish the binaries and a Docker image
-# You need to add the following secrets to your GitHub Repository or Organization to make this work
-# - DOCKERHUB_USERNAME: The username of the DockerHub account. E.g. parity
-# - DOCKERHUB_TOKEN: Access token for DockerHub, see https://docs.docker.com/docker-hub/access-tokens/.
-# The following is set up as an environment variable below
-# - DOCKER_REPO: The unique name of the DockerHub repository. E.g. parity/polkadot
-
 name: Release
 
-permissions:
-  contents: read
-
-# Controls when the action will run.
 on:
   push:
-    # Triggers the workflow on tag push events
     tags:
-      - v[0-9]+.*
+      - v*
 
-env:
-  RUST_BACKTRACE: 1
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
-  CARGO_NET_RETRY: 10
-  RUSTFLAGS: -D warnings
-  RUSTUP_MAX_RETRIES: 10
-  CARGO_TERM_COLOR: always
-  # Set an environment variable (that can be overriden) for the Docker Repo
-  DOCKER_REPO: tripleight/node-template
-
-defaults:
-  run:
-    shell: bash
+permissions:
+  contents: write
 
 jobs:
-  create-release:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          persist-credentials: false
-      - uses: taiki-e/create-gh-release-action@v1
-        with:
-          title: $version
-          branch: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-assets:
-    name: ${{ matrix.target }}
-    needs:
-      - create-release
+  build-runtimes:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        # The list of architechture and OS to build for
-        # You can add or remove targets here if you want
-        #
-        # When updating this list, remember to update the target list in tests too
         include:
-          # - target: aarch64-unknown-linux-gnu
-          - target: x86_64-unknown-linux-gnu
-          - target: aarch64-apple-darwin
-            os: macos-11
-          - target: x86_64-apple-darwin
-            os: macos-11
-          # - target: universal-apple-darwin
-          #   os: macos-11
-
-    # The type of runner that the job will run on
-    # Runs on Ubuntu if other os is not specified above
-    runs-on: ${{ matrix.os || 'ubuntu-22.04' }}
-    timeout-minutes: 90
-    permissions:
-      contents: write
+          - name: bulletin-westend
+            package: bulletin-westend-runtime
+            path: runtimes/bulletin-westend
+          - name: bulletin-polkadot
+            package: bulletin-polkadot-runtime
+            path: runtimes/bulletin-polkadot
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
-        with:
-          persist-credentials: false
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Build ${{ matrix.name }} runtime
+        id: srtool_build
+        uses: chevdor/srtool-actions@v0.9.2
+        env:
+          BUILD_OPTS: "--features on-chain-release-build"
+        with:
+          chain: ${{ matrix.name }}
+          package: ${{ matrix.package }}
+          runtime_dir: ${{ matrix.path }}
+          profile: production
+
+      - name: Store srtool digest
         run: |
-          rustup update stable --no-self-update
-          rustup target add wasm32v1-none
+          echo '${{ steps.srtool_build.outputs.json }}' | jq > ${{ matrix.name }}_srtool_output.json
 
-      - name: Install linux dependencies
-        if: (matrix.os == '' || startsWith(matrix.os, 'ubuntu'))
-        run: |
-          sudo apt-get -qq update
-          sudo apt-get install -y protobuf-compiler
-
-      - name: Install mac dependencies
-        if: startsWith(matrix.os, 'macos')
-        run: brew install protobuf
-      - uses: taiki-e/setup-cross-toolchain-action@v1
-        if: (matrix.os == '' || startsWith(matrix.os, 'ubuntu'))
-        with:
-          target: ${{ matrix.target }}
-
-      # Build and upload the binary to the new release
-      - uses: taiki-e/upload-rust-binary-action@v1
-        with:
-          bin: node-template
-          target: ${{ matrix.target }}
-          tar: all
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload x86_64 linux binary to workflow
-        if: (matrix.target == 'x86_64-unknown-linux-gnu')
+      - name: Upload ${{ matrix.name }} wasm
         uses: actions/upload-artifact@v4
         with:
-          name: node-template
-          path: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/node-template
+          name: ${{ matrix.name }}-runtime
+          path: |
+            ${{ steps.srtool_build.outputs.wasm_compressed }}
+            ${{ matrix.name }}_srtool_output.json
 
-  build-image:
-    # The type of runner that the job will run on
-    needs:
-      - upload-assets
-    runs-on: ubuntu-22.04
-    # Steps represent a sequence of tasks that will be executed as part of the job
+  publish-release:
+    runs-on: ubuntu-latest
+    needs: build-runtimes
     steps:
-      # Login to Docker hub using the credentials stored in the repository secrets
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - name: Check out the repo
-        uses: actions/checkout@v3
-
-      # Download the binary from the previous job
-      - name: Download x86_64 linux binary
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: node-template
-          path: ${{ github.workspace }}
+          path: artifacts
 
-      # Build and push 2 images, One with the version tag and the other with latest tag
-      - name: Build and push Docker images
-        uses: docker/build-push-action@v4
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "*.wasm" -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Add runtime info to changelog
+        run: |
+          CONTEXT=$(find . -name '*_srtool_output.json')
+          SRTOOL() { <$(<<<$CONTEXT head -n1) jq -r .$1; }
+          WASM() { <${JSON} jq -r ".runtimes.compressed.subwasm.$1"; }
+
+          tee RELEASE_NOTES.md <<-EOF
+          # Runtime info
+          *These runtimes were built with **$(SRTOOL rustc)** using **[$(SRTOOL gen)](https://github.com/paritytech/srtool)***
+          EOF
+
+          for JSON in $(<<<$CONTEXT sort -sr)
+          do
+          RUNTIME_NAME=$(basename ${JSON} _srtool_output.json)
+          tee -a RELEASE_NOTES.md <<-EOF
+
+          ## ${RUNTIME_NAME}
+          ~~~
+          🏋️ Runtime Size:           $(numfmt --to iec-i --format "%.2f" $(WASM size)) ($(WASM size) bytes)
+          🗜 Compressed:             $(WASM 'compression | if .compressed then "Yes: \(1 - .size_compressed / .size_decompressed | . * 10000 | round / 100)%" else "No" end')
+          🔥 Core Version:           $(WASM 'core_version | "\(.specName)-\(.specVersion) \(.implName)-\(.implVersion).tx\(.transactionVersion).au\(.authoringVersion)"')
+          🎁 Metadata version:       V$(WASM metadata_version)
+          🗳️ Blake2-256 hash:        $(WASM blake2_256)
+          📦 IPFS:                   $(WASM ipfs_hash)
+          ~~~
+          EOF
+          done
+
+          cat RELEASE_NOTES.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         with:
-          context: .
-          file: ./Containerfile
-          push: true
-          build-args: |
-            DOCKER_REPO=${{ env.DOCKER_REPO }}
-          tags: |
-            ${{ env.DOCKER_REPO }}:${{ github.ref_name }}
-            ${{ env.DOCKER_REPO }}:latest
+          files: release-assets/*.wasm
+          body_path: RELEASE_NOTES.md
