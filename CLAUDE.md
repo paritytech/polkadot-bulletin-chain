@@ -8,7 +8,7 @@ Polkadot Bulletin Chain is a specialized blockchain providing distributed data s
 - **Solochain**: Run with the custom `node/` binary which includes BABE + GRANDPA consensus and integrated IPFS support
 - **Parachain**: Run with Polkadot SDK's `polkadot-omni-node` for parachain deployments
 
-**Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable period (currently 2 weeks).
+**Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable `RetentionPeriod`.
 
 ## Build Commands
 
@@ -94,7 +94,7 @@ polkadot-bulletin-chain/
 - `runtimes/bulletin-westend/` - Westend testnet
 
 **Core Pallets**:
-- `pallet-transaction-storage` - Stores data, manages 2-week retention, provides storage proofs
+- `pallet-transaction-storage` - Stores data, manages retention, provides storage proofs
 - `pallet-validator-set` - Dynamic validator set management (PoA)
 - `pallet-relayer-set` - Manages bridge relayers between Bulletin and PoP chain
 
@@ -147,7 +147,7 @@ The Polkadot SDK provides:
 
 ## Notes
 
-- Storage retention is 2 weeks (~201,600 blocks)
+- Configurable Storage Retention Period
 - Maximum storage requirement: 1.5-2TB
 - IPFS idle connection timeout: 1 hour
 - Node supports litep2p/Bitswap
