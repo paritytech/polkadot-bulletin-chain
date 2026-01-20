@@ -16,7 +16,8 @@ export async function authorizeAccount(
         `for transactions: ${transactions} and bytes: ${bytes}...`
     );
 
-    // TODO: rewrite with batch
+    // Collect accounts that need authorization
+    const accountsToAuthorize = [];
     for (const who of accounts) {
         const auth = await typedApi.query.TransactionStorage.Authorizations.getValue(Enum("Account", who));
         console.log(`ℹ Account: ${who} Authorization info: `, auth);
@@ -32,18 +33,32 @@ export async function authorizeAccount(
         } else {
             console.log('ℹ️ No existing authorization found — requesting new one...');
         }
+        accountsToAuthorize.push(who);
+    }
 
-        const authorizeTx = typedApi.tx.TransactionStorage.authorize_account({
+    if (accountsToAuthorize.length === 0) {
+        console.log('✅ All accounts already have sufficient authorization.');
+        return;
+    }
+
+    // Build batch of authorize_account calls
+    const authorizeCalls = accountsToAuthorize.map(who =>
+        typedApi.tx.TransactionStorage.authorize_account({
             who,
             transactions,
             bytes
-        });
-        const sudoTx = typedApi.tx.Sudo.sudo({
-            call: authorizeTx.decodedCall
-        });
+        }).decodedCall
+    );
 
-        await waitForTransaction(sudoTx, sudoSigner, "Authorize", txMode);
-    }
+    // Wrap in Sudo(Utility::batchAll(...))
+    const batchTx = typedApi.tx.Utility.batch_all({
+        calls: authorizeCalls
+    });
+    const sudoTx = typedApi.tx.Sudo.sudo({
+        call: batchTx.decodedCall
+    });
+
+    await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
 }
 
 export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
