@@ -47,9 +47,30 @@ jobs:
             ${{ steps.srtool_build.outputs.wasm_compressed }}
             ${{ matrix.name }}_srtool_output.json
 
+  build-node:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Install Protobuf
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Build polkadot-bulletin-chain binary
+        run: cargo build --profile production -p polkadot-bulletin-chain
+
+      - name: Upload polkadot-bulletin-chain binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: polkadot-bulletin-chain
+          path: target/production/polkadot-bulletin-chain
+
   publish-release:
     runs-on: ubuntu-latest
-    needs: build-runtimes
+    needs: [build-runtimes, build-node]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,6 +84,7 @@ jobs:
         run: |
           mkdir -p release-assets
           find artifacts -name "*.wasm" -exec cp {} release-assets/ \;
+          cp artifacts/polkadot-bulletin-chain/polkadot-bulletin-chain release-assets/
           ls -la release-assets/
 
       - name: Add runtime info to changelog
@@ -98,5 +120,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*.wasm
+          files: |
+            release-assets/*.wasm
+            release-assets/polkadot-bulletin-chain
           body_path: RELEASE_NOTES.md
