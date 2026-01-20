@@ -44,10 +44,10 @@ cargo test -p bulletin-polkadot-runtime
 cargo test -p bulletin-westend-runtime
 
 # Run clippy linting
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets --all-features --workspace -- -D warnings
 
 # Format check
-cargo fmt --check
+cargo +nightly fmt --all -- --check
 ```
 
 ## Run Commands
@@ -100,8 +100,8 @@ polkadot-bulletin-chain/
 
 ## Development Workflow
 
-1. **Format code**: `cargo fmt`
-2. **Run clippy**: `cargo clippy --all-targets`
+1. **Format code**: `cargo +nightly fmt --all -- --check`
+2. **Run clippy**: `cargo clippy --all-targets --all-features --workspace`
 3. **Run tests**: `cargo test`
 4. **Build**: `cargo build --release`
 
