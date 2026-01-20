@@ -19,9 +19,9 @@ cargo build
 # Build the node (release)
 cargo build --release
 
-# Build production runtime (with optimizations)
-cargo build --profile production -p bulletin-polkadot-runtime
-cargo build --profile production -p bulletin-westend-runtime
+# Build production runtime (with optimizations, strips logs)
+cargo build --profile production -p bulletin-polkadot-runtime --features on-chain-release-build
+cargo build --profile production -p bulletin-westend-runtime --features on-chain-release-build
 
 # Build with runtime benchmarks enabled
 cargo build --release --features runtime-benchmarks
@@ -144,6 +144,7 @@ The Polkadot SDK provides:
 - `runtime-benchmarks` - Enable weight generation
 - `try-runtime` - Runtime migration testing
 - `std` - Standard library features (default)
+- `on-chain-release-build` - Production build that strips logs for smaller wasm size
 
 ## Notes
 
