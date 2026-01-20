@@ -134,8 +134,8 @@ async function main() {
             bulletinAPI,
             sudoSigner,
             whoAddress,
-            1,
-            BigInt(dataToStore.length)
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
         );
 
         // Store data.

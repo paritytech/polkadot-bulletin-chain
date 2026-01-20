@@ -18,9 +18,11 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// ---- CONFIG ----
-const NODE_WS = 'ws://localhost:10000';
-// ----
+// Command line arguments: [ws_url] [seed]
+// Note: --signer-disc=XX flag is also supported for parallel runs
+const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
 
 // -------------------- queue --------------------
 const queue = [];
@@ -132,17 +134,20 @@ const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-di
 async function main() {
     await cryptoWaitReady()
 
+    console.log(`Connecting to: ${NODE_WS}`);
+    console.log(`Using seed: ${SEED}`);
+
     let client, resultCode;
     try {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletinimggen-"));
         const filePath = path.join(tmpDir, "image.jpeg");
         const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
-        generateTextImage(filePath, "Hello, Bulletin - " + new Date().toString(), "big");
+        generateTextImage(filePath, "Hello, Bulletin big - " + new Date().toString(), "big");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, _ } = setupKeyringAndSigners('//Alice', '//Bigdatasigner');
+        const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
 
         // Let's do parallelism with multiple accounts
         const signers = Array.from({ length: 12 }, (_, i) => {
