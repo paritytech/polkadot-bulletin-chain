@@ -109,7 +109,7 @@ jobs:
     name: Test
     runs-on: parity-large-test
     timeout-minutes: 60
-    needs: [set-image, check]
+    needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
