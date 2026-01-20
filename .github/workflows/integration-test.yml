@@ -26,7 +26,7 @@ env:
 jobs:
   setup:
     name: Setup
-    runs-on: ubuntu-latest
+    runs-on: parity-large-new
     steps:
       - name: Free Disk Space (Ubuntu)
         if: ${{ runner.environment == 'github-hosted' }}
@@ -98,7 +98,7 @@ jobs:
   integration-tests:
     needs: [setup]
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: parity-large-new
     timeout-minutes: 200
 
     steps:
