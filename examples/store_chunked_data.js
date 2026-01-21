@@ -214,12 +214,12 @@ async function main() {
             fs.unlinkSync(FILE_PATH);
             console.log(`File ${FILE_PATH} removed.`);
         }
-        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString(), "small");
+        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI chunked - " + new Date().toString(), "small");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Chunkedsigner');
 
         // Authorize an account.
         await authorizeAccount(
@@ -239,7 +239,7 @@ async function main() {
         console.log('✅ Connected to Bulletin node')
 
         const keyring = new Keyring({ type: 'sr25519' })
-        const pair = keyring.addFromUri('//Alice')
+        const pair = keyring.addFromUri('//Chunkedsigner')
         const sudoPair = keyring.addFromUri('//Alice')
         let { nonce } = await api.query.system.account(pair.address);
         const nonceMgr = new NonceManager(nonce);
