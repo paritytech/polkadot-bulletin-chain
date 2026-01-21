@@ -1,8 +1,7 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { blake2AsU8a } from '@polkadot/util-crypto';
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 import { CHUNK_SIZE } from './common.js';
-const util = require('util');
+import util from 'util';
 
 export async function authorizeAccount(
     typedApi,
