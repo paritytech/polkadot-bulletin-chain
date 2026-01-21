@@ -1,6 +1,8 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { blake2AsU8a } from '@polkadot/util-crypto';
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
+import { CHUNK_SIZE } from './common.js';
+const util = require('util');
 
 export async function authorizeAccount(
     typedApi,
@@ -65,30 +67,34 @@ export async function authorizeAccount(
 export async function authorizePreimage(
     typedApi,
     sudoSigner,
-    bytes,
-    txMode = TX_MODE_IN_BLOCK
+    contentHashes,
+    maxSize = CHUNK_SIZE,
+    txMode = TX_MODE_IN_BLOCK,
 ) {
+    const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
 
-    const contentHash = blake2AsU8a(bytes);
-    const maxSize = bytes.length;
-    console.log(
-        `⬆️ Authorizing preimage with bytes: ${bytes}...`
-    );
-    console.log(`Content hash: ${contentHash}`);
-    console.log(`Max size: ${maxSize}`);
+    // TODO: rewrite with batch
+    for (const contentHash of contentHashesArray) {
+        console.log(
+            `⬆️ Authorizing preimage with content hash: ${contentHash}...`
+        );
+        console.log(`Max size: ${maxSize}`);
 
-    const authorizeTx = typedApi.tx.TransactionStorage.authorize_preimage({
-        contentHash,
-        maxSize
-    });
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: authorizeTx.decodedCall
-    });
+        const authorizeTx = typedApi.tx.TransactionStorage.authorize_preimage({
+            contentHash,
+            maxSize
+        });
+        console.log(`✅ Authorize preimage tx: `, util.inspect(authorizeTx, { depth: null, colors: true }));
 
-    await waitForTransaction(sudoTx, sudoSigner, "Authorize", txMode);
+        const sudoTx = typedApi.tx.Sudo.sudo({
+            call: authorizeTx.decodedCall
+        });
+
+        await waitForTransaction(sudoTx, sudoSigner, "Authorize Preimage", txMode);
+    }
 }
 
-export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
+export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, client) {
     console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
@@ -102,7 +108,7 @@ export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
     const binaryData = new Binary(bytes);
 
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-    await waitForTransaction(tx, signer, "Store", txMode);
+    await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
     return cid;
 }
 
@@ -127,7 +133,7 @@ const TX_MODE_CONFIG = {
     },
 };
 
-function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS) {
+function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
         return Promise.reject(new Error(`Unhandled txMode: ${txMode}`));
@@ -150,7 +156,14 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeo
             }
         }, timeoutMs);
 
-        sub = tx.signSubmitAndWatch(signer).subscribe({
+        let observer;
+        if (signer === null) {
+            console.log(`⬆️ Submitting ${txName} with client: `, util.inspect(client, { depth: null, colors: true }));
+            observer = client.submitAndWatch(tx);
+        } else {
+            observer = tx.signSubmitAndWatch(signer);
+        }
+        sub = observer.subscribe({
             next: (ev) => {
                 console.log(`✅ ${txName} event:`, ev.type);
                 if (!resolved && config.match(ev)) {

@@ -2,8 +2,8 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizePreimage, fetchCid, store} from './api.js';
-import { setupKeyringAndSigners } from './common.js';
+import { authorizePreimage, fetchCid, store } from './api.js';
+import { setupKeyringAndSigners, contentHash } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
@@ -12,7 +12,7 @@ const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function main() {
     await cryptoWaitReady();
-    
+
     let client, resultCode;
     try {
         // Init WS PAPI client and typed api.
@@ -25,16 +25,18 @@ async function main() {
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
         let expectedCid = await cidFromBytes(dataToStore);
+        let contentHashes = contentHash(dataToStore);
 
         // Authorize an account.
         await authorizePreimage(
             bulletinAPI,
             sudoSigner,
+            contentHashes,
             BigInt(dataToStore.length)
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, whoSigner, dataToStore);
+        const cid = await store(bulletinAPI, null, dataToStore, TX_MODE_IN_BLOCK, client);
         console.log("✅ Data stored successfully with CID:", cid);
 
         // Read back from IPFS
