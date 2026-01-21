@@ -172,7 +172,7 @@ These guidelines are used by the Claude Code review bot and should be followed b
 - **Errors**: Define descriptive error types in the pallet's `Error` enum.
 - **Weights**: All extrinsics must have accurate weight annotations. Update benchmarks when logic changes.
 - **Origins**: Use the principle of least privilege for origin checks.
-- **Hooks**: Be cautious with `on_initialize` and `on_finalize`; they affect block production time.
+- **Hooks**: Be cautious with `on_initialize` and `on_finalize`; they affect block production time in solochains and can brick parachains. Never panic or do unbounded iteration in them. Always benchmark them properly.
 
 ### Security Considerations
 
