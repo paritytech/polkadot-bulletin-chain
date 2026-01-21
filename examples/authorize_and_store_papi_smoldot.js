@@ -139,7 +139,7 @@ async function main() {
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, whoSigner, dataToStore);
+        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
         console.log("✅ Data stored successfully with CID:", cid);
 
         // Read back from IPFS
