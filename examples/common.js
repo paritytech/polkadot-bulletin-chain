@@ -227,7 +227,7 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
     return false;
 }
 
-export function contentHash(bytes) {
+export function getContentHash(bytes) {
   return blake2AsU8a(bytes);
 }
 

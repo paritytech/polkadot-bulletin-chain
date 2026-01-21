@@ -3,7 +3,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizePreimage, fetchCid, store } from './api.js';
-import { setupKeyringAndSigners, contentHash } from './common.js';
+import { setupKeyringAndSigners, getContentHash } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
@@ -25,7 +25,7 @@ async function main() {
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
         let expectedCid = await cidFromBytes(dataToStore);
-        let contentHash = contentHash(dataToStore);
+        let contentHash = getContentHash(dataToStore);
 
         // Authorize an account.
         await authorizePreimage(

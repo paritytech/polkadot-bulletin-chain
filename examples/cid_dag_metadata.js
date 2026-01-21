@@ -1,5 +1,5 @@
 import * as multihash from 'multiformats/hashes/digest';
-import { contentHash } from './common.js';
+import { getContentHash } from './common.js';
 import { CID } from 'multiformats/cid';
 import * as dagPB from '@ipld/dag-pb';
 import { UnixFS } from 'ipfs-unixfs';
@@ -63,7 +63,7 @@ export async function cidFromBytes(bytes, cidCodec = 0x55, mhCode = 0xb220) {
     let mh;
     switch (mhCode) {
         case 0xb220: // blake2b-256
-            mh = multihash.create(mhCode, contentHash(bytes));
+            mh = multihash.create(mhCode, getContentHash(bytes));
             break;
         default:
             throw new Error("Unhandled multihash code: " + mhCode);
