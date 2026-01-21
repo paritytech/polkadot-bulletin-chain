@@ -83,7 +83,7 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 60_000; // 60 seconds or 10 blocks
+const DEFAULT_TX_TIMEOUT_MS = 120_000; // 120 seconds or 20 blocks
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
