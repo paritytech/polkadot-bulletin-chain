@@ -25,13 +25,13 @@ async function main() {
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
         let expectedCid = await cidFromBytes(dataToStore);
-        let contentHashes = contentHash(dataToStore);
+        let contentHash = contentHash(dataToStore);
 
         // Authorize an account.
         await authorizePreimage(
             bulletinAPI,
             sudoSigner,
-            contentHashes,
+            contentHash,
             BigInt(dataToStore.length)
         );
 
