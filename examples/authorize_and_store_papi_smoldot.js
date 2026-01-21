@@ -10,7 +10,8 @@ import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
-const SYNC_WAIT_SEC = 15;
+// Increased sync time for parachain mode where smoldot needs more time to sync relay + para
+const SYNC_WAIT_SEC = 30;
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
@@ -120,8 +121,9 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
         await waitForChainReady(bulletinAPI);
 
-        // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+        // Signers: Use Bob for the account being authorized to avoid nonce conflicts
+        // when running after ws test (which uses Alice) on the same chain.
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
@@ -132,8 +134,8 @@ async function main() {
             bulletinAPI,
             sudoSigner,
             whoAddress,
-            1,
-            BigInt(dataToStore.length)
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
         );
 
         // Store data.
