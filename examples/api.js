@@ -73,7 +73,8 @@ export async function authorizePreimage(
 ) {
     const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
 
-    // TODO: rewrite with batch
+    // Collect hashes that need authorization
+    const authorizeCalls = [];
     for (const contentHash of contentHashesArray) {
         console.log(
             `⬆️ Authorizing preimage with content hash: ${contentHash}...`
@@ -86,12 +87,23 @@ export async function authorizePreimage(
         });
         console.log(`✅ Authorize preimage tx: `, util.inspect(authorizeTx, { depth: null, colors: true }));
 
-        const sudoTx = typedApi.tx.Sudo.sudo({
-            call: authorizeTx.decodedCall
-        });
-
-        await waitForTransaction(sudoTx, sudoSigner, "Authorize Preimage", txMode);
+        authorizeCalls.push(authorizeTx.decodedCall);
     }
+
+    if (authorizeCalls.length === 0) {
+        console.log('✅ All hashes already have sufficient authorization.');
+        return;
+    }
+
+    // Wrap in Sudo(Utility::batchAll(...))
+    const batchTx = typedApi.tx.Utility.batch_all({
+        calls: authorizeCalls
+    });
+    const sudoTx = typedApi.tx.Sudo.sudo({
+        call: batchTx.decodedCall
+    });
+
+    await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize Preimages", txMode);
 }
 
 export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, client) {
