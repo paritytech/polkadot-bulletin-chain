@@ -179,7 +179,7 @@ These guidelines are used by the Claude Code review bot and should be followed b
 - **No Panics in Runtime**: Runtime code must never panic. Use defensive programming.
 - **Bounded Collections**: Use `BoundedVec`, `BoundedBTreeMap` etc. to prevent unbounded storage growth.
 - **Input Validation**: Validate all user inputs at the entry point.
-- **Storage Deposits**: Consider requiring deposits for user-created storage items.
+- **Storage Deposits**: Consider requiring deposits for user-created storage items that are returned once the item is cleared.
 
 ### Testing Requirements
 
