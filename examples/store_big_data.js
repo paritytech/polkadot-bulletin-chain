@@ -18,11 +18,12 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed]
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
 // Note: --signer-disc=XX flag is also supported for parallel runs
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
+const IPFS_API_URL = args[2] || 'http://127.0.0.1:5001';
 
 // -------------------- queue --------------------
 const queue = [];
@@ -34,6 +35,13 @@ const resultQueue = [];
 function pushToResultQueue(data) {
     resultQueue.push(data);
 }
+
+// -------------------- statistics --------------------
+const stats = {
+    startTime: null,
+    endTime: null,
+    blockNumbers: [],  // Track all block numbers where txs were included
+};
 function waitForQueueLength(targetLength, timeoutMs = 60000) {
     return new Promise((resolve, reject) => {
         const start = Date.now();
@@ -76,14 +84,51 @@ async function processJob(typedApi, workerId, signer, chunk) {
         `Worker ${workerId} submitting tx for chunk ${chunk.cid} of size ${chunk.len} bytes`
     );
 
-    let cid = await store(typedApi, signer.signer, chunk.bytes);
-    pushToResultQueue(cid);
-    console.log(`Worker ${workerId} tx included in the block with CID: ${cid}`);
+    let { cid, blockHash, blockNumber } = await store(typedApi, signer.signer, chunk.bytes);
+    pushToResultQueue({ cid, blockNumber });
+    if (blockNumber !== undefined) {
+        stats.blockNumbers.push(blockNumber);
+    }
+    console.log(`Worker ${workerId} tx included in block #${blockNumber} with CID: ${cid}`);
 }
 
 // -------------------- helpers --------------------
 function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
+}
+
+function formatBytes(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MiB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KiB';
+    return bytes + ' B';
+}
+
+function formatDuration(ms) {
+    if (ms >= 60000) return (ms / 60000).toFixed(2) + ' min';
+    if (ms >= 1000) return (ms / 1000).toFixed(2) + ' s';
+    return ms + ' ms';
+}
+
+function printStatistics(dataSize) {
+    const uniqueBlocks = [...new Set(stats.blockNumbers)];
+    const numBlocks = uniqueBlocks.length;
+    const numTxs = stats.blockNumbers.length;
+    const avgTxsPerBlock = numBlocks > 0 ? (numTxs / numBlocks).toFixed(2) : 'N/A';
+    const elapsed = stats.endTime - stats.startTime;
+
+    console.log('\n');
+    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log('                            📊 STORAGE STATISTICS                              ');
+    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log(`| File size           | ${formatBytes(dataSize).padEnd(20)} |`);
+    console.log(`| Chunk size          | ${formatBytes(CHUNK_SIZE).padEnd(20)} |`);
+    console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
+    console.log(`| Number of blocks    | ${numBlocks.toString().padEnd(20)} |`);
+    console.log(`| Avg txs per block   | ${avgTxsPerBlock.toString().padEnd(20)} |`);
+    console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
+    console.log(`| Throughput          | ${formatBytes(dataSize / (elapsed / 1000)).padEnd(20)} /s |`);
+    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log('\n');
 }
 
 /**
@@ -112,7 +157,7 @@ export async function storeChunkedFile(api, filePath) {
 
 // Connect to a local IPFS gateway (e.g. Kubo)
 const ipfs = create({
-    url: 'http://127.0.0.1:5001', // Local IPFS API
+    url: IPFS_API_URL,
 });
 
 async function readFromIpfs(cid) {
@@ -136,6 +181,7 @@ async function main() {
 
     console.log(`Connecting to: ${NODE_WS}`);
     console.log(`Using seed: ${SEED}`);
+    console.log(`Using IPFS API: ${IPFS_API_URL}`);
 
     let client, resultCode;
     try {
@@ -177,15 +223,23 @@ async function main() {
         // Read the file, chunk it, store in Bulletin and return CIDs.
         let { chunks, dataSize } = await storeChunkedFile(bulletinAPI, filePath);
 
+        // Start timing for statistics
+        stats.startTime = Date.now();
+
         // wait for all chunks are stored
         try {
             console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
             await waitForQueueLength(chunks.length, 180_000);
+            stats.endTime = Date.now();
             console.log(`All chunks ${chunks.length} are stored!`);
         } catch (err) {
+            stats.endTime = Date.now();
             console.error(err.message);
             throw new Error('❌ Storing chunks failed! Error:' + err.message);
         }
+
+        // Print storage statistics
+        printStatistics(dataSize);
 
         // Check all chunks are there.
         let downloadedChunks = [];

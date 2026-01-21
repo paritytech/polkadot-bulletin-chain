@@ -75,8 +75,8 @@ export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
     const binaryData = new Binary(bytes);
 
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-    await waitForTransaction(tx, signer, "Store", txMode);
-    return cid;
+    const result = await waitForTransaction(tx, signer, "Store", txMode);
+    return { cid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
 export const TX_MODE_IN_BLOCK = "in-block";

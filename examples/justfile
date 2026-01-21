@@ -430,11 +430,17 @@ run-test-store-chunked-data test_dir:
 # Run store-big-data test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
-run-test-store-big-data test_dir:
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   ipfs_api_url - IPFS API URL (default: http://127.0.0.1:5001)
+run-test-store-big-data test_dir ws_url="ws://localhost:10000" seed="//Alice" ipfs_api_url="http://127.0.0.1:5001":
     #!/usr/bin/env bash
     set -e
     echo "🧪 Running store big data test (test_dir: {{ test_dir }})..."
-    node store_big_data.js
+    echo "   WS URL: {{ ws_url }}"
+    echo "   Seed: {{ seed }}"
+    echo "   IPFS API: {{ ipfs_api_url }}"
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
 
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
@@ -519,7 +525,12 @@ run-store-chunked-data runtime: npm-install
     exit $EXAMPLE_EXIT
 
 # Run store big data example.
-run-store-big-data runtime: npm-install
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   ipfs_api_url - IPFS API URL (default: http://127.0.0.1:5001)
+run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" ipfs_api_url="http://127.0.0.1:5001": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -529,7 +540,7 @@ run-store-big-data runtime: npm-install
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
-    node store_big_data.js
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
     EXAMPLE_EXIT=$?
 
     echo ""
@@ -547,25 +558,30 @@ run-store-big-data runtime: npm-install
 # Run tests against external environments
 # ============================================================================
 
-# Run authorize-and-store test against an external endpoint
+# Run store-big-data test against an external endpoint
 # Parameters:
 #   ws_url - WebSocket URL of the Bulletin chain node
 #   seed - Account seed phrase or dev seed (e.g., "//Alice" or "word1 word2 ...")
-run-tests-against ws_url seed: npm-install
+#   ipfs_api_url - IPFS API URL (default: http://127.0.0.1:5001 for local Docker Kubo)
+run-tests-against ws_url seed ipfs_api_url="http://127.0.0.1:5001": npm-install
     #!/usr/bin/env bash
     set -e
-    echo "🧪 Running authorize-and-store test against external endpoint..."
-    echo "   URL: {{ ws_url }}"
+    echo "🧪 Running store-big-data test against external endpoint..."
+    echo "   RPC URL: {{ ws_url }}"
+    echo "   Seed: {{ seed }}"
+    echo "   IPFS API: {{ ipfs_api_url }}"
     just papi-generate "{{ ws_url }}"
 
-    # TODO: connect to the local IPFS:8080
-    # TODO: find out the WS/IP/ live node address
+    # To use local Docker Kubo with external RPC:
+    # 1. Start local IPFS: docker run -d --name ipfs-node -p 4001:4001 -p 5001:5001 -p 8080:8080 ipfs/kubo:latest
+    # 2. Connect to Bulletin IPFS nodes: docker exec ipfs-node ipfs swarm connect <multiaddr>
+    #    (Get multiaddrs from the Bulletin chain's IPFS bootstrap list)
 
-    # node authorize_and_store_papi.js "{{ ws_url }}" "{{ seed }}"
-    node store_big_data.js "{{ ws_url }}" "{{ seed }}"
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
 
-# Run authorize-and-store test against Westend
+# Run store-big-data test against Westend Bulletin
 # Parameters:
 #   seed - Account seed phrase or dev seed (e.g., "//Alice" or "word1 word2 ...")
-run-tests-against-westend seed:
-    just run-tests-against "wss://westend-bulletin-rpc.polkadot.io" "{{ seed }}"
+#   ipfs_api_url - IPFS API URL (default: http://127.0.0.1:5001 for local Docker Kubo)
+run-tests-against-westend seed ipfs_api_url="http://127.0.0.1:5001":
+    just run-tests-against "wss://westend-bulletin-rpc.polkadot.io" "{{ seed }}" "{{ ipfs_api_url }}"
