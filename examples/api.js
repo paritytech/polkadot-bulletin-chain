@@ -69,40 +69,35 @@ export async function authorizePreimage(
     contentHashes,
     maxSize = CHUNK_SIZE,
     txMode = TX_MODE_IN_BLOCK,
+    batchSize = 10,
 ) {
     const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
 
     // Collect hashes that need authorization
-    const authorizeCalls = [];
-    for (const contentHash of contentHashesArray) {
+    for (let i = 0; i < contentHashesArray.length; i += batchSize) {
+        const batch = contentHashesArray.slice(i, i + batchSize);
+        console.log(`\n🔄 Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(contentHashesArray.length / batchSize)}`);
         console.log(
-            `⬆️ Authorizing preimage with content hash: ${contentHash}...`
+            `⬆️ Authorizing preimage with content hash: `, util.inspect(batch, { depth: null, colors: true })
         );
-        console.log(`Max size: ${maxSize}`);
 
-        const authorizeTx = typedApi.tx.TransactionStorage.authorize_preimage({
-            contentHash,
-            maxSize
+        const authorizeCalls = batch.map(contentHash => {
+            typedApi.tx.TransactionStorage.authorize_preimage({
+                contentHash,
+                maxSize
+            }).decodedCall
         });
-        console.log(`✅ Authorize preimage tx: `, util.inspect(authorizeTx, { depth: null, colors: true }));
 
-        authorizeCalls.push(authorizeTx.decodedCall);
+        // Wrap in Sudo(Utility::batchAll(...))
+        const batchTx = typedApi.tx.Utility.batch_all({
+            calls: authorizeCalls
+        });
+        const sudoTx = typedApi.tx.Sudo.sudo({
+            call: batchTx.decodedCall
+        });
+
+        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${Math.floor(i / batchSize) + 1}`, txMode);
     }
-
-    if (authorizeCalls.length === 0) {
-        console.log('✅ All hashes already have sufficient authorization.');
-        return;
-    }
-
-    // Wrap in Sudo(Utility::batchAll(...))
-    const batchTx = typedApi.tx.Utility.batch_all({
-        calls: authorizeCalls
-    });
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: batchTx.decodedCall
-    });
-
-    await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize Preimages", txMode);
 }
 
 export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, client) {
