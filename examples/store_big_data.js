@@ -84,7 +84,8 @@ async function processJob(typedApi, workerId, signer, chunk) {
         `Worker ${workerId} submitting tx for chunk ${chunk.cid} of size ${chunk.len} bytes`
     );
 
-    let { cid, blockHash, blockNumber } = await store(typedApi, signer.signer, chunk.bytes);
+    // Use longer timeout (120s) for parallel workers to avoid timeouts under heavy load
+    let { cid, blockHash, blockNumber } = await store(typedApi, signer.signer, chunk.bytes, undefined, 120_000);
     pushToResultQueue({ cid, blockNumber });
     if (blockNumber !== undefined) {
         stats.blockNumbers.push(blockNumber);

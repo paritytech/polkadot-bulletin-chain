@@ -61,7 +61,7 @@ export async function authorizeAccount(
     await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
 }
 
-export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
+export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS) {
     console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
@@ -75,7 +75,7 @@ export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
     const binaryData = new Binary(bytes);
 
     const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-    const result = await waitForTransaction(tx, signer, "Store", txMode);
+    const result = await waitForTransaction(tx, signer, "Store", txMode, timeoutMs);
     return { cid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
@@ -83,7 +83,7 @@ export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 60_000; // 60 seconds or 10 blocks
+export const DEFAULT_TX_TIMEOUT_MS = 60_000; // 60 seconds or 10 blocks
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
