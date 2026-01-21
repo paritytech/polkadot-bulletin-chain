@@ -239,7 +239,7 @@ async function main() {
         console.log('✅ Connected to Bulletin node')
 
         const keyring = new Keyring({ type: 'sr25519' })
-        const pair = keyring.addFromUri('//Alice')
+        const pair = keyring.addFromUri('//Chunkedsigner')
         const sudoPair = keyring.addFromUri('//Alice')
         let { nonce } = await api.query.system.account(pair.address);
         const nonceMgr = new NonceManager(nonce);
