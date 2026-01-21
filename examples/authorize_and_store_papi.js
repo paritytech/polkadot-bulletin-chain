@@ -7,12 +7,18 @@ import { setupKeyringAndSigners } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-const NODE_WS = 'ws://localhost:10000';
+// Command line arguments: [ws_url] [seed]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function main() {
     await cryptoWaitReady();
-    
+
+    console.log(`Connecting to: ${NODE_WS}`);
+    console.log(`Using seed: ${SEED}`);
+
     let client, resultCode;
     try {
         // Init WS PAPI client and typed api.
@@ -20,7 +26,7 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Papisigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
@@ -31,8 +37,8 @@ async function main() {
             bulletinAPI,
             sudoSigner,
             whoAddress,
-            1,
-            BigInt(dataToStore.length)
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
         );
 
         // Store data.
