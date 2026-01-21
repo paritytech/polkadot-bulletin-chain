@@ -91,10 +91,10 @@ pub mod bp_people_polkadot {
 		Parachain,
 	};
 	use frame_support::{dispatch::DispatchClass, weights::Weight};
-	use sp_runtime::{RuntimeDebug, StateVersion};
+	use sp_runtime::StateVersion;
 
 	/// PeoplePolkadot parachain.
-	#[derive(RuntimeDebug)]
+	#[derive(Debug)]
 	pub struct PeoplePolkadot;
 
 	impl Chain for PeoplePolkadot {

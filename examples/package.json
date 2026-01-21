@@ -1,4 +1,6 @@
 {
+  "name": "polkadot-bulletin-chain-examples",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "papi:generate": "papi add -w ws://localhost:10000 bulletin",
@@ -11,13 +13,16 @@
     "@polkadot/keyring": "^13.5.8",
     "@polkadot/util": "^13.5.8",
     "@polkadot/util-crypto": "^13.5.8",
+    "canvas": "^3.2.0",
     "fs": "^0.0.1-security",
     "ipfs-http-client": "^60.0.1",
     "multiformats": "^13.4.1",
-    "polkadot-api": "^1.20.6",
-    "smoldot": "^2.0.39"
+    "polkadot-api": "^1.22.0",
+    "smoldot": "^2.0.40",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@polkadot-api/cli": "^0.13.3"
+    "@polkadot-api/cli": "^0.13.4",
+    "@types/bun": "latest"
   }
 }

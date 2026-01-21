@@ -19,7 +19,10 @@ use codec::{Decode, Encode};
 use polkadot_sdk_frame::{
 	deps::frame_support,
 	prelude::{
-		fungible::{Dust, Inspect, InspectHold, Mutate, MutateHold, Unbalanced, UnbalancedHold},
+		fungible::{
+			hold::DoneSlash, Balanced, BalancedHold, Dust, Inspect, InspectHold, Mutate,
+			MutateHold, Unbalanced, UnbalancedHold,
+		},
 		DepositConsequence, DispatchError, DispatchResult, Fortitude, Preservation, Provenance,
 		WithdrawConsequence, Zero,
 	},
@@ -39,6 +42,27 @@ use scale_info::TypeInfo;
 pub struct NoCurrency<AccountId, HoldReason = ()>(
 	core::marker::PhantomData<(AccountId, HoldReason)>,
 );
+
+impl<AccountId, HoldReason> Balanced<AccountId> for NoCurrency<AccountId, HoldReason>
+where
+	HoldReason: Encode + Decode + TypeInfo + 'static,
+{
+	type OnDropDebt = ();
+	type OnDropCredit = ();
+}
+
+impl<AccountId, HoldReason> BalancedHold<AccountId> for NoCurrency<AccountId, HoldReason> where
+	HoldReason: Encode + Decode + TypeInfo + 'static
+{
+}
+
+impl<AccountId, HoldReason, Balance> DoneSlash<HoldReason, AccountId, Balance>
+	for NoCurrency<AccountId, HoldReason>
+where
+	Balance: Sized,
+	HoldReason: Encode + Decode + TypeInfo + 'static,
+{
+}
 
 impl<AccountId, HoldReason: Encode + Decode + TypeInfo + 'static> Inspect<AccountId>
 	for NoCurrency<AccountId, HoldReason>

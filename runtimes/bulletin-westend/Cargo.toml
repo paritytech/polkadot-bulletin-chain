@@ -32,11 +32,14 @@ pallet-authorship = { workspace = true }
 pallet-balances = { workspace = true }
 pallet-message-queue = { workspace = true }
 pallet-session = { workspace = true }
+pallet-skip-feeless-payment = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
+pallet-utility = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-transaction-storage = { workspace = true }
+pallets-common = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
 sp-consensus-aura = { workspace = true }
@@ -65,7 +68,7 @@ xcm-runtime-apis = { workspace = true }
 
 # Cumulus
 cumulus-pallet-aura-ext = { workspace = true }
-cumulus-pallet-parachain-system = { workspace = true }
+cumulus-pallet-parachain-system = { features = ["transaction-index"], workspace = true }
 cumulus-pallet-session-benchmarking = { workspace = true }
 cumulus-pallet-weight-reclaim = { workspace = true }
 cumulus-pallet-xcm = { workspace = true }
@@ -113,13 +116,16 @@ std = [
 	"pallet-collator-selection/std",
 	"pallet-message-queue/std",
 	"pallet-session/std",
+	"pallet-skip-feeless-payment/std",
 	"pallet-sudo/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
 	"pallet-transaction-payment/std",
 	"pallet-transaction-storage/std",
+	"pallet-utility/std",
 	"pallet-xcm-benchmarks?/std",
 	"pallet-xcm/std",
+	"pallets-common/std",
 	"parachain-info/std",
 	"parachains-common/std",
 	"polkadot-parachain-primitives/std",
@@ -133,6 +139,7 @@ std = [
 	"sp-core/std",
 	"sp-genesis-builder/std",
 	"sp-inherents/std",
+	"sp-io/std",
 	"sp-keyring/std",
 	"sp-offchain/std",
 	"sp-runtime/std",
@@ -164,12 +171,16 @@ runtime-benchmarks = [
 	"pallet-balances/runtime-benchmarks",
 	"pallet-collator-selection/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
+	"pallet-session/runtime-benchmarks",
+	"pallet-skip-feeless-payment/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
+	"pallet-utility/runtime-benchmarks",
 	"pallet-xcm-benchmarks/runtime-benchmarks",
 	"pallet-xcm/runtime-benchmarks",
+	"pallets-common/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
 	"polkadot-parachain-primitives/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
@@ -196,11 +207,14 @@ try-runtime = [
 	"pallet-collator-selection/try-runtime",
 	"pallet-message-queue/try-runtime",
 	"pallet-session/try-runtime",
+	"pallet-skip-feeless-payment/try-runtime",
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
+	"pallet-utility/try-runtime",
 	"pallet-xcm/try-runtime",
+	"pallets-common/try-runtime",
 	"parachain-info/try-runtime",
 	"parachains-common/try-runtime",
 	"polkadot-runtime-common/try-runtime",
@@ -216,4 +230,4 @@ metadata-hash = ["substrate-wasm-builder/metadata-hash"]
 # A feature that should be enabled when the runtime should be built for on-chain
 # deployment. This will disable stuff that shouldn't be part of the on-chain wasm
 # to make it smaller, like logging for example.
-on-chain-release-build = ["metadata-hash"]
+on-chain-release-build = ["metadata-hash", "sp-api/disable-logging"]
