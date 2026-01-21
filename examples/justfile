@@ -234,7 +234,12 @@ ipfs-start test_dir: _check-docker
     echo "   Container: ipfs-node"
     echo "   Waiting for container to start..."
     sleep 5
-    
+
+    # Bitswap logging
+    docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
+    docker exec ipfs-node ipfs log level bitswap debug
+    docker exec ipfs-node ipfs log level bitswap/client debug
+
     # Store container name in PID directory for cleanup
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
@@ -387,11 +392,14 @@ run-authorize-and-store runtime mode="ws": npm-install
     if [ "{{ mode }}" = "smoldot" ]; then
         # Set chainspec path based on runtime
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-1/cfg/westend-local-1006.json"
-        else # bulletin-polkadot-runtime
+            # Parachain: relay chain (required) + parachain spec (optional)
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1006.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH"
+        else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH"
         fi
-        node $SCRIPT_NAME "$CHAINSPEC_PATH"
     else
         node $SCRIPT_NAME
     fi
@@ -422,6 +430,31 @@ run-store-chunked-data runtime: npm-install
 
     set +e
     node store_chunked_data.js
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
+# Run store big data example.
+run-store-big-data runtime: npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting store big data workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node store_big_data.js
     EXAMPLE_EXIT=$?
 
     echo ""
