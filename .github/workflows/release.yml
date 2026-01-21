@@ -48,7 +48,16 @@ jobs:
             ${{ matrix.name }}_srtool_output.json
 
   build-node:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: polkadot-bulletin-chain-linux
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_name: polkadot-bulletin-chain-macos-aarch64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,11 +68,21 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rust-src
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install protobuf llvm
+          LLVM_PATH=$(brew --prefix llvm)
+          echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> $GITHUB_ENV
+          echo "LDFLAGS=-L$LLVM_PATH/lib" >> $GITHUB_ENV
+          echo "CPPFLAGS=-I$LLVM_PATH/include" >> $GITHUB_ENV
 
       - name: Build polkadot-bulletin-chain binary
         run: cargo build --profile production -p polkadot-bulletin-chain
@@ -71,7 +90,7 @@ jobs:
       - name: Upload polkadot-bulletin-chain binary
         uses: actions/upload-artifact@v4
         with:
-          name: polkadot-bulletin-chain
+          name: ${{ matrix.artifact_name }}
           path: target/production/polkadot-bulletin-chain
 
   publish-release:
@@ -90,7 +109,8 @@ jobs:
         run: |
           mkdir -p release-assets
           find artifacts -name "*.wasm" -exec cp {} release-assets/ \;
-          cp artifacts/polkadot-bulletin-chain/polkadot-bulletin-chain release-assets/
+          cp artifacts/polkadot-bulletin-chain-linux/polkadot-bulletin-chain release-assets/polkadot-bulletin-chain-linux
+          cp artifacts/polkadot-bulletin-chain-macos-aarch64/polkadot-bulletin-chain release-assets/polkadot-bulletin-chain-macos-aarch64
           ls -la release-assets/
 
       - name: Add runtime info to changelog
@@ -128,5 +148,6 @@ jobs:
         with:
           files: |
             release-assets/*.wasm
-            release-assets/polkadot-bulletin-chain
+            release-assets/polkadot-bulletin-chain-linux
+            release-assets/polkadot-bulletin-chain-macos-aarch64
           body_path: RELEASE_NOTES.md
