@@ -1,6 +1,5 @@
 extern crate alloc;
 
-use core::marker::PhantomData;
 use crate::{
 	xcm_config::{ImmediateExecutingXcmRouter, UniversalLocation, XcmConfig},
 	ConstU32, Runtime, RuntimeCall, RuntimeEvent,
@@ -13,6 +12,7 @@ use bp_messages::{
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_runtime::messages::MessageDispatchResult;
 use codec::{Decode, DecodeWithMemTracking, Encode};
+use core::marker::PhantomData;
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;

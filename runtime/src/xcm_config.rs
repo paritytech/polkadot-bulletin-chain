@@ -21,8 +21,8 @@ use crate::{
 	bridge_config::{BridgedNetwork, ToBridgeHaulBlobExporter},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
-use core::marker::PhantomData;
 use codec::{Decode, DecodeLimit, Encode};
+use core::marker::PhantomData;
 use frame_support::{
 	ensure, parameter_types,
 	traits::{Contains, Everything, Nothing, ProcessMessageError},
