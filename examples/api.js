@@ -3,6 +3,8 @@ import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 import { CHUNK_SIZE } from './common.js';
 import util from 'util';
 
+const UTILITY_BATCH_SIZE = 10;
+
 export async function authorizeAccount(
     typedApi,
     sudoSigner,
@@ -69,7 +71,7 @@ export async function authorizePreimage(
     contentHashes,
     maxSize = CHUNK_SIZE,
     txMode = TX_MODE_IN_BLOCK,
-    batchSize = 10,
+    batchSize = UTILITY_BATCH_SIZE,
 ) {
     const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
 
