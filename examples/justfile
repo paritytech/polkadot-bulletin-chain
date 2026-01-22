@@ -436,6 +436,15 @@ run-test-store-big-data test_dir:
     echo "🧪 Running store big data test (test_dir: {{ test_dir }})..."
     node store_big_data.js
 
+# Run authorize-preimage-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+run-test-authorize-preimage-and-store test_dir:
+    #!/usr/bin/env bash
+    set -e
+    echo "🧪 Running authorize preimage and store test (test_dir: {{ test_dir }})..."
+    node authorize_preimage_and_store_papi.js
+
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
 # ============================================================================
