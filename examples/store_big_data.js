@@ -189,24 +189,6 @@ async function main() {
             throw new Error('❌ Storing chunks failed! Error:' + err.message);
         }
 
-        // TODO: temporary do not download chunks (it changes something, with this the DAG download works).
-        // // Check all chunks are there.
-        // let downloadedChunks = [];
-        // for (const chunk of chunks) {
-        //     // Download the chunk from IPFS.
-        //     let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
-        //     downloadedChunks.push(block);
-        // }
-        // let fullBuffer = Buffer.concat(downloadedChunks);
-        // console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        // await fileToDisk(downloadedFilePath, fullBuffer);
-        // filesAreEqual(filePath, downloadedFilePath);
-        // assert.strictEqual(
-        //     dataSize,
-        //     fullBuffer.length,
-        //     '❌ Failed to download all the data!'
-        // );
-
         console.log(`Storing DAG...`);
         let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
         let cid = await store(bulletinAPI, signers[0].signer, dagBytes);
@@ -218,6 +200,23 @@ async function main() {
         assert.strictEqual(
             dataSize,
             downloadedContent.length,
+            '❌ Failed to download all the data!'
+        );
+
+        // Check all chunks are there.
+        let downloadedChunks = [];
+        for (const chunk of chunks) {
+            // Download the chunk from IPFS.
+            let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
+            downloadedChunks.push(block);
+        }
+        let fullBuffer = Buffer.concat(downloadedChunks);
+        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+        await fileToDisk(downloadedFilePath, fullBuffer);
+        filesAreEqual(filePath, downloadedFilePath);
+        assert.strictEqual(
+            dataSize,
+            fullBuffer.length,
             '❌ Failed to download all the data!'
         );
 
