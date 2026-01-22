@@ -1,9 +1,12 @@
 //! With Rococo Bridge Hub bridge configuration.
 
+extern crate alloc;
+
 use crate::{
 	xcm_config::{decode_bridge_message, XcmConfig},
 	ConstU32, Runtime, RuntimeEvent,
 };
+use core::marker::PhantomData;
 use bp_messages::{
 	source_chain::MessagesBridge,
 	target_chain::{DispatchMessage, MessageDispatch},
@@ -16,7 +19,6 @@ use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
 use sp_runtime::SaturatedConversion;
-use sp_std::marker::PhantomData;
 use xcm::{latest::ROCOCO_GENESIS_HASH, prelude::*};
 use xcm_builder::{DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError, HaulBlobExporter};
 use xcm_executor::XcmExecutor;

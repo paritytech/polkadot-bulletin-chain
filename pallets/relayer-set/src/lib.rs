@@ -18,13 +18,16 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 mod benchmarking;
 mod mock;
 mod tests;
 pub mod weights;
 
+use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
-use polkadot_sdk_frame::{deps::sp_core::sp_std::prelude::*, prelude::*};
+use polkadot_sdk_frame::prelude::*;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
 pub use pallet::*;

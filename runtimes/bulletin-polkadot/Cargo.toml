@@ -39,7 +39,6 @@ sp-io = { workspace = true }
 sp-offchain = { workspace = true }
 sp-runtime = { workspace = true }
 sp-session = { workspace = true }
-sp-std = { workspace = true }
 sp-transaction-pool = { workspace = true }
 sp-transaction-storage-proof = { workspace = true }
 sp-version = { workspace = true }
@@ -132,7 +131,6 @@ std = [
 	"sp-offchain/std",
 	"sp-runtime/std",
 	"sp-session/std",
-	"sp-std/std",
 	"sp-tracing/std",
 	"sp-transaction-pool/std",
 	"sp-transaction-storage-proof/std",

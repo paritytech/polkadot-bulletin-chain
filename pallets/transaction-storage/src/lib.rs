@@ -35,10 +35,11 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
-	deps::{sp_core::sp_std::prelude::*, *},
+	deps::*,
 	prelude::*,
 	traits::{
 		fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
