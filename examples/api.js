@@ -73,10 +73,12 @@ export async function authorizePreimage(
 ) {
     const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
 
-    // Collect hashes that need authorization
+    const totalBatches = Math.ceil(contentHashesArray.length / batchSize);
+
     for (let i = 0; i < contentHashesArray.length; i += batchSize) {
+        const batchNumber = Math.floor(i / batchSize) + 1;
         const batch = contentHashesArray.slice(i, i + batchSize);
-        console.log(`\n🔄 Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(contentHashesArray.length / batchSize)}`);
+        console.log(`\n🔄 Processing batch ${batchNumber} of ${totalBatches}`);
         console.log(
             `⬆️ Authorizing preimage with content hash: `, util.inspect(batch, { depth: null, colors: true })
         );
@@ -96,7 +98,7 @@ export async function authorizePreimage(
             call: batchTx.decodedCall
         });
 
-        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${Math.floor(i / batchSize) + 1}`, txMode);
+        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
     }
 }
 
