@@ -285,6 +285,7 @@ ipfs-shutdown test_dir:
     echo "🛑 Shutting down IPFS Docker container..."
     docker stop ipfs-node 2>/dev/null || echo "   ⚠ Container not running or already stopped"
     docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
+    docker volume rm ipfs-data 2>/dev/null || echo "   ⚠ Volume not found or already removed"
     
     # Clean up container file if it exists
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
