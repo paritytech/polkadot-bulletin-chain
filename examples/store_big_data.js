@@ -193,6 +193,7 @@ async function main() {
         );
 
         // Check all chunks are there.
+        console.log(`Downloading by chunks...`);
         let downloadedChunks = [];
         for (const chunk of chunks) {
             // Download the chunk from IPFS.
