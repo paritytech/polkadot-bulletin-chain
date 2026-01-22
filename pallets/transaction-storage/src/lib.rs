@@ -623,7 +623,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::remove_expired_preimage_authorization())]
 		#[pallet::authorize(|_source, hash| {
 			Pallet::<T>::to_validity_with_refund(
-				Pallet::<T>::check_unsigned_remove_expired_preimage(hash, CheckContext::Validate),
+				Pallet::<T>::check_unsigned_remove_expired_preimage_authorization(hash, CheckContext::Validate),
 			)
 		})]
 		#[pallet::weight_of_authorize(Weight::zero())]
@@ -1140,7 +1140,7 @@ pub mod pallet {
 					}))
 		}
 
-		fn check_unsigned_remove_expired_preimage(
+		fn check_unsigned_remove_expired_preimage_authorization(
 			hash: &ContentHash,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
@@ -1167,7 +1167,7 @@ pub mod pallet {
 				Call::<T>::remove_expired_account_authorization { who } =>
 					Self::check_unsigned_remove_expired_account(who, context),
 				Call::<T>::remove_expired_preimage_authorization { hash } =>
-					Self::check_unsigned_remove_expired_preimage(hash, context),
+					Self::check_unsigned_remove_expired_preimage_authorization(hash, context),
 				_ => Err(InvalidTransaction::Call.into()),
 			}
 		}
