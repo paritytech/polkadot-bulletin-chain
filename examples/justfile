@@ -96,17 +96,17 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     ROOT_DIR="{{ justfile_directory() }}/.."
     # Build the node binary (which will build the runtime as a dependency)
     cargo build --release -p polkadot-bulletin-chain
+    POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
         runtime   : {{ runtime }}
         test_dir  : {{ test_dir }}
         zombienet : $ZOMBIENET_BIN
-        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
-        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+        POLKADOT_BULLETIN_BINARY_PATH : $POLKADOT_BULLETIN_BINARY_PATH
     EOF
     cd "$ROOT_DIR"
-    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
+    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$POLKADOT_BULLETIN_BINARY_PATH" \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
     cd -
 
