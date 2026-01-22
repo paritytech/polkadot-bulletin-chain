@@ -70,7 +70,7 @@ jobs:
           # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
           git clone https://github.com/paritytech/polkadot-sdk.git
           cd polkadot-sdk
-          git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
+          git reset --hard 81a3af9830ea8b6ff64b066b73b04bb3b675add5
           cargo build -p polkadot-omni-node -r
           cd ..
           cp polkadot-sdk/target/release/polkadot-omni-node .
