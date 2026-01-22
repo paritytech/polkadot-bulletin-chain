@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from "os";
 import path from "path";
 import assert from "assert";
-import { authorizeAccount, store, fetchCid } from "./api.js";
+import { authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
@@ -168,6 +168,7 @@ async function main() {
             signers.map(a => a.address),
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK,
         );
 
         // Start 8 workers
