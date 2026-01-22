@@ -116,18 +116,6 @@ const ipfs = create({
     url: 'http://127.0.0.1:5001', // Local IPFS API
 });
 
-async function readFromIpfs(cid) {
-    // Fetch the block (downloads via Bitswap if not local)
-    console.log('Trying to get cid: ', cid);
-    const chunks = [];
-    for await (const chunk of ipfs.cat(cid)) {
-        chunks.push(chunk);
-    }
-    const fullData = Buffer.concat(chunks);
-    console.log('Received block: ', fullData);
-    return fullData
-}
-
 // Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
 // E.g.: node store_big_data.js --signer-disc=BB
 const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
