@@ -17,6 +17,9 @@ jobs:
           - name: bulletin-westend
             package: bulletin-westend-runtime
             path: runtimes/bulletin-westend
+          - name: bulletin-paseo
+            package: bulletin-westend-runtime
+            path: runtimes/bulletin-westend
           - name: bulletin-polkadot
             package: bulletin-polkadot-runtime
             path: runtimes/bulletin-polkadot

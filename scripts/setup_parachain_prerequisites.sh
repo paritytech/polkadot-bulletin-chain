@@ -32,7 +32,7 @@ echo "   Checking out latest master..."
 # TODO:
 # git reset --hard origin/master
 # Let's use the same commit as Cargo.toml to avoid moving Polkadot-SDK
-git reset --hard b2bcb74b13f1a1e082f701e3e05ce1be44d16790
+git reset --hard 81a3af9830ea8b6ff64b066b73b04bb3b675add5
 
 # Build polkadot binary
 echo "   Building polkadot binary (this may take a while)..."

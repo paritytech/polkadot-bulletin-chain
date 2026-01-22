@@ -187,13 +187,6 @@ docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12
 
 #### Example for Simple Authorizing and Store
 
-##### Using Legacy @polkadot/api (PJS)
-```
-cd examples
-npm install
-
-node authorize_and_store.js
-```
 
 ##### Using Modern PAPI (Polkadot API)
 ```bash
