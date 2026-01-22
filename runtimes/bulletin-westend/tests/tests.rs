@@ -137,6 +137,39 @@ fn assert_ok_ok(apply_result: ApplyExtrinsicResult) {
 	assert_ok!(apply_result.unwrap());
 }
 
+fn construct_unsigned_extrinsic(call: RuntimeCall) -> UncheckedExtrinsic {
+	let inner = (
+		frame_system::AuthorizeCall::<Runtime>::new(),
+		frame_system::CheckNonZeroSender::<Runtime>::new(),
+		frame_system::CheckSpecVersion::<Runtime>::new(),
+		frame_system::CheckTxVersion::<Runtime>::new(),
+		frame_system::CheckGenesis::<Runtime>::new(),
+		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
+		frame_system::CheckNonce::<Runtime>::from(0u32),
+		frame_system::CheckWeight::<Runtime>::new(),
+		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
+		bulletin_westend_runtime::ValidateSigned,
+		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+	);
+	let tx_ext: TxExtension =
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
+	UncheckedExtrinsic::new_transaction(call, tx_ext)
+}
+
+fn construct_and_apply_unsigned_extrinsic(call: RuntimeCall) -> ApplyExtrinsicResult {
+	let dispatch_info = call.get_dispatch_info();
+	let xt = construct_unsigned_extrinsic(call);
+	let xt_len = xt.encode().len();
+	tracing::info!(
+		"Applying unsigned extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
+		dispatch_info.class,
+		dispatch_info.pays_fee,
+		dispatch_info.total_weight(),
+		xt_len
+	);
+	bulletin_westend_runtime::Executive::apply_extrinsic(xt)
+}
+
 #[test]
 fn transaction_storage_runtime_sizes() {
 	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
@@ -217,6 +250,41 @@ fn transaction_storage_runtime_sizes() {
 			);
 		});
 }
+
+#[test]
+fn transaction_storage_unsigned_preimage_store_works() {
+	use bulletin_westend_runtime as runtime;
+	use bulletin_westend_runtime::BuildStorage;
+	use frame_support::assert_ok;
+	use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+
+	sp_io::TestExternalities::new(
+		runtime::RuntimeGenesisConfig::default().build_storage().unwrap(),
+	)
+	.execute_with(|| {
+		advance_block();
+
+		let data = vec![7u8; 2000];
+		let hash = sp_io::hashing::blake2_256(&data);
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			hash,
+			data.len() as u64,
+		));
+
+		let res = construct_and_apply_unsigned_extrinsic(RuntimeCall::TransactionStorage(
+			TxStorageCall::<Runtime>::store { data },
+		));
+		assert_ok!(res);
+		assert_ok!(res.unwrap());
+
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
 
 /// Test maximum write throughput: 8 transactions of 1 MiB each in a single block (8 MiB total).
 #[test]
