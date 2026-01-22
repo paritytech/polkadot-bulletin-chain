@@ -47,8 +47,8 @@ use xcm_builder::{
 	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
 	DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
 	DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
-	HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset,
-	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
+	HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset, RelayChainAsNative,
+	SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
 	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
 	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
 	XcmFeeManagerFromComponents,
@@ -204,8 +204,8 @@ where
 {
 	fn contains(asset: &Asset, origin: &Location) -> bool {
 		let loc = Origin::get();
-		&loc == origin
-			&& matches!(
+		&loc == origin &&
+			matches!(
 				asset,
 				Asset {
 					id: AssetId(asset_id_location),

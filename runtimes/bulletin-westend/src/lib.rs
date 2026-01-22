@@ -81,11 +81,11 @@ use sp_version::RuntimeVersion;
 use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
+#[cfg(feature = "runtime-benchmarks")]
+use xcm_config::AssetHubLocation;
 use xcm_config::{
 	FellowshipLocation, GovernanceLocation, TokenRelayLocation, XcmOriginToTransactDispatchOrigin,
 };
-#[cfg(feature = "runtime-benchmarks")]
-use xcm_config::AssetHubLocation;
 use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
 	fees::Error as XcmPaymentApiError,
