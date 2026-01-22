@@ -15,12 +15,13 @@
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
 //! XCM configuration for Polkadot Bulletin chain.
+extern crate alloc;
 
 use crate::{
 	bridge_config::{BridgedNetwork, ToBridgeHaulBlobExporter},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
-
+use core::marker::PhantomData;
 use codec::{Decode, DecodeLimit, Encode};
 use frame_support::{
 	ensure, parameter_types,
@@ -136,7 +137,7 @@ impl WeightTrader for NoopTrader {
 ///
 /// That's a 1:1 copy of corresponding Cumulus structure.
 pub struct AllowUnpaidTransactsFrom<RuntimeCall, AllowedOrigin>(
-	sp_std::marker::PhantomData<(RuntimeCall, AllowedOrigin)>,
+	PhantomData<(RuntimeCall, AllowedOrigin)>,
 );
 
 impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute
