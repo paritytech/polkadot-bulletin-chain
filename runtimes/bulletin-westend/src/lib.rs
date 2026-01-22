@@ -84,6 +84,8 @@ use xcm::{prelude::*, Version as XcmVersion};
 use xcm_config::{
 	FellowshipLocation, GovernanceLocation, TokenRelayLocation, XcmOriginToTransactDispatchOrigin,
 };
+#[cfg(feature = "runtime-benchmarks")]
+use xcm_config::AssetHubLocation;
 use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
 	fees::Error as XcmPaymentApiError,
@@ -964,7 +966,12 @@ impl_runtime_apis! {
 				}
 
 				fn teleportable_asset_and_dest() -> Option<(Asset, Location)> {
-					// Relay/native token can be teleported between AH and Relay.
+					// Non-system parachains do not support teleports.
+					None
+				}
+
+				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
+					// Non-system parachains use reserve transfers for DOT from Asset Hub.
 					Some((
 						Asset {
 							fun: Fungible(ExistentialDeposit::get()),
@@ -974,18 +981,32 @@ impl_runtime_apis! {
 					))
 				}
 
-				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
-					None
-				}
-
 				fn set_up_complex_asset_transfer() -> Option<(Assets, u32, Location, alloc::boxed::Box<dyn FnOnce()>)> {
-					let native_location = Parent.into();
-					let dest = Parent.into();
+					// Bulletin-westend is a non-system parachain that uses reserve transfers for the relay token.
+					// We set up a reserve transfer of the native token (relay token) to AssetHub.
+					use frame_support::traits::fungible::{Inspect, Mutate};
 
-					pallet_xcm::benchmarking::helpers::native_teleport_as_asset_transfer::<Runtime>(
-						native_location,
-						dest,
-					)
+					let dest = AssetHubLocation::get();
+					let fee_amount: Balance = ExistentialDeposit::get();
+					let fee_asset: Asset = (Location::parent(), fee_amount).into();
+
+					let who = frame_benchmarking::whitelisted_caller();
+					// Give some multiple of the existential deposit
+					let balance: Balance = fee_amount + ExistentialDeposit::get() * 1000;
+					let _ = <Balances as Mutate<_>>::mint_into(&who, balance);
+					// verify initial balance
+					assert_eq!(<Balances as Inspect<_>>::balance(&who), balance);
+
+					let assets: Assets = vec![fee_asset.clone()].into();
+					let fee_index = 0u32;
+
+					// verify transferred successfully
+					let verify = alloc::boxed::Box::new(move || {
+						// verify balance after transfer, decreased by transferred amount
+						// (plus transport/remote fees)
+						assert!(<Balances as Inspect<_>>::balance(&who) <= balance - fee_amount);
+					});
+					Some((assets, fee_index, dest, verify))
 				}
 
 				fn get_asset() -> Asset {
@@ -1038,12 +1059,12 @@ impl_runtime_apis! {
 			}
 
 			parameter_types! {
-				pub const TrustedTeleporter: Option<(Location, Asset)> = Some((
+				pub const TrustedTeleporter: Option<(Location, Asset)> = None;
+				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
+				pub const TrustedReserve: Option<(Location, Asset)> = Some((
 					TokenRelayLocation::get(),
 					Asset { fun: Fungible(UNITS), id: AssetId(TokenRelayLocation::get()) },
 				));
-				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
-				pub const TrustedReserve: Option<(Location, Asset)> = None;
 			}
 
 			impl pallet_xcm_benchmarks::fungible::Config for Runtime {

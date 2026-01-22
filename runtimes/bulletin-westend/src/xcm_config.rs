@@ -32,7 +32,7 @@ use pallet_xcm::{AuthorizedAliasers, XcmPassthrough};
 use parachains_common::{
 	xcm_config::{
 		AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
-		ConcreteAssetFromSystem, ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+		ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
 	},
 	TREASURY_PALLET_ID,
 };
@@ -47,7 +47,7 @@ use xcm_builder::{
 	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
 	DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
 	DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
-	HashedDescription, IsConcrete, LocationAsSuperuser, ParentAsSuperuser, ParentIsPreset,
+	HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset,
 	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
 	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
 	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
@@ -119,9 +119,9 @@ pub type XcmOriginToTransactDispatchOrigin = (
 	// Native converter for sibling Parachains; will convert to a `SiblingPara` origin when
 	// recognized.
 	SiblingParachainAsNative<cumulus_pallet_xcm::Origin, RuntimeOrigin>,
-	// Superuser converter for the Relay-chain (Parent) location. This will allow it to issue a
-	// transaction from the Root origin.
-	ParentAsSuperuser<RuntimeOrigin>,
+	// AssetHub can execute as root (based on: https://github.com/polkadot-fellows/runtimes/issues/651).
+	// This will allow it to issue a transaction from the Root origin.
+	LocationAsSuperuser<Equals<AssetHubLocation>, RuntimeOrigin>,
 	// Native signed account converter; this just converts an `AccountId32` origin into a normal
 	// `RuntimeOrigin::Signed` origin of the same 32-byte value.
 	SignedAccountId32AsNative<RelayNetwork, RuntimeOrigin>,
@@ -159,14 +159,15 @@ pub type Barrier = TrailingSetTopicAsId<
 					// If the message is one that immediately attempts to pay for execution, then
 					// allow it.
 					AllowTopLevelPaidExecutionFrom<Everything>,
-					// Parent, its pluralities (i.e. governance bodies), and the Fellows plurality
-					// get free execution.
+					// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
+					// and AssetHub get free execution.
 					AllowExplicitUnpaidExecutionFrom<(
 						ParentOrParentsPlurality,
 						FellowsPlurality,
 						Equals<GovernanceLocation>,
 						// Let's allow a People chain for PoP authorizations.
 						Equals<PeopleLocation>,
+						Equals<AssetHubLocation>,
 					)>,
 					// Subscriptions for version tracking are OK.
 					AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
@@ -191,11 +192,36 @@ pub type WaivedLocations = (
 	Equals<RootLocation>,
 	RelayOrOtherSystemParachains<AllSiblingSystemParachains, Runtime>,
 	Equals<RelayTreasuryLocation>,
+	Equals<AssetHubLocation>,
 );
 
-/// Cases where a remote origin is accepted as trusted Teleporter for a given asset:
-/// - WND with the parent Relay Chain and sibling parachains.
-pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
+/// Helper type to match DOT (relay native token) from Asset Hub.
+/// Non-system parachains should trust Asset Hub as the reserve location for DOT.
+pub struct IsDotFrom<Origin>(core::marker::PhantomData<Origin>);
+impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsDotFrom<Origin>
+where
+	Origin: frame_support::traits::Get<Location>,
+{
+	fn contains(asset: &Asset, origin: &Location) -> bool {
+		let loc = Origin::get();
+		&loc == origin
+			&& matches!(
+				asset,
+				Asset {
+					id: AssetId(asset_id_location),
+					fun: Fungible(_),
+				} if *asset_id_location == TokenRelayLocation::get()
+			)
+	}
+}
+
+/// Reserve locations for assets.
+/// Non-system parachains should trust Asset Hub as the reserve for relay chain native token (DOT).
+pub type Reserves = IsDotFrom<AssetHubLocation>;
+
+/// Cases where a remote origin is accepted as trusted Teleporter for a given asset.
+/// Non-system parachains should not accept teleports, use reserve transfers instead.
+pub type TrustedTeleporters = ();
 
 /// Defines origin aliasing rules for this chain.
 ///
@@ -217,10 +243,10 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Bulletin chain does not recognize a reserve location for any asset. Users must teleport ROC
-	// where allowed (e.g. with the Relay Chain).
-	type IsReserve = ();
-	type IsTeleporter = TrustedTeleporters;
+	// As a non-system parachain, Bulletin accepts DOT reserve transfers from Asset Hub.
+	// Teleports are not supported.
+	type IsReserve = Reserves;
+	type IsTeleporter = ();
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
 	type Weigher = WeightInfoBounds<
@@ -290,7 +316,7 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type XcmTeleportFilter = Everything;
+	type XcmTeleportFilter = Nothing;
 	type XcmReserveTransferFilter = Everything;
 	type Weigher = WeightInfoBounds<
 		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
