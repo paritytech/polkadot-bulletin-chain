@@ -1,5 +1,23 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
+import { CHUNK_SIZE, toHex } from './common.js';
+import util from 'util';
+
+const UTILITY_BATCH_SIZE = 20;
+
+// Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
+function toBinary(data) {
+    let bytes;
+    if (typeof data === 'string') {
+        const buf = Buffer.from(data);
+        bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    } else if (data instanceof Uint8Array) {
+        bytes = data;
+    } else {
+        bytes = new Uint8Array(data);
+    }
+    return new Binary(bytes);
+}
 
 export async function authorizeAccount(
     typedApi,
@@ -61,21 +79,48 @@ export async function authorizeAccount(
     await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
 }
 
-export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK) {
+export async function authorizePreimage(
+    typedApi,
+    sudoSigner,
+    contentHashes,
+    maxSize = CHUNK_SIZE,
+    txMode = TX_MODE_IN_BLOCK,
+    batchSize = UTILITY_BATCH_SIZE,
+) {
+    const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
+    const totalBatches = Math.ceil(contentHashesArray.length / batchSize);
+
+    for (let i = 0; i < contentHashesArray.length; i += batchSize) {
+        const batchNumber = Math.floor(i / batchSize) + 1;
+        const batch = contentHashesArray.slice(i, i + batchSize);
+        console.log(`\n🔄 Processing batch ${batchNumber} of ${totalBatches}`);
+        console.log(`⬆️ Authorizing preimage with content hash: ${batch.map(toHex).join(', ')}`);
+
+        const authorizeCalls = batch.map(contentHash =>
+            typedApi.tx.TransactionStorage.authorize_preimage({
+                content_hash: toBinary(contentHash),
+                max_size: BigInt(maxSize)
+            }).decodedCall
+        );
+
+        // Wrap in Sudo(Utility::batchAll(...))
+        const batchTx = typedApi.tx.Utility.batch_all({
+            calls: authorizeCalls
+        });
+        const sudoTx = typedApi.tx.Sudo.sudo({
+            call: batchTx.decodedCall
+        });
+
+        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
+    }
+}
+
+export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, client) {
     console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
-    // Convert data to Uint8Array then wrap in Binary for PAPI typed API
-    const bytes =
-        typeof data === 'string'
-            ? new Uint8Array(Buffer.from(data))
-            : data instanceof Uint8Array
-                ? data
-                : new Uint8Array(data);
-    const binaryData = new Binary(bytes);
-
-    const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
-    await waitForTransaction(tx, signer, "Store", txMode);
+    const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
+    await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
     return cid;
 }
 
@@ -100,10 +145,20 @@ const TX_MODE_CONFIG = {
     },
 };
 
-function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS) {
+async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
-        return Promise.reject(new Error(`Unhandled txMode: ${txMode}`));
+        throw new Error(`Unhandled txMode: ${txMode}`);
+    }
+
+    // Get the observable - either signed or unsigned
+    let observable;
+    if (signer === null) {
+        console.log(`⬆️ Submitting unsigned ${txName}`);
+        const bareTx = await tx.getBareTx();
+        observable = client.submitAndWatch(bareTx);
+    } else {
+        observable = tx.signSubmitAndWatch(signer);
     }
 
     return new Promise((resolve, reject) => {
@@ -123,7 +178,7 @@ function waitForTransaction(tx, signer, txName, txMode = TX_MODE_IN_BLOCK, timeo
             }
         }, timeoutMs);
 
-        sub = tx.signSubmitAndWatch(signer).subscribe({
+        sub = observable.subscribe({
             next: (ev) => {
                 console.log(`✅ ${txName} event:`, ev.type);
                 if (!resolved && config.match(ev)) {

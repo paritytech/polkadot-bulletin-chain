@@ -2,22 +2,16 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { setupKeyringAndSigners } from './common.js';
+import { authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
+import { setupKeyringAndSigners, getContentHash } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed]
-const args = process.argv.slice(2);
-const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const NODE_WS = 'ws://localhost:10000';
 const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 async function main() {
     await cryptoWaitReady();
-
-    console.log(`Connecting to: ${NODE_WS}`);
-    console.log(`Using seed: ${SEED}`);
 
     let client, resultCode;
     try {
@@ -26,24 +20,23 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Papisigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
         let expectedCid = await cidFromBytes(dataToStore);
+        let contentHash = getContentHash(dataToStore);
 
-        // Authorize an account.
-        await authorizeAccount(
+        // Authorize a preimage.
+        await authorizePreimage(
             bulletinAPI,
             sudoSigner,
-            whoAddress,
-            100,
-            BigInt(100 * 1024 * 1024), // 100 MiB
-            TX_MODE_FINALIZED_BLOCK,
+            contentHash,
+            BigInt(dataToStore.length)
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, whoSigner, dataToStore);
+        const cid = await store(bulletinAPI, null, dataToStore, TX_MODE_IN_BLOCK, client);
         console.log("✅ Data stored successfully with CID:", cid);
 
         // Read back from IPFS
