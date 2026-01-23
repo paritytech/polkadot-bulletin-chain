@@ -311,9 +311,6 @@ pub mod pallet {
 			if total_chunks != 0 {
 				<Transactions<T>>::insert(n, transactions);
 			}
-
-			// Kill storage.
-			CidConfigForStore::<T>::kill();
 		}
 
 		fn integrity_test() {
