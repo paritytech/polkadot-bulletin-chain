@@ -15,7 +15,6 @@
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
 //! XCM configuration for Polkadot Bulletin chain.
-extern crate alloc;
 
 use crate::{
 	bridge_config::{BridgedNetwork, ToBridgeHaulBlobExporter},

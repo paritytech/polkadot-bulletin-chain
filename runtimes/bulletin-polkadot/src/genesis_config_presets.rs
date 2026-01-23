@@ -1,4 +1,3 @@
-extern crate alloc;
 
 use crate::{
 	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig,

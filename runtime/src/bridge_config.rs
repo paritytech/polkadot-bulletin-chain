@@ -1,7 +1,5 @@
 //! With Rococo Bridge Hub bridge configuration.
 
-extern crate alloc;
-
 use crate::{
 	xcm_config::{decode_bridge_message, XcmConfig},
 	ConstU32, Runtime, RuntimeEvent,

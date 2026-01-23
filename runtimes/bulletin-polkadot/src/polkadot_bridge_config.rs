@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use crate::{
 	xcm_config::{ImmediateExecutingXcmRouter, UniversalLocation, XcmConfig},
 	ConstU32, Runtime, RuntimeCall, RuntimeEvent,
