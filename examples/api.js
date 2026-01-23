@@ -7,13 +7,16 @@ const UTILITY_BATCH_SIZE = 20;
 
 // Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
 function toBinary(data) {
+    let bytes;
     if (typeof data === 'string') {
-        return new Binary(new Uint8Array(Buffer.from(data)));
+        const buf = Buffer.from(data);
+        bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    } else if (data instanceof Uint8Array) {
+        bytes = data;
+    } else {
+        bytes = new Uint8Array(data);
     }
-    if (data instanceof Uint8Array) {
-        return new Binary(data);
-    }
-    return new Binary(new Uint8Array(data));
+    return new Binary(bytes);
 }
 
 export async function authorizeAccount(
