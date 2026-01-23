@@ -1,5 +1,5 @@
-import { blake2AsU8a } from '@polkadot/util-crypto';
 import * as multihash from 'multiformats/hashes/digest';
+import { getContentHash } from './common.js';
 import { CID } from 'multiformats/cid';
 import * as dagPB from '@ipld/dag-pb';
 import { UnixFS } from 'ipfs-unixfs';
@@ -63,13 +63,12 @@ export async function cidFromBytes(bytes, cidCodec = 0x55, mhCode = 0xb220) {
     let mh;
     switch (mhCode) {
         case 0xb220: // blake2b-256
-            mh = multihash.create(mhCode, blake2AsU8a(bytes));
+            mh = multihash.create(mhCode, getContentHash(bytes));
             break;
-
         default:
-            throw new Error("Unhandled multihash code: " + mhCode)
+            throw new Error("Unhandled multihash code: " + mhCode);
     }
-    return CID.createV1(cidCodec, mh)
+    return CID.createV1(cidCodec, mh);
 }
 
 export function convertCid(cid, cidCodec) {

@@ -4,15 +4,16 @@ import fs from 'fs'
 import os from "os";
 import path from "path";
 import assert from "assert";
-import { authorizeAccount, store, TX_MODE_FINALIZED_BLOCK } from "./api.js";
-import {cidFromBytes} from "./cid_dag_metadata.js";
+import { authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
+import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
+    HTTP_IPFS_API,
     newSigner,
     fileToDisk,
     filesAreEqual,
-    generateTextImage
+    generateTextImage,
 } from "./common.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
@@ -115,18 +116,6 @@ const ipfs = create({
     url: 'http://127.0.0.1:5001', // Local IPFS API
 });
 
-async function readFromIpfs(cid) {
-    // Fetch the block (downloads via Bitswap if not local)
-    console.log('Trying to get cid: ', cid);
-    const chunks = [];
-    for await (const chunk of ipfs.cat(cid)) {
-        chunks.push(chunk);
-    }
-    const fullData = Buffer.concat(chunks);
-    console.log('Received block: ', fullData);
-    return fullData
-}
-
 // Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
 // E.g.: node store_big_data.js --signer-disc=BB
 const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
@@ -142,6 +131,7 @@ async function main() {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletinimggen-"));
         const filePath = path.join(tmpDir, "image.jpeg");
         const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
+        const downloadedFileByDagPath = path.join(tmpDir, "downloadedByDag.jpeg");
         generateTextImage(filePath, "Hello, Bulletin big - " + new Date().toString(), "big");
 
         // Init WS PAPI client and typed api.
@@ -188,7 +178,22 @@ async function main() {
             throw new Error('❌ Storing chunks failed! Error:' + err.message);
         }
 
+        console.log(`Storing DAG...`);
+        let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
+        let cid = await store(bulletinAPI, signers[0].signer, dagBytes);
+        console.log(`Downloading...${cid} / ${rootCid}`);
+        let downloadedContent = await fetchCid(HTTP_IPFS_API, rootCid);
+        console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
+        await fileToDisk(downloadedFileByDagPath, downloadedContent);
+        filesAreEqual(filePath, downloadedFileByDagPath);
+        assert.strictEqual(
+            dataSize,
+            downloadedContent.length,
+            '❌ Failed to download all the data!'
+        );
+
         // Check all chunks are there.
+        console.log(`Downloading by chunks...`);
         let downloadedChunks = [];
         for (const chunk of chunks) {
             // Download the chunk from IPFS.

@@ -7,7 +7,7 @@ import { create } from 'ipfs-http-client'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { waitForNewBlock, generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, NonceManager } from './common.js'
+import { waitForNewBlock, generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, NonceManager, toHex } from './common.js'
 import { authorizeAccount, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
@@ -25,9 +25,6 @@ const OUT_2_PATH = './retrieved_random_picture2.jpg'
 const CHUNK_SIZE = 4 * 1024 // 4 KB
 // -----------------
 
-function to_hex(input) {
-    return '0x' + input.toString('hex');
-}
 
 /**
  * Read the file, chunk it, store in Bulletin and return CIDs.
@@ -42,7 +39,7 @@ async function storeChunkedFile(api, pair, filePath, nonceMgr) {
     for (let i = 0; i < fileData.length; i += CHUNK_SIZE) {
         const chunk = fileData.subarray(i, i + CHUNK_SIZE)
         const cid = await cidFromBytes(chunk)
-        chunks.push({cid, bytes: to_hex(chunk), len: chunk.length})
+        chunks.push({cid, bytes: toHex(chunk), len: chunk.length})
     }
     console.log(`✂️ Split into ${chunks.length} chunks`)
 
@@ -129,7 +126,7 @@ export async function storeMetadata(api, pair, chunks, nonceMgr) {
     console.log('🧩 Metadata CID:', metadataCid.toString())
 
     // 3️⃣ Store JSON bytes in Bulletin
-    const tx = api.tx.transactionStorage.store(to_hex(jsonBytes));
+    const tx = api.tx.transactionStorage.store(toHex(jsonBytes));
     const result = await tx.signAndSend(pair, { nonce: nonceMgr.getAndIncrement()})
     console.log('📤 Metadata stored in Bulletin:', result.toHuman?.())
 
@@ -184,7 +181,7 @@ async function storeProof(api, sudoPair, pair, rootCID, dagFileBytes, nonceMgr, 
     const rawDagCid = await cidFromBytes(dagFileBytes)
 
     // Store DAG bytes in Bulletin
-    const storeTx = api.tx.transactionStorage.store(to_hex(dagFileBytes));
+    const storeTx = api.tx.transactionStorage.store(toHex(dagFileBytes));
     const storeResult = await storeTx.signAndSend(pair, { nonce: nonceMgr.getAndIncrement()})
     console.log('📤 DAG proof "bytes" stored in Bulletin:', storeResult.toHuman?.())
 
