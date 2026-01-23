@@ -1,0 +1,36 @@
+[package]
+name = "bulletin-westend-integration-tests"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+description = "XCM integration tests for Bulletin Westend parachain"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+codec = { workspace = true, default-features = true }
+frame-support = { workspace = true, default-features = true }
+frame-system = { workspace = true, default-features = true }
+pallet-balances = { workspace = true, default-features = true }
+pallet-message-queue = { workspace = true, default-features = true }
+pallet-xcm = { workspace = true, default-features = true }
+sp-core = { workspace = true, default-features = true }
+sp-keyring = { workspace = true, default-features = true }
+sp-runtime = { workspace = true, default-features = true }
+xcm = { workspace = true, default-features = true }
+xcm-executor = { workspace = true, default-features = true }
+
+# Emulator framework
+xcm-emulator = { workspace = true }
+emulated-integration-tests-common = { workspace = true }
+
+# Emulated chains from Polkadot SDK
+westend-emulated-chain = { workspace = true }
+asset-hub-westend-emulated-chain = { workspace = true }
+asset-hub-westend-runtime = { workspace = true }
+
+# Local runtime
+bulletin-westend-runtime = { workspace = true, default-features = true }
+cumulus-primitives-core = { workspace = true, default-features = true }
+parachains-common = { workspace = true, default-features = true }
+cumulus-pallet-xcmp-queue = { workspace = true, default-features = true }

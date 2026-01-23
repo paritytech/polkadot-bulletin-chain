@@ -45,10 +45,9 @@ use xcm_builder::{
 	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
 	AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
 	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
-	DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
-	DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
-	HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset, RelayChainAsNative,
-	SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
+	DescribeAllTerminal, DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor,
+	FungibleAdapter, HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset,
+	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
 	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
 	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
 	XcmFeeManagerFromComponents,
@@ -143,40 +142,35 @@ impl Contains<Location> for FellowsPlurality {
 	}
 }
 
-pub type Barrier = TrailingSetTopicAsId<
-	DenyThenTry<
-		DenyRecursively<DenyReserveTransferToRelayChain>,
+pub type Barrier = TrailingSetTopicAsId<(
+	// Allow local users to buy weight credit.
+	TakeWeightCredit,
+	// Expected responses are OK.
+	AllowKnownQueryResponses<PolkadotXcm>,
+	WithComputedOrigin<
 		(
-			// Allow local users to buy weight credit.
-			TakeWeightCredit,
-			// Expected responses are OK.
-			AllowKnownQueryResponses<PolkadotXcm>,
-			WithComputedOrigin<
-				(
-					// If the message is one that immediately attempts to pay for execution, then
-					// allow it.
-					AllowTopLevelPaidExecutionFrom<Everything>,
-					// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
-					// and AssetHub get free execution.
-					AllowExplicitUnpaidExecutionFrom<(
-						ParentOrParentsPlurality,
-						FellowsPlurality,
-						Equals<GovernanceLocation>,
-						// Let's allow a People chain for PoP authorizations.
-						Equals<PeopleLocation>,
-						Equals<AssetHubLocation>,
-					)>,
-					// Subscriptions for version tracking are OK.
-					AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
-					// HRMP notifications from the relay chain are OK.
-					AllowHrmpNotificationsFromRelayChain,
-				),
-				UniversalLocation,
-				ConstU32<8>,
-			>,
+			// If the message is one that immediately attempts to pay for execution, then
+			// allow it.
+			AllowTopLevelPaidExecutionFrom<Everything>,
+			// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
+			// and AssetHub get free execution.
+			AllowExplicitUnpaidExecutionFrom<(
+				ParentOrParentsPlurality,
+				FellowsPlurality,
+				Equals<GovernanceLocation>,
+				// Let's allow a People chain for PoP authorizations.
+				Equals<PeopleLocation>,
+				Equals<AssetHubLocation>,
+			)>,
+			// Subscriptions for version tracking are OK.
+			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
+			// HRMP notifications from the relay chain are OK.
+			AllowHrmpNotificationsFromRelayChain,
 		),
+		UniversalLocation,
+		ConstU32<8>,
 	>,
->;
+)>;
 
 parameter_types! {
 	pub TreasuryAccount: AccountId = TREASURY_PALLET_ID.into_account_truncating();
@@ -192,8 +186,8 @@ pub type WaivedLocations = (
 	Equals<AssetHubLocation>,
 );
 
-/// Helper type to match DOT (relay native token) from Asset Hub.
-/// Non-system parachains should trust Asset Hub as the reserve location for DOT.
+/// Helper type to match WND (relay native token) from Asset Hub.
+/// Non-system parachains should trust Asset Hub as the reserve location for the relay token.
 pub struct IsDotFrom<Origin>(core::marker::PhantomData<Origin>);
 impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsDotFrom<Origin>
 where

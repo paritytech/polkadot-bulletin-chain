@@ -971,13 +971,13 @@ impl_runtime_apis! {
 				}
 
 				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
-					// Non-system parachains use reserve transfers for DOT from Asset Hub.
+					// Non-system parachains use reserve transfers for WND from Asset Hub.
 					Some((
 						Asset {
 							fun: Fungible(ExistentialDeposit::get()),
 							id: AssetId(Parent.into())
 						},
-						Parent.into(),
+						AssetHubLocation::get(),
 					))
 				}
 
@@ -1061,8 +1061,8 @@ impl_runtime_apis! {
 			parameter_types! {
 				pub const TrustedTeleporter: Option<(Location, Asset)> = None;
 				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
-				pub const TrustedReserve: Option<(Location, Asset)> = Some((
-					TokenRelayLocation::get(),
+				pub TrustedReserve: Option<(Location, Asset)> = Some((
+					AssetHubLocation::get(),
 					Asset { fun: Fungible(UNITS), id: AssetId(TokenRelayLocation::get()) },
 				));
 			}
