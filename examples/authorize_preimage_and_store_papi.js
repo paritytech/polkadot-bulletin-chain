@@ -27,7 +27,7 @@ async function main() {
         let expectedCid = await cidFromBytes(dataToStore);
         let contentHash = getContentHash(dataToStore);
 
-        // Authorize an account.
+        // Authorize a preimage.
         await authorizePreimage(
             bulletinAPI,
             sudoSigner,
