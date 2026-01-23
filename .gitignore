@@ -22,5 +22,3 @@ package-lock.json
 examples/retrieved_picture.*
 kubo/
 zombienet-*
-zombienet/
-bulletin-data
