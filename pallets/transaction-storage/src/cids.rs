@@ -125,12 +125,12 @@ impl TryFrom<CidData> for CidGeneric<32> {
 	fn try_from(cid_data: CidData) -> Result<Self, Self::Error> {
 		let mh = Multihash::<32>::wrap(cid_data.hashing.multihash_code(), &cid_data.content_hash)
 			.map_err(|e| {
-				tracing::warn!(
-					target: LOG_TARGET,
-					"Failed to create CID for content_hash: {:?}, hashing: {:?}, codec: {:?}, error: {:?}",
-					cid_data.content_hash, cid_data.hashing, cid_data.codec, e
-				);
-			})?;
+			tracing::warn!(
+				target: LOG_TARGET,
+				"Failed to create CID for content_hash: {:?}, hashing: {:?}, codec: {:?}, error: {:?}",
+				cid_data.content_hash, cid_data.hashing, cid_data.codec, e
+			);
+		})?;
 		Ok(CidGeneric::<32>::new_v1(cid_data.codec, mh))
 	}
 }
@@ -204,7 +204,10 @@ mod tests {
 		)
 		.expect("valid_cid");
 		assert_eq!(cid_raw.to_bytes().expect("valid cid"), expected_cid.to_bytes());
-		assert_eq!(to_base32(Base::Base32Lower, &cid_raw.to_bytes().expect("valid cid")), expected_cid_base32);
+		assert_eq!(
+			to_base32(Base::Base32Lower, &cid_raw.to_bytes().expect("valid cid")),
+			expected_cid_base32
+		);
 		assert_eq!(cid_raw.codec, expected_cid.codec());
 		assert_eq!(cid_raw.hashing.multihash_code(), expected_cid.hash().code());
 		assert_eq!(cid_raw.content_hash, expected_cid.hash().digest());
@@ -254,7 +257,10 @@ mod tests {
 			)
 			.expect("calculate_cid succeeded");
 
-			assert_eq!(to_base32(Base::Base32Lower, &calculated.to_bytes().expect("valid cid")), expected_cid_str);
+			assert_eq!(
+				to_base32(Base::Base32Lower, &calculated.to_bytes().expect("valid cid")),
+				expected_cid_str
+			);
 			assert_eq!(calculated.codec, codec);
 			assert_eq!(calculated.hashing.multihash_code(), mh_code);
 			assert_eq!(calculated.content_hash, cid.hash().digest());
