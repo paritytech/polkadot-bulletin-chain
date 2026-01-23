@@ -18,7 +18,8 @@
 //! This crate contains integration tests demonstrating WND reserve transfers
 //! between Asset Hub and Bulletin chain using the xcm-emulator framework.
 
-pub mod tests;
+#[cfg(test)]
+mod tests;
 
 use asset_hub_westend_emulated_chain::AssetHubWestend;
 use bulletin_westend_runtime::SessionKeys;
