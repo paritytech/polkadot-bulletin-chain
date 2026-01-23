@@ -31,7 +31,7 @@ trait WeighAssets {
 	fn weigh_assets(&self, weight: Weight) -> Weight;
 }
 
-const MAX_ASSETS: u64 = 100;
+const MAX_ASSETS: u64 = 5;
 
 impl WeighAssets for AssetFilter {
 	fn weigh_assets(&self, weight: Weight) -> Weight {
