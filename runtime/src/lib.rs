@@ -8,6 +8,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+use alloc::vec::Vec;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{derive_impl, traits::ValidatorRegistration};
 use frame_system::EnsureRoot;
@@ -31,7 +32,6 @@ use sp_runtime::{
 	},
 	ApplyExtrinsicResult, DispatchResult, MultiSignature,
 };
-use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
@@ -703,7 +703,7 @@ impl_runtime_apis! {
 			Runtime::metadata_at_version(version)
 		}
 
-		fn metadata_versions() -> sp_std::vec::Vec<u32> {
+		fn metadata_versions() -> Vec<u32> {
 			Runtime::metadata_versions()
 		}
 	}

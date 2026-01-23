@@ -8,6 +8,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+use alloc::vec::Vec;
 use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{
@@ -35,7 +36,6 @@ use sp_runtime::{
 	},
 	ApplyExtrinsicResult, DispatchResult, MultiSignature,
 };
-use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
@@ -790,6 +790,7 @@ mod benches {
 
 	impl BridgeParachainsConfig<bridge_config::WithPolkadotBridgeParachainsInstance> for Runtime {
 		fn parachains() -> Vec<bp_polkadot_core::parachains::ParaId> {
+			use alloc::vec;
 			use bp_runtime::Parachain;
 			vec![bp_polkadot_core::parachains::ParaId(
 				bridge_config::bp_people_polkadot::PeoplePolkadot::PARACHAIN_ID,
@@ -906,7 +907,7 @@ impl_runtime_apis! {
 			Runtime::metadata_at_version(version)
 		}
 
-		fn metadata_versions() -> sp_std::vec::Vec<u32> {
+		fn metadata_versions() -> Vec<u32> {
 			Runtime::metadata_versions()
 		}
 	}
