@@ -1,6 +1,6 @@
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
-import { blake2AsU8a } from '@polkadot/util-crypto';
+import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'
 import { createCanvas } from "canvas";
 import fs from "fs";
 import assert from "assert";
@@ -227,8 +227,17 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
     return false;
 }
 
-export function getContentHash(bytes) {
-  return blake2AsU8a(bytes);
+export function getContentHash(bytes, mhCode = 0xb220) {
+  switch (mhCode) {
+    case 0xb220: // blake2b-256
+      return blake2AsU8a(bytes);
+    case 0x12:   // sha2-256
+      return sha256AsU8a(bytes);
+    case 0x1b:   // keccak-256
+      return keccak256AsU8a(bytes);
+    default:
+      throw new Error("Unhandled multihash code: " + mhCode);
+  }
 }
 
 export function toHex(bytes) {
