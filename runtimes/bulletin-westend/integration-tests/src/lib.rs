@@ -24,15 +24,20 @@ use asset_hub_westend_emulated_chain::AssetHubWestend;
 use bulletin_westend_runtime::SessionKeys;
 use cumulus_primitives_core::ParaId;
 use emulated_integration_tests_common::{
-	accounts, impl_accounts_helpers_for_parachain, impl_assert_events_helpers_for_parachain,
-	impl_xcm_helpers_for_parachain, xcm_emulator::decl_test_parachains, AuraDigestProvider,
+	accounts::{self, ALICE, BOB},
+	impl_accounts_helpers_for_parachain, impl_assert_events_helpers_for_parachain,
+	impl_xcm_helpers_for_parachain,
+	xcm_emulator::decl_test_parachains,
+	AuraDigestProvider,
 };
 use frame_support::traits::OnInitialize;
 use parachains_common::{AuraId, Balance};
 use sp_core::sr25519;
 use sp_keyring::Sr25519Keyring;
 use westend_emulated_chain::Westend;
-use xcm_emulator::{decl_test_networks, Parachain};
+use xcm_emulator::{
+	decl_test_networks, decl_test_sender_receiver_accounts_parameter_types, Parachain,
+};
 
 /// Bulletin Westend parachain ID (1006 on Westend).
 pub const BULLETIN_PARA_ID: u32 = 1006;
@@ -77,6 +82,11 @@ decl_test_networks! {
 impl_accounts_helpers_for_parachain!(BulletinWestend);
 impl_assert_events_helpers_for_parachain!(BulletinWestend);
 impl_xcm_helpers_for_parachain!(BulletinWestend);
+
+decl_test_sender_receiver_accounts_parameter_types! {
+	BulletinWestendPara { sender: ALICE, receiver: BOB },
+	AssetHubWestendPara { sender: ALICE, receiver: BOB }
+}
 
 /// Genesis configuration for Bulletin Westend parachain.
 pub fn bulletin_genesis() -> sp_runtime::Storage {

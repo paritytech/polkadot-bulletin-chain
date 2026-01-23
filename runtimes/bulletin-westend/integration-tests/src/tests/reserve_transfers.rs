@@ -19,14 +19,16 @@
 //! 1. WND reserve transfers from Asset Hub to Bulletin (Asset Hub is reserve - LocalReserve)
 //! 2. WND reserve transfers from Bulletin back to Asset Hub (DestinationReserve)
 
-use crate::{BulletinWestend, WestendMockNet, BULLETIN_PARA_ID};
+use crate::{
+	AssetHubWestendParaReceiver, AssetHubWestendParaSender, BulletinWestend,
+	BulletinWestendParaReceiver, BulletinWestendParaSender, WestendMockNet, BULLETIN_PARA_ID,
+};
 use asset_hub_westend_emulated_chain::AssetHubWestend;
 use frame_support::{
 	assert_ok,
 	traits::fungible::{Inspect, Mutate},
 };
 use parachains_common::Balance;
-use sp_keyring::Sr25519Keyring;
 use xcm::{latest::prelude::*, VersionedXcm};
 use xcm_emulator::{Chain, Network, Parachain, TestExt};
 use xcm_executor::traits::TransferType;
@@ -39,11 +41,6 @@ const TRANSFER_AMOUNT: Balance = 1_000_000_000_000; // 1 WND
 
 /// Amount to use for fees.
 const FEE_AMOUNT: Balance = 500_000_000_000; // 0.5 WND
-
-/// Get the account ID for a keyring as bytes.
-fn account_id(keyring: Sr25519Keyring) -> [u8; 32] {
-	keyring.to_account_id().into()
-}
 
 /// Type alias for AssetHubWestend with our network.
 type AssetHubWestendNet = AssetHubWestend<WestendMockNet>;
@@ -64,31 +61,32 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 	// Reset the network state for a clean test
 	WestendMockNet::reset();
 
-	let alice = Sr25519Keyring::Alice;
-	let bob = Sr25519Keyring::Bob;
+	let sender = AssetHubWestendParaSender::get();
+	let receiver = BulletinWestendParaReceiver::get();
 
 	// Get initial balances
-	let alice_initial_on_asset_hub = AssetHubWestendNet::execute_with(|| {
+	let sender_initial_on_asset_hub = AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
-		<Balances as Inspect<_>>::balance(&alice.to_account_id())
+		<Balances as Inspect<_>>::balance(&sender)
 	});
 
-	let bob_initial_on_bulletin = BulletinWestendNet::execute_with(|| {
+	let receiver_initial_on_bulletin = BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
-		<Balances as Inspect<_>>::balance(&bob.to_account_id())
+		<Balances as Inspect<_>>::balance(&receiver)
 	});
 
-	// Ensure Alice has enough balance
+	// Ensure sender has enough balance
 	assert!(
-		alice_initial_on_asset_hub >= TRANSFER_AMOUNT + FEE_AMOUNT,
-		"Alice needs sufficient balance on Asset Hub"
+		sender_initial_on_asset_hub >= TRANSFER_AMOUNT + FEE_AMOUNT,
+		"Sender needs sufficient balance on Asset Hub"
 	);
 
 	// Construct the destination: Bulletin parachain (from Asset Hub's perspective)
 	let dest = Location::new(1, [Parachain(BULLETIN_PARA_ID)]);
 
-	// Construct the beneficiary: Bob on the destination chain
-	let beneficiary = Location::new(0, [AccountId32 { network: None, id: account_id(bob) }]);
+	// Construct the beneficiary: receiver on the destination chain
+	let beneficiary =
+		Location::new(0, [AccountId32 { network: None, id: receiver.clone().into() }]);
 
 	// WND asset location (relay chain native token)
 	let wnd_location = Location::parent();
@@ -109,7 +107,7 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 		type RuntimeOrigin = <AssetHubWestendNet as Chain>::RuntimeOrigin;
 
 		let result = PolkadotXcm::transfer_assets_using_type_and_then(
-			RuntimeOrigin::signed(alice.to_account_id()),
+			RuntimeOrigin::signed(sender.clone()),
 			Box::new(dest.into()),
 			Box::new(assets.into()),
 			Box::new(TransferType::LocalReserve),
@@ -131,23 +129,23 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 		assert_ok!(result);
 	});
 
-	// Verify Alice's balance decreased on Asset Hub
+	// Verify sender's balance decreased on Asset Hub
 	AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
-		let alice_balance = <Balances as Inspect<_>>::balance(&alice.to_account_id());
+		let sender_balance = <Balances as Inspect<_>>::balance(&sender);
 		assert!(
-			alice_balance < alice_initial_on_asset_hub,
-			"Alice's balance should decrease after transfer"
+			sender_balance < sender_initial_on_asset_hub,
+			"Sender's balance should decrease after transfer"
 		);
 		// Account for transfer amount + fees
 		assert!(
-			alice_initial_on_asset_hub - alice_balance >= TRANSFER_AMOUNT,
-			"Alice should have transferred at least {} WND",
+			sender_initial_on_asset_hub - sender_balance >= TRANSFER_AMOUNT,
+			"Sender should have transferred at least {} WND",
 			TRANSFER_AMOUNT
 		);
 	});
 
-	// Verify Bob's balance increased on Bulletin
+	// Verify receiver's balance increased on Bulletin
 	BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
 
@@ -158,13 +156,13 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 			println!("  Bulletin Event: {:?}", event.event);
 		}
 
-		let bob_balance = <Balances as Inspect<_>>::balance(&bob.to_account_id());
-		// Bob should receive the transferred amount minus any execution fees
+		let receiver_balance = <Balances as Inspect<_>>::balance(&receiver);
+		// Receiver should receive the transferred amount minus any execution fees
 		assert!(
-			bob_balance > bob_initial_on_bulletin,
-			"Bob's balance should increase after receiving transfer. Initial: {}, Current: {}",
-			bob_initial_on_bulletin,
-			bob_balance
+			receiver_balance > receiver_initial_on_bulletin,
+			"Receiver's balance should increase after receiving transfer. Initial: {}, Current: {}",
+			receiver_initial_on_bulletin,
+			receiver_balance
 		);
 	});
 }
@@ -198,27 +196,27 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		<Balances as Mutate<_>>::mint_into(&sovereign_account, fund_amount).unwrap();
 	});
 
-	let alice = Sr25519Keyring::Alice;
-	let bob = Sr25519Keyring::Bob;
+	let sender = BulletinWestendParaSender::get();
+	let receiver = AssetHubWestendParaReceiver::get();
 
 	// Get initial balances
-	let alice_initial_on_bulletin = BulletinWestendNet::execute_with(|| {
+	let sender_initial_on_bulletin = BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
-		<Balances as Inspect<_>>::balance(&alice.to_account_id())
+		<Balances as Inspect<_>>::balance(&sender)
 	});
 
-	let bob_initial_on_asset_hub = AssetHubWestendNet::execute_with(|| {
+	let receiver_initial_on_asset_hub = AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
-		<Balances as Inspect<_>>::balance(&bob.to_account_id())
+		<Balances as Inspect<_>>::balance(&receiver)
 	});
 
-	// Ensure Alice has enough balance on Bulletin
-	// If Alice doesn't have enough, we skip this test since it depends on genesis config
-	if alice_initial_on_bulletin < TRANSFER_AMOUNT + FEE_AMOUNT {
+	// Ensure sender has enough balance on Bulletin
+	// If sender doesn't have enough, we skip this test since it depends on genesis config
+	if sender_initial_on_bulletin < TRANSFER_AMOUNT + FEE_AMOUNT {
 		println!(
-			"Skipping test: Alice needs at least {} on Bulletin, has {}",
+			"Skipping test: Sender needs at least {} on Bulletin, has {}",
 			TRANSFER_AMOUNT + FEE_AMOUNT,
-			alice_initial_on_bulletin
+			sender_initial_on_bulletin
 		);
 		return;
 	}
@@ -226,8 +224,9 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 	// Construct the destination: Asset Hub parachain (from Bulletin's perspective)
 	let dest = Location::new(1, [Parachain(ASSET_HUB_PARA_ID)]);
 
-	// Construct the beneficiary: Bob on the destination chain
-	let beneficiary = Location::new(0, [AccountId32 { network: None, id: account_id(bob) }]);
+	// Construct the beneficiary: receiver on the destination chain
+	let beneficiary =
+		Location::new(0, [AccountId32 { network: None, id: receiver.clone().into() }]);
 
 	// WND asset location (relay chain native token)
 	let wnd_location = Location::parent();
@@ -248,7 +247,7 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		type RuntimeOrigin = <BulletinWestendNet as Chain>::RuntimeOrigin;
 
 		let result = PolkadotXcm::transfer_assets_using_type_and_then(
-			RuntimeOrigin::signed(alice.to_account_id()),
+			RuntimeOrigin::signed(sender.clone()),
 			Box::new(dest.into()),
 			Box::new(assets.into()),
 			Box::new(TransferType::DestinationReserve),
@@ -270,23 +269,23 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		assert_ok!(result);
 	});
 
-	// Verify Alice's balance decreased on Bulletin
+	// Verify sender's balance decreased on Bulletin
 	BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
-		let alice_balance = <Balances as Inspect<_>>::balance(&alice.to_account_id());
+		let sender_balance = <Balances as Inspect<_>>::balance(&sender);
 		assert!(
-			alice_balance < alice_initial_on_bulletin,
-			"Alice's balance should decrease after transfer"
+			sender_balance < sender_initial_on_bulletin,
+			"Sender's balance should decrease after transfer"
 		);
 		// Account for transfer amount + fees
 		assert!(
-			alice_initial_on_bulletin - alice_balance >= TRANSFER_AMOUNT,
-			"Alice should have transferred at least {} WND",
+			sender_initial_on_bulletin - sender_balance >= TRANSFER_AMOUNT,
+			"Sender should have transferred at least {} WND",
 			TRANSFER_AMOUNT
 		);
 	});
 
-	// Verify Bob's balance increased on Asset Hub
+	// Verify receiver's balance increased on Asset Hub
 	AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
 
@@ -297,13 +296,13 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 			println!("  Asset Hub Event: {:?}", event.event);
 		}
 
-		let bob_balance = <Balances as Inspect<_>>::balance(&bob.to_account_id());
-		// Bob should receive the transferred amount minus any execution fees
+		let receiver_balance = <Balances as Inspect<_>>::balance(&receiver);
+		// Receiver should receive the transferred amount minus any execution fees
 		assert!(
-			bob_balance > bob_initial_on_asset_hub,
-			"Bob's balance should increase after receiving transfer. Initial: {}, Current: {}",
-			bob_initial_on_asset_hub,
-			bob_balance
+			receiver_balance > receiver_initial_on_asset_hub,
+			"Receiver's balance should increase after receiving transfer. Initial: {}, Current: {}",
+			receiver_initial_on_asset_hub,
+			receiver_balance
 		);
 	});
 }
