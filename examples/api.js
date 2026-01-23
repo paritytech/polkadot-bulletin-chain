@@ -170,8 +170,34 @@ function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK
 
         let observer;
         if (signer === null) {
-            console.log(`⬆️ Submitting ${txName} with client: `, util.inspect(client, { depth: null, colors: true }));
-            observer = client.submitAndWatch(tx);
+            // For unsigned transactions, get bare tx and submit via client
+            console.log(`⬆️ Submitting unsigned ${txName}`);
+            tx.getBareTx().then(bareTx => {
+                sub = client.submitAndWatch(bareTx).subscribe({
+                    next: (ev) => {
+                        console.log(`✅ ${txName} event:`, ev.type);
+                        if (!resolved && config.match(ev)) {
+                            console.log(config.log(txName, ev));
+                            cleanup();
+                            resolve(ev);
+                        }
+                    },
+                    error: (err) => {
+                        console.error(`❌ ${txName} error:`, err);
+                        if (!resolved) {
+                            cleanup();
+                            reject(err);
+                        }
+                    },
+                    complete: () => {
+                        console.log(`✅ ${txName} complete!`);
+                    }
+                });
+            }).catch(err => {
+                cleanup();
+                reject(err);
+            });
+            return; // Skip the common subscribe below
         } else {
             observer = tx.signSubmitAndWatch(signer);
         }
