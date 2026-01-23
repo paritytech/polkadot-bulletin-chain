@@ -34,11 +34,10 @@ use polkadot_sdk_frame::{
 		traits::{GetStorageVersion, OnRuntimeUpgrade},
 		BoundedVec,
 	},
-	prelude::{frame_system::RawOrigin, *},
+	prelude::{frame_system::RawOrigin, TransactionSource, *},
 	testing_prelude::*,
 	traits::{Authorize, StorageVersion},
 };
-use polkadot_sdk_frame::prelude::TransactionSource;
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;

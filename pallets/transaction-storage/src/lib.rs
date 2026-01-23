@@ -353,10 +353,7 @@ pub mod pallet {
 		})]
 		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			let is_authorized = matches!(
-				origin.into(),
-				Ok(frame_system::RawOrigin::Authorized)
-			);
+			let is_authorized = matches!(origin.into(), Ok(frame_system::RawOrigin::Authorized));
 			if is_authorized {
 				Self::check_unsigned_store(data.as_slice(), true)
 					.map_err(Self::dispatch_error_from_validity)?;
@@ -432,10 +429,7 @@ pub mod pallet {
 			block: BlockNumberFor<T>,
 			index: u32,
 		) -> DispatchResultWithPostInfo {
-			let is_authorized = matches!(
-				origin.into(),
-				Ok(frame_system::RawOrigin::Authorized)
-			);
+			let is_authorized = matches!(origin.into(), Ok(frame_system::RawOrigin::Authorized));
 			if is_authorized {
 				Self::check_unsigned_renew(&block, &index, true)
 					.map_err(Self::dispatch_error_from_validity)?;
@@ -1063,11 +1057,7 @@ pub mod pallet {
 
 			let hash = hash();
 
-			Self::check_authorization(
-				AuthorizationScope::Preimage(hash),
-				size as u32,
-				consume,
-			)?;
+			Self::check_authorization(AuthorizationScope::Preimage(hash), size as u32, consume)?;
 
 			Ok(ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
 				.and_provides(hash)
