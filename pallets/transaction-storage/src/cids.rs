@@ -102,6 +102,10 @@ pub struct CidConfig {
 	pub hashing: HashingAlgorithm,
 }
 
+/// Error returned when CID creation fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CidError;
+
 /// Representation of a generated CID containing only the component parts.
 ///
 /// Use `CidGeneric::<32>::try_from(cid_data)` to build the actual [`CidGeneric`], or
@@ -120,7 +124,7 @@ pub struct CidData {
 }
 
 impl TryFrom<CidData> for CidGeneric<32> {
-	type Error = ();
+	type Error = CidError;
 
 	fn try_from(cid_data: CidData) -> Result<Self, Self::Error> {
 		let mh = Multihash::<32>::wrap(cid_data.hashing.multihash_code(), &cid_data.content_hash)
@@ -130,6 +134,7 @@ impl TryFrom<CidData> for CidGeneric<32> {
 				"Failed to create CID for content_hash: {:?}, hashing: {:?}, codec: {:?}, error: {:?}",
 				cid_data.content_hash, cid_data.hashing, cid_data.codec, e
 			);
+			CidError
 		})?;
 		Ok(CidGeneric::<32>::new_v1(cid_data.codec, mh))
 	}
@@ -151,8 +156,8 @@ impl CidData {
 /// - Hashing: Blake2b-256
 ///
 /// # Errors
-/// Returns `Err(())` if multihash wrapping fails.
-pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, ()> {
+/// Returns `Err(CidError)` if multihash wrapping fails.
+pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, CidError> {
 	// Determine hashing algorithm and codec
 	let (hashing, codec) = config.map_or_else(
 		|| {
@@ -205,7 +210,7 @@ mod tests {
 		.expect("valid_cid");
 		assert_eq!(cid_raw.to_bytes().expect("valid cid"), expected_cid.to_bytes());
 		assert_eq!(
-			to_base32(Base::Base32Lower, &cid_raw.to_bytes().expect("valid cid")),
+			to_base32(Base::Base32Lower, cid_raw.to_bytes().expect("valid cid")),
 			expected_cid_base32
 		);
 		assert_eq!(cid_raw.codec, expected_cid.codec());
@@ -258,7 +263,7 @@ mod tests {
 			.expect("calculate_cid succeeded");
 
 			assert_eq!(
-				to_base32(Base::Base32Lower, &calculated.to_bytes().expect("valid cid")),
+				to_base32(Base::Base32Lower, calculated.to_bytes().expect("valid cid")),
 				expected_cid_str
 			);
 			assert_eq!(calculated.codec, codec);

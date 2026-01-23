@@ -426,7 +426,7 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = info.content_hash.into();
+			let content_hash = info.content_hash;
 			sp_io::transaction_index::renew(extrinsic_index, content_hash);
 
 			let mut index = 0;
@@ -1052,7 +1052,7 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
 						info.size as usize,
-						|| info.content_hash.into(),
+						|| info.content_hash,
 						context,
 					)
 				},
