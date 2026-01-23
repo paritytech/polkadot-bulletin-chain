@@ -231,6 +231,10 @@ export function getContentHash(bytes) {
   return blake2AsU8a(bytes);
 }
 
+export function toHex(bytes) {
+  return '0x' + Buffer.from(bytes).toString('hex');
+}
+
 // // Try uncoment and: node common.js generateTextImage "B4" big
 //
 // const [, , command, ...args] = process.argv;

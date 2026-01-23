@@ -1,9 +1,20 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
-import { CHUNK_SIZE } from './common.js';
+import { CHUNK_SIZE, toHex } from './common.js';
 import util from 'util';
 
-const UTILITY_BATCH_SIZE = 10;
+const UTILITY_BATCH_SIZE = 20;
+
+// Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
+function toBinary(data) {
+    if (typeof data === 'string') {
+        return Binary.fromBytes(new Uint8Array(Buffer.from(data)));
+    }
+    if (data instanceof Uint8Array) {
+        return Binary.fromBytes(data);
+    }
+    return Binary.fromBytes(new Uint8Array(data));
+}
 
 export async function authorizeAccount(
     typedApi,
@@ -74,23 +85,20 @@ export async function authorizePreimage(
     batchSize = UTILITY_BATCH_SIZE,
 ) {
     const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
-
     const totalBatches = Math.ceil(contentHashesArray.length / batchSize);
 
     for (let i = 0; i < contentHashesArray.length; i += batchSize) {
         const batchNumber = Math.floor(i / batchSize) + 1;
         const batch = contentHashesArray.slice(i, i + batchSize);
         console.log(`\n🔄 Processing batch ${batchNumber} of ${totalBatches}`);
-        console.log(
-            `⬆️ Authorizing preimage with content hash: `, util.inspect(batch, { depth: null, colors: true })
-        );
+        console.log(`⬆️ Authorizing preimage with content hash: ${batch.map(toHex).join(', ')}`);
 
-        const authorizeCalls = batch.map(contentHash => {
+        const authorizeCalls = batch.map(contentHash =>
             typedApi.tx.TransactionStorage.authorize_preimage({
-                contentHash,
+                contentHash: toHex(contentHash),
                 maxSize
             }).decodedCall
-        });
+        );
 
         // Wrap in Sudo(Utility::batchAll(...))
         const batchTx = typedApi.tx.Utility.batch_all({
@@ -108,16 +116,7 @@ export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, c
     console.log('⬆️ Storing data with length=', data.length);
     const cid = await cidFromBytes(data);
 
-    // Convert data to Uint8Array then wrap in Binary for PAPI typed API
-    const bytes =
-        typeof data === 'string'
-            ? new Uint8Array(Buffer.from(data))
-            : data instanceof Uint8Array
-                ? data
-                : new Uint8Array(data);
-    const binaryData = new Binary(bytes);
-
-    const tx = typedApi.tx.TransactionStorage.store({ data: binaryData });
+    const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
     await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
     return cid;
 }
