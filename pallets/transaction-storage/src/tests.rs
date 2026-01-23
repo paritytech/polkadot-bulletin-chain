@@ -28,6 +28,7 @@ use super::{
 };
 use crate::migrations::v1::OldTransactionInfo;
 use codec::Encode;
+use frame_support::traits::Authorize;
 use polkadot_sdk_frame::{
 	deps::frame_support::{
 		storage::unhashed,
@@ -38,9 +39,8 @@ use polkadot_sdk_frame::{
 	testing_prelude::*,
 	traits::StorageVersion,
 };
-use frame_support::traits::Authorize;
-use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 use sp_runtime::transaction_validity::TransactionSource;
+use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;

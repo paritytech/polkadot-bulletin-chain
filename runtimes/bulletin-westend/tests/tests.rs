@@ -147,7 +147,9 @@ fn construct_unsigned_extrinsic(call: RuntimeCall) -> UncheckedExtrinsic {
 		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
 		frame_system::CheckNonce::<Runtime>::from(0u32),
 		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
+		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
+		),
 		bulletin_westend_runtime::ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
@@ -284,7 +286,6 @@ fn transaction_storage_unsigned_preimage_store_works() {
 		);
 	});
 }
-
 
 /// Test maximum write throughput: 8 transactions of 1 MiB each in a single block (8 MiB total).
 #[test]
