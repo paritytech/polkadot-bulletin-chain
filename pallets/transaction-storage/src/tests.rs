@@ -25,13 +25,13 @@ use super::{
 	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
 	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
+use frame_support::traits::Authorize;
 use polkadot_sdk_frame::{
 	prelude::{frame_system::RawOrigin, *},
 	testing_prelude::*,
 };
-use frame_support::traits::Authorize;
-use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 use sp_runtime::transaction_validity::TransactionSource;
+use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;
