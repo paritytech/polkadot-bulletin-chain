@@ -36,7 +36,7 @@ async function main() {
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, null, dataToStore, TX_MODE_IN_BLOCK, client);
+        const cid = await store(bulletinAPI, null, dataToStore, null, null, TX_MODE_IN_BLOCK, client);
         console.log("✅ Data stored successfully with CID:", cid);
 
         // Read back from IPFS
