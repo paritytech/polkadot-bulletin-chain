@@ -1,9 +1,6 @@
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
-import { CHUNK_SIZE, toHex } from './common.js';
-import util from 'util';
-
-const UTILITY_BATCH_SIZE = 20;
+import { CHUNK_SIZE, toHex, toHashingEnum } from './common.js';
 
 // Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
 function toBinary(data) {
@@ -115,20 +112,37 @@ export async function authorizePreimage(
     }
 }
 
-export async function store(typedApi, signer, data, txMode = TX_MODE_IN_BLOCK, client) {
+export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null) {
     console.log('⬆️ Storing data with length=', data.length);
-    const cid = await cidFromBytes(data);
+
+    // Add custom `TransactionExtension` for codec, if specified.
+    const txOpts = {};
+    let expectedCid;
+    if (cidCodec != null && mhCode != null) {
+        txOpts.customSignedExtensions = {
+            ProvideCidConfig: {
+                value: {
+                    codec: BigInt(cidCodec),
+                    hashing: toHashingEnum(mhCode),
+                }
+            }
+        };
+        expectedCid = await cidFromBytes(data, cidCodec, mhCode);
+    } else {
+        expectedCid = await cidFromBytes(data);
+    }
 
     const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
-    await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
-    return cid;
+    await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
+    return expectedCid;
 }
 
+const UTILITY_BATCH_SIZE = 20;
 export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
 
-const DEFAULT_TX_TIMEOUT_MS = 120_000; // 120 seconds or 20 blocks
+const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds or 30 blocks
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
@@ -145,7 +159,7 @@ const TX_MODE_CONFIG = {
     },
 };
 
-async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null) {
+async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
         throw new Error(`Unhandled txMode: ${txMode}`);
@@ -155,10 +169,10 @@ async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN
     let observable;
     if (signer === null) {
         console.log(`⬆️ Submitting unsigned ${txName}`);
-        const bareTx = await tx.getBareTx();
+        const bareTx = await tx.getBareTx(txOpts);
         observable = client.submitAndWatch(bareTx);
     } else {
-        observable = tx.signSubmitAndWatch(signer);
+        observable = tx.signSubmitAndWatch(signer, txOpts);
     }
 
     return new Promise((resolve, reject) => {

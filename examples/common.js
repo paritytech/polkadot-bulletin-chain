@@ -240,6 +240,16 @@ export function getContentHash(bytes, mhCode = 0xb220) {
   }
 }
 
+// Convert multihash code to HashingAlgorithm enum for the runtime
+export function toHashingEnum(mhCode) {
+  switch (mhCode) {
+    case 0xb220: return { type: "Blake2b256" };
+    case 0x12:   return { type: "Sha2_256" };
+    case 0x1b:   return { type: "Keccak256" };
+    default:     throw new Error(`Unhandled multihash code: ${mhCode}`);
+  }
+}
+
 export function toHex(bytes) {
   return '0x' + Buffer.from(bytes).toString('hex');
 }

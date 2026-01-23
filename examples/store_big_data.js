@@ -35,7 +35,7 @@ const resultQueue = [];
 function pushToResultQueue(data) {
     resultQueue.push(data);
 }
-function waitForQueueLength(targetLength, timeoutMs = 60000) {
+function waitForQueueLength(targetLength, timeoutMs = 300000) {
     return new Promise((resolve, reject) => {
         const start = Date.now();
 
@@ -47,7 +47,7 @@ function waitForQueueLength(targetLength, timeoutMs = 60000) {
                 clearInterval(interval);
                 reject(new Error(`Timeout waiting for ${targetLength} entries in queue`));
             }
-        }, 50); // check every 50ms
+        }, 500); // check every 500ms
     });
 }
 
@@ -171,7 +171,7 @@ async function main() {
         // wait for all chunks are stored
         try {
             console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
-            await waitForQueueLength(chunks.length, 180_000);
+            await waitForQueueLength(chunks.length);
             console.log(`All chunks ${chunks.length} are stored!`);
         } catch (err) {
             console.error(err.message);

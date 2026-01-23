@@ -45,7 +45,6 @@ async function storeChunkedFile(api, pair, filePath) {
     return { chunks };
 }
 
-let client;
 async function main() {
     await cryptoWaitReady()
     if (fs.existsSync(FILE_PATH)) {
@@ -58,62 +57,72 @@ async function main() {
     }
     generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString());
 
-    console.log('🛰 Connecting to Bulletin node...')
-    // Create PAPI client with WebSocket provider
-    client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
-    // Get typed API with generated descriptors
-    const typedApi = client.getTypedApi(bulletin);
+    let client, resultCode;
+    try {
+        console.log('🛰 Connecting to Bulletin node...')
+        // Create PAPI client with WebSocket provider
+        client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
+        // Get typed API with generated descriptors
+        const typedApi = client.getTypedApi(bulletin);
 
-    // Create signers
-    const { signer: sudoSigner } = newSigner('//Alice');
-    const { signer: whoSigner, address: whoAddress } = newSigner('//Nativeipfsdagsigner');
+        // Create signers
+        const { signer: sudoSigner } = newSigner('//Alice');
+        const { signer: whoSigner, address: whoAddress } = newSigner('//Nativeipfsdagsigner');
 
-    console.log('✅ Connected to Bulletin node')
-    console.log(`💳 Using account: ${whoAddress}`)
+        console.log('✅ Connected to Bulletin node')
+        console.log(`💳 Using account: ${whoAddress}`)
 
-    // Make sure an account can store data.
-    await authorizeAccount(typedApi, sudoSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
+        // Make sure an account can store data.
+        await authorizeAccount(typedApi, sudoSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
 
-    // Read the file, chunk it, store in Bulletin and return CIDs.
-    let { chunks } = await storeChunkedFile(typedApi, whoSigner, FILE_PATH);
+        // Read the file, chunk it, store in Bulletin and return CIDs.
+        let { chunks } = await storeChunkedFile(typedApi, whoSigner, FILE_PATH);
 
-    ////////////////////////////////////////////////////////////////////////////////////
-    // Example download picture by rootCID with IPFS DAG feature and HTTP gateway.
-    // Demonstrates how to download chunked content by one root CID.
-    // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
-    const { rootCid: expectedRootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0x12);
-    let calculatedRootCid = await cidFromBytes(dagBytes, 0x70, 0x12);
-    assert.deepStrictEqual(expectedRootCid, calculatedRootCid);
+        ////////////////////////////////////////////////////////////////////////////////////
+        // Example download picture by rootCID with IPFS DAG feature and HTTP gateway.
+        // Demonstrates how to download chunked content by one root CID.
+        // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
+        const { rootCid: expectedRootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0x12);
+        let calculatedRootCid = await cidFromBytes(dagBytes, 0x70, 0x12);
+        assert.deepStrictEqual(expectedRootCid, calculatedRootCid);
 
-    // Store DAG file directly to the Bulletin. with DAG-PB / SHA2_256 content_hash.
-    // !!! (No IPFS magic needed: ipfs.dag.put or ipfs.block.put(dagBytes, { format: 'dag-pb', mhtype: 'sha2-256'}))
-    let rootCid = await store(typedApi, whoSigner, dagBytes);
-    assert.deepStrictEqual(expectedRootCid, rootCid);
+        // Store DAG file directly to the Bulletin. with DAG-PB / SHA2_256 content_hash.
+        // !!! (No IPFS magic needed: ipfs.dag.put or ipfs.block.put(dagBytes, { format: 'dag-pb', mhtype: 'sha2-256'}))
+        let rootCid = await store(typedApi, whoSigner, dagBytes, 0x70, 0x12);
+        assert.deepStrictEqual(expectedRootCid, rootCid);
 
-    // Read by rootCID directly over IPFS gateway, which handles download all the chunks.
-    // (Other words Bulletin is compatible)
-    console.log('🧱 DAG stored on Bulletin with CID:', rootCid.toString())
-    console.log('\n🌐 Try opening in browser:')
-    console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
-    console.log("   (You'll see binary content since this is an image)")
-    console.log('')
-    console.log(`   http://127.0.0.1:8080/ipfs/${convertCid(rootCid, 0x55)}`)
-    console.log("   (You'll see the DAG file itself)")
+        // Read by rootCID directly over IPFS gateway, which handles download all the chunks.
+        // (Other words Bulletin is compatible)
+        console.log('🧱 DAG stored on Bulletin with CID:', rootCid.toString())
+        console.log('\n🌐 Try opening in browser:')
+        console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
+        console.log("   (You'll see binary content since this is an image)")
+        console.log('')
+        console.log(`   http://127.0.0.1:8080/ipfs/${convertCid(rootCid, 0x55)}`)
+        console.log("   (You'll see the DAG file itself)")
 
-    // Download the content from IPFS HTTP gateway.
-    const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
-    console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-    await fileToDisk(OUT_PATH, fullBuffer);
-    filesAreEqual(FILE_PATH, OUT_PATH);
+        // Download the content from IPFS HTTP gateway.
+        const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
+        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+        await fileToDisk(OUT_PATH, fullBuffer);
+        filesAreEqual(FILE_PATH, OUT_PATH);
 
-    // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
-    const rootCidAsRaw = convertCid(rootCid, 0x55);
-    const storedDagNode = dagPB.decode(await fetchCid(HTTP_IPFS_API, rootCidAsRaw));
-    console.log("✅ Reconstructed DAG file: ", storedDagNode);
+        // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
+        const rootCidAsRaw = convertCid(rootCid, 0x55);
+        const storedDagNode = dagPB.decode(await fetchCid(HTTP_IPFS_API, rootCidAsRaw));
+        const decodedDagNode = dagPB.decode(Buffer.from(dagBytes));
+        console.log("✅ Reconstructed DAG file: ", storedDagNode);
+        assert.deepStrictEqual(storedDagNode, decodedDagNode);
 
-    console.log(`\n\n\n✅✅✅ Passed all tests ✅✅✅`);
+        console.log(`\n\n\n✅✅✅ Passed all tests ✅✅✅`);
+        resultCode = 0;
+    } catch (error) {
+        console.error("❌ Error:", error);
+        resultCode = 1;
+    } finally {
+        if (client) client.destroy();
+        process.exit(resultCode);
+    }
 }
 
-main().catch(console.error).finally(() => {
-    if (client) client.destroy();
-});
+await main();
