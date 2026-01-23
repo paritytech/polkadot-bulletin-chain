@@ -20,8 +20,8 @@
 #![cfg(feature = "runtime-benchmarks")]
 extern crate alloc;
 
-use alloc::vec;
 use super::{Pallet as TransactionStorage, *};
+use alloc::vec;
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
 	deps::frame_system::{EventRecord, Pallet as System, RawOrigin},
