@@ -393,7 +393,7 @@ pub mod pallet {
 			Self::deposit_event(Event::Stored {
 				index,
 				content_hash: cid.content_hash,
-				cid: cid.cid,
+				cid: cid.to_bytes(),
 			});
 			Ok(())
 		}
@@ -629,7 +629,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32, content_hash: ContentHash, cid: Cid },
+		Stored { index: u32, content_hash: ContentHash, cid: Option<Cid> },
 		/// Renewed data under specified index.
 		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.

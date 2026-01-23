@@ -38,6 +38,7 @@ pub type CidCodec = u64;
 /// Supported hashing algorithms for computing CIDs.
 #[derive(
 	Clone,
+	Copy,
 	PartialEq,
 	Eq,
 	Encode,
@@ -101,20 +102,46 @@ pub struct CidConfig {
 	pub hashing: HashingAlgorithm,
 }
 
-/// Representation of a generated CID.
-#[derive(Debug, PartialEq, Eq)]
+/// Representation of a generated CID containing only the component parts.
+///
+/// Use `CidGeneric::<32>::try_from(cid_data)` to build the actual [`CidGeneric`], or
+/// [`CidData::to_bytes()`] for the serialized CIDv1 bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CidData {
 	/// 32-byte content hash of the input data.
 	///
 	/// Note: This is used for indexing transactions and retrieving
-	/// `self.client.indexed_transaction(hash)`. Note: This is equal to `cid.hash().digest()`.
+	/// `self.client.indexed_transaction(hash)`. This is equal to `cid.hash().digest()`.
 	pub content_hash: ContentHash,
 	/// Hashing algorithm used.
 	pub hashing: HashingAlgorithm,
 	/// Codec used for the CIDv1.
 	pub codec: CidCodec,
-	/// CIDv1 serialized bytes (codec + multihash(content_hash)).
-	pub cid: Cid,
+}
+
+impl TryFrom<CidData> for CidGeneric<32> {
+	type Error = ();
+
+	fn try_from(cid_data: CidData) -> Result<Self, Self::Error> {
+		let mh = Multihash::<32>::wrap(cid_data.hashing.multihash_code(), &cid_data.content_hash)
+			.map_err(|e| {
+				tracing::warn!(
+					target: LOG_TARGET,
+					"Failed to create CID for content_hash: {:?}, hashing: {:?}, codec: {:?}, error: {:?}",
+					cid_data.content_hash, cid_data.hashing, cid_data.codec, e
+				);
+			})?;
+		Ok(CidGeneric::<32>::new_v1(cid_data.codec, mh))
+	}
+}
+
+impl CidData {
+	/// Serialize the CID to bytes (CIDv1 format).
+	///
+	/// Returns `None` if the CID cannot be created.
+	pub fn to_bytes(&self) -> Option<Cid> {
+		CidGeneric::<32>::try_from(*self).ok().map(|cid| cid.to_bytes())
+	}
 }
 
 /// Compute a CIDv1 for the given data with optional configuration.
@@ -137,21 +164,12 @@ pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, 
 
 	// Hash the data
 	let content_hash = hashing.hash(data);
+	let cid_data = CidData { content_hash, hashing, codec };
 
-	// Wrap hash into a multihash
-	let multihash_code = hashing.multihash_code();
-	let mh = Multihash::<32>::wrap(multihash_code, &content_hash).map_err(|e| {
-		tracing::warn!(
-			target: LOG_TARGET,
-			"Failed to create Multihash for content_hash: {content_hash:?}, multihash_code: {multihash_code:?}, error: {e:?}"
-		);
-	})?;
+	// Validate CID can be created
+	let _: CidGeneric<32> = cid_data.try_into()?;
 
-	// Create CIDv1 bytes
-	let cid_bytes = CidGeneric::<32>::new_v1(codec, mh).to_bytes();
-
-	// Return all relevant data
-	Ok(CidData { content_hash, hashing, codec, cid: cid_bytes })
+	Ok(cid_data)
 }
 
 #[cfg(test)]
@@ -185,8 +203,8 @@ mod tests {
 			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 }),
 		)
 		.expect("valid_cid");
-		assert_eq!(cid_raw.cid, expected_cid.to_bytes());
-		assert_eq!(to_base32(Base::Base32Lower, &cid_raw.cid), expected_cid_base32);
+		assert_eq!(cid_raw.to_bytes().expect("valid cid"), expected_cid.to_bytes());
+		assert_eq!(to_base32(Base::Base32Lower, &cid_raw.to_bytes().expect("valid cid")), expected_cid_base32);
 		assert_eq!(cid_raw.codec, expected_cid.codec());
 		assert_eq!(cid_raw.hashing.multihash_code(), expected_cid.hash().code());
 		assert_eq!(cid_raw.content_hash, expected_cid.hash().digest());
@@ -236,7 +254,7 @@ mod tests {
 			)
 			.expect("calculate_cid succeeded");
 
-			assert_eq!(to_base32(Base::Base32Lower, &calculated.cid), expected_cid_str);
+			assert_eq!(to_base32(Base::Base32Lower, &calculated.to_bytes().expect("valid cid")), expected_cid_str);
 			assert_eq!(calculated.codec, codec);
 			assert_eq!(calculated.hashing.multihash_code(), mh_code);
 			assert_eq!(calculated.content_hash, cid.hash().digest());
