@@ -164,6 +164,7 @@ These guidelines are used by the Claude Code review bot and should be followed b
 - **Arithmetic Safety**: Use `checked_*`, `saturating_*`, or `wrapping_*` arithmetic to prevent overflow. Never use raw arithmetic operators on user-provided values.
 - **Naming**: Follow Rust naming conventions (snake_case for functions/variables, CamelCase for types).
 - **Complexity**: Prefer simple, readable code. Avoid over-engineering and premature abstractions.
+- **No useless comments**: Comments should mostly explain **why** things are done, not **how**, the code should be readable enough to explain the how.
 
 ### FRAME Pallet Standards
 

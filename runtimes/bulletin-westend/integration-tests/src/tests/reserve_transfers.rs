@@ -58,13 +58,11 @@ type BulletinWestendNet = BulletinWestend<WestendMockNet>;
 /// Since Asset Hub is the reserve for WND, we use LocalReserve transfer type.
 #[test]
 fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
-	// Reset the network state for a clean test
 	WestendMockNet::reset();
 
 	let sender = AssetHubWestendParaSender::get();
 	let receiver = BulletinWestendParaReceiver::get();
 
-	// Get initial balances
 	let sender_initial_on_asset_hub = AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
 		<Balances as Inspect<_>>::balance(&sender)
@@ -75,38 +73,24 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 		<Balances as Inspect<_>>::balance(&receiver)
 	});
 
-	// Ensure sender has enough balance
 	assert!(
 		sender_initial_on_asset_hub >= TRANSFER_AMOUNT + FEE_AMOUNT,
 		"Sender needs sufficient balance on Asset Hub"
 	);
 
-	// Construct the destination: Bulletin parachain (from Asset Hub's perspective)
 	let dest = Location::new(1, [Parachain(BULLETIN_PARA_ID)]);
-
-	// Construct the beneficiary: receiver on the destination chain
 	let beneficiary =
 		Location::new(0, [AccountId32 { network: None, id: receiver.clone().into() }]);
-
-	// WND asset location (relay chain native token)
 	let wnd_location = Location::parent();
-
-	// Assets to transfer
 	let assets: Assets = (wnd_location.clone(), TRANSFER_AMOUNT).into();
-
-	// Fee asset ID
 	let fee_asset_id: AssetId = wnd_location.into();
-
-	// XCM to be executed on the destination (Bulletin) - just deposit to beneficiary
 	let xcm_on_dest = Xcm::<()>(vec![DepositAsset { assets: Wild(AllCounted(1)), beneficiary }]);
 
-	// Transfer assets from Asset Hub to Bulletin
-	// Asset Hub is the reserve, so we use LocalReserve transfer type
 	AssetHubWestendNet::execute_with(|| {
 		type PolkadotXcm = asset_hub_westend_runtime::PolkadotXcm;
 		type RuntimeOrigin = <AssetHubWestendNet as Chain>::RuntimeOrigin;
 
-		let result = PolkadotXcm::transfer_assets_using_type_and_then(
+		assert_ok!(PolkadotXcm::transfer_assets_using_type_and_then(
 			RuntimeOrigin::signed(sender.clone()),
 			Box::new(dest.into()),
 			Box::new(assets.into()),
@@ -115,21 +99,9 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 			Box::new(TransferType::LocalReserve),
 			Box::new(VersionedXcm::from(xcm_on_dest)),
 			WeightLimit::Unlimited,
-		);
-
-		println!("Asset Hub transfer result: {:?}", result);
-
-		// Print events for debugging
-		let events = frame_system::Pallet::<asset_hub_westend_runtime::Runtime>::events();
-		println!("Asset Hub events count: {}", events.len());
-		for event in events.iter().rev().take(10) {
-			println!("  Event: {:?}", event.event);
-		}
-
-		assert_ok!(result);
+		));
 	});
 
-	// Verify sender's balance decreased on Asset Hub
 	AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
 		let sender_balance = <Balances as Inspect<_>>::balance(&sender);
@@ -137,7 +109,6 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 			sender_balance < sender_initial_on_asset_hub,
 			"Sender's balance should decrease after transfer"
 		);
-		// Account for transfer amount + fees
 		assert!(
 			sender_initial_on_asset_hub - sender_balance >= TRANSFER_AMOUNT,
 			"Sender should have transferred at least {} WND",
@@ -145,19 +116,9 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 		);
 	});
 
-	// Verify receiver's balance increased on Bulletin
 	BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
-
-		// Print Bulletin events for debugging
-		let events = frame_system::Pallet::<bulletin_westend_runtime::Runtime>::events();
-		println!("Bulletin events count: {}", events.len());
-		for event in events.iter().rev().take(10) {
-			println!("  Bulletin Event: {:?}", event.event);
-		}
-
 		let receiver_balance = <Balances as Inspect<_>>::balance(&receiver);
-		// Receiver should receive the transferred amount minus any execution fees
 		assert!(
 			receiver_balance > receiver_initial_on_bulletin,
 			"Receiver's balance should increase after receiving transfer. Initial: {}, Current: {}",
@@ -177,29 +138,22 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 /// Since Asset Hub is the reserve for WND, we use DestinationReserve transfer type.
 #[test]
 fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
-	// Reset the network state for a clean test
 	WestendMockNet::reset();
 
-	// Fund Bulletin's sovereign account on Asset Hub with enough WND for the transfer.
-	// This simulates that WND was previously deposited here via reserve transfers.
-	// When Bulletin sends a DestinationReserve transfer, Asset Hub will withdraw from
-	// Bulletin's sovereign account.
+	// Fund Bulletin's sovereign account on Asset Hub. When Bulletin sends a DestinationReserve
+	// transfer, Asset Hub will withdraw from Bulletin's sovereign account.
 	AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
-
 		let bulletin_location = Location::new(1, [Parachain(BULLETIN_PARA_ID)]);
 		let sovereign_account =
 			<AssetHubWestendNet as Parachain>::sovereign_account_id_of(bulletin_location);
-
-		// Fund sovereign account with enough for transfer + fees
-		let fund_amount = TRANSFER_AMOUNT + FEE_AMOUNT;
-		<Balances as Mutate<_>>::mint_into(&sovereign_account, fund_amount).unwrap();
+		<Balances as Mutate<_>>::mint_into(&sovereign_account, TRANSFER_AMOUNT + FEE_AMOUNT)
+			.unwrap();
 	});
 
 	let sender = BulletinWestendParaSender::get();
 	let receiver = AssetHubWestendParaReceiver::get();
 
-	// Get initial balances
 	let sender_initial_on_bulletin = BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
 		<Balances as Inspect<_>>::balance(&sender)
@@ -210,43 +164,24 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		<Balances as Inspect<_>>::balance(&receiver)
 	});
 
-	// Ensure sender has enough balance on Bulletin
-	// If sender doesn't have enough, we skip this test since it depends on genesis config
-	if sender_initial_on_bulletin < TRANSFER_AMOUNT + FEE_AMOUNT {
-		println!(
-			"Skipping test: Sender needs at least {} on Bulletin, has {}",
-			TRANSFER_AMOUNT + FEE_AMOUNT,
-			sender_initial_on_bulletin
-		);
-		return;
-	}
+	assert!(
+		sender_initial_on_bulletin >= TRANSFER_AMOUNT + FEE_AMOUNT,
+		"Sender needs sufficient balance on Bulletin"
+	);
 
-	// Construct the destination: Asset Hub parachain (from Bulletin's perspective)
 	let dest = Location::new(1, [Parachain(ASSET_HUB_PARA_ID)]);
-
-	// Construct the beneficiary: receiver on the destination chain
 	let beneficiary =
 		Location::new(0, [AccountId32 { network: None, id: receiver.clone().into() }]);
-
-	// WND asset location (relay chain native token)
 	let wnd_location = Location::parent();
-
-	// Assets to transfer
 	let assets: Assets = (wnd_location.clone(), TRANSFER_AMOUNT).into();
-
-	// Fee asset ID
 	let fee_asset_id: AssetId = wnd_location.into();
-
-	// XCM to be executed on the destination (Asset Hub) - just deposit to beneficiary
 	let xcm_on_dest = Xcm::<()>(vec![DepositAsset { assets: Wild(AllCounted(1)), beneficiary }]);
 
-	// Transfer assets from Bulletin to Asset Hub
-	// Asset Hub is the reserve, so we use DestinationReserve transfer type
 	BulletinWestendNet::execute_with(|| {
 		type PolkadotXcm = bulletin_westend_runtime::PolkadotXcm;
 		type RuntimeOrigin = <BulletinWestendNet as Chain>::RuntimeOrigin;
 
-		let result = PolkadotXcm::transfer_assets_using_type_and_then(
+		assert_ok!(PolkadotXcm::transfer_assets_using_type_and_then(
 			RuntimeOrigin::signed(sender.clone()),
 			Box::new(dest.into()),
 			Box::new(assets.into()),
@@ -255,21 +190,9 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 			Box::new(TransferType::DestinationReserve),
 			Box::new(VersionedXcm::from(xcm_on_dest)),
 			WeightLimit::Unlimited,
-		);
-
-		println!("Bulletin transfer result: {:?}", result);
-
-		// Print events for debugging
-		let events = frame_system::Pallet::<bulletin_westend_runtime::Runtime>::events();
-		println!("Bulletin events count: {}", events.len());
-		for event in events.iter().rev().take(10) {
-			println!("  Bulletin Event: {:?}", event.event);
-		}
-
-		assert_ok!(result);
+		));
 	});
 
-	// Verify sender's balance decreased on Bulletin
 	BulletinWestendNet::execute_with(|| {
 		type Balances = bulletin_westend_runtime::Balances;
 		let sender_balance = <Balances as Inspect<_>>::balance(&sender);
@@ -277,7 +200,6 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 			sender_balance < sender_initial_on_bulletin,
 			"Sender's balance should decrease after transfer"
 		);
-		// Account for transfer amount + fees
 		assert!(
 			sender_initial_on_bulletin - sender_balance >= TRANSFER_AMOUNT,
 			"Sender should have transferred at least {} WND",
@@ -285,19 +207,9 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		);
 	});
 
-	// Verify receiver's balance increased on Asset Hub
 	AssetHubWestendNet::execute_with(|| {
 		type Balances = asset_hub_westend_runtime::Balances;
-
-		// Print Asset Hub events for debugging
-		let events = frame_system::Pallet::<asset_hub_westend_runtime::Runtime>::events();
-		println!("Asset Hub events count: {}", events.len());
-		for event in events.iter().rev().take(10) {
-			println!("  Asset Hub Event: {:?}", event.event);
-		}
-
 		let receiver_balance = <Balances as Inspect<_>>::balance(&receiver);
-		// Receiver should receive the transferred amount minus any execution fees
 		assert!(
 			receiver_balance > receiver_initial_on_asset_hub,
 			"Receiver's balance should increase after receiving transfer. Initial: {}, Current: {}",
