@@ -144,7 +144,6 @@ pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, 
 			target: LOG_TARGET,
 			"Failed to create Multihash for content_hash: {content_hash:?}, multihash_code: {multihash_code:?}, error: {e:?}"
 		);
-		()
 	})?;
 
 	// Create CIDv1 bytes
@@ -199,7 +198,7 @@ mod tests {
 			0xb220 => HashingAlgorithm::Blake2b256,
 			0x12 => HashingAlgorithm::Sha2_256,
 			0x1b => HashingAlgorithm::Keccak256,
-			code @ _ => panic!("{code} is not supported"),
+			code => panic!("{code} is not supported"),
 		}
 	}
 

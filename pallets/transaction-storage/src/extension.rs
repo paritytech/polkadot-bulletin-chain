@@ -104,19 +104,6 @@ where
 			// Let's store the codec in the intermediary storage, which will be cleared by the store
 			// extrinsic.
 			CidConfigForStore::<T>::set(Some(cid_config));
-
-			// TODO: just attempt with dispatch `with_context`, not working, will remove.
-			// /// Temporarily tracks provided optional CID codec.
-			// #[derive(Default)]
-			// pub struct CidCodecContext {
-			//	pub codec: Option<CidCodec>,
-			// }
-			// Put cid codec to the dispatch context
-			// with_context::<CidCodecContext, _>(|v| {
-			// 	let context = v.or_default();
-			// 	context.codec = Some(cid_codec);
-			// 	log::error!(target: LOG_TARGET, "prepare - setting: {cid_codec:?}!");
-			// });
 			Ok(true)
 		} else {
 			Ok(false)
