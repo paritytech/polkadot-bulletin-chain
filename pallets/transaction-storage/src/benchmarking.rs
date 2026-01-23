@@ -126,7 +126,7 @@ mod benchmarks {
 	fn store(l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; l as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
-		let cid = calculate_cid(&data, None).unwrap().cid;
+		let cid = calculate_cid(&data, None).unwrap().to_bytes();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
