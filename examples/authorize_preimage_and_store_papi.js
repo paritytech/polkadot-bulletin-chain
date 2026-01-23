@@ -2,7 +2,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizePreimage, fetchCid, store } from './api.js';
+import { authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
 import { setupKeyringAndSigners, getContentHash } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';

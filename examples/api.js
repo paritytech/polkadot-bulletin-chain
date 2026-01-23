@@ -8,12 +8,12 @@ const UTILITY_BATCH_SIZE = 20;
 // Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
 function toBinary(data) {
     if (typeof data === 'string') {
-        return Binary.fromBytes(new Uint8Array(Buffer.from(data)));
+        return new Binary(new Uint8Array(Buffer.from(data)));
     }
     if (data instanceof Uint8Array) {
-        return Binary.fromBytes(data);
+        return new Binary(data);
     }
-    return Binary.fromBytes(new Uint8Array(data));
+    return new Binary(new Uint8Array(data));
 }
 
 export async function authorizeAccount(
@@ -95,8 +95,8 @@ export async function authorizePreimage(
 
         const authorizeCalls = batch.map(contentHash =>
             typedApi.tx.TransactionStorage.authorize_preimage({
-                contentHash: toHex(contentHash),
-                maxSize
+                content_hash: toBinary(contentHash),
+                max_size: BigInt(maxSize)
             }).decodedCall
         );
 
