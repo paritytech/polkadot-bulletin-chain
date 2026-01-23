@@ -145,10 +145,20 @@ const TX_MODE_CONFIG = {
     },
 };
 
-function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null) {
+async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
-        return Promise.reject(new Error(`Unhandled txMode: ${txMode}`));
+        throw new Error(`Unhandled txMode: ${txMode}`);
+    }
+
+    // Get the observable - either signed or unsigned
+    let observable;
+    if (signer === null) {
+        console.log(`⬆️ Submitting unsigned ${txName}`);
+        const bareTx = await tx.getBareTx();
+        observable = client.submitAndWatch(bareTx);
+    } else {
+        observable = tx.signSubmitAndWatch(signer);
     }
 
     return new Promise((resolve, reject) => {
@@ -168,40 +178,7 @@ function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK
             }
         }, timeoutMs);
 
-        let observer;
-        if (signer === null) {
-            // For unsigned transactions, get bare tx and submit via client
-            console.log(`⬆️ Submitting unsigned ${txName}`);
-            tx.getBareTx().then(bareTx => {
-                sub = client.submitAndWatch(bareTx).subscribe({
-                    next: (ev) => {
-                        console.log(`✅ ${txName} event:`, ev.type);
-                        if (!resolved && config.match(ev)) {
-                            console.log(config.log(txName, ev));
-                            cleanup();
-                            resolve(ev);
-                        }
-                    },
-                    error: (err) => {
-                        console.error(`❌ ${txName} error:`, err);
-                        if (!resolved) {
-                            cleanup();
-                            reject(err);
-                        }
-                    },
-                    complete: () => {
-                        console.log(`✅ ${txName} complete!`);
-                    }
-                });
-            }).catch(err => {
-                cleanup();
-                reject(err);
-            });
-            return; // Skip the common subscribe below
-        } else {
-            observer = tx.signSubmitAndWatch(signer);
-        }
-        sub = observer.subscribe({
+        sub = observable.subscribe({
             next: (ev) => {
                 console.log(`✅ ${txName} event:`, ev.type);
                 if (!resolved && config.match(ev)) {
