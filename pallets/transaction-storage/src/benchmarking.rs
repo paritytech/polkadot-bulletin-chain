@@ -18,7 +18,9 @@
 //! Benchmarks for transaction-storage Pallet
 
 #![cfg(feature = "runtime-benchmarks")]
+extern crate alloc;
 
+use alloc::vec;
 use super::{Pallet as TransactionStorage, *};
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,

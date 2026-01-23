@@ -776,6 +776,7 @@ mod benches {
 	impl BridgeParachainsConfig<bridge_config::WithPolkadotBridgeParachainsInstance> for Runtime {
 		fn parachains() -> Vec<bp_polkadot_core::parachains::ParaId> {
 			use bp_runtime::Parachain;
+			use alloc::vec;
 			vec![bp_polkadot_core::parachains::ParaId(
 				bridge_config::bp_people_polkadot::PeoplePolkadot::PARACHAIN_ID,
 			)]
