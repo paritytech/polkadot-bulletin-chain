@@ -1,9 +1,8 @@
 import { createClient } from 'polkadot-api';
-import { Enum } from '@polkadot-api/substrate-bindings';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
-import { generateTextImage, fileToDisk, filesAreEqual, NonceManager, newSigner, HTTP_IPFS_API } from './common.js';
+import { generateTextImage, fileToDisk, filesAreEqual, newSigner, HTTP_IPFS_API } from './common.js';
 import { authorizeAccount, store, fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
@@ -46,29 +45,6 @@ async function storeChunkedFile(api, pair, filePath) {
     return { chunks };
 }
 
-async function authorizeStorage(api, sudoPair, pair) {
-    // Ensure enough quota.
-    const auth = await api.query.TransactionStorage.Authorizations.getValue(Enum("Account", pair.address));
-    console.log('Authorization info:', auth)
-
-    if (auth != null) {
-        const authValue = auth.extent;
-        const transactions = authValue.transactions;
-        const bytes = authValue.bytes;
-
-        if (transactions > 10 && bytes > 24 * CHUNK_SIZE) {
-            console.log('✅ Account authorization is sufficient.');
-            return;
-        }
-    } else {
-        console.log('ℹ️ No existing authorization found — requesting new one...');
-    }
-
-    const transactions = 128;
-    const bytes = BigInt(64 * 1024 * 1024); // 64 MB
-    await authorizeAccount(api, sudoPair, pair.address, transactions, bytes)
-}
-
 let client;
 async function main() {
     await cryptoWaitReady()
@@ -93,12 +69,10 @@ async function main() {
     const { signer: whoSigner, address: whoAddress } = newSigner('//Nativeipfsdagsigner');
 
     console.log('✅ Connected to Bulletin node')
-    let { nonce } = await typedApi.query.System.Account.getValue(whoAddress);
-    const nonceMgr = new NonceManager(nonce);
-    console.log(`💳 Using account: ${whoAddress}, nonce: ${nonce}`)
+    console.log(`💳 Using account: ${whoAddress}`)
 
     // Make sure an account can store data.
-    await authorizeStorage(typedApi, sudoSigner, { address: whoAddress });
+    await authorizeAccount(typedApi, sudoSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
 
     // Read the file, chunk it, store in Bulletin and return CIDs.
     let { chunks } = await storeChunkedFile(typedApi, whoSigner, FILE_PATH);
