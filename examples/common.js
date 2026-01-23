@@ -10,13 +10,6 @@ export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gatew
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
 
-// TODO: replace with PAPI
-export async function waitForNewBlock() {
-  // TODO: wait for a new block.
-  console.log('🛰 Waiting for new block...')
-  return new Promise(resolve => setTimeout(resolve, 8000))
-}
-
 /**
  * Creates a PAPI-compatible signer from a Keyring account
  */

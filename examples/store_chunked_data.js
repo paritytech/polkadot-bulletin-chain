@@ -1,10 +1,12 @@
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { cryptoWaitReady } from '@polkadot/util-crypto'
 import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { waitForNewBlock, generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, HTTP_IPFS_API } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, HTTP_IPFS_API } from './common.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
@@ -14,9 +16,6 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // ---- CONFIG ----
 const NODE_WS = 'ws://localhost:10000';
-const FILE_PATH = './random_picture.jpg'
-const OUT_1_PATH = './retrieved_random_picture1.jpg'
-const OUT_2_PATH = './retrieved_random_picture2.jpg'
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 // -----------------
 
@@ -159,19 +158,11 @@ async function main() {
 
     let client, resultCode;
     try {
-        if (fs.existsSync(OUT_1_PATH)) {
-            fs.unlinkSync(OUT_1_PATH);
-            console.log(`File ${OUT_1_PATH} removed.`);
-        }
-        if (fs.existsSync(OUT_2_PATH)) {
-            fs.unlinkSync(OUT_2_PATH);
-            console.log(`File ${OUT_2_PATH} removed.`);
-        }
-        if (fs.existsSync(FILE_PATH)) {
-            fs.unlinkSync(FILE_PATH);
-            console.log(`File ${FILE_PATH} removed.`);
-        }
-        generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI chunked - " + new Date().toString(), "small");
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletin-chunked-"));
+        const filePath = path.join(tmpDir, "image.jpeg");
+        const out1Path = path.join(tmpDir, "retrieved1.jpeg");
+        const out2Path = path.join(tmpDir, "retrieved2.jpeg");
+        generateTextImage(filePath, "Hello, Bulletin with PAPI chunked - " + new Date().toString(), "small");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
@@ -189,7 +180,7 @@ async function main() {
         );
 
         // Read the file, chunk it, store in Bulletin and return CIDs (using PAPI).
-        let { chunks} = await storeChunkedFile(bulletinAPI, whoSigner, FILE_PATH, CHUNK_SIZE);
+        let { chunks} = await storeChunkedFile(bulletinAPI, whoSigner, filePath, CHUNK_SIZE);
 
         // Store metadata file with all the CIDs to the Bulletin.
         const { metadataCid} = await storeMetadata(bulletinAPI, whoSigner, chunks);
@@ -197,8 +188,8 @@ async function main() {
         ////////////////////////////////////////////////////////////////////////////////////
         // 1. example manually retrieve the picture (no IPFS DAG feature)
         const metadataJson = await retrieveMetadata(metadataCid)
-        await retrieveFileForMetadata(metadataJson, OUT_1_PATH);
-        filesAreEqual(FILE_PATH, OUT_1_PATH);
+        await retrieveFileForMetadata(metadataJson, out1Path);
+        filesAreEqual(filePath, out1Path);
 
         ////////////////////////////////////////////////////////////////////////////////////
         // 2. example download picture by rootCID with IPFS DAG feature and HTTP gateway.
@@ -208,7 +199,6 @@ async function main() {
 
         // Store DAG and proof to the Bulletin.
         let { rawDagCid } = await storeProof(bulletinAPI, sudoSigner, whoSigner, rootCid, Buffer.from(dagBytes));
-        await waitForNewBlock();
         await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
 
         // Store DAG into IPFS.
@@ -227,9 +217,9 @@ async function main() {
         // Download the content from IPFS HTTP gateway
         const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
         console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(OUT_2_PATH, fullBuffer);
-        filesAreEqual(FILE_PATH, OUT_1_PATH);
-        filesAreEqual(OUT_1_PATH, OUT_2_PATH);
+        await fileToDisk(out2Path, fullBuffer);
+        filesAreEqual(filePath, out1Path);
+        filesAreEqual(out1Path, out2Path);
 
         // Download the DAG descriptor raw file itself.
         const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
