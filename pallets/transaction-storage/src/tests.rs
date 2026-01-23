@@ -25,12 +25,12 @@ use super::{
 	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
 	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use frame_support::traits::Authorize;
 use polkadot_sdk_frame::{
 	prelude::{frame_system::RawOrigin, *},
 	testing_prelude::*,
+	traits::Authorize,
 };
-use sp_runtime::transaction_validity::TransactionSource;
+use polkadot_sdk_frame::prelude::TransactionSource;
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;
@@ -114,9 +114,13 @@ fn uses_preimage_authorization() {
 		assert_ok!(call.authorize(TransactionSource::External).unwrap());
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { transactions: 0, bytes: 0 }
+			AuthorizationExtent { transactions: 1, bytes: 2002 }
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RawOrigin::Authorized.into()));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
 		run_to_block(3, || None);
 		let call = Call::renew { block: 1, index: 0 };
 		assert_noop!(
@@ -127,9 +131,13 @@ fn uses_preimage_authorization() {
 		assert_ok!(call.authorize(TransactionSource::External).unwrap());
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { transactions: 0, bytes: 0 }
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RawOrigin::Authorized.into()));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
 	});
 }
 
