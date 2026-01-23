@@ -137,11 +137,11 @@ xcm-executor = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "
 parachains-common = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = false }
 
 # XCM emulator framework for integration tests
-xcm-emulator = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
-emulated-integration-tests-common = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
-westend-emulated-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
 asset-hub-westend-emulated-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
 asset-hub-westend-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
+emulated-integration-tests-common = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
+westend-emulated-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
+xcm-emulator = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = true }
 
 # Runtime metadata hash extension
 frame-metadata-hash-extension = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = false }
