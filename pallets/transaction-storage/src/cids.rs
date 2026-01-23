@@ -47,6 +47,7 @@ pub type CidCodec = u64;
 	scale_info::TypeInfo,
 	MaxEncodedLen,
 )]
+#[non_exhaustive]
 pub enum HashingAlgorithm {
 	/// Blake2b-256 hash function.
 	Blake2b256,
