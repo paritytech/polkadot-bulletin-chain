@@ -20,6 +20,7 @@
 #![cfg(feature = "runtime-benchmarks")]
 
 use super::{Pallet as TransactionStorage, *};
+use alloc::vec;
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
 	deps::frame_system::{EventRecord, Pallet as System, RawOrigin},

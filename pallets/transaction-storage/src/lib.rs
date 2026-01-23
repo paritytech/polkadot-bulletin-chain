@@ -42,7 +42,7 @@ use cids::{calculate_cid, Cid, CidConfig, ContentHash};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
-	deps::{sp_core::sp_std::prelude::*, *},
+	deps::*,
 	prelude::*,
 	traits::{
 		fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
