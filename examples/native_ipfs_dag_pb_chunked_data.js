@@ -9,13 +9,11 @@ import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
 
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import * as dagPB from "@ipld/dag-pb";
 
-// ---- CONFIG ----
-const FILE_PATH = './random_picture.jpg'
-const OUT_PATH = './retrieved_random_picture.jpg'
 const CHUNK_SIZE = 4 * 1024 // 4 KB
-// -----------------
 
 /**
  * Read the file, chunk it, store in Bulletin and return CIDs.
@@ -47,18 +45,14 @@ async function storeChunkedFile(api, pair, filePath) {
 
 async function main() {
     await cryptoWaitReady()
-    if (fs.existsSync(FILE_PATH)) {
-        fs.unlinkSync(FILE_PATH);
-        console.log(`File ${FILE_PATH} removed.`);
-    }
-    if (fs.existsSync(OUT_PATH)) {
-        fs.unlinkSync(OUT_PATH);
-        console.log(`File ${OUT_PATH} removed.`);
-    }
-    generateTextImage(FILE_PATH, "Hello, Bulletin with PAPI - " + new Date().toString());
 
     let client, resultCode;
     try {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletinimggen-"));
+        const filePath = path.join(tmpDir, "image.jpeg");
+        const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
+        generateTextImage(filePath, "Hello, Bulletin dag - " + new Date().toString());
+
         console.log('🛰 Connecting to Bulletin node...')
         // Create PAPI client with WebSocket provider
         client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
@@ -76,7 +70,7 @@ async function main() {
         await authorizeAccount(typedApi, sudoSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
 
         // Read the file, chunk it, store in Bulletin and return CIDs.
-        let { chunks } = await storeChunkedFile(typedApi, whoSigner, FILE_PATH);
+        let { chunks } = await storeChunkedFile(typedApi, whoSigner, filePath);
 
         ////////////////////////////////////////////////////////////////////////////////////
         // Example download picture by rootCID with IPFS DAG feature and HTTP gateway.
@@ -104,8 +98,8 @@ async function main() {
         // Download the content from IPFS HTTP gateway.
         const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
         console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(OUT_PATH, fullBuffer);
-        filesAreEqual(FILE_PATH, OUT_PATH);
+        await fileToDisk(downloadedFilePath, fullBuffer);
+        filesAreEqual(filePath, downloadedFilePath);
 
         // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
         const rootCidAsRaw = convertCid(rootCid, 0x55);
