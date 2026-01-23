@@ -393,7 +393,11 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index, content_hash: cid.content_hash, cid: cid.cid });
+			Self::deposit_event(Event::Stored {
+				index,
+				content_hash: cid.content_hash,
+				cid: cid.cid,
+			});
 			Ok(())
 		}
 
