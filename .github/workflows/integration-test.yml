@@ -184,6 +184,10 @@ jobs:
         working-directory: examples
         run: just run-test-store-big-data "${{ env.TEST_DIR }}"
 
+      - name: Test authorize-preimage-and-store (Westend parachain)
+        working-directory: examples
+        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+
       - name: Stop services (Westend parachain)
         if: always()
         working-directory: examples
@@ -216,6 +220,10 @@ jobs:
       - name: Test store-big-data (Polkadot solochain)
         working-directory: examples
         run: just run-test-store-big-data "${{ env.TEST_DIR }}"
+
+      - name: Test authorize-preimage-and-store (Polkadot solochain)
+        working-directory: examples
+        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
       - name: Stop services (Polkadot solochain)
         if: always()
