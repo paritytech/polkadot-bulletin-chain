@@ -1,3 +1,5 @@
+import fs from 'fs';
+import assert from 'assert';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 import { CHUNK_SIZE, toHex, toHashingEnum } from './common.js';
@@ -221,4 +223,35 @@ export async function fetchCid(httpIpfsApi, cid) {
     const res = await fetch(contentUrl);
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     return Buffer.from(await res.arrayBuffer())
+}
+
+/**
+ * Read the file, chunk it, store in Bulletin and return CIDs.
+ * @param {object} typedApi - PAPI typed API
+ * @param {object} signer - Signer for transactions
+ * @param {string} filePath - Path to file to chunk and store
+ * @param {number} chunkSize - Size of each chunk in bytes
+ * @returns {{ chunks: Array<{ cid, bytes, len }> }}
+ */
+export async function storeChunkedFile(typedApi, signer, filePath, chunkSize) {
+    const fileData = fs.readFileSync(filePath);
+    console.log(`📁 Read ${filePath}, size ${fileData.length} bytes`);
+
+    const chunks = [];
+    for (let i = 0; i < fileData.length; i += chunkSize) {
+        const chunk = fileData.subarray(i, i + chunkSize);
+        const cid = await cidFromBytes(chunk);
+        chunks.push({ cid, bytes: chunk, len: chunk.length });
+    }
+    console.log(`✂️ Split into ${chunks.length} chunks`);
+
+    // Store chunks in Bulletin
+    for (let i = 0; i < chunks.length; i++) {
+        const { cid: expectedCid, bytes } = chunks[i];
+        console.log(`📤 Storing chunk #${i + 1} CID: ${expectedCid}`);
+        let cid = await store(typedApi, signer, bytes);
+        assert.deepStrictEqual(expectedCid, cid);
+        console.log(`✅ Stored chunk #${i + 1} and CID equals!`);
+    }
+    return { chunks };
 }

@@ -3,7 +3,7 @@ import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, HTTP_IPFS_API } from './common.js';
-import { authorizeAccount, store, fetchCid } from './api.js';
+import { authorizeAccount, store, storeChunkedFile, fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
@@ -13,35 +13,9 @@ import os from 'os'
 import path from 'path'
 import * as dagPB from "@ipld/dag-pb";
 
-const CHUNK_SIZE = 4 * 1024 // 4 KB
-
-/**
- * Read the file, chunk it, store in Bulletin and return CIDs.
- * Returns { chunks }
- */
-async function storeChunkedFile(api, pair, filePath) {
-    // ---- 1️⃣ Read and split a file ----
-    const fileData = fs.readFileSync(filePath)
-    console.log(`📁 Read ${filePath}, size ${fileData.length} bytes`)
-
-    const chunks = []
-    for (let i = 0; i < fileData.length; i += CHUNK_SIZE) {
-        const chunk = fileData.subarray(i, i + CHUNK_SIZE)
-        const cid = await cidFromBytes(chunk);
-        chunks.push({ cid, bytes: chunk, len: chunk.length })
-    }
-    console.log(`✂️ Split into ${chunks.length} chunks`)
-
-    // ---- 2️⃣ Store chunks in Bulletin (expecting just one block) ----
-    for (let i = 0; i < chunks.length; i++) {
-        const {cid: expectedCid, bytes} = chunks[i]
-        console.log(`📤 Storing chunk #${i + 1} CID: ${expectedCid}`)
-        let cid = await store(api, pair, bytes);
-        assert.deepStrictEqual(expectedCid, cid);
-        console.log(`✅ Stored chunk #${i + 1} and CID equals!`)
-    }
-    return { chunks };
-}
+// ---- CONFIG ----
+const CHUNK_SIZE = 6 * 1024 // 6 KB
+// -----------------
 
 async function main() {
     await cryptoWaitReady()
@@ -53,7 +27,6 @@ async function main() {
         const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
         generateTextImage(filePath, "Hello, Bulletin dag - " + new Date().toString());
 
-        console.log('🛰 Connecting to Bulletin node...')
         // Create PAPI client with WebSocket provider
         client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
         // Get typed API with generated descriptors
@@ -70,7 +43,7 @@ async function main() {
         await authorizeAccount(typedApi, sudoSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
 
         // Read the file, chunk it, store in Bulletin and return CIDs.
-        let { chunks } = await storeChunkedFile(typedApi, whoSigner, filePath);
+        let { chunks } = await storeChunkedFile(typedApi, whoSigner, filePath, CHUNK_SIZE);
 
         ////////////////////////////////////////////////////////////////////////////////////
         // Example download picture by rootCID with IPFS DAG feature and HTTP gateway.
