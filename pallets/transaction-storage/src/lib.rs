@@ -918,7 +918,7 @@ pub mod pallet {
 		/// This is equivalent to `validate_unsigned` but for signed transactions. It should be
 		/// called from a `SignedExtension` implementation.
 		pub fn validate_signed(who: &T::AccountId, call: &Call<T>) -> TransactionValidity {
-			Ok(Self::check_signed(who, call, false)?)
+			Self::check_signed(who, call, false)
 		}
 
 		/// Check the validity of the given call, signed by the given account, and consume
