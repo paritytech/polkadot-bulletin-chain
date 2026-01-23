@@ -39,8 +39,8 @@ use xcm_emulator::{
 	decl_test_networks, decl_test_sender_receiver_accounts_parameter_types, Parachain,
 };
 
-/// Bulletin Westend parachain ID (1006 on Westend).
-pub const BULLETIN_PARA_ID: u32 = 1006;
+/// Bulletin Westend parachain ID.
+pub const BULLETIN_PARA_ID: u32 = 2487;
 
 /// Initial balance for test accounts.
 pub const INITIAL_BALANCE: Balance = 100_000_000_000_000; // 100 WND
