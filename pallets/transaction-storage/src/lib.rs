@@ -312,7 +312,7 @@ pub mod pallet {
 				<Transactions<T>>::insert(n, transactions);
 			}
 
-			// Kill
+			// Kill storage.
 			CidConfigForStore::<T>::kill();
 		}
 
@@ -393,7 +393,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index, cid: cid.cid });
+			Self::deposit_event(Event::Stored { index, content_hash: cid.content_hash, cid: cid.cid });
 			Ok(())
 		}
 
@@ -628,7 +628,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32, cid: Cid },
+		Stored { index: u32, content_hash: ContentHash, cid: Cid },
 		/// Renewed data under specified index.
 		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.
