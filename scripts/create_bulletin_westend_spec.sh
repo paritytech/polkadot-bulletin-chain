@@ -14,5 +14,4 @@ chain-spec-builder create \
         -r ./target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm \
         named-preset local_testnet
 
-mv chain_spec.json bulletin-westend-spec.json
-cp bulletin-westend-spec.json ./zombienet/bulletin-westend-spec.json
+mv chain_spec.json ./zombienet/bulletin-westend-spec.json
