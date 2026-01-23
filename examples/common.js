@@ -7,7 +7,7 @@ import assert from "assert";
 
 // ---- CONFIG ----
 export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
-export const CHUNK_SIZE = 2 * 1024 * 1024; // 1 MiB
+export const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB
 // -----------------
 
 // TODO: replace with PAPI
