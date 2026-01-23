@@ -31,7 +31,7 @@ balance = 2000000000000
 args = ["--listen-addr", "/ip4/0.0.0.0/tcp/30434/ws"]
 
 [[parachains]]
-id = 1006
+id = 2487
 chain_spec_path = "./zombienet/bulletin-westend-spec.json"
 cumulus_based = true
 
