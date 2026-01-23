@@ -26,11 +26,10 @@ use super::{
 	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{
-	prelude::{frame_system::RawOrigin, *},
+	prelude::{frame_system::RawOrigin, TransactionSource, *},
 	testing_prelude::*,
 	traits::Authorize,
 };
-use polkadot_sdk_frame::prelude::TransactionSource;
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;
