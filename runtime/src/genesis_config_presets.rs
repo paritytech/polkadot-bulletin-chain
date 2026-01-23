@@ -1,4 +1,3 @@
-
 use crate::{
 	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig, BridgeRococoGrandpaConfig,
 	BridgeRococoMessagesConfig, BridgeRococoParachainsConfig, RelayerSetConfig,

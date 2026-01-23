@@ -17,6 +17,7 @@
 
 //! Benchmarks for transaction-storage Pallet
 
+#![cfg(feature = "runtime-benchmarks")]
 
 use super::{Pallet as TransactionStorage, *};
 use alloc::vec;
