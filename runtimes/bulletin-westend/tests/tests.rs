@@ -19,14 +19,10 @@
 use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
-	AllPalletsWithoutSystem, Balance, Block, Runtime, RuntimeCall, RuntimeEvent,
-	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
-	UncheckedExtrinsic,
+	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeGenesisConfig,
+	RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension, UncheckedExtrinsic,
 };
-use frame_support::{
-	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks,
-	traits::fungible::Mutate as FungibleMutate,
-};
+use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
 use pallet_transaction_storage::{
 	cids::{calculate_cid, CidConfig, HashingAlgorithm},
 	AuthorizationExtent, Call as TxStorageCall, CidConfigForStore, Config as TxStorageConfig,
@@ -48,12 +44,10 @@ const ALICE: [u8; 32] = [1u8; 32];
 
 /// Advance to the next block for testing transaction storage.
 fn advance_block() {
-	use frame_support::traits::{OnFinalize, OnInitialize};
-
 	let current = frame_system::Pallet::<Runtime>::block_number();
 
-	TransactionStorage::on_finalize(current);
-	System::on_finalize(current);
+	<TransactionStorage as Hooks<_>>::on_finalize(current);
+	<System as Hooks<_>>::on_finalize(current);
 
 	let next = current + 1;
 	System::set_block_number(next);
@@ -61,16 +55,8 @@ fn advance_block() {
 	frame_system::BlockWeight::<Runtime>::kill();
 	frame_system::AllExtrinsicsLen::<Runtime>::kill();
 
-	System::on_initialize(next);
-	TransactionStorage::on_initialize(next);
-}
-
-/// Constructs an unsigned extrinsic when `sender` is `None`.
-fn construct_extrinsic(
-	sender: Option<sp_core::sr25519::Pair>,
-	call: RuntimeCall,
-) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
-	construct_extrinsic_with_codec(sender, call, None)
+	<System as Hooks<_>>::on_initialize(next);
+	<TransactionStorage as Hooks<_>>::on_initialize(next);
 }
 
 fn construct_extrinsic_with_codec(
@@ -335,10 +321,6 @@ fn provide_cid_codec_extension_works() {
 		let data = vec![0u8; 4 * 1024];
 		let total_bytes: u64 = data.len() as u64;
 		let block_number = System::block_number();
-
-		// fund Alice to cover fees
-		let initial: Balance = 10_000_000_000_000_000_000u128;
-		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
 
 		// Authorize.
 		assert_ok!(runtime::TransactionStorage::authorize_account(
