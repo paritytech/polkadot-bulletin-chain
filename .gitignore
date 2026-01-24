@@ -19,6 +19,5 @@ package-lock.json
 .papi/
 
 # Local test files
-examples/retrieved_picture.*
 kubo/
 zombienet-*
