@@ -365,7 +365,6 @@ fn provide_cid_codec_extension_works() {
 			.unwrap()
 			.into_iter()
 			.enumerate()
-			.map(|(idx, tx)| (idx, tx))
 			.collect::<HashMap<_, _>>();
 		assert_eq!(stored_txs.len(), 3);
 		assert_eq!(stored_txs[&0].content_hash, calculate_cid(&data, None).unwrap().content_hash);
