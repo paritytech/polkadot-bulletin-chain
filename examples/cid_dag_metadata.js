@@ -14,8 +14,8 @@ export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
         throw new Error('❌ buildUnixFSDag: chunks[] is empty')
     }
 
-    // UnixFS blockSizes = sizes of child blocks
-    const blockSizes = chunks.map(c => c.len)
+    // UnixFS blockSizes = sizes of child blocks (must be regular numbers, not BigInt)
+    const blockSizes = chunks.map(c => Number(c.len))
 
     console.log(`🧩 Building UnixFS DAG from chunks:
   • totalChunks: ${chunks.length}
