@@ -160,7 +160,6 @@ pub type Barrier = TrailingSetTopicAsId<(
 				Equals<GovernanceLocation>,
 				// Let's allow a People chain for PoP authorizations.
 				Equals<PeopleLocation>,
-				Equals<AssetHubLocation>,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
@@ -186,10 +185,10 @@ pub type WaivedLocations = (
 	Equals<AssetHubLocation>,
 );
 
-/// Helper type to match WND (relay native token) from Asset Hub.
+/// Helper type to match the relay chain native token from Asset Hub.
 /// Non-system parachains should trust Asset Hub as the reserve location for the relay token.
-pub struct IsDotFrom<Origin>(core::marker::PhantomData<Origin>);
-impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsDotFrom<Origin>
+pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
+impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
 where
 	Origin: frame_support::traits::Get<Location>,
 {
@@ -207,8 +206,8 @@ where
 }
 
 /// Reserve locations for assets.
-/// Non-system parachains should trust Asset Hub as the reserve for relay chain native token (DOT).
-pub type Reserves = IsDotFrom<AssetHubLocation>;
+/// Non-system parachains should trust Asset Hub as the reserve for the relay chain native token.
+pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
 
 /// Cases where a remote origin is accepted as trusted Teleporter for a given asset.
 /// Non-system parachains should not accept teleports, use reserve transfers instead.
