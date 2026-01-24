@@ -7,6 +7,9 @@ pub struct Cli {
 
 	#[clap(flatten)]
 	pub run: RunCmd,
+
+	#[clap(flatten)]
+	pub hop: hop_service::HopParams,
 }
 
 #[derive(Debug, clap::Subcommand)]
