@@ -53,3 +53,16 @@ runtime-benchmarks = [
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
 ]
+try-runtime = [
+	"asset-hub-westend-runtime/try-runtime",
+	"bulletin-westend-runtime/try-runtime",
+	"cumulus-pallet-xcmp-queue/try-runtime",
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+	"pallet-balances/try-runtime",
+	"pallet-message-queue/try-runtime",
+	"pallet-xcm/try-runtime",
+	"parachains-common/try-runtime",
+	"sp-runtime/try-runtime",
+	"westend-runtime/try-runtime",
+]

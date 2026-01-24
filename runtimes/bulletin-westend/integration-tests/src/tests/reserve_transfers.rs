@@ -111,8 +111,7 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 		);
 		assert!(
 			sender_initial_on_asset_hub - sender_balance >= TRANSFER_AMOUNT,
-			"Sender should have transferred at least {} WND",
-			TRANSFER_AMOUNT
+			"Sender should have transferred at least {TRANSFER_AMOUNT} WND"
 		);
 	});
 
@@ -121,9 +120,7 @@ fn reserve_transfer_wnd_from_asset_hub_to_bulletin() {
 		let receiver_balance = <Balances as Inspect<_>>::balance(&receiver);
 		assert!(
 			receiver_balance > receiver_initial_on_bulletin,
-			"Receiver's balance should increase after receiving transfer. Initial: {}, Current: {}",
-			receiver_initial_on_bulletin,
-			receiver_balance
+			"Receiver's balance should increase after receiving transfer. Initial: {receiver_initial_on_bulletin}, Current: {receiver_balance}"
 		);
 	});
 }
@@ -202,8 +199,7 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		);
 		assert!(
 			sender_initial_on_bulletin - sender_balance >= TRANSFER_AMOUNT,
-			"Sender should have transferred at least {} WND",
-			TRANSFER_AMOUNT
+			"Sender should have transferred at least {TRANSFER_AMOUNT} WND"
 		);
 	});
 
@@ -212,9 +208,7 @@ fn reserve_transfer_wnd_from_bulletin_to_asset_hub() {
 		let receiver_balance = <Balances as Inspect<_>>::balance(&receiver);
 		assert!(
 			receiver_balance > receiver_initial_on_asset_hub,
-			"Receiver's balance should increase after receiving transfer. Initial: {}, Current: {}",
-			receiver_initial_on_asset_hub,
-			receiver_balance
+			"Receiver's balance should increase after receiving transfer. Initial: {receiver_initial_on_asset_hub}, Current: {receiver_balance}"
 		);
 	});
 }
