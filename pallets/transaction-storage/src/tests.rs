@@ -26,8 +26,9 @@ use super::{
 	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{
-	prelude::{frame_system::RawOrigin, *},
+	prelude::{frame_system::RawOrigin, TransactionSource, *},
 	testing_prelude::*,
+	traits::Authorize,
 };
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
@@ -104,19 +105,34 @@ fn uses_preimage_authorization() {
 			AuthorizationExtent { transactions: 1, bytes: 2002 }
 		);
 		let call = Call::store { data: vec![1; 2000] };
-		assert_noop!(TransactionStorage::pre_dispatch(&call), InvalidTransaction::Payment);
+		assert_noop!(
+			call.authorize(TransactionSource::External).unwrap(),
+			InvalidTransaction::Payment
+		);
 		let call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		assert_ok!(call.authorize(TransactionSource::External).unwrap());
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 1, bytes: 2002 }
+		);
+		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RawOrigin::Authorized.into()));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 }
 		);
-		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
 		let call = Call::renew { block: 1, index: 0 };
-		assert_noop!(TransactionStorage::pre_dispatch(&call), InvalidTransaction::Payment);
+		assert_noop!(
+			call.authorize(TransactionSource::External).unwrap(),
+			InvalidTransaction::Payment
+		);
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2000));
-		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		assert_ok!(call.authorize(TransactionSource::External).unwrap());
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RawOrigin::Authorized.into()));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 }
@@ -292,9 +308,12 @@ fn expired_authorization_clears() {
 		// Can't remove too early
 		run_to_block(10, || None);
 		let remove_call = Call::remove_expired_account_authorization { who };
-		assert_noop!(TransactionStorage::pre_dispatch(&remove_call), AUTHORIZATION_NOT_EXPIRED);
 		assert_noop!(
-			Into::<RuntimeCall>::into(remove_call.clone()).dispatch(RuntimeOrigin::none()),
+			remove_call.authorize(TransactionSource::External).unwrap(),
+			AUTHORIZATION_NOT_EXPIRED
+		);
+		assert_noop!(
+			Into::<RuntimeCall>::into(remove_call.clone()).dispatch(RawOrigin::Authorized.into()),
 			Error::AuthorizationNotExpired,
 		);
 
@@ -308,8 +327,8 @@ fn expired_authorization_clears() {
 			InvalidTransaction::Payment,
 		);
 		// Anyone can remove it
-		assert_ok!(TransactionStorage::pre_dispatch(&remove_call));
-		assert_ok!(Into::<RuntimeCall>::into(remove_call).dispatch(RuntimeOrigin::none()));
+		assert_ok!(remove_call.authorize(TransactionSource::External).unwrap());
+		assert_ok!(Into::<RuntimeCall>::into(remove_call).dispatch(RawOrigin::Authorized.into()));
 		System::assert_has_event(RuntimeEvent::TransactionStorage(
 			Event::ExpiredAccountAuthorizationRemoved { who },
 		));
