@@ -22,7 +22,6 @@ emulated-integration-tests-common = { workspace = true }
 
 # Emulated chains from Polkadot SDK
 westend-emulated-chain = { workspace = true }
-westend-runtime = { workspace = true }
 asset-hub-westend-emulated-chain = { workspace = true }
 asset-hub-westend-runtime = { workspace = true }
 
@@ -40,7 +39,6 @@ runtime-benchmarks = [
 	"frame-system/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
-	"westend-runtime/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
 ]
@@ -51,5 +49,4 @@ try-runtime = [
 	"frame-system/try-runtime",
 	"parachains-common/try-runtime",
 	"sp-runtime/try-runtime",
-	"westend-runtime/try-runtime",
 ]
