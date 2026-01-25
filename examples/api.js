@@ -171,7 +171,9 @@ async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN
     let observable;
     if (signer === null) {
         console.log(`⬆️ Submitting unsigned ${txName}`);
-        const bareTx = await tx.getBareTx(txOpts);
+        // TODO: https://github.com/polkadot-api/polkadot-api/issues/760
+        // const bareTx = await tx.getBareTx(txOpts);
+        const bareTx = await tx.getBareTx();
         observable = client.submitAndWatch(bareTx);
     } else {
         observable = tx.signSubmitAndWatch(signer, txOpts);
