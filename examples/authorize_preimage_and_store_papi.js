@@ -2,7 +2,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
+import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
 import { setupKeyringAndSigners, getContentHash } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
@@ -17,11 +17,12 @@ const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
  * @param {object} bulletinAPI - PAPI typed API
  * @param {object} sudoSigner - Sudo signer for authorization
  * @param {object|null} signer - Signer for store (null for unsigned)
+ * @param {string|null} signerAddress - Address of the signer (required if signer is not null)
  * @param {number|null} cidCodec - CID codec (null for default)
  * @param {number|null} mhCode - Multihash code (null for default)
  * @param {object|null} client - Client for unsigned transactions
  */
-async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, cidCodec, mhCode, client) {
+async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, signerAddress, cidCodec, mhCode, client) {
     console.log(`\n========== ${testName} ==========\n`);
 
     // Data to store
@@ -40,6 +41,18 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, c
         contentHash,
         BigInt(dataToStore.length)
     );
+
+    // If signer is provided, also authorize the account (to increment inc_providers/inc_sufficients for `CheckNonce`).
+    if (signer != null && signerAddress != null) {
+        console.log(`ℹ️ Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
+        await authorizeAccount(
+            bulletinAPI,
+            sudoSigner,
+            signerAddress,
+            10,        // dummy transactions
+            BigInt(10000)  // dummy bytes
+        );
+    }
 
     // Store data
     const cid = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
@@ -76,27 +89,30 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, _ } = setupKeyringAndSigners('//Alice', '//Preimagesigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Preimagesigner');
 
         // Test 1: Unsigned store with preimage auth (default CID config)
         await runPreimageStoreTest(
             "Test 1: Unsigned store with preimage auth",
             bulletinAPI,
             sudoSigner,
-            null,   // unsigned
-            null,   // default codec
-            null,   // default hash
+            null,       // unsigned
+            null,       // no signer address
+            null,       // default codec
+            null,       // default hash
             client
         );
 
-        // Test 2: Signed store with preimage auth and custom CID config (DAG-PB + SHA2-256)
+        // Test 2: Signed store with preimage auth and custom CID config (raw + SHA2-256)
+        // Also authorizes account to verify preimage auth is preferred
         await runPreimageStoreTest(
             "Test 2: Signed store with preimage auth and custom CID",
             bulletinAPI,
             sudoSigner,
-            whoSigner,  // signed
-            0x70,       // dag-pb
-            0x12,       // sha2-256
+            whoSigner,      // signed
+            whoAddress,     // signer address for account auth
+            0x55,           // raw
+            0x12,           // sha2-256
             client
         );
 

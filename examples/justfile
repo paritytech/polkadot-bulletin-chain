@@ -320,7 +320,7 @@ ipfs-reconnect-start test_dir runtime:
 # Generate PAPI descriptors from a running node
 # Parameters:
 #   ws_url - WebSocket URL of the node (default: ws://localhost:10000)
-papi-generate ws_url="ws://localhost:10000":
+papi-generate ws_url="ws://localhost:10000": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -330,7 +330,7 @@ papi-generate ws_url="ws://localhost:10000":
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-setup-services test_dir runtime:
+setup-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -371,7 +371,7 @@ teardown-services test_dir:
 
 # Start all services for a runtime (use with run-test-* recipes)
 # Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
-start-services test_dir runtime: npm-install
+start-services test_dir runtime:
     #!/usr/bin/env bash
     set -e
     mkdir -p "{{ test_dir }}"

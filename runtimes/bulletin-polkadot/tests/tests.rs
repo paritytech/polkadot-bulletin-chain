@@ -460,6 +460,95 @@ fn provide_cid_codec_extension_works() {
 }
 
 #[test]
+fn preimage_authorized_storage_transactions_work() {
+	run_test(|| {
+		advance_block();
+
+		// Use relayer_signer since only relayers can submit transactions in bulletin-polkadot
+		let account = relayer_signer();
+		let data = vec![0u8; 24];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+
+		// Not authorized (no account or preimage auth) should fail to store.
+		assert_eq!(
+			construct_and_apply_extrinsic(account.pair(), call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment))
+		);
+
+		// Authorize preimage (not account).
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			data.len() as u64,
+		));
+
+		// Now should work via preimage authorization.
+		assert_ok_ok(construct_and_apply_extrinsic(account.pair(), call));
+
+		// Verify preimage authorization was consumed.
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+#[test]
+fn signed_store_prefers_preimage_authorization_over_account() {
+	run_test(|| {
+		advance_block();
+
+		// Use relayer_signer since only relayers can submit transactions in bulletin-polkadot
+		let account = relayer_signer();
+		let who: AccountId = account.to_account_id();
+		let data = vec![0u8; 100];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+
+		// Setup: authorize both account and preimage
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			5,
+			500,
+		));
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			data.len() as u64,
+		));
+
+		// Verify both authorizations exist
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 5, bytes: 500 },
+		);
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+
+		// Store data
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		assert_ok_ok(construct_and_apply_extrinsic(account.pair(), call));
+
+		// Verify: preimage authorization was consumed, account authorization unchanged
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Preimage authorization should be consumed"
+		);
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 5, bytes: 500 },
+			"Account authorization should remain unchanged when preimage auth is used"
+		);
+	});
+}
+
+#[test]
 fn only_relayer_may_submit_polkadot_headers() {
 	run_test(|| {
 		assert_ok_ok(initialize_polkadot_grandpa_pallet());
