@@ -173,6 +173,9 @@ async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN
         console.log(`⬆️ Submitting unsigned ${txName}`);
         // TODO: https://github.com/polkadot-api/polkadot-api/issues/760
         // const bareTx = await tx.getBareTx(txOpts);
+        if (Object.keys(txOpts).length > 0) {
+            throw new Error(`txOpts not supported for unsigned transactions (getBareTx doesn't accept options). See: https://github.com/polkadot-api/polkadot-api/issues/760`);
+        }
         const bareTx = await tx.getBareTx();
         observable = client.submitAndWatch(bareTx);
     } else {
