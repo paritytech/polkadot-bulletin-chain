@@ -1089,11 +1089,14 @@ pub mod pallet {
 			call: &Call<T>,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
-			let size = match call {
-				Call::<T>::store { data } => data.len(),
+			let (size, content_hash) = match call {
+				Call::<T>::store { data } => {
+					let content_hash = sp_io::hashing::blake2_256(data);
+					(data.len(), content_hash)
+				},
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					info.size as usize
+					(info.size as usize, info.content_hash)
 				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};
@@ -1106,11 +1109,22 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
+			// Prefer preimage authorization if available.
+			// This allows anyone to store/renew pre-authorized content without consuming their
+			// own account authorization.
+			let consume = context.consume_authorization();
 			Self::check_authorization(
-				AuthorizationScope::Account(who.clone()),
+				AuthorizationScope::Preimage(content_hash),
 				size as u32,
-				context.consume_authorization(),
-			)?;
+				consume,
+			)
+			.or_else(|_| {
+				Self::check_authorization(
+					AuthorizationScope::Account(who.clone()),
+					size as u32,
+					consume,
+				)
+			})?;
 
 			Ok(context.want_valid_transaction().then(|| ValidTransaction {
 				priority: T::StoreRenewPriority::get(),
