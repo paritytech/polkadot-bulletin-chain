@@ -8,12 +8,8 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-codec = { workspace = true, default-features = true }
 frame-support = { workspace = true, default-features = true }
 frame-system = { workspace = true, default-features = true }
-pallet-balances = { workspace = true, default-features = true }
-pallet-message-queue = { workspace = true, default-features = true }
-pallet-xcm = { workspace = true, default-features = true }
 sp-core = { workspace = true, default-features = true }
 sp-keyring = { workspace = true, default-features = true }
 sp-runtime = { workspace = true, default-features = true }
@@ -26,7 +22,6 @@ emulated-integration-tests-common = { workspace = true }
 
 # Emulated chains from Polkadot SDK
 westend-emulated-chain = { workspace = true }
-westend-runtime = { workspace = true }
 asset-hub-westend-emulated-chain = { workspace = true }
 asset-hub-westend-runtime = { workspace = true }
 
@@ -34,35 +29,24 @@ asset-hub-westend-runtime = { workspace = true }
 bulletin-westend-runtime = { workspace = true, default-features = true }
 cumulus-primitives-core = { workspace = true, default-features = true }
 parachains-common = { workspace = true, default-features = true }
-cumulus-pallet-xcmp-queue = { workspace = true, default-features = true }
 
 [features]
 runtime-benchmarks = [
 	"asset-hub-westend-runtime/runtime-benchmarks",
 	"bulletin-westend-runtime/runtime-benchmarks",
-	"cumulus-pallet-xcmp-queue/runtime-benchmarks",
 	"cumulus-primitives-core/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
-	"pallet-balances/runtime-benchmarks",
-	"pallet-message-queue/runtime-benchmarks",
-	"pallet-xcm/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
-	"westend-runtime/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
 ]
 try-runtime = [
 	"asset-hub-westend-runtime/try-runtime",
 	"bulletin-westend-runtime/try-runtime",
-	"cumulus-pallet-xcmp-queue/try-runtime",
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
-	"pallet-balances/try-runtime",
-	"pallet-message-queue/try-runtime",
-	"pallet-xcm/try-runtime",
 	"parachains-common/try-runtime",
 	"sp-runtime/try-runtime",
-	"westend-runtime/try-runtime",
 ]
