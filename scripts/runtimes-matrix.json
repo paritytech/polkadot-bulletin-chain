@@ -14,7 +14,7 @@
   {
     "name": "bulletin-westend",
     "package": "bulletin-westend-runtime",
-    "path": "runtime",
+    "path": "runtimes/bulletin-westend",
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"

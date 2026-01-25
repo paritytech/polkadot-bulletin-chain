@@ -146,4 +146,9 @@ jobs:
         run: |
           cargo test -p bulletin-westend-runtime
 
+      - name: Run (Westend) XCM integration tests
+        run: |
+          unset SKIP_WASM_BUILD
+          cargo test -p bulletin-westend-integration-tests
+
       # TODO: check benchmarks
