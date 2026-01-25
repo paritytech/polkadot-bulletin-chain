@@ -145,5 +145,6 @@ jobs:
       - name: Run (Westend) runtime tests
         run: |
           cargo test -p bulletin-westend-runtime
+          cargo test -p bulletin-westend-integration-tests
 
       # TODO: check benchmarks
