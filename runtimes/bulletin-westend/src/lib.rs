@@ -972,42 +972,15 @@ impl_runtime_apis! {
 				}
 
 				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
-					// Non-system parachains use reserve transfers for WND from Asset Hub.
-					Some((
-						Asset {
-							fun: Fungible(ExistentialDeposit::get()),
-							id: AssetId(Parent.into())
-						},
-						AssetHubLocation::get(),
-					))
+					// The extrinsic enabled by this benchmark is blocked for the relay token.
+					// See: https://github.com/paritytech/polkadot-sdk/issues/9054
+					None
 				}
 
 				fn set_up_complex_asset_transfer() -> Option<(Assets, u32, Location, alloc::boxed::Box<dyn FnOnce()>)> {
-					// Bulletin-westend is a non-system parachain that uses reserve transfers for the relay token.
-					// We set up a reserve transfer of the native token (relay token) to AssetHub.
-					use frame_support::traits::fungible::{Inspect, Mutate};
-
-					let dest = AssetHubLocation::get();
-					let fee_amount: Balance = ExistentialDeposit::get();
-					let fee_asset: Asset = (Location::parent(), fee_amount).into();
-
-					let who = frame_benchmarking::whitelisted_caller();
-					// Give some multiple of the existential deposit
-					let balance: Balance = fee_amount + ExistentialDeposit::get() * 1000;
-					let _ = <Balances as Mutate<_>>::mint_into(&who, balance);
-					// verify initial balance
-					assert_eq!(<Balances as Inspect<_>>::balance(&who), balance);
-
-					let assets: Assets = vec![fee_asset.clone()].into();
-					let fee_index = 0u32;
-
-					// verify transferred successfully
-					let verify = alloc::boxed::Box::new(move || {
-						// verify balance after transfer, decreased by transferred amount
-						// (plus transport/remote fees)
-						assert!(<Balances as Inspect<_>>::balance(&who) <= balance - fee_amount);
-					});
-					Some((assets, fee_index, dest, verify))
+					// The extrinsic enabled by this benchmark is blocked for the relay token.
+					// See: https://github.com/paritytech/polkadot-sdk/issues/9054
+					None
 				}
 
 				fn get_asset() -> Asset {
