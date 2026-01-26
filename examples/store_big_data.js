@@ -41,8 +41,15 @@ function pushToResultQueue(data) {
 const stats = {
     startTime: null,
     endTime: null,
+    startBlock: null,
+    endBlock: null,
     blockNumbers: [],  // Track all block numbers where txs were included
 };
+
+async function getCurrentBlockNumber(api) {
+    return await api.query.System.Number.getValue();
+}
+
 function waitForQueueLength(targetLength, timeoutMs = 300000) {
     return new Promise((resolve, reject) => {
         const start = Date.now();
@@ -114,6 +121,7 @@ function formatDuration(ms) {
 function printStatistics(dataSize) {
     const numTxs = stats.blockNumbers.length;
     const elapsed = stats.endTime - stats.startTime;
+    const blocksElapsed = stats.endBlock - stats.startBlock;
 
     // Count transactions per block
     const txsPerBlock = {};
@@ -133,6 +141,7 @@ function printStatistics(dataSize) {
     console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
     console.log(`| Avg txs per block   | ${avgTxsPerBlock.toString().padEnd(20)} |`);
     console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
+    console.log(`| Blocks elapsed      | ${`${blocksElapsed} (#${stats.startBlock} → #${stats.endBlock})`.padEnd(20)} |`);
     console.log(`| Throughput          | ${formatBytes(dataSize / (elapsed / 1000)).padEnd(20)} /s |`);
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     console.log('                         📦 TRANSACTIONS PER BLOCK                             ');
@@ -165,6 +174,7 @@ export async function storeChunkedFile(api, filePath) {
 
     // Start timing for statistics
     stats.startTime = Date.now();
+    stats.startBlock = await getCurrentBlockNumber(api);
 
     // ---- 2️⃣ Store chunks in Bulletin ----
     for (let i = 0; i < chunks.length; i++) {
@@ -236,9 +246,11 @@ async function main() {
             console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
             await waitForQueueLength(chunks.length);
             stats.endTime = Date.now();
+            stats.endBlock = await getCurrentBlockNumber(bulletinAPI);
             console.log(`All chunks ${chunks.length} are stored!`);
         } catch (err) {
             stats.endTime = Date.now();
+            stats.endBlock = await getCurrentBlockNumber(bulletinAPI);
             console.error(err.message);
             throw new Error('❌ Storing chunks failed! Error:' + err.message);
         }
