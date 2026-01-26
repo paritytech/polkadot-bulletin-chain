@@ -353,8 +353,12 @@ pub mod pallet {
 		})]
 		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			let is_authorized = matches!(origin.into(), Ok(frame_system::RawOrigin::Authorized));
-			if is_authorized {
+			let (is_authorized, is_unsigned) = match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => (true, false),
+				Ok(frame_system::RawOrigin::None) => (false, true),
+				_ => (false, false),
+			};
+			if is_authorized || is_unsigned {
 				Self::check_unsigned_store(data.as_slice(), true)
 					.map_err(Self::dispatch_error_from_validity)?;
 			}
@@ -429,8 +433,12 @@ pub mod pallet {
 			block: BlockNumberFor<T>,
 			index: u32,
 		) -> DispatchResultWithPostInfo {
-			let is_authorized = matches!(origin.into(), Ok(frame_system::RawOrigin::Authorized));
-			if is_authorized {
+			let (is_authorized, is_unsigned) = match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => (true, false),
+				Ok(frame_system::RawOrigin::None) => (false, true),
+				_ => (false, false),
+			};
+			if is_authorized || is_unsigned {
 				Self::check_unsigned_renew(&block, &index, true)
 					.map_err(Self::dispatch_error_from_validity)?;
 			}
@@ -774,6 +782,19 @@ pub mod pallet {
 		}
 	}
 
+	#[pallet::validate_unsigned]
+	impl<T: Config> ValidateUnsigned for Pallet<T> {
+		type Call = Call<T>;
+
+		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+			Self::check_unsigned_call(call)
+		}
+
+		fn pre_dispatch(_call: &Self::Call) -> Result<(), TransactionValidityError> {
+			Ok(())
+		}
+	}
+
 	impl<T: Config> Pallet<T> {
 		fn to_validity_with_refund(
 			result: Result<ValidTransaction, TransactionValidityError>,
@@ -1060,9 +1081,9 @@ pub mod pallet {
 			Self::check_authorization(AuthorizationScope::Preimage(hash), size as u32, consume)?;
 
 			Ok(ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-				.and_provides(hash)
-				.priority(T::StoreRenewPriority::get())
-				.longevity(T::StoreRenewLongevity::get())
+					.and_provides(hash)
+					.priority(T::StoreRenewPriority::get())
+					.longevity(T::StoreRenewLongevity::get())
 				.into())
 		}
 
@@ -1071,8 +1092,8 @@ pub mod pallet {
 			consume: bool,
 		) -> Result<ValidTransaction, TransactionValidityError> {
 			Self::check_store_renew_unsigned(
-				data.len(),
-				|| sp_io::hashing::blake2_256(data),
+					data.len(),
+					|| sp_io::hashing::blake2_256(data),
 				consume,
 			)
 		}
@@ -1082,38 +1103,51 @@ pub mod pallet {
 			index: &u32,
 			consume: bool,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-			let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-			Self::check_store_renew_unsigned(
-				info.size as usize,
-				|| info.content_hash.into(),
+					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
+					Self::check_store_renew_unsigned(
+						info.size as usize,
+						|| info.content_hash.into(),
 				consume,
-			)
+					)
 		}
 
 		fn check_unsigned_remove_expired_account(
 			who: &T::AccountId,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-			Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
+					Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
 			Ok(ValidTransaction::with_tag_prefix(
-				"TransactionStorageRemoveExpiredAccountAuthorization",
-			)
-			.and_provides(who)
-			.priority(T::RemoveExpiredAuthorizationPriority::get())
-			.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+							"TransactionStorageRemoveExpiredAccountAuthorization",
+						)
+						.and_provides(who)
+						.priority(T::RemoveExpiredAuthorizationPriority::get())
+						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 			.into())
 		}
 
 		fn check_unsigned_remove_expired_preimage_authorization(
 			hash: &ContentHash,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-			Self::check_authorization_expired(AuthorizationScope::Preimage(*hash))?;
+					Self::check_authorization_expired(AuthorizationScope::Preimage(*hash))?;
 			Ok(ValidTransaction::with_tag_prefix(
-				"TransactionStorageRemoveExpiredPreimageAuthorization",
-			)
-			.and_provides(hash)
-			.priority(T::RemoveExpiredAuthorizationPriority::get())
-			.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+							"TransactionStorageRemoveExpiredPreimageAuthorization",
+						)
+						.and_provides(hash)
+						.priority(T::RemoveExpiredAuthorizationPriority::get())
+						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 			.into())
+		}
+
+		fn check_unsigned_call(call: &Call<T>) -> Result<ValidTransaction, TransactionValidityError> {
+			match call {
+				Call::<T>::store { data } => Self::check_unsigned_store(data.as_slice(), false),
+				Call::<T>::renew { block, index } =>
+					Self::check_unsigned_renew(block, index, false),
+				Call::<T>::remove_expired_account_authorization { who } =>
+					Self::check_unsigned_remove_expired_account(who),
+				Call::<T>::remove_expired_preimage_authorization { content_hash } =>
+					Self::check_unsigned_remove_expired_preimage_authorization(content_hash),
+				_ => Err(InvalidTransaction::Call.into()),
+			}
 		}
 
 		fn check_signed(
