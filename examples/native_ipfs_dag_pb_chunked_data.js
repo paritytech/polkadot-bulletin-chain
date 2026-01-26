@@ -55,7 +55,7 @@ async function main() {
 
         // Store DAG file directly to the Bulletin. with DAG-PB / SHA2_256 content_hash.
         // !!! (No IPFS magic needed: ipfs.dag.put or ipfs.block.put(dagBytes, { format: 'dag-pb', mhtype: 'sha2-256'}))
-        let { rootCid } = await store(typedApi, whoSigner, dagBytes, 0x70, 0x12);
+        let { cid: rootCid } = await store(typedApi, whoSigner, dagBytes, 0x70, 0x12);
         assert.deepStrictEqual(expectedRootCid, rootCid);
 
         // Read by rootCID directly over IPFS gateway, which handles download all the chunks.
