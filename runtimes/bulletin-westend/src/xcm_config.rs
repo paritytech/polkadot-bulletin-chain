@@ -32,7 +32,7 @@ use pallet_xcm::{AuthorizedAliasers, XcmPassthrough};
 use parachains_common::{
 	xcm_config::{
 		AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
-		ConcreteAssetFromSystem, ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+		ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
 	},
 	TREASURY_PALLET_ID,
 };
@@ -45,9 +45,8 @@ use xcm_builder::{
 	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
 	AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
 	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
-	DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
-	DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
-	HashedDescription, IsConcrete, LocationAsSuperuser, ParentAsSuperuser, ParentIsPreset,
+	DescribeAllTerminal, DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor,
+	FungibleAdapter, HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset,
 	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
 	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
 	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
@@ -119,9 +118,6 @@ pub type XcmOriginToTransactDispatchOrigin = (
 	// Native converter for sibling Parachains; will convert to a `SiblingPara` origin when
 	// recognized.
 	SiblingParachainAsNative<cumulus_pallet_xcm::Origin, RuntimeOrigin>,
-	// Superuser converter for the Relay-chain (Parent) location. This will allow it to issue a
-	// transaction from the Root origin.
-	ParentAsSuperuser<RuntimeOrigin>,
 	// Native signed account converter; this just converts an `AccountId32` origin into a normal
 	// `RuntimeOrigin::Signed` origin of the same 32-byte value.
 	SignedAccountId32AsNative<RelayNetwork, RuntimeOrigin>,
@@ -146,39 +142,34 @@ impl Contains<Location> for FellowsPlurality {
 	}
 }
 
-pub type Barrier = TrailingSetTopicAsId<
-	DenyThenTry<
-		DenyRecursively<DenyReserveTransferToRelayChain>,
+pub type Barrier = TrailingSetTopicAsId<(
+	// Allow local users to buy weight credit.
+	TakeWeightCredit,
+	// Expected responses are OK.
+	AllowKnownQueryResponses<PolkadotXcm>,
+	WithComputedOrigin<
 		(
-			// Allow local users to buy weight credit.
-			TakeWeightCredit,
-			// Expected responses are OK.
-			AllowKnownQueryResponses<PolkadotXcm>,
-			WithComputedOrigin<
-				(
-					// If the message is one that immediately attempts to pay for execution, then
-					// allow it.
-					AllowTopLevelPaidExecutionFrom<Everything>,
-					// Parent, its pluralities (i.e. governance bodies), and the Fellows plurality
-					// get free execution.
-					AllowExplicitUnpaidExecutionFrom<(
-						ParentOrParentsPlurality,
-						FellowsPlurality,
-						Equals<GovernanceLocation>,
-						// Let's allow a People chain for PoP authorizations.
-						Equals<PeopleLocation>,
-					)>,
-					// Subscriptions for version tracking are OK.
-					AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
-					// HRMP notifications from the relay chain are OK.
-					AllowHrmpNotificationsFromRelayChain,
-				),
-				UniversalLocation,
-				ConstU32<8>,
-			>,
+			// If the message is one that immediately attempts to pay for execution, then
+			// allow it.
+			AllowTopLevelPaidExecutionFrom<Everything>,
+			// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
+			// and AssetHub get free execution.
+			AllowExplicitUnpaidExecutionFrom<(
+				ParentOrParentsPlurality,
+				FellowsPlurality,
+				Equals<GovernanceLocation>,
+				// Let's allow a People chain for PoP authorizations.
+				Equals<PeopleLocation>,
+			)>,
+			// Subscriptions for version tracking are OK.
+			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
+			// HRMP notifications from the relay chain are OK.
+			AllowHrmpNotificationsFromRelayChain,
 		),
+		UniversalLocation,
+		ConstU32<8>,
 	>,
->;
+)>;
 
 parameter_types! {
 	pub TreasuryAccount: AccountId = TREASURY_PALLET_ID.into_account_truncating();
@@ -191,11 +182,36 @@ pub type WaivedLocations = (
 	Equals<RootLocation>,
 	RelayOrOtherSystemParachains<AllSiblingSystemParachains, Runtime>,
 	Equals<RelayTreasuryLocation>,
+	Equals<AssetHubLocation>,
 );
 
-/// Cases where a remote origin is accepted as trusted Teleporter for a given asset:
-/// - WND with the parent Relay Chain and sibling parachains.
-pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
+/// Helper type to match the relay chain native token from Asset Hub.
+/// Non-system parachains should trust Asset Hub as the reserve location for the relay token.
+pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
+impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
+where
+	Origin: frame_support::traits::Get<Location>,
+{
+	fn contains(asset: &Asset, origin: &Location) -> bool {
+		let loc = Origin::get();
+		&loc == origin &&
+			matches!(
+				asset,
+				Asset {
+					id: AssetId(asset_id_location),
+					fun: Fungible(_),
+				} if *asset_id_location == TokenRelayLocation::get()
+			)
+	}
+}
+
+/// Reserve locations for assets.
+/// Non-system parachains should trust Asset Hub as the reserve for the relay chain native token.
+pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
+
+/// Cases where a remote origin is accepted as trusted Teleporter for a given asset.
+/// Non-system parachains should not accept teleports, use reserve transfers instead.
+pub type TrustedTeleporters = ();
 
 /// Defines origin aliasing rules for this chain.
 ///
@@ -217,10 +233,10 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Bulletin chain does not recognize a reserve location for any asset. Users must teleport ROC
-	// where allowed (e.g. with the Relay Chain).
-	type IsReserve = ();
-	type IsTeleporter = TrustedTeleporters;
+	// As a non-system parachain, Bulletin accepts DOT reserve transfers from Asset Hub.
+	// Teleports are not supported.
+	type IsReserve = Reserves;
+	type IsTeleporter = ();
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
 	type Weigher = WeightInfoBounds<
@@ -290,7 +306,7 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type XcmTeleportFilter = Everything;
+	type XcmTeleportFilter = Nothing;
 	type XcmReserveTransferFilter = Everything;
 	type Weigher = WeightInfoBounds<
 		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,

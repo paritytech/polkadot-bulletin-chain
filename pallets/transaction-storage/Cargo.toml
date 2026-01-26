@@ -14,6 +14,7 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 array-bytes = { optional = true, workspace = true }
+cid = { features = ["alloc"], workspace = true }
 codec = { workspace = true }
 scale-info = { features = ["derive"], workspace = true }
 tracing = { workspace = true }
@@ -34,6 +35,7 @@ runtime-benchmarks = [
 	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
+	"cid/std",
 	"codec/std",
 	"pallets-common/std",
 	"polkadot-sdk-frame/std",

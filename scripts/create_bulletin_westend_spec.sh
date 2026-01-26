@@ -6,7 +6,7 @@ cargo build --release -p bulletin-westend-runtime
 
 # cargo install staging-chain-spec-builder
 chain-spec-builder create \
-        -p 1006 \
+        -p 2487 \
         -c westend \
         -i bulletin-westend \
         -n Bulletin \
