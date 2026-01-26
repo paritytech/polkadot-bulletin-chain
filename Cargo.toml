@@ -7,6 +7,7 @@ repository = "https://github.com/zdave-parity/polkadot-bulletin-chain.git"
 array-bytes = { version = "6.1" }
 bp-test-utils = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5" }
 cfg-if = { version = "1.0" }
+cid = { version = "0.11.1", default-features = false }
 clap = { version = "4.2.5" }
 codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false }
 cumulus-pallet-aura-ext = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = false }

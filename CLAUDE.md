@@ -48,6 +48,8 @@ cargo clippy --all-targets --all-features --workspace -- -D warnings
 
 # Format check
 cargo +nightly fmt --all -- --check
+taplo format --config .config/taplo.toml
+zepter run --config .config/zepter.yaml
 ```
 
 ## Run Commands

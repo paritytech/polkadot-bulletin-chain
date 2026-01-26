@@ -1,6 +1,6 @@
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
-import { blake2AsU8a } from '@polkadot/util-crypto';
+import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'
 import { createCanvas } from "canvas";
 import fs from "fs";
 import assert from "assert";
@@ -9,13 +9,6 @@ import assert from "assert";
 export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
-
-// TODO: replace with PAPI
-export async function waitForNewBlock() {
-  // TODO: wait for a new block.
-  console.log('🛰 Waiting for new block...')
-  return new Promise(resolve => setTimeout(resolve, 8000))
-}
 
 /**
  * Creates a PAPI-compatible signer from a Keyring account
@@ -227,8 +220,27 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
     return false;
 }
 
-export function getContentHash(bytes) {
-  return blake2AsU8a(bytes);
+export function getContentHash(bytes, mhCode = 0xb220) {
+  switch (mhCode) {
+    case 0xb220: // blake2b-256
+      return blake2AsU8a(bytes);
+    case 0x12:   // sha2-256
+      return sha256AsU8a(bytes);
+    case 0x1b:   // keccak-256
+      return keccak256AsU8a(bytes);
+    default:
+      throw new Error("Unhandled multihash code: " + mhCode);
+  }
+}
+
+// Convert multihash code to HashingAlgorithm enum for the runtime
+export function toHashingEnum(mhCode) {
+  switch (mhCode) {
+    case 0xb220: return { type: "Blake2b256" };
+    case 0x12:   return { type: "Sha2_256" };
+    case 0x1b:   return { type: "Keccak256" };
+    default:     throw new Error(`Unhandled multihash code: ${mhCode}`);
+  }
 }
 
 export function toHex(bytes) {
