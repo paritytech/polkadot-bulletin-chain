@@ -16,14 +16,16 @@
 
 #![cfg(test)]
 
+use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeGenesisConfig,
 	RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension, UncheckedExtrinsic,
 };
-use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo};
+use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
 use pallet_transaction_storage::{
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
+	cids::{calculate_cid, CidConfig, HashingAlgorithm},
+	AuthorizationExtent, Call as TxStorageCall, CidConfigForStore, Config as TxStorageConfig,
 };
 use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
@@ -33,6 +35,7 @@ use sp_runtime::{
 	transaction_validity, transaction_validity::InvalidTransaction, ApplyExtrinsicResult,
 	BuildStorage, Either,
 };
+use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
@@ -41,12 +44,10 @@ const ALICE: [u8; 32] = [1u8; 32];
 
 /// Advance to the next block for testing transaction storage.
 fn advance_block() {
-	use frame_support::traits::{OnFinalize, OnInitialize};
-
 	let current = frame_system::Pallet::<Runtime>::block_number();
 
-	TransactionStorage::on_finalize(current);
-	System::on_finalize(current);
+	<TransactionStorage as Hooks<_>>::on_finalize(current);
+	<System as Hooks<_>>::on_finalize(current);
 
 	let next = current + 1;
 	System::set_block_number(next);
@@ -54,14 +55,14 @@ fn advance_block() {
 	frame_system::BlockWeight::<Runtime>::kill();
 	frame_system::AllExtrinsicsLen::<Runtime>::kill();
 
-	System::on_initialize(next);
-	TransactionStorage::on_initialize(next);
+	<System as Hooks<_>>::on_initialize(next);
+	<TransactionStorage as Hooks<_>>::on_initialize(next);
 }
 
-/// Constructs an unsigned extrinsic when `sender` is `None`.
-fn construct_extrinsic(
+fn construct_extrinsic_with_codec(
 	sender: Option<sp_core::sr25519::Pair>,
 	call: RuntimeCall,
+	cid_config: Option<CidConfig>,
 ) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
 	// provide a known block hash for the immortal era check
 	frame_system::BlockHash::<Runtime>::insert(0, PcHash::default());
@@ -84,6 +85,7 @@ fn construct_extrinsic(
 		),
 		bulletin_westend_runtime::ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		pallet_transaction_storage::extension::ProvideCidConfig::<Runtime>::new(cid_config),
 	);
 	let tx_ext: TxExtension =
 		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
@@ -109,8 +111,16 @@ fn construct_and_apply_extrinsic(
 	account: Option<sp_core::sr25519::Pair>,
 	call: RuntimeCall,
 ) -> ApplyExtrinsicResult {
+	construct_and_apply_extrinsic_with_codec(account, call, None)
+}
+
+fn construct_and_apply_extrinsic_with_codec(
+	account: Option<sp_core::sr25519::Pair>,
+	call: RuntimeCall,
+	cid_config: Option<CidConfig>,
+) -> ApplyExtrinsicResult {
 	let dispatch_info = call.get_dispatch_info();
-	let xt = construct_extrinsic(account, call)?;
+	let xt = construct_extrinsic_with_codec(account, call, cid_config)?;
 	let xt_len = xt.encode().len();
 	tracing::info!(
 		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
@@ -120,6 +130,11 @@ fn construct_and_apply_extrinsic(
 		xt_len
 	);
 	bulletin_westend_runtime::Executive::apply_extrinsic(xt)
+}
+
+fn assert_ok_ok(apply_result: ApplyExtrinsicResult) {
+	assert_ok!(apply_result);
+	assert_ok!(apply_result.unwrap());
 }
 
 #[test]
@@ -173,10 +188,10 @@ fn transaction_storage_runtime_sizes() {
 
 			// (MaxTransactionSize+1) should exceed MaxTransactionSize and fail
 			let oversized: u64 =
-			(<<Runtime as TxStorageConfig>::MaxTransactionSize as frame_support::traits::Get<
-				u32,
-			>>::get() + 1)
-				.into();
+				(<<Runtime as TxStorageConfig>::MaxTransactionSize as frame_support::traits::Get<
+					u32,
+				>>::get() + 1)
+					.into();
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
@@ -295,6 +310,67 @@ fn authorized_storage_transactions_are_for_free() {
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
 		});
+}
+
+#[test]
+fn provide_cid_codec_extension_works() {
+	ExtBuilder::<Runtime>::default().with_tracing().build().execute_with(|| {
+		// prepare data
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![0u8; 4 * 1024];
+		let total_bytes: u64 = data.len() as u64;
+		let block_number = System::block_number();
+
+		// Authorize.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			3,
+			3 * total_bytes,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 3, bytes: 3 * total_bytes },
+		);
+
+		// 1. Store data WITHOUT a custom cid_config.
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			None,
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// 2. Store data WITH a cid_config as the default codec for raw data.
+		// (Should produce the same result as above).
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 }),
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec).
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 }),
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// Check the content_hashes and CIDs.
+		runtime::TransactionStorage::on_finalize(block_number);
+		let stored_txs = runtime::TransactionStorage::transaction_roots(block_number)
+			.unwrap()
+			.into_iter()
+			.enumerate()
+			.collect::<HashMap<_, _>>();
+		assert_eq!(stored_txs.len(), 3);
+		assert_eq!(stored_txs[&0].content_hash, calculate_cid(&data, None).unwrap().content_hash);
+		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
+		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
+	});
 }
 
 #[test]
@@ -454,13 +530,16 @@ fn governance_authorize_upgrade_works() {
 		Either::Right(InstructionError { index: 2, error: XcmError::BadOrigin })
 	);
 
-	// ok - relaychain
-	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
-		Runtime,
-		RuntimeOrigin,
-	>(GovernanceOrigin::Location(Location::parent())));
+	// no - relaychain (relay chain does not have superuser access, only AssetHub does)
+	assert_err!(
+		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
+			Runtime,
+			RuntimeOrigin,
+		>(GovernanceOrigin::Location(Location::parent())),
+		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
+	);
 
-	// ok - governance location
+	// ok - governance location (which is AssetHub)
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 		Runtime,
 		RuntimeOrigin,

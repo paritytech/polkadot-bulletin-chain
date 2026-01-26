@@ -36,15 +36,18 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 mod benchmarking;
 mod mock;
 mod tests;
 pub mod weights;
 
+use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use pallet_session::SessionManager;
 use polkadot_sdk_frame::{
-	deps::{frame_system::RawOrigin, sp_core::sp_std::prelude::*, sp_runtime::Perbill, *},
+	deps::{frame_system::RawOrigin, sp_runtime::Perbill, *},
 	prelude::*,
 	traits::ConvertInto,
 };

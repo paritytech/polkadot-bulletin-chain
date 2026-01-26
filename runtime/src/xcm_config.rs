@@ -20,8 +20,8 @@ use crate::{
 	bridge_config::{BridgedNetwork, ToBridgeHaulBlobExporter},
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
-
 use codec::{Decode, DecodeLimit, Encode};
+use core::marker::PhantomData;
 use frame_support::{
 	ensure, parameter_types,
 	traits::{Contains, Everything, Nothing, ProcessMessageError},
@@ -136,7 +136,7 @@ impl WeightTrader for NoopTrader {
 ///
 /// That's a 1:1 copy of corresponding Cumulus structure.
 pub struct AllowUnpaidTransactsFrom<RuntimeCall, AllowedOrigin>(
-	sp_std::marker::PhantomData<(RuntimeCall, AllowedOrigin)>,
+	PhantomData<(RuntimeCall, AllowedOrigin)>,
 );
 
 impl<RuntimeCall: Decode, AllowedOrigin: Contains<Location>> ShouldExecute

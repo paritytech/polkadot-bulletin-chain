@@ -15,14 +15,16 @@ use bulletin_polkadot_runtime::{
 	},
 	AccountId, BridgePolkadotGrandpa, BridgePolkadotMessages,
 };
-use frame_support::{assert_ok, dispatch::GetDispatchInfo, traits::Get};
+use frame_support::{assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get};
 use pallet_bridge_messages::{
 	messages_generation::{encode_all_messages, encode_lane_data, prepare_messages_storage_proof},
 	BridgedChainOf, LaneIdOf, ThisChainOf,
 };
 use pallet_bridge_parachains::ParachainHeaders;
 use pallet_transaction_storage::{
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
+	cids::{calculate_cid, CidConfig, HashingAlgorithm},
+	AuthorizationExtent, Call as TxStorageCall, CidConfigForStore, Config as TxStorageConfig,
+	BAD_DATA_SIZE,
 };
 use runtime::{
 	bridge_config::bp_people_polkadot, BuildStorage, Executive, Hash, Header, Runtime, RuntimeCall,
@@ -38,6 +40,7 @@ use sp_runtime::{
 	ApplyExtrinsicResult,
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
+use std::collections::HashMap;
 
 fn advance_block() {
 	let current_number = System::block_number();
@@ -262,10 +265,11 @@ fn emulate_sent_messages() {
 	);
 }
 
-fn construct_extrinsic(
+fn construct_extrinsic_with_codec(
 	sender: sp_core::sr25519::Pair,
 	call: RuntimeCall,
-) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
+	cid_config: Option<CidConfig>,
+) -> Result<UncheckedExtrinsic, TransactionValidityError> {
 	let account_id = sp_runtime::AccountId32::from(sender.public());
 	frame_system::BlockHash::<Runtime>::insert(0, Hash::default());
 	let tx_ext: TxExtension = (
@@ -280,6 +284,7 @@ fn construct_extrinsic(
 		frame_system::CheckWeight::<Runtime>::new(),
 		runtime::ValidateSigned,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
+		pallet_transaction_storage::extension::ProvideCidConfig::<Runtime>::new(cid_config),
 	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
 	let signature = payload.using_encoded(|e| sender.sign(e));
@@ -295,8 +300,15 @@ fn construct_and_apply_extrinsic(
 	account: sp_core::sr25519::Pair,
 	call: RuntimeCall,
 ) -> ApplyExtrinsicResult {
+	construct_and_apply_extrinsic_with_codec(account, call, None)
+}
+fn construct_and_apply_extrinsic_with_codec(
+	account: sp_core::sr25519::Pair,
+	call: RuntimeCall,
+	cid_config: Option<CidConfig>,
+) -> ApplyExtrinsicResult {
 	let dispatch_info = call.get_dispatch_info();
-	let xt = construct_extrinsic(account, call)?;
+	let xt = construct_extrinsic_with_codec(account, call, cid_config)?;
 	let xt_len = xt.encode().len();
 	log::info!(
 		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
@@ -382,6 +394,156 @@ fn transaction_storage_runtime_sizes() {
 				})
 			),
 			Err(BAD_DATA_SIZE.into())
+		);
+	});
+}
+
+#[test]
+fn provide_cid_codec_extension_works() {
+	run_test(|| {
+		// prepare data
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![0u8; 4 * 1024];
+		let total_bytes: u64 = data.len() as u64;
+		let block_number = System::block_number();
+
+		// Authorize.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			3,
+			3 * total_bytes,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 3, bytes: 3 * total_bytes },
+		);
+
+		// 1. Store data WITHOUT a custom cid_config.
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			None,
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// 2. Store data WITH a cid_config as the default codec for raw data.
+		// (Should produce the same result as above).
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 }),
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec).
+		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 }),
+		));
+		assert!(!CidConfigForStore::<Runtime>::exists());
+
+		// Check the content_hashes and CIDs.
+		runtime::TransactionStorage::on_finalize(block_number);
+		let stored_txs = runtime::TransactionStorage::transaction_roots(block_number)
+			.unwrap()
+			.into_iter()
+			.enumerate()
+			.collect::<HashMap<_, _>>();
+		assert_eq!(stored_txs.len(), 3);
+		assert_eq!(stored_txs[&0].content_hash, calculate_cid(&data, None).unwrap().content_hash);
+		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
+		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
+	});
+}
+
+#[test]
+fn preimage_authorized_storage_transactions_work() {
+	run_test(|| {
+		advance_block();
+
+		// Use relayer_signer since only relayers can submit transactions in bulletin-polkadot
+		let account = relayer_signer();
+		let data = vec![0u8; 24];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+
+		// Not authorized (no account or preimage auth) should fail to store.
+		assert_eq!(
+			construct_and_apply_extrinsic(account.pair(), call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment))
+		);
+
+		// Authorize preimage (not account).
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			data.len() as u64,
+		));
+
+		// Now should work via preimage authorization.
+		assert_ok_ok(construct_and_apply_extrinsic(account.pair(), call));
+
+		// Verify preimage authorization was consumed.
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+#[test]
+fn signed_store_prefers_preimage_authorization_over_account() {
+	run_test(|| {
+		advance_block();
+
+		// Use relayer_signer since only relayers can submit transactions in bulletin-polkadot
+		let account = relayer_signer();
+		let who: AccountId = account.to_account_id();
+		let data = vec![0u8; 100];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+
+		// Setup: authorize both account and preimage
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			5,
+			500,
+		));
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			data.len() as u64,
+		));
+
+		// Verify both authorizations exist
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 5, bytes: 500 },
+		);
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+
+		// Store data
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		assert_ok_ok(construct_and_apply_extrinsic(account.pair(), call));
+
+		// Verify: preimage authorization was consumed, account authorization unchanged
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Preimage authorization should be consumed"
+		);
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 5, bytes: 500 },
+			"Account authorization should remain unchanged when preimage auth is used"
 		);
 	});
 }
