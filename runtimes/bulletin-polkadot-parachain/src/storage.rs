@@ -56,7 +56,7 @@ impl pallet_transaction_storage::Config for Runtime {
 		crate::EnsureRoot<Self::AccountId>,
 		// People chain can also handle authorizations.
 		EnsureXcm<Equals<PeopleLocation>>,
-		// TODO: Open this to other origins or locations (e.g., a smart contract on AH). 
+		// TODO: Open this to other origins or locations (e.g., a smart contract on AH).
 		// First we need to determine the proper incentives
 	>;
 	type StoreRenewPriority = StoreRenewPriority;

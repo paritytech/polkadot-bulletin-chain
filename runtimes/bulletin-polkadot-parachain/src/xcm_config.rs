@@ -32,11 +32,10 @@ use pallet_xcm::{AuthorizedAliasers, XcmPassthrough};
 use parachains_common::{
 	xcm_config::{
 		AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
-		ConcreteAssetFromSystem, ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+		ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
 	},
 	TREASURY_PALLET_ID,
 };
-use polkadot_parachain_primitives::primitives::Sibling;
 use polkadot_runtime_common::xcm_sender::ExponentialPrice;
 use sp_runtime::traits::AccountIdConversion;
 use xcm::latest::prelude::*;
@@ -46,11 +45,10 @@ use xcm_builder::{
 	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
 	DenyRecursively, DenyReserveTransferToRelayChain, DenyThenTry, DescribeAllTerminal,
 	DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor, FungibleAdapter,
-	HashedDescription, IsConcrete, LocationAsSuperuser, ParentAsSuperuser, ParentIsPreset,
-	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
-	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
-	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
-	XcmFeeManagerFromComponents,
+	HashedDescription, IsConcrete, LocationAsSuperuser, RelayChainAsNative, SendXcmFeeToAccount,
+	SiblingParachainAsNative, SignedAccountId32AsNative, SignedToAccountId32,
+	SovereignSignedViaLocation, TakeWeightCredit, TrailingSetTopicAsId, UsingComponents,
+	WeightInfoBounds, WithComputedOrigin, WithUniqueTopic, XcmFeeManagerFromComponents,
 };
 use xcm_executor::XcmExecutor;
 
@@ -86,17 +84,14 @@ parameter_types! {
 	pub const MaxAssetsIntoHolding: u32 = 64;
 	pub FellowshipLocation: Location = Location::new(1, Parachain(COLLECTIVES_ID));
 	pub PeopleLocation: Location = Location::new(1, Parachain(PEOPLE_ID));
-	pub GovernanceLocation: Location = Location::parent();
+	/// For non-system parachains, Asset Hub acts as the governance location.
+	pub GovernanceLocation: Location = AssetHubLocation::get();
 }
 
 /// Type for specifying how a `Location` can be converted into an `AccountId`. This is used
 /// when determining ownership of accounts for asset transacting and when attempting to use XCM
 /// `Transact` in order to determine the dispatch Origin.
 pub type LocationToAccountId = (
-	// The parent (Relay-chain) origin converts to the parent `AccountId`.
-	ParentIsPreset<AccountId>,
-	// Sibling parachain origins convert to AccountId via the `ParaId::into`.
-	SiblingParachainConvertsVia<Sibling, AccountId>,
 	// Straight up local `AccountId32` origins just alias directly to `AccountId`.
 	AccountId32Aliases<RelayNetwork, AccountId>,
 	// Foreign locations alias into accounts according to a hash of their standard description.
@@ -137,9 +132,6 @@ pub type XcmOriginToTransactDispatchOrigin = (
 	// Native converter for sibling Parachains; will convert to a `SiblingPara` origin when
 	// recognized.
 	SiblingParachainAsNative<cumulus_pallet_xcm::Origin, RuntimeOrigin>,
-	// Superuser converter for the Relay-chain (Parent) location. This will allow it to issue a
-	// transaction from the Root origin.
-	ParentAsSuperuser<RuntimeOrigin>,
 	// Native signed account converter; this just converts an `AccountId32` origin into a normal
 	// `RuntimeOrigin::Signed` origin of the same 32-byte value.
 	SignedAccountId32AsNative<RelayNetwork, RuntimeOrigin>,
@@ -182,6 +174,7 @@ pub type Barrier = TrailingSetTopicAsId<
 					AllowExplicitUnpaidExecutionFrom<(
 						ParentOrParentsPlurality,
 						FellowsPlurality,
+						// GovernanceLocation is Asset Hub for non-system parachains.
 						Equals<GovernanceLocation>,
 						// Let's allow a People chain for PoP authorizations.
 						Equals<PeopleLocation>,
@@ -211,9 +204,30 @@ pub type WaivedLocations = (
 	Equals<RelayTreasuryLocation>,
 );
 
-/// Cases where a remote origin is accepted as trusted Teleporter for a given asset:
-/// - DOT with the parent Relay Chain and sibling parachains.
-pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
+/// Helper type to match DOT (relay native token) from Asset Hub.
+/// Non-system parachains should trust Asset Hub as the reserve location for DOT.
+pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
+impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
+where
+	Origin: frame_support::traits::Get<Location>,
+{
+	fn contains(asset: &Asset, origin: &Location) -> bool {
+		let loc = Origin::get();
+		&loc == origin &&
+			matches!(
+				asset,
+				Asset { id: AssetId(asset_id_location), fun: Fungible(_) }
+					if *asset_id_location == TokenRelayLocation::get()
+			)
+	}
+}
+
+/// Reserve locations for assets.
+/// Non-system parachains should trust Asset Hub as the reserve for relay chain native token (DOT).
+pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
+
+/// Non-system parachains should not accept teleports.
+pub type TrustedTeleporters = ();
 
 /// Defines origin aliasing rules for this chain.
 ///
@@ -235,9 +249,9 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Bulletin chain does not recognize a reserve location for any asset. Users must teleport DOT
-	// where allowed (e.g. with the Relay Chain).
-	type IsReserve = ();
+	// Non-system parachains should trust Asset Hub as the reserve for DOT.
+	type IsReserve = Reserves;
+	// Non-system parachains should not accept teleports.
 	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
@@ -308,7 +322,8 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type XcmTeleportFilter = Everything;
+	// Non-system parachains do not support teleports.
+	type XcmTeleportFilter = Nothing;
 	type XcmReserveTransferFilter = Everything;
 	type Weigher = WeightInfoBounds<
 		crate::weights::xcm::BulletinPolkadotXcmWeight<RuntimeCall>,

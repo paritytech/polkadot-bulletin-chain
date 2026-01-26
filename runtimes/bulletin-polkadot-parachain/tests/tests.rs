@@ -18,7 +18,9 @@
 
 use bulletin_polkadot_parachain_runtime::{
 	polkadot_constants::fee::WeightToFee,
-	xcm_config::{polkadot_system_parachain, GovernanceLocation, LocationToAccountId, PeopleLocation},
+	xcm_config::{
+		polkadot_system_parachain, GovernanceLocation, LocationToAccountId, PeopleLocation,
+	},
 	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
 	System, TxExtension, UncheckedExtrinsic,
 };
@@ -202,7 +204,8 @@ fn transaction_storage_runtime_sizes() {
 }
 
 /// Test maximum write throughput: 8 transactions of 1 MiB each in a single block (8 MiB data).
-/// A 9th transaction should fail with ExhaustsResources due to overhead on the 8 transactions pushing the 9th above 9 MiB.
+/// A 9th transaction should fail with ExhaustsResources due to overhead on the 8 transactions
+/// pushing the 9th above 9 MiB.
 #[test]
 fn transaction_storage_max_throughput() {
 	use bulletin_polkadot_parachain_runtime as runtime;
@@ -221,10 +224,9 @@ fn transaction_storage_max_throughput() {
 	.execute_with(|| {
 		let account = Sr25519Keyring::Alice;
 		let who: AccountId = account.to_account_id();
-                // fund Alice to cover length-based tx fees
-        let initial: Balance = 10_000_000_000_000_000_000u128;
-        <pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
-
+		// fund Alice to cover length-based tx fees
+		let initial: Balance = 10_000_000_000_000_000_000u128;
+		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
 
 		// Authorize 8 + 1 transactions (one extra for the overflow test)
 		assert_ok!(runtime::TransactionStorage::authorize_account(
@@ -255,7 +257,6 @@ fn transaction_storage_max_throughput() {
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
 		}
-
 
 		// Try to store a 9th transaction - should fail because block is full
 		// (10 MiB block * 90% NORMAL_DISPATCH_RATIO = 9 MiB limit, minus ~1 MiB overhead for 8 txs)

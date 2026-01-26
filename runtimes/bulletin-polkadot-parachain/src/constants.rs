@@ -93,8 +93,9 @@ pub mod polkadot_constants {
 		impl WeightToFeePolynomial for RefTimeToFee {
 			type Balance = Balance;
 			fn polynomial() -> WeightToFeeCoefficients<Self::Balance> {
-				// In Polkadot, extrinsic base weight (smallest non-zero weight) is mapped to 1/10 CENT:
-				// The standard system parachain configuration is 1/20 of that, as in 1/200 CENT.
+				// In Polkadot, extrinsic base weight (smallest non-zero weight) is mapped to 1/10
+				// CENT: The standard system parachain configuration is 1/20 of that, as in
+				// 1/200 CENT.
 				let p = super::currency::CENTS;
 				let q = 200 * Balance::from(ExtrinsicBaseWeight::get().ref_time());
 
@@ -138,8 +139,8 @@ pub mod polkadot_constants {
 		/// Change this to adjust the block time.
 		pub const MILLISECS_PER_BLOCK: u64 = 6000;
 
-		// NOTE: Currently it is not possible to change the slot duration after the chain has started.
-		//       Attempting to do so will brick block production.
+		// NOTE: Currently it is not possible to change the slot duration after the chain has
+		// started.       Attempting to do so will brick block production.
 		pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
 
 		// Time is measured by number of blocks.
@@ -151,4 +152,3 @@ pub mod polkadot_constants {
 	/// XCM version to use in genesis.
 	pub const SAFE_XCM_VERSION: u32 = xcm::prelude::XCM_VERSION;
 }
-
