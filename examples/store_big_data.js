@@ -129,7 +129,7 @@ function printStatistics(dataSize) {
     console.log('                            📊 STORAGE STATISTICS                              ');
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     console.log(`| File size           | ${formatBytes(dataSize).padEnd(20)} |`);
-    console.log(`| Chunk size          | ${formatBytes(CHUNK_SIZE).padEnd(20)} |`);
+    console.log(`| Chunk/TX size       | ${formatBytes(CHUNK_SIZE).padEnd(20)} |`);
     console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
     console.log(`| Avg txs per block   | ${avgTxsPerBlock.toString().padEnd(20)} |`);
     console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
@@ -162,6 +162,9 @@ export async function storeChunkedFile(api, filePath) {
         chunks.push({ cid, bytes: chunk, len: chunk.length })
     }
     console.log(`✂️ Split into ${chunks.length} chunks`)
+
+    // Start timing for statistics
+    stats.startTime = Date.now();
 
     // ---- 2️⃣ Store chunks in Bulletin ----
     for (let i = 0; i < chunks.length; i++) {
@@ -227,9 +230,6 @@ async function main() {
         // push data to queue
         // Read the file, chunk it, store in Bulletin and return CIDs.
         let { chunks, dataSize } = await storeChunkedFile(bulletinAPI, filePath);
-
-        // Start timing for statistics
-        stats.startTime = Date.now();
 
         // wait for all chunks are stored
         try {
