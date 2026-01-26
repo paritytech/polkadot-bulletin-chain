@@ -270,7 +270,7 @@ impl pallet_timestamp::Config for Runtime {
 	Clone,
 	PartialEq,
 	Eq,
-	sp_runtime::RuntimeDebug,
+	Debug,
 	codec::Encode,
 	codec::Decode,
 	codec::DecodeWithMemTracking,
@@ -712,8 +712,11 @@ impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(seed: Option<Vec<u8>>) -> Vec<u8> {
-			SessionKeys::generate(seed)
+		fn generate_session_keys(
+			owner: Vec<u8>,
+			seed: Option<Vec<u8>>,
+		) -> sp_session::OpaqueGeneratedSessionKeys {
+			SessionKeys::generate(&owner, seed).into()
 		}
 
 		fn decode_session_keys(
@@ -791,8 +794,16 @@ impl_runtime_apis! {
 			PolkadotXcm::query_xcm_weight(message)
 		}
 
-		fn query_delivery_fees(destination: VersionedLocation, message: VersionedXcm<()>) -> Result<VersionedAssets, XcmPaymentApiError> {
-			PolkadotXcm::query_delivery_fees(destination, message)
+		fn query_delivery_fees(
+			destination: VersionedLocation,
+			message: VersionedXcm<()>,
+			asset_id: VersionedAssetId,
+		) -> Result<VersionedAssets, XcmPaymentApiError> {
+			use crate::xcm_config::XcmConfig;
+
+			type AssetExchanger = <XcmConfig as xcm_executor::Config>::AssetExchanger;
+
+			PolkadotXcm::query_delivery_fees::<AssetExchanger>(destination, message, asset_id)
 		}
 	}
 

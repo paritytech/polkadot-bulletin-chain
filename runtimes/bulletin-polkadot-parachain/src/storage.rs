@@ -16,18 +16,17 @@
 
 //! Storage-specific configurations.
 
-use super::{Runtime, RuntimeEvent};
+use super::{Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
 use crate::xcm_config::PeopleLocation;
 use frame_support::{
 	parameter_types,
 	traits::{EitherOfDiverse, Equals},
 };
 use pallet_xcm::EnsureXcm;
+use pallets_common::NoCurrency;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 
 parameter_types! {
-	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
-	pub const StoragePeriod: crate::BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
@@ -42,12 +41,15 @@ parameter_types! {
 /// The main business of the Bulletin chain.
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
+	type RuntimeHoldReason = RuntimeHoldReason;
+	type FeeDestination = ();
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	/// Set to 1 MB for now to match BitSwap's recommended max
 	type MaxTransactionSize = crate::ConstU32<{ 1 * 1024 * 1024 }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		// Root can do whatever.
