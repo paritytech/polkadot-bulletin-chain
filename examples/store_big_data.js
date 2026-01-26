@@ -112,11 +112,17 @@ function formatDuration(ms) {
 }
 
 function printStatistics(dataSize) {
-    const uniqueBlocks = [...new Set(stats.blockNumbers)];
-    const numBlocks = uniqueBlocks.length;
     const numTxs = stats.blockNumbers.length;
-    const avgTxsPerBlock = numBlocks > 0 ? (numTxs / numBlocks).toFixed(2) : 'N/A';
     const elapsed = stats.endTime - stats.startTime;
+
+    // Count transactions per block
+    const txsPerBlock = {};
+    for (const blockNum of stats.blockNumbers) {
+        txsPerBlock[blockNum] = (txsPerBlock[blockNum] || 0) + 1;
+    }
+    const sortedBlocks = Object.keys(txsPerBlock).map(Number).sort((a, b) => a - b);
+    const numBlocks = sortedBlocks.length;
+    const avgTxsPerBlock = numBlocks > 0 ? (numTxs / numBlocks).toFixed(2) : 'N/A';
 
     console.log('\n');
     console.log('═══════════════════════════════════════════════════════════════════════════════');
@@ -125,10 +131,17 @@ function printStatistics(dataSize) {
     console.log(`| File size           | ${formatBytes(dataSize).padEnd(20)} |`);
     console.log(`| Chunk size          | ${formatBytes(CHUNK_SIZE).padEnd(20)} |`);
     console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
-    console.log(`| Number of blocks    | ${numBlocks.toString().padEnd(20)} |`);
     console.log(`| Avg txs per block   | ${avgTxsPerBlock.toString().padEnd(20)} |`);
     console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
     console.log(`| Throughput          | ${formatBytes(dataSize / (elapsed / 1000)).padEnd(20)} /s |`);
+    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log('                         📦 TRANSACTIONS PER BLOCK                             ');
+    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    for (const blockNum of sortedBlocks) {
+        const count = txsPerBlock[blockNum];
+        const bar = '█'.repeat(count);
+        console.log(`| Block #${blockNum.toString().padEnd(10)} | ${count.toString().padStart(3)} txs | ${bar}`);
+    }
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     console.log('\n');
 }
