@@ -14,6 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! XCM Configuration for Bulletin Polkadot Parachain
+//!
+//! As a non-system parachain, this runtime:
+//! - Uses Asset Hub as the reserve location for DOT (no teleports)
+//! - Trusts Asset Hub as the governance location (not the relay)
+
 use super::{
 	AccountId, AllPalletsWithSystem, Balance, Balances, BaseDeliveryFee, FeeAssetId, ParachainInfo,
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
@@ -84,7 +90,6 @@ parameter_types! {
 	pub const MaxAssetsIntoHolding: u32 = 64;
 	pub FellowshipLocation: Location = Location::new(1, Parachain(COLLECTIVES_ID));
 	pub PeopleLocation: Location = Location::new(1, Parachain(PEOPLE_ID));
-	/// For non-system parachains, Asset Hub acts as the governance location.
 	pub GovernanceLocation: Location = AssetHubLocation::get();
 }
 
@@ -174,9 +179,8 @@ pub type Barrier = TrailingSetTopicAsId<
 					AllowExplicitUnpaidExecutionFrom<(
 						ParentOrParentsPlurality,
 						FellowsPlurality,
-						// GovernanceLocation is Asset Hub for non-system parachains.
 						Equals<GovernanceLocation>,
-						// Let's allow a People chain for PoP authorizations.
+						// People chain has free execution for PoP authorizations.
 						Equals<PeopleLocation>,
 					)>,
 					// Subscriptions for version tracking are OK.
@@ -205,7 +209,6 @@ pub type WaivedLocations = (
 );
 
 /// Helper type to match DOT (relay native token) from Asset Hub.
-/// Non-system parachains should trust Asset Hub as the reserve location for DOT.
 pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
 impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
 where
@@ -222,11 +225,10 @@ where
 	}
 }
 
-/// Reserve locations for assets.
-/// Non-system parachains should trust Asset Hub as the reserve for relay chain native token (DOT).
+/// Reserve locations for assets (Asset Hub for DOT).
 pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
 
-/// Non-system parachains should not accept teleports.
+/// No trusted teleporters.
 pub type TrustedTeleporters = ();
 
 /// Defines origin aliasing rules for this chain.
@@ -249,9 +251,7 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Non-system parachains should trust Asset Hub as the reserve for DOT.
 	type IsReserve = Reserves;
-	// Non-system parachains should not accept teleports.
 	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
@@ -322,7 +322,6 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	// Non-system parachains do not support teleports.
 	type XcmTeleportFilter = Nothing;
 	type XcmReserveTransferFilter = Everything;
 	type Weigher = WeightInfoBounds<
