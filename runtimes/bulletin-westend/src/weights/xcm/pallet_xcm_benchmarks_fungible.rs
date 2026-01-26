@@ -95,11 +95,11 @@ impl<T: frame_system::Config> WeightInfo<T> {
 		//  Estimated: `0`
 		// Minimum execution time: 6_230_000 picoseconds.
 		Weight::from_parts(6_230_000, 0)
-}
+	}
 
-pub(crate) fn receive_teleported_asset() -> Weight {
+	pub(crate) fn receive_teleported_asset() -> Weight {
 		Weight::MAX
-}
+	}
 	/// Storage: `ParachainInfo::ParachainId` (r:1 w:0)
 	/// Proof: `ParachainInfo::ParachainId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `PolkadotXcm::SupportedVersion` (r:1 w:0)
