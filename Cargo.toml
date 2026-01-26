@@ -33,9 +33,7 @@ serde_json = { version = "1.0.132", default-features = false }
 static_assertions = { version = "1.1" }
 testnet-parachains-constants = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "testnet-parachains-constants", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
-westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "westend-runtime-constants", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = false }
-polkadot-runtime-constants = { version = "../runtimes/relay/polkadot/constants", default-features = false }
-system-parachains-constants = { path = "../runtimes/system-parachains/constants", default-features = false }
+westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "westend-runtime-constants", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
 
 # Local workspace members
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
