@@ -405,3 +405,197 @@ fn stores_various_sizes_with_account_authorization() {
 		run_to_block(2, || None);
 	});
 }
+
+#[test]
+fn signed_store_prefers_preimage_authorization_over_account() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Setup: user has account authorization
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 4000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 2, bytes: 4000 }
+		);
+
+		// Setup: preimage authorization also exists for the same content
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			2000
+		));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+
+		// Store the pre-authorized content using a signed transaction
+		let call = Call::store { data: data.clone() };
+		assert_ok!(TransactionStorage::validate_signed(&who, &call));
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+
+		// Verify: preimage authorization was consumed, not account authorization
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Preimage authorization should be consumed"
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 2, bytes: 4000 },
+			"Account authorization should remain unchanged"
+		);
+
+		// User can still use their account authorization for different content
+		let other_data = vec![99u8; 1000];
+		let other_call = Call::store { data: other_data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &other_call));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 3000 },
+			"Account authorization should be used for non-pre-authorized content"
+		);
+	});
+}
+
+#[test]
+fn signed_store_falls_back_to_account_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+		let different_hash = blake2_256(&[0u8; 100]); // Hash for different content
+
+		// Setup: user has account authorization
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 4000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 2, bytes: 4000 }
+		);
+
+		// Setup: preimage authorization exists but for DIFFERENT content
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			different_hash,
+			1000
+		));
+
+		// Store content that doesn't have preimage authorization
+		let call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+
+		// Verify: account authorization was consumed since no preimage auth for this content
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+			"Account authorization should be consumed when no matching preimage auth"
+		);
+		// Preimage authorization for different content should remain unchanged
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(different_hash),
+			AuthorizationExtent { transactions: 1, bytes: 1000 },
+			"Unrelated preimage authorization should remain unchanged"
+		);
+	});
+}
+
+#[test]
+fn signed_renew_uses_account_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Setup: authorize preimage and store the data
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			2000
+		));
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		run_to_block(3, || None);
+
+		// Setup: user has account authorization for renew
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+
+		// Renew the stored data using signed transaction.
+		// Since preimage authorization was consumed during store, renew falls back to account.
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+
+		// Verify: account authorization was consumed for renew
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Account authorization should be consumed for renew when no preimage auth"
+		);
+	});
+}
+
+#[test]
+fn signed_renew_prefers_preimage_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Setup: store data using account authorization
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		// Account authorization consumed after store
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+
+		run_to_block(3, || None);
+
+		// Setup: authorize both preimage and account for renew
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			2000
+		));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+
+		// Renew using signed transaction - should prefer preimage authorization
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+
+		// Verify: preimage authorization was consumed, account authorization unchanged
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Preimage authorization should be consumed for renew"
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+			"Account authorization should remain unchanged when preimage auth is used"
+		);
+	});
+}

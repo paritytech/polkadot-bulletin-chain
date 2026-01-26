@@ -10,11 +10,11 @@ use bp_messages::{
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_runtime::messages::MessageDispatchResult;
 use codec::{Decode, DecodeWithMemTracking, Encode};
+use core::marker::PhantomData;
 use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
 use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
 use sp_runtime::SaturatedConversion;
-use sp_std::marker::PhantomData;
 use xcm::prelude::*;
 use xcm_builder::{
 	BridgeBlobDispatcher, BridgeMessage, DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError,

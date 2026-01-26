@@ -96,17 +96,17 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     ROOT_DIR="{{ justfile_directory() }}/.."
     # Build the node binary (which will build the runtime as a dependency)
     cargo build --release -p polkadot-bulletin-chain
+    POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
         runtime   : {{ runtime }}
         test_dir  : {{ test_dir }}
         zombienet : $ZOMBIENET_BIN
-        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
-        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+        POLKADOT_BULLETIN_BINARY_PATH : $POLKADOT_BULLETIN_BINARY_PATH
     EOF
     cd "$ROOT_DIR"
-    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
+    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$POLKADOT_BULLETIN_BINARY_PATH" \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
     cd -
 
@@ -239,7 +239,7 @@ ipfs-start test_dir: _check-docker
     docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
     docker exec ipfs-node ipfs log level bitswap debug
     docker exec ipfs-node ipfs log level bitswap/client debug
-    
+
     # Store container name in PID directory for cleanup
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
@@ -285,6 +285,7 @@ ipfs-shutdown test_dir:
     echo "🛑 Shutting down IPFS Docker container..."
     docker stop ipfs-node 2>/dev/null || echo "   ⚠ Container not running or already stopped"
     docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
+    docker volume rm ipfs-data 2>/dev/null || echo "   ⚠ Volume not found or already removed"
     
     # Clean up container file if it exists
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
@@ -319,7 +320,7 @@ ipfs-reconnect-start test_dir runtime:
 # Generate PAPI descriptors from a running node
 # Parameters:
 #   ws_url - WebSocket URL of the node (default: ws://localhost:10000)
-papi-generate ws_url="ws://localhost:10000":
+papi-generate ws_url="ws://localhost:10000": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -329,7 +330,7 @@ papi-generate ws_url="ws://localhost:10000":
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-setup-services test_dir runtime:
+setup-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -370,7 +371,7 @@ teardown-services test_dir:
 
 # Start all services for a runtime (use with run-test-* recipes)
 # Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
-start-services test_dir runtime: npm-install
+start-services test_dir runtime:
     #!/usr/bin/env bash
     set -e
     mkdir -p "{{ test_dir }}"
@@ -408,7 +409,7 @@ run-test-authorize-and-store test_dir runtime mode="ws":
     if [ "{{ mode }}" = "smoldot" ]; then
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
             RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1006.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH"
         else
             CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
@@ -435,6 +436,15 @@ run-test-store-big-data test_dir:
     set -e
     echo "🧪 Running store big data test (test_dir: {{ test_dir }})..."
     node store_big_data.js
+
+# Run authorize-preimage-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+run-test-authorize-preimage-and-store test_dir:
+    #!/usr/bin/env bash
+    set -e
+    echo "🧪 Running authorize preimage and store test (test_dir: {{ test_dir }})..."
+    node authorize_preimage_and_store_papi.js
 
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
@@ -469,7 +479,7 @@ run-authorize-and-store runtime mode="ws": npm-install
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
             # Parachain: relay chain (required) + parachain spec (optional)
             RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1006.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH"
         else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
@@ -530,6 +540,31 @@ run-store-big-data runtime: npm-install
 
     set +e
     node store_big_data.js
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
+# Run authorize preimage and store with PAPI example.
+run-authorize-preimage-and-store-papi runtime: npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting authorize preimage and store with PAPI workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node authorize_preimage_and_store_papi.js
     EXAMPLE_EXIT=$?
 
     echo ""
