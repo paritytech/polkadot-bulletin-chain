@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 import { describe, it, expect } from 'vitest';
-import { Chunker, ChunkerConfig } from '../../src/chunker';
+import { FixedSizeChunker, ChunkerConfig } from '../../src/chunker';
 
 describe('Chunker', () => {
   it('should chunk data correctly with default config', () => {
@@ -13,7 +13,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    const chunker = new Chunker(config);
+    const chunker = new FixedSizeChunker(config);
     const chunks = chunker.chunk(data);
 
     expect(chunks).toHaveLength(5);
@@ -33,7 +33,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    const chunker = new Chunker(config);
+    const chunker = new FixedSizeChunker(config);
     const chunks = chunker.chunk(data);
 
     expect(chunks).toHaveLength(1);
@@ -50,7 +50,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    const chunker = new Chunker(config);
+    const chunker = new FixedSizeChunker(config);
     const chunks = chunker.chunk(data);
 
     expect(chunks).toHaveLength(3);
@@ -66,7 +66,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    const chunker = new Chunker(config);
+    const chunker = new FixedSizeChunker(config);
 
     expect(chunker.numChunks(1024 * 1024)).toBe(1);
     expect(chunker.numChunks(5 * 1024 * 1024)).toBe(5);
@@ -81,7 +81,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    expect(() => new Chunker(config)).toThrow();
+    expect(() => new FixedSizeChunker(config)).toThrow();
   });
 
   it('should throw error for zero chunk size', () => {
@@ -91,7 +91,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    expect(() => new Chunker(config)).toThrow();
+    expect(() => new FixedSizeChunker(config)).toThrow();
   });
 
   it('should validate chunk data integrity', () => {
@@ -106,7 +106,7 @@ describe('Chunker', () => {
       createManifest: true,
     };
 
-    const chunker = new Chunker(config);
+    const chunker = new FixedSizeChunker(config);
     const chunks = chunker.chunk(data);
 
     // Reassemble and verify
