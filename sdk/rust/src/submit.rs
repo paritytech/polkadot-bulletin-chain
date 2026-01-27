@@ -8,10 +8,7 @@
 
 #![cfg(feature = "std")]
 
-use crate::{
-	cid::ContentHash,
-	types::Result,
-};
+use crate::{cid::ContentHash, types::Result};
 use alloc::vec::Vec;
 use sp_runtime::AccountId32;
 
@@ -129,34 +126,14 @@ impl TransactionBuilder {
 /// A TransactionStorage pallet call.
 #[derive(Debug, Clone)]
 pub enum Call {
-	Store {
-		data: Vec<u8>,
-	},
-	Renew {
-		block: u32,
-		index: u32,
-	},
-	AuthorizeAccount {
-		who: AccountId32,
-		transactions: u32,
-		bytes: u64,
-	},
-	AuthorizePreimage {
-		content_hash: ContentHash,
-		max_size: u64,
-	},
-	RefreshAccountAuthorization {
-		who: AccountId32,
-	},
-	RefreshPreimageAuthorization {
-		content_hash: ContentHash,
-	},
-	RemoveExpiredAccountAuthorization {
-		who: AccountId32,
-	},
-	RemoveExpiredPreimageAuthorization {
-		content_hash: ContentHash,
-	},
+	Store { data: Vec<u8> },
+	Renew { block: u32, index: u32 },
+	AuthorizeAccount { who: AccountId32, transactions: u32, bytes: u64 },
+	AuthorizePreimage { content_hash: ContentHash, max_size: u64 },
+	RefreshAccountAuthorization { who: AccountId32 },
+	RefreshPreimageAuthorization { content_hash: ContentHash },
+	RemoveExpiredAccountAuthorization { who: AccountId32 },
+	RemoveExpiredPreimageAuthorization { content_hash: ContentHash },
 }
 
 impl Call {

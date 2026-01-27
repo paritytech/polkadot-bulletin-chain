@@ -58,9 +58,7 @@ async fn main() -> Result<()> {
 
 	// Authorize Bob's account
 	println!("⏳ Authorizing account...");
-	let receipt = client
-		.authorize_account(bob_account.clone(), transactions, bytes)
-		.await?;
+	let receipt = client.authorize_account(bob_account.clone(), transactions, bytes).await?;
 
 	println!("✅ Account authorized!");
 	println!("   Block hash: {}", receipt.block_hash);
@@ -79,9 +77,7 @@ async fn main() -> Result<()> {
 
 	// Authorize this specific preimage
 	println!("\n⏳ Authorizing preimage...");
-	let receipt = client
-		.authorize_preimage(content_hash, data.len() as u64)
-		.await?;
+	let receipt = client.authorize_preimage(content_hash, data.len() as u64).await?;
 
 	println!("✅ Preimage authorized!");
 	println!("   Block hash: {}", receipt.block_hash);
@@ -91,18 +87,14 @@ async fn main() -> Result<()> {
 	println!("═══ Refresh Authorization Example ═══\n");
 
 	println!("🔄 Refreshing Bob's account authorization...");
-	let receipt = client
-		.refresh_account_authorization(bob_account.clone())
-		.await?;
+	let receipt = client.refresh_account_authorization(bob_account.clone()).await?;
 
 	println!("✅ Authorization refreshed!");
 	println!("   Block hash: {}", receipt.block_hash);
 	println!("   Tx hash: {}\n", receipt.extrinsic_hash);
 
 	println!("🔄 Refreshing preimage authorization...");
-	let receipt = client
-		.refresh_preimage_authorization(content_hash)
-		.await?;
+	let receipt = client.refresh_preimage_authorization(content_hash).await?;
 
 	println!("✅ Preimage authorization refreshed!");
 	println!("   Block hash: {}", receipt.block_hash);

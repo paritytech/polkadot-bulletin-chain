@@ -76,8 +76,7 @@ impl TransactionSubmitter for TestSubmitter {
 		transactions: u32,
 		bytes: u64,
 	) -> Result<TransactionReceipt> {
-		let tx =
-			bulletin::tx().transaction_storage().authorize_account(who, transactions, bytes);
+		let tx = bulletin::tx().transaction_storage().authorize_account(who, transactions, bytes);
 
 		let result = self
 			.api
@@ -167,7 +166,9 @@ impl TransactionSubmitter for TestSubmitter {
 		&self,
 		content_hash: ContentHash,
 	) -> Result<TransactionReceipt> {
-		let tx = bulletin::tx().transaction_storage().refresh_preimage_authorization(content_hash);
+		let tx = bulletin::tx()
+			.transaction_storage()
+			.refresh_preimage_authorization(content_hash);
 
 		let result = self
 			.api
@@ -190,9 +191,7 @@ impl TransactionSubmitter for TestSubmitter {
 		&self,
 		who: AccountId32,
 	) -> Result<TransactionReceipt> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.remove_expired_account_authorization(who);
+		let tx = bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
 
 		let result = self
 			.api
@@ -280,16 +279,13 @@ async fn test_chunked_store() -> Result<()> {
 				create_manifest: true,
 			}),
 			StoreOptions::default(),
-			Some(Box::new(move |event| {
-				match event {
-					ProgressEvent::ChunkCompleted { index, total, .. } => {
-						chunks_completed += 1;
-						println!("   Chunk {}/{} completed", index + 1, total);
-					},
-					ProgressEvent::ManifestCreated { .. } =>
-						println!("   Manifest created"),
-					_ => {},
-				}
+			Some(Box::new(move |event| match event {
+				ProgressEvent::ChunkCompleted { index, total, .. } => {
+					chunks_completed += 1;
+					println!("   Chunk {}/{} completed", index + 1, total);
+				},
+				ProgressEvent::ManifestCreated { .. } => println!("   Manifest created"),
+				_ => {},
 			})),
 		)
 		.await?;
@@ -319,17 +315,14 @@ async fn test_authorization_workflow() -> Result<()> {
 	println!("   Authorization estimate: {} tx, {} bytes", transactions, bytes);
 
 	// Authorize Bob's account (Alice has sudo)
-	let receipt = alice_client
-		.authorize_account(bob_account.clone(), transactions, bytes)
-		.await?;
+	let receipt = alice_client.authorize_account(bob_account.clone(), transactions, bytes).await?;
 
 	assert!(!receipt.block_hash.is_empty());
 	println!("✅ Account authorization test passed");
 	println!("   Block hash: {}", receipt.block_hash);
 
 	// Test refresh
-	let refresh_receipt =
-		alice_client.refresh_account_authorization(bob_account.clone()).await?;
+	let refresh_receipt = alice_client.refresh_account_authorization(bob_account.clone()).await?;
 
 	assert!(!refresh_receipt.block_hash.is_empty());
 	println!("✅ Authorization refresh test passed");
@@ -346,9 +339,7 @@ async fn test_preimage_authorization() -> Result<()> {
 	let content_hash = sp_io::hashing::blake2_256(data);
 
 	// Authorize preimage
-	let receipt = alice_client
-		.authorize_preimage(content_hash, data.len() as u64)
-		.await?;
+	let receipt = alice_client.authorize_preimage(content_hash, data.len() as u64).await?;
 
 	assert!(!receipt.block_hash.is_empty());
 	println!("✅ Preimage authorization test passed");
@@ -421,11 +412,7 @@ async fn test_dag_manifest() -> Result<()> {
 	};
 
 	let data = vec![0xBBu8; 5 * 1024 * 1024]; // 5 MiB
-	let config = ChunkerConfig {
-		chunk_size: 1_048_576,
-		max_parallel: 8,
-		create_manifest: true,
-	};
+	let config = ChunkerConfig { chunk_size: 1_048_576, max_parallel: 8, create_manifest: true };
 
 	let chunker = FixedSizeChunker::new(config);
 	let chunks = chunker.chunk(&data)?;

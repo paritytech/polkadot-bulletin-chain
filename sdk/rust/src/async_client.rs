@@ -67,11 +67,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 
 	/// Create a client with custom configuration.
 	pub fn with_config(submitter: S, config: AsyncClientConfig) -> Self {
-		Self {
-			config,
-			auth_manager: AuthorizationManager::new(),
-			submitter,
-		}
+		Self { config, auth_manager: AuthorizationManager::new(), submitter }
 	}
 
 	/// Set the authorization manager.

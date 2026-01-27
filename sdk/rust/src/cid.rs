@@ -36,10 +36,7 @@ pub fn hash_algorithm_to_pallet(algo: HashAlgorithm) -> HashingAlgorithm {
 
 /// Create a CidConfig from SDK types.
 pub fn create_config(codec: CidCodec, hash_algo: HashAlgorithm) -> CidConfig {
-	CidConfig {
-		codec: codec_to_u64(codec),
-		hashing: hash_algorithm_to_pallet(hash_algo),
-	}
+	CidConfig { codec: codec_to_u64(codec), hashing: hash_algorithm_to_pallet(hash_algo) }
 }
 
 /// Calculate CID for data using SDK configuration types.
@@ -49,7 +46,8 @@ pub fn calculate_cid_with_config(
 	hash_algo: HashAlgorithm,
 ) -> Result<CidData> {
 	let config = create_config(codec, hash_algo);
-	calculate_cid(data, Some(config)).map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
+	calculate_cid(data, Some(config))
+		.map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
 }
 
 /// Calculate CID with default configuration (raw codec, blake2b-256).

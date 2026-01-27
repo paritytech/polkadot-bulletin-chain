@@ -17,7 +17,10 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum Error {
 	/// Chunk size exceeds maximum allowed (8 MiB).
-	#[cfg_attr(feature = "std", error("Chunk size {0} exceeds maximum allowed size of 8388608 bytes"))]
+	#[cfg_attr(
+		feature = "std",
+		error("Chunk size {0} exceeds maximum allowed size of 8388608 bytes")
+	)]
 	ChunkTooLarge(u64),
 
 	/// Data is empty.
@@ -33,7 +36,10 @@ pub enum Error {
 	AuthorizationNotFound(String),
 
 	/// Insufficient authorization.
-	#[cfg_attr(feature = "std", error("Insufficient authorization: need {need} bytes, have {available} bytes"))]
+	#[cfg_attr(
+		feature = "std",
+		error("Insufficient authorization: need {need} bytes, have {available} bytes")
+	)]
 	InsufficientAuthorization { need: u64, available: u64 },
 
 	/// Storage operation failed.
