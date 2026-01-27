@@ -3,8 +3,6 @@
 
 //! Common types and error definitions for the Bulletin SDK.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-
 extern crate alloc;
 
 use alloc::{string::String, vec::Vec};

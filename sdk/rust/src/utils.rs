@@ -8,6 +8,8 @@ use crate::{
     types::{CidCodec, Error, HashAlgorithm, Result},
 };
 use alloc::{string::String, vec::Vec};
+
+#[cfg(feature = "std")]
 use sp_runtime::AccountId32;
 
 /// Convert hex string to bytes
