@@ -414,7 +414,7 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:1
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ ipfs_api_url }}"
         else
             CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
-            node $SCRIPT_NAME "$CHAINSPEC_PATH" "{{ ipfs_api_url }}"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "{{ ipfs_api_url }}"
         fi
     else
         node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
@@ -490,7 +490,7 @@ run-authorize-and-store runtime mode="ws": npm-install
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8080"
         else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
-            node $SCRIPT_NAME "$CHAINSPEC_PATH" "http://127.0.0.1:8080"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "http://127.0.0.1:8080"
         fi
     else
         node $SCRIPT_NAME "ws://localhost:10000" "//Alice" "http://127.0.0.1:8080"
