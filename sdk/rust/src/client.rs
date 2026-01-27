@@ -210,7 +210,6 @@ pub mod async_client {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::types::{CidCodec, HashAlgorithm};
 
 	#[test]
 	fn test_client_new() {

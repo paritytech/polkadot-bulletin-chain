@@ -20,7 +20,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
-    "test": "vitest",
+    "test": "vitest run test/unit",
+    "test:all": "vitest",
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
     "lint": "eslint src --ext .ts",

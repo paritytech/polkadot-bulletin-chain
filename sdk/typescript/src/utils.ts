@@ -153,7 +153,7 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
 
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  return `${(bytes / Math.pow(k, i)).toFixed(dm)} ${sizes[i]}`;
 }
 
 /**
@@ -469,7 +469,11 @@ export function truncate(
   }
 
   const partLength = Math.floor((maxLength - ellipsis.length) / 2);
-  return str.slice(0, partLength) + ellipsis + str.slice(-partLength);
+  // Correctly handle odd/even splits so the total length equals maxLength
+  const front = str.slice(0, Math.ceil((maxLength - ellipsis.length) / 2));
+  const back = str.slice(-Math.floor((maxLength - ellipsis.length) / 2));
+  
+  return front + ellipsis + back;
 }
 
 /**

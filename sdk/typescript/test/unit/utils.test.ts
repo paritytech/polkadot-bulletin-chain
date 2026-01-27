@@ -267,7 +267,7 @@ describe('Utils', () => {
   describe('truncate', () => {
     it('should truncate long strings', () => {
       const truncated = truncate('bafkreiabcd1234567890', 15);
-      expect(truncated).toBe('bafkr...67890');
+      expect(truncated).toBe('bafkre...567890');
       expect(truncated.length).toBe(15);
     });
 

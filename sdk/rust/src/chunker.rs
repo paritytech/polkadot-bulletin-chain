@@ -159,7 +159,7 @@ mod tests {
 		assert_eq!(chunks[2].data.len(), 500);
 
 		for (i, chunk) in chunks.iter().enumerate() {
-			assert_eq!(chunk.index, i);
+			assert_eq!(chunk.index, i as u32);
 			assert_eq!(chunk.total_chunks, 3);
 		}
 	}
@@ -183,7 +183,7 @@ mod tests {
 	#[test]
 	fn test_chunk_size_too_large() {
 		let config = ChunkerConfig {
-			chunk_size: MAX_CHUNK_SIZE + 1,
+			chunk_size: (MAX_CHUNK_SIZE + 1) as u32,
 			max_parallel: 8,
 			create_manifest: true,
 		};
