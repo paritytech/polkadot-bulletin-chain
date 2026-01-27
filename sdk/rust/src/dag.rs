@@ -70,16 +70,16 @@ impl UnixFsDagBuilder {
 		// Field 1: Type = 2 (File)
 		// Wire format: field_number << 3 | wire_type
 		// wire_type for varint = 0
-		buf.push((1 << 3) | 0);
+		buf.push(1 << 3);
 		buf.push(2); // File type
 
 		// Field 3: filesize (optional)
-		buf.push((3 << 3) | 0);
+		buf.push(3 << 3);
 		encode_varint(total_size, &mut buf);
 
 		// Field 4: blocksizes (repeated)
 		for &size in block_sizes {
-			buf.push((4 << 3) | 0);
+			buf.push(4 << 3);
 			encode_varint(size, &mut buf);
 		}
 
@@ -112,7 +112,7 @@ impl UnixFsDagBuilder {
 		}
 
 		// Field 3: Tsize (uint64)
-		buf.push((3 << 3) | 0); // wire_type 0 = varint
+		buf.push(3 << 3); // wire_type 0 = varint
 		encode_varint(tsize, &mut buf);
 
 		buf

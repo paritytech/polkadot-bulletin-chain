@@ -41,8 +41,7 @@ npm run test:unit
 # Start node first:
 ./target/release/polkadot-bulletin-chain --dev --tmp
 
-# Then run integration tests:
-cd sdk/rust && cargo test --test integration_tests --features std -- --ignored --test-threads=1
+# TypeScript integration tests:
 cd sdk/typescript && npm run test:integration
 ```
 
@@ -79,12 +78,7 @@ Both SDKs provide:
 
 ## Examples
 
-Each SDK includes working examples:
-
-**Rust** (`sdk/rust/examples/`):
-- `simple_store.rs` - Basic storage with SubxtSubmitter
-- `chunked_store.rs` - Large file upload with progress
-- `authorization_management.rs` - All authorization operations
+**Rust**: Example code is available in the [SDK book documentation](../docs/sdk-book/). Rust examples require metadata files from a running node, so they're not included in the repository. See the SDK book for complete working examples and instructions.
 
 **TypeScript** (`sdk/typescript/examples/`):
 - `simple-store.ts` - Basic storage with PAPI

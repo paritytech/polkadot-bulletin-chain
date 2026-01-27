@@ -6,8 +6,6 @@
 //! This module provides traits for submitting transactions to Bulletin Chain.
 //! Users can implement these traits with their preferred signing/submission method.
 
-#![cfg(feature = "std")]
-
 use crate::{cid::ContentHash, types::Result};
 use alloc::vec::Vec;
 use sp_runtime::AccountId32;
