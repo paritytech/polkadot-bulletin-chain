@@ -3,7 +3,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { setupKeyringAndSigners } from './common.js';
+import { setupKeyringAndSigners, logHeader, logConnection, logSuccess, logError, logTestResult } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
@@ -16,9 +16,8 @@ const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
 async function main() {
     await cryptoWaitReady();
 
-    console.log(`Connecting to: ${NODE_WS}`);
-    console.log(`Using seed: ${SEED}`);
-    console.log(`Using IPFS API: ${HTTP_IPFS_API}`);
+    logHeader('AUTHORIZE AND STORE TEST (WebSocket)');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
     let client, resultCode;
     try {
@@ -45,11 +44,11 @@ async function main() {
 
         // Store data.
         const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
-        console.log("✅ Data stored successfully with CID:", cid);
+        logSuccess(`Data stored successfully with CID: ${cid}`);
 
         // Read back from IPFS
         let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
-        console.log("✅ Downloaded content:", downloadedContent.toString());
+        logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,
             expectedCid,
@@ -60,12 +59,13 @@ async function main() {
             downloadedContent.toString(),
             '❌ dataToStore does not match downloadedContent!'
         );
-        console.log(`✅ Verified content!`);
+        logSuccess('Verified content!');
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Authorize and Store Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();

@@ -398,13 +398,8 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:1
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🧪 Running authorize and store test (mode: smoldot, runtime: {{ runtime }})..."
         SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
     elif [ "{{ mode }}" = "ws" ]; then
-        echo "🧪 Running authorize and store test (mode: ws, runtime: {{ runtime }})..."
-        echo "   WS URL: {{ ws_url }}"
-        echo "   Seed: {{ seed }}"
-        echo "   IPFS API: {{ ipfs_api_url }}"
         SCRIPT_NAME="authorize_and_store_papi.js"
     else
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
@@ -434,10 +429,6 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:1
 run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" ipfs_api_url="http://127.0.0.1:8080":
     #!/usr/bin/env bash
     set -e
-    echo "🧪 Running store chunked data test (test_dir: {{ test_dir }})..."
-    echo "   WS URL: {{ ws_url }}"
-    echo "   Seed: {{ seed }}"
-    echo "   IPFS API: {{ ipfs_api_url }}"
     node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
 
 # Run store-big-data test only (services must already be running via start-services)
@@ -449,10 +440,6 @@ run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice
 run-test-store-big-data test_dir ws_url="ws://localhost:10000" seed="//Alice" ipfs_api_url="http://127.0.0.1:5001":
     #!/usr/bin/env bash
     set -e
-    echo "🧪 Running store big data test (test_dir: {{ test_dir }})..."
-    echo "   WS URL: {{ ws_url }}"
-    echo "   Seed: {{ seed }}"
-    echo "   IPFS API: {{ ipfs_api_url }}"
     node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
 
 # Run authorize-preimage-and-store test only (services must already be running via start-services)
@@ -464,10 +451,6 @@ run-test-store-big-data test_dir ws_url="ws://localhost:10000" seed="//Alice" ip
 run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice" ipfs_api_url="http://127.0.0.1:8080":
     #!/usr/bin/env bash
     set -e
-    echo "🧪 Running authorize preimage and store test (test_dir: {{ test_dir }})..."
-    echo "   WS URL: {{ ws_url }}"
-    echo "   Seed: {{ seed }}"
-    echo "   IPFS API: {{ ipfs_api_url }}"
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_api_url }}"
 
 # ============================================================================
@@ -627,10 +610,7 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed
 run-tests-against ws_url seed ipfs_api_url="http://127.0.0.1:5001": npm-install
     #!/usr/bin/env bash
     set -e
-    echo "🧪 Running store-big-data test against external endpoint..."
-    echo "   RPC URL: {{ ws_url }}"
-    echo "   Seed: {{ seed }}"
-    echo "   IPFS API: {{ ipfs_api_url }}"
+    echo "🌐 Testing against external endpoint: {{ ws_url }}"
     just papi-generate "{{ ws_url }}"
 
     # To use local Docker Kubo with external RPC:

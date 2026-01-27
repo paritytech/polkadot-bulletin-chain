@@ -14,6 +14,12 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
+    logHeader,
+    logConnection,
+    logStep,
+    logSuccess,
+    logError,
+    logTestResult,
 } from "./common.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
@@ -197,9 +203,8 @@ const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-di
 async function main() {
     await cryptoWaitReady()
 
-    console.log(`Connecting to: ${NODE_WS}`);
-    console.log(`Using seed: ${SEED}`);
-    console.log(`Using IPFS API: ${IPFS_API_URL}`);
+    logHeader('STORE BIG DATA TEST');
+    logConnection(NODE_WS, SEED, IPFS_API_URL);
 
     let client, resultCode;
     try {
@@ -292,10 +297,11 @@ async function main() {
         // Print storage statistics
         printStatistics(dataSize);
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Store Big Data Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();

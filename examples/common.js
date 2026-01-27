@@ -10,6 +10,97 @@ export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gatew
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
 
+// ============================================================================
+// Unified Logging Functions
+// ============================================================================
+
+/**
+ * Print a section header
+ */
+export function logHeader(text) {
+    console.log('\n' + '═'.repeat(80));
+    console.log(`  ${text}`);
+    console.log('═'.repeat(80));
+}
+
+/**
+ * Print a sub-section header
+ */
+export function logSection(text) {
+    console.log('\n' + '─'.repeat(80));
+    console.log(`  ${text}`);
+    console.log('─'.repeat(80));
+}
+
+/**
+ * Log test configuration parameters
+ */
+export function logConfig(config) {
+    console.log('\n📋 Configuration:');
+    for (const [key, value] of Object.entries(config)) {
+        console.log(`   ${key.padEnd(20)}: ${value}`);
+    }
+}
+
+/**
+ * Log connection information
+ */
+export function logConnection(wsUrl, seed, ipfsApi) {
+    logConfig({
+        'RPC Endpoint': wsUrl,
+        'Account/Seed': seed,
+        'IPFS API': ipfsApi
+    });
+}
+
+/**
+ * Log a step in the process
+ */
+export function logStep(step, message) {
+    console.log(`\n${step} ${message}`);
+}
+
+/**
+ * Log success message
+ */
+export function logSuccess(message) {
+    console.log(`✅ ${message}`);
+}
+
+/**
+ * Log error message
+ */
+export function logError(message) {
+    console.error(`❌ ${message}`);
+}
+
+/**
+ * Log info message
+ */
+export function logInfo(message) {
+    console.log(`ℹ️  ${message}`);
+}
+
+/**
+ * Log warning message
+ */
+export function logWarning(message) {
+    console.log(`⚠️  ${message}`);
+}
+
+/**
+ * Log final test result
+ */
+export function logTestResult(passed, testName = 'Test') {
+    console.log('\n' + '═'.repeat(80));
+    if (passed) {
+        console.log(`  ✅✅✅ ${testName} PASSED! ✅✅✅`);
+    } else {
+        console.log(`  ❌❌❌ ${testName} FAILED! ❌❌❌`);
+    }
+    console.log('═'.repeat(80) + '\n');
+}
+
 /**
  * Creates a PAPI-compatible signer from a Keyring account
  */

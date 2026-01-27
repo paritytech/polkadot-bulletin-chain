@@ -6,7 +6,7 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, logHeader, logConnection, logSuccess, logError, logTestResult } from './common.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
@@ -158,9 +158,8 @@ async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes
 async function main() {
     await cryptoWaitReady()
 
-    console.log(`Connecting to: ${NODE_WS}`);
-    console.log(`Using seed: ${SEED}`);
-    console.log(`Using IPFS API: ${HTTP_IPFS_API}`);
+    logHeader('STORE CHUNKED DATA TEST');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
     let client, resultCode;
     try {
@@ -229,15 +228,16 @@ async function main() {
 
         // Download the DAG descriptor raw file itself.
         const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
-        console.log(`✅ Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
+        logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
         assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
         const dagNode = dagPB.decode(downloadedDagBytes);
         console.log('📄 Decoded DAG node:', dagNode);
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Store Chunked Data Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();

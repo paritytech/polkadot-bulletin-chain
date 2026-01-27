@@ -3,7 +3,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
-import { setupKeyringAndSigners, getContentHash } from './common.js';
+import { setupKeyringAndSigners, getContentHash, logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
@@ -26,7 +26,7 @@ const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
  * @param {object|null} client - Client for unsigned transactions
  */
 async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, signerAddress, cidCodec, mhCode, client) {
-    console.log(`\n========== ${testName} ==========\n`);
+    logSection(testName);
 
     // Data to store
     const dataToStore = `Hello, Bulletin - ${testName} - ${new Date().toString()}`;
@@ -47,7 +47,7 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
 
     // If signer is provided, also authorize the account (to increment inc_providers/inc_sufficients for `CheckNonce`).
     if (signer != null && signerAddress != null) {
-        console.log(`ℹ️ Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
+        logInfo(`Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
         await authorizeAccount(
             bulletinAPI,
             sudoSigner,
@@ -59,11 +59,11 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
 
     // Store data
     const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
-    console.log("✅ Data stored successfully with CID:", cid.toString());
+    logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
     // Read back from IPFS
     const downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
-    console.log("✅ Downloaded content:", downloadedContent.toString());
+    logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
 
     // Verify CID matches
     assert.deepStrictEqual(
@@ -79,15 +79,14 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         '❌ Stored data does not match downloaded content!'
     );
 
-    console.log(`✅ Verified content!`);
+    logSuccess('Verified content!');
 }
 
 async function main() {
     await cryptoWaitReady();
 
-    console.log(`Connecting to: ${NODE_WS}`);
-    console.log(`Using seed: ${SEED}`);
-    console.log(`Using IPFS API: ${HTTP_IPFS_API}`);
+    logHeader('AUTHORIZE PREIMAGE AND STORE TEST');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
     let client, resultCode;
     try {
@@ -123,10 +122,11 @@ async function main() {
             client
         );
 
-        console.log(`\n\n\n✅✅✅ All tests passed! ✅✅✅`);
+        logTestResult(true, 'Authorize Preimage and Store Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();
