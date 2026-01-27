@@ -3,7 +3,8 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { setupKeyringAndSigners, logHeader, logConnection, logSuccess, logError, logTestResult } from './common.js';
+import { setupKeyringAndSigners } from './common.js';
+import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 

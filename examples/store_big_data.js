@@ -14,13 +14,15 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
+} from "./common.js";
+import {
     logHeader,
     logConnection,
     logStep,
     logSuccess,
     logError,
     logTestResult,
-} from "./common.js";
+} from "./logger.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';

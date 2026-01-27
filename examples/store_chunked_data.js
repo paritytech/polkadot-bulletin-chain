@@ -6,7 +6,8 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, logHeader, logConnection, logSuccess, logError, logTestResult } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners } from './common.js'
+import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
