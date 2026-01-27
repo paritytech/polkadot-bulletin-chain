@@ -272,7 +272,7 @@ function formatBytes(bytes, decimals = 2) {
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+  return `${(bytes / Math.pow(k, i)).toFixed(dm)} ${sizes[i]}`;
 }
 function validateChunkSize(size) {
   const MAX_CHUNK_SIZE2 = 8 * 1024 * 1024;
@@ -406,7 +406,9 @@ function truncate(str, maxLength, ellipsis = "...") {
     return str;
   }
   const partLength = Math.floor((maxLength - ellipsis.length) / 2);
-  return str.slice(0, partLength) + ellipsis + str.slice(-partLength);
+  const front = str.slice(0, Math.ceil((maxLength - ellipsis.length) / 2));
+  const back = str.slice(-Math.floor((maxLength - ellipsis.length) / 2));
+  return front + ellipsis + back;
 }
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));

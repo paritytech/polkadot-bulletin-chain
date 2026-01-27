@@ -180,8 +180,8 @@ members = [
 	"runtime",
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
-	"sdk/rust",
 	"runtimes/bulletin-westend/integration-tests",
+	"sdk/rust",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.

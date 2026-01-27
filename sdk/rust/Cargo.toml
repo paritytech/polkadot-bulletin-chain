@@ -46,28 +46,38 @@ subxt = "0.37"
 default = ["std"]
 
 std = [
-    "codec/std",
-    "scale-info/std",
-    "cid/std",
-    "multihash/std",
-    "pallet-transaction-storage/std",
-    "sp-core/std",
-    "sp-runtime/std",
-    "sp-io/std",
-    "serde?/std",
-    "thiserror",
-    "async-trait",
-    "subxt",
-    "tokio",
+	"async-trait",
+	"cid/std",
+	"codec/std",
+	"multihash/std",
+	"pallet-transaction-storage/std",
+	"scale-info/std",
+	"serde?/std",
+	"sp-core/std",
+	"sp-io/std",
+	"sp-runtime/std",
+	"subxt",
+	"thiserror",
+	"tokio",
 ]
 
 # Enable for ink! smart contract compatibility
 ink = [
-    "codec/max-encoded-len",
+	"codec/max-encoded-len",
 ]
 
 # Enable DAG serialization features
 serde-support = ["serde"]
+
+# Runtime benchmarking (no-op for SDK, but required for workspace consistency)
+runtime-benchmarks = [
+	"pallet-transaction-storage/runtime-benchmarks",
+]
+
+# Try-runtime support (no-op for SDK, but required for workspace consistency)
+try-runtime = [
+	"pallet-transaction-storage/try-runtime",
+]
 
 # Note: Examples and integration tests are not included in the repository because they
 # require metadata files from a running Bulletin Chain node and would cause CI failures.
