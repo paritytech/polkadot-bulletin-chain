@@ -65,7 +65,7 @@ impl FixedSizeChunker {
 			return 0;
 		}
 		let chunk_size = self.config.chunk_size as usize;
-		(data_size + chunk_size - 1) / chunk_size
+		data_size.div_ceil(chunk_size)
 	}
 }
 

@@ -95,7 +95,7 @@ impl BulletinClient {
 		}
 
 		// Use provided config or default
-		let chunker_config = config.unwrap_or_else(|| ChunkerConfig {
+		let chunker_config = config.unwrap_or(ChunkerConfig {
 			chunk_size: self.config.default_chunk_size,
 			max_parallel: self.config.max_parallel,
 			create_manifest: self.config.create_manifest,

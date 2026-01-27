@@ -37,22 +37,19 @@ cargo build --release --all-features
 
 # Unit tests
 cargo test --lib --all-features
-
-# Integration tests (requires running node)
-cargo test --test integration_tests --features std -- --ignored --test-threads=1
 ```
 
 ## Examples
 
-See [`examples/`](examples/) for complete working examples:
-- `simple_store.rs` - Basic storage with SubxtSubmitter
-- `chunked_store.rs` - Large file upload with progress
-- `authorization_management.rs` - All authorization operations
+Example code is available in the [SDK book documentation](../../docs/sdk-book/).
 
-Run examples:
-```bash
-cargo run --example simple_store --features std
-```
+Rust examples require metadata files from a running Bulletin Chain node and external dependencies (subxt), so they're not included in the repository to avoid CI issues. The SDK book contains complete working examples with detailed explanations.
+
+**Key examples covered in the SDK book:**
+- Basic storage with SubxtSubmitter implementation
+- Large file upload with progress tracking
+- Authorization management (all 8 pallet operations)
+- Custom TransactionSubmitter implementations
 
 ## Documentation
 

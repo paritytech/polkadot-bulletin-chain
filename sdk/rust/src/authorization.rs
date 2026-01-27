@@ -119,11 +119,8 @@ impl AuthorizationManager {
 	pub fn estimate_authorization(&self, data_size: u64, create_manifest: bool) -> (u32, u64) {
 		const DEFAULT_CHUNK_SIZE: u64 = 1024 * 1024; // 1 MiB
 
-		let num_chunks = if data_size == 0 {
-			1
-		} else {
-			((data_size + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE) as usize
-		};
+		let num_chunks =
+			if data_size == 0 { 1 } else { data_size.div_ceil(DEFAULT_CHUNK_SIZE) as usize };
 
 		self.calculate_requirements(data_size, num_chunks, create_manifest)
 	}
