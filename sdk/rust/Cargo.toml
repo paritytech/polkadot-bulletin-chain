@@ -1,0 +1,70 @@
+[package]
+name = "bulletin-sdk-rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Parity Technologies <admin@parity.io>"]
+license = "GPL-3.0-or-later"
+description = "Off-chain client SDK for Polkadot Bulletin Chain"
+repository = "https://github.com/paritytech/polkadot-bulletin-chain"
+
+[dependencies]
+# Core dependencies (no_std compatible)
+codec = { workspace = true, default-features = false }
+scale-info = { workspace = true, default-features = false, features = ["derive"] }
+
+# IPFS CID support
+cid = { version = "0.11", default-features = false, features = ["alloc"] }
+multihash = { version = "0.19", default-features = false }
+unsigned-varint = { version = "0.8", default-features = false }
+
+# Re-export pallet types
+pallet-transaction-storage = { workspace = true, default-features = false }
+
+# Substrate primitives
+sp-core = { workspace = true, default-features = false }
+sp-runtime = { workspace = true, default-features = false }
+sp-io = { workspace = true, default-features = false }
+
+# Serialization for DAG-PB
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"], optional = true }
+
+# Error handling (std-only)
+thiserror = { version = "2.0", optional = true }
+
+# Async support (std-only)
+async-trait = { version = "0.1", optional = true }
+
+# Async runtime and subxt (std-only)
+subxt = { version = "0.37", optional = true }
+tokio = { version = "1.40", features = ["full"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["full"] }
+subxt = "0.37"
+
+[features]
+default = ["std"]
+
+std = [
+    "codec/std",
+    "scale-info/std",
+    "cid/std",
+    "multihash/std",
+    "pallet-transaction-storage/std",
+    "sp-core/std",
+    "sp-runtime/std",
+    "sp-io/std",
+    "serde?/std",
+    "thiserror",
+    "async-trait",
+    "subxt",
+    "tokio",
+]
+
+# Enable for ink! smart contract compatibility
+ink = [
+    "codec/max-encoded-len",
+]
+
+# Enable DAG serialization features
+serde-support = ["serde"]
