@@ -7,8 +7,11 @@ import { setupKeyringAndSigners, getContentHash } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-const NODE_WS = 'ws://localhost:10000';
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
 
 /**
  * Run a preimage authorization + store test.
@@ -82,6 +85,10 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
 async function main() {
     await cryptoWaitReady();
 
+    console.log(`Connecting to: ${NODE_WS}`);
+    console.log(`Using seed: ${SEED}`);
+    console.log(`Using IPFS API: ${HTTP_IPFS_API}`);
+
     let client, resultCode;
     try {
         // Init WS PAPI client and typed api.
@@ -89,7 +96,7 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Preimagesigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Preimagesigner');
 
         // Test 1: Unsigned store with preimage auth (default CID config)
         await runPreimageStoreTest(

@@ -6,7 +6,7 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, HTTP_IPFS_API } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners } from './common.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
@@ -14,10 +14,12 @@ import { getWsProvider } from "polkadot-api/ws-provider";
 import { Binary } from '@polkadot-api/substrate-bindings';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// ---- CONFIG ----
-const NODE_WS = 'ws://localhost:10000';
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
 const CHUNK_SIZE = 6 * 1024 // 6 KB
-// -----------------
 
 /**
  * Reads metadata JSON from IPFS by metadataCid.
@@ -156,6 +158,10 @@ async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes
 async function main() {
     await cryptoWaitReady()
 
+    console.log(`Connecting to: ${NODE_WS}`);
+    console.log(`Using seed: ${SEED}`);
+    console.log(`Using IPFS API: ${HTTP_IPFS_API}`);
+
     let client, resultCode;
     try {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletin-chunked-"));
@@ -167,7 +173,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Chunkedsigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
         // Authorize an account.
         await authorizeAccount(

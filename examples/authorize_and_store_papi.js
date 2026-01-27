@@ -7,17 +7,18 @@ import { setupKeyringAndSigners } from './common.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed]
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
+const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
 
 async function main() {
     await cryptoWaitReady();
 
     console.log(`Connecting to: ${NODE_WS}`);
     console.log(`Using seed: ${SEED}`);
+    console.log(`Using IPFS API: ${HTTP_IPFS_API}`);
 
     let client, resultCode;
     try {
