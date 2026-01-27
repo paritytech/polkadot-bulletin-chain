@@ -8,17 +8,14 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use crate::{
 	authorization::AuthorizationManager,
 	chunker::{Chunker, FixedSizeChunker},
 	dag::{DagBuilder, UnixFsDagBuilder},
 	storage::{BatchStorageOperation, StorageOperation},
-	types::{
-		ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result,
-		StoreOptions,
-	},
+	types::{ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result, StoreOptions},
 };
+use alloc::vec::Vec;
 
 /// Configuration for the Bulletin client.
 #[derive(Debug, Clone)]
@@ -58,18 +55,12 @@ pub struct BulletinClient {
 impl BulletinClient {
 	/// Create a new Bulletin client with default configuration.
 	pub fn new() -> Self {
-		Self {
-			config: ClientConfig::default(),
-			auth_manager: AuthorizationManager::new(),
-		}
+		Self { config: ClientConfig::default(), auth_manager: AuthorizationManager::new() }
 	}
 
 	/// Create a client with custom configuration.
 	pub fn with_config(config: ClientConfig) -> Self {
-		Self {
-			config,
-			auth_manager: AuthorizationManager::new(),
-		}
+		Self { config, auth_manager: AuthorizationManager::new() }
 	}
 
 	/// Set the authorization manager.
@@ -175,9 +166,7 @@ pub mod async_client {
 	impl AsyncBulletinClient {
 		/// Create a new async client.
 		pub fn new(config: ClientConfig) -> Self {
-			Self {
-				client: BulletinClient::with_config(config),
-			}
+			Self { client: BulletinClient::with_config(config) }
 		}
 
 		/// Store data (placeholder - requires subxt integration).
@@ -196,7 +185,11 @@ pub mod async_client {
 		///     // Process result and return StoreResult
 		/// }
 		/// ```
-		pub async fn store_placeholder(&self, _data: Vec<u8>, _options: StoreOptions) -> Result<()> {
+		pub async fn store_placeholder(
+			&self,
+			_data: Vec<u8>,
+			_options: StoreOptions,
+		) -> Result<()> {
 			// Placeholder - users should implement with their subxt setup
 			Err(Error::StorageFailed(
 				"This is a placeholder. Implement with subxt integration.".into(),
@@ -241,11 +234,8 @@ mod tests {
 	fn test_prepare_store_chunked() {
 		let client = BulletinClient::new();
 		let data = vec![1u8; 5000];
-		let config = Some(ChunkerConfig {
-			chunk_size: 2000,
-			max_parallel: 8,
-			create_manifest: true,
-		});
+		let config =
+			Some(ChunkerConfig { chunk_size: 2000, max_parallel: 8, create_manifest: true });
 		let options = StoreOptions::default();
 
 		let result = client.prepare_store_chunked(&data, config, options, None);
@@ -260,11 +250,8 @@ mod tests {
 	fn test_prepare_store_chunked_no_manifest() {
 		let client = BulletinClient::new();
 		let data = vec![1u8; 5000];
-		let config = Some(ChunkerConfig {
-			chunk_size: 2000,
-			max_parallel: 8,
-			create_manifest: false,
-		});
+		let config =
+			Some(ChunkerConfig { chunk_size: 2000, max_parallel: 8, create_manifest: false });
 		let options = StoreOptions::default();
 
 		let result = client.prepare_store_chunked(&data, config, options, None);

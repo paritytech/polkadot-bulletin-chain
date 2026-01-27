@@ -70,9 +70,11 @@ impl TransactionSubmitter for SubxtSubmitter {
 		transactions: u32,
 		bytes: u64,
 	) -> Result<TransactionReceipt> {
-		let tx = bulletin_runtime::tx()
-			.transaction_storage()
-			.authorize_account(who, transactions, bytes);
+		let tx = bulletin_runtime::tx().transaction_storage().authorize_account(
+			who,
+			transactions,
+			bytes,
+		);
 
 		let result = self
 			.api
@@ -141,9 +143,7 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		who: AccountId32,
 	) -> Result<TransactionReceipt> {
-		let tx = bulletin_runtime::tx()
-			.transaction_storage()
-			.refresh_account_authorization(who);
+		let tx = bulletin_runtime::tx().transaction_storage().refresh_account_authorization(who);
 
 		let result = self
 			.api

@@ -5,8 +5,8 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use crate::types::{Chunk, ChunkerConfig, Error, Result};
+use alloc::vec::Vec;
 
 /// Maximum chunk size allowed (8 MiB, matches pallet limit).
 pub const MAX_CHUNK_SIZE: usize = 8 * 1024 * 1024;
@@ -51,9 +51,7 @@ impl FixedSizeChunker {
 
 	/// Create a chunker with default configuration.
 	pub fn default_config() -> Self {
-		Self {
-			config: ChunkerConfig::default(),
-		}
+		Self { config: ChunkerConfig::default() }
 	}
 
 	/// Get the chunk size.
@@ -99,9 +97,11 @@ pub fn reassemble_chunks(chunks: &[Chunk]) -> Result<Vec<u8>> {
 	// Validate chunk indices are sequential
 	for (i, chunk) in chunks.iter().enumerate() {
 		if chunk.index != i as u32 {
-			return Err(Error::ChunkingFailed(
-				alloc::format!("Chunk index mismatch: expected {}, got {}", i, chunk.index),
-			));
+			return Err(Error::ChunkingFailed(alloc::format!(
+				"Chunk index mismatch: expected {}, got {}",
+				i,
+				chunk.index
+			)));
 		}
 	}
 
@@ -124,11 +124,7 @@ mod tests {
 	#[test]
 	fn test_fixed_size_chunker_single_chunk() {
 		let data = vec![1u8; 100];
-		let config = ChunkerConfig {
-			chunk_size: 1024,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 1024, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();
@@ -142,11 +138,7 @@ mod tests {
 	#[test]
 	fn test_fixed_size_chunker_multiple_chunks() {
 		let data = vec![1u8; 2500];
-		let config = ChunkerConfig {
-			chunk_size: 1000,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 1000, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();
@@ -165,11 +157,7 @@ mod tests {
 	#[test]
 	fn test_reassemble_chunks() {
 		let original_data = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-		let config = ChunkerConfig {
-			chunk_size: 3,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 3, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&original_data).unwrap();

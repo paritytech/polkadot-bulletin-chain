@@ -8,11 +8,11 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use crate::{
 	cid::{calculate_cid, CidConfig, CidData},
-	types::{CidCodec, Chunk, Error, HashAlgorithm, Result},
+	types::{Chunk, CidCodec, Error, HashAlgorithm, Result},
 };
+use alloc::vec::Vec;
 
 /// A DAG-PB manifest representing a file composed of multiple chunks.
 #[derive(Debug, Clone)]
@@ -222,8 +222,10 @@ fn encode_varint(mut value: u64, buf: &mut Vec<u8>) {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::chunker::{Chunker, FixedSizeChunker};
-	use crate::types::ChunkerConfig;
+	use crate::{
+		chunker::{Chunker, FixedSizeChunker},
+		types::ChunkerConfig,
+	};
 
 	#[test]
 	fn test_encode_varint() {
@@ -247,11 +249,7 @@ mod tests {
 	#[test]
 	fn test_build_dag_manifest() {
 		let data = vec![1u8; 5000];
-		let config = ChunkerConfig {
-			chunk_size: 2000,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 2000, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();
@@ -268,11 +266,7 @@ mod tests {
 	#[test]
 	fn test_build_dag_manifest_single_chunk() {
 		let data = vec![42u8; 100];
-		let config = ChunkerConfig {
-			chunk_size: 1000,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 1000, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();

@@ -4,8 +4,8 @@
 //! Utility functions and helpers for Bulletin SDK
 
 use crate::{
-    cid::ContentHash,
-    types::{CidCodec, Error, HashAlgorithm, Result},
+	cid::ContentHash,
+	types::{CidCodec, Error, HashAlgorithm, Result},
 };
 use alloc::{string::String, vec::Vec};
 
@@ -153,11 +153,7 @@ pub fn hash_data(data: &[u8]) -> ContentHash {
 /// # }
 /// ```
 #[cfg(feature = "std")]
-pub async fn retry_async<F, Fut, T>(
-	max_retries: u32,
-	delay_ms: u64,
-	mut f: F,
-) -> Result<T>
+pub async fn retry_async<F, Fut, T>(max_retries: u32, delay_ms: u64, mut f: F) -> Result<T>
 where
 	F: FnMut() -> Fut,
 	Fut: core::future::Future<Output = Result<T>>,
@@ -201,7 +197,8 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 	if size > MAX_CHUNK_SIZE {
 		return Err(Error::InvalidConfig(alloc::format!(
 			"Chunk size {} exceeds maximum {}",
-			size, MAX_CHUNK_SIZE
+			size,
+			MAX_CHUNK_SIZE
 		)))
 	}
 

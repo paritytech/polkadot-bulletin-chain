@@ -40,9 +40,8 @@ async fn main() -> Result<()> {
 	println!("📁 Reading file: {}", file_path);
 
 	// 2. Read file data
-	let data = fs::read(file_path).map_err(|e| {
-		Error::StorageFailed(format!("Failed to read file: {:?}", e))
-	})?;
+	let data = fs::read(file_path)
+		.map_err(|e| Error::StorageFailed(format!("Failed to read file: {:?}", e)))?;
 
 	println!("📊 File size: {} bytes ({:.2} MB)\n", data.len(), data.len() as f64 / 1_048_576.0);
 
@@ -80,12 +79,11 @@ async fn main() -> Result<()> {
 			None, // use default config
 			StoreOptions::default(),
 			Some(|event| match event {
-				ProgressEvent::ChunkStarted { index, total } => {
+				ProgressEvent::ChunkStarted { index, total } =>
 					if total_chunks == 0 {
 						total_chunks = total;
 						println!("🔨 Starting upload of {} chunks...", total);
-					}
-				},
+					},
 				ProgressEvent::ChunkCompleted { index, total, cid } => {
 					chunks_completed += 1;
 					let progress = (chunks_completed as f32 / total as f32) * 100.0;

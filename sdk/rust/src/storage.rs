@@ -8,11 +8,11 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use crate::{
 	cid::{CidConfig, CidData},
 	types::{Chunk, Error, Result, StoreOptions},
 };
+use alloc::vec::Vec;
 
 /// Storage operation builder for creating transactions.
 #[derive(Debug, Clone)]
@@ -33,11 +33,7 @@ impl StorageOperation {
 			hashing: crate::cid::hash_algorithm_to_pallet(options.hash_algorithm),
 		};
 
-		Self {
-			data,
-			cid_config,
-			wait_finalization: options.wait_for_finalization,
-		}
+		Self { data, cid_config, wait_finalization: options.wait_for_finalization }
 	}
 
 	/// Calculate the CID for this operation.
@@ -87,10 +83,7 @@ impl BatchStorageOperation {
 			operations.push(op);
 		}
 
-		Ok(Self {
-			operations,
-			wait_finalization: options.wait_for_finalization,
-		})
+		Ok(Self { operations, wait_finalization: options.wait_for_finalization })
 	}
 
 	/// Get the number of operations.
@@ -110,10 +103,7 @@ impl BatchStorageOperation {
 
 	/// Calculate CIDs for all operations.
 	pub fn calculate_cids(&self) -> Result<Vec<CidData>> {
-		self.operations
-			.iter()
-			.map(|op| op.calculate_cid())
-			.collect()
+		self.operations.iter().map(|op| op.calculate_cid()).collect()
 	}
 }
 
@@ -209,15 +199,13 @@ mod tests {
 
 	#[test]
 	fn test_batch_storage_operation() {
-		use crate::chunker::{Chunker, FixedSizeChunker};
-		use crate::types::ChunkerConfig;
+		use crate::{
+			chunker::{Chunker, FixedSizeChunker},
+			types::ChunkerConfig,
+		};
 
 		let data = vec![1u8; 5000];
-		let config = ChunkerConfig {
-			chunk_size: 2000,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 2000, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();
@@ -233,15 +221,13 @@ mod tests {
 
 	#[test]
 	fn test_batch_calculate_cids() {
-		use crate::chunker::{Chunker, FixedSizeChunker};
-		use crate::types::ChunkerConfig;
+		use crate::{
+			chunker::{Chunker, FixedSizeChunker},
+			types::ChunkerConfig,
+		};
 
 		let data = vec![1u8; 3000];
-		let config = ChunkerConfig {
-			chunk_size: 1000,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config = ChunkerConfig { chunk_size: 1000, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();

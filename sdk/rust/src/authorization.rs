@@ -39,10 +39,7 @@ pub struct AuthorizationManager {
 
 impl Default for AuthorizationManager {
 	fn default() -> Self {
-		Self {
-			default_scope: AuthorizationScope::Account,
-			auto_refresh: false,
-		}
+		Self { default_scope: AuthorizationScope::Account, auto_refresh: false }
 	}
 }
 
@@ -54,18 +51,12 @@ impl AuthorizationManager {
 
 	/// Create an authorization manager with account-based authorization.
 	pub fn with_account_auth() -> Self {
-		Self {
-			default_scope: AuthorizationScope::Account,
-			auto_refresh: false,
-		}
+		Self { default_scope: AuthorizationScope::Account, auto_refresh: false }
 	}
 
 	/// Create an authorization manager with preimage-based authorization.
 	pub fn with_preimage_auth() -> Self {
-		Self {
-			default_scope: AuthorizationScope::Preimage,
-			auto_refresh: false,
-		}
+		Self { default_scope: AuthorizationScope::Preimage, auto_refresh: false }
 	}
 
 	/// Enable auto-refresh of authorizations.
@@ -146,7 +137,11 @@ pub mod helpers {
 	/// Build authorization request parameters for account-based auth.
 	///
 	/// Returns: (transactions, max_size)
-	pub fn build_account_auth_params(data_size: u64, num_chunks: usize, include_manifest: bool) -> (u32, u64) {
+	pub fn build_account_auth_params(
+		data_size: u64,
+		num_chunks: usize,
+		include_manifest: bool,
+	) -> (u32, u64) {
 		let manager = AuthorizationManager::new();
 		manager.calculate_requirements(data_size, num_chunks, include_manifest)
 	}
@@ -229,7 +224,8 @@ mod tests {
 		assert_eq!(txs, 10);
 
 		// With manifest
-		let (txs_with_manifest, bytes_with_manifest) = manager.estimate_authorization(10_000_000, true);
+		let (txs_with_manifest, bytes_with_manifest) =
+			manager.estimate_authorization(10_000_000, true);
 		assert_eq!(txs_with_manifest, 11);
 		assert!(bytes_with_manifest > bytes);
 	}
