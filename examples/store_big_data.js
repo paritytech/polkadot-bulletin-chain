@@ -148,8 +148,9 @@ function printStatistics(dataSize) {
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     for (const blockNum of sortedBlocks) {
         const count = txsPerBlock[blockNum];
+        const size = formatBytes(count * CHUNK_SIZE);
         const bar = '█'.repeat(count);
-        console.log(`| Block #${blockNum.toString().padEnd(10)} | ${count.toString().padStart(3)} txs | ${bar}`);
+        console.log(`| Block #${blockNum.toString().padEnd(10)} | ${count.toString().padStart(3)} txs | ${size.padEnd(12)} | ${bar}`);
     }
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     console.log('\n');
@@ -213,7 +214,7 @@ async function main() {
         const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
 
         // Let's do parallelism with multiple accounts
-        const signers = Array.from({ length: 12 }, (_, i) => {
+        const signers = Array.from({ length: 18 }, (_, i) => {
             if (!signerDiscriminator) {
                 return newSigner(`//Signer${i + 1}`)
             } else {
