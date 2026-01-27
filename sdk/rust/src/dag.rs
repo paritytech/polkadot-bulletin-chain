@@ -6,8 +6,6 @@
 //! This module provides functionality to create IPFS-compatible DAG-PB
 //! manifests for chunked data, following the UnixFS specification.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-
 extern crate alloc;
 
 use alloc::vec::Vec;

@@ -6,8 +6,6 @@
 //! This module re-exports CID types from the pallet and provides
 //! additional utility functions for working with CIDs in the SDK.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-
 extern crate alloc;
 
 use crate::types::{CidCodec, Error, HashAlgorithm, Result};

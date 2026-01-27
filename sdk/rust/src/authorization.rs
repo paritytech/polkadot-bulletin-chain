@@ -7,8 +7,6 @@
 //! 1. **Account-based**: Authorize an account to store N transactions with max total size
 //! 2. **Preimage-based**: Authorize anyone to store a specific preimage (by content hash)
 
-#![cfg_attr(not(feature = "std"), no_std)]
-
 extern crate alloc;
 
 use crate::types::{AuthorizationScope, Error, Result};

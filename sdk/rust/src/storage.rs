@@ -6,8 +6,6 @@
 //! This module provides helpers for building and submitting storage transactions.
 //! The actual submission requires integration with `subxt` (enabled with `std` feature).
 
-#![cfg_attr(not(feature = "std"), no_std)]
-
 extern crate alloc;
 
 use alloc::vec::Vec;
