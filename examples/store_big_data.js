@@ -25,6 +25,7 @@ const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
 const IPFS_API_URL = args[2] || 'http://127.0.0.1:5001';
+const NUM_SIGNERS = 16;
 
 // -------------------- queue --------------------
 const queue = [];
@@ -214,7 +215,7 @@ async function main() {
         const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
 
         // Let's do parallelism with multiple accounts
-        const signers = Array.from({ length: 18 }, (_, i) => {
+        const signers = Array.from({ length: NUM_SIGNERS }, (_, i) => {
             if (!signerDiscriminator) {
                 return newSigner(`//Signer${i + 1}`)
             } else {
