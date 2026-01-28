@@ -24,10 +24,8 @@ use bulletin_polkadot_parachain_runtime::{
 	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
 	System, TxExtension, UncheckedExtrinsic,
 };
-use frame_support::{
-	assert_err, assert_ok, dispatch::GetDispatchInfo, traits::fungible::Mutate as FungibleMutate,
-};
-use parachains_common::{AccountId, AuraId, Balance, Hash as PcHash, Signature as PcSignature};
+use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo};
+use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
@@ -75,7 +73,9 @@ fn construct_extrinsic(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
+		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
+		),
 		bulletin_polkadot_parachain_runtime::ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
@@ -134,10 +134,6 @@ fn transaction_storage_runtime_sizes() {
 			1 * 1024 * 1024, // 1 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
-
-		// fund Alice to cover length-based tx fees
-		let initial: Balance = 10_000_000_000_000_000_000u128;
-		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
 
 		// authorize
 		assert_ok!(runtime::TransactionStorage::authorize_account(
@@ -224,10 +220,6 @@ fn transaction_storage_max_throughput() {
 	.execute_with(|| {
 		let account = Sr25519Keyring::Alice;
 		let who: AccountId = account.to_account_id();
-		// fund Alice to cover length-based tx fees
-		let initial: Balance = 10_000_000_000_000_000_000u128;
-		<pallet_balances::Pallet<Runtime> as FungibleMutate<_>>::set_balance(&who, initial);
-
 		// Authorize 8 + 1 transactions (one extra for the overflow test)
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),

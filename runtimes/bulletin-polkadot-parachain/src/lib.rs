@@ -118,7 +118,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 		frame_system::CheckEra<Runtime>,
 		frame_system::CheckNonce<Runtime>,
 		frame_system::CheckWeight<Runtime>,
-		pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
+		pallet_skip_feeless_payment::SkipCheckIfFeeless<
+			Runtime,
+			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
+		>,
 		ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
@@ -362,6 +365,10 @@ impl pallet_transaction_payment::Config for Runtime {
 	type WeightInfo = weights::pallet_transaction_payment::WeightInfo<Runtime>;
 }
 
+impl pallet_skip_feeless_payment::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+}
+
 parameter_types! {
 	pub const ReservedXcmpWeight: Weight = MAXIMUM_BLOCK_WEIGHT.saturating_div(4);
 	pub const ReservedDmpWeight: Weight = MAXIMUM_BLOCK_WEIGHT.saturating_div(4);
@@ -551,6 +558,7 @@ construct_runtime!(
 		// Monetary stuff.
 		Balances: pallet_balances = 10,
 		TransactionPayment: pallet_transaction_payment = 11,
+	SkipFeelessPayment: pallet_skip_feeless_payment = 12,
 
 		// Storage
 		TransactionStorage: pallet_transaction_storage = 40,
