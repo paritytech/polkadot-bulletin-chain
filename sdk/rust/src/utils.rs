@@ -186,9 +186,12 @@ where
 /// use bulletin_sdk_rust::utils::validate_chunk_size;
 ///
 /// assert!(validate_chunk_size(1_048_576).is_ok()); // 1 MiB - valid
-/// assert!(validate_chunk_size(3_000_000).is_err()); // > 2 MiB - invalid
+/// assert!(validate_chunk_size(10_000_000).is_err()); // > 2 MiB - invalid
 /// ```
 pub fn validate_chunk_size(size: u64) -> Result<()> {
+	use crate::chunker::MAX_CHUNK_SIZE;
+
+
 	if size == 0 {
 		return Err(Error::InvalidConfig("Chunk size cannot be zero".into()))
 	}
@@ -216,17 +219,18 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 /// assert!(size >= 1_048_576); // At least 1 MiB
 /// ```
 pub fn optimal_chunk_size(data_size: u64) -> u64 {
-	const MIN_CHUNK_SIZE: u64 = 1024 * 1024; // 1 MiB
+	use crate::chunker::{MAX_CHUNK_SIZE, MIN_CHUNK_SIZE};
+
 	const OPTIMAL_CHUNKS: u64 = 100; // Target chunk count
 
-	if data_size <= MIN_CHUNK_SIZE {
+	if data_size <= MIN_CHUNK_SIZE as u64 {
 		return data_size;
 	}
 
 	let optimal_size = data_size / OPTIMAL_CHUNKS;
 
-	if optimal_size < MIN_CHUNK_SIZE {
-		MIN_CHUNK_SIZE
+	if optimal_size < MIN_CHUNK_SIZE as u64 {
+		MIN_CHUNK_SIZE as u64
 	} else if optimal_size > MAX_CHUNK_SIZE as u64 {
 		MAX_CHUNK_SIZE as u64
 	} else {
@@ -318,17 +322,18 @@ mod tests {
 
 	#[test]
 	fn test_validate_chunk_size() {
-		assert!(validate_chunk_size(1_048_576).is_ok());
-		assert!(validate_chunk_size(8 * 1024 * 1024).is_ok());
-		assert!(validate_chunk_size(0).is_err());
-		assert!(validate_chunk_size(10_000_000).is_err());
+		assert!(validate_chunk_size(1_048_576).is_ok()); // 1 MiB - valid
+		assert!(validate_chunk_size(2 * 1024 * 1024).is_ok()); // 2 MiB - valid (max)
+		assert!(validate_chunk_size(0).is_err()); // Zero - invalid
+		assert!(validate_chunk_size(3 * 1024 * 1024).is_err()); // 3 MiB - exceeds limit
+		assert!(validate_chunk_size(10_000_000).is_err()); // > 2 MiB - invalid
 	}
 
 	#[test]
 	fn test_optimal_chunk_size() {
 		assert_eq!(optimal_chunk_size(500_000), 500_000);
-		assert_eq!(optimal_chunk_size(100_000_000), 1_048_576);
-		assert_eq!(optimal_chunk_size(1_000_000_000), 4_194_304);
+		assert_eq!(optimal_chunk_size(100_000_000), 1_048_576); // 1 MiB
+		assert_eq!(optimal_chunk_size(1_000_000_000), 2_097_152); // 2 MiB (max)
 	}
 
 	#[test]
