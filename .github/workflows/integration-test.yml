@@ -55,6 +55,7 @@ jobs:
           curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
           # TODO: replace POLKADOT_SDK_VERSION_WITH_BULLETIN with POLKADOT_SDK_VERSION when released: https://github.com/paritytech/polkadot-sdk/pull/10662
           curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
+          chmod +x *
 
       # Cache the Zombienet binaries
       - name: Cache Zombienet
