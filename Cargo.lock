@@ -11865,6 +11865,8 @@ dependencies = [
  "bulletin-sdk-rust",
  "clap",
  "hex",
+ "parity-scale-codec",
+ "scale-info",
  "sp-runtime",
  "subxt 0.37.0",
  "subxt-signer 0.37.0",
