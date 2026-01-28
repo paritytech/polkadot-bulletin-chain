@@ -191,7 +191,6 @@ where
 pub fn validate_chunk_size(size: u64) -> Result<()> {
 	use crate::chunker::MAX_CHUNK_SIZE;
 
-
 	if size == 0 {
 		return Err(Error::InvalidConfig("Chunk size cannot be zero".into()))
 	}
