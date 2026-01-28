@@ -129,7 +129,9 @@ jobs:
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
       - name: Add binaries to PATH
         run: |
+          chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
           ls -lrt "${POLKADOT_SDK_BIN_DIR}"
+          chmod +x "${ZOMBIENET_BIN_DIR}"/*
           ls -lrt "${ZOMBIENET_BIN_DIR}"
           echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
           echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
