@@ -151,4 +151,19 @@ jobs:
           unset SKIP_WASM_BUILD
           cargo test -p bulletin-westend-integration-tests
 
-      # TODO: check benchmarks
+  benchmarks:
+    name: Check Benchmarks
+    runs-on: parity-large
+    timeout-minutes: 60
+    needs: [set-image, check-fmt]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    env:
+      SKIP_WASM_BUILD: 1
+    steps:
+      - name: Build runtime-benchmarks
+        run: |
+          cargo build --release --features runtime-benchmarks
+      - name: Run benchmarks
+        run: |
+          python3 ./scripts/cmd/cmd.py bench --steps 2 --repeat 1
