@@ -30,7 +30,7 @@
 // --extrinsic=*
 // --runtime=target/production/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.wasm
 // --pallet=pallet_xcm_benchmarks::fungible
-// --header=/home/ubuntu/rosarp/polkadot-bulletin-chain/scripts/cmd/file_header.txt
+// --header=./scripts/cmd/file_header.txt
 // --output=./runtimes/bulletin-westend/src/weights/xcm
 // --wasm-execution=compiled
 // --steps=50
@@ -98,6 +98,7 @@ impl<T: frame_system::Config> WeightInfo<T> {
 	}
 
 	pub(crate) fn receive_teleported_asset() -> Weight {
+		// Teleportation is not supported by this runtime.
 		Weight::MAX
 	}
 	/// Storage: `ParachainInfo::ParachainId` (r:1 w:0)

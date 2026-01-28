@@ -30,7 +30,7 @@
 // --extrinsic=*
 // --runtime=target/production/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.wasm
 // --pallet=pallet_message_queue
-// --header=/home/ubuntu/rosarp/polkadot-bulletin-chain/scripts/cmd/file_header.txt
+// --header=./scripts/cmd/file_header.txt
 // --output=./runtimes/bulletin-westend/src/weights
 // --wasm-execution=compiled
 // --steps=50
