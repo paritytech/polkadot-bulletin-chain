@@ -174,16 +174,16 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [workspace]
 resolver = "2"
 members = [
-  "node",
-  "pallets/common",
-  "pallets/relayer-set",
-  "pallets/transaction-storage",
-  "pallets/validator-set",
-  "runtime",
-  "runtimes/bulletin-polkadot",
-  "runtimes/bulletin-polkadot-parachain",
-  "runtimes/bulletin-westend",
-  "runtimes/bulletin-westend/integration-tests",
+	"node",
+	"pallets/common",
+	"pallets/relayer-set",
+	"pallets/transaction-storage",
+	"pallets/validator-set",
+	"runtime",
+	"runtimes/bulletin-polkadot",
+	"runtimes/bulletin-polkadot-parachain",
+	"runtimes/bulletin-westend",
+	"runtimes/bulletin-westend/integration-tests",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.
