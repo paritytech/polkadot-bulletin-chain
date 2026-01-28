@@ -60,8 +60,8 @@ for arg, config in common_args.items():
 
 parser_bench.add_argument('--runtime', help='Runtime(s) space separated', choices=runtimeNames, nargs='*', default=runtimeNames)
 parser_bench.add_argument('--pallet', help='Pallet(s) space separated', nargs='*', default=[])
-parser_bench.add_argument('--steps', help='Select how many samples we should take across the variable components [default: 2]', default=2)
-parser_bench.add_argument('--repeat', help='Select how many repetitions of this benchmark should run from within the wasm [default: 1', default=1)
+parser_bench.add_argument('--steps', help='Select how many samples we should take across the variable components [default: 50]', default=50)
+parser_bench.add_argument('--repeat', help='Select how many repetitions of this benchmark should run from within the wasm [default: 20', default=20)
 
 """
 FMT
