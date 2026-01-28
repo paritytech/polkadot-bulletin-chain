@@ -161,6 +161,15 @@ jobs:
     env:
       SKIP_WASM_BUILD: 1
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bulletin-cache-benchmarks"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      
       - name: Build runtime-benchmarks
         run: |
           cargo build --release --features runtime-benchmarks
