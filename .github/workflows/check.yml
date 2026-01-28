@@ -166,4 +166,4 @@ jobs:
           cargo build --release --features runtime-benchmarks
       - name: Run benchmarks
         run: |
-          python3 ./scripts/cmd/cmd.py bench --steps 2 --repeat 1
+          python3 ./scripts/cmd/cmd.py bench --runtime bulletin-westend --steps 2 --repeat 1
