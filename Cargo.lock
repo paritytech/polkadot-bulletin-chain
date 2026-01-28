@@ -2114,6 +2114,7 @@ dependencies = [
  "pallet-collator-selection",
  "pallet-message-queue 31.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5)",
  "pallet-session 28.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5)",
+ "pallet-skip-feeless-payment",
  "pallet-sudo",
  "pallet-timestamp 27.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5)",
  "pallet-transaction-payment 28.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5)",
