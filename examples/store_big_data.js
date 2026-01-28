@@ -50,14 +50,8 @@ function pushToResultQueue(data) {
 const stats = {
     startTime: null,
     endTime: null,
-    startBlock: null,
-    endBlock: null,
     blockNumbers: [],  // Track all block numbers where txs were included
 };
-
-async function getCurrentBlockNumber(api) {
-    return await api.query.System.Number.getValue();
-}
 
 function waitForQueueLength(targetLength, timeoutMs = 300000) {
     return new Promise((resolve, reject) => {
@@ -130,16 +124,19 @@ function formatDuration(ms) {
 function printStatistics(dataSize) {
     const numTxs = stats.blockNumbers.length;
     const elapsed = stats.endTime - stats.startTime;
-    const blocksElapsed = stats.endBlock - stats.startBlock;
+
+    // Calculate startBlock and endBlock from actual transaction blocks
+    const startBlock = Math.min(...stats.blockNumbers);
+    const endBlock = Math.max(...stats.blockNumbers);
+    const blocksElapsed = endBlock - startBlock;
 
     // Count transactions per block
     const txsPerBlock = {};
     for (const blockNum of stats.blockNumbers) {
         txsPerBlock[blockNum] = (txsPerBlock[blockNum] || 0) + 1;
     }
-    const sortedBlocks = Object.keys(txsPerBlock).map(Number).sort((a, b) => a - b);
-    const numBlocks = sortedBlocks.length;
-    const avgTxsPerBlock = numBlocks > 0 ? (numTxs / numBlocks).toFixed(2) : 'N/A';
+    const numBlocksWithTxs = Object.keys(txsPerBlock).length;
+    const avgTxsPerBlock = numBlocksWithTxs > 0 ? (numTxs / numBlocksWithTxs).toFixed(2) : 'N/A';
 
     console.log('\n');
     console.log('═══════════════════════════════════════════════════════════════════════════════');
@@ -150,15 +147,15 @@ function printStatistics(dataSize) {
     console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
     console.log(`| Avg txs per block   | ${avgTxsPerBlock.toString().padEnd(20)} |`);
     console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
-    console.log(`| Blocks elapsed      | ${`${blocksElapsed} (#${stats.startBlock} → #${stats.endBlock})`.padEnd(20)} |`);
+    console.log(`| Blocks elapsed      | ${`${blocksElapsed} (#${startBlock} → #${endBlock})`.padEnd(20)} |`);
     console.log(`| Throughput          | ${formatBytes(dataSize / (elapsed / 1000)).padEnd(20)} /s |`);
     console.log('═══════════════════════════════════════════════════════════════════════════════');
     console.log('                         📦 TRANSACTIONS PER BLOCK                             ');
     console.log('═══════════════════════════════════════════════════════════════════════════════');
-    for (const blockNum of sortedBlocks) {
-        const count = txsPerBlock[blockNum];
-        const size = formatBytes(count * CHUNK_SIZE);
-        const bar = '█'.repeat(count);
+    for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
+        const count = txsPerBlock[blockNum] || 0;
+        const size = count > 0 ? formatBytes(count * CHUNK_SIZE) : '-';
+        const bar = count > 0 ? '█'.repeat(count) : '';
         console.log(`| Block #${blockNum.toString().padEnd(10)} | ${count.toString().padStart(3)} txs | ${size.padEnd(12)} | ${bar}`);
     }
     console.log('═══════════════════════════════════════════════════════════════════════════════');
@@ -184,7 +181,6 @@ export async function storeChunkedFile(api, filePath) {
 
     // Start timing for statistics
     stats.startTime = Date.now();
-    stats.startBlock = await getCurrentBlockNumber(api);
 
     // ---- 2️⃣ Store chunks in Bulletin ----
     for (let i = 0; i < chunks.length; i++) {
@@ -255,11 +251,9 @@ async function main() {
             console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
             await waitForQueueLength(chunks.length);
             stats.endTime = Date.now();
-            stats.endBlock = await getCurrentBlockNumber(bulletinAPI);
             console.log(`All chunks ${chunks.length} are stored!`);
         } catch (err) {
             stats.endTime = Date.now();
-            stats.endBlock = await getCurrentBlockNumber(bulletinAPI);
             console.error(err.message);
             throw new Error('❌ Storing chunks failed! Error:' + err.message);
         }
