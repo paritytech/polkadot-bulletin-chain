@@ -97,10 +97,6 @@ impl<T: frame_system::Config> WeightInfo<T> {
 		Weight::from_parts(2_130_000, 0)
 	}
 
-	pub(crate) fn receive_teleported_asset() -> Weight {
-		// Teleportation is not supported by this runtime.
-		Weight::MAX
-	}
 	/// Storage: `ParachainInfo::ParachainId` (r:1 w:0)
 	/// Proof: `ParachainInfo::ParachainId` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `PolkadotXcm::SupportedVersion` (r:1 w:0)
