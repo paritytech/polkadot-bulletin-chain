@@ -127,11 +127,11 @@ fn transaction_storage_runtime_sizes() {
 		let who: AccountId = account.to_account_id();
 		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
-			2000,            // 2 KB
+			2 * 1024,      // 2 KB
+			16 * 1024,     // 16 KB
+			128 * 1024,    // 128 KB
+			512 * 1024,    // 512 KB
 			1 * 1024 * 1024, // 1 MB
-			4 * 1024 * 1024, // 4 MB
-			6 * 1024 * 1024, // 6 MB
-			8 * 1024 * 1024, // 8 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
@@ -247,7 +247,7 @@ fn transaction_storage_max_throughput() {
 		advance_block();
 
 		// Store all 8 transactions in the same block (no advance_block between them)
-		for index in 0..NUM_TRANSACTIONS {
+		for _index in 0..NUM_TRANSACTIONS {
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -289,12 +289,12 @@ fn location_conversion_works() {
 		TestCase {
 			description: "DescribeTerminus Parent",
 			location: Location::new(1, Here),
-			expected_account_id_str: "5Dt6dpkWPwLaH4BBCKJwjiWrFVAGyYk3tLUabvyn4v7KtESG",
+			expected_account_id_str: "5GyWtDJP7qaipWRGr4KJ6VUDxRXf4jDnPW6KPTeCekHfqZkD",
 		},
 		TestCase {
 			description: "DescribeTerminus Sibling",
 			location: Location::new(1, [Parachain(1111)]),
-			expected_account_id_str: "5Eg2fnssmmJnF3z1iZ1NouAuzciDaaDQH7qURAy3w15jULDk",
+			expected_account_id_str: "5EC5GfEFm9XEBYjXzxb1VseMHsG2VhPeGTGWF9H8tYZnGsSk",
 		},
 		// DescribePalletTerminal
 		TestCase {
@@ -432,11 +432,14 @@ fn governance_authorize_upgrade_works() {
 		Either::Right(InstructionError { index: 2, error: XcmError::BadOrigin })
 	);
 
-	// ok - relaychain
-	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
-		Runtime,
-		RuntimeOrigin,
-	>(GovernanceOrigin::Location(Location::parent())));
+	// no - relaychain (relay chain does not have superuser access, only AssetHub does)
+	assert_err!(
+		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
+			Runtime,
+			RuntimeOrigin,
+		>(GovernanceOrigin::Location(Location::parent())),
+		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
+	);
 
 	// ok - governance location
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
