@@ -173,7 +173,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 						callback(ProgressEvent::ChunkFailed {
 							index: chunk.index,
 							total: chunk.total_chunks,
-							error: format!("{:?}", e),
+							error: format!("{e:?}"),
 						});
 					}
 					return Err(e);
