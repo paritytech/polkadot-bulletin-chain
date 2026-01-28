@@ -158,8 +158,6 @@ jobs:
     needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    env:
-      SKIP_WASM_BUILD: 1
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
