@@ -176,6 +176,7 @@ jobs:
           echo "Downloading frame-omni-bencher..."
           curl -L -o frame-omni-bencher https://github.com/paritytech/polkadot-sdk/releases/latest/download/frame-omni-bencher
           chmod +x frame-omni-bencher
+          ./frame-omni-bencher --version
           echo "${FRAME_OMNI_BENCHER_BIN_DIR}" >> $GITHUB_PATH
 
       - name: Run benchmarks (Westend parachain)
