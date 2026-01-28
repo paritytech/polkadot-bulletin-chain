@@ -170,5 +170,10 @@ jobs:
 
       - name: Run benchmarks (Westend parachain)
         run: |
+          echo "Running benchmarks for Westend parachain..."
           python3 ./scripts/cmd/cmd.py bench --runtime bulletin-westend --steps 2 --repeat 1
-          cargo check --profile production -p bulletin-westend
+          echo "Benchmarks for Westend parachain completed."
+          
+          echo "Running production check for Westend parachain..."
+          cargo check --profile production -p bulletin-westend-runtime
+          echo "Production check for Westend parachain completed."
