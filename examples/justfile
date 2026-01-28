@@ -419,6 +419,25 @@ run-test-authorize-and-store test_dir runtime mode="ws":
         node $SCRIPT_NAME
     fi
 
+# Run Rust authorize-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin Chain node (default: ws://localhost:10000)
+#   seed - Seed phrase or dev seed (default: //Alice)
+run-test-rust-authorize-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice":
+    #!/usr/bin/env bash
+    set -e
+    echo "🦀 Running Rust authorize and store test..."
+    echo "   WS URL: {{ ws_url }}"
+    echo "   Seed: {{ seed }}"
+
+    # Build the Rust binary
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    cargo build --release -p rust-authorize-and-store --manifest-path "$ROOT_DIR/Cargo.toml"
+
+    # Run the test
+    "$ROOT_DIR/target/release/authorize-and-store" --ws "{{ ws_url }}" --seed "{{ seed }}"
+
 # Run store-chunked-data test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running

@@ -4621,7 +4621,7 @@ dependencies = [
  "sp-version",
  "sp-wasm-interface",
  "subxt 0.43.1",
- "subxt-signer",
+ "subxt-signer 0.43.0",
  "thiserror 1.0.69",
  "thousands",
 ]
@@ -9101,7 +9101,7 @@ dependencies = [
  "sp-runtime",
  "sp-version",
  "substrate-bn",
- "subxt-signer",
+ "subxt-signer 0.43.0",
 ]
 
 [[package]]
@@ -11855,6 +11855,21 @@ name = "ruint-macro"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
+
+[[package]]
+name = "rust-authorize-and-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bulletin-sdk-rust",
+ "clap",
+ "hex",
+ "sp-runtime",
+ "subxt 0.37.0",
+ "subxt-signer 0.37.0",
+ "tokio",
+]
 
 [[package]]
 name = "rustc-demangle"
@@ -15919,6 +15934,28 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "subxt-signer"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49888ae6ae90fe01b471193528eea5bd4ed52d8eecd2d13f4a2333b87388850"
+dependencies = [
+ "bip39",
+ "cfg-if",
+ "hex",
+ "hmac 0.12.1",
+ "parity-scale-codec",
+ "pbkdf2",
+ "regex",
+ "schnorrkel",
+ "secp256k1 0.28.2",
+ "secrecy 0.8.0",
+ "sha2 0.10.9",
+ "sp-crypto-hashing 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "subxt-core 0.37.1",
+ "zeroize",
 ]
 
 [[package]]
