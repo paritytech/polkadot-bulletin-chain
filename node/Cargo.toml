@@ -88,25 +88,25 @@ substrate-build-script-utils = { workspace = true }
 [features]
 # Dependencies that are only required if runtime benchmarking should be built.
 runtime-benchmarks = [
-	"bulletin-polkadot-runtime/runtime-benchmarks",
-	"frame-benchmarking-cli/runtime-benchmarks",
-	"frame-benchmarking/runtime-benchmarks",
-	"frame-support/runtime-benchmarks",
-	"pallet-transaction-payment/runtime-benchmarks",
-	"pallet-transaction-storage/runtime-benchmarks",
-	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
-	"polkadot-primitives/runtime-benchmarks",
-	"sc-service/runtime-benchmarks",
-	"sp-runtime/runtime-benchmarks",
+  "bulletin-polkadot-runtime/runtime-benchmarks",
+  "frame-benchmarking-cli/runtime-benchmarks",
+  "frame-benchmarking/runtime-benchmarks",
+  "frame-support/runtime-benchmarks",
+  "pallet-transaction-payment/runtime-benchmarks",
+  "pallet-transaction-storage/runtime-benchmarks",
+  "polkadot-bulletin-chain-runtime/runtime-benchmarks",
+  "polkadot-primitives/runtime-benchmarks",
+  "sc-service/runtime-benchmarks",
+  "sp-runtime/runtime-benchmarks",
 ]
 # Enable features that allow the runtime to be tried and debugged. Name might be subject to change
 # in the near future.
 try-runtime = [
-	"bulletin-polkadot-runtime/try-runtime",
-	"frame-support/try-runtime",
-	"frame-try-runtime/try-runtime",
-	"pallet-transaction-payment/try-runtime",
-	"pallet-transaction-storage/try-runtime",
-	"polkadot-bulletin-chain-runtime/try-runtime",
-	"sp-runtime/try-runtime",
+  "bulletin-polkadot-runtime/try-runtime",
+  "frame-support/try-runtime",
+  "frame-try-runtime/try-runtime",
+  "pallet-transaction-payment/try-runtime",
+  "pallet-transaction-storage/try-runtime",
+  "polkadot-bulletin-chain-runtime/try-runtime",
+  "sp-runtime/try-runtime",
 ]

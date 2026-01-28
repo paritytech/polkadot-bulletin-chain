@@ -16,20 +16,11 @@ log = { workspace = true, default-features = true }
 scale-info = { features = ["derive"], workspace = true }
 
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
-	"runtime",
+  "runtime",
 ] }
 
 [features]
 default = ["std"]
-runtime-benchmarks = [
-	"polkadot-sdk-frame/runtime-benchmarks",
-]
-std = [
-	"codec/std",
-	"log/std",
-	"polkadot-sdk-frame/std",
-	"scale-info/std",
-]
-try-runtime = [
-	"polkadot-sdk-frame/try-runtime",
-]
+runtime-benchmarks = ["polkadot-sdk-frame/runtime-benchmarks"]
+std = ["codec/std", "log/std", "polkadot-sdk-frame/std", "scale-info/std"]
+try-runtime = ["polkadot-sdk-frame/try-runtime"]
