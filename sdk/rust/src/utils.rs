@@ -259,7 +259,7 @@ pub fn estimate_fees(data_size: u64) -> u64 {
 ///
 /// # Example
 /// ```
-/// use bulletin_sdk_rust::{utils::codec_name, cid::CidCodec};
+/// use bulletin_sdk_rust::{utils::codec_name, types::CidCodec};
 ///
 /// assert_eq!(codec_name(CidCodec::Raw), "raw");
 /// assert_eq!(codec_name(CidCodec::DagPb), "dag-pb");
@@ -276,7 +276,7 @@ pub fn codec_name(codec: CidCodec) -> &'static str {
 ///
 /// # Example
 /// ```
-/// use bulletin_sdk_rust::{utils::hash_algorithm_name, cid::HashAlgorithm};
+/// use bulletin_sdk_rust::{utils::hash_algorithm_name, types::HashAlgorithm};
 ///
 /// assert_eq!(hash_algorithm_name(HashAlgorithm::Blake2b256), "blake2b-256");
 /// assert_eq!(hash_algorithm_name(HashAlgorithm::Sha2_256), "sha2-256");

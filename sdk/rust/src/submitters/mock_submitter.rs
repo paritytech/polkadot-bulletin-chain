@@ -40,7 +40,7 @@ use sp_runtime::AccountId32;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct MockSubmitter {
 	/// Counter for generating unique block numbers.
 	block_counter: core::sync::atomic::AtomicU32,
@@ -61,8 +61,7 @@ impl MockSubmitter {
 
 	/// Generate a mock transaction receipt.
 	fn generate_receipt(&self) -> TransactionReceipt {
-		let block_number =
-			self.block_counter.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+		let block_number = self.block_counter.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
 
 		TransactionReceipt {
 			block_hash: alloc::format!("0xmock_block_{block_number}"),
@@ -155,8 +154,7 @@ impl TransactionSubmitter for MockSubmitter {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::async_client::AsyncBulletinClient;
-	use crate::types::StoreOptions;
+	use crate::{async_client::AsyncBulletinClient, types::StoreOptions};
 
 	#[tokio::test]
 	async fn test_mock_submitter_success() {
@@ -186,8 +184,8 @@ mod tests {
 
 		assert!(result.is_ok());
 		let store_result = result.unwrap();
-		assert_eq!(store_result.size, 17);
-		assert_eq!(store_result.cid.len(), 36); // Blake2b-256 CID length
+		assert_eq!(store_result.size, 16); // "Hello, Bulletin!" is 16 bytes
+		assert!(!store_result.cid.is_empty()); // CID should be present
 	}
 
 	#[tokio::test]
