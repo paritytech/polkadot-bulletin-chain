@@ -4,6 +4,7 @@
 //! Utility functions and helpers for Bulletin SDK
 
 use crate::{
+	chunker::MAX_CHUNK_SIZE,
 	cid::ContentHash,
 	types::{CidCodec, Error, HashAlgorithm, Result},
 };
@@ -185,16 +186,14 @@ where
 /// use bulletin_sdk_rust::utils::validate_chunk_size;
 ///
 /// assert!(validate_chunk_size(1_048_576).is_ok()); // 1 MiB - valid
-/// assert!(validate_chunk_size(10_000_000).is_err()); // > 8 MiB - invalid
+/// assert!(validate_chunk_size(3_000_000).is_err()); // > 2 MiB - invalid
 /// ```
 pub fn validate_chunk_size(size: u64) -> Result<()> {
-	const MAX_CHUNK_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
-
 	if size == 0 {
 		return Err(Error::InvalidConfig("Chunk size cannot be zero".into()))
 	}
 
-	if size > MAX_CHUNK_SIZE {
+	if size > MAX_CHUNK_SIZE as u64 {
 		return Err(Error::InvalidConfig(alloc::format!(
 			"Chunk size {} exceeds maximum {}",
 			size,
@@ -218,7 +217,6 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 /// ```
 pub fn optimal_chunk_size(data_size: u64) -> u64 {
 	const MIN_CHUNK_SIZE: u64 = 1024 * 1024; // 1 MiB
-	const MAX_CHUNK_SIZE: u64 = 4 * 1024 * 1024; // 4 MiB
 	const OPTIMAL_CHUNKS: u64 = 100; // Target chunk count
 
 	if data_size <= MIN_CHUNK_SIZE {
@@ -229,8 +227,8 @@ pub fn optimal_chunk_size(data_size: u64) -> u64 {
 
 	if optimal_size < MIN_CHUNK_SIZE {
 		MIN_CHUNK_SIZE
-	} else if optimal_size > MAX_CHUNK_SIZE {
-		MAX_CHUNK_SIZE
+	} else if optimal_size > MAX_CHUNK_SIZE as u64 {
+		MAX_CHUNK_SIZE as u64
 	} else {
 		// Round to nearest MiB
 		(optimal_size / 1_048_576) * 1_048_576

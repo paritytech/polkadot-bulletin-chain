@@ -8,8 +8,8 @@ extern crate alloc;
 use crate::types::{Chunk, ChunkerConfig, Error, Result};
 use alloc::vec::Vec;
 
-/// Maximum chunk size allowed (8 MiB, matches pallet limit).
-pub const MAX_CHUNK_SIZE: usize = 8 * 1024 * 1024;
+/// Maximum chunk size allowed (2 MiB, matches Bitswap limit).
+pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// Default chunk size (1 MiB).
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
