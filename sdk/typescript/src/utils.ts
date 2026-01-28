@@ -9,6 +9,7 @@ import { CID } from 'multiformats/cid';
 import * as digest from 'multiformats/hashes/digest';
 import { blake2AsU8a, sha256AsU8a } from '@polkadot/util-crypto';
 import { HashAlgorithm, BulletinError } from './types.js';
+import { MAX_CHUNK_SIZE } from './chunker.js';
 
 /**
  * Calculate content hash using the specified algorithm
@@ -162,8 +163,6 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
  * @throws BulletinError if chunk size is invalid
  */
 export function validateChunkSize(size: number): void {
-  const MAX_CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB
-
   if (size <= 0) {
     throw new BulletinError('Chunk size must be positive', 'INVALID_CHUNK_SIZE');
   }
@@ -189,7 +188,6 @@ export function validateChunkSize(size: number): void {
  */
 export function optimalChunkSize(dataSize: number): number {
   const MIN_CHUNK_SIZE = 1024 * 1024; // 1 MiB
-  const MAX_CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
   const OPTIMAL_CHUNKS = 100; // Target chunk count
 
   if (dataSize <= MIN_CHUNK_SIZE) {

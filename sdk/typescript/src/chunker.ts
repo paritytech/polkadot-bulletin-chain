@@ -7,8 +7,8 @@
 
 import { Chunk, ChunkerConfig, DEFAULT_CHUNKER_CONFIG, BulletinError } from './types.js';
 
-/** Maximum chunk size allowed (8 MiB, matches pallet limit) */
-export const MAX_CHUNK_SIZE = 8 * 1024 * 1024;
+/** Maximum chunk size allowed (2 MiB, matches Bitswap limit) */
+export const MAX_CHUNK_SIZE = 2 * 1024 * 1024;
 
 /**
  * Fixed-size chunker that splits data into equal-sized chunks
