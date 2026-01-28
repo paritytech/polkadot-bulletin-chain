@@ -151,4 +151,29 @@ jobs:
           unset SKIP_WASM_BUILD
           cargo test -p bulletin-westend-integration-tests
 
-      # TODO: check benchmarks
+  benchmarks:
+    name: Check Benchmarks
+    runs-on: parity-large
+    timeout-minutes: 60
+    needs: [set-image, check-fmt]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bulletin-cache-benchmarks"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run benchmarks (Westend parachain)
+        run: |
+          echo "Running benchmarks for Westend parachain..."
+          python3 ./scripts/cmd/cmd.py bench --runtime bulletin-westend --steps 2 --repeat 1
+          echo "Benchmarks for Westend parachain completed."
+          
+          echo "Running production check for Westend parachain..."
+          cargo check --profile production -p bulletin-westend-runtime
+          echo "Production check for Westend parachain completed."
