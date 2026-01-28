@@ -45,7 +45,7 @@ export class BulletinClient {
   }
 
   /**
-   * Prepare a simple store operation (data < 8 MiB)
+   * Prepare a simple store operation (data < 2 MiB)
    *
    * Returns the data and its CID. Use PAPI to submit to TransactionStorage.store
    */

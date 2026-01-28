@@ -74,7 +74,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		self
 	}
 
-	/// Store data on Bulletin Chain (simple, < 8 MiB).
+	/// Store data on Bulletin Chain (simple, < 2 MiB).
 	///
 	/// This handles the complete workflow:
 	/// 1. Calculate CID

@@ -5,7 +5,7 @@
  * Large file example - Store large files with automatic chunking
  *
  * This example demonstrates:
- * - Storing large files (> 8 MiB) with automatic chunking
+ * - Storing large files (> 2 MiB) with automatic chunking
  * - Progress tracking during upload
  * - DAG-PB manifest creation for IPFS compatibility
  * - Retrieving chunk and manifest CIDs

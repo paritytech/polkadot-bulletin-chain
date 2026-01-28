@@ -76,7 +76,7 @@ describe('Chunker', () => {
 
   it('should throw error for chunk size exceeding maximum', () => {
     const config: ChunkerConfig = {
-      chunkSize: 10 * 1024 * 1024, // 10 MiB > MAX (8 MiB)
+      chunkSize: 10 * 1024 * 1024, // 10 MiB > MAX (2 MiB)
       maxParallel: 8,
       createManifest: true,
     };

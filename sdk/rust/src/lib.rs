@@ -17,7 +17,7 @@
 //!
 //! ## Usage
 //!
-//! ### Simple Store (< 8 MiB)
+//! ### Simple Store (< 2 MiB)
 //!
 //! ```ignore
 //! use bulletin_sdk_rust::{BulletinClient, types::StoreOptions};

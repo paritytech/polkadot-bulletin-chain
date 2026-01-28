@@ -69,7 +69,7 @@ impl BulletinClient {
 		self
 	}
 
-	/// Prepare a simple store operation (data < 8 MiB).
+	/// Prepare a simple store operation (data < 2 MiB).
 	///
 	/// This creates a storage operation that can be submitted to the blockchain.
 	/// For actual submission, use `subxt` to call `TransactionStorage.store`.
@@ -79,7 +79,7 @@ impl BulletinClient {
 		Ok(op)
 	}
 
-	/// Prepare a chunked store operation (data >= 8 MiB or when chunking is desired).
+	/// Prepare a chunked store operation (data >= 2 MiB or when chunking is desired).
 	///
 	/// This chunks the data, calculates CIDs, and optionally creates a DAG-PB manifest.
 	/// Returns the batch operation and optionally the manifest data.

@@ -16,10 +16,10 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum Error {
-	/// Chunk size exceeds maximum allowed (8 MiB).
+	/// Chunk size exceeds maximum allowed (2 MiB).
 	#[cfg_attr(
 		feature = "std",
-		error("Chunk size {0} exceeds maximum allowed size of 8388608 bytes")
+		error("Chunk size {0} exceeds maximum allowed size of 2097152 bytes (2 MiB)")
 	)]
 	ChunkTooLarge(u64),
 
