@@ -3,8 +3,9 @@
 
 //! Transaction submitter implementations for different blockchain client libraries.
 //!
-//! This module provides concrete implementations of the [`TransactionSubmitter`](crate::submit::TransactionSubmitter)
-//! trait for various blockchain interaction libraries:
+//! This module provides concrete implementations of the
+//! [`TransactionSubmitter`](crate::submit::TransactionSubmitter) trait for various blockchain
+//! interaction libraries:
 //!
 //! - [`SubxtSubmitter`] - Uses the `subxt` library for type-safe blockchain interaction
 //!
