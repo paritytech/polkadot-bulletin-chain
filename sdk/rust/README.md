@@ -8,14 +8,15 @@ Off-chain client SDK for Polkadot Bulletin Chain with **complete transaction sub
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
-use subxt::{OnlineClient, PolkadotConfig};
 
-// Create subxt client and signer
-let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
+// Get WebSocket URL from environment or use default
+let ws_url = std::env::var("BULLETIN_WS_URL")
+    .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+
 let signer = /* your PairSigner */;
 
-// Create bulletin client with SubxtSubmitter
-let submitter = SubxtSubmitter::new(api, signer);
+// Create submitter with URL - it connects automatically
+let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
 let client = AsyncBulletinClient::new(submitter);
 
 // Store data - complete workflow in one call
