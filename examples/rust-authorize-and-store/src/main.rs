@@ -106,36 +106,21 @@ impl TransactionSubmitter for SubxtSubmitter {
             who, transactions, bytes
         );
 
-        // Build authorize_account call
-        let authorize_call = subxt::dynamic::tx(
+        // Build the inner call as a variant for the RuntimeCall enum
+        let inner_call = Value::unnamed_variant(
             "TransactionStorage",
-            "authorize_account",
-            vec![
-                Value::from_bytes(AsRef::<[u8]>::as_ref(&who)),
-                Value::u128(transactions as u128),
-                Value::u128(bytes as u128),
-            ],
+            [Value::unnamed_variant(
+                "authorize_account",
+                [
+                    Value::from_bytes(AsRef::<[u8]>::as_ref(&who)),
+                    Value::u128(transactions as u128),
+                    Value::u128(bytes as u128),
+                ],
+            )],
         );
 
-        // Encode the inner call
-        let inner_call_data = self
-            .api
-            .tx()
-            .call_data(&authorize_call)
-            .map_err(|e| SdkError::SubmissionFailed(format!("Failed to encode call: {e}")))?;
-
-        // Wrap in sudo_unchecked_weight
-        let sudo_tx = subxt::dynamic::tx(
-            "Sudo",
-            "sudo_unchecked_weight",
-            vec![
-                Value::from_bytes(&inner_call_data),
-                Value::unnamed_composite([
-                    Value::u128(1_000_000_000),
-                    Value::u128(100_000),
-                ]),
-            ],
-        );
+        // Wrap in Sudo.sudo
+        let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
 
         let tx_progress = self
             .api
@@ -175,32 +160,20 @@ impl TransactionSubmitter for SubxtSubmitter {
             content_hash, max_size
         );
 
-        let authorize_call = subxt::dynamic::tx(
+        // Build the inner call as a variant for the RuntimeCall enum
+        let inner_call = Value::unnamed_variant(
             "TransactionStorage",
-            "authorize_preimage",
-            vec![
-                Value::from_bytes(content_hash),
-                Value::u128(max_size as u128),
-            ],
+            [Value::unnamed_variant(
+                "authorize_preimage",
+                [
+                    Value::from_bytes(content_hash),
+                    Value::u128(max_size as u128),
+                ],
+            )],
         );
 
-        let inner_call_data = self
-            .api
-            .tx()
-            .call_data(&authorize_call)
-            .map_err(|e| SdkError::SubmissionFailed(format!("Failed to encode call: {e}")))?;
-
-        let sudo_tx = subxt::dynamic::tx(
-            "Sudo",
-            "sudo_unchecked_weight",
-            vec![
-                Value::from_bytes(&inner_call_data),
-                Value::unnamed_composite([
-                    Value::u128(1_000_000_000),
-                    Value::u128(100_000),
-                ]),
-            ],
-        );
+        // Wrap in Sudo.sudo
+        let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
 
         let tx_progress = self
             .api
@@ -253,29 +226,17 @@ impl TransactionSubmitter for SubxtSubmitter {
         &self,
         who: sp_runtime::AccountId32,
     ) -> SdkResult<TransactionReceipt> {
-        let call = subxt::dynamic::tx(
+        // Build the inner call as a variant for the RuntimeCall enum
+        let inner_call = Value::unnamed_variant(
             "TransactionStorage",
-            "refresh_account_authorization",
-            vec![Value::from_bytes(AsRef::<[u8]>::as_ref(&who))],
+            [Value::unnamed_variant(
+                "refresh_account_authorization",
+                [Value::from_bytes(AsRef::<[u8]>::as_ref(&who))],
+            )],
         );
 
-        let inner_call_data = self
-            .api
-            .tx()
-            .call_data(&call)
-            .map_err(|e| SdkError::SubmissionFailed(format!("Failed to encode call: {e}")))?;
-
-        let sudo_tx = subxt::dynamic::tx(
-            "Sudo",
-            "sudo_unchecked_weight",
-            vec![
-                Value::from_bytes(&inner_call_data),
-                Value::unnamed_composite([
-                    Value::u128(1_000_000_000),
-                    Value::u128(100_000),
-                ]),
-            ],
-        );
+        // Wrap in Sudo.sudo
+        let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
 
         let tx_progress = self
             .api
@@ -300,29 +261,17 @@ impl TransactionSubmitter for SubxtSubmitter {
         &self,
         content_hash: ContentHash,
     ) -> SdkResult<TransactionReceipt> {
-        let call = subxt::dynamic::tx(
+        // Build the inner call as a variant for the RuntimeCall enum
+        let inner_call = Value::unnamed_variant(
             "TransactionStorage",
-            "refresh_preimage_authorization",
-            vec![Value::from_bytes(content_hash)],
+            [Value::unnamed_variant(
+                "refresh_preimage_authorization",
+                [Value::from_bytes(content_hash)],
+            )],
         );
 
-        let inner_call_data = self
-            .api
-            .tx()
-            .call_data(&call)
-            .map_err(|e| SdkError::SubmissionFailed(format!("Failed to encode call: {e}")))?;
-
-        let sudo_tx = subxt::dynamic::tx(
-            "Sudo",
-            "sudo_unchecked_weight",
-            vec![
-                Value::from_bytes(&inner_call_data),
-                Value::unnamed_composite([
-                    Value::u128(1_000_000_000),
-                    Value::u128(100_000),
-                ]),
-            ],
-        );
+        // Wrap in Sudo.sudo
+        let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
 
         let tx_progress = self
             .api
