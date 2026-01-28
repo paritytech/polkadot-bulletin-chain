@@ -167,10 +167,7 @@ jobs:
         with:
           shared-key: "bulletin-cache-benchmarks"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      
-      - name: Build runtime-benchmarks
-        run: |
-          cargo build --release --features runtime-benchmarks
+
       - name: Run benchmarks (Westend parachain)
         run: |
           python3 ./scripts/cmd/cmd.py bench --runtime bulletin-westend --steps 2 --repeat 1
