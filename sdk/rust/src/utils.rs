@@ -4,7 +4,6 @@
 //! Utility functions and helpers for Bulletin SDK
 
 use crate::{
-	chunker::MAX_CHUNK_SIZE,
 	cid::ContentHash,
 	types::{CidCodec, Error, HashAlgorithm, Result},
 };
@@ -51,7 +50,7 @@ pub fn hex_to_bytes(hex: &str) -> Result<Vec<u8>> {
 pub fn bytes_to_hex(bytes: &[u8]) -> String {
 	let mut hex = String::with_capacity(bytes.len() * 2);
 	for byte in bytes {
-		hex.push_str(&alloc::format!("{:02x}", byte));
+		hex.push_str(&alloc::format!("{byte:02x}"));
 	}
 	hex
 }
@@ -69,7 +68,7 @@ pub fn ss58_to_account_id(ss58: &str) -> Result<AccountId32> {
 	use sp_core::crypto::Ss58Codec;
 
 	AccountId32::from_ss58check(ss58)
-		.map_err(|e| Error::InvalidConfig(alloc::format!("Invalid SS58 address: {:?}", e)))
+		.map_err(|e| Error::InvalidConfig(alloc::format!("Invalid SS58 address: {e:?}")))
 }
 
 /// Convert AccountId32 to SS58 address
@@ -197,9 +196,7 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 
 	if size > MAX_CHUNK_SIZE as u64 {
 		return Err(Error::InvalidConfig(alloc::format!(
-			"Chunk size {} exceeds maximum {}",
-			size,
-			MAX_CHUNK_SIZE
+			"Chunk size {size} exceeds maximum {MAX_CHUNK_SIZE}"
 		)))
 	}
 

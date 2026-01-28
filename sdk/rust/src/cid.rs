@@ -66,7 +66,7 @@ pub fn cid_to_bytes(cid_data: &CidData) -> Result<Cid> {
 #[cfg(feature = "std")]
 pub fn cid_from_bytes(bytes: &[u8]) -> Result<cid::Cid> {
 	cid::Cid::try_from(bytes)
-		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to parse CID from bytes: {:?}", e)))
+		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to parse CID from bytes: {e:?}")))
 }
 
 /// Convert CID to base32 string representation.
@@ -80,7 +80,7 @@ pub fn cid_to_string(cid: &cid::Cid) -> String {
 pub fn cid_from_string(s: &str) -> Result<cid::Cid> {
 	use core::str::FromStr;
 	cid::Cid::from_str(s)
-		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to parse CID from string: {:?}", e)))
+		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to parse CID from string: {e:?}")))
 }
 
 /// Helper to convert multihash code to HashingAlgorithm.
