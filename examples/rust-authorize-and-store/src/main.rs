@@ -133,6 +133,20 @@ impl SubxtSubmitter {
             storage_keypair: Arc::new(storage_keypair),
         }
     }
+
+    /// Create a new SubxtSubmitter by connecting to a node via WebSocket URL.
+    ///
+    /// This is a convenience constructor that handles the connection for you.
+    async fn from_url(
+        url: impl AsRef<str>,
+        sudo_keypair: Keypair,
+        storage_keypair: Keypair,
+    ) -> Result<Self> {
+        let api = OnlineClient::<BulletinConfig>::from_url(url)
+            .await
+            .map_err(|e| anyhow!("Failed to connect to node: {e}"))?;
+        Ok(Self::new(api, sudo_keypair, storage_keypair))
+    }
 }
 
 #[async_trait]
@@ -464,10 +478,6 @@ async fn main() -> Result<()> {
     println!("Connecting to: {}", args.ws);
     println!("Using seed: {}", args.seed);
 
-    // Connect to the node
-    let api = OnlineClient::<BulletinConfig>::from_url(&args.ws).await?;
-    println!("Connected to chain");
-
     // Create keypairs
     let sudo_keypair = keypair_from_seed(&args.seed)?;
     let sudo_account: AccountId32 = sudo_keypair.public_key().into();
@@ -477,8 +487,10 @@ async fn main() -> Result<()> {
     let storage_account: AccountId32 = storage_keypair.public_key().into();
     println!("Storage account: {}", storage_account);
 
-    // Create the SDK client with our subxt-based submitter
-    let submitter = SubxtSubmitter::new(api, sudo_keypair, storage_keypair);
+    // Create the SDK client with our subxt-based submitter (connects via URL)
+    let submitter = SubxtSubmitter::from_url(&args.ws, sudo_keypair, storage_keypair).await?;
+    println!("Connected to chain");
+
     let client = AsyncBulletinClient::new(submitter);
 
     // Data to store
