@@ -127,10 +127,10 @@ fn transaction_storage_runtime_sizes() {
 		let who: AccountId = account.to_account_id();
 		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
-			2 * 1024,      // 2 KB
-			16 * 1024,     // 16 KB
-			128 * 1024,    // 128 KB
-			512 * 1024,    // 512 KB
+			2 * 1024,        // 2 KB
+			16 * 1024,       // 16 KB
+			128 * 1024,      // 128 KB
+			512 * 1024,      // 512 KB
 			1 * 1024 * 1024, // 1 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();

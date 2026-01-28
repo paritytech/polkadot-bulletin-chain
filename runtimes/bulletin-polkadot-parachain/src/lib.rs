@@ -21,10 +21,10 @@
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-pub mod constants;
 mod apis;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarks;
+pub mod constants;
 mod genesis_config_presets;
 pub mod migrations;
 pub mod storage;

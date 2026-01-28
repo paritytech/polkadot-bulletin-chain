@@ -43,4 +43,3 @@ pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 /// MBM migrations to apply on runtime upgrade.
 pub type MbmMigrations = ();
-

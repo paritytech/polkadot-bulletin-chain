@@ -30,4 +30,3 @@ frame_benchmarking::define_benchmarks!(
 	[pallet_xcm_benchmarks::generic, XcmGeneric]
 	[cumulus_pallet_weight_reclaim, WeightReclaim]
 );
-
