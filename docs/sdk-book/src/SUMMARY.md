@@ -7,6 +7,7 @@
     - [Manifests & IPFS](./concepts/manifests.md)
 - [Rust SDK](./rust/README.md)
     - [Installation](./rust/installation.md)
+    - [Transaction Submitters](./rust/submitters.md)
     - [Basic Storage](./rust/basic-storage.md)
     - [Chunked Uploads](./rust/chunked-uploads.md)
     - [Authorization](./rust/authorization.md)
