@@ -24,7 +24,15 @@ use bulletin_sdk_rust::{
     Result as SdkResult,
 };
 use clap::Parser;
-use subxt::{dynamic::Value, utils::AccountId32, OnlineClient, SubstrateConfig};
+use codec::Encode;
+use scale_info::PortableRegistry;
+use subxt::client::ClientState;
+use subxt::config::signed_extensions::{self, SignedExtension};
+use subxt::config::{
+    Config, DefaultExtrinsicParamsBuilder, ExtrinsicParams, ExtrinsicParamsEncoder,
+    ExtrinsicParamsError,
+};
+use subxt::{dynamic::Value, utils::AccountId32, OnlineClient};
 use subxt_signer::sr25519::Keypair;
 
 #[derive(Parser, Debug)]
@@ -40,16 +48,82 @@ struct Args {
     seed: String,
 }
 
+/// Custom Config for Bulletin Chain that includes the ProvideCidConfig signed extension.
+pub enum BulletinConfig {}
+
+impl Config for BulletinConfig {
+    type Hash = subxt::utils::H256;
+    type AccountId = subxt::utils::AccountId32;
+    type Address = subxt::utils::MultiAddress<Self::AccountId, ()>;
+    type Signature = subxt::utils::MultiSignature;
+    type Hasher = subxt::config::substrate::BlakeTwo256;
+    type Header = subxt::config::substrate::SubstrateHeader<u32, Self::Hasher>;
+    type ExtrinsicParams = signed_extensions::AnyOf<
+        Self,
+        (
+            // Standard extensions matching DefaultExtrinsicParamsBuilder
+            signed_extensions::CheckSpecVersion,
+            signed_extensions::CheckTxVersion,
+            signed_extensions::CheckNonce,
+            signed_extensions::CheckGenesis<Self>,
+            signed_extensions::CheckMortality<Self>,
+            signed_extensions::ChargeAssetTxPayment<Self>,
+            signed_extensions::ChargeTransactionPayment,
+            signed_extensions::CheckMetadataHash,
+            // Bulletin Chain's custom ProvideCidConfig extension
+            ProvideCidConfigExt,
+        ),
+    >;
+    type AssetId = u32;
+}
+
+/// Custom signed extension for Bulletin Chain's ProvideCidConfig.
+/// For non-store calls, this should encode as Option::None (0x00).
+pub struct ProvideCidConfigExt;
+
+impl<T: Config> SignedExtension<T> for ProvideCidConfigExt {
+    type Decoded = ();
+    fn matches(identifier: &str, _type_id: u32, _types: &PortableRegistry) -> bool {
+        identifier == "ProvideCidConfig"
+    }
+}
+
+impl<T: Config> ExtrinsicParams<T> for ProvideCidConfigExt {
+    type Params = ();
+
+    fn new(_client: &ClientState<T>, _params: Self::Params) -> Result<Self, ExtrinsicParamsError> {
+        Ok(ProvideCidConfigExt)
+    }
+}
+
+impl ExtrinsicParamsEncoder for ProvideCidConfigExt {
+    fn encode_extra_to(&self, v: &mut Vec<u8>) {
+        // Encode Option::None as 0x00 byte (no CidConfig for non-store calls)
+        Option::<()>::None.encode_to(v);
+    }
+    fn encode_additional_to(&self, _v: &mut Vec<u8>) {
+        // No additional signed data
+    }
+}
+
+/// Helper to build extrinsic params with our custom extension.
+fn bulletin_params(
+    params: DefaultExtrinsicParamsBuilder<BulletinConfig>,
+) -> <<BulletinConfig as Config>::ExtrinsicParams as ExtrinsicParams<BulletinConfig>>::Params {
+    let (a, b, c, d, e, f, g, h) = params.build();
+    (a, b, c, d, e, f, g, h, ())
+}
+
 /// Subxt-based implementation of TransactionSubmitter for the SDK.
 struct SubxtSubmitter {
-    api: OnlineClient<SubstrateConfig>,
+    api: OnlineClient<BulletinConfig>,
     sudo_keypair: Arc<Keypair>,
     storage_keypair: Arc<Keypair>,
 }
 
 impl SubxtSubmitter {
     fn new(
-        api: OnlineClient<SubstrateConfig>,
+        api: OnlineClient<BulletinConfig>,
         sudo_keypair: Keypair,
         storage_keypair: Keypair,
     ) -> Self {
@@ -75,7 +149,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&store_tx, self.storage_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &store_tx,
+                self.storage_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit store tx: {e}")))?;
 
@@ -125,7 +203,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&sudo_tx, self.sudo_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &sudo_tx,
+                self.sudo_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| {
                 SdkError::SubmissionFailed(format!("Failed to submit authorize tx: {e}"))
@@ -178,7 +260,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&sudo_tx, self.sudo_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &sudo_tx,
+                self.sudo_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| {
                 SdkError::SubmissionFailed(format!("Failed to submit authorize_preimage tx: {e}"))
@@ -206,7 +292,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&renew_tx, self.storage_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &renew_tx,
+                self.storage_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit renew tx: {e}")))?;
 
@@ -241,7 +331,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&sudo_tx, self.sudo_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &sudo_tx,
+                self.sudo_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
 
@@ -276,7 +370,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&sudo_tx, self.sudo_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &sudo_tx,
+                self.sudo_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
 
@@ -305,7 +403,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&call, self.storage_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &call,
+                self.storage_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
 
@@ -334,7 +436,11 @@ impl TransactionSubmitter for SubxtSubmitter {
         let tx_progress = self
             .api
             .tx()
-            .sign_and_submit_then_watch_default(&call, self.storage_keypair.as_ref())
+            .sign_and_submit_then_watch(
+                &call,
+                self.storage_keypair.as_ref(),
+                bulletin_params(DefaultExtrinsicParamsBuilder::new()),
+            )
             .await
             .map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
 
@@ -359,7 +465,7 @@ async fn main() -> Result<()> {
     println!("Using seed: {}", args.seed);
 
     // Connect to the node
-    let api = OnlineClient::<SubstrateConfig>::from_url(&args.ws).await?;
+    let api = OnlineClient::<BulletinConfig>::from_url(&args.ws).await?;
     println!("Connected to chain");
 
     // Create keypairs

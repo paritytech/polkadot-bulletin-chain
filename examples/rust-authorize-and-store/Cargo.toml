@@ -18,3 +18,5 @@ tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
 anyhow = "1.0"
 hex = "0.4"
+codec = { package = "parity-scale-codec", version = "3.6", features = ["derive"] }
+scale-info = "2.11"
