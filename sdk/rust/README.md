@@ -4,16 +4,36 @@ Off-chain client SDK for Polkadot Bulletin Chain with **complete transaction sub
 
 ## Quick Start
 
+### With Subxt
+
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use subxt::{OnlineClient, PolkadotConfig};
 
-// Create client with your transaction submitter
-let submitter = MySubmitter::new("ws://localhost:9944").await?;
+// Create subxt client and signer
+let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
+let signer = /* your PairSigner */;
+
+// Create bulletin client with SubxtSubmitter
+let submitter = SubxtSubmitter::new(api, signer);
 let client = AsyncBulletinClient::new(submitter);
 
 // Store data - complete workflow in one call
 let result = client.store(b"Hello!".to_vec(), StoreOptions::default()).await?;
 println!("Stored with CID: {:?}", result.cid);
+```
+
+### For Testing (Mock Submitter)
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+// Create client with mock submitter (for testing)
+let submitter = MockSubmitter::new();
+let client = AsyncBulletinClient::new(submitter);
+
+// Test without connecting to a node
+let result = client.store(b"Hello!".to_vec(), StoreOptions::default()).await?;
 ```
 
 ## Installation
@@ -62,9 +82,47 @@ The SDK book contains:
 - Integration guides
 - no_std usage
 
+## Transaction Submitters
+
+The SDK supports multiple transaction submitter implementations:
+
+### Built-in Submitters
+
+- **`SubxtSubmitter`** - Uses the `subxt` library for type-safe blockchain interaction
+  - Status: Requires metadata generation (see docs)
+  - Best for: Production applications, full type safety
+
+- **`MockSubmitter`** - Mock implementation for testing
+  - Status: Ready to use
+  - Best for: Unit tests, development without a node
+
+### Custom Submitters
+
+You can implement your own submitter for any blockchain client library:
+
+```rust
+use bulletin_sdk_rust::submit::{TransactionSubmitter, TransactionReceipt};
+use async_trait::async_trait;
+
+pub struct MyCustomSubmitter {
+    // Your client fields
+}
+
+#[async_trait]
+impl TransactionSubmitter for MyCustomSubmitter {
+    async fn submit_store(&self, data: Vec<u8>) -> Result<TransactionReceipt> {
+        // Your implementation
+    }
+    // ... implement other methods
+}
+```
+
+See [`src/submitters/README.md`](src/submitters/README.md) for detailed guidance.
+
 ## Features
 
 - ✅ Complete transaction submission
+- ✅ Multiple submitter implementations (Subxt, Mock, Custom)
 - ✅ All 8 pallet operations
 - ✅ Automatic chunking (default 1 MiB)
 - ✅ DAG-PB manifests (IPFS-compatible)

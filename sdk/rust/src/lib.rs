@@ -93,6 +93,10 @@ pub mod utils;
 #[cfg(feature = "std")]
 pub mod submit;
 
+// Transaction submitters for different client libraries (std-only)
+#[cfg(feature = "std")]
+pub mod submitters;
+
 // Async client with full transaction support (std-only)
 #[cfg(feature = "std")]
 pub mod async_client;
@@ -135,6 +139,9 @@ pub mod prelude {
 
 	#[cfg(feature = "std")]
 	pub use crate::submit::{Call, TransactionBuilder, TransactionReceipt, TransactionSubmitter};
+
+	#[cfg(feature = "std")]
+	pub use crate::submitters::{MockSubmitter, SubxtSubmitter};
 }
 
 #[cfg(test)]
