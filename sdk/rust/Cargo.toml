@@ -59,7 +59,7 @@ std = [
 	"subxt",
 	"thiserror",
 	"tokio",
-	"unsigned-varint/std"
+	"unsigned-varint/std",
 ]
 
 # Enable for ink! smart contract compatibility
@@ -73,13 +73,13 @@ serde-support = ["serde"]
 # Runtime benchmarking (no-op for SDK, but required for workspace consistency)
 runtime-benchmarks = [
 	"pallet-transaction-storage/runtime-benchmarks",
-	"sp-runtime/runtime-benchmarks"
+	"sp-runtime/runtime-benchmarks",
 ]
 
 # Try-runtime support (no-op for SDK, but required for workspace consistency)
 try-runtime = [
 	"pallet-transaction-storage/try-runtime",
-	"sp-runtime/try-runtime"
+	"sp-runtime/try-runtime",
 ]
 
 # Note: Examples and integration tests are not included in the repository because they
