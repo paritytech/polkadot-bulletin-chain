@@ -22,16 +22,15 @@ use subxt::{OnlineClient, PolkadotConfig};
 /// ```ignore
 /// use bulletin_sdk_rust::submitters::SubxtSubmitter;
 /// use bulletin_sdk_rust::async_client::AsyncBulletinClient;
-/// use subxt::{OnlineClient, PolkadotConfig};
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     // Create subxt client
-///     let api = OnlineClient::<PolkadotConfig>::new().await?;
 ///     let signer = // ... your signer (PairSigner, etc.)
 ///
-///     // Create submitter
-///     let submitter = SubxtSubmitter::new(api, signer);
+///     // Option 1: Connect via URL directly in constructor
+///     let ws_url = std::env::var("BULLETIN_WS_URL")
+///         .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+///     let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
 ///
 ///     // Create bulletin client with submitter
 ///     let client = AsyncBulletinClient::new(submitter);
@@ -43,6 +42,16 @@ use subxt::{OnlineClient, PolkadotConfig};
 ///     Ok(())
 /// }
 /// ```
+///
+/// # Example with pre-connected client
+///
+/// ```ignore
+/// use subxt::{OnlineClient, PolkadotConfig};
+///
+/// // Option 2: Pass an already-connected client
+/// let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:10000").await?;
+/// let submitter = SubxtSubmitter::new(api, signer);
+/// ```
 pub struct SubxtSubmitter<Signer> {
 	/// Subxt online client.
 	api: OnlineClient<PolkadotConfig>,
@@ -51,14 +60,46 @@ pub struct SubxtSubmitter<Signer> {
 }
 
 impl<Signer> SubxtSubmitter<Signer> {
-	/// Create a new SubxtSubmitter.
+	/// Create a new SubxtSubmitter with an already-connected client.
 	///
 	/// # Arguments
 	///
 	/// * `api` - The subxt `OnlineClient` connected to a Bulletin Chain node
 	/// * `signer` - A signer that implements `subxt::tx::Signer` (e.g., `PairSigner`)
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:10000").await?;
+	/// let signer = /* your signer */;
+	/// let submitter = SubxtSubmitter::new(api, signer);
+	/// ```
 	pub fn new(api: OnlineClient<PolkadotConfig>, signer: Signer) -> Self {
 		Self { api, signer }
+	}
+
+	/// Create a new SubxtSubmitter by connecting to a node via WebSocket URL.
+	///
+	/// This is a convenience constructor that handles the connection for you.
+	///
+	/// # Arguments
+	///
+	/// * `url` - WebSocket URL of the Bulletin Chain node (e.g., "ws://localhost:10000")
+	/// * `signer` - A signer that implements `subxt::tx::Signer`
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// let signer = /* your signer */;
+	/// let submitter = SubxtSubmitter::from_url("ws://localhost:10000", signer).await?;
+	/// let client = AsyncBulletinClient::new(submitter);
+	/// ```
+	pub async fn from_url(
+		url: impl AsRef<str>,
+		signer: Signer,
+	) -> core::result::Result<Self, subxt::Error> {
+		let api = OnlineClient::<PolkadotConfig>::from_url(url).await?;
+		Ok(Self { api, signer })
 	}
 
 	/// Get a reference to the API client.

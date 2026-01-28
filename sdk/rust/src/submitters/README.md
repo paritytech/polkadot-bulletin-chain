@@ -14,13 +14,20 @@ Uses the `subxt` library for type-safe Substrate/Polkadot blockchain interaction
 ```rust
 use bulletin_sdk_rust::submitters::SubxtSubmitter;
 use bulletin_sdk_rust::async_client::AsyncBulletinClient;
-use subxt::{OnlineClient, PolkadotConfig};
 
-let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
+// Get URL from config, env, or CLI args
+let ws_url = std::env::var("BULLETIN_WS_URL")
+    .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+
 let signer = /* your PairSigner */;
 
-let submitter = SubxtSubmitter::new(api, signer);
+// Option 1: Connect via URL (simplest)
+let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
 let client = AsyncBulletinClient::new(submitter);
+
+// Option 2: Pass pre-connected client (advanced)
+// let api = OnlineClient::<PolkadotConfig>::from_url(&ws_url).await?;
+// let submitter = SubxtSubmitter::new(api, signer);
 ```
 
 **Implementation Guide**:
