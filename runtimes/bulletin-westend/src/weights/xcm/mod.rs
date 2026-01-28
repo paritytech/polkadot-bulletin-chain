@@ -67,7 +67,7 @@ impl<Call> XcmWeightInfo<Call> for BulletinWestendXcmWeight<Call> {
 	fn reserve_asset_deposited(assets: &Assets) -> Weight {
 		assets.weigh_assets(XcmFungibleWeight::<Runtime>::reserve_asset_deposited())
 	}
-	fn receive_teleported_asset(assets: &Assets) -> Weight {
+	fn receive_teleported_asset(_assets: &Assets) -> Weight {
 		Weight::MAX
 	}
 	fn query_response(
