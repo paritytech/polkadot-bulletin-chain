@@ -43,7 +43,7 @@ export class AsyncBulletinClient {
   }
 
   /**
-   * Store data on Bulletin Chain (simple, < 8 MiB)
+   * Store data on Bulletin Chain (simple, < 2 MiB)
    *
    * Handles the complete workflow:
    * 1. Calculate CID

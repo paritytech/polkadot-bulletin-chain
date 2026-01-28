@@ -53,8 +53,8 @@ impl StorageOperation {
 			return Err(Error::EmptyData);
 		}
 
-		// Check if data exceeds max chunk size (8 MiB)
-		const MAX_SIZE: usize = 8 * 1024 * 1024;
+		// Check if data exceeds max chunk size (2 MiB)
+		const MAX_SIZE: usize = 2 * 1024 * 1024;
 		if self.data.len() > MAX_SIZE {
 			return Err(Error::ChunkTooLarge(self.data.len() as u64));
 		}

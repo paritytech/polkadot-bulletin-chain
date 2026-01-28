@@ -4,7 +4,6 @@
 //! Utility functions and helpers for Bulletin SDK
 
 use crate::{
-	chunker::MAX_CHUNK_SIZE,
 	cid::ContentHash,
 	types::{CidCodec, Error, HashAlgorithm, Result},
 };
