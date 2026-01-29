@@ -156,6 +156,10 @@ jobs:
         working-directory: examples
         run: just run-test-rust-authorize-and-store "${{ env.TEST_DIR }}"
 
+      - name: Test TypeScript SDK store-big-data (Westend parachain)
+        working-directory: examples
+        run: just run-test-sdk-store-big-data "${{ env.TEST_DIR }}"
+
       - name: Test authorize-and-store smoldot (Westend parachain)
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"
@@ -171,6 +175,10 @@ jobs:
       - name: Test authorize-preimage-and-store (Westend parachain)
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+
+      - name: Test client comparison (PAPI vs Rust vs TypeScript) (Westend parachain)
+        working-directory: examples
+        run: just run-test-compare-clients "${{ env.TEST_DIR }}"
 
       - name: Stop services (Westend parachain)
         if: always()
@@ -195,6 +203,10 @@ jobs:
         working-directory: examples
         run: just run-test-rust-authorize-and-store "${{ env.TEST_DIR }}"
 
+      - name: Test TypeScript SDK store-big-data (Polkadot solochain)
+        working-directory: examples
+        run: just run-test-sdk-store-big-data "${{ env.TEST_DIR }}"
+
       - name: Test authorize-and-store smoldot (Polkadot solochain)
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "smoldot"
@@ -210,6 +222,10 @@ jobs:
       - name: Test authorize-preimage-and-store (Polkadot solochain)
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+
+      - name: Test client comparison (PAPI vs Rust vs TypeScript) (Polkadot solochain)
+        working-directory: examples
+        run: just run-test-compare-clients "${{ env.TEST_DIR }}"
 
       - name: Stop services (Polkadot solochain)
         if: always()
