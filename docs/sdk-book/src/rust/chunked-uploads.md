@@ -335,14 +335,183 @@ if let Some(manifest_bytes) = manifest_data {
 }
 ```
 
+## Authorization Checking (Fail Fast)
+
+For large chunked uploads, authorization checking is especially important to avoid wasting time uploading many chunks only to fail at the end.
+
+### Automatic Checking
+
+By default, the SDK checks authorization before starting any chunk uploads:
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let ws_url = std::env::var("BULLETIN_WS_URL")
+        .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+    let signer = /* your signer */;
+    let account = /* your AccountId32 */;
+
+    // Create client with account for authorization checking
+    let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
+    let client = AsyncBulletinClient::new(submitter)
+        .with_account(account);
+
+    // Load large file
+    let data = std::fs::read("large-file.bin")?;
+    println!("File size: {} bytes", data.len());
+
+    // Configure chunking
+    let config = ChunkerConfig {
+        chunk_size: 1024 * 1024,  // 1 MiB
+        max_parallel: 8,
+        create_manifest: true,
+    };
+
+    // Upload - authorization is checked BEFORE uploading any chunks
+    let result = client
+        .store_chunked(&data, Some(config), StoreOptions::default(), None)
+        .await?;
+    //           ⬆️ Fails immediately if insufficient authorization
+    //              No chunks uploaded if auth is insufficient!
+
+    println!("✅ Success! Manifest CID: {}", hex::encode(result.manifest_cid.unwrap()));
+    Ok(())
+}
+```
+
+### What Gets Checked
+
+Before uploading **any** chunks, the SDK:
+1. **Calculates** total requirements:
+   - Number of transactions = number of chunks + 1 (for manifest)
+   - Total bytes = file size + estimated manifest size
+2. **Queries** blockchain for current authorization
+3. **Validates** sufficient transactions and bytes are authorized
+4. **Fails immediately** if insufficient (saves uploading time!)
+5. **Proceeds** only if authorization is sufficient
+
+### Estimate Before Upload
+
+Check authorization requirements before starting:
+
+```rust
+// Estimate what's needed
+let file_size = std::fs::metadata("large-file.bin")?.len();
+let (txs_needed, bytes_needed) = client.estimate_authorization(file_size, true);
+
+println!("This upload will need:");
+println!("  {} transactions", txs_needed);
+println!("  {} bytes authorized", bytes_needed);
+
+// For 100 MB file with 1 MiB chunks:
+// - 100 chunk transactions
+// - 1 manifest transaction
+// - Total: 101 transactions, ~100 MB authorized
+```
+
+### Handle Insufficient Authorization
+
+```rust
+match client.store_chunked(&data, config, options, None).await {
+    Ok(result) => {
+        println!("✅ Uploaded {} chunks", result.num_chunks);
+        println!("   Manifest: {}", hex::encode(result.manifest_cid.unwrap()));
+    }
+    Err(Error::InsufficientAuthorization { need, available }) => {
+        eprintln!("❌ Insufficient authorization:");
+        eprintln!("   Need: {} bytes and {} transactions", need, /* calculate txs */);
+        eprintln!("   Have: {} bytes available", available);
+        eprintln!("\n💡 Authorize your account first:");
+        eprintln!("   client.authorize_account(account, {}, {}).await?",
+                  txs_needed, bytes_needed);
+    }
+    Err(e) => {
+        eprintln!("❌ Error: {:?}", e);
+    }
+}
+```
+
+### Complete Example with Authorization
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+use std::path::Path;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Setup
+    let ws_url = std::env::var("BULLETIN_WS_URL")
+        .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+    let signer = /* your signer */;
+    let account = /* your AccountId32 */;
+
+    let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
+    let client = AsyncBulletinClient::new(submitter)
+        .with_account(account.clone());
+
+    // Load file
+    let file_path = Path::new("large-video.mp4");
+    let data = std::fs::read(file_path)?;
+    println!("📁 File: {} ({} bytes)", file_path.display(), data.len());
+
+    // Estimate authorization needed
+    let (txs_needed, bytes_needed) = client.estimate_authorization(data.len() as u64);
+    println!("\n📊 Authorization Required:");
+    println!("   Transactions: {}", txs_needed);
+    println!("   Bytes: {}", bytes_needed);
+
+    // Check if we need to authorize
+    // (In real code, query current auth state first)
+    println!("\n🔐 Authorizing account...");
+    client.authorize_account(account, txs_needed, bytes_needed).await?;
+    println!("✅ Authorization complete");
+
+    // Configure chunking
+    let config = ChunkerConfig {
+        chunk_size: 1024 * 1024,  // 1 MiB
+        max_parallel: 8,
+        create_manifest: true,
+    };
+
+    // Upload with authorization checking (enabled by default)
+    println!("\n⬆️  Uploading...");
+    let start = std::time::Instant::now();
+
+    let result = client
+        .store_chunked(
+            &data,
+            Some(config),
+            StoreOptions::default(),
+            Some(|event| {
+                if let ProgressEvent::ChunkCompleted { index, total, .. } = event {
+                    let percent = ((index + 1) as f64 / total as f64) * 100.0;
+                    print!("\r   Progress: {:.1}%", percent);
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                }
+            }),
+        )
+        .await?;
+
+    let duration = start.elapsed();
+    println!("\n\n✅ Upload complete in {:.2}s", duration.as_secs_f64());
+    println!("   Manifest CID: {}", hex::encode(result.manifest_cid.unwrap()));
+    println!("   {} chunks uploaded", result.num_chunks);
+
+    Ok(())
+}
+```
+
 ## Best Practices
 
-1. **Choose appropriate chunk size** - 1 MiB is a good default
-2. **Enable progress tracking** - Show users what's happening
-3. **Handle failures gracefully** - Network errors are common
-4. **Keep manifest CID** - Use it to retrieve the complete file
-5. **Test with MockSubmitter** - Fast tests without a node
-6. **Estimate authorization** - Use `client.estimate_authorization(file_size)` first
+1. **Check authorization first** - Use `.with_account()` to enable automatic checking before upload
+2. **Estimate requirements** - Call `client.estimate_authorization(file_size)` before large uploads
+3. **Choose appropriate chunk size** - 1 MiB is a good default
+4. **Enable progress tracking** - Show users what's happening
+5. **Handle failures gracefully** - Check for `InsufficientAuthorization` errors
+6. **Keep manifest CID** - Use it to retrieve the complete file
+7. **Test with MockSubmitter** - Fast tests without a node
 
 ## Next Steps
 

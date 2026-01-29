@@ -6,7 +6,7 @@
 //! This module provides traits for submitting transactions to Bulletin Chain.
 //! Users can implement these traits with their preferred signing/submission method.
 
-use crate::{cid::ContentHash, types::Result};
+use crate::{authorization::Authorization, cid::ContentHash, types::Result};
 use alloc::vec::Vec;
 use sp_runtime::AccountId32;
 
@@ -60,6 +60,28 @@ pub trait TransactionSubmitter: Send + Sync {
 		&self,
 		content_hash: ContentHash,
 	) -> Result<TransactionReceipt>;
+
+	/// Query authorization state for an account.
+	///
+	/// Returns `None` if this submitter doesn't support queries or if no authorization exists.
+	/// Default implementation returns `None`.
+	async fn query_account_authorization(
+		&self,
+		_who: AccountId32,
+	) -> Result<Option<Authorization>> {
+		Ok(None)
+	}
+
+	/// Query authorization state for a preimage.
+	///
+	/// Returns `None` if this submitter doesn't support queries or if no authorization exists.
+	/// Default implementation returns `None`.
+	async fn query_preimage_authorization(
+		&self,
+		_content_hash: ContentHash,
+	) -> Result<Option<Authorization>> {
+		Ok(None)
+	}
 }
 
 /// Receipt from a successful transaction.

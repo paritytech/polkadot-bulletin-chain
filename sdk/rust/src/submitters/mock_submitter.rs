@@ -10,12 +10,14 @@
 //! - Development and prototyping
 
 use crate::{
+	authorization::Authorization,
 	cid::ContentHash,
 	submit::{TransactionReceipt, TransactionSubmitter},
 	types::Result,
 };
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use sp_runtime::AccountId32;
+use std::sync::Mutex;
 
 /// Mock transaction submitter that simulates blockchain interaction.
 ///
@@ -40,23 +42,53 @@ use sp_runtime::AccountId32;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MockSubmitter {
 	/// Counter for generating unique block numbers.
 	block_counter: core::sync::atomic::AtomicU32,
 	/// Whether to simulate failures.
 	pub fail_submissions: bool,
+	/// Mock authorization storage (account -> authorization).
+	account_authorizations: Arc<Mutex<BTreeMap<AccountId32, Authorization>>>,
+	/// Mock authorization storage (content_hash -> authorization).
+	preimage_authorizations: Arc<Mutex<BTreeMap<ContentHash, Authorization>>>,
+}
+
+impl Default for MockSubmitter {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl MockSubmitter {
 	/// Create a new mock submitter.
 	pub fn new() -> Self {
-		Self { block_counter: core::sync::atomic::AtomicU32::new(1), fail_submissions: false }
+		Self {
+			block_counter: core::sync::atomic::AtomicU32::new(1),
+			fail_submissions: false,
+			account_authorizations: Arc::new(Mutex::new(BTreeMap::new())),
+			preimage_authorizations: Arc::new(Mutex::new(BTreeMap::new())),
+		}
 	}
 
 	/// Create a mock submitter that fails all submissions.
 	pub fn failing() -> Self {
-		Self { block_counter: core::sync::atomic::AtomicU32::new(1), fail_submissions: true }
+		Self {
+			block_counter: core::sync::atomic::AtomicU32::new(1),
+			fail_submissions: true,
+			account_authorizations: Arc::new(Mutex::new(BTreeMap::new())),
+			preimage_authorizations: Arc::new(Mutex::new(BTreeMap::new())),
+		}
+	}
+
+	/// Set mock authorization for an account (for testing).
+	pub fn set_account_authorization(&self, account: AccountId32, auth: Authorization) {
+		self.account_authorizations.lock().unwrap().insert(account, auth);
+	}
+
+	/// Set mock authorization for a preimage (for testing).
+	pub fn set_preimage_authorization(&self, content_hash: ContentHash, auth: Authorization) {
+		self.preimage_authorizations.lock().unwrap().insert(content_hash, auth);
 	}
 
 	/// Generate a mock transaction receipt.
@@ -149,12 +181,26 @@ impl TransactionSubmitter for MockSubmitter {
 		}
 		Ok(self.generate_receipt())
 	}
+
+	async fn query_account_authorization(&self, who: AccountId32) -> Result<Option<Authorization>> {
+		Ok(self.account_authorizations.lock().unwrap().get(&who).cloned())
+	}
+
+	async fn query_preimage_authorization(
+		&self,
+		content_hash: ContentHash,
+	) -> Result<Option<Authorization>> {
+		Ok(self.preimage_authorizations.lock().unwrap().get(&content_hash).cloned())
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{async_client::AsyncBulletinClient, types::StoreOptions};
+	use crate::{
+		async_client::AsyncBulletinClient,
+		types::{AuthorizationScope, StoreOptions},
+	};
 
 	#[tokio::test]
 	async fn test_mock_submitter_success() {
@@ -199,5 +245,93 @@ mod tests {
 		assert_eq!(receipt1.block_number, Some(1));
 		assert_eq!(receipt2.block_number, Some(2));
 		assert_eq!(receipt3.block_number, Some(3));
+	}
+
+	#[tokio::test]
+	async fn test_authorization_query() {
+		let submitter = MockSubmitter::new();
+		let account = AccountId32::from([1u8; 32]);
+
+		// Initially no authorization
+		let auth = submitter.query_account_authorization(account.clone()).await.unwrap();
+		assert!(auth.is_none());
+
+		// Set authorization
+		let test_auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 100,
+			max_size: 1_000_000,
+			expires_at: Some(1000),
+		};
+		submitter.set_account_authorization(account.clone(), test_auth.clone());
+
+		// Query should return it
+		let auth = submitter.query_account_authorization(account).await.unwrap();
+		assert!(auth.is_some());
+		let auth = auth.unwrap();
+		assert_eq!(auth.transactions, 100);
+		assert_eq!(auth.max_size, 1_000_000);
+	}
+
+	#[tokio::test]
+	async fn test_authorization_check_with_client() {
+		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+
+		let submitter = MockSubmitter::new();
+		let account = AccountId32::from([1u8; 32]);
+
+		// Set authorization for 10 transactions and 10KB
+		submitter.set_account_authorization(
+			account.clone(),
+			Authorization {
+				scope: AuthorizationScope::Account,
+				transactions: 10,
+				max_size: 10_000,
+				expires_at: None,
+			},
+		);
+
+		// Create client with authorization checking enabled
+		let mut config = AsyncClientConfig::default();
+		config.check_authorization_before_upload = true;
+		let client = AsyncBulletinClient::with_config(submitter, config).with_account(account);
+
+		// Should succeed - 16 bytes is within limits
+		let data = b"Hello, Bulletin!".to_vec();
+		let result = client.store(data, StoreOptions::default()).await;
+		assert!(result.is_ok());
+	}
+
+	#[tokio::test]
+	async fn test_insufficient_authorization_fails() {
+		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+
+		let submitter = MockSubmitter::new();
+		let account = AccountId32::from([1u8; 32]);
+
+		// Set authorization for only 10 bytes
+		submitter.set_account_authorization(
+			account.clone(),
+			Authorization {
+				scope: AuthorizationScope::Account,
+				transactions: 10,
+				max_size: 10, // Only 10 bytes allowed
+				expires_at: None,
+			},
+		);
+
+		// Create client with authorization checking enabled
+		let mut config = AsyncClientConfig::default();
+		config.check_authorization_before_upload = true;
+		let client = AsyncBulletinClient::with_config(submitter, config).with_account(account);
+
+		// Should fail - 16 bytes exceeds limits
+		let data = b"Hello, Bulletin!".to_vec();
+		let result = client.store(data, StoreOptions::default()).await;
+		assert!(result.is_err());
+		assert!(matches!(
+			result.unwrap_err(),
+			crate::types::Error::InsufficientAuthorization { .. }
+		));
 	}
 }

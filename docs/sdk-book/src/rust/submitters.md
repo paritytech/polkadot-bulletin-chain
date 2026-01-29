@@ -6,6 +6,7 @@ The Rust SDK uses the **Transaction Submitter** pattern to separate blockchain i
 
 A `TransactionSubmitter` is a trait that defines methods for submitting all TransactionStorage pallet operations:
 
+**Submission Methods:**
 - `submit_store` - Store data
 - `submit_authorize_account` - Authorize account (sudo)
 - `submit_authorize_preimage` - Authorize preimage (sudo)
@@ -14,6 +15,12 @@ A `TransactionSubmitter` is a trait that defines methods for submitting all Tran
 - `submit_refresh_preimage_authorization` - Refresh authorization (sudo)
 - `submit_remove_expired_account_authorization` - Remove expired auth
 - `submit_remove_expired_preimage_authorization` - Remove expired auth
+
+**Query Methods (for authorization checking):**
+- `query_account_authorization` - Query account authorization state
+- `query_preimage_authorization` - Query preimage authorization state
+
+These query methods enable the SDK to check authorization **before** uploading to fail fast and avoid wasted transaction fees.
 
 ## Built-in Submitters
 
@@ -89,6 +96,124 @@ let client = AsyncBulletinClient::new(submitter);
 // All operations will fail with mock errors
 let result = client.store(data, options).await; // Returns Err
 ```
+
+**Mock Authorization Support**:
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+// Create mock submitter with authorization
+let submitter = MockSubmitter::new();
+let account = AccountId32::from([1u8; 32]);
+
+// Set mock authorization for testing
+submitter.set_account_authorization(
+    account.clone(),
+    Authorization {
+        scope: AuthorizationScope::Account,
+        transactions: 100,
+        max_size: 10_000_000,
+        expires_at: None,
+    },
+);
+
+// Create client with account for authorization checking
+let client = AsyncBulletinClient::new(submitter)
+    .with_account(account);
+
+// Upload - authorization will be checked automatically
+let result = client.store(data, StoreOptions::default()).await?;
+```
+
+## Authorization Queries
+
+Submitters can implement query methods to enable automatic authorization checking before uploads. This allows the SDK to fail fast if authorization is insufficient.
+
+### Query Methods
+
+```rust
+pub trait TransactionSubmitter {
+    // ... submission methods ...
+
+    /// Query authorization state for an account.
+    /// Returns `None` if no authorization exists or queries are not supported.
+    async fn query_account_authorization(
+        &self,
+        who: AccountId32,
+    ) -> Result<Option<Authorization>>;
+
+    /// Query authorization state for a preimage.
+    /// Returns `None` if no authorization exists or queries are not supported.
+    async fn query_preimage_authorization(
+        &self,
+        content_hash: ContentHash,
+    ) -> Result<Option<Authorization>>;
+}
+```
+
+### MockSubmitter Implementation
+
+`MockSubmitter` fully implements authorization queries for testing:
+
+```rust
+let submitter = MockSubmitter::new();
+let account = AccountId32::from([1u8; 32]);
+
+// Set authorization
+submitter.set_account_authorization(
+    account.clone(),
+    Authorization {
+        scope: AuthorizationScope::Account,
+        transactions: 50,
+        max_size: 5_000_000,
+        expires_at: Some(1000),
+    },
+);
+
+// Query it back
+let auth = submitter.query_account_authorization(account).await?;
+assert!(auth.is_some());
+println!("Available: {} txs, {} bytes", auth.unwrap().transactions, auth.unwrap().max_size);
+```
+
+### SubxtSubmitter Implementation
+
+`SubxtSubmitter` provides documentation on how to implement queries but requires metadata generation:
+
+```rust
+// Example implementation (requires generated metadata):
+async fn query_account_authorization(&self, who: AccountId32) -> Result<Option<Authorization>> {
+    let address = bulletin_metadata::storage()
+        .transaction_storage()
+        .account_authorizations(&who);
+
+    let result = self.api.storage().at_latest().await?.fetch(&address).await?;
+
+    Ok(result.map(|auth_data| Authorization {
+        scope: AuthorizationScope::Account,
+        transactions: auth_data.transactions,
+        max_size: auth_data.max_size,
+        expires_at: Some(auth_data.expires_at),
+    }))
+}
+```
+
+### How Authorization Checking Works
+
+When you set an account on the client:
+
+```rust
+let client = AsyncBulletinClient::new(submitter)
+    .with_account(account);  // Enable automatic authorization checking
+```
+
+The SDK will:
+1. Call `query_account_authorization()` before each upload
+2. Validate sufficient transactions and bytes are authorized
+3. Fail immediately with `Error::InsufficientAuthorization` if not enough
+4. Proceed with upload only if authorization is sufficient
+
+This saves transaction fees and time by catching authorization issues early!
 
 ## Creating Custom Submitters
 
