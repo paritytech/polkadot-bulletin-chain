@@ -229,7 +229,7 @@ ipfs-start test_dir: _check-docker
     echo "   NETWORK_ARGS: $NETWORK_ARGS"
     echo "   Waiting for container to start..."
     sleep 5
-    docker inspect ipfs-node --format '{{.HostConfig.NetworkMode}}'
+    docker inspect ipfs-node --format '{{{{.HostConfig.NetworkMode}}}}'
     docker exec ipfs-node ipfs --version
 
     # Bitswap logging
