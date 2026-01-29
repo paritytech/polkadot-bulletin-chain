@@ -6,7 +6,7 @@
  */
 
 import { PolkadotSigner, TypedApi } from 'polkadot-api';
-import { BulletinError } from './types.js';
+import { Authorization, BulletinError } from './types.js';
 
 /**
  * Transaction receipt from a successful submission
@@ -56,12 +56,37 @@ export interface TransactionSubmitter {
 
   /** Submit a remove_expired_preimage_authorization transaction */
   submitRemoveExpiredPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
+
+  /**
+   * Query authorization state for an account
+   *
+   * Returns undefined if this submitter doesn't support queries or if no authorization exists.
+   */
+  queryAccountAuthorization?(who: string): Promise<Authorization | undefined>;
+
+  /**
+   * Query authorization state for a preimage
+   *
+   * Returns undefined if this submitter doesn't support queries or if no authorization exists.
+   */
+  queryPreimageAuthorization?(contentHash: Uint8Array): Promise<Authorization | undefined>;
+
+  /**
+   * Query the current block number
+   *
+   * Returns undefined if this submitter doesn't support queries.
+   */
+  queryCurrentBlock?(): Promise<number | undefined>;
 }
 
 /**
  * PAPI-based transaction submitter
  *
  * Complete implementation using Polkadot API (PAPI)
+ *
+ * Note: Query methods (queryAccountAuthorization, queryPreimageAuthorization, queryCurrentBlock)
+ * are not implemented by default. To enable authorization pre-flight checking, extend this class
+ * and implement the query methods to query the blockchain state.
  */
 export class PAPITransactionSubmitter implements TransactionSubmitter {
   constructor(

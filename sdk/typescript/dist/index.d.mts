@@ -188,6 +188,9 @@ interface ClientConfig {
     /** Threshold for automatic chunking (default: 2 MiB).
      * Data larger than this will be automatically chunked by `store()`. */
     chunkingThreshold?: number;
+    /** Check authorization before uploading to fail fast (default: true).
+     * Queries blockchain for current authorization and validates before submission. */
+    checkAuthorizationBeforeUpload?: boolean;
 }
 
 /**
@@ -560,11 +563,33 @@ interface TransactionSubmitter {
     submitRemoveExpiredAccountAuthorization(who: string): Promise<TransactionReceipt>;
     /** Submit a remove_expired_preimage_authorization transaction */
     submitRemoveExpiredPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
+    /**
+     * Query authorization state for an account
+     *
+     * Returns undefined if this submitter doesn't support queries or if no authorization exists.
+     */
+    queryAccountAuthorization?(who: string): Promise<Authorization | undefined>;
+    /**
+     * Query authorization state for a preimage
+     *
+     * Returns undefined if this submitter doesn't support queries or if no authorization exists.
+     */
+    queryPreimageAuthorization?(contentHash: Uint8Array): Promise<Authorization | undefined>;
+    /**
+     * Query the current block number
+     *
+     * Returns undefined if this submitter doesn't support queries.
+     */
+    queryCurrentBlock?(): Promise<number | undefined>;
 }
 /**
  * PAPI-based transaction submitter
  *
  * Complete implementation using Polkadot API (PAPI)
+ *
+ * Note: Query methods (queryAccountAuthorization, queryPreimageAuthorization, queryCurrentBlock)
+ * are not implemented by default. To enable authorization pre-flight checking, extend this class
+ * and implement the query methods to query the blockchain state.
  */
 declare class PAPITransactionSubmitter implements TransactionSubmitter {
     private api;
@@ -589,7 +614,15 @@ declare class PAPITransactionSubmitter implements TransactionSubmitter {
 declare class AsyncBulletinClient {
     private submitter;
     private config;
+    private account?;
     constructor(submitter: TransactionSubmitter, config?: Partial<ClientConfig>);
+    /**
+     * Set the account for authorization checks
+     *
+     * If set and `checkAuthorizationBeforeUpload` is enabled, the client will
+     * query authorization state before uploading and fail fast if insufficient.
+     */
+    withAccount(account: string): this;
     /**
      * Store data on Bulletin Chain
      *
@@ -609,6 +642,10 @@ declare class AsyncBulletinClient {
      * Internal: Store data in a single transaction (no chunking)
      */
     private storeInternalSingle;
+    /**
+     * Calculate authorization requirements for chunked upload
+     */
+    private calculateRequirements;
     /**
      * Internal: Store data with chunking (returns unified StoreResult)
      */

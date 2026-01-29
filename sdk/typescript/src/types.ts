@@ -201,4 +201,7 @@ export interface ClientConfig {
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number;
+  /** Check authorization before uploading to fail fast (default: true).
+   * Queries blockchain for current authorization and validates before submission. */
+  checkAuthorizationBeforeUpload?: boolean;
 }

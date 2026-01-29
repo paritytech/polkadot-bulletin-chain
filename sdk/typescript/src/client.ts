@@ -42,6 +42,7 @@ export class BulletinClient {
       maxParallel: config.maxParallel ?? 8,
       createManifest: config.createManifest ?? true,
       chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
+      checkAuthorizationBeforeUpload: config.checkAuthorizationBeforeUpload ?? true,
     };
   }
 
