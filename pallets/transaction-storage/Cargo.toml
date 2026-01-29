@@ -43,7 +43,4 @@ std = [
 	"sp-transaction-storage-proof/std",
 	"tracing/std",
 ]
-try-runtime = [
-	"pallets-common/try-runtime",
-	"polkadot-sdk-frame/try-runtime",
-]
+try-runtime = ["pallets-common/try-runtime", "polkadot-sdk-frame/try-runtime"]
