@@ -21,6 +21,7 @@ concurrency:
 # Repo env variable doesn't work for PRs from forks
 env:
   CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+  FRAME_OMNI_BENCHER_BIN_DIR: ${{ github.workspace }}/.frame-omni-bencher-bin
 
 jobs:
   set-image:
@@ -167,6 +168,16 @@ jobs:
         with:
           shared-key: "bulletin-cache-benchmarks"
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      
+      - name: Download frame-omni-bencher
+        run: |
+          mkdir -p $FRAME_OMNI_BENCHER_BIN_DIR
+          cd $FRAME_OMNI_BENCHER_BIN_DIR
+          echo "Downloading frame-omni-bencher..."
+          curl -L -o frame-omni-bencher https://github.com/paritytech/polkadot-sdk/releases/latest/download/frame-omni-bencher
+          chmod +x frame-omni-bencher
+          ./frame-omni-bencher --version
+          echo "${FRAME_OMNI_BENCHER_BIN_DIR}" >> $GITHUB_PATH
 
       - name: Run benchmarks (Westend parachain)
         run: |
