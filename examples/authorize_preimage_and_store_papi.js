@@ -2,7 +2,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
+import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, getContentHash } from './common.js';
 import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -43,7 +43,8 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         bulletinAPI,
         sudoSigner,
         contentHash,
-        BigInt(dataToStore.length)
+        BigInt(dataToStore.length),
+        TX_MODE_FINALIZED_BLOCK
     );
 
     // If signer is provided, also authorize the account (to increment inc_providers/inc_sufficients for `CheckNonce`).
@@ -54,7 +55,8 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
             sudoSigner,
             signerAddress,
             10,        // dummy transactions
-            BigInt(10000)  // dummy bytes
+            BigInt(10000),  // dummy bytes
+            TX_MODE_FINALIZED_BLOCK
         );
     }
 
