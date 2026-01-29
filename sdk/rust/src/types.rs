@@ -69,6 +69,10 @@ pub enum Error {
 	/// Submission failed.
 	#[cfg_attr(feature = "std", error("Submission failed: {0}"))]
 	SubmissionFailed(String),
+
+	/// Unsupported hash algorithm.
+	#[cfg_attr(feature = "std", error("Unsupported hash algorithm: {0}"))]
+	UnsupportedHashAlgorithm(String),
 }
 
 /// Configuration for chunking large data.

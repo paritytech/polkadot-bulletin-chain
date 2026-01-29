@@ -27,13 +27,15 @@ pub struct StorageOperation {
 
 impl StorageOperation {
 	/// Create a new storage operation.
-	pub fn new(data: Vec<u8>, options: StoreOptions) -> Self {
+	///
+	/// Returns an error if the hash algorithm is not supported.
+	pub fn new(data: Vec<u8>, options: StoreOptions) -> Result<Self> {
 		let cid_config = CidConfig {
 			codec: options.cid_codec.code(),
-			hashing: crate::cid::hash_algorithm_to_pallet(options.hash_algorithm),
+			hashing: crate::cid::hash_algorithm_to_pallet(options.hash_algorithm)?,
 		};
 
-		Self { data, cid_config, wait_finalization: options.wait_for_finalization }
+		Ok(Self { data, cid_config, wait_finalization: options.wait_for_finalization })
 	}
 
 	/// Calculate the CID for this operation.
@@ -78,7 +80,7 @@ impl BatchStorageOperation {
 		let mut operations = Vec::with_capacity(chunks.len());
 
 		for chunk in chunks {
-			let op = StorageOperation::new(chunk.data.clone(), options.clone());
+			let op = StorageOperation::new(chunk.data.clone(), options.clone())?;
 			op.validate()?;
 			operations.push(op);
 		}
@@ -162,7 +164,7 @@ mod tests {
 			wait_for_finalization: false,
 		};
 
-		let op = StorageOperation::new(data.clone(), options);
+		let op = StorageOperation::new(data.clone(), options).unwrap();
 		assert_eq!(op.data, data);
 		assert_eq!(op.size(), 5);
 	}
@@ -171,7 +173,7 @@ mod tests {
 	fn test_storage_operation_calculate_cid() {
 		let data = vec![1, 2, 3, 4, 5];
 		let options = StoreOptions::default();
-		let op = StorageOperation::new(data, options);
+		let op = StorageOperation::new(data, options).unwrap();
 
 		let cid = op.calculate_cid();
 		assert!(cid.is_ok());
@@ -181,7 +183,7 @@ mod tests {
 	fn test_storage_operation_validate_empty() {
 		let data = vec![];
 		let options = StoreOptions::default();
-		let op = StorageOperation::new(data, options);
+		let op = StorageOperation::new(data, options).unwrap();
 
 		let result = op.validate();
 		assert!(result.is_err());
@@ -191,7 +193,7 @@ mod tests {
 	fn test_storage_operation_validate_too_large() {
 		let data = vec![0u8; 9 * 1024 * 1024]; // 9 MB
 		let options = StoreOptions::default();
-		let op = StorageOperation::new(data, options);
+		let op = StorageOperation::new(data, options).unwrap();
 
 		let result = op.validate();
 		assert!(result.is_err());

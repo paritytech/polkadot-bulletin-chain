@@ -162,7 +162,7 @@ impl DagBuilder for UnixFsDagBuilder {
 		for chunk in chunks {
 			let cid_config = CidConfig {
 				codec: CidCodec::Raw.code(),
-				hashing: crate::cid::hash_algorithm_to_pallet(hash_algo),
+				hashing: crate::cid::hash_algorithm_to_pallet(hash_algo)?,
 			};
 
 			let cid_data = calculate_cid(&chunk.data, Some(cid_config))
@@ -194,7 +194,7 @@ impl DagBuilder for UnixFsDagBuilder {
 		// Calculate root CID (using dag-pb codec)
 		let root_config = CidConfig {
 			codec: CidCodec::DagPb.code(),
-			hashing: crate::cid::hash_algorithm_to_pallet(hash_algo),
+			hashing: crate::cid::hash_algorithm_to_pallet(hash_algo)?,
 		};
 
 		let root_cid = calculate_cid(&dag_bytes, Some(root_config))
