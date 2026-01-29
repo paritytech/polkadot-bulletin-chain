@@ -276,9 +276,9 @@ ipfs-start test_dir: _check-docker
 ipfs-connect runtime:
     #!/usr/bin/env bash
     set -e
-    
+
     echo "🔗 Connecting IPFS nodes (Docker, runtime: {{ runtime }})..."
-    
+
     # Detect the correct host and protocol for Docker
     if [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS - use dns4/host.docker.internal (bridge network)

@@ -43,8 +43,8 @@ p2p_port = 10001
 rpc_port = 10000
 args = [
 	"--ipfs-server",
-	# Increased tx pool from 20->30 MiB
-	"--pool-kbytes 30720",
+	# Increased tx pool from 20->40 MiB
+	"--pool-kbytes 40960",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# WebSocket P2P on p2p_port + 1 for smoldot light client support
 	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
@@ -59,8 +59,8 @@ p2p_port = 12347
 rpc_port = 12346
 args = [
 	"--ipfs-server",
-	# Increased tx pool from 20->30 MiB
-	"--pool-kbytes 30720",
+	# Increased tx pool from 20->40 MiB
+	"--pool-kbytes 40960",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# WebSocket P2P on p2p_port + 1 for smoldot light client support
 	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
