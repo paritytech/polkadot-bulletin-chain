@@ -216,9 +216,12 @@ ipfs-start test_dir: _check-docker
     #!/usr/bin/env bash
     set -e
     echo "🐳 Starting IPFS Docker container..."
-    
+
     # Pull latest kubo image if not present
     docker pull ipfs/kubo:latest
+
+    # Remove old volume to start fresh (no cached peers)
+    docker volume rm ipfs-data 2>/dev/null || true
 
     # Determine network mode based on OS
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -229,21 +232,31 @@ ipfs-start test_dir: _check-docker
         NETWORK_ARGS="--network host"
     fi
 
-    # Start Docker container
+    # Start container - daemon will init and start
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
     echo "   Container: ipfs-node (network: $NETWORK_ARGS)"
-    echo "   Waiting for container to start..."
+    echo "   Waiting for IPFS to initialize..."
     sleep 5
-    docker exec ipfs-node ipfs --version
-    # Remove all bootstrap peers
+
+    # Stop daemon to apply config changes before it connects to peers
+    echo "   Stopping daemon to configure..."
+    docker exec ipfs-node ipfs shutdown || true
+    sleep 2
+
+    # Configure IPFS for isolated mode (no external peer discovery)
+    echo "   Configuring isolated mode..."
     docker exec ipfs-node ipfs bootstrap rm --all
-    # Disable DHT (prevents peer discovery)
     docker exec ipfs-node ipfs config --json Routing.Type '"none"'
-    # Disable mDNS local discovery
     docker exec ipfs-node ipfs config --json Discovery.MDNS.Enabled false
-    # Restart IPFS to apply changes
+    docker exec ipfs-node ipfs config --json Swarm.RelayClient.Enabled false
+    docker exec ipfs-node ipfs config --json Swarm.RelayService.Enabled false
+
+    # Restart container to start daemon with clean config
+    echo "   Starting daemon with isolated config..."
     docker restart ipfs-node
     sleep 5
+
+    docker exec ipfs-node ipfs --version
 
     # Bitswap logging
     docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
