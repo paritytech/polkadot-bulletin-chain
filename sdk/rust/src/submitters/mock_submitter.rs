@@ -192,6 +192,11 @@ impl TransactionSubmitter for MockSubmitter {
 	) -> Result<Option<Authorization>> {
 		Ok(self.preimage_authorizations.lock().unwrap().get(&content_hash).cloned())
 	}
+
+	async fn query_current_block(&self) -> Result<Option<u32>> {
+		// Return the current block counter value
+		Ok(Some(self.block_counter.load(core::sync::atomic::Ordering::SeqCst)))
+	}
 }
 
 #[cfg(test)]

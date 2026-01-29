@@ -31,6 +31,9 @@ pub struct AsyncClientConfig {
 	/// Check authorization before uploading to fail fast (default: true).
 	/// Queries blockchain for current authorization and validates before submission.
 	pub check_authorization_before_upload: bool,
+	/// Threshold for automatic chunking (default: 2 MiB).
+	/// Data larger than this will be automatically chunked by `store()`.
+	pub chunking_threshold: u32,
 }
 
 impl Default for AsyncClientConfig {
@@ -40,6 +43,7 @@ impl Default for AsyncClientConfig {
 			max_parallel: 8,
 			create_manifest: true,
 			check_authorization_before_upload: true,
+			chunking_threshold: 2 * 1024 * 1024, // 2 MiB
 		}
 	}
 }
@@ -111,6 +115,18 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 				if let Some(auth) =
 					self.submitter.query_account_authorization(account.clone()).await?
 				{
+					// Check if authorization has expired
+					if let Some(expires_at) = auth.expires_at {
+						if let Some(current_block) = self.submitter.query_current_block().await? {
+							if expires_at <= current_block {
+								return Err(Error::AuthorizationExpired {
+									expired_at: expires_at,
+									current_block,
+								});
+							}
+						}
+					}
+
 					// Check if sufficient for this upload (1 transaction, data size)
 					self.auth_manager.check_authorization(&auth, data.len() as u64, 1)?;
 				}
@@ -134,6 +150,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 			cid: cid_bytes,
 			size: data.len() as u64,
 			block_number: receipt.block_number,
+			chunks: None, // No chunking for single upload
 		})
 	}
 
@@ -182,6 +199,18 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 				if let Some(auth) =
 					self.submitter.query_account_authorization(account.clone()).await?
 				{
+					// Check if authorization has expired
+					if let Some(expires_at) = auth.expires_at {
+						if let Some(current_block) = self.submitter.query_current_block().await? {
+							if expires_at <= current_block {
+								return Err(Error::AuthorizationExpired {
+									expired_at: expires_at,
+									current_block,
+								});
+							}
+						}
+					}
+
 					// Check if sufficient
 					self.auth_manager.check_authorization(&auth, bytes_needed, txs_needed)?;
 				}
