@@ -152,6 +152,10 @@ jobs:
         working-directory: examples
         run: just run-all-tests "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
 
+      - name: Test client comparison (PAPI vs Rust vs TypeScript) (Westend parachain)
+        working-directory: examples
+        run: just run-test-compare-clients "${{ env.TEST_DIR }}"
+
       - name: Stop services (Westend parachain)
         if: always()
         working-directory: examples
@@ -170,6 +174,10 @@ jobs:
       - name: Run all tests (Polkadot solochain)
         working-directory: examples
         run: just run-all-tests "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
+
+      - name: Test client comparison (PAPI vs Rust vs TypeScript) (Polkadot solochain)
+        working-directory: examples
+        run: just run-test-compare-clients "${{ env.TEST_DIR }}"
 
       - name: Stop services (Polkadot solochain)
         if: always()
