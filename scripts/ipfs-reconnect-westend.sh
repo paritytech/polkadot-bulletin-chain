@@ -23,24 +23,28 @@ else
     check_host="127.0.0.1"
 fi
 
-# Peers to monitor (TCP ports: 10001, 12347)
-PEERS_TO_CHECK=(
-    "/${check_protocol}/${check_host}/tcp/10001/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
-    "/${check_protocol}/${check_host}/tcp/12347/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
+# Peer IDs to monitor
+PEER_IDS=(
+    "12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
+    "12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 )
+
+# Full addresses for connecting (TCP ports: 10001, 12347)
+declare -A PEER_ADDRS
+PEER_ADDRS["12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"]="/${check_protocol}/${check_host}/tcp/10001/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
+PEER_ADDRS["12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"]="/${check_protocol}/${check_host}/tcp/12347/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 
 while true; do
     # Read all current connections once
     PEERS="$(${check_cmd} swarm peers)"
     echo "Connected peers: $PEERS"
 
-    for PEER in "${PEERS_TO_CHECK[@]}"; do
-        echo "$PEERS" | grep -q "$PEER"
-        if [ $? -ne 0 ]; then
-            echo "$(date) - $PEER disconnected. Reconnecting..."
-            ${check_cmd} swarm connect "$PEER"
+    for PEER_ID in "${PEER_IDS[@]}"; do
+        if echo "$PEERS" | grep -q "$PEER_ID"; then
+            echo "$(date) - $PEER_ID connected."
         else
-            echo "$(date) - $PEER connected."
+            echo "$(date) - $PEER_ID disconnected. Reconnecting..."
+            ${check_cmd} swarm connect "${PEER_ADDRS[$PEER_ID]}"
         fi
     done
 
