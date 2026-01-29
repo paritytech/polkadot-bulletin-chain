@@ -82,6 +82,14 @@ pub trait TransactionSubmitter: Send + Sync {
 	) -> Result<Option<Authorization>> {
 		Ok(None)
 	}
+
+	/// Query the current block number.
+	///
+	/// Returns `None` if this submitter doesn't support queries.
+	/// Default implementation returns `None`.
+	async fn query_current_block(&self) -> Result<Option<u32>> {
+		Ok(None)
+	}
 }
 
 /// Receipt from a successful transaction.

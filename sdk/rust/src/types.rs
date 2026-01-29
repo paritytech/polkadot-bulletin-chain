@@ -42,6 +42,13 @@ pub enum Error {
 	)]
 	InsufficientAuthorization { need: u64, available: u64 },
 
+	/// Authorization has expired.
+	#[cfg_attr(
+		feature = "std",
+		error("Authorization expired at block {expired_at} (current block: {current_block})")
+	)]
+	AuthorizationExpired { expired_at: u32, current_block: u32 },
+
 	/// Storage operation failed.
 	#[cfg_attr(feature = "std", error("Storage operation failed: {0}"))]
 	StorageFailed(String),
@@ -124,14 +131,31 @@ impl Chunk {
 }
 
 /// Result of a storage operation.
+///
+/// This result type works for both single-transaction uploads and chunked uploads.
+/// For chunked uploads, the `cid` field contains the manifest CID, and `chunks`
+/// contains details about the individual chunks.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct StoreResult {
-	/// The CID of the stored data as bytes.
+	/// The primary CID of the stored data as bytes.
+	/// - For single uploads: CID of the data
+	/// - For chunked uploads: CID of the manifest
 	pub cid: Vec<u8>,
-	/// Size of the stored data in bytes.
+	/// Total size of the stored data in bytes.
 	pub size: u64,
-	/// Block number where data was stored.
+	/// Block number where data was stored (or last chunk was stored).
 	pub block_number: Option<u32>,
+	/// Chunk details (only present for chunked uploads).
+	pub chunks: Option<ChunkDetails>,
+}
+
+/// Details about chunks in a chunked upload.
+#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+pub struct ChunkDetails {
+	/// CIDs of all stored chunks as bytes.
+	pub chunk_cids: Vec<Vec<u8>>,
+	/// Number of chunks.
+	pub num_chunks: u32,
 }
 
 /// Result of a chunked storage operation.
