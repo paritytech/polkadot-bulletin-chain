@@ -32,7 +32,8 @@ import { TransactionSubmitter, TransactionReceipt } from './transaction.js';
  */
 export class AsyncBulletinClient {
   private submitter: TransactionSubmitter;
-  private config: Required<Omit<ClientConfig, 'endpoint'>> & { chunkingThreshold: number };
+  private config: Required<Omit<ClientConfig, 'endpoint'>> & { chunkingThreshold: number; checkAuthorizationBeforeUpload: boolean };
+  private account?: string;
 
   constructor(submitter: TransactionSubmitter, config?: Partial<ClientConfig>) {
     this.submitter = submitter;
@@ -41,7 +42,19 @@ export class AsyncBulletinClient {
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
+      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true,
     };
+  }
+
+  /**
+   * Set the account for authorization checks
+   *
+   * If set and `checkAuthorizationBeforeUpload` is enabled, the client will
+   * query authorization state before uploading and fail fast if insufficient.
+   */
+  withAccount(account: string): this {
+    this.account = account;
+    return this;
   }
 
   /**
@@ -88,6 +101,48 @@ export class AsyncBulletinClient {
       throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
     }
 
+    // Check authorization before upload if enabled
+    if (this.config.checkAuthorizationBeforeUpload && this.account) {
+      if (this.submitter.queryAccountAuthorization) {
+        // Query current authorization
+        const auth = await this.submitter.queryAccountAuthorization(this.account);
+
+        if (auth) {
+          // Check if authorization has expired
+          if (auth.expiresAt !== undefined) {
+            if (this.submitter.queryCurrentBlock) {
+              const currentBlock = await this.submitter.queryCurrentBlock();
+              if (currentBlock !== undefined && auth.expiresAt <= currentBlock) {
+                throw new BulletinError(
+                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
+                  'AUTHORIZATION_EXPIRED',
+                  { expiredAt: auth.expiresAt, currentBlock },
+                );
+              }
+            }
+          }
+
+          // Check if sufficient for this upload (1 transaction, data size)
+          if (auth.maxSize < BigInt(data.length)) {
+            throw new BulletinError(
+              `Insufficient authorization: need ${data.length} bytes, have ${auth.maxSize} bytes`,
+              'INSUFFICIENT_AUTHORIZATION',
+              { need: data.length, available: auth.maxSize },
+            );
+          }
+
+          if (auth.transactions < 1) {
+            throw new BulletinError(
+              `Insufficient authorization: need 1 transaction, have ${auth.transactions} transactions`,
+              'INSUFFICIENT_AUTHORIZATION',
+              { need: 1, available: auth.transactions },
+            );
+          }
+        }
+        // If no authorization found, let it proceed - on-chain validation will catch it
+      }
+    }
+
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
     // Calculate CID
@@ -106,6 +161,28 @@ export class AsyncBulletinClient {
       blockNumber: receipt.blockNumber,
       // No chunks for single upload
     };
+  }
+
+  /**
+   * Calculate authorization requirements for chunked upload
+   */
+  private calculateRequirements(
+    dataSize: number,
+    numChunks: number,
+    createManifest: boolean,
+  ): { transactions: number; bytes: number } {
+    // Each chunk needs one transaction
+    let transactions = numChunks;
+
+    // If creating manifest, add one more transaction
+    if (createManifest) {
+      transactions += 1;
+    }
+
+    // Total bytes = data size
+    const bytes = dataSize;
+
+    return { transactions, bytes };
   }
 
   /**
@@ -133,6 +210,55 @@ export class AsyncBulletinClient {
     // Chunk the data
     const chunker = new FixedSizeChunker(chunkerConfig);
     const chunks = chunker.chunk(data);
+
+    // Check authorization before upload if enabled
+    if (this.config.checkAuthorizationBeforeUpload && this.account) {
+      if (this.submitter.queryAccountAuthorization) {
+        // Calculate requirements
+        const { transactions: txsNeeded, bytes: bytesNeeded } = this.calculateRequirements(
+          data.length,
+          chunks.length,
+          chunkerConfig.createManifest,
+        );
+
+        // Query current authorization
+        const auth = await this.submitter.queryAccountAuthorization(this.account);
+
+        if (auth) {
+          // Check if authorization has expired
+          if (auth.expiresAt !== undefined) {
+            if (this.submitter.queryCurrentBlock) {
+              const currentBlock = await this.submitter.queryCurrentBlock();
+              if (currentBlock !== undefined && auth.expiresAt <= currentBlock) {
+                throw new BulletinError(
+                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
+                  'AUTHORIZATION_EXPIRED',
+                  { expiredAt: auth.expiresAt, currentBlock },
+                );
+              }
+            }
+          }
+
+          // Check if sufficient
+          if (auth.maxSize < BigInt(bytesNeeded)) {
+            throw new BulletinError(
+              `Insufficient authorization: need ${bytesNeeded} bytes, have ${auth.maxSize} bytes`,
+              'INSUFFICIENT_AUTHORIZATION',
+              { need: bytesNeeded, available: auth.maxSize },
+            );
+          }
+
+          if (auth.transactions < txsNeeded) {
+            throw new BulletinError(
+              `Insufficient authorization: need ${txsNeeded} transactions, have ${auth.transactions} transactions`,
+              'INSUFFICIENT_AUTHORIZATION',
+              { need: txsNeeded, available: auth.transactions },
+            );
+          }
+        }
+        // If no authorization found, let it proceed - on-chain validation will catch it
+      }
+    }
 
     const chunkCids: CID[] = [];
     let lastBlockNumber: number | undefined;

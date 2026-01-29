@@ -421,7 +421,8 @@ var BulletinClient = class {
       defaultChunkSize: config.defaultChunkSize ?? 1024 * 1024,
       maxParallel: config.maxParallel ?? 8,
       createManifest: config.createManifest ?? true,
-      chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024
+      chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
+      checkAuthorizationBeforeUpload: config.checkAuthorizationBeforeUpload ?? true
     };
   }
   /**
@@ -708,9 +709,20 @@ var AsyncBulletinClient = class {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024
+      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
       // 2 MiB
+      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true
     };
+  }
+  /**
+   * Set the account for authorization checks
+   *
+   * If set and `checkAuthorizationBeforeUpload` is enabled, the client will
+   * query authorization state before uploading and fail fast if insufficient.
+   */
+  withAccount(account) {
+    this.account = account;
+    return this;
   }
   /**
    * Store data on Bulletin Chain
@@ -743,6 +755,39 @@ var AsyncBulletinClient = class {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
+    if (this.config.checkAuthorizationBeforeUpload && this.account) {
+      if (this.submitter.queryAccountAuthorization) {
+        const auth = await this.submitter.queryAccountAuthorization(this.account);
+        if (auth) {
+          if (auth.expiresAt !== void 0) {
+            if (this.submitter.queryCurrentBlock) {
+              const currentBlock = await this.submitter.queryCurrentBlock();
+              if (currentBlock !== void 0 && auth.expiresAt <= currentBlock) {
+                throw new BulletinError(
+                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
+                  "AUTHORIZATION_EXPIRED",
+                  { expiredAt: auth.expiresAt, currentBlock }
+                );
+              }
+            }
+          }
+          if (auth.maxSize < BigInt(data.length)) {
+            throw new BulletinError(
+              `Insufficient authorization: need ${data.length} bytes, have ${auth.maxSize} bytes`,
+              "INSUFFICIENT_AUTHORIZATION",
+              { need: data.length, available: auth.maxSize }
+            );
+          }
+          if (auth.transactions < 1) {
+            throw new BulletinError(
+              `Insufficient authorization: need 1 transaction, have ${auth.transactions} transactions`,
+              "INSUFFICIENT_AUTHORIZATION",
+              { need: 1, available: auth.transactions }
+            );
+          }
+        }
+      }
+    }
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
     const cid = await calculateCid(
       data,
@@ -756,6 +801,17 @@ var AsyncBulletinClient = class {
       blockNumber: receipt.blockNumber
       // No chunks for single upload
     };
+  }
+  /**
+   * Calculate authorization requirements for chunked upload
+   */
+  calculateRequirements(dataSize, numChunks, createManifest) {
+    let transactions = numChunks;
+    if (createManifest) {
+      transactions += 1;
+    }
+    const bytes = dataSize;
+    return { transactions, bytes };
   }
   /**
    * Internal: Store data with chunking (returns unified StoreResult)
@@ -773,6 +829,44 @@ var AsyncBulletinClient = class {
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
     const chunker = new FixedSizeChunker(chunkerConfig);
     const chunks = chunker.chunk(data);
+    if (this.config.checkAuthorizationBeforeUpload && this.account) {
+      if (this.submitter.queryAccountAuthorization) {
+        const { transactions: txsNeeded, bytes: bytesNeeded } = this.calculateRequirements(
+          data.length,
+          chunks.length,
+          chunkerConfig.createManifest
+        );
+        const auth = await this.submitter.queryAccountAuthorization(this.account);
+        if (auth) {
+          if (auth.expiresAt !== void 0) {
+            if (this.submitter.queryCurrentBlock) {
+              const currentBlock = await this.submitter.queryCurrentBlock();
+              if (currentBlock !== void 0 && auth.expiresAt <= currentBlock) {
+                throw new BulletinError(
+                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
+                  "AUTHORIZATION_EXPIRED",
+                  { expiredAt: auth.expiresAt, currentBlock }
+                );
+              }
+            }
+          }
+          if (auth.maxSize < BigInt(bytesNeeded)) {
+            throw new BulletinError(
+              `Insufficient authorization: need ${bytesNeeded} bytes, have ${auth.maxSize} bytes`,
+              "INSUFFICIENT_AUTHORIZATION",
+              { need: bytesNeeded, available: auth.maxSize }
+            );
+          }
+          if (auth.transactions < txsNeeded) {
+            throw new BulletinError(
+              `Insufficient authorization: need ${txsNeeded} transactions, have ${auth.transactions} transactions`,
+              "INSUFFICIENT_AUTHORIZATION",
+              { need: txsNeeded, available: auth.transactions }
+            );
+          }
+        }
+      }
+    }
     const chunkCids = [];
     let lastBlockNumber;
     for (const chunk of chunks) {
