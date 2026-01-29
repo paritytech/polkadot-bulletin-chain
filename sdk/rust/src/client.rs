@@ -74,7 +74,7 @@ impl BulletinClient {
 	/// This creates a storage operation that can be submitted to the blockchain.
 	/// For actual submission, use `subxt` to call `TransactionStorage.store`.
 	pub fn prepare_store(&self, data: Vec<u8>, options: StoreOptions) -> Result<StorageOperation> {
-		let op = StorageOperation::new(data, options);
+		let op = StorageOperation::new(data, options)?;
 		op.validate()?;
 		Ok(op)
 	}

@@ -21,31 +21,35 @@ pub fn codec_to_u64(codec: CidCodec) -> u64 {
 }
 
 /// Convert SDK HashAlgorithm to pallet HashingAlgorithm.
-pub fn hash_algorithm_to_pallet(algo: HashAlgorithm) -> HashingAlgorithm {
+///
+/// Returns an error if the algorithm is not supported by the pallet.
+pub fn hash_algorithm_to_pallet(algo: HashAlgorithm) -> Result<HashingAlgorithm> {
 	match algo {
-		HashAlgorithm::Blake2b256 => HashingAlgorithm::Blake2b256,
-		HashAlgorithm::Sha2_256 => HashingAlgorithm::Sha2_256,
+		HashAlgorithm::Blake2b256 => Ok(HashingAlgorithm::Blake2b256),
+		HashAlgorithm::Sha2_256 => Ok(HashingAlgorithm::Sha2_256),
 		HashAlgorithm::Sha2_512 => {
-			// Note: The pallet doesn't support SHA2-512 yet
-			// Default to SHA2-256 for now
-			HashingAlgorithm::Sha2_256
+			Err(Error::UnsupportedHashAlgorithm("SHA2-512 is not supported by the pallet".into()))
 		},
-		HashAlgorithm::Keccak256 => HashingAlgorithm::Keccak256,
+		HashAlgorithm::Keccak256 => Ok(HashingAlgorithm::Keccak256),
 	}
 }
 
 /// Create a CidConfig from SDK types.
-pub fn create_config(codec: CidCodec, hash_algo: HashAlgorithm) -> CidConfig {
-	CidConfig { codec: codec_to_u64(codec), hashing: hash_algorithm_to_pallet(hash_algo) }
+///
+/// Returns an error if the hash algorithm is not supported.
+pub fn create_config(codec: CidCodec, hash_algo: HashAlgorithm) -> Result<CidConfig> {
+	Ok(CidConfig { codec: codec_to_u64(codec), hashing: hash_algorithm_to_pallet(hash_algo)? })
 }
 
 /// Calculate CID for data using SDK configuration types.
+///
+/// Returns an error if the hash algorithm is not supported or CID calculation fails.
 pub fn calculate_cid_with_config(
 	data: &[u8],
 	codec: CidCodec,
 	hash_algo: HashAlgorithm,
 ) -> Result<CidData> {
-	let config = create_config(codec, hash_algo);
+	let config = create_config(codec, hash_algo)?;
 	calculate_cid(data, Some(config))
 		.map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
 }
@@ -142,5 +146,25 @@ mod tests {
 		let reparsed = cid_from_string(&string);
 		assert!(reparsed.is_ok());
 		assert_eq!(cid, reparsed.unwrap());
+	}
+
+	#[test]
+	fn test_sha2_512_returns_error() {
+		let data = b"Hello, Bulletin!";
+		let result = calculate_cid_with_config(data, CidCodec::Raw, HashAlgorithm::Sha2_512);
+		assert!(result.is_err());
+		assert!(matches!(result.unwrap_err(), Error::UnsupportedHashAlgorithm(_)));
+	}
+
+	#[test]
+	fn test_hash_algorithm_to_pallet_supported() {
+		assert!(hash_algorithm_to_pallet(HashAlgorithm::Blake2b256).is_ok());
+		assert!(hash_algorithm_to_pallet(HashAlgorithm::Sha2_256).is_ok());
+		assert!(hash_algorithm_to_pallet(HashAlgorithm::Keccak256).is_ok());
+	}
+
+	#[test]
+	fn test_hash_algorithm_to_pallet_unsupported() {
+		assert!(hash_algorithm_to_pallet(HashAlgorithm::Sha2_512).is_err());
 	}
 }
