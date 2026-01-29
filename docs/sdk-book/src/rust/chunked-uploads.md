@@ -1,6 +1,63 @@
 # Chunked Uploads
 
-For large files (> 8 MiB), use `AsyncBulletinClient::store_chunked()` which automatically splits your data into chunks and creates a DAG-PB manifest.
+The Bulletin SDK automatically handles chunking for large files. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks.
+
+## Automatic Chunking (Recommended)
+
+For most use cases, simply use `store()` - it automatically chunks large files:
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
+    let client = AsyncBulletinClient::new(submitter);
+
+    // Load file of any size
+    let data = std::fs::read("any-size-file.bin")?;
+
+    // Automatically chunks if > 2 MiB
+    let result = client.store(data, StoreOptions::default(), Some(|event| {
+        match event {
+            ProgressEvent::ChunkCompleted { index, total, .. } => {
+                println!("Chunk {}/{} uploaded", index + 1, total);
+            }
+            ProgressEvent::Completed { .. } => println!("Done!"),
+            _ => {}
+        }
+    })).await?;
+
+    println!("Stored with CID: {}", hex::encode(&result.cid));
+    if let Some(chunks) = result.chunks {
+        println!("Chunked into {} pieces", chunks.num_chunks);
+    }
+
+    Ok(())
+}
+```
+
+### Configuring Automatic Chunking
+
+You can configure the threshold and chunk size:
+
+```rust
+use bulletin_sdk_rust::async_client::AsyncClientConfig;
+
+let config = AsyncClientConfig {
+    chunking_threshold: 5 * 1024 * 1024,  // Chunk files > 5 MiB
+    default_chunk_size: 2 * 1024 * 1024,   // 2 MiB chunks
+    max_parallel: 8,                        // Upload 8 chunks in parallel
+    create_manifest: true,                  // Create DAG-PB manifest
+    check_authorization_before_upload: true,
+};
+
+let client = AsyncBulletinClient::with_config(submitter, config);
+```
+
+## Advanced: Manual Chunking
+
+For advanced use cases where you need detailed control over chunking, use `store_chunked()`:
 
 ## Quick Start
 
@@ -84,6 +141,23 @@ The `store_chunked()` method:
 4. **Creates DAG-PB manifest** linking all chunks
 5. **Submits manifest** as final transaction
 6. **Returns result** with all CIDs
+
+### When to Use `store_chunked()` vs `store()`
+
+**Use `store()` (recommended):**
+- ✅ For most use cases - it automatically handles everything
+- ✅ When you don't need detailed chunk information
+- ✅ For both small and large files
+
+**Use `store_chunked()` (advanced):**
+- ⚙️ When you need detailed control over chunking parameters
+- ⚙️ When you need the full `ChunkedStoreResult` with all chunk CIDs
+- ⚙️ When you want to force chunking on small files
+- ⚙️ For testing or debugging chunking behavior
+
+**Key Difference:**
+- `store()` returns `StoreResult` with optional chunk info
+- `store_chunked()` returns `ChunkedStoreResult` with detailed chunk information
 
 ## Configuration Options
 
