@@ -235,6 +235,15 @@ ipfs-start test_dir: _check-docker
     echo "   Waiting for container to start..."
     sleep 5
     docker exec ipfs-node ipfs --version
+    # Remove all bootstrap peers
+    docker exec ipfs-node ipfs bootstrap rm --all
+    # Disable DHT (prevents peer discovery)
+    docker exec ipfs-node ipfs config --json Routing.Type '"none"'
+    # Disable mDNS local discovery
+    docker exec ipfs-node ipfs config --json Discovery.MDNS.Enabled false
+    # Restart IPFS to apply changes
+    docker restart ipfs-node
+    sleep 5
 
     # Bitswap logging
     docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
