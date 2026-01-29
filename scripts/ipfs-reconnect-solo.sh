@@ -25,8 +25,8 @@ fi
 
 # Peers to monitor
 PEERS_TO_CHECK=(
-    "/${check_protocol}/${check_host}/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
-    "/${check_protocol}/${check_host}/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
+    "/${check_protocol}/${check_host}/tcp/10001/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
+    "/${check_protocol}/${check_host}/tcp/12347/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
 )
 
 while true; do
