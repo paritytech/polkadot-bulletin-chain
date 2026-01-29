@@ -56,6 +56,7 @@ const stats = {
     startTime: null,
     endTime: null,
     blockNumbers: [],  // Track all block numbers where txs were included
+    blockHashes: {},   // Map block number -> block hash for timestamp lookups
 };
 
 function waitForQueueLength(targetLength, timeoutMs = 300000) {
@@ -105,6 +106,9 @@ async function processJob(typedApi, workerId, signer, chunk) {
     pushToResultQueue({ cid, blockNumber });
     if (blockNumber !== undefined) {
         stats.blockNumbers.push(blockNumber);
+        if (blockHash && !stats.blockHashes[blockNumber]) {
+            stats.blockHashes[blockNumber] = blockHash;
+        }
     }
     console.log(`Worker ${workerId} tx included in block #${blockNumber} with CID: ${cid}`);
 }
@@ -126,7 +130,7 @@ function formatDuration(ms) {
     return ms + ' ms';
 }
 
-function printStatistics(dataSize) {
+async function printStatistics(dataSize, typedApi) {
     const numTxs = stats.blockNumbers.length;
     const elapsed = stats.endTime - stats.startTime;
 
@@ -141,29 +145,50 @@ function printStatistics(dataSize) {
         txsPerBlock[blockNum] = (txsPerBlock[blockNum] || 0) + 1;
     }
     const numBlocksWithTxs = Object.keys(txsPerBlock).length;
-    const avgTxsPerBlock = numBlocksWithTxs > 0 ? (numTxs / numBlocksWithTxs).toFixed(2) : 'N/A';
+    const totalBlocksInRange = blocksElapsed + 1;
+    const avgTxsPerBlock = totalBlocksInRange > 0 ? (numTxs / totalBlocksInRange).toFixed(2) : 'N/A';
+
+    // Fetch block timestamps for all blocks in range
+    const blockTimestamps = {};
+    for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
+        try {
+            // Get block hash - either from our stored hashes or query the chain
+            let blockHash = stats.blockHashes[blockNum];
+            if (!blockHash) {
+                blockHash = await typedApi.query.System.BlockHash.getValue(blockNum);
+            }
+            if (blockHash) {
+                const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHash });
+                blockTimestamps[blockNum] = timestamp;
+            }
+        } catch (e) {
+            // Timestamp not available for this block
+        }
+    }
 
     console.log('\n');
-    console.log('═══════════════════════════════════════════════════════════════════════════════');
-    console.log('                            📊 STORAGE STATISTICS                              ');
-    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('                                     📊 STORAGE STATISTICS                                         ');
+    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
     console.log(`| File size           | ${formatBytes(dataSize).padEnd(20)} |`);
     console.log(`| Chunk/TX size       | ${formatBytes(CHUNK_SIZE).padEnd(20)} |`);
     console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
-    console.log(`| Avg txs per block   | ${avgTxsPerBlock.toString().padEnd(20)} |`);
+    console.log(`| Avg txs per block   | ${`${avgTxsPerBlock} (${numTxs}/${totalBlocksInRange})`.padEnd(20)} |`);
     console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
     console.log(`| Blocks elapsed      | ${`${blocksElapsed} (#${startBlock} → #${endBlock})`.padEnd(20)} |`);
     console.log(`| Throughput          | ${formatBytes(dataSize / (elapsed / 1000)).padEnd(20)} /s |`);
-    console.log('═══════════════════════════════════════════════════════════════════════════════');
-    console.log('                         📦 TRANSACTIONS PER BLOCK                             ');
-    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('                                    📦 TRANSACTIONS PER BLOCK                                      ');
+    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
     for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
         const count = txsPerBlock[blockNum] || 0;
         const size = count > 0 ? formatBytes(count * CHUNK_SIZE) : '-';
-        const bar = count > 0 ? '█'.repeat(count) : '';
-        console.log(`| Block #${blockNum.toString().padEnd(10)} | ${count.toString().padStart(3)} txs | ${size.padEnd(12)} | ${bar}`);
+        const bar = count > 0 ? '█'.repeat(Math.min(count, 20)) : '';
+        const timestamp = blockTimestamps[blockNum];
+        const timeStr = timestamp ? new Date(Number(timestamp)).toISOString().replace('T', ' ').replace('Z', '') : '-';
+        console.log(`| Block #${blockNum.toString().padEnd(8)} | ${timeStr.padEnd(23)} | ${count.toString().padStart(3)} txs | ${size.padEnd(12)} | ${bar}`);
     }
-    console.log('═══════════════════════════════════════════════════════════════════════════════');
+    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
     console.log('\n');
 }
 
@@ -305,7 +330,7 @@ async function main() {
         );
 
         // Print storage statistics
-        printStatistics(dataSize);
+        await printStatistics(dataSize, bulletinAPI);
 
         logTestResult(true, 'Store Big Data Test');
         resultCode = 0;
