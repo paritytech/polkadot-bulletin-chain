@@ -6,17 +6,26 @@ THIS_DIR=$(cd $(dirname $0); pwd)
 mode="${1:-local}"
 if [ "$mode" = "docker" ]; then
     check_cmd="docker exec ipfs-node ipfs"
-    # TODO: what is right? ipfs-reconnect uses 127.0.0.1
-    check_host="127.0.0.1"
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      # macOS - use dns4/host.docker.internal
+      check_protocol="dns4"
+      check_host="host.docker.internal"
+    else
+      # Linux (with bridge networking) - use ip4/172.17.0.1
+      check_protocol="ip4"
+      check_host="172.17.0.1"
+    fi
 else
     check_cmd="${THIS_DIR}/../kubo/ipfs"
+    check_protocol="ip4"
     check_host="127.0.0.1"
 fi
 
 # Peers to monitor
 PEERS_TO_CHECK=(
-    "/ip4/${check_host}/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
-    "/ip4/${check_host}/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
+    "/${check_protocol}/${check_host}/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
+    "/${check_protocol}/${check_host}/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 )
 
 while true; do
