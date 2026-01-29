@@ -20,6 +20,7 @@ import {
   ProgressCallback,
   BulletinError,
   CidCodec,
+  ChunkDetails,
 } from './types.js';
 import { TransactionSubmitter, TransactionReceipt } from './transaction.js';
 
@@ -31,7 +32,7 @@ import { TransactionSubmitter, TransactionReceipt } from './transaction.js';
  */
 export class AsyncBulletinClient {
   private submitter: TransactionSubmitter;
-  private config: Required<Omit<ClientConfig, 'endpoint'>>;
+  private config: Required<Omit<ClientConfig, 'endpoint'>> & { chunkingThreshold: number };
 
   constructor(submitter: TransactionSubmitter, config?: Partial<ClientConfig>) {
     this.submitter = submitter;
@@ -39,18 +40,50 @@ export class AsyncBulletinClient {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
+      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
     };
   }
 
   /**
-   * Store data on Bulletin Chain (simple, < 2 MiB)
+   * Store data on Bulletin Chain
    *
-   * Handles the complete workflow:
-   * 1. Calculate CID
-   * 2. Submit transaction
-   * 3. Wait for finalization
+   * Automatically chunks data if it exceeds the configured threshold.
+   * This handles the complete workflow:
+   * 1. Decide whether to chunk based on data size
+   * 2. Calculate CID(s)
+   * 3. Submit transaction(s)
+   * 4. Wait for finalization
+   *
+   * @param data - Data to store
+   * @param options - Storage options (CID codec, hash algorithm)
+   * @param progressCallback - Optional callback for progress tracking (only called for chunked uploads)
    */
-  async store(data: Uint8Array, options?: StoreOptions): Promise<StoreResult> {
+  async store(
+    data: Uint8Array,
+    options?: StoreOptions,
+    progressCallback?: ProgressCallback,
+  ): Promise<StoreResult> {
+    if (data.length === 0) {
+      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+    }
+
+    // Decide whether to chunk based on threshold
+    if (data.length > this.config.chunkingThreshold) {
+      // Large data - use chunking
+      return this.storeInternalChunked(data, undefined, options, progressCallback);
+    } else {
+      // Small data - single transaction
+      return this.storeInternalSingle(data, options);
+    }
+  }
+
+  /**
+   * Internal: Store data in a single transaction (no chunking)
+   */
+  private async storeInternalSingle(
+    data: Uint8Array,
+    options?: StoreOptions,
+  ): Promise<StoreResult> {
     if (data.length === 0) {
       throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
     }
@@ -71,6 +104,126 @@ export class AsyncBulletinClient {
       cid,
       size: data.length,
       blockNumber: receipt.blockNumber,
+      // No chunks for single upload
+    };
+  }
+
+  /**
+   * Internal: Store data with chunking (returns unified StoreResult)
+   */
+  private async storeInternalChunked(
+    data: Uint8Array,
+    config?: Partial<ChunkerConfig>,
+    options?: StoreOptions,
+    progressCallback?: ProgressCallback,
+  ): Promise<StoreResult> {
+    if (data.length === 0) {
+      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+    }
+
+    const chunkerConfig: ChunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
+      maxParallel: config?.maxParallel ?? this.config.maxParallel,
+      createManifest: config?.createManifest ?? this.config.createManifest,
+    };
+
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+
+    // Chunk the data
+    const chunker = new FixedSizeChunker(chunkerConfig);
+    const chunks = chunker.chunk(data);
+
+    const chunkCids: CID[] = [];
+    let lastBlockNumber: number | undefined;
+
+    // Submit each chunk
+    for (const chunk of chunks) {
+      if (progressCallback) {
+        progressCallback({
+          type: 'chunk_started',
+          index: chunk.index,
+          total: chunks.length,
+        });
+      }
+
+      try {
+        // Calculate CID for this chunk
+        const cid = await calculateCid(
+          chunk.data,
+          opts.cidCodec ?? CidCodec.Raw,
+          opts.hashingAlgorithm!,
+        );
+
+        chunk.cid = cid;
+
+        // Submit chunk transaction
+        const receipt = await this.submitter.submitStore(chunk.data);
+        lastBlockNumber = receipt.blockNumber;
+
+        chunkCids.push(cid);
+
+        if (progressCallback) {
+          progressCallback({
+            type: 'chunk_completed',
+            index: chunk.index,
+            total: chunks.length,
+            cid,
+          });
+        }
+      } catch (error) {
+        if (progressCallback) {
+          progressCallback({
+            type: 'chunk_failed',
+            index: chunk.index,
+            total: chunks.length,
+            error: error as Error,
+          });
+        }
+        throw error;
+      }
+    }
+
+    // Optionally create and submit manifest
+    let manifestCid: CID | undefined;
+    if (chunkerConfig.createManifest) {
+      if (progressCallback) {
+        progressCallback({ type: 'manifest_started' });
+      }
+
+      const builder = new UnixFsDagBuilder();
+      const manifest = await builder.build(chunks, opts.hashingAlgorithm!);
+
+      // Submit manifest
+      const receipt = await this.submitter.submitStore(manifest.dagBytes);
+      lastBlockNumber = receipt.blockNumber;
+
+      manifestCid = manifest.rootCid;
+
+      if (progressCallback) {
+        progressCallback({
+          type: 'manifest_created',
+          cid: manifest.rootCid,
+        });
+      }
+    }
+
+    if (progressCallback) {
+      progressCallback({
+        type: 'completed',
+        manifestCid,
+      });
+    }
+
+    // Return unified StoreResult
+    return {
+      cid: manifestCid ?? chunkCids[0]!,
+      size: data.length,
+      blockNumber: lastBlockNumber,
+      chunks: {
+        chunkCids,
+        numChunks: chunks.length,
+      },
     };
   }
 

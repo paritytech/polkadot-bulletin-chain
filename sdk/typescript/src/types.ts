@@ -88,15 +88,34 @@ export const DEFAULT_STORE_OPTIONS: StoreOptions = {
 };
 
 /**
+ * Details about chunks in a chunked upload
+ */
+export interface ChunkDetails {
+  /** CIDs of all stored chunks */
+  chunkCids: CID[];
+  /** Number of chunks */
+  numChunks: number;
+}
+
+/**
  * Result of a storage operation
+ *
+ * This result type works for both single-transaction uploads and chunked uploads.
+ * For chunked uploads, the `cid` field contains the manifest CID, and `chunks`
+ * contains details about the individual chunks.
  */
 export interface StoreResult {
-  /** The CID of the stored data */
+  /** The primary CID of the stored data
+   * - For single uploads: CID of the data
+   * - For chunked uploads: CID of the manifest
+   */
   cid: CID;
   /** Size of the stored data in bytes */
   size: number;
   /** Block number where data was stored (if known) */
   blockNumber?: number;
+  /** Chunk details (only present for chunked uploads) */
+  chunks?: ChunkDetails;
 }
 
 /**
@@ -179,4 +198,7 @@ export interface ClientConfig {
   maxParallel?: number;
   /** Whether to create manifests for chunked uploads (default: true) */
   createManifest?: boolean;
+  /** Threshold for automatic chunking (default: 2 MiB).
+   * Data larger than this will be automatically chunked by `store()`. */
+  chunkingThreshold?: number;
 }
