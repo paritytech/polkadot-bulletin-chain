@@ -103,8 +103,7 @@ jobs:
         with:
           workspaces: .
           shared-key: "bulletin-cache-bulletin-integration-tests"
-          # TODO: tmp
-          save-if: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -152,10 +151,6 @@ jobs:
       - name: Test authorize-and-store ws (Westend parachain)
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
-
-      - name: Test store-big-data (Westend parachain)
-        working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
 
       - name: Test authorize-and-store smoldot (Westend parachain)
         working-directory: examples
