@@ -12,8 +12,8 @@ use crate::{
 	dag::{DagBuilder, UnixFsDagBuilder},
 	submit::{TransactionReceipt, TransactionSubmitter},
 	types::{
-		ChunkedStoreResult, ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result,
-		StoreOptions, StoreResult,
+		ChunkDetails, ChunkedStoreResult, ChunkerConfig, Error, ProgressCallback, ProgressEvent,
+		Result, StoreOptions, StoreResult,
 	},
 };
 use alloc::vec::Vec;
@@ -96,14 +96,48 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		self
 	}
 
-	/// Store data on Bulletin Chain (simple, < 2 MiB).
+	/// Store data on Bulletin Chain.
 	///
+	/// Automatically chunks data if it exceeds the configured threshold.
 	/// This handles the complete workflow:
 	/// 1. Check authorization (if enabled)
-	/// 2. Calculate CID
-	/// 3. Submit transaction
-	/// 4. Wait for finalization
-	pub async fn store(&self, data: Vec<u8>, options: StoreOptions) -> Result<StoreResult> {
+	/// 2. Decide whether to chunk based on data size
+	/// 3. Calculate CID(s)
+	/// 4. Submit transaction(s)
+	/// 5. Wait for finalization
+	///
+	/// # Arguments
+	///
+	/// * `data` - Data to store
+	/// * `options` - Storage options (CID codec, hash algorithm)
+	/// * `progress_callback` - Optional callback for progress tracking (only called for chunked
+	///   uploads)
+	pub async fn store(
+		&self,
+		data: Vec<u8>,
+		options: StoreOptions,
+		progress_callback: Option<ProgressCallback>,
+	) -> Result<StoreResult> {
+		if data.is_empty() {
+			return Err(Error::EmptyData);
+		}
+
+		// Decide whether to chunk based on threshold
+		if data.len() > self.config.chunking_threshold as usize {
+			// Large data - use chunking
+			self.store_internal_chunked(&data, None, options, progress_callback).await
+		} else {
+			// Small data - single transaction
+			self.store_internal_single(data, options).await
+		}
+	}
+
+	/// Internal: Store data in a single transaction (no chunking).
+	async fn store_internal_single(
+		&self,
+		data: Vec<u8>,
+		options: StoreOptions,
+	) -> Result<StoreResult> {
 		if data.is_empty() {
 			return Err(Error::EmptyData);
 		}
@@ -151,6 +185,147 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 			size: data.len() as u64,
 			block_number: receipt.block_number,
 			chunks: None, // No chunking for single upload
+		})
+	}
+
+	/// Internal: Store data with chunking (returns unified StoreResult).
+	async fn store_internal_chunked(
+		&self,
+		data: &[u8],
+		config: Option<ChunkerConfig>,
+		options: StoreOptions,
+		progress_callback: Option<ProgressCallback>,
+	) -> Result<StoreResult> {
+		if data.is_empty() {
+			return Err(Error::EmptyData);
+		}
+
+		// Use provided config or default
+		let chunker_config = config.unwrap_or(ChunkerConfig {
+			chunk_size: self.config.default_chunk_size,
+			max_parallel: self.config.max_parallel,
+			create_manifest: self.config.create_manifest,
+		});
+
+		// Chunk the data
+		let chunker = FixedSizeChunker::new(chunker_config.clone())?;
+		let chunks = chunker.chunk(data)?;
+
+		// Check authorization before upload if enabled
+		if self.config.check_authorization_before_upload {
+			if let Some(account) = &self.account {
+				// Calculate requirements
+				let (txs_needed, bytes_needed) = self.auth_manager.calculate_requirements(
+					data.len() as u64,
+					chunks.len(),
+					chunker_config.create_manifest,
+				);
+
+				// Query current authorization
+				if let Some(auth) =
+					self.submitter.query_account_authorization(account.clone()).await?
+				{
+					// Check if authorization has expired
+					if let Some(expires_at) = auth.expires_at {
+						if let Some(current_block) = self.submitter.query_current_block().await? {
+							if expires_at <= current_block {
+								return Err(Error::AuthorizationExpired {
+									expired_at: expires_at,
+									current_block,
+								});
+							}
+						}
+					}
+
+					// Check if sufficient
+					self.auth_manager.check_authorization(&auth, bytes_needed, txs_needed)?;
+				}
+				// If no authorization found, let it proceed - on-chain validation will catch it
+			}
+		}
+
+		let mut chunk_cids = Vec::new();
+		let total_chunks = chunks.len();
+		let mut last_block_number = None;
+
+		// Submit each chunk
+		for chunk in &chunks {
+			if let Some(callback) = progress_callback {
+				callback(ProgressEvent::ChunkStarted {
+					index: chunk.index,
+					total: chunk.total_chunks,
+				});
+			}
+
+			// Calculate CID for this chunk
+			let cid_data = crate::cid::calculate_cid_with_config(
+				&chunk.data,
+				options.cid_codec,
+				options.hash_algorithm,
+			)?;
+
+			let cid_bytes = crate::cid::cid_to_bytes(&cid_data)?;
+
+			// Submit chunk
+			match self.submitter.submit_store(chunk.data.clone()).await {
+				Ok(receipt) => {
+					chunk_cids.push(cid_bytes.clone());
+					last_block_number = receipt.block_number;
+
+					if let Some(callback) = progress_callback {
+						callback(ProgressEvent::ChunkCompleted {
+							index: chunk.index,
+							total: chunk.total_chunks,
+							cid: cid_bytes,
+						});
+					}
+				},
+				Err(e) => {
+					if let Some(callback) = progress_callback {
+						callback(ProgressEvent::ChunkFailed {
+							index: chunk.index,
+							total: chunk.total_chunks,
+							error: format!("{e:?}"),
+						});
+					}
+					return Err(e);
+				},
+			}
+		}
+
+		// Optionally create and submit manifest
+		let manifest_cid = if chunker_config.create_manifest {
+			if let Some(callback) = progress_callback {
+				callback(ProgressEvent::ManifestStarted);
+			}
+
+			let builder = UnixFsDagBuilder::new();
+			let manifest = builder.build(&chunks, options.hash_algorithm)?;
+
+			// Submit manifest
+			let manifest_cid_bytes = crate::cid::cid_to_bytes(&manifest.root_cid)?;
+			let receipt = self.submitter.submit_store(manifest.dag_bytes).await?;
+			last_block_number = receipt.block_number;
+
+			if let Some(callback) = progress_callback {
+				callback(ProgressEvent::ManifestCreated { cid: manifest_cid_bytes.clone() });
+			}
+
+			Some(manifest_cid_bytes)
+		} else {
+			None
+		};
+
+		if let Some(callback) = progress_callback {
+			callback(ProgressEvent::Completed { manifest_cid: manifest_cid.clone() });
+		}
+
+		// Return unified StoreResult
+		Ok(StoreResult {
+			cid: manifest_cid.clone().unwrap_or_else(|| chunk_cids[0].clone()),
+			size: data.len() as u64,
+			block_number: last_block_number,
+			chunks: Some(ChunkDetails { chunk_cids, num_chunks: total_chunks as u32 }),
 		})
 	}
 

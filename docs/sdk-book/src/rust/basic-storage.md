@@ -1,10 +1,10 @@
 # Basic Storage
 
-This guide shows how to store a small piece of data (< 8 MiB) using the `AsyncBulletinClient` with transaction submitters.
+This guide shows how to store data using the `AsyncBulletinClient` with transaction submitters.
 
 ## Quick Start
 
-For small data that fits in a single transaction (< 8 MiB):
+The `store()` method automatically handles both small and large files:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Prepare and store data
     let data = b"Hello, Bulletin!".to_vec();
-    let result = client.store(data, StoreOptions::default()).await?;
+    let result = client.store(data, StoreOptions::default(), None).await?;
 
     // 3. Get results
     println!("Stored successfully!");
@@ -84,14 +84,31 @@ let options = StoreOptions::default(); // Raw codec, Blake2b-256
 
 ### 5. Store and Wait
 
-The `store()` method does everything:
+The `store()` method automatically handles everything:
 - Validates data size
-- Calculates CID
-- Submits transaction
+- Checks authorization (if configured)
+- Automatically chunks large files (> 2 MiB by default)
+- Calculates CID(s)
+- Submits transaction(s)
 - Waits for finalization
 
 ```rust
-let result = client.store(data, options).await?;
+// For small files (< 2 MiB): single transaction
+// For large files (> 2 MiB): automatic chunking
+let result = client.store(data, options, None).await?;
+
+// With progress tracking for large files
+let result = client.store(data, options, Some(|event| {
+    match event {
+        ProgressEvent::ChunkCompleted { index, total, .. } => {
+            println!("Chunk {}/{} uploaded", index + 1, total);
+        }
+        ProgressEvent::Completed { .. } => {
+            println!("Upload complete!");
+        }
+        _ => {}
+    }
+})).await?;
 ```
 
 ### 6. Handle Result
@@ -124,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store data
     let data = format!("Hello from Rust SDK at {}", chrono::Utc::now());
     let result = client
-        .store(data.as_bytes().to_vec(), StoreOptions::default())
+        .store(data.as_bytes().to_vec(), StoreOptions::default(), None)
         .await?;
 
     println!("✅ Stored successfully!");
@@ -153,7 +170,7 @@ let client = AsyncBulletinClient::new(submitter)
 
 // 2. Upload - authorization is checked automatically
 let data = b"Hello, Bulletin!".to_vec();
-let result = client.store(data, StoreOptions::default()).await?;
+let result = client.store(data, StoreOptions::default(), None).await?;
 //                       ⬆️ Queries blockchain first, fails fast if insufficient auth
 ```
 
@@ -183,7 +200,7 @@ let client = AsyncBulletinClient::with_config(submitter, config)
 
 ```rust
 // Insufficient authorization fails fast
-match client.store(data, options).await {
+match client.store(data, options, None).await {
     Err(Error::InsufficientAuthorization { need, available }) => {
         eprintln!("Need {} bytes but only {} available", need, available);
         eprintln!("Please authorize your account first!");
@@ -223,7 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // client.authorize_account(account, txs, bytes).await?;
 
     // Store - will check authorization automatically
-    match client.store(data, StoreOptions::default()).await {
+    match client.store(data, StoreOptions::default(), None).await {
         Ok(result) => {
             println!("✅ Stored: {}", hex::encode(&result.cid));
         }
@@ -246,7 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Error Handling
 
 ```rust
-match client.store(data, options).await {
+match client.store(data, options, None).await {
     Ok(result) => {
         println!("Success! CID: {}", hex::encode(&result.cid));
     }
@@ -278,7 +295,7 @@ mod tests {
         let client = AsyncBulletinClient::new(submitter);
 
         let data = b"test data".to_vec();
-        let result = client.store(data, StoreOptions::default()).await;
+        let result = client.store(data, StoreOptions::default(), None).await;
 
         assert!(result.is_ok());
     }

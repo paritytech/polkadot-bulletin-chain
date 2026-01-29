@@ -231,7 +231,7 @@ mod tests {
 		let client = AsyncBulletinClient::new(submitter);
 
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default()).await;
+		let result = client.store(data, StoreOptions::default(), None).await;
 
 		assert!(result.is_ok());
 		let store_result = result.unwrap();
@@ -297,13 +297,13 @@ mod tests {
 		);
 
 		// Create client with authorization checking enabled
-		let mut config = AsyncClientConfig::default();
-		config.check_authorization_before_upload = true;
+		let config =
+			AsyncClientConfig { check_authorization_before_upload: true, ..Default::default() };
 		let client = AsyncBulletinClient::with_config(submitter, config).with_account(account);
 
 		// Should succeed - 16 bytes is within limits
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default()).await;
+		let result = client.store(data, StoreOptions::default(), None).await;
 		assert!(result.is_ok());
 	}
 
@@ -326,17 +326,97 @@ mod tests {
 		);
 
 		// Create client with authorization checking enabled
-		let mut config = AsyncClientConfig::default();
-		config.check_authorization_before_upload = true;
+		let config =
+			AsyncClientConfig { check_authorization_before_upload: true, ..Default::default() };
 		let client = AsyncBulletinClient::with_config(submitter, config).with_account(account);
 
 		// Should fail - 16 bytes exceeds limits
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default()).await;
+		let result = client.store(data, StoreOptions::default(), None).await;
 		assert!(result.is_err());
 		assert!(matches!(
 			result.unwrap_err(),
 			crate::types::Error::InsufficientAuthorization { .. }
 		));
+	}
+
+	#[tokio::test]
+	async fn test_unified_api_small_data() {
+		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+
+		let submitter = MockSubmitter::new();
+		let config =
+			AsyncClientConfig { chunking_threshold: 2 * 1024 * 1024, ..Default::default() };
+		let client = AsyncBulletinClient::with_config(submitter, config);
+
+		// Small data (16 bytes < 2 MiB threshold) - should use single transaction
+		let data = b"Hello, Bulletin!".to_vec();
+		let result = client.store(data, StoreOptions::default(), None).await;
+
+		assert!(result.is_ok());
+		let store_result = result.unwrap();
+		assert_eq!(store_result.size, 16);
+		assert!(store_result.chunks.is_none()); // No chunking for small data
+	}
+
+	#[tokio::test]
+	async fn test_unified_api_large_data() {
+		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+
+		let submitter = MockSubmitter::new();
+		let config = AsyncClientConfig {
+			chunking_threshold: 100,
+			default_chunk_size: 50,
+			..Default::default()
+		};
+		let client = AsyncBulletinClient::with_config(submitter, config);
+
+		// Large data (150 bytes > 100 byte threshold) - should auto-chunk
+		let data = vec![0u8; 150];
+		let result = client.store(data, StoreOptions::default(), None).await;
+
+		assert!(result.is_ok());
+		let store_result = result.unwrap();
+		assert_eq!(store_result.size, 150);
+		assert!(store_result.chunks.is_some()); // Should have chunks
+		let chunks = store_result.chunks.unwrap();
+		assert_eq!(chunks.num_chunks, 3); // 150 bytes / 50 byte chunks = 3 chunks
+		assert_eq!(chunks.chunk_cids.len(), 3);
+	}
+
+	#[tokio::test]
+	async fn test_authorization_expiration() {
+		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+
+		let submitter = MockSubmitter::new();
+		let account = AccountId32::from([1u8; 32]);
+
+		// Advance the mock submitter's block counter to block 10
+		for _ in 0..10 {
+			submitter.submit_store(vec![1, 2, 3]).await.unwrap();
+		}
+
+		// Set authorization that expires at block 5 (already expired)
+		submitter.set_account_authorization(
+			account.clone(),
+			Authorization {
+				scope: AuthorizationScope::Account,
+				transactions: 100,
+				max_size: 10_000,
+				expires_at: Some(5), // Expires at block 5 (current is 11)
+			},
+		);
+
+		// Create client with authorization checking enabled
+		let config =
+			AsyncClientConfig { check_authorization_before_upload: true, ..Default::default() };
+		let client = AsyncBulletinClient::with_config(submitter, config).with_account(account);
+
+		// Should fail with expiration error - authorization expired at block 5, current is 11
+		let data = b"Hello".to_vec();
+		let result = client.store(data, StoreOptions::default(), None).await;
+
+		assert!(result.is_err());
+		assert!(matches!(result.unwrap_err(), crate::types::Error::AuthorizationExpired { .. }));
 	}
 }
