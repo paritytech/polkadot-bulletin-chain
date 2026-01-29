@@ -25,7 +25,7 @@ jobs:
             path: runtimes/bulletin-polkadot
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build ${{ matrix.name }} runtime
         id: srtool_build
@@ -43,7 +43,7 @@ jobs:
           echo '${{ steps.srtool_build.outputs.json }}' | jq > ${{ matrix.name }}_srtool_output.json
 
       - name: Upload ${{ matrix.name }} wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.name }}-runtime
           path: |
@@ -63,7 +63,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -91,7 +91,7 @@ jobs:
         run: cargo build --profile production -p polkadot-bulletin-chain
 
       - name: Upload polkadot-bulletin-chain binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: target/production/polkadot-bulletin-chain
@@ -101,10 +101,10 @@ jobs:
     needs: [build-runtimes, build-node]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
