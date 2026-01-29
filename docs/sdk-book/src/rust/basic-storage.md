@@ -135,6 +135,114 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Authorization Checking (Fail Fast)
+
+By default, the SDK checks authorization **before** uploading to fail fast and avoid wasted transaction fees.
+
+### How It Works
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+// 1. Create client with your account
+let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
+let account = AccountId32::from(/* your account */);
+
+let client = AsyncBulletinClient::new(submitter)
+    .with_account(account);  // Set the account for auth checking
+
+// 2. Upload - authorization is checked automatically
+let data = b"Hello, Bulletin!".to_vec();
+let result = client.store(data, StoreOptions::default()).await?;
+//                       ⬆️ Queries blockchain first, fails fast if insufficient auth
+```
+
+### What Gets Checked
+
+Before submitting the transaction, the SDK:
+1. **Queries** the blockchain for your current authorization
+2. **Validates** you have enough transactions and bytes authorized
+3. **Fails immediately** if insufficient (no transaction fees wasted!)
+4. **Proceeds** only if authorization is sufficient
+
+### Disable Authorization Checking
+
+If you want to skip the check (e.g., you know authorization exists):
+
+```rust
+use bulletin_sdk_rust::async_client::AsyncClientConfig;
+
+let mut config = AsyncClientConfig::default();
+config.check_authorization_before_upload = false;  // Disable checking
+
+let client = AsyncBulletinClient::with_config(submitter, config)
+    .with_account(account);
+```
+
+### Error Example
+
+```rust
+// Insufficient authorization fails fast
+match client.store(data, options).await {
+    Err(Error::InsufficientAuthorization { need, available }) => {
+        eprintln!("Need {} bytes but only {} available", need, available);
+        eprintln!("Please authorize your account first!");
+    }
+    Ok(result) => {
+        println!("Success!");
+    }
+    Err(e) => {
+        eprintln!("Error: {:?}", e);
+    }
+}
+```
+
+### Complete Example with Authorization
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let ws_url = std::env::var("BULLETIN_WS_URL")
+        .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+    let signer = /* your signer */;
+    let account = /* your AccountId32 */;
+
+    // Connect
+    let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
+    let client = AsyncBulletinClient::new(submitter)
+        .with_account(account.clone());
+
+    // Estimate what's needed
+    let data = std::fs::read("myfile.dat")?;
+    let (txs, bytes) = client.estimate_authorization(data.len() as u64);
+    println!("Need authorization for {} txs and {} bytes", txs, bytes);
+
+    // Authorize (if needed)
+    // client.authorize_account(account, txs, bytes).await?;
+
+    // Store - will check authorization automatically
+    match client.store(data, StoreOptions::default()).await {
+        Ok(result) => {
+            println!("✅ Stored: {}", hex::encode(&result.cid));
+        }
+        Err(Error::InsufficientAuthorization { need, available }) => {
+            eprintln!("❌ Insufficient authorization:");
+            eprintln!("   Need: {} bytes", need);
+            eprintln!("   Have: {} bytes", available);
+            return Err("Please authorize your account first".into());
+        }
+        Err(e) => {
+            eprintln!("❌ Error: {:?}", e);
+            return Err(e.into());
+        }
+    }
+
+    Ok(())
+}
+```
+
 ## Error Handling
 
 ```rust

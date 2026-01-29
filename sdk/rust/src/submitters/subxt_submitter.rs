@@ -236,6 +236,32 @@ where
 			"SubxtSubmitter requires metadata generation. See subxt documentation.".into(),
 		))
 	}
+
+	// NOTE: query_account_authorization and query_preimage_authorization use default
+	// implementations (return None).
+	//
+	// To enable authorization checking before upload, implement these methods:
+	// 1. Query the TransactionStorage pallet's AccountAuthorizations storage map
+	// 2. Query the TransactionStorage pallet's PreimageAuthorizations storage map
+	// 3. Parse the results and return Some(Authorization) if found
+	//
+	// Example (requires generated metadata):
+	// ```ignore
+	// async fn query_account_authorization(&self, who: AccountId32) -> Result<Option<Authorization>> {
+	//     let address = bulletin_metadata::storage()
+	//         .transaction_storage()
+	//         .account_authorizations(&who);
+	//
+	//     let result = self.api.storage().at_latest().await?.fetch(&address).await?;
+	//
+	//     Ok(result.map(|auth_data| Authorization {
+	//         scope: AuthorizationScope::Account,
+	//         transactions: auth_data.transactions,
+	//         max_size: auth_data.max_size,
+	//         expires_at: Some(auth_data.expires_at),
+	//     }))
+	// }
+	// ```
 }
 
 // Note: For a complete implementation, users should:

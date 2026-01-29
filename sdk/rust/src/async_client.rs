@@ -28,6 +28,9 @@ pub struct AsyncClientConfig {
 	pub max_parallel: u32,
 	/// Whether to create manifests for chunked uploads (default: true).
 	pub create_manifest: bool,
+	/// Check authorization before uploading to fail fast (default: true).
+	/// Queries blockchain for current authorization and validates before submission.
+	pub check_authorization_before_upload: bool,
 }
 
 impl Default for AsyncClientConfig {
@@ -36,6 +39,7 @@ impl Default for AsyncClientConfig {
 			default_chunk_size: 1024 * 1024, // 1 MiB
 			max_parallel: 8,
 			create_manifest: true,
+			check_authorization_before_upload: true,
 		}
 	}
 }
@@ -51,6 +55,10 @@ pub struct AsyncBulletinClient<S: TransactionSubmitter> {
 	pub auth_manager: AuthorizationManager,
 	/// Transaction submitter.
 	submitter: S,
+	/// Account for authorization checks (optional).
+	/// If set and check_authorization_before_upload is enabled, the client will
+	/// query and validate authorization before uploading.
+	account: Option<AccountId32>,
 }
 
 impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
@@ -60,12 +68,13 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 			config: AsyncClientConfig::default(),
 			auth_manager: AuthorizationManager::new(),
 			submitter,
+			account: None,
 		}
 	}
 
 	/// Create a client with custom configuration.
 	pub fn with_config(submitter: S, config: AsyncClientConfig) -> Self {
-		Self { config, auth_manager: AuthorizationManager::new(), submitter }
+		Self { config, auth_manager: AuthorizationManager::new(), submitter, account: None }
 	}
 
 	/// Set the authorization manager.
@@ -74,15 +83,39 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		self
 	}
 
+	/// Set the account for authorization checks.
+	///
+	/// If set and `check_authorization_before_upload` is enabled, the client will
+	/// query authorization state before uploading and fail fast if insufficient.
+	pub fn with_account(mut self, account: AccountId32) -> Self {
+		self.account = Some(account);
+		self
+	}
+
 	/// Store data on Bulletin Chain (simple, < 2 MiB).
 	///
 	/// This handles the complete workflow:
-	/// 1. Calculate CID
-	/// 2. Submit transaction
-	/// 3. Wait for finalization
+	/// 1. Check authorization (if enabled)
+	/// 2. Calculate CID
+	/// 3. Submit transaction
+	/// 4. Wait for finalization
 	pub async fn store(&self, data: Vec<u8>, options: StoreOptions) -> Result<StoreResult> {
 		if data.is_empty() {
 			return Err(Error::EmptyData);
+		}
+
+		// Check authorization before upload if enabled
+		if self.config.check_authorization_before_upload {
+			if let Some(account) = &self.account {
+				// Query current authorization
+				if let Some(auth) =
+					self.submitter.query_account_authorization(account.clone()).await?
+				{
+					// Check if sufficient for this upload (1 transaction, data size)
+					self.auth_manager.check_authorization(&auth, data.len() as u64, 1)?;
+				}
+				// If no authorization found, let it proceed - on-chain validation will catch it
+			}
 		}
 
 		// Calculate CID
@@ -108,10 +141,11 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 	///
 	/// This handles the complete workflow:
 	/// 1. Chunk the data
-	/// 2. Calculate CIDs for each chunk
-	/// 3. Submit each chunk as a separate transaction
-	/// 4. Create and submit DAG-PB manifest (if enabled)
-	/// 5. Return all CIDs and receipt information
+	/// 2. Check authorization (if enabled)
+	/// 3. Calculate CIDs for each chunk
+	/// 4. Submit each chunk as a separate transaction
+	/// 5. Create and submit DAG-PB manifest (if enabled)
+	/// 6. Return all CIDs and receipt information
 	pub async fn store_chunked(
 		&self,
 		data: &[u8],
@@ -133,6 +167,27 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		// Chunk the data
 		let chunker = FixedSizeChunker::new(chunker_config.clone())?;
 		let chunks = chunker.chunk(data)?;
+
+		// Check authorization before upload if enabled
+		if self.config.check_authorization_before_upload {
+			if let Some(account) = &self.account {
+				// Calculate requirements
+				let (txs_needed, bytes_needed) = self.auth_manager.calculate_requirements(
+					data.len() as u64,
+					chunks.len(),
+					chunker_config.create_manifest,
+				);
+
+				// Query current authorization
+				if let Some(auth) =
+					self.submitter.query_account_authorization(account.clone()).await?
+				{
+					// Check if sufficient
+					self.auth_manager.check_authorization(&auth, bytes_needed, txs_needed)?;
+				}
+				// If no authorization found, let it proceed - on-chain validation will catch it
+			}
+		}
 
 		let mut chunk_cids = Vec::new();
 		let total_chunks = chunks.len();
