@@ -9,7 +9,6 @@ import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
-    HTTP_IPFS_API,
     newSigner,
     fileToDisk,
     filesAreEqual,
@@ -32,7 +31,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const IPFS_API_URL = args[2] || 'http://127.0.0.1:5001';
+const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:5001';
 const NUM_SIGNERS = 16;
 
 // -------------------- queue --------------------
@@ -191,7 +190,7 @@ export async function storeChunkedFile(api, filePath) {
 
 // Connect to a local IPFS gateway (e.g. Kubo)
 const ipfs = create({
-    url: IPFS_API_URL,
+    url: HTTP_IPFS_API,
 });
 
 // Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
@@ -202,7 +201,7 @@ async function main() {
     await cryptoWaitReady()
 
     logHeader('STORE BIG DATA TEST');
-    logConnection(NODE_WS, SEED, IPFS_API_URL);
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
     let client, resultCode;
     try {
