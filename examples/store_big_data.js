@@ -37,7 +37,7 @@ const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 // Derive API URL from gateway URL (port 8283 -> 5011)
 const IPFS_API_URL = IPFS_GATEWAY_URL.replace(':8283', ':5011');
 // Image size preset: small, big32, big64, big96
-const IMAGE_SIZE = args[3] || 'big96';
+const IMAGE_SIZE = args[3] || 'big64';
 const NUM_SIGNERS = 16;
 
 // -------------------- queue --------------------
