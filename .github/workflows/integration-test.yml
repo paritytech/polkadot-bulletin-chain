@@ -37,7 +37,7 @@ jobs:
 
       # Cache the Polkadot SDK binaries
       - name: Cache Polkadot SDK binaries
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
@@ -59,7 +59,7 @@ jobs:
 
       # Cache the Zombienet binaries
       - name: Cache Zombienet
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         id: zombienet-cache
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
@@ -84,7 +84,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -116,13 +116,13 @@ jobs:
         run: cargo install just --locked || true
 
       - name: Cache Polkadot SDK binaries
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
           key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_VERSION_WITH_BULLETIN }}-binaries
       - name: Cache Zombienet
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         id: zombienet-cache
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
