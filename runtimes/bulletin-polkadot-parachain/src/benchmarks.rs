@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::*;
-
 frame_benchmarking::define_benchmarks!(
 	[frame_system, SystemBench::<Runtime>]
 	[cumulus_pallet_parachain_system, ParachainSystem]
