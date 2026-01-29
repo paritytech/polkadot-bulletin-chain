@@ -175,7 +175,7 @@ jobs:
         id: frame-omni-bencher-cache
         with:
           path: ${{ env.FRAME_OMNI_BENCHER_BIN_DIR }}
-          key: frame-omni-bencher-${{ runner.os }}-${{ env.POLKADOT_SDK_VERSION }}
+          key: frame-omni-bencher-${{ env.POLKADOT_SDK_VERSION }}
           
       - name: Download frame-omni-bencher
         if: steps.frame-omni-bencher-cache.outputs.cache-hit != 'true'
