@@ -47,8 +47,8 @@ args = [
 	# "--pool-kbytes 30720",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# WebSocket P2P on p2p_port + 1 for smoldot light client support
-	"--listen-addr",
-	"/ip4/0.0.0.0/tcp/10002/ws",
+	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
+	"--listen-addr=/ip4/0.0.0.0/tcp/10002/ws",
 ]
 
 [[parachains.collators]]
@@ -63,6 +63,6 @@ args = [
 	# "--pool-kbytes 30720",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# WebSocket P2P on p2p_port + 1 for smoldot light client support
-	"--listen-addr",
-	"/ip4/0.0.0.0/tcp/12348/ws",
+	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
+	"--listen-addr=/ip4/0.0.0.0/tcp/12348/ws",
 ]
