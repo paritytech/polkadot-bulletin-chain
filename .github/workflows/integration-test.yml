@@ -148,6 +148,10 @@ jobs:
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           just start-services "$TEST_DIR" "bulletin-westend-runtime"
 
+      - name: Test store-big-data (Westend parachain)
+        working-directory: examples
+        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
+
       - name: Test authorize-and-store ws (Westend parachain)
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
