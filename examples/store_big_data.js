@@ -209,7 +209,7 @@ async function main() {
         const filePath = path.join(tmpDir, "image.jpeg");
         const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
         const downloadedFileByDagPath = path.join(tmpDir, "downloadedByDag.jpeg");
-        generateTextImage(filePath, "Hello, Bulletin big - " + new Date().toString(), "big32");
+        generateTextImage(filePath, "Hello, Bulletin big64 - " + new Date().toString(), "big64");
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
