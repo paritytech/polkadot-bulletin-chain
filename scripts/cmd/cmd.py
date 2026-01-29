@@ -97,6 +97,9 @@ if args.command == 'bench':
         wasm_file = f"target/{profile}/wbuild/{runtime['package']}/{runtime['package'].replace('-', '_')}.wasm"
         output = os.popen(
             f"frame-omni-bencher v1 benchmark pallet --no-csv-header --all --list --runtime={wasm_file}").read()
+        if output == "":
+            print(f'frame-omni-bencher not found')
+            sys.exit(1)
         raw_pallets = output.split('\n')
 
         all_pallets = set()
@@ -130,7 +133,7 @@ if args.command == 'bench':
             print(f"No pallets [{args.pallet}] found in {args.runtime}")
         else:
             print('No runtimes found')
-        sys.exit(0)
+        sys.exit(1)
 
     header_path = os.path.abspath('./scripts/cmd/file_header.txt')
 

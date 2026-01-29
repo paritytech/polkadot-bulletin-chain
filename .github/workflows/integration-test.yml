@@ -19,7 +19,7 @@ concurrency:
 env:
   NODE_VERSION: 22
   POLKADOT_SDK_VERSION: polkadot-stable2512
-  POLKADOT_SDK_COMMIT: 81a3af9830ea8b6ff64b066b73b04bb3b675add5
+  POLKADOT_SDK_VERSION_WITH_BULLETIN: unstable-bulletin-support-v1
   POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
   ZOMBIENET_VERSION: v1.3.138
   ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
@@ -35,25 +35,13 @@ jobs:
         with:
           tool-cache: false
 
-      # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-          components: rust-src
-      - name: Install system dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libclang-dev
-
       # Cache the Polkadot SDK binaries
       - name: Cache Polkadot SDK binaries
         uses: actions/cache@v3
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
-          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_COMMIT }}-binaries
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_VERSION_WITH_BULLETIN }}-binaries
       # Download and extract binaries if cache missed
       - name: Download Polkadot SDK binaries
         if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
@@ -65,17 +53,9 @@ jobs:
           curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
           curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
           curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
-          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-          # curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node
+          # TODO: replace POLKADOT_SDK_VERSION_WITH_BULLETIN with POLKADOT_SDK_VERSION when released: https://github.com/paritytech/polkadot-sdk/pull/10662
+          curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
           chmod +x *
-          # TODO: remove when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-          git clone https://github.com/paritytech/polkadot-sdk.git
-          cd polkadot-sdk
-          git reset --hard $POLKADOT_SDK_COMMIT
-          cargo build -p polkadot-omni-node -r
-          cd ..
-          cp polkadot-sdk/target/release/polkadot-omni-node .
-          rm -R polkadot-sdk
 
       # Cache the Zombienet binaries
       - name: Cache Zombienet
@@ -140,7 +120,7 @@ jobs:
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
-          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_COMMIT }}-binaries
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_VERSION_WITH_BULLETIN }}-binaries
       - name: Cache Zombienet
         uses: actions/cache@v3
         id: zombienet-cache
@@ -149,7 +129,9 @@ jobs:
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
       - name: Add binaries to PATH
         run: |
+          chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
           ls -lrt "${POLKADOT_SDK_BIN_DIR}"
+          chmod +x "${ZOMBIENET_BIN_DIR}"/*
           ls -lrt "${ZOMBIENET_BIN_DIR}"
           echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
           echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
