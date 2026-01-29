@@ -76,6 +76,29 @@ jobs:
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
 
+      # TODO: tmp
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+      - name: Install system dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libclang-dev
+      - name: Rust cache (Bulletin)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-bulletin-integration-tests"
+          save-if: true
+      # Pre-build runtimes to warm up cargo cache
+      - name: Build bulletin-westend-runtime (cache warmup)
+        run: cargo build --release -p bulletin-westend-runtime
+
   integration-tests:
     needs: [setup]
     name: Integration Tests
@@ -103,7 +126,8 @@ jobs:
         with:
           workspaces: .
           shared-key: "bulletin-cache-bulletin-integration-tests"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # TODO: tmp
+          save-if: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
