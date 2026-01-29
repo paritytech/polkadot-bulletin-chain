@@ -6,7 +6,7 @@ import fs from "fs";
 import assert from "assert";
 
 // ---- CONFIG ----
-export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
+export const DEFAULT_HTTP_IPFS_API = 'http://127.0.0.1:8283';   // Local IPFS HTTP gateway
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
 

@@ -3,7 +3,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { setupKeyringAndSigners } from './common.js';
+import { setupKeyringAndSigners, DEFAULT_HTTP_IPFS_API } from './common.js';
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
@@ -12,7 +12,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
+const HTTP_IPFS_API = args[2] || DEFAULT_HTTP_IPFS_API;
 
 async function main() {
     await cryptoWaitReady();

@@ -13,6 +13,7 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
+    DEFAULT_HTTP_IPFS_API,
 } from "./common.js";
 import {
     logHeader,
@@ -31,7 +32,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:5001';
+const HTTP_IPFS_API = args[2] || DEFAULT_HTTP_IPFS_API;
 const NUM_SIGNERS = 16;
 
 // -------------------- queue --------------------
