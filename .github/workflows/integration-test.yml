@@ -76,29 +76,6 @@ jobs:
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
 
-      # TODO: tmp
-      - name: Checkout sources
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-          components: rust-src
-      - name: Install system dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libclang-dev
-      - name: Rust cache (Bulletin)
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-          shared-key: "bulletin-cache-bulletin-integration-tests"
-          save-if: true
-      # Pre-build runtimes to warm up cargo cache
-      - name: Build bulletin-westend-runtime (cache warmup)
-        run: cargo build --release -p bulletin-westend-runtime
-
   integration-tests:
     needs: [setup]
     name: Integration Tests
@@ -172,13 +149,13 @@ jobs:
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           just start-services "$TEST_DIR" "bulletin-westend-runtime"
 
-      - name: Test store-big-data (Westend parachain)
-        working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
-
       - name: Test authorize-and-store ws (Westend parachain)
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
+
+      - name: Test store-big-data (Westend parachain)
+        working-directory: examples
+        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
 
       - name: Test authorize-and-store smoldot (Westend parachain)
         working-directory: examples
