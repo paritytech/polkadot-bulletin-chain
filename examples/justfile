@@ -234,6 +234,7 @@ ipfs-start test_dir: _check-docker
     echo "   Container: ipfs-node"
     echo "   Waiting for container to start..."
     sleep 5
+    docker exec ipfs-node ipfs --version
 
     # Bitswap logging
     docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
