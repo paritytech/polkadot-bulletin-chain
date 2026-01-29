@@ -1,0 +1,22 @@
+[package]
+name = "rust-authorize-and-store"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "authorize-and-store"
+path = "src/main.rs"
+
+[dependencies]
+bulletin-sdk-rust = { path = "../../sdk/rust" }
+clap = { version = "4.2", features = ["derive"] }
+subxt = "0.37"
+subxt-signer = { version = "0.37", features = ["sr25519", "subxt"] }
+sp-runtime = { workspace = true }
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+anyhow = "1.0"
+hex = "0.4"
+codec = { package = "parity-scale-codec", version = "3.6", features = ["derive"] }
+scale-info = "2.11"

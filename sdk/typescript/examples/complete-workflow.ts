@@ -1,0 +1,192 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
+/**
+ * Complete workflow example - All Bulletin Chain operations
+ *
+ * This example demonstrates:
+ * - Account and preimage authorization
+ * - Storing data with proper authorization
+ * - Refreshing authorizations
+ * - Renewing stored data
+ * - Removing expired authorizations
+ *
+ * Usage:
+ *   npm install
+ *   npm run build
+ *   node examples/complete-workflow.js
+ */
+
+import { AsyncBulletinClient, PAPITransactionSubmitter, StoreOptions } from '../dist/index.js';
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
+import { getPolkadotSigner } from 'polkadot-api/signer';
+import { DEV_PHRASE } from '@polkadot-labs/hdkd-helpers';
+import { blake2b256 } from '@noble/hashes/blake2b';
+
+async function main() {
+  console.log('🚀 Bulletin SDK - Complete Workflow Example\n');
+
+  // 1. Setup connection
+  console.log('📡 Connecting to Bulletin Chain...');
+  const wsProvider = getWsProvider('ws://localhost:9944');
+  const papiClient = createClient(wsProvider);
+  const api = papiClient.getTypedApi(/* your chain descriptors */);
+
+  // Using Alice (sudo) for authorization operations
+  const keyring = sr25519CreateDerive(DEV_PHRASE);
+  const aliceSigner = getPolkadotSigner(keyring.derive("//Alice"), "Alice", 42);
+  const bobSigner = getPolkadotSigner(keyring.derive("//Bob"), "Bob", 42);
+
+  console.log('✅ Connected\n');
+
+  // 2. Account Authorization Workflow
+  console.log('═══ Account Authorization Workflow ═══\n');
+
+  const aliceSubmitter = new PAPITransactionSubmitter(api, aliceSigner);
+  const aliceClient = new AsyncBulletinClient(aliceSubmitter);
+
+  // Authorize Bob's account
+  const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
+  console.log('👤 Authorizing Bob:', bobAddress);
+
+  // Calculate authorization needed for 10 MB
+  const dataSize = 10 * 1024 * 1024;
+  const estimate = aliceClient.estimateAuthorization(dataSize);
+  console.log('📊 Authorization estimate:');
+  console.log('   Transactions:', estimate.transactions);
+  console.log('   Bytes:', estimate.bytes, '\n');
+
+  console.log('⏳ Authorizing account...');
+  const authReceipt = await aliceClient.authorizeAccount(
+    bobAddress,
+    estimate.transactions,
+    BigInt(estimate.bytes)
+  );
+  console.log('✅ Account authorized!');
+  console.log('   Block:', authReceipt.blockHash);
+  console.log('   Tx:', authReceipt.txHash, '\n');
+
+  // 3. Store Data as Bob
+  console.log('═══ Store Data Workflow ═══\n');
+
+  const bobSubmitter = new PAPITransactionSubmitter(api, bobSigner);
+  const bobClient = new AsyncBulletinClient(bobSubmitter);
+
+  const data = new TextEncoder().encode('Hello from Bob! This data is stored with proper authorization.');
+  console.log('📝 Data:', new TextDecoder().decode(data));
+  console.log('   Size:', data.length, 'bytes\n');
+
+  console.log('⏳ Storing data...');
+  const storeResult = await bobClient.store(data);
+  console.log('✅ Data stored!');
+  console.log('   CID:', storeResult.cid.toString());
+  console.log('   Block:', storeResult.blockNumber, '\n');
+
+  // 4. Preimage Authorization Workflow
+  console.log('═══ Preimage Authorization Workflow ═══\n');
+
+  const specificData = new TextEncoder().encode('This specific content is authorized by hash');
+  const contentHash = blake2b256(specificData);
+
+  console.log('📝 Content to authorize:');
+  console.log('   Data:', new TextDecoder().decode(specificData));
+  console.log('   Hash:', Buffer.from(contentHash).toString('hex').substring(0, 16) + '...', '\n');
+
+  console.log('⏳ Authorizing preimage...');
+  const preimageReceipt = await aliceClient.authorizePreimage(
+    contentHash,
+    BigInt(specificData.length)
+  );
+  console.log('✅ Preimage authorized!');
+  console.log('   Block:', preimageReceipt.blockHash, '\n');
+
+  // Anyone can now store this specific content
+  console.log('⏳ Storing authorized preimage...');
+  const preimageResult = await bobClient.store(specificData);
+  console.log('✅ Preimage stored!');
+  console.log('   CID:', preimageResult.cid.toString(), '\n');
+
+  // 5. Refresh Authorization Workflow
+  console.log('═══ Refresh Authorization Workflow ═══\n');
+
+  console.log('🔄 Refreshing Bob\'s account authorization...');
+  const refreshReceipt = await aliceClient.refreshAccountAuthorization(bobAddress);
+  console.log('✅ Authorization refreshed!');
+  console.log('   Block:', refreshReceipt.blockHash, '\n');
+
+  console.log('🔄 Refreshing preimage authorization...');
+  const refreshPreimageReceipt = await aliceClient.refreshPreimageAuthorization(contentHash);
+  console.log('✅ Preimage authorization refreshed!');
+  console.log('   Block:', refreshPreimageReceipt.blockHash, '\n');
+
+  // 6. Renew Data Workflow
+  console.log('═══ Renew Data Workflow ═══\n');
+
+  if (storeResult.blockNumber) {
+    console.log('🔄 Renewing stored data...');
+    console.log('   Original block:', storeResult.blockNumber);
+
+    try {
+      const renewReceipt = await bobClient.renew(storeResult.blockNumber, 0);
+      console.log('✅ Data renewed!');
+      console.log('   Block:', renewReceipt.blockHash, '\n');
+    } catch (error) {
+      console.log('ℹ️  Could not renew (may not be renewable yet)');
+      console.log('   Error:', (error as Error).message, '\n');
+    }
+  }
+
+  // 7. Remove Expired Authorization Workflow
+  console.log('═══ Remove Expired Authorization Workflow ═══\n');
+  console.log('💡 Note: These will only work if authorizations have actually expired\n');
+
+  // Try to remove expired account authorization
+  try {
+    console.log('⏳ Checking for expired account authorizations...');
+    const removeReceipt = await aliceClient.removeExpiredAccountAuthorization(bobAddress);
+    console.log('✅ Expired authorization removed!');
+    console.log('   Block:', removeReceipt.blockHash);
+  } catch (error) {
+    console.log('ℹ️  No expired authorization found (this is normal)');
+  }
+
+  console.log();
+
+  // Try to remove expired preimage authorization
+  try {
+    console.log('⏳ Checking for expired preimage authorizations...');
+    const removeReceipt = await aliceClient.removeExpiredPreimageAuthorization(contentHash);
+    console.log('✅ Expired preimage authorization removed!');
+    console.log('   Block:', removeReceipt.blockHash);
+  } catch (error) {
+    console.log('ℹ️  No expired preimage authorization found (this is normal)');
+  }
+
+  // 8. Summary
+  console.log('\n═══ Workflow Complete ═══\n');
+  console.log('✅ Demonstrated operations:');
+  console.log('   • Account authorization (Alice authorizes Bob)');
+  console.log('   • Data storage (Bob stores with authorization)');
+  console.log('   • Preimage authorization (content-addressed)');
+  console.log('   • Preimage storage (anyone can store authorized content)');
+  console.log('   • Refresh authorizations (extends expiry)');
+  console.log('   • Renew stored data (extends retention)');
+  console.log('   • Remove expired authorizations (cleanup)');
+
+  console.log('\n💡 Best Practices:');
+  console.log('   • Authorize before storing to ensure capacity');
+  console.log('   • Use account auth for dynamic content');
+  console.log('   • Use preimage auth when content is known ahead');
+  console.log('   • Refresh authorizations before they expire');
+  console.log('   • Renew important data before retention period ends');
+  console.log('   • Clean up expired authorizations to free storage');
+
+  console.log('\n🎉 Complete workflow example finished!');
+
+  // Cleanup
+  await papiClient.destroy();
+}
+
+main().catch(console.error);
