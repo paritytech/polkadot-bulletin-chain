@@ -37,7 +37,7 @@ var BulletinError = class extends Error {
 };
 
 // src/chunker.ts
-var MAX_CHUNK_SIZE = 8 * 1024 * 1024;
+var MAX_CHUNK_SIZE = 2 * 1024 * 1024;
 var FixedSizeChunker = class {
   constructor(config) {
     this.config = { ...DEFAULT_CHUNKER_CONFIG, ...config };
@@ -200,20 +200,18 @@ function formatBytes(bytes, decimals = 2) {
   return `${(bytes / Math.pow(k, i)).toFixed(dm)} ${sizes[i]}`;
 }
 function validateChunkSize(size) {
-  const MAX_CHUNK_SIZE2 = 8 * 1024 * 1024;
   if (size <= 0) {
     throw new BulletinError("Chunk size must be positive", "INVALID_CHUNK_SIZE");
   }
-  if (size > MAX_CHUNK_SIZE2) {
+  if (size > MAX_CHUNK_SIZE) {
     throw new BulletinError(
-      `Chunk size ${formatBytes(size)} exceeds maximum ${formatBytes(MAX_CHUNK_SIZE2)}`,
+      `Chunk size ${formatBytes(size)} exceeds maximum ${formatBytes(MAX_CHUNK_SIZE)}`,
       "CHUNK_TOO_LARGE"
     );
   }
 }
 function optimalChunkSize(dataSize) {
   const MIN_CHUNK_SIZE = 1024 * 1024;
-  const MAX_CHUNK_SIZE2 = 4 * 1024 * 1024;
   const OPTIMAL_CHUNKS = 100;
   if (dataSize <= MIN_CHUNK_SIZE) {
     return dataSize;
@@ -221,8 +219,8 @@ function optimalChunkSize(dataSize) {
   const optimalSize = Math.floor(dataSize / OPTIMAL_CHUNKS);
   if (optimalSize < MIN_CHUNK_SIZE) {
     return MIN_CHUNK_SIZE;
-  } else if (optimalSize > MAX_CHUNK_SIZE2) {
-    return MAX_CHUNK_SIZE2;
+  } else if (optimalSize > MAX_CHUNK_SIZE) {
+    return MAX_CHUNK_SIZE;
   } else {
     return Math.floor(optimalSize / 1048576) * 1048576;
   }
@@ -422,11 +420,12 @@ var BulletinClient = class {
       endpoint: config.endpoint,
       defaultChunkSize: config.defaultChunkSize ?? 1024 * 1024,
       maxParallel: config.maxParallel ?? 8,
-      createManifest: config.createManifest ?? true
+      createManifest: config.createManifest ?? true,
+      chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024
     };
   }
   /**
-   * Prepare a simple store operation (data < 8 MiB)
+   * Prepare a simple store operation (data < 2 MiB)
    *
    * Returns the data and its CID. Use PAPI to submit to TransactionStorage.store
    */
@@ -708,18 +707,39 @@ var AsyncBulletinClient = class {
     this.config = {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
       maxParallel: config?.maxParallel ?? 8,
-      createManifest: config?.createManifest ?? true
+      createManifest: config?.createManifest ?? true,
+      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024
+      // 2 MiB
     };
   }
   /**
-   * Store data on Bulletin Chain (simple, < 8 MiB)
+   * Store data on Bulletin Chain
    *
-   * Handles the complete workflow:
-   * 1. Calculate CID
-   * 2. Submit transaction
-   * 3. Wait for finalization
+   * Automatically chunks data if it exceeds the configured threshold.
+   * This handles the complete workflow:
+   * 1. Decide whether to chunk based on data size
+   * 2. Calculate CID(s)
+   * 3. Submit transaction(s)
+   * 4. Wait for finalization
+   *
+   * @param data - Data to store
+   * @param options - Storage options (CID codec, hash algorithm)
+   * @param progressCallback - Optional callback for progress tracking (only called for chunked uploads)
    */
-  async store(data, options) {
+  async store(data, options, progressCallback) {
+    if (data.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    if (data.length > this.config.chunkingThreshold) {
+      return this.storeInternalChunked(data, void 0, options, progressCallback);
+    } else {
+      return this.storeInternalSingle(data, options);
+    }
+  }
+  /**
+   * Internal: Store data in a single transaction (no chunking)
+   */
+  async storeInternalSingle(data, options) {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
@@ -734,6 +754,96 @@ var AsyncBulletinClient = class {
       cid,
       size: data.length,
       blockNumber: receipt.blockNumber
+      // No chunks for single upload
+    };
+  }
+  /**
+   * Internal: Store data with chunking (returns unified StoreResult)
+   */
+  async storeInternalChunked(data, config, options, progressCallback) {
+    if (data.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    const chunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
+      maxParallel: config?.maxParallel ?? this.config.maxParallel,
+      createManifest: config?.createManifest ?? this.config.createManifest
+    };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const chunker = new FixedSizeChunker(chunkerConfig);
+    const chunks = chunker.chunk(data);
+    const chunkCids = [];
+    let lastBlockNumber;
+    for (const chunk of chunks) {
+      if (progressCallback) {
+        progressCallback({
+          type: "chunk_started",
+          index: chunk.index,
+          total: chunks.length
+        });
+      }
+      try {
+        const cid = await calculateCid(
+          chunk.data,
+          opts.cidCodec ?? 85 /* Raw */,
+          opts.hashingAlgorithm
+        );
+        chunk.cid = cid;
+        const receipt = await this.submitter.submitStore(chunk.data);
+        lastBlockNumber = receipt.blockNumber;
+        chunkCids.push(cid);
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_completed",
+            index: chunk.index,
+            total: chunks.length,
+            cid
+          });
+        }
+      } catch (error) {
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_failed",
+            index: chunk.index,
+            total: chunks.length,
+            error
+          });
+        }
+        throw error;
+      }
+    }
+    let manifestCid;
+    if (chunkerConfig.createManifest) {
+      if (progressCallback) {
+        progressCallback({ type: "manifest_started" });
+      }
+      const builder = new UnixFsDagBuilder();
+      const manifest = await builder.build(chunks, opts.hashingAlgorithm);
+      const receipt = await this.submitter.submitStore(manifest.dagBytes);
+      lastBlockNumber = receipt.blockNumber;
+      manifestCid = manifest.rootCid;
+      if (progressCallback) {
+        progressCallback({
+          type: "manifest_created",
+          cid: manifest.rootCid
+        });
+      }
+    }
+    if (progressCallback) {
+      progressCallback({
+        type: "completed",
+        manifestCid
+      });
+    }
+    return {
+      cid: manifestCid ?? chunkCids[0],
+      size: data.length,
+      blockNumber: lastBlockNumber,
+      chunks: {
+        chunkCids,
+        numChunks: chunks.length
+      }
     };
   }
   /**

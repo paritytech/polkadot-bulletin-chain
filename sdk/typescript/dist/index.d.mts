@@ -72,15 +72,33 @@ interface StoreOptions {
  */
 declare const DEFAULT_STORE_OPTIONS: StoreOptions;
 /**
+ * Details about chunks in a chunked upload
+ */
+interface ChunkDetails {
+    /** CIDs of all stored chunks */
+    chunkCids: CID[];
+    /** Number of chunks */
+    numChunks: number;
+}
+/**
  * Result of a storage operation
+ *
+ * This result type works for both single-transaction uploads and chunked uploads.
+ * For chunked uploads, the `cid` field contains the manifest CID, and `chunks`
+ * contains details about the individual chunks.
  */
 interface StoreResult {
-    /** The CID of the stored data */
+    /** The primary CID of the stored data
+     * - For single uploads: CID of the data
+     * - For chunked uploads: CID of the manifest
+     */
     cid: CID;
     /** Size of the stored data in bytes */
     size: number;
     /** Block number where data was stored (if known) */
     blockNumber?: number;
+    /** Chunk details (only present for chunked uploads) */
+    chunks?: ChunkDetails;
 }
 /**
  * Result of a chunked storage operation
@@ -167,13 +185,16 @@ interface ClientConfig {
     maxParallel?: number;
     /** Whether to create manifests for chunked uploads (default: true) */
     createManifest?: boolean;
+    /** Threshold for automatic chunking (default: 2 MiB).
+     * Data larger than this will be automatically chunked by `store()`. */
+    chunkingThreshold?: number;
 }
 
 /**
  * Data chunking utilities for splitting large files into smaller pieces
  */
 
-/** Maximum chunk size allowed (8 MiB, matches pallet limit) */
+/** Maximum chunk size allowed (2 MiB, matches Bitswap limit) */
 declare const MAX_CHUNK_SIZE: number;
 /**
  * Fixed-size chunker that splits data into equal-sized chunks
@@ -470,7 +491,7 @@ declare class BulletinClient {
     private config;
     constructor(config: ClientConfig);
     /**
-     * Prepare a simple store operation (data < 8 MiB)
+     * Prepare a simple store operation (data < 2 MiB)
      *
      * Returns the data and its CID. Use PAPI to submit to TransactionStorage.store
      */
@@ -570,14 +591,28 @@ declare class AsyncBulletinClient {
     private config;
     constructor(submitter: TransactionSubmitter, config?: Partial<ClientConfig>);
     /**
-     * Store data on Bulletin Chain (simple, < 8 MiB)
+     * Store data on Bulletin Chain
      *
-     * Handles the complete workflow:
-     * 1. Calculate CID
-     * 2. Submit transaction
-     * 3. Wait for finalization
+     * Automatically chunks data if it exceeds the configured threshold.
+     * This handles the complete workflow:
+     * 1. Decide whether to chunk based on data size
+     * 2. Calculate CID(s)
+     * 3. Submit transaction(s)
+     * 4. Wait for finalization
+     *
+     * @param data - Data to store
+     * @param options - Storage options (CID codec, hash algorithm)
+     * @param progressCallback - Optional callback for progress tracking (only called for chunked uploads)
      */
-    store(data: Uint8Array, options?: StoreOptions): Promise<StoreResult>;
+    store(data: Uint8Array, options?: StoreOptions, progressCallback?: ProgressCallback): Promise<StoreResult>;
+    /**
+     * Internal: Store data in a single transaction (no chunking)
+     */
+    private storeInternalSingle;
+    /**
+     * Internal: Store data with chunking (returns unified StoreResult)
+     */
+    private storeInternalChunked;
     /**
      * Store large data with automatic chunking and manifest creation
      *
@@ -648,4 +683,4 @@ declare class AsyncBulletinClient {
  */
 declare const VERSION = "0.1.0";
 
-export { AsyncBulletinClient, type Authorization, AuthorizationScope, BulletinClient, BulletinError, type Chunk, type ChunkedStoreResult, type ChunkerConfig, CidCodec, type ClientConfig, DEFAULT_CHUNKER_CONFIG, DEFAULT_STORE_OPTIONS, type DagManifest, FixedSizeChunker, HashAlgorithm, MAX_CHUNK_SIZE, PAPITransactionSubmitter, type ProgressCallback, type ProgressEvent, type StoreOptions, type StoreResult, type TransactionReceipt, type TransactionSubmitter, UnixFsDagBuilder, VERSION, batch, bytesToHex, calculateCid, calculateThroughput, cidFromBytes, cidToBytes, convertCid, createProgressTracker, deepClone, estimateFees, formatBytes, formatThroughput, getContentHash, hexToBytes, isBrowser, isNode, isValidSS58, limitConcurrency, measureTime, optimalChunkSize, parseCid, reassembleChunks, retry, sleep, truncate, validateChunkSize };
+export { AsyncBulletinClient, type Authorization, AuthorizationScope, BulletinClient, BulletinError, type Chunk, type ChunkDetails, type ChunkedStoreResult, type ChunkerConfig, CidCodec, type ClientConfig, DEFAULT_CHUNKER_CONFIG, DEFAULT_STORE_OPTIONS, type DagManifest, FixedSizeChunker, HashAlgorithm, MAX_CHUNK_SIZE, PAPITransactionSubmitter, type ProgressCallback, type ProgressEvent, type StoreOptions, type StoreResult, type TransactionReceipt, type TransactionSubmitter, UnixFsDagBuilder, VERSION, batch, bytesToHex, calculateCid, calculateThroughput, cidFromBytes, cidToBytes, convertCid, createProgressTracker, deepClone, estimateFees, formatBytes, formatThroughput, getContentHash, hexToBytes, isBrowser, isNode, isValidSS58, limitConcurrency, measureTime, optimalChunkSize, parseCid, reassembleChunks, retry, sleep, truncate, validateChunkSize };

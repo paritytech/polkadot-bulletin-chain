@@ -41,6 +41,7 @@ export class BulletinClient {
       defaultChunkSize: config.defaultChunkSize ?? 1024 * 1024,
       maxParallel: config.maxParallel ?? 8,
       createManifest: config.createManifest ?? true,
+      chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
     };
   }
 
