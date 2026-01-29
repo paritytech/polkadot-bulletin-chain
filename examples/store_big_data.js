@@ -28,7 +28,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed] [ipfs_gateway_url]
+// Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
 // Note: --signer-disc=XX flag is also supported for parallel runs
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
@@ -36,6 +36,8 @@ const SEED = args[1] || '//Alice';
 const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 // Derive API URL from gateway URL (port 8283 -> 5011)
 const IPFS_API_URL = IPFS_GATEWAY_URL.replace(':8283', ':5011');
+// Image size preset: small, big32, big64, big96
+const IMAGE_SIZE = args[3] || 'big96';
 const NUM_SIGNERS = 16;
 
 // -------------------- queue --------------------
@@ -213,7 +215,7 @@ async function main() {
         const filePath = path.join(tmpDir, "image.jpeg");
         const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
         const downloadedFileByDagPath = path.join(tmpDir, "downloadedByDag.jpeg");
-        generateTextImage(filePath, "Hello, Bulletin big64 - " + new Date().toString(), "big64");
+        generateTextImage(filePath, `Hello, Bulletin ${IMAGE_SIZE} - ` + new Date().toString(), IMAGE_SIZE);
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));

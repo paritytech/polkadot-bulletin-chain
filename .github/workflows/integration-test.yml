@@ -169,7 +169,7 @@ jobs:
 
       - name: Test store-big-data (Westend parachain)
         working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
+        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
 
       - name: Test authorize-preimage-and-store (Westend parachain)
         working-directory: examples
@@ -211,7 +211,7 @@ jobs:
 
       - name: Test store-big-data (Polkadot solochain)
         working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
+        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
 
       - name: Test authorize-preimage-and-store (Polkadot solochain)
         working-directory: examples
