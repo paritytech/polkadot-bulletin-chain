@@ -43,7 +43,7 @@ export async function authorizeAccount(
             const accountTransactions = authValue.transactions;
             const accountBytes = authValue.bytes;
 
-            if (accountTransactions > transactions && accountBytes > bytes) {
+            if (accountTransactions >= transactions && accountBytes >= bytes) {
                 console.log('✅ Account authorization is sufficient.');
                 continue;
             }

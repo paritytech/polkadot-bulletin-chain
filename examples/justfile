@@ -600,30 +600,41 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed
     exit $EXAMPLE_EXIT
 
 # ============================================================================
-# Run tests against external environments
+# Live network tests (external endpoints - Westend, Paseo, etc.)
 # ============================================================================
+#
+# Run store-big-data test against live Bulletin chain deployments.
+# These require pre-authorized accounts and a local Docker Kubo connected to collators.
+#
+# Usage:
+#   just run-live-tests-westend <seed>
+#   just run-live-tests-paseo <seed>
 
-# Run store-big-data test against an external endpoint
+# Live network endpoints
+WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
+PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
+
+# Run store-big-data test against a live endpoint
 # Parameters:
 #   ws_url - WebSocket URL of the Bulletin chain node
-#   seed - Account seed phrase or dev seed (e.g., "//Alice" or "word1 word2 ...")
+#   seed - Account seed phrase (must be pre-authorized on the network)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5001 for local Docker Kubo)
-run-tests-against ws_url seed http_ipfs_api="http://127.0.0.1:5001": npm-install
+_run-live-tests ws_url seed http_ipfs_api="http://127.0.0.1:5001": npm-install
     #!/usr/bin/env bash
     set -e
-    echo "🌐 Testing against external endpoint: {{ ws_url }}"
+    echo "🌐 Running live tests against: {{ ws_url }}"
     just papi-generate "{{ ws_url }}"
 
-    # To use local Docker Kubo with external RPC:
+    # Prerequisites for live testing:
     # 1. Start local IPFS: docker run -d --name ipfs-node -p 4001:4001 -p 5001:5001 -p 8080:8080 ipfs/kubo:latest
-    # 2. Connect to Bulletin IPFS nodes: docker exec ipfs-node ipfs swarm connect <multiaddr>
-    #    (Get multiaddrs from the Bulletin chain's IPFS bootstrap list)
+    # 2. Connect to Bulletin collators: docker exec ipfs-node ipfs swarm connect <multiaddr>
 
     node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
 
-# Run store-big-data test against Westend Bulletin
-# Parameters:
-#   seed - Account seed phrase or dev seed (e.g., "//Alice" or "word1 word2 ...")
-#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5001 for local Docker Kubo)
-run-tests-against-westend seed http_ipfs_api="http://127.0.0.1:5001":
-    just run-tests-against "wss://westend-bulletin-rpc.polkadot.io" "{{ seed }}" "{{ http_ipfs_api }}"
+# Run live tests against Westend Bulletin
+run-live-tests-westend seed http_ipfs_api="http://127.0.0.1:5001":
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run live tests against Paseo Bulletin
+run-live-tests-paseo seed http_ipfs_api="http://127.0.0.1:5001":
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ http_ipfs_api }}"
