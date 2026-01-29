@@ -32,6 +32,7 @@ PEERS_TO_CHECK=(
 while true; do
     # Read all current connections once
     PEERS="$(${check_cmd} swarm peers)"
+    echo "Connected peers: $PEERS"
 
     for PEER in "${PEERS_TO_CHECK[@]}"; do
         echo "$PEERS" | grep -q "$PEER"
