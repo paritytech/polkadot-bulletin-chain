@@ -6,7 +6,8 @@ THIS_DIR=$(cd $(dirname $0); pwd)
 mode="${1:-local}"
 if [ "$mode" = "docker" ]; then
     check_cmd="docker exec ipfs-node ipfs"
-    check_host="172.17.0.1"
+    # TODO: what is right? ipfs-reconnect uses 127.0.0.1
+    check_host="127.0.0.1"
 else
     check_cmd="${THIS_DIR}/../kubo/ipfs"
     check_host="127.0.0.1"
