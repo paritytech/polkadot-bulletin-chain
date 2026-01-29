@@ -2,19 +2,20 @@
 
 THIS_DIR=$(cd $(dirname $0); pwd)
 
-# Choose mode based on argument
+# Arguments: mode [sleep_interval]
 mode="${1:-local}"
+sleep_interval="${2:-2}"
 if [ "$mode" = "docker" ]; then
     check_cmd="docker exec ipfs-node ipfs"
 
     if [[ "$OSTYPE" == "darwin"* ]]; then
-      # macOS - use dns4/host.docker.internal
+      # macOS - use dns4/host.docker.internal (bridge network)
       check_protocol="dns4"
       check_host="host.docker.internal"
     else
-      # Linux (with bridge networking) - use ip4/172.17.0.1
+      # Linux - use ip4/127.0.0.1 (host network mode)
       check_protocol="ip4"
-      check_host="172.17.0.1"
+      check_host="127.0.0.1"
     fi
 else
     check_cmd="${THIS_DIR}/../kubo/ipfs"
@@ -42,5 +43,5 @@ while true; do
         fi
     done
 
-    sleep 2
+    sleep "$sleep_interval"
 done

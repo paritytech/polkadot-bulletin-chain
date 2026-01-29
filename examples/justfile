@@ -220,16 +220,20 @@ ipfs-start test_dir: _check-docker
     # Pull latest kubo image if not present
     docker pull ipfs/kubo:latest
 
-    # Use bridge network mode
-    NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
+    # Determine network mode based on OS
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS - use bridge with port mapping
+        NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
+    else
+        # Linux (including CI) - use host networking so container can reach localhost services
+        NETWORK_ARGS="--network host"
+    fi
 
     # Start Docker container
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
-    echo "   Container: ipfs-node"
-    echo "   NETWORK_ARGS: $NETWORK_ARGS"
+    echo "   Container: ipfs-node (network: $NETWORK_ARGS)"
     echo "   Waiting for container to start..."
     sleep 5
-    docker inspect ipfs-node --format '{{{{.HostConfig.NetworkMode}}}}'
     docker exec ipfs-node ipfs --version
 
     # Bitswap logging
@@ -249,13 +253,13 @@ ipfs-connect runtime:
     
     # Detect the correct host and protocol for Docker
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use dns4/host.docker.internal
+        # macOS - use dns4/host.docker.internal (bridge network)
         PROTOCOL="dns4"
         DOCKER_HOST="host.docker.internal"
     else
-        # Linux (with bridge networking) - use ip4/172.17.0.1
+        # Linux - use ip4/127.0.0.1 (host network mode)
         PROTOCOL="ip4"
-        DOCKER_HOST="172.17.0.1"
+        DOCKER_HOST="127.0.0.1"
     fi
 
     echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
@@ -298,9 +302,9 @@ ipfs-reconnect-start test_dir runtime:
     cd "$ROOT_DIR"
     # TODO: improve this for multiple runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        ./scripts/ipfs-reconnect-westend.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+        ./scripts/ipfs-reconnect-westend.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        ./scripts/ipfs-reconnect-solo.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+        ./scripts/ipfs-reconnect-solo.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     else
         echo "🐳 Unhandled runtime: {{ runtime }} specified!"
         exit 1
