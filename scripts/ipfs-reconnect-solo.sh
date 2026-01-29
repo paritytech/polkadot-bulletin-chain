@@ -23,10 +23,10 @@ else
     check_host="127.0.0.1"
 fi
 
-# Peers to monitor (WebSocket ports: 10002, 12348)
+# Peers to monitor (TCP ports: 10001, 12347)
 PEERS_TO_CHECK=(
-    "/${check_protocol}/${check_host}/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
-    "/${check_protocol}/${check_host}/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
+    "/${check_protocol}/${check_host}/tcp/10001/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
+    "/${check_protocol}/${check_host}/tcp/12347/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
 )
 
 while true; do
