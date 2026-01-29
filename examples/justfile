@@ -243,12 +243,7 @@ ipfs-start test_dir: _check-docker
     echo "   Waiting for IPFS to initialize..."
     sleep 5
 
-    # Stop daemon to apply config changes before it connects to peers
-    echo "   Stopping daemon to configure..."
-    docker exec ipfs-node ipfs shutdown || true
-    sleep 2
-
-    # Configure IPFS for isolated mode (no external peer discovery)
+    # Configure IPFS for isolated mode while daemon is running (config changes take effect on restart)
     echo "   Configuring isolated mode..."
     docker exec ipfs-node ipfs bootstrap rm --all
     docker exec ipfs-node ipfs config --json Routing.Type '"none"'
@@ -262,8 +257,8 @@ ipfs-start test_dir: _check-docker
     docker exec ipfs-node ipfs config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
     docker exec ipfs-node ipfs config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
-    # Restart container to start daemon with clean config
-    echo "   Starting daemon with isolated config..."
+    # Restart container to apply config changes
+    echo "   Restarting daemon with isolated config..."
     docker restart ipfs-node
     sleep 5
 
