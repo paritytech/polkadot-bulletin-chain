@@ -216,9 +216,9 @@ async function main() {
         console.log('🧱 DAG stored on IPFS with CID:', rawDagCid.toString())
         console.log('\n🌐 Try opening in browser:')
         console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
-        console.log('   (You'll see binary content since this is an image)')
+        console.log("   (You'll see binary content since this is an image)")
         console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
-        console.log('   (You’ll see the encoded DAG descriptor content)')
+        console.log("   (You'll see the encoded DAG descriptor content)")
 
         // Download the content from IPFS HTTP gateway
         const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
