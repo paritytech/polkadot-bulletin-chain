@@ -259,7 +259,14 @@ async function main() {
 
         console.log(`Storing DAG...`);
         let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
-        let { cid } = await store(bulletinAPI, signers[0].signer, dagBytes);
+        let { cid } = await store(
+            bulletinAPI,
+            signers[0].signer,
+            dagBytes,
+            undefined,
+            undefined,
+            TX_MODE_FINALIZED_BLOCK
+        );
         console.log(`Downloading...${cid} / ${rootCid}`);
         let downloadedContent = await fetchCid(HTTP_IPFS_API, rootCid);
         console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
