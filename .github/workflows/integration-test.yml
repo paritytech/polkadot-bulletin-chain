@@ -160,12 +160,12 @@ jobs:
         working-directory: examples
         run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
 
-      - name: Restart IPFS before store-big-data (Westend parachain)
-        working-directory: examples
-        run: |
-          echo "🔄 Restarting IPFS to clear state..."
-          just ipfs-shutdown "${{ env.TEST_DIR }}"
-          just ipfs-start "${{ env.TEST_DIR }}"
+#      - name: Restart IPFS before store-big-data (Westend parachain)
+#        working-directory: examples
+#        run: |
+#          echo "🔄 Restarting IPFS to clear state..."
+#          just ipfs-shutdown "${{ env.TEST_DIR }}"
+#          just ipfs-start "${{ env.TEST_DIR }}"
 
       - name: Test store-big-data (Westend parachain)
         working-directory: examples
@@ -202,12 +202,12 @@ jobs:
         working-directory: examples
         run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
 
-      - name: Restart IPFS before store-big-data (Polkadot solochain)
-        working-directory: examples
-        run: |
-          echo "🔄 Restarting IPFS to clear state..."
-          just ipfs-shutdown "${{ env.TEST_DIR }}"
-          just ipfs-start "${{ env.TEST_DIR }}"
+#      - name: Restart IPFS before store-big-data (Polkadot solochain)
+#        working-directory: examples
+#        run: |
+#          echo "🔄 Restarting IPFS to clear state..."
+#          just ipfs-shutdown "${{ env.TEST_DIR }}"
+#          just ipfs-start "${{ env.TEST_DIR }}"
 
       - name: Test store-big-data (Polkadot solochain)
         working-directory: examples
