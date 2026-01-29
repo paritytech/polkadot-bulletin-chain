@@ -2,7 +2,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
-import { generateTextImage, fileToDisk, filesAreEqual, newSigner, DEFAULT_HTTP_IPFS_API as HTTP_IPFS_API } from './common.js';
+import { generateTextImage, fileToDisk, filesAreEqual, newSigner, DEFAULT_IPFS_GATEWAY_URL as HTTP_IPFS_API } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"

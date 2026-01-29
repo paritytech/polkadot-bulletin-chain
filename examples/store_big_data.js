@@ -13,7 +13,8 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
-    DEFAULT_HTTP_IPFS_API,
+    DEFAULT_IPFS_API_URL,
+    DEFAULT_IPFS_GATEWAY_URL,
 } from "./common.js";
 import {
     logHeader,
@@ -27,12 +28,14 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+// Command line arguments: [ws_url] [seed] [ipfs_gateway_url]
 // Note: --signer-disc=XX flag is also supported for parallel runs
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = args[2] || DEFAULT_HTTP_IPFS_API;
+const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
+// Derive API URL from gateway URL (port 8283 -> 5011)
+const IPFS_API_URL = IPFS_GATEWAY_URL.replace(':8283', ':5011');
 const NUM_SIGNERS = 16;
 
 // -------------------- queue --------------------
@@ -189,9 +192,9 @@ export async function storeChunkedFile(api, filePath) {
     return { chunks, dataSize: fileData.length };
 }
 
-// Connect to a local IPFS gateway (e.g. Kubo)
+// Connect to IPFS API (for ipfs-http-client operations like block.get)
 const ipfs = create({
-    url: HTTP_IPFS_API,
+    url: IPFS_API_URL,
 });
 
 // Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
@@ -202,7 +205,7 @@ async function main() {
     await cryptoWaitReady()
 
     logHeader('STORE BIG DATA TEST');
-    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
+    logConnection(NODE_WS, SEED, IPFS_GATEWAY_URL);
 
     let client, resultCode;
     try {
@@ -271,7 +274,7 @@ async function main() {
         );
         console.log(`Downloading...${cid} / ${rootCid}`);
         assert.deepStrictEqual(cid, rootCid, '❌ CID mismatch between stored and computed DAG root');
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, rootCid);
+        let downloadedContent = await fetchCid(IPFS_GATEWAY_URL, rootCid);
         console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
         await fileToDisk(downloadedFileByDagPath, downloadedContent);
         filesAreEqual(filePath, downloadedFileByDagPath);

@@ -6,7 +6,7 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, DEFAULT_HTTP_IPFS_API } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
@@ -19,7 +19,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = args[2] || DEFAULT_HTTP_IPFS_API;
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 
 /**
