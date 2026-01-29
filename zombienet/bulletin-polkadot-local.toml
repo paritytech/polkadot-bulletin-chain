@@ -13,9 +13,9 @@ rpc_port = 10000
 validator = true
 args = [
 	"--ipfs-server",
-	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
 	"--listen-addr=/ip4/0.0.0.0/tcp/10002/ws",
+	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 ]
 
 [[relaychain.nodes]]
@@ -24,7 +24,8 @@ p2p_port = 12347
 rpc_port = 12346
 validator = true
 args = [
-	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
+	"--ipfs-server",
 	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
 	"--listen-addr=/ip4/0.0.0.0/tcp/12348/ws",
+	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 ]

@@ -29,10 +29,10 @@ PEER_IDS=(
     "12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
 )
 
-# Full addresses for connecting (TCP ports: 10001, 12347)
+# Full addresses for connecting (WebSocket ports: 10002, 12348)
 declare -A PEER_ADDRS
-PEER_ADDRS["12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"]="/${check_protocol}/${check_host}/tcp/10001/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
-PEER_ADDRS["12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"]="/${check_protocol}/${check_host}/tcp/12347/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
+PEER_ADDRS["12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"]="/${check_protocol}/${check_host}/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
+PEER_ADDRS["12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"]="/${check_protocol}/${check_host}/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
 
 while true; do
     # Read all current connections once
