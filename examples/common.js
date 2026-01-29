@@ -48,7 +48,7 @@ export function newSigner(seed) {
  *
  * @param {string} file
  * @param {string} text
- * @param {"small" | "big32" | "big64"} size
+ * @param {"small" | "big32" | "big64" | "big96"} size
  */
 export function generateTextImage(file, text, size = "small") {
     console.log(`Generating ${size} image with text: ${text} to the file: ${file}...`);
@@ -77,6 +77,15 @@ export function generateTextImage(file, text, size = "small") {
             shapes: 1000,
             noise: 50,
             targetBytes: 65 * 1024 * 1024,
+        },
+        // ~96 MiB
+        big96: {
+            width: 9000,
+            height: 6500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 98 * 1024 * 1024,
         },
     };
 
@@ -118,7 +127,7 @@ export function generateTextImage(file, text, size = "small") {
 
     // 🔧 Big images: tune quality to hit target size
     let imageBytes;
-    if ((size === "big32" || size === "big64") && cfg.targetBytes) {
+    if ((size === "big32" || size === "big64" || size === "big96") && cfg.targetBytes) {
         let quality = cfg.quality;
 
         do {
@@ -272,7 +281,7 @@ export function toHex(bytes) {
 //         console.error("Unknown command:", command);
 //         console.error("Usage:");
 //         console.error(
-//             '  node common.js generateTextImage "TEXT" [small|big32|big64]'
+//             '  node common.js generateTextImage "TEXT" [small|big32|big64|big96]'
 //         );
 //         process.exit(1);
 // }
