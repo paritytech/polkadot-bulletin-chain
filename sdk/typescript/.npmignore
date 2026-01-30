@@ -1,0 +1,44 @@
+# Source files (we publish dist/ only)
+src/
+test/
+examples/
+
+# Config files
+tsconfig.json
+vitest.config.ts
+.eslintrc.*
+.prettierrc.*
+
+# Development files
+*.log
+*.tgz
+node_modules/
+coverage/
+.nyc_output/
+
+# Git files
+.git/
+.gitignore
+.github/
+
+# CI/CD
+.circleci/
+.travis.yml
+appveyor.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep these
+!dist/
+!README.md
+!LICENSE
+!package.json

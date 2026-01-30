@@ -26,7 +26,8 @@
     "test:integration": "vitest run test/integration",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
   },
   "keywords": [
     "polkadot",

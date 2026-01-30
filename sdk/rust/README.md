@@ -39,15 +39,28 @@ let result = client.store(b"Hello!".to_vec(), StoreOptions::default()).await?;
 
 ## Installation
 
+From crates.io:
 ```toml
 [dependencies]
-bulletin-sdk-rust = { workspace = true }
+bulletin-sdk-rust = "0.1"
 ```
 
 For no_std environments:
 ```toml
 [dependencies]
-bulletin-sdk-rust = { workspace = true, default-features = false }
+bulletin-sdk-rust = { version = "0.1", default-features = false }
+```
+
+For ink! smart contracts:
+```toml
+[dependencies]
+bulletin-sdk-rust = { version = "0.1", default-features = false, features = ["ink"] }
+```
+
+From workspace (if in the polkadot-bulletin-chain repository):
+```toml
+[dependencies]
+bulletin-sdk-rust = { workspace = true }
 ```
 
 ## Build & Test

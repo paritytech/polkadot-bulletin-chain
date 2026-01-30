@@ -6,6 +6,16 @@ authors = ["Parity Technologies <admin@parity.io>"]
 license = "GPL-3.0-or-later"
 description = "Off-chain client SDK for Polkadot Bulletin Chain"
 repository = "https://github.com/paritytech/polkadot-bulletin-chain"
+homepage = "https://github.com/paritytech/polkadot-bulletin-chain"
+documentation = "https://docs.rs/bulletin-sdk-rust"
+readme = "README.md"
+keywords = ["polkadot", "bulletin", "blockchain", "storage", "ipfs"]
+categories = ["api-bindings", "cryptography", "no-std"]
+exclude = [
+    ".github/",
+    "tests/",
+    "examples/",
+]
 
 [dependencies]
 # Core dependencies (no_std compatible)

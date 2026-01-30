@@ -439,6 +439,28 @@ run-test-rust-authorize-and-store test_dir ws_url="ws://localhost:10000" seed="/
     # Run the test
     "$ROOT_DIR/target/release/authorize-and-store" --ws "{{ ws_url }}" --seed "{{ seed }}"
 
+# Run TypeScript SDK store-big-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin Chain node (default: ws://localhost:10000)
+#   seed - Seed phrase or dev seed (default: //Alice)
+run-test-sdk-store-big-data test_dir ws_url="ws://localhost:10000" seed="//Alice":
+    #!/usr/bin/env bash
+    set -e
+    echo "📦 Running TypeScript SDK store big data test..."
+    echo "   WS URL: {{ ws_url }}"
+    echo "   Seed: {{ seed }}"
+
+    # Build the TypeScript SDK
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    cd "$ROOT_DIR/sdk/typescript"
+    npm install
+    npm run build
+    cd -
+
+    # Run the test
+    node sdk_store_big_data.js "{{ ws_url }}" "{{ seed }}"
+
 # Run store-chunked-data test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
@@ -465,6 +487,19 @@ run-test-authorize-preimage-and-store test_dir:
     set -e
     echo "🧪 Running authorize preimage and store test (test_dir: {{ test_dir }})..."
     node authorize_preimage_and_store_papi.js
+
+# Run client comparison test (PAPI vs Rust SDK vs TypeScript SDK)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin Chain node (default: ws://localhost:10000)
+#   seed - Seed phrase or dev seed (default: //Alice)
+run-test-compare-clients test_dir ws_url="ws://localhost:10000" seed="//Alice":
+    #!/usr/bin/env bash
+    set -e
+    echo "🔬 Running client comparison test..."
+    echo "   WS URL: {{ ws_url }}"
+    echo "   Seed: {{ seed }}"
+    node compare_clients.js "{{ ws_url }}" "{{ seed }}"
 
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
