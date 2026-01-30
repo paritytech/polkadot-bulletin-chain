@@ -503,7 +503,7 @@ async fn main() -> Result<()> {
 	// Step 2: Store data using the SDK
 	println!("\nStep 2: Storing data...");
 	let result = client
-		.store(data_to_store.as_bytes().to_vec(), Default::default(), None)
+		.store(data_to_store.as_bytes().to_vec(), None)
 		.await
 		.map_err(|e| anyhow!("Failed to store data: {e:?}"))?;
 

@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read("any-size-file.bin")?;
 
     // Automatically chunks if > 2 MiB
-    let result = client.store(data, StoreOptions::default(), Some(|event| {
+    let result = client.store(data, Some(|event| {
         match event {
             ProgressEvent::ChunkCompleted { index, total, .. } => {
                 println!("Chunk {}/{} uploaded", index + 1, total);
