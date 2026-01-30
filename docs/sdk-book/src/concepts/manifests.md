@@ -2,7 +2,7 @@
 
 ## What is a Manifest?
 
-In the context of the SDK, a **Manifest** is a small data structure that describes how to reassemble a large file from its chunks. We use **DAG-PB** (Merkle DAG Protobuf), which is the default format for IPFS.
+In the context of the SDK, a **Manifest** is a small data structure that describes how to reassemble a large file from its chunks. We use [**DAG-PB**](https://docs.ipfs.tech/concepts/merkle-dag/) (Merkle DAG Protobuf), which is the default format for IPFS.
 
 When you upload a large file using the SDK:
 1.  The file is split into chunks (leaves).
