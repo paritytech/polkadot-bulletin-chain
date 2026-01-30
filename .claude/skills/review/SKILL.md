@@ -1,6 +1,12 @@
-Review pull request #$ARGUMENTS
+---
+name: review
+description: Review local changes or a PR
+---
 
-Fetch the PR diff and details using `gh pr view` and `gh pr diff`, then analyze for:
+If no arguments are passed, review the local changes by looking at the diff between the base branch and the current branch.
+If arguments are passed, review pull request #$ARGUMENTS by fetching it and seeing its details with `gh pr view` and `gh pr diff`.
+
+When reviewing, analyze for:
 
 1. **Code Quality**
    - Rust idioms and Polkadot SDK patterns
