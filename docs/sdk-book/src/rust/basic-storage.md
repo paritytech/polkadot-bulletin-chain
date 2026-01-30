@@ -187,16 +187,23 @@ Before submitting the transaction, the SDK:
 
 ### Disable Authorization Checking
 
-If you want to skip the check (e.g., you know authorization exists):
+You might want to skip pre-flight authorization checking in these scenarios:
+
+- **Performance**: Avoid extra query when doing many sequential uploads (authorization was already verified)
+- **Testing**: Test on-chain authorization validation directly
+- **Offline preparation**: Prepare transactions offline for later broadcast
+- **Batch operations**: Already checked authorization once for the entire batch
 
 ```rust
 use bulletin_sdk_rust::async_client::AsyncClientConfig;
 
 let mut config = AsyncClientConfig::default();
-config.check_authorization_before_upload = false;  // Disable checking
+config.check_authorization_before_upload = false;  // Disable pre-flight checking
 
 let client = AsyncBulletinClient::with_config(submitter, config)
     .with_account(account);
+
+// Authorization will still be validated on-chain during transaction execution
 ```
 
 ### Error Example
