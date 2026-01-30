@@ -91,9 +91,19 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 	///
 	/// If set and `check_authorization_before_upload` is enabled, the client will
 	/// query authorization state before uploading and fail fast if insufficient.
+	///
+	/// If not set, the SDK will attempt to derive the account from the submitter's signer
+	/// (if available) when performing authorization checks.
 	pub fn with_account(mut self, account: AccountId32) -> Self {
 		self.account = Some(account);
 		self
+	}
+
+	/// Get the account used for authorization checks.
+	///
+	/// Returns the explicitly set account, or attempts to derive it from the submitter's signer.
+	fn get_account(&self) -> Option<AccountId32> {
+		self.account.clone().or_else(|| self.submitter.signer_account())
 	}
 
 	/// Store data on Bulletin Chain with default options.
@@ -171,10 +181,10 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 
 		// Check authorization before upload if enabled
 		if self.config.check_authorization_before_upload {
-			if let Some(account) = &self.account {
+			if let Some(account) = self.get_account() {
 				// Query current authorization
 				if let Some(auth) =
-					self.submitter.query_account_authorization(account.clone()).await?
+					self.submitter.query_account_authorization(account).await?
 				{
 					// Check if authorization has expired
 					if let Some(expires_at) = auth.expires_at {
@@ -240,7 +250,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 
 		// Check authorization before upload if enabled
 		if self.config.check_authorization_before_upload {
-			if let Some(account) = &self.account {
+			if let Some(account) = self.get_account() {
 				// Calculate requirements
 				let (txs_needed, bytes_needed) = self.auth_manager.calculate_requirements(
 					data.len() as u64,
@@ -250,7 +260,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 
 				// Query current authorization
 				if let Some(auth) =
-					self.submitter.query_account_authorization(account.clone()).await?
+					self.submitter.query_account_authorization(account).await?
 				{
 					// Check if authorization has expired
 					if let Some(expires_at) = auth.expires_at {
@@ -389,7 +399,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 
 		// Check authorization before upload if enabled
 		if self.config.check_authorization_before_upload {
-			if let Some(account) = &self.account {
+			if let Some(account) = self.get_account() {
 				// Calculate requirements
 				let (txs_needed, bytes_needed) = self.auth_manager.calculate_requirements(
 					data.len() as u64,
@@ -399,7 +409,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 
 				// Query current authorization
 				if let Some(auth) =
-					self.submitter.query_account_authorization(account.clone()).await?
+					self.submitter.query_account_authorization(account).await?
 				{
 					// Check if authorization has expired
 					if let Some(expires_at) = auth.expires_at {
@@ -511,6 +521,31 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		bytes: u64,
 	) -> Result<TransactionReceipt> {
 		self.submitter.submit_authorize_account(who, transactions, bytes).await
+	}
+
+	/// Estimate and authorize an account to store data of a given size.
+	///
+	/// This is a convenience method that combines `estimate_authorization` and `authorize_account`.
+	/// Useful for testing or when you want to authorize based on data size directly.
+	///
+	/// Requires sudo/authorizer privileges.
+	///
+	/// # Arguments
+	///
+	/// * `who` - Account to authorize
+	/// * `data_size` - Size of data in bytes
+	///
+	/// # Returns
+	///
+	/// Returns the transaction receipt and the estimated values (transactions, bytes)
+	pub async fn authorize_account_for_size(
+		&self,
+		who: AccountId32,
+		data_size: u64,
+	) -> Result<(TransactionReceipt, u32, u64)> {
+		let (transactions, bytes) = self.estimate_authorization(data_size);
+		let receipt = self.authorize_account(who, transactions, bytes).await?;
+		Ok((receipt, transactions, bytes))
 	}
 
 	/// Authorize a preimage (by content hash) to be stored.
