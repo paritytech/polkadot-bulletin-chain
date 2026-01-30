@@ -2,13 +2,17 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from './api.js';
-import { setupKeyringAndSigners, getContentHash } from './common.js';
+import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { setupKeyringAndSigners, getContentHash, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-const NODE_WS = 'ws://localhost:10000';
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 /**
  * Run a preimage authorization + store test.
@@ -23,7 +27,7 @@ const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
  * @param {object|null} client - Client for unsigned transactions
  */
 async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, signerAddress, cidCodec, mhCode, client) {
-    console.log(`\n========== ${testName} ==========\n`);
+    logSection(testName);
 
     // Data to store
     const dataToStore = `Hello, Bulletin - ${testName} - ${new Date().toString()}`;
@@ -39,28 +43,30 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         bulletinAPI,
         sudoSigner,
         contentHash,
-        BigInt(dataToStore.length)
+        BigInt(dataToStore.length),
+        TX_MODE_FINALIZED_BLOCK
     );
 
     // If signer is provided, also authorize the account (to increment inc_providers/inc_sufficients for `CheckNonce`).
     if (signer != null && signerAddress != null) {
-        console.log(`ℹ️ Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
+        logInfo(`Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
         await authorizeAccount(
             bulletinAPI,
             sudoSigner,
             signerAddress,
             10,        // dummy transactions
-            BigInt(10000)  // dummy bytes
+            BigInt(10000),  // dummy bytes
+            TX_MODE_FINALIZED_BLOCK
         );
     }
 
     // Store data
-    const cid = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
-    console.log("✅ Data stored successfully with CID:", cid.toString());
+    const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
+    logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
     // Read back from IPFS
     const downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
-    console.log("✅ Downloaded content:", downloadedContent.toString());
+    logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
 
     // Verify CID matches
     assert.deepStrictEqual(
@@ -76,11 +82,14 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         '❌ Stored data does not match downloaded content!'
     );
 
-    console.log(`✅ Verified content!`);
+    logSuccess('Verified content!');
 }
 
 async function main() {
     await cryptoWaitReady();
+
+    logHeader('AUTHORIZE PREIMAGE AND STORE TEST');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
     let client, resultCode;
     try {
@@ -89,7 +98,7 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Preimagesigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Preimagesigner');
 
         // Test 1: Unsigned store with preimage auth (default CID config)
         await runPreimageStoreTest(
@@ -116,10 +125,11 @@ async function main() {
             client
         );
 
-        console.log(`\n\n\n✅✅✅ All tests passed! ✅✅✅`);
+        logTestResult(true, 'Authorize Preimage and Store Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();

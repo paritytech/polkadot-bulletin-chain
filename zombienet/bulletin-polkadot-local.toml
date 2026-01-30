@@ -11,11 +11,25 @@ name = "alice"
 p2p_port = 10001
 rpc_port = 10000
 validator = true
-args = ["--ipfs-server", "-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug"]
+args = [
+	"--ipfs-server",
+	# Increase tx pool from 20->40 MiB
+	# "--pool-kbytes 40960",
+	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
+	"--listen-addr=/ip4/0.0.0.0/tcp/10002/ws",
+	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
+]
 
 [[relaychain.nodes]]
 name = "bob"
 p2p_port = 12347
 rpc_port = 12346
 validator = true
-args = ["-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug"]
+args = [
+	"--ipfs-server",
+	# Increase tx pool from 20->40 MiB
+	# "--pool-kbytes 40960",
+	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
+	"--listen-addr=/ip4/0.0.0.0/tcp/12348/ws",
+	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
+]
