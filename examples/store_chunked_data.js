@@ -6,7 +6,7 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
@@ -19,7 +19,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8080';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 
 /**
@@ -215,10 +215,10 @@ async function main() {
         );
         console.log('🧱 DAG stored on IPFS with CID:', rawDagCid.toString())
         console.log('\n🌐 Try opening in browser:')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
-        console.log('   (You’ll see binary content since this is an image)')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rawDagCid.toString()}`)
-        console.log('   (You’ll see the encoded DAG descriptor content)')
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
+        console.log("   (You'll see binary content since this is an image)")
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
+        console.log("   (You'll see the encoded DAG descriptor content)")
 
         // Download the content from IPFS HTTP gateway
         const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);

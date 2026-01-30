@@ -2,7 +2,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
-import { generateTextImage, fileToDisk, filesAreEqual, newSigner, HTTP_IPFS_API } from './common.js';
+import { generateTextImage, fileToDisk, filesAreEqual, newSigner, DEFAULT_IPFS_GATEWAY_URL as HTTP_IPFS_API } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
@@ -62,10 +62,10 @@ async function main() {
         // (Other words Bulletin is compatible)
         console.log('🧱 DAG stored on Bulletin with CID:', rootCid.toString())
         console.log('\n🌐 Try opening in browser:')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
         console.log("   (You'll see binary content since this is an image)")
         console.log('')
-        console.log(`   http://127.0.0.1:8080/ipfs/${convertCid(rootCid, 0x55)}`)
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${convertCid(rootCid, 0x55)}`)
         console.log("   (You'll see the DAG file itself)")
 
         // Download the content from IPFS HTTP gateway.

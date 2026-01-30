@@ -2,35 +2,51 @@
 
 THIS_DIR=$(cd $(dirname $0); pwd)
 
-# Choose mode based on argument
+# Arguments: mode [sleep_interval]
 mode="${1:-local}"
+sleep_interval="${2:-2}"
 if [ "$mode" = "docker" ]; then
     check_cmd="docker exec ipfs-node ipfs"
-    check_host="172.17.0.1"
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      # macOS - use dns4/host.docker.internal (bridge network)
+      check_protocol="dns4"
+      check_host="host.docker.internal"
+    else
+      # Linux - use ip4/127.0.0.1 (host network mode)
+      check_protocol="ip4"
+      check_host="127.0.0.1"
+    fi
 else
     check_cmd="${THIS_DIR}/../kubo/ipfs"
+    check_protocol="ip4"
     check_host="127.0.0.1"
 fi
 
-# Peers to monitor
-PEERS_TO_CHECK=(
-    "/ip4/${check_host}/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
-    "/ip4/${check_host}/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
+# Peer IDs to monitor
+PEER_IDS=(
+    "12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
+    "12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
 )
+
+# Full addresses for connecting (WebSocket ports: 10002, 12348)
+declare -A PEER_ADDRS
+PEER_ADDRS["12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"]="/${check_protocol}/${check_host}/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
+PEER_ADDRS["12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"]="/${check_protocol}/${check_host}/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
 
 while true; do
     # Read all current connections once
     PEERS="$(${check_cmd} swarm peers)"
+    echo "Connected peers: $PEERS"
 
-    for PEER in "${PEERS_TO_CHECK[@]}"; do
-        echo "$PEERS" | grep -q "$PEER"
-        if [ $? -ne 0 ]; then
-            echo "$(date) - $PEER disconnected. Reconnecting..."
-            ${check_cmd} swarm connect "$PEER"
+    for PEER_ID in "${PEER_IDS[@]}"; do
+        if echo "$PEERS" | grep -q "$PEER_ID"; then
+            echo "$(date) - $PEER_ID connected."
         else
-            echo "$(date) - $PEER connected."
+            echo "$(date) - $PEER_ID disconnected. Reconnecting..."
+            ${check_cmd} swarm connect "${PEER_ADDRS[$PEER_ID]}"
         fi
     done
 
-    sleep 2
+    sleep "$sleep_interval"
 done
