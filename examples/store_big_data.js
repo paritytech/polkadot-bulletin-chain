@@ -155,57 +155,65 @@ async function printStatistics(dataSize, typedApi) {
     const avgTxsPerBlock = totalBlocksInRange > 0 ? (numTxs / totalBlocksInRange).toFixed(2) : 'N/A';
 
     // Fetch block timestamps for all blocks in range
+    // Query at the last known block to ensure all previous blocks are visible
+    const lastKnownBlockHash = stats.blockHashes[endBlock];
     const blockTimestamps = {};
     for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
         try {
-            // Get block hash - either from our stored hashes or query the chain
+            // Get block hash - either from stored or query at last known block
             let blockHash = stats.blockHashes[blockNum];
             if (!blockHash) {
-                const queriedHash = await typedApi.query.System.BlockHash.getValue(blockNum);
-                // Handle different hash formats (string, Binary, Uint8Array)
-                // PAPI Binary objects have asHex() method, fall back to toString()
-                const hashStr = typeof queriedHash === 'string'
-                    ? queriedHash
-                    : (queriedHash?.asHex?.() || queriedHash?.toHex?.() || queriedHash?.toString?.() || '');
-                // Check if hash is not empty (all zeros means pruned/unavailable)
-                if (hashStr && !hashStr.match(/^(0x)?0+$/)) {
-                    blockHash = queriedHash;
-                }
+                blockHash = await typedApi.query.System.BlockHash.getValue(blockNum, { at: lastKnownBlockHash });
             }
-            if (blockHash) {
-                const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHash });
-                blockTimestamps[blockNum] = timestamp;
+            // Convert Binary/Uint8Array to hex string for PAPI's at parameter
+            const blockHashHex = typeof blockHash === 'string'
+                ? blockHash
+                : (blockHash?.asHex?.() || blockHash?.toHex?.() || '0x' + Buffer.from(blockHash).toString('hex'));
+            // Skip blocks with zero hash (pruned)
+            if (blockHashHex.match(/^(0x)?0+$/)) {
+                continue;
             }
+            const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHashHex });
+            blockTimestamps[blockNum] = timestamp;
         } catch (e) {
             console.error(`Failed to fetch timestamp for block #${blockNum}:`, e.message);
         }
     }
 
     console.log('\n');
-    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log('                                       📊 STORAGE STATISTICS                                            ');
-    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    // Calculate average block time from timestamps
+    const startTimestamp = blockTimestamps[startBlock];
+    const endTimestamp = blockTimestamps[endBlock];
+    const avgBlockTime = (startTimestamp && endTimestamp && blocksElapsed > 0)
+        ? (Number(endTimestamp) - Number(startTimestamp)) / blocksElapsed
+        : null;
+
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('📊 STORAGE STATISTICS');
+    console.log('════════════════════════════════════════════════════════════════════════════════');
     console.log(`│ File size           │ ${formatBytes(dataSize).padEnd(25)} │`);
     console.log(`│ Chunk/TX size       │ ${formatBytes(CHUNK_SIZE).padEnd(25)} │`);
     console.log(`│ Number of chunks    │ ${numTxs.toString().padEnd(25)} │`);
-    console.log(`│ Avg txs per block   │ ${`${avgTxsPerBlock} (${numTxs}/${totalBlocksInRange})`.padEnd(25)} │`);
+    console.log(`│ Avg txs per block   │ ${`${avgTxsPerBlock} (${numTxs} txs in #${startBlock} → #${endBlock})`.padEnd(25)} │`);
+    console.log(`│ Avg block time      │ ${(avgBlockTime ? formatDuration(avgBlockTime) : 'N/A').padEnd(25)} │`);
     console.log(`│ Time elapsed        │ ${formatDuration(elapsed).padEnd(25)} │`);
     console.log(`│ Blocks elapsed      │ ${`${blocksElapsed} (#${startBlock} → #${endBlock})`.padEnd(25)} │`);
-    console.log(`│ Throughput          │ ${formatBytes(dataSize / (elapsed / 1000)).padEnd(22)} /s │`);
-    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log('                                      📦 TRANSACTIONS PER BLOCK                                         ');
-    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log('│ Block       │ Time                    │ TXs │ Size         │ Bar                  │');
-    console.log('├─────────────┼─────────────────────────┼─────┼──────────────┼──────────────────────┤');
+    console.log(`│ Throughput/sec      │ ${(formatBytes(dataSize / (elapsed / 1000)) + '/s').padEnd(25)} │`);
+    console.log(`│ Throughput/block    │ ${(formatBytes(dataSize / totalBlocksInRange) + '/block').padEnd(25)} │`);
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('📦 TRANSACTIONS PER BLOCK');
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('│ Block       │ Time                │ TXs │ Size         │ Bar                  │');
+    console.log('├─────────────┼─────────────────────┼─────┼──────────────┼──────────────────────┤');
     for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
         const count = txsPerBlock[blockNum] || 0;
         const size = count > 0 ? formatBytes(count * CHUNK_SIZE) : '-';
         const bar = count > 0 ? '█'.repeat(Math.min(count, 20)) : '';
         const timestamp = blockTimestamps[blockNum];
-        const timeStr = timestamp ? new Date(Number(timestamp)).toISOString().replace('T', ' ').replace('Z', '') : '-';
-        console.log(`│ #${blockNum.toString().padEnd(10)} │ ${timeStr.padEnd(23)} │ ${count.toString().padStart(3)} │ ${size.padEnd(12)} │ ${bar.padEnd(20)} │`);
+        const timeStr = timestamp ? new Date(Number(timestamp)).toISOString().replace('T', ' ').slice(0, 19) : '-';
+        console.log(`│ #${blockNum.toString().padEnd(10)} │ ${timeStr.padEnd(19)} │ ${count.toString().padStart(3)} │ ${size.padEnd(12)} │ ${bar.padEnd(20)} │`);
     }
-    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('════════════════════════════════════════════════════════════════════════════════');
     console.log('\n');
 }
 
