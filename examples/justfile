@@ -632,155 +632,33 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed
 # ============================================================================
 #
 # Run store-big-data test against live Bulletin chain deployments.
-# These require pre-authorized accounts and a local Docker Kubo connected to collators.
+# These require pre-authorized accounts.
 #
 # Usage:
 #   just run-live-tests-westend <seed>
 #   just run-live-tests-westend <seed> http://127.0.0.1:8283 small
-#   just run-live-tests-paseo <seed>
-#
-# Prerequisites for IPFS retrieval:
-#   1. Start local IPFS: docker run -d --name ipfs-node -p 4011:4011 -p 5011:5011 -p 8283:8283 ipfs/kubo:latest
-#   2. Connect to Bulletin IPFS nodes: docker exec ipfs-node ipfs swarm connect <multiaddr>
-#      (Get multiaddrs by querying the collators' IPFS peer info)
 
 # Live network endpoints
 WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
 PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
 
-# Run store-big-data-live test against a live endpoint
+# Run store-big-data test against a live endpoint
 # Parameters:
 #   ws_url - WebSocket URL of the Bulletin chain node
 #   seed - Account seed phrase (must be pre-authorized on the network)
-#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283 for local Docker Kubo)
-#   image_size - Image size preset: small, big32, big64, big96 (default: small for live tests)
+#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
+#   image_size - Image size preset: small, big32, big64, big96 (default: small)
 _run-live-tests ws_url seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small": npm-install
     #!/usr/bin/env bash
     set -e
     echo "🌐 Running live tests against: {{ ws_url }}"
-    echo "   IPFS Gateway: {{ ipfs_gateway_url }}"
-    echo "   Image size: {{ image_size }}"
-
     just papi-generate "{{ ws_url }}"
-
-    # Check if IPFS peers are configured for live network
-    EXTRA_FLAGS=""
-    if [ -z "$WESTEND_PEER1_ID" ] || [ -z "$WESTEND_PEER1_ADDR" ]; then
-        echo ""
-        echo "⚠️  IPFS peer info not configured - running storage-only test."
-        echo "   To enable IPFS verification, set WESTEND_PEER1_ID and WESTEND_PEER1_ADDR."
-        echo ""
-        EXTRA_FLAGS="--skip-ipfs-verify"
-    fi
-
-    node store_big_data_live.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" $EXTRA_FLAGS
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" --skip-authorize --skip-ipfs-verify
 
 # Run live tests against Westend Bulletin
-# Parameters:
-#   seed - Account seed phrase (must be pre-authorized on the network)
-#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
-#   image_size - Image size preset: small, big32, big64, big96 (default: small)
 run-live-tests-westend seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
     just _run-live-tests "{{ WESTEND_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
 
 # Run live tests against Paseo Bulletin
-# Parameters:
-#   seed - Account seed phrase (must be pre-authorized on the network)
-#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
-#   image_size - Image size preset: small, big32, big64, big96 (default: small)
 run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
     just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
-
-# Setup IPFS for live network testing (starts Docker Kubo)
-setup-live-ipfs:
-    #!/usr/bin/env bash
-    set -e
-    echo "🐳 Setting up IPFS for live network testing..."
-
-    # Stop existing container if running
-    docker stop ipfs-node 2>/dev/null || true
-    docker rm ipfs-node 2>/dev/null || true
-    docker volume rm ipfs-data 2>/dev/null || true
-
-    # Pull and start fresh kubo container
-    docker pull ipfs/kubo:latest
-    docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4011:4011 -p 5011:5011 -p 8283:8283 ipfs/kubo:latest
-
-    echo "   Waiting for IPFS to initialize..."
-    sleep 5
-
-    # Configure for isolated mode (no public DHT)
-    docker exec ipfs-node ipfs bootstrap rm --all
-    docker exec ipfs-node ipfs config --json Routing.Type '"none"'
-    docker exec ipfs-node ipfs config --json Discovery.MDNS.Enabled false
-
-    # Restart to apply config
-    docker restart ipfs-node
-    sleep 5
-
-    docker exec ipfs-node ipfs --version
-    echo "✅ IPFS ready. Connect to bulletin nodes with:"
-    echo "   docker exec ipfs-node ipfs swarm connect <multiaddr>"
-
-# Connect IPFS to live Westend Bulletin network
-# Requires environment variables: WESTEND_PEER1_ID, WESTEND_PEER1_ADDR
-# Optional: WESTEND_PEER2_ID, WESTEND_PEER2_ADDR
-connect-live-ipfs-westend:
-    #!/usr/bin/env bash
-    set -e
-
-    if [ -z "$WESTEND_PEER1_ID" ] || [ -z "$WESTEND_PEER1_ADDR" ]; then
-        echo "❌ Error: Live Westend peer info not configured."
-        echo ""
-        echo "Please set environment variables:"
-        echo "  export WESTEND_PEER1_ID='12D3KooW...'"
-        echo "  export WESTEND_PEER1_ADDR='/dns4/collator.example.com/tcp/30333/ws'"
-        echo ""
-        echo "Get these from the Westend Bulletin collator operators."
-        exit 1
-    fi
-
-    echo "🔗 Connecting to live Westend Bulletin IPFS nodes..."
-    ADDR1="${WESTEND_PEER1_ADDR}/p2p/${WESTEND_PEER1_ID}"
-    echo "   Peer 1: $ADDR1"
-    docker exec ipfs-node ipfs swarm connect "$ADDR1" || true
-
-    if [ -n "$WESTEND_PEER2_ID" ] && [ -n "$WESTEND_PEER2_ADDR" ]; then
-        ADDR2="${WESTEND_PEER2_ADDR}/p2p/${WESTEND_PEER2_ID}"
-        echo "   Peer 2: $ADDR2"
-        docker exec ipfs-node ipfs swarm connect "$ADDR2" || true
-    fi
-
-    echo "✅ IPFS connection attempted. Check with: docker exec ipfs-node ipfs swarm peers"
-
-# Start IPFS reconnect script for live Westend network
-# Requires environment variables: WESTEND_PEER1_ID, WESTEND_PEER1_ADDR
-ipfs-reconnect-live-westend-start test_dir:
-    #!/usr/bin/env bash
-    set -e
-
-    if [ -z "$WESTEND_PEER1_ID" ] || [ -z "$WESTEND_PEER1_ADDR" ]; then
-        echo "❌ Error: Live Westend peer info not configured."
-        exit 1
-    fi
-
-    echo "🔄 Starting IPFS reconnect for live Westend..."
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    cd "$ROOT_DIR"
-    ./scripts/ipfs-reconnect-westend-live.sh docker 10 > {{ test_dir }}/ipfs-reconnect-live.log 2>&1 &
-    cd -
-
-    RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-live.pid
-    echo "   Reconnect PID: $RECONNECT_PID"
-    echo "   Log: {{ test_dir }}/ipfs-reconnect-live.log"
-    sleep 2
-
-# Teardown IPFS for live network testing
-teardown-live-ipfs:
-    #!/usr/bin/env bash
-    echo "🛑 Tearing down IPFS for live testing..."
-    docker stop ipfs-node 2>/dev/null || true
-    docker rm ipfs-node 2>/dev/null || true
-    docker volume rm ipfs-data 2>/dev/null || true
-    echo "✅ IPFS teardown complete"
