@@ -466,6 +466,25 @@ run-test-authorize-preimage-and-store test_dir:
     echo "🧪 Running authorize preimage and store test (test_dir: {{ test_dir }})..."
     node authorize_preimage_and_store_papi.js
 
+# Run all tests (services must already be running via start-services)
+# This is a convenience recipe that runs all tests in sequence
+# Parameters:
+#   test_dir - Test directory where services are running
+#   runtime - Runtime name for mode-specific tests (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+run-all-tests test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    echo "🧪 Running all tests..."
+
+    just run-test-authorize-and-store "{{ test_dir }}" "{{ runtime }}" "ws"
+    just run-test-rust-authorize-and-store "{{ test_dir }}"
+    just run-test-authorize-and-store "{{ test_dir }}" "{{ runtime }}" "smoldot"
+    just run-test-store-chunked-data "{{ test_dir }}"
+    just run-test-store-big-data "{{ test_dir }}"
+    just run-test-authorize-preimage-and-store "{{ test_dir }}"
+
+    echo "✅ All tests passed!"
+
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
 # ============================================================================

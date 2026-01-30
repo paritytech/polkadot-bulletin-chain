@@ -148,29 +148,9 @@ jobs:
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           just start-services "$TEST_DIR" "bulletin-westend-runtime"
 
-      - name: Test authorize-and-store ws (Westend parachain)
+      - name: Run all tests (Westend parachain)
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
-
-      - name: Test Rust authorize-and-store (Westend parachain)
-        working-directory: examples
-        run: just run-test-rust-authorize-and-store "${{ env.TEST_DIR }}"
-
-      - name: Test authorize-and-store smoldot (Westend parachain)
-        working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"
-
-      - name: Test store-chunked-data (Westend parachain)
-        working-directory: examples
-        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
-
-      - name: Test store-big-data (Westend parachain)
-        working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
-
-      - name: Test authorize-preimage-and-store (Westend parachain)
-        working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+        run: just run-all-tests "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
 
       - name: Stop services (Westend parachain)
         if: always()
@@ -187,29 +167,9 @@ jobs:
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           just start-services "$TEST_DIR" "bulletin-polkadot-runtime"
 
-      - name: Test authorize-and-store ws (Polkadot solochain)
+      - name: Run all tests (Polkadot solochain)
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "ws"
-
-      - name: Test Rust authorize-and-store (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-rust-authorize-and-store "${{ env.TEST_DIR }}"
-
-      - name: Test authorize-and-store smoldot (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "smoldot"
-
-      - name: Test store-chunked-data (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
-
-      - name: Test store-big-data (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}"
-
-      - name: Test authorize-preimage-and-store (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+        run: just run-all-tests "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
 
       - name: Stop services (Polkadot solochain)
         if: always()
