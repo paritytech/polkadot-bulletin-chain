@@ -1,9 +1,9 @@
 ---
 name: review
-description: Review local changes or a PR
+description: Review local changes or a pull request
 ---
 
-If no arguments are passed, review the local changes by looking at the diff between the base branch and the current branch.
+If no arguments are passed, review the local changes by looking at the diff between the base branch - main by default - and the current branch.
 If arguments are passed, review pull request #$ARGUMENTS by fetching it and seeing its details with `gh pr view` and `gh pr diff`.
 
 When reviewing, analyze for:
