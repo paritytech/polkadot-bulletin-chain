@@ -35,6 +35,7 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 
 # Local workspace members
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
+bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
@@ -171,6 +172,7 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [workspace]
 resolver = "2"
 members = [
+	"examples/rust-authorize-and-store",
 	"node",
 	"pallets/common",
 	"pallets/relayer-set",
@@ -180,6 +182,7 @@ members = [
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
+	"sdk/rust",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.
