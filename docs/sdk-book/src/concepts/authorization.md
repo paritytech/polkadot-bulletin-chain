@@ -1,6 +1,6 @@
 # Authorization
 
-Before storing data, you must authorize the storage. This mechanism prevents spam and ensures users pay for the state bloat they introduce.
+Before storing data, you must authorize the storage. This mechanism prevents spam and ensures users pay for the storage they introduce.
 
 ## Types of Authorization
 
