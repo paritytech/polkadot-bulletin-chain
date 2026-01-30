@@ -96,9 +96,36 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		self
 	}
 
-	/// Store data on Bulletin Chain.
+	/// Store data on Bulletin Chain with default options.
 	///
+	/// Uses default CID codec (raw) and hash algorithm (blake2b-256).
 	/// Automatically chunks data if it exceeds the configured threshold.
+	///
+	/// This handles the complete workflow:
+	/// 1. Check authorization (if enabled)
+	/// 2. Decide whether to chunk based on data size
+	/// 3. Calculate CID(s)
+	/// 4. Submit transaction(s)
+	/// 5. Wait for finalization
+	///
+	/// # Arguments
+	///
+	/// * `data` - Data to store
+	/// * `progress_callback` - Optional callback for progress tracking (only called for chunked
+	///   uploads)
+	pub async fn store(
+		&self,
+		data: Vec<u8>,
+		progress_callback: Option<ProgressCallback>,
+	) -> Result<StoreResult> {
+		self.store_with_options(data, StoreOptions::default(), progress_callback).await
+	}
+
+	/// Store data on Bulletin Chain with custom options.
+	///
+	/// Allows specifying custom CID codec, hash algorithm, and finalization behavior.
+	/// Automatically chunks data if it exceeds the configured threshold.
+	///
 	/// This handles the complete workflow:
 	/// 1. Check authorization (if enabled)
 	/// 2. Decide whether to chunk based on data size
@@ -112,7 +139,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 	/// * `options` - Storage options (CID codec, hash algorithm)
 	/// * `progress_callback` - Optional callback for progress tracking (only called for chunked
 	///   uploads)
-	pub async fn store(
+	pub async fn store_with_options(
 		&self,
 		data: Vec<u8>,
 		options: StoreOptions,

@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Prepare and store data
     let data = b"Hello, Bulletin!".to_vec();
-    let result = client.store(data, StoreOptions::default(), None).await?;
+    let result = client.store(data, None).await?;
 
     // 3. Get results
     println!("Stored successfully!");
@@ -95,10 +95,13 @@ The `store()` method automatically handles everything:
 ```rust
 // For small files (< 2 MiB): single transaction
 // For large files (> 2 MiB): automatic chunking
-let result = client.store(data, options, None).await?;
+let result = client.store(data, None).await?;
+
+// With custom options (advanced users)
+let result = client.store_with_options(data, options, None).await?;
 
 // With progress tracking for large files
-let result = client.store(data, options, Some(|event| {
+let result = client.store(data, Some(|event| {
     match event {
         ProgressEvent::ChunkCompleted { index, total, .. } => {
             println!("Chunk {}/{} uploaded", index + 1, total);
@@ -141,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store data
     let data = format!("Hello from Rust SDK at {}", chrono::Utc::now());
     let result = client
-        .store(data.as_bytes().to_vec(), StoreOptions::default(), None)
+        .store(data.as_bytes().to_vec(), None)
         .await?;
 
     println!("✅ Stored successfully!");
@@ -170,7 +173,7 @@ let client = AsyncBulletinClient::new(submitter)
 
 // 2. Upload - authorization is checked automatically
 let data = b"Hello, Bulletin!".to_vec();
-let result = client.store(data, StoreOptions::default(), None).await?;
+let result = client.store(data, None).await?;
 //                       ⬆️ Queries blockchain first, fails fast if insufficient auth
 ```
 
@@ -200,7 +203,7 @@ let client = AsyncBulletinClient::with_config(submitter, config)
 
 ```rust
 // Insufficient authorization fails fast
-match client.store(data, options, None).await {
+match client.store(data, None).await {
     Err(Error::InsufficientAuthorization { need, available }) => {
         eprintln!("Need {} bytes but only {} available", need, available);
         eprintln!("Please authorize your account first!");
@@ -240,7 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // client.authorize_account(account, txs, bytes).await?;
 
     // Store - will check authorization automatically
-    match client.store(data, StoreOptions::default(), None).await {
+    match client.store(data, None).await {
         Ok(result) => {
             println!("✅ Stored: {}", hex::encode(&result.cid));
         }
@@ -263,7 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Error Handling
 
 ```rust
-match client.store(data, options, None).await {
+match client.store(data, None).await {
     Ok(result) => {
         println!("Success! CID: {}", hex::encode(&result.cid));
     }
@@ -295,7 +298,7 @@ mod tests {
         let client = AsyncBulletinClient::new(submitter);
 
         let data = b"test data".to_vec();
-        let result = client.store(data, StoreOptions::default(), None).await;
+        let result = client.store(data, None).await;
 
         assert!(result.is_ok());
     }
