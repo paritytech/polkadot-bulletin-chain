@@ -39,7 +39,7 @@ let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
 let client = AsyncBulletinClient::new(submitter);
 
 // Store data - complete workflow
-let result = client.store(data, StoreOptions::default()).await?;
+let result = client.store(data, None).await?;
 ```
 
 Proceed to [Installation](./installation.md) to get started.
