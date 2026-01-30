@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from "os";
 import path from "path";
 import assert from "assert";
-import { authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
+import {authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK, TX_MODE_IN_BLOCK} from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
@@ -154,40 +154,51 @@ async function printStatistics(dataSize, typedApi) {
             // Get block hash - either from our stored hashes or query the chain
             let blockHash = stats.blockHashes[blockNum];
             if (!blockHash) {
-                blockHash = await typedApi.query.System.BlockHash.getValue(blockNum);
+                const queriedHash = await typedApi.query.System.BlockHash.getValue(blockNum);
+                // Handle different hash formats (string, Binary, Uint8Array)
+                // PAPI Binary objects have asHex() method, fall back to toString()
+                const hashStr = typeof queriedHash === 'string'
+                    ? queriedHash
+                    : (queriedHash?.asHex?.() || queriedHash?.toHex?.() || queriedHash?.toString?.() || '');
+                // Check if hash is not empty (all zeros means pruned/unavailable)
+                if (hashStr && !hashStr.match(/^(0x)?0+$/)) {
+                    blockHash = queriedHash;
+                }
             }
             if (blockHash) {
                 const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHash });
                 blockTimestamps[blockNum] = timestamp;
             }
         } catch (e) {
-            // Timestamp not available for this block
+            console.error(`Failed to fetch timestamp for block #${blockNum}:`, e.message);
         }
     }
 
     console.log('\n');
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log('                                     📊 STORAGE STATISTICS                                         ');
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log(`| File size           | ${formatBytes(dataSize).padEnd(20)} |`);
-    console.log(`| Chunk/TX size       | ${formatBytes(CHUNK_SIZE).padEnd(20)} |`);
-    console.log(`| Number of chunks    | ${numTxs.toString().padEnd(20)} |`);
-    console.log(`| Avg txs per block   | ${`${avgTxsPerBlock} (${numTxs}/${totalBlocksInRange})`.padEnd(20)} |`);
-    console.log(`| Time elapsed        | ${formatDuration(elapsed).padEnd(20)} |`);
-    console.log(`| Blocks elapsed      | ${`${blocksElapsed} (#${startBlock} → #${endBlock})`.padEnd(20)} |`);
-    console.log(`| Throughput          | ${formatBytes(dataSize / (elapsed / 1000)).padEnd(20)} /s |`);
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
-    console.log('                                    📦 TRANSACTIONS PER BLOCK                                      ');
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('                                       📊 STORAGE STATISTICS                                            ');
+    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log(`│ File size           │ ${formatBytes(dataSize).padEnd(25)} │`);
+    console.log(`│ Chunk/TX size       │ ${formatBytes(CHUNK_SIZE).padEnd(25)} │`);
+    console.log(`│ Number of chunks    │ ${numTxs.toString().padEnd(25)} │`);
+    console.log(`│ Avg txs per block   │ ${`${avgTxsPerBlock} (${numTxs}/${totalBlocksInRange})`.padEnd(25)} │`);
+    console.log(`│ Time elapsed        │ ${formatDuration(elapsed).padEnd(25)} │`);
+    console.log(`│ Blocks elapsed      │ ${`${blocksElapsed} (#${startBlock} → #${endBlock})`.padEnd(25)} │`);
+    console.log(`│ Throughput          │ ${formatBytes(dataSize / (elapsed / 1000)).padEnd(22)} /s │`);
+    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('                                      📦 TRANSACTIONS PER BLOCK                                         ');
+    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('│ Block       │ Time                    │ TXs │ Size         │ Bar                  │');
+    console.log('├─────────────┼─────────────────────────┼─────┼──────────────┼──────────────────────┤');
     for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
         const count = txsPerBlock[blockNum] || 0;
         const size = count > 0 ? formatBytes(count * CHUNK_SIZE) : '-';
         const bar = count > 0 ? '█'.repeat(Math.min(count, 20)) : '';
         const timestamp = blockTimestamps[blockNum];
         const timeStr = timestamp ? new Date(Number(timestamp)).toISOString().replace('T', ' ').replace('Z', '') : '-';
-        console.log(`| Block #${blockNum.toString().padEnd(8)} | ${timeStr.padEnd(23)} | ${count.toString().padStart(3)} txs | ${size.padEnd(12)} | ${bar}`);
+        console.log(`│ #${blockNum.toString().padEnd(10)} │ ${timeStr.padEnd(23)} │ ${count.toString().padStart(3)} │ ${size.padEnd(12)} │ ${bar.padEnd(20)} │`);
     }
-    console.log('═══════════════════════════════════════════════════════════════════════════════════════════════════');
+    console.log('════════════════════════════════════════════════════════════════════════════════════════════════════════');
     console.log('\n');
 }
 
@@ -296,7 +307,7 @@ async function main() {
             dagBytes,
             0x70,   // dag-pb codec
             0xb220, // blake2b-256
-            TX_MODE_FINALIZED_BLOCK
+            TX_MODE_IN_BLOCK
         );
         console.log(`Downloading...${cid} / ${rootCid}`);
         assert.deepStrictEqual(cid, rootCid, '❌ CID mismatch between stored and computed DAG root');
