@@ -90,6 +90,17 @@ pub trait TransactionSubmitter: Send + Sync {
 	async fn query_current_block(&self) -> Result<Option<u32>> {
 		Ok(None)
 	}
+
+	/// Get the account ID of the signer (if available).
+	///
+	/// Returns `None` if this submitter doesn't have a signer or can't derive the account.
+	/// Default implementation returns `None`.
+	///
+	/// Useful for automatically setting the account for authorization checks without
+	/// requiring the user to manually specify it.
+	fn signer_account(&self) -> Option<AccountId32> {
+		None
+	}
 }
 
 /// Receipt from a successful transaction.
