@@ -183,9 +183,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		if self.config.check_authorization_before_upload {
 			if let Some(account) = self.get_account() {
 				// Query current authorization
-				if let Some(auth) =
-					self.submitter.query_account_authorization(account).await?
-				{
+				if let Some(auth) = self.submitter.query_account_authorization(account).await? {
 					// Check if authorization has expired
 					if let Some(expires_at) = auth.expires_at {
 						if let Some(current_block) = self.submitter.query_current_block().await? {
@@ -259,9 +257,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 				);
 
 				// Query current authorization
-				if let Some(auth) =
-					self.submitter.query_account_authorization(account).await?
-				{
+				if let Some(auth) = self.submitter.query_account_authorization(account).await? {
 					// Check if authorization has expired
 					if let Some(expires_at) = auth.expires_at {
 						if let Some(current_block) = self.submitter.query_current_block().await? {
@@ -408,9 +404,7 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 				);
 
 				// Query current authorization
-				if let Some(auth) =
-					self.submitter.query_account_authorization(account).await?
-				{
+				if let Some(auth) = self.submitter.query_account_authorization(account).await? {
 					// Check if authorization has expired
 					if let Some(expires_at) = auth.expires_at {
 						if let Some(current_block) = self.submitter.query_current_block().await? {
