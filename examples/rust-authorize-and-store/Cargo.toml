@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 bulletin-sdk-rust = { path = "../../sdk/rust" }
 clap = { version = "4.2", features = ["derive"] }
-subxt = "0.37"
+subxt = { version = "0.37", features = ["substrate-compat"] }
 subxt-signer = { version = "0.37", features = ["sr25519", "subxt"] }
 sp-runtime = { workspace = true }
 tokio = { version = "1.40", features = ["full"] }
