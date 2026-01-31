@@ -8,8 +8,14 @@
 //! 1. Authorize an account to store data
 //! 2. Store data on the Bulletin Chain
 //!
-//! Usage:
-//!   authorize-and-store --ws ws://localhost:10000 --seed "//Alice"
+//! ## Setup
+//!
+//! Before running this example, generate metadata from a running node:
+//!   ./fetch_metadata.sh ws://localhost:10000
+//!
+//! ## Usage
+//!
+//!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
 
 use std::{str::FromStr, sync::Arc};
 
@@ -30,9 +36,8 @@ use subxt::{
 	config::{
 		signed_extensions::{self, SignedExtension},
 		Config, DefaultExtrinsicParamsBuilder, ExtrinsicParams, ExtrinsicParamsEncoder,
-		ExtrinsicParamsError,
+		ExtrinsicParamsError, SubstrateConfig,
 	},
-	dynamic::Value,
 	utils::AccountId32,
 	OnlineClient,
 };
@@ -51,20 +56,24 @@ struct Args {
 	seed: String,
 }
 
-/// Custom Config for Bulletin Chain that includes the ProvideCidConfig signed extension.
+// Generate types from metadata using subxt codegen
+// This reads bulletin_metadata.scale and generates all the necessary types at compile time
+#[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
+pub mod bulletin {}
+
+/// Custom Config for Bulletin Chain extending SubstrateConfig with ProvideCidConfig extension
 pub enum BulletinConfig {}
 
 impl Config for BulletinConfig {
-	type Hash = subxt::utils::H256;
-	type AccountId = subxt::utils::AccountId32;
-	type Address = subxt::utils::MultiAddress<Self::AccountId, ()>;
-	type Signature = subxt::utils::MultiSignature;
-	type Hasher = subxt::config::substrate::BlakeTwo256;
-	type Header = subxt::config::substrate::SubstrateHeader<u32, Self::Hasher>;
+	type Hash = <SubstrateConfig as Config>::Hash;
+	type AccountId = <SubstrateConfig as Config>::AccountId;
+	type Address = <SubstrateConfig as Config>::Address;
+	type Signature = <SubstrateConfig as Config>::Signature;
+	type Hasher = <SubstrateConfig as Config>::Hasher;
+	type Header = <SubstrateConfig as Config>::Header;
 	type ExtrinsicParams = signed_extensions::AnyOf<
 		Self,
 		(
-			// Standard extensions matching DefaultExtrinsicParamsBuilder
 			signed_extensions::CheckSpecVersion,
 			signed_extensions::CheckTxVersion,
 			signed_extensions::CheckNonce,
@@ -73,19 +82,21 @@ impl Config for BulletinConfig {
 			signed_extensions::ChargeAssetTxPayment<Self>,
 			signed_extensions::ChargeTransactionPayment,
 			signed_extensions::CheckMetadataHash,
-			// Bulletin Chain's custom ProvideCidConfig extension
-			ProvideCidConfigExt,
+			ProvideCidConfigExt, // Bulletin Chain's custom extension
 		),
 	>;
-	type AssetId = u32;
+	type AssetId = <SubstrateConfig as Config>::AssetId;
 }
 
 /// Custom signed extension for Bulletin Chain's ProvideCidConfig.
-/// For non-store calls, this should encode as Option::None (0x00).
+///
+/// This extension is required by the TransactionStorage pallet to configure CID codec
+/// and hash algorithm. For non-store calls, this encodes as Option::None.
 pub struct ProvideCidConfigExt;
 
 impl<T: Config> SignedExtension<T> for ProvideCidConfigExt {
 	type Decoded = ();
+
 	fn matches(identifier: &str, _type_id: u32, _types: &PortableRegistry) -> bool {
 		identifier == "ProvideCidConfig"
 	}
@@ -101,15 +112,16 @@ impl<T: Config> ExtrinsicParams<T> for ProvideCidConfigExt {
 
 impl ExtrinsicParamsEncoder for ProvideCidConfigExt {
 	fn encode_extra_to(&self, v: &mut Vec<u8>) {
-		// Encode Option::None as 0x00 byte (no CidConfig for non-store calls)
+		// Encode Option::None for non-store calls (no CID config needed)
 		Option::<()>::None.encode_to(v);
 	}
+
 	fn encode_additional_to(&self, _v: &mut Vec<u8>) {
 		// No additional signed data
 	}
 }
 
-/// Helper to build extrinsic params with our custom extension.
+/// Helper to build extrinsic params with our custom extension
 fn bulletin_params(
 	params: DefaultExtrinsicParamsBuilder<BulletinConfig>,
 ) -> <<BulletinConfig as Config>::ExtrinsicParams as ExtrinsicParams<BulletinConfig>>::Params {
@@ -117,7 +129,7 @@ fn bulletin_params(
 	(a, b, c, d, e, f, g, h, ())
 }
 
-/// Subxt-based implementation of TransactionSubmitter for the SDK.
+/// Subxt-based implementation of TransactionSubmitter for the SDK
 struct SubxtSubmitter {
 	api: OnlineClient<BulletinConfig>,
 	sudo_keypair: Arc<Keypair>,
@@ -137,112 +149,83 @@ impl SubxtSubmitter {
 		}
 	}
 
-	/// Create a new SubxtSubmitter by connecting to a node via WebSocket URL.
-	///
-	/// This is a convenience constructor that handles the connection for you.
-	async fn from_url(
-		url: impl AsRef<str>,
-		sudo_keypair: Keypair,
-		storage_keypair: Keypair,
-	) -> Result<Self> {
-		let api = OnlineClient::<BulletinConfig>::from_url(url)
+	/// Build a TransactionReceipt from subxt's ExtrinsicEvents
+	async fn build_receipt(
+		&self,
+		events: subxt::blocks::ExtrinsicEvents<BulletinConfig>,
+	) -> SdkResult<TransactionReceipt> {
+		let block_hash = events.block_hash();
+		let extrinsic_hash = events.extrinsic_hash();
+
+		// Get block number if available
+		let block = self
+			.api
+			.blocks()
+			.at(block_hash)
 			.await
-			.map_err(|e| anyhow!("Failed to connect to node: {e}"))?;
-		Ok(Self::new(api, sudo_keypair, storage_keypair))
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to get block: {e:?}")))?;
+		let block_number = block.number();
+
+		Ok(TransactionReceipt {
+			block_hash: format!("{:?}", block_hash),
+			extrinsic_hash: format!("{:?}", extrinsic_hash),
+			block_number: Some(block_number),
+		})
 	}
 }
 
 #[async_trait]
 impl TransactionSubmitter for SubxtSubmitter {
 	async fn submit_store(&self, data: Vec<u8>) -> SdkResult<TransactionReceipt> {
-		println!("  SDK: Storing {} bytes of data...", data.len());
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		let store_tx =
-			subxt::dynamic::tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
+		// Use generated store call from metadata
+		let store_tx = bulletin::tx()
+			.transaction_storage()
+			.store(data);
 
-		let tx_progress = self
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&store_tx,
-				self.storage_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch_default(&store_tx, &signer)
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit store tx: {e}")))?;
-
-		println!("  SDK: Store tx submitted, waiting for finalization...");
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Store tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		println!("  SDK: Store finalized, extrinsic hash: {:?}", finalized.extrinsic_hash());
-
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_authorize_account(
 		&self,
-		who: sp_runtime::AccountId32,
+		who: AccountId32,
 		transactions: u32,
 		bytes: u64,
 	) -> SdkResult<TransactionReceipt> {
-		println!(
-			"  SDK: Authorizing account {who} for {transactions} transactions and {bytes} bytes..."
-		);
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		// Build the inner call as a variant for the RuntimeCall enum
-		let inner_call = Value::unnamed_variant(
-			"TransactionStorage",
-			[Value::unnamed_variant(
-				"authorize_account",
-				[
-					Value::from_bytes(AsRef::<[u8]>::as_ref(&who)),
-					Value::u128(transactions as u128),
-					Value::u128(bytes as u128),
-				],
-			)],
-		);
+		// Use generated authorize_account call from metadata
+		let authorize_tx = bulletin::tx()
+			.transaction_storage()
+			.authorize_account(who, transactions, bytes);
 
-		// Wrap in Sudo.sudo
-		let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
+		// Wrap in sudo call
+		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
 
-		let tx_progress = self
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				self.sudo_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
 			.await
-			.map_err(|e| {
-				SdkError::SubmissionFailed(format!("Failed to submit authorize tx: {e}"))
-			})?;
-
-		println!("  SDK: Authorization tx submitted, waiting for finalization...");
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Authorize tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		println!(
-			"  SDK: Authorization finalized, extrinsic hash: {:?}",
-			finalized.extrinsic_hash()
-		);
-
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_authorize_preimage(
@@ -250,216 +233,151 @@ impl TransactionSubmitter for SubxtSubmitter {
 		content_hash: ContentHash,
 		max_size: u64,
 	) -> SdkResult<TransactionReceipt> {
-		println!("  SDK: Authorizing preimage {content_hash:?} with max size {max_size}...");
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		// Build the inner call as a variant for the RuntimeCall enum
-		let inner_call = Value::unnamed_variant(
-			"TransactionStorage",
-			[Value::unnamed_variant(
-				"authorize_preimage",
-				[Value::from_bytes(content_hash), Value::u128(max_size as u128)],
-			)],
-		);
+		let authorize_tx = bulletin::tx()
+			.transaction_storage()
+			.authorize_preimage(content_hash, max_size);
 
-		// Wrap in Sudo.sudo
-		let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
+		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
 
-		let tx_progress = self
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				self.sudo_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
 			.await
-			.map_err(|e| {
-				SdkError::SubmissionFailed(format!("Failed to submit authorize_preimage tx: {e}"))
-			})?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
+			.wait_for_finalized_success()
+			.await
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		let finalized = tx_progress.wait_for_finalized_success().await.map_err(|e| {
-			SdkError::SubmissionFailed(format!("Authorize preimage tx failed: {e}"))
-		})?;
-
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_renew(&self, block: u32, index: u32) -> SdkResult<TransactionReceipt> {
-		let renew_tx = subxt::dynamic::tx(
-			"TransactionStorage",
-			"renew",
-			vec![Value::u128(block as u128), Value::u128(index as u128)],
-		);
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		let tx_progress = self
+		let renew_tx = bulletin::tx()
+			.transaction_storage()
+			.renew(block, index);
+
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&renew_tx,
-				self.storage_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch_default(&renew_tx, &signer)
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit renew tx: {e}")))?;
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Renew tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_refresh_account_authorization(
 		&self,
-		who: sp_runtime::AccountId32,
+		who: AccountId32,
 	) -> SdkResult<TransactionReceipt> {
-		// Build the inner call as a variant for the RuntimeCall enum
-		let inner_call = Value::unnamed_variant(
-			"TransactionStorage",
-			[Value::unnamed_variant(
-				"refresh_account_authorization",
-				[Value::from_bytes(AsRef::<[u8]>::as_ref(&who))],
-			)],
-		);
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		// Wrap in Sudo.sudo
-		let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
+		let refresh_tx = bulletin::tx()
+			.transaction_storage()
+			.refresh_account_authorization(who);
 
-		let tx_progress = self
+		let sudo_tx = bulletin::tx().sudo().sudo(refresh_tx);
+
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				self.sudo_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_refresh_preimage_authorization(
 		&self,
 		content_hash: ContentHash,
 	) -> SdkResult<TransactionReceipt> {
-		// Build the inner call as a variant for the RuntimeCall enum
-		let inner_call = Value::unnamed_variant(
-			"TransactionStorage",
-			[Value::unnamed_variant(
-				"refresh_preimage_authorization",
-				[Value::from_bytes(content_hash)],
-			)],
-		);
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		// Wrap in Sudo.sudo
-		let sudo_tx = subxt::dynamic::tx("Sudo", "sudo", vec![inner_call]);
+		let refresh_tx = bulletin::tx()
+			.transaction_storage()
+			.refresh_preimage_authorization(content_hash);
 
-		let tx_progress = self
+		let sudo_tx = bulletin::tx().sudo().sudo(refresh_tx);
+
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				self.sudo_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_remove_expired_account_authorization(
 		&self,
-		who: sp_runtime::AccountId32,
+		who: AccountId32,
 	) -> SdkResult<TransactionReceipt> {
-		let call = subxt::dynamic::tx(
-			"TransactionStorage",
-			"remove_expired_account_authorization",
-			vec![Value::from_bytes(AsRef::<[u8]>::as_ref(&who))],
-		);
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		let tx_progress = self
+		let remove_tx = bulletin::tx()
+			.transaction_storage()
+			.remove_expired_account_authorization(who);
+
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&call,
-				self.storage_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch_default(&remove_tx, &signer)
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
 	}
 
 	async fn submit_remove_expired_preimage_authorization(
 		&self,
 		content_hash: ContentHash,
 	) -> SdkResult<TransactionReceipt> {
-		let call = subxt::dynamic::tx(
-			"TransactionStorage",
-			"remove_expired_preimage_authorization",
-			vec![Value::from_bytes(content_hash)],
-		);
+		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
 
-		let tx_progress = self
+		let remove_tx = bulletin::tx()
+			.transaction_storage()
+			.remove_expired_preimage_authorization(content_hash);
+
+		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(
-				&call,
-				self.storage_keypair.as_ref(),
-				bulletin_params(DefaultExtrinsicParamsBuilder::new()),
-			)
+			.sign_and_submit_then_watch_default(&remove_tx, &signer)
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit tx: {e}")))?;
-
-		let finalized = tx_progress
+			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Tx failed: {e}")))?;
+			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
 
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", finalized.extrinsic_hash()),
-			extrinsic_hash: format!("{:?}", finalized.extrinsic_hash()),
-			block_number: None,
-		})
+		self.build_receipt(events).await
+	}
+
+	fn signer_account(&self) -> Option<AccountId32> {
+		Some(self.storage_keypair.public_key().into())
 	}
 }
 
@@ -467,41 +385,38 @@ impl TransactionSubmitter for SubxtSubmitter {
 async fn main() -> Result<()> {
 	let args = Args::parse();
 
-	println!("Connecting to: {}", args.ws);
-	println!("Using seed: {}", args.seed);
+	// Parse keypair from seed
+	let keypair = keypair_from_seed(&args.seed)?;
+	println!("Using account: {}", hex::encode(keypair.public_key().0));
 
-	// Create keypairs
-	let sudo_keypair = keypair_from_seed(&args.seed)?;
-	let sudo_account: AccountId32 = sudo_keypair.public_key().into();
-	println!("Sudo account: {sudo_account}");
+	// Connect to Bulletin Chain node
+	println!("Connecting to {}...", args.ws);
+	let api = OnlineClient::<BulletinConfig>::from_url(&args.ws)
+		.await
+		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
+	println!("Connected successfully!");
 
-	let storage_keypair = keypair_from_seed("//Rustsigner")?;
-	let storage_account: AccountId32 = storage_keypair.public_key().into();
-	println!("Storage account: {storage_account}");
+	// Create submitter (Alice as sudo, same account for storage)
+	let submitter = SubxtSubmitter::new(api, keypair.clone(), keypair);
 
-	// Create the SDK client with our subxt-based submitter (connects via URL)
-	let submitter = SubxtSubmitter::from_url(&args.ws, sudo_keypair, storage_keypair).await?;
-	println!("Connected to chain");
-
+	// Create SDK client with the submitter
 	let client = AsyncBulletinClient::new(submitter);
 
-	// Data to store
-	let data_to_store = format!("Hello, Bulletin from Rust SDK - {}", chrono_lite());
-	println!("Data to store: {data_to_store}");
-
-	// Convert subxt AccountId32 to sp_runtime::AccountId32 for the SDK
-	let who = sp_runtime::AccountId32::from(storage_account.0);
-
-	// Step 1: Authorize account using the SDK
+	// Step 1: Authorize the account to store data
 	println!("\nStep 1: Authorizing account...");
 	client
-		.authorize_account(who, 100, 100 * 1024 * 1024)
+		.authorize_account(
+			keypair_from_seed(&args.seed)?.public_key().into(),
+			100,      // 100 transactions
+			100 * 1024 * 1024, // 100 MB
+		)
 		.await
 		.map_err(|e| anyhow!("Failed to authorize account: {e:?}"))?;
 	println!("Account authorized successfully!");
 
 	// Step 2: Store data using the SDK
 	println!("\nStep 2: Storing data...");
+	let data_to_store = format!("Hello from Bulletin SDK at {}", chrono_lite());
 	let result = client
 		.store(data_to_store.as_bytes().to_vec(), None)
 		.await
