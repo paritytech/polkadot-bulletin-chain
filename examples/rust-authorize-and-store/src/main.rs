@@ -177,13 +177,14 @@ impl SubxtSubmitter {
 #[async_trait]
 impl TransactionSubmitter for SubxtSubmitter {
 	async fn submit_store(&self, data: Vec<u8>) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
 		// Use generated store call from metadata
-		let store_tx = bulletin::tx()
-			.transaction_storage()
-			.store(data);
+		let store_tx = bulletin::tx().transaction_storage().store(data);
 
 		let events = self
 			.api
@@ -204,13 +205,15 @@ impl TransactionSubmitter for SubxtSubmitter {
 		transactions: u32,
 		bytes: u64,
 	) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
 		// Use generated authorize_account call from metadata
-		let authorize_tx = bulletin::tx()
-			.transaction_storage()
-			.authorize_account(who, transactions, bytes);
+		let authorize_tx =
+			bulletin::tx().transaction_storage().authorize_account(who, transactions, bytes);
 
 		// Wrap in sudo call
 		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
@@ -233,12 +236,14 @@ impl TransactionSubmitter for SubxtSubmitter {
 		content_hash: ContentHash,
 		max_size: u64,
 	) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
-		let authorize_tx = bulletin::tx()
-			.transaction_storage()
-			.authorize_preimage(content_hash, max_size);
+		let authorize_tx =
+			bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
 		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
 
@@ -256,12 +261,13 @@ impl TransactionSubmitter for SubxtSubmitter {
 	}
 
 	async fn submit_renew(&self, block: u32, index: u32) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
-		let renew_tx = bulletin::tx()
-			.transaction_storage()
-			.renew(block, index);
+		let renew_tx = bulletin::tx().transaction_storage().renew(block, index);
 
 		let events = self
 			.api
@@ -280,12 +286,13 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		who: AccountId32,
 	) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
-		let refresh_tx = bulletin::tx()
-			.transaction_storage()
-			.refresh_account_authorization(who);
+		let refresh_tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
 
 		let sudo_tx = bulletin::tx().sudo().sudo(refresh_tx);
 
@@ -306,8 +313,11 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		content_hash: ContentHash,
 	) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
 		let refresh_tx = bulletin::tx()
 			.transaction_storage()
@@ -332,12 +342,14 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		who: AccountId32,
 	) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
-		let remove_tx = bulletin::tx()
-			.transaction_storage()
-			.remove_expired_account_authorization(who);
+		let remove_tx =
+			bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
 
 		let events = self
 			.api
@@ -356,8 +368,11 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		content_hash: ContentHash,
 	) -> SdkResult<TransactionReceipt> {
-		let signer = subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}")))?;
+		let signer =
+			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
+				.map_err(|e| {
+					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
+				})?;
 
 		let remove_tx = bulletin::tx()
 			.transaction_storage()
@@ -407,7 +422,7 @@ async fn main() -> Result<()> {
 	client
 		.authorize_account(
 			keypair_from_seed(&args.seed)?.public_key().into(),
-			100,      // 100 transactions
+			100,               // 100 transactions
 			100 * 1024 * 1024, // 100 MB
 		)
 		.await

@@ -4,33 +4,43 @@ This example demonstrates using the `bulletin-sdk-rust` with a subxt-based Trans
 
 ## Prerequisites
 
-1. **Running Bulletin Chain node**:
+1. **Running Bulletin Chain node**: You need a running Bulletin Chain node with WebSocket endpoint available
+
+   Example for local development:
    ```bash
    # From project root
    cargo build --release
    ./target/release/polkadot-bulletin-chain --dev --tmp
    ```
 
+   This typically runs on `ws://localhost:10000`, but your setup may differ.
+
 2. **Generate metadata** (required before first build):
    ```bash
    cd examples/rust-authorize-and-store
-   ./fetch_metadata.sh
+   ./fetch_metadata.sh <WS_URL>
    ```
+
+   Where `<WS_URL>` is your node's WebSocket endpoint (e.g., `ws://localhost:10000` or `ws://your-node:9944`).
 
    Or manually:
    ```bash
    # Install subxt CLI if not already installed
    cargo install subxt-cli
 
-   # Fetch metadata from running node
-   subxt metadata --url ws://localhost:10000 -f bytes > bulletin_metadata.scale
+   # Fetch metadata from your running node
+   subxt metadata --url <WS_URL> -f bytes > bulletin_metadata.scale
    ```
 
 ## Usage
 
 ```bash
-cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 ```
+
+Where:
+- `<WS_URL>`: WebSocket URL of your Bulletin Chain node (default: `ws://localhost:10000`)
+- `<SEED>`: Account seed phrase or dev seed like `//Alice` (default: `//Alice`)
 
 ## How it Works
 

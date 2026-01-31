@@ -25,7 +25,7 @@ pub fn hex_to_bytes(hex: &str) -> Result<Vec<u8>> {
 	let hex = hex.trim_start_matches("0x");
 
 	if hex.len() % 2 != 0 {
-		return Err(Error::InvalidConfig("Hex string must have even length".into()))
+		return Err(Error::InvalidConfig("Hex string must have even length".into()));
 	}
 
 	let mut bytes = Vec::with_capacity(hex.len() / 2);
@@ -191,13 +191,13 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 	use crate::chunker::MAX_CHUNK_SIZE;
 
 	if size == 0 {
-		return Err(Error::InvalidConfig("Chunk size cannot be zero".into()))
+		return Err(Error::InvalidConfig("Chunk size cannot be zero".into()));
 	}
 
 	if size > MAX_CHUNK_SIZE as u64 {
 		return Err(Error::InvalidConfig(alloc::format!(
 			"Chunk size {size} exceeds maximum {MAX_CHUNK_SIZE}"
-		)))
+		)));
 	}
 
 	Ok(())

@@ -4,21 +4,25 @@ This example uses subxt's metadata codegen to generate Rust types from a running
 
 ## For Local Development
 
-1. Start a Bulletin Chain node:
+1. **Start a Bulletin Chain node**: Ensure you have a running node with WebSocket endpoint
+
+   Example:
    ```bash
    cargo build --release
    ./target/release/polkadot-bulletin-chain --dev --tmp
    ```
 
-2. Generate metadata:
+2. **Generate metadata**:
    ```bash
    cd examples/rust-authorize-and-store
-   ./fetch_metadata.sh ws://localhost:10000
+   ./fetch_metadata.sh <WS_URL>
    ```
 
-3. Build and run:
+   Replace `<WS_URL>` with your node's WebSocket endpoint (e.g., `ws://localhost:10000`).
+
+3. **Build and run**:
    ```bash
-   cargo run --release
+   cargo run --release -- --ws <WS_URL>
    ```
 
 ## For CI/CD
