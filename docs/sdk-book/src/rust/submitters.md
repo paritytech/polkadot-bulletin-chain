@@ -62,10 +62,18 @@ let submitter = SubxtSubmitter::new(api, signer);
 ```
 
 **Implementation Note**: The built-in `SubxtSubmitter` is a placeholder that returns errors. For a working implementation, see the example at `examples/rust-authorize-and-store/src/main.rs` which shows:
-- Custom signed extensions (ProvideCidConfig)
-- Dynamic transaction building
-- Sudo call wrapping
-- Error handling
+- **Metadata codegen**: Uses `#[subxt::subxt]` macro to generate types from runtime metadata
+- **Custom signed extensions**: Implements ProvideCidConfig for CID configuration
+- **Type-safe transactions**: Generated transaction builders from actual runtime
+- **Sudo call wrapping**: For authorization operations requiring root
+- **Error handling**: Comprehensive error mapping
+
+**Setup**: The example requires generating metadata from your running Bulletin Chain node first:
+```bash
+cd examples/rust-authorize-and-store
+./fetch_metadata.sh <WS_URL>  # e.g., ws://localhost:10000
+cargo run --release -- --ws <WS_URL>
+```
 
 ### MockSubmitter
 
@@ -313,15 +321,27 @@ let submitter = SubxtSubmitter::from_url(&args.ws, signer).await?;
 ## Complete Example
 
 See `examples/rust-authorize-and-store/` for a complete working example that demonstrates:
-- Custom `BulletinConfig` with signed extensions
-- `SubxtSubmitter` implementation with all 8 pallet operations
-- Authorization and storage workflow
-- CLI argument handling
+- **Metadata-driven codegen**: Uses `#[subxt::subxt]` to generate types from runtime
+- **Custom signed extensions**: Implements `ProvideCidConfig` for Bulletin Chain
+- **SubxtSubmitter implementation**: All 8 pallet operations with proper error handling
+- **Authorization and storage workflow**: Complete end-to-end example
+- **CLI argument handling**: Clean argument parsing with clap
 
+**Usage**:
 ```bash
+# First, generate metadata from your running Bulletin Chain node
 cd examples/rust-authorize-and-store
-cargo run -- --ws ws://localhost:10000 --seed "//Alice"
+./fetch_metadata.sh <WS_URL>
+
+# Then build and run
+cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 ```
+
+Where:
+- `<WS_URL>`: Your node's WebSocket URL (e.g., `ws://localhost:10000`)
+- `<SEED>`: Account seed like `//Alice` for dev or your mnemonic
+
+**Note**: The example requires `bulletin_metadata.scale` to be generated before compilation. See the example's README for details.
 
 ## Testing with Submitters
 

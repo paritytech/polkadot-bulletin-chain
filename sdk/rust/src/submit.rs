@@ -185,10 +185,12 @@ impl Call {
 			Call::AuthorizePreimage { .. } => "authorize_preimage",
 			Call::RefreshAccountAuthorization { .. } => "refresh_account_authorization",
 			Call::RefreshPreimageAuthorization { .. } => "refresh_preimage_authorization",
-			Call::RemoveExpiredAccountAuthorization { .. } =>
-				"remove_expired_account_authorization",
-			Call::RemoveExpiredPreimageAuthorization { .. } =>
-				"remove_expired_preimage_authorization",
+			Call::RemoveExpiredAccountAuthorization { .. } => {
+				"remove_expired_account_authorization"
+			},
+			Call::RemoveExpiredPreimageAuthorization { .. } => {
+				"remove_expired_preimage_authorization"
+			},
 		}
 	}
 

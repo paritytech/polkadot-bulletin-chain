@@ -542,35 +542,37 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 
 		let validity = match call {
 			// Transaction storage call
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			RuntimeCall::TransactionStorage(inner_call) => {
+				TransactionStorage::validate_signed(who, inner_call)
+			},
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
 				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
-				}),
+				})
+			},
 			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
 
 			// Bridge-related calls
 			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
-			}) |
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+			})
+			| RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
-			}) |
-			RuntimeCall::BridgePolkadotParachains(
+			})
+			| RuntimeCall::BridgePolkadotParachains(
 				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			RuntimeCall::BridgePolkadotParachains(
+			)
+			| RuntimeCall::BridgePolkadotParachains(
 				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+			)
+			| RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
 				..
-			}) |
-			RuntimeCall::BridgePolkadotMessages(
+			})
+			| RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
 				priority: BridgeTxPriority::get(),
@@ -579,14 +581,15 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			}),
 
 			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) => {
 				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
 					.map_err(|_| InvalidTransaction::BadSigner.into())
 					.map(|()| ValidTransaction {
 						priority: BridgeTxPriority::get(),
 						longevity: BridgeTxLongevity::get(),
 						..Default::default()
-					}),
+					})
+			},
 
 			// Sudo calls
 			RuntimeCall::Proxy(_call) => Ok(ValidTransaction {
@@ -604,12 +607,13 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				longevity: BridgeTxLongevity::get(),
 				..Default::default()
 			}),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => {
 				Ok(ValidTransaction {
 					priority: SudoPriority::get(),
 					longevity: BridgeTxLongevity::get(),
 					..Default::default()
-				}),
+				})
+			},
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),
@@ -629,47 +633,52 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
 		match call {
 			// Transaction storage validation
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+			RuntimeCall::TransactionStorage(inner_call) => {
+				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None)
+			},
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
-			RuntimeCall::Session(SessionCall::purge_keys {}) =>
-				validate_purge_keys(who).map(|_| None),
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
+				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None)
+			},
+			RuntimeCall::Session(SessionCall::purge_keys {}) => {
+				validate_purge_keys(who).map(|_| None)
+			},
 
 			// Bridge-related calls
 			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
-			}) |
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+			})
+			| RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
-			}) |
-			RuntimeCall::BridgePolkadotParachains(
+			})
+			| RuntimeCall::BridgePolkadotParachains(
 				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			RuntimeCall::BridgePolkadotParachains(
+			)
+			| RuntimeCall::BridgePolkadotParachains(
 				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
+			)
+			| RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
 				..
-			}) |
-			RuntimeCall::BridgePolkadotMessages(
+			})
+			| RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
 
 			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) => {
 				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
 					.map_err(|_| InvalidTransaction::BadSigner.into())
-					.map(|()| Some(who.clone())),
+					.map(|()| Some(who.clone()))
+			},
 
 			// Sudo calls
 			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
 			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
 			RuntimeCall::Utility(_) => Ok(Some(who.clone())),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(Some(who.clone())),
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => {
+				Ok(Some(who.clone()))
+			},
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),

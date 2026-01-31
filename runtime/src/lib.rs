@@ -490,39 +490,41 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 
 		let validity = match call {
 			// Transaction storage call
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			RuntimeCall::TransactionStorage(inner_call) => {
+				TransactionStorage::validate_signed(who, inner_call)
+			},
 
 			// Sudo call
 			RuntimeCall::Sudo(_) => validate_sudo(who),
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
 				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
-				}),
+				})
+			},
 
 			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
 
 			// Bridge-related calls
 			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
-			}) |
-			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+			})
+			| RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
-			}) |
-			RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
+			})
+			| RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
-			}) |
-			RuntimeCall::BridgeRococoParachains(
+			})
+			| RuntimeCall::BridgeRococoParachains(
 				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+			)
+			| RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
 				..
-			}) |
-			RuntimeCall::BridgeRococoMessages(
+			})
+			| RuntimeCall::BridgeRococoMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
 				priority: BridgeTxPriority::get(),
@@ -548,35 +550,38 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
 		match call {
 			// Transaction storage validation
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+			RuntimeCall::TransactionStorage(inner_call) => {
+				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None)
+			},
 
 			// Sudo validation
 			RuntimeCall::Sudo(_) => validate_sudo(who).map(|_| None),
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
-			RuntimeCall::Session(SessionCall::purge_keys {}) =>
-				validate_purge_keys(who).map(|_| None),
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
+				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None)
+			},
+			RuntimeCall::Session(SessionCall::purge_keys {}) => {
+				validate_purge_keys(who).map(|_| None)
+			},
 
 			// Bridge-related calls
 			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof {
 				..
-			}) |
-			RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
+			})
+			| RuntimeCall::BridgeRococoGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
 				..
-			}) |
-			RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
+			})
+			| RuntimeCall::BridgeRococoParachains(BridgeParachainsCall::submit_parachain_heads {
 				..
-			}) |
-			RuntimeCall::BridgeRococoParachains(
+			})
+			| RuntimeCall::BridgeRococoParachains(
 				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
+			)
+			| RuntimeCall::BridgeRococoMessages(BridgeMessagesCall::receive_messages_proof {
 				..
-			}) |
-			RuntimeCall::BridgeRococoMessages(
+			})
+			| RuntimeCall::BridgeRococoMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
 			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
 
