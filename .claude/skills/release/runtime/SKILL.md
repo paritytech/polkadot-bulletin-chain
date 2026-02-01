@@ -1,7 +1,7 @@
 ---
 name: release-runtime
-description: Release Bulletin Chain runtime to Westend and Paseo testnets
-argument-hint: "<spec_version> [--dry-run]"
+description: Release Bulletin Chain runtime to testnets (Westend/Paseo/PoP)
+argument-hint: "<version> [--dry-run]"
 disable-model-invocation: true
 user-invocable: true
 allowed-tools: Bash, Read, Edit, Glob, Grep
@@ -9,11 +9,11 @@ allowed-tools: Bash, Read, Edit, Glob, Grep
 
 # Release Bulletin Runtime v$ARGUMENTS
 
-Release and upgrade the Bulletin Chain runtime to Westend and Paseo testnets.
+Release the Bulletin Chain runtime. All deployments use `bulletin-westend-runtime`.
 
 ## Arguments
 
-- `$0` - New spec_version (e.g., `1000002`)
+- `$0` - Version tag (e.g., `1.2.0`)
 - `--dry-run` - Simulate only, no changes
 
 ## Step 1: Pre-flight Checks
@@ -23,121 +23,114 @@ git status --porcelain
 git branch --show-current
 ```
 
-Read current spec_version from `runtimes/bulletin-westend/src/lib.rs`:
-```rust
-spec_version: 1_000_001,  // Find current value
-```
+Check current spec_version in `runtimes/bulletin-westend/src/lib.rs`.
 
-**Report:**
-- Current spec_version: X
-- New spec_version: $0
+## Step 2: Prepare Release
 
-**Stop if:** New spec_version <= current
-
-## Step 2: Bump spec_version
-
-Edit `runtimes/bulletin-westend/src/lib.rs`:
-
-Change:
-```rust
-spec_version: 1_000_001,
-```
-To:
-```rust
-spec_version: $0,
-```
-
-## Step 3: Build Production Runtime
+### Run Tests
 
 ```bash
-cargo build --profile production \
-  -p bulletin-westend-runtime \
-  --features on-chain-release-build
+cargo test
+cargo clippy --all-targets --all-features --workspace -- -D warnings
+cargo +nightly fmt --all -- --check
 ```
 
-Verify WASM:
+### Update Benchmarks (if weights changed)
+
 ```bash
-ls -la target/production/wbuild/bulletin-westend-runtime/*.compact.compressed.wasm
+cargo build --release -p bulletin-westend-runtime --features runtime-benchmarks
+python3 scripts/cmd/cmd.py bench bulletin-westend
 ```
 
-## Step 4: Run Tests
+### Build Production Runtime
 
 ```bash
-cargo test -p bulletin-westend-runtime
-cargo clippy -p bulletin-westend-runtime -- -D warnings
+cargo build --profile production -p bulletin-westend-runtime --features on-chain-release-build
 ```
 
-**If tests fail:** Stop and report.
+Verify output:
+```bash
+ls -la target/production/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm
+```
 
-## Step 5: Commit and Tag (skip if --dry-run)
+## Step 3: Commit and Tag (skip if --dry-run)
 
 ```bash
-git add runtimes/bulletin-westend/src/lib.rs
-git commit -m "chore(runtime): bump bulletin-westend spec_version to $0"
-git tag runtime-westend-v$0
+git add -A
+git commit -m "chore: release v$0"
+git tag v$0
 git push origin HEAD --tags
 ```
 
-## Step 6: Upgrade with Sudo
+CI will build artifacts for: bulletin-polkadot, bulletin-westend, bulletin-paseo, bulletin-pop
 
-### Westend Bulletin
+## Step 4: Runtime Upgrade
 
-1. Open: https://polkadot.js.org/apps/?rpc=wss://westend-bulletin-rpc.polkadot.io
-2. Developer → Sudo → system.setCode
-3. Upload WASM blob
-4. Submit and verify spec_version shows $0
+### Testnets (Westend/Paseo) - Method 1: Immediate
 
-### Paseo Bulletin
+1. Download `bulletin_westend_runtime.compact.compressed.wasm` from GitHub release
+2. Open polkadot.js:
+   - Westend: https://polkadot.js.org/apps/?rpc=wss://westend-bulletin-rpc.polkadot.io
+   - Paseo: https://polkadot.js.org/apps/?rpc=wss://paseo-bulletin-rpc.polkadot.io
+3. Developer → Extrinsics → `sudo.sudo(system.setCode(code))`
+4. Verify: Developer → Chain State → `system.lastRuntimeUpgrade()`
 
-1. Open Polkadot.js for Paseo Bulletin
-2. Developer → Sudo → system.setCode
-3. Upload same WASM blob
-4. Submit and verify spec_version shows $0
+### Production (Polkadot) - Method 2: Authorized
 
-## Step 7: Run Live Tests (after upgrade confirmed)
+1. Download WASM, calculate hash:
+   ```bash
+   cat bulletin_westend_runtime.compact.compressed.wasm | sha256sum
+   ```
+2. Submit: `system.authorizeUpgrade(0x<hash>)`
+3. Submit: `system.applyAuthorizedUpgrade(code)`
 
-**Wait for nodes to be running the new version, then:**
+## Step 5: Verify and Test
+
+After upgrade confirmed on-chain:
 
 ```bash
-cd examples
-
-# Westend
-just run-live-tests-westend "<seed>"
-
-# Paseo
-just run-live-tests-paseo "<seed>"
+cd examples && npm install
+just run-tests-against-westend "//Seed"
 ```
 
-### Paseo RPC Issues
+### If Paseo RPC Issues
 
-If Paseo RPC has problems:
-1. Escalate to infra team
-2. Or send script to Nikola to run directly
-   - Keep it simple - just the script, no Kubo setup needed
+- Escalate to infra team
+- Or send script to operator to run directly (keep simple, no extra setup)
 
-## Step 8: Report Success
+## Step 6: Report Success
 
 ```
 ✅ Runtime v$0 released!
 
+CI artifacts: bulletin-polkadot, bulletin-westend, bulletin-paseo, bulletin-pop
+
 Upgraded:
-- [x] Westend Bulletin (spec_version: $0)
-- [x] Paseo Bulletin (spec_version: $0)
+- [ ] Westend (Para ID: 2487)
+- [ ] Paseo
+- [ ] PoP (if applicable)
 
 Live tests:
-- [ ] just run-live-tests-westend
-- [ ] just run-live-tests-paseo
+- [ ] just run-tests-against-westend "//Seed"
 ```
 
 ## Dry Run Mode
 
 If `--dry-run`:
-- Complete steps 1-4 only
-- Show what WOULD be committed
+- Run tests and build only
+- Show what WOULD be committed/tagged
 - Do NOT commit, tag, push, or upgrade
+
+## Network Info
+
+| Network | Para ID | RPC |
+|---------|---------|-----|
+| Westend | 2487 | `wss://westend-bulletin-rpc.polkadot.io` |
+| Paseo | TBD | `wss://paseo-bulletin-rpc.polkadot.io` |
+| Polkadot | TBD | TBD |
 
 ## Links
 
-- [Westend Bulletin PJS](https://polkadot.js.org/apps/?rpc=wss://westend-bulletin-rpc.polkadot.io)
-- [Bulletin Westend Runtime](/runtimes/bulletin-westend/)
-- Playbook/Runbook (ask Andrii)
+- [Westend PJS](https://polkadot.js.org/apps/?rpc=wss://westend-bulletin-rpc.polkadot.io)
+- [bulletin-westend-runtime](/runtimes/bulletin-westend/)
+- [Maintenance Playbook](docs/playbook.md)
