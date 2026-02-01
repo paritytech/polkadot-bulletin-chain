@@ -36,7 +36,7 @@ use std::sync::Mutex;
 /// let client = AsyncBulletinClient::new(submitter);
 ///
 /// let data = b"Hello, Bulletin!".to_vec();
-/// let result = client.store(data, StoreOptions::default()).await?;
+/// let result = client.store(data, None).await?;
 ///
 /// println!("Mock CID: {:?}", result.cid);
 /// # Ok(())
@@ -202,10 +202,7 @@ impl TransactionSubmitter for MockSubmitter {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{
-		async_client::AsyncBulletinClient,
-		types::{AuthorizationScope, StoreOptions},
-	};
+	use crate::{async_client::AsyncBulletinClient, types::AuthorizationScope};
 
 	#[tokio::test]
 	async fn test_mock_submitter_success() {
@@ -231,7 +228,7 @@ mod tests {
 		let client = AsyncBulletinClient::new(submitter);
 
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default(), None).await;
+		let result = client.store(data, None).await;
 
 		assert!(result.is_ok());
 		let store_result = result.unwrap();
@@ -280,7 +277,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_authorization_check_with_client() {
-		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+		use crate::async_client::AsyncClientConfig;
 
 		let submitter = MockSubmitter::new();
 		let account = AccountId32::from([1u8; 32]);
@@ -303,13 +300,13 @@ mod tests {
 
 		// Should succeed - 16 bytes is within limits
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default(), None).await;
+		let result = client.store(data, None).await;
 		assert!(result.is_ok());
 	}
 
 	#[tokio::test]
 	async fn test_insufficient_authorization_fails() {
-		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+		use crate::async_client::AsyncClientConfig;
 
 		let submitter = MockSubmitter::new();
 		let account = AccountId32::from([1u8; 32]);
@@ -332,7 +329,7 @@ mod tests {
 
 		// Should fail - 16 bytes exceeds limits
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default(), None).await;
+		let result = client.store(data, None).await;
 		assert!(result.is_err());
 		assert!(matches!(
 			result.unwrap_err(),
@@ -342,7 +339,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_unified_api_small_data() {
-		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+		use crate::async_client::AsyncClientConfig;
 
 		let submitter = MockSubmitter::new();
 		let config =
@@ -351,7 +348,7 @@ mod tests {
 
 		// Small data (16 bytes < 2 MiB threshold) - should use single transaction
 		let data = b"Hello, Bulletin!".to_vec();
-		let result = client.store(data, StoreOptions::default(), None).await;
+		let result = client.store(data, None).await;
 
 		assert!(result.is_ok());
 		let store_result = result.unwrap();
@@ -361,7 +358,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_unified_api_large_data() {
-		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+		use crate::async_client::AsyncClientConfig;
 
 		let submitter = MockSubmitter::new();
 		let config = AsyncClientConfig {
@@ -373,7 +370,7 @@ mod tests {
 
 		// Large data (150 bytes > 100 byte threshold) - should auto-chunk
 		let data = vec![0u8; 150];
-		let result = client.store(data, StoreOptions::default(), None).await;
+		let result = client.store(data, None).await;
 
 		assert!(result.is_ok());
 		let store_result = result.unwrap();
@@ -386,7 +383,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_authorization_expiration() {
-		use crate::{async_client::AsyncClientConfig, types::StoreOptions};
+		use crate::async_client::AsyncClientConfig;
 
 		let submitter = MockSubmitter::new();
 		let account = AccountId32::from([1u8; 32]);
@@ -414,7 +411,7 @@ mod tests {
 
 		// Should fail with expiration error - authorization expired at block 5, current is 11
 		let data = b"Hello".to_vec();
-		let result = client.store(data, StoreOptions::default(), None).await;
+		let result = client.store(data, None).await;
 
 		assert!(result.is_err());
 		assert!(matches!(result.unwrap_err(), crate::types::Error::AuthorizationExpired { .. }));
