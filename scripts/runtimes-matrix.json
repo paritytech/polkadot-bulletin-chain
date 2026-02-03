@@ -3,6 +3,7 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "path": "runtimes/bulletin-polkadot",
+    "blocktime": 6000,
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
@@ -15,6 +16,7 @@
     "name": "bulletin-westend",
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
+    "blocktime": 6000,
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
@@ -24,6 +26,7 @@
     "name": "bulletin-rococo",
     "package": "polkadot-bulletin-chain-runtime",
     "path": "runtime",
+    "blocktime": 6000,
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"

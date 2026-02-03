@@ -1,0 +1,201 @@
+name: Check Runtime Migrations
+
+# If you modify more jobs, ensure that you add them as required to the job "confirmMigrationsPassed"
+# which is located at the end of this file (more info in the job)
+
+on:
+  push:
+    branches: ["release-*"]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *'  # Daily at 5 AM UTC
+
+# Cancel a currently running workflow from the same PR, branch or tag when a new workflow is
+# triggered (ref https://stackoverflow.com/a/72408109)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# drop permissions for default token
+permissions: {}
+
+jobs:
+  runtime-matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
+    name: Extract tasks from matrix
+    steps:
+      - uses: actions/checkout@v6
+      - id: runtime
+        run: |
+          # Filter out runtimes that don't have URIs
+          TASKS=$(jq '[.[] | select(.uris != null and (.uris | length) > 0)]' scripts/runtimes-matrix.json)
+          SKIPPED_TASKS=$(jq '[.[] | select(.uris == null or (.uris | length) == 0)]' scripts/runtimes-matrix.json)
+          echo --- Running the following tasks ---
+          echo $TASKS
+          echo --- Skipping the following tasks due to not having a uris field ---
+          echo $SKIPPED_TASKS
+          # Strip whitespace from Tasks now that we've logged it
+          TASKS=$(echo $TASKS | jq -c .)
+          echo "runtime=$TASKS" >> $GITHUB_OUTPUT
+
+  prepare-snapshots:
+    needs: [runtime-matrix]
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Check if snapshot exists in cache
+        id: cache-restore
+        if: github.event_name != 'schedule'
+        uses: actions/cache/restore@v5
+        with:
+          lookup-only: true
+          path: snapshot.raw
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-
+          fail-on-cache-miss: false
+
+      - name: Install try-runtime-cli
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        run: |
+          curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.1/try-runtime-x86_64-unknown-linux-musl -o try-runtime
+          chmod +x try-runtime
+          sudo mv try-runtime /usr/local/bin/
+
+      - name: Generate snapshot for ${{ matrix.runtime.name }}
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        run: |
+          echo "Generating snapshot for ${{ matrix.runtime.name }}..."
+
+          URI_ARGS=$(echo '${{ toJSON(matrix.runtime.uris) }}' | jq -r '.[] | "--uri " + .' | tr '\n' ' ')
+          echo "Using URIs: $URI_ARGS"
+
+          for i in {1..10}; do
+            echo "Snapshot creation attempt $i/10"
+            if try-runtime create-snapshot $URI_ARGS -- snapshot.raw; then
+              if [ -f "snapshot.raw" ] && [ -s "snapshot.raw" ]; then
+                echo "Snapshot created successfully"
+                break
+              fi
+            fi
+            echo "Snapshot creation failed, attempt $i/10"
+            rm -f snapshot.raw
+            if [ $i -eq 10 ]; then
+              echo "All snapshot creation attempts failed"
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "today=$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Save snapshot to cache
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        uses: actions/cache/save@v5
+        with:
+          path: snapshot.raw
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
+
+
+  check-migrations:
+    needs: [runtime-matrix, prepare-snapshots]
+    runs-on: self-hosted
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: "Fetch upstream tags"
+        run: |
+          git remote add upstream https://github.com/${{ github.event.pull_request.base.repo.full_name }}.git
+          git fetch upstream --tags
+
+      - name: Build EXTRA_FLAGS
+        run: |
+          sudo apt install python3
+
+          EXTRA_FLAGS=" --blocktime ${{ matrix.runtime.blocktime }} "
+          EXTRA_FLAGS+=" --disable-spec-version-check"
+          CHECKS="all"
+
+          echo "Flags: $EXTRA_FLAGS"
+          echo "Checks: $CHECKS"
+
+          echo "EXTRA_FLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
+          echo "CHECKS=$CHECKS" >> $GITHUB_ENV
+
+      - name: Set rust version via common env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          targets: "wasm32v1-none"
+          components: "rust-src"
+          toolchain: "${{env.RUST_STABLE_VERSION}}"
+
+      - name: Install try-runtime-cli
+        run: |
+          curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.0/try-runtime-x86_64-unknown-linux-musl -o try-runtime
+          chmod +x try-runtime
+          sudo mv try-runtime /usr/local/bin/
+
+      - name: Restore snapshot from cache
+        uses: actions/cache/restore@v5
+        with:
+          path: snapshot.raw
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-
+          fail-on-cache-miss: true
+
+      - name: Run ${{ matrix.runtime.name }} Runtime Checks
+        env:
+          EXTRA_FLAGS: ${{ env.EXTRA_FLAGS }}
+          CHECKS: ${{ env.CHECKS }}
+        run: |
+          try-runtime --version
+
+          FEATURES="--features try-runtime"
+          echo "Setting features: ${FEATURES}"
+          cargo build --release -p ${{ matrix.runtime.package }} $FEATURES -q --locked
+
+          PACKAGE_NAME=${{ matrix.runtime.package }}
+          RUNTIME_BLOB_NAME=$(echo $PACKAGE_NAME | sed 's/-/_/g').compact.compressed.wasm
+          RUNTIME_BLOB_PATH=./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME
+          export RUST_LOG=remote-ext=debug,runtime=trace
+          
+          COMMAND="try-runtime \
+            --runtime $RUNTIME_BLOB_PATH \
+            on-runtime-upgrade --checks=$CHECKS \
+            $EXTRA_FLAGS \
+            live --uri ${{ matrix.runtime.uri }}"
+          
+          echo "Running command:"
+          echo "$COMMAND"
+          eval "$COMMAND"
+
+  # This will only run if all the tests in its "needs" array passed.
+  # Add this as your required job, becuase if the matrix changes size (new things get added)
+  # it will still require all the steps to succeed.
+  # If you add more jobs, remember to add them to the "needs" array.
+  confirmMigrationsPassed:
+    runs-on: self-hosted
+    name: All migrations passed
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    needs: [check-migrations]
+    steps:
+      - run: echo '### Good job! All the migrations passed 🚀' >> $GITHUB_STEP_SUMMARY
