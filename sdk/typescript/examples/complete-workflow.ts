@@ -17,7 +17,7 @@
  *   node examples/complete-workflow.js
  */
 
-import { AsyncBulletinClient, PAPITransactionSubmitter, StoreOptions } from '../dist/index.js';
+import { AsyncBulletinClient, StoreOptions } from '../dist/index.js';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
@@ -44,8 +44,8 @@ async function main() {
   // 2. Account Authorization Workflow
   console.log('═══ Account Authorization Workflow ═══\n');
 
-  const aliceSubmitter = new PAPITransactionSubmitter(api, aliceSigner);
-  const aliceClient = new AsyncBulletinClient(aliceSubmitter);
+  // Create client for Alice (sudo account)
+  const aliceClient = new AsyncBulletinClient(api, aliceSigner);
 
   // Authorize Bob's account
   const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
@@ -71,15 +71,15 @@ async function main() {
   // 3. Store Data as Bob
   console.log('═══ Store Data Workflow ═══\n');
 
-  const bobSubmitter = new PAPITransactionSubmitter(api, bobSigner);
-  const bobClient = new AsyncBulletinClient(bobSubmitter);
+  // Create client for Bob
+  const bobClient = new AsyncBulletinClient(api, bobSigner);
 
   const data = new TextEncoder().encode('Hello from Bob! This data is stored with proper authorization.');
   console.log('📝 Data:', new TextDecoder().decode(data));
   console.log('   Size:', data.length, 'bytes\n');
 
   console.log('⏳ Storing data...');
-  const storeResult = await bobClient.store(data);
+  const storeResult = await bobClient.store(data).send();
   console.log('✅ Data stored!');
   console.log('   CID:', storeResult.cid.toString());
   console.log('   Block:', storeResult.blockNumber, '\n');

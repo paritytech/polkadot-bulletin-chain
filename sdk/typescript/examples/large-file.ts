@@ -17,7 +17,7 @@
  *   node examples/large-file.js large_video.mp4
  */
 
-import { AsyncBulletinClient, PAPITransactionSubmitter, StoreOptions } from '../dist/index.js';
+import { AsyncBulletinClient, StoreOptions } from '../dist/index.js';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
@@ -54,9 +54,8 @@ async function main() {
 
   console.log('✅ Connected to Bulletin Chain\n');
 
-  // 4. Create client with custom config
-  const submitter = new PAPITransactionSubmitter(api, signer);
-  const client = new AsyncBulletinClient(submitter, {
+  // 4. Create client with custom config (directly with PAPI client and signer)
+  const client = new AsyncBulletinClient(api, signer, {
     defaultChunkSize: 1024 * 1024, // 1 MiB chunks
     maxParallel: 8,
     createManifest: true,

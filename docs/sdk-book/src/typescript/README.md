@@ -19,23 +19,30 @@ The `@bulletin/sdk` package provides a modern, type-safe client for Node.js and 
 
 ### Developer Experience
 - **Full Type Support**: Written in TypeScript with complete definitions
-- **PAPI Integration**: Designed to work seamlessly with the Polkadot API (PAPI)
+- **Direct PAPI Integration**: Tightly coupled to Polkadot API for type-safe blockchain interaction
+- **Builder Pattern**: Fluent API for configuring store operations
 - **Isomorphic**: Works in Node.js, Browsers, and other JS runtimes
-- **Mock Support**: Easy testing without a blockchain node
+- **Mock Support**: `MockBulletinClient` for testing without a blockchain node
 
 ## Quick Example
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
-// Create client
-const submitter = new PAPITransactionSubmitter(api, signer);
-const client = new AsyncBulletinClient(submitter)
+// Setup PAPI client
+const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
+const papiClient = createClient(wsProvider);
+const api = papiClient.getTypedApi(bulletinDescriptor);
+
+// Create SDK client with PAPI client and signer
+const client = new AsyncBulletinClient(api, signer)
     .withAccount(account);  // Enable authorization checking
 
-// Store any size file (automatically chunks if > 2 MiB)
+// Store any size file using builder pattern
 const data = new Uint8Array(50_000_000); // 50 MB
-const result = await client.store(data);
+const result = await client.store(data).send();
 
 console.log('Stored with CID:', result.cid.toString());
 ```

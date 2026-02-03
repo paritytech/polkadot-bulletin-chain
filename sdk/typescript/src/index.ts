@@ -15,8 +15,8 @@ export * from './chunker.js';
 export * from './dag.js';
 export * from './utils.js';
 export * from './client.js';
-export * from './transaction.js';
 export * from './async-client.js';
+export * from './mock-client.js';
 
 export { CID } from 'multiformats/cid';
 
