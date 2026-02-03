@@ -341,6 +341,24 @@ Where:
 - `<WS_URL>`: Your node's WebSocket URL (e.g., `ws://localhost:10000`)
 - `<SEED>`: Account seed like `//Alice` for dev or your mnemonic
 
+**Controlling Log Output**:
+
+The example uses `tracing` for structured logging. Control log levels with the `RUST_LOG` environment variable:
+
+```bash
+# Default (INFO level)
+cargo run --release -- --ws <WS_URL> --seed "<SEED>"
+
+# Debug output (more verbose)
+RUST_LOG=debug cargo run --release -- --ws <WS_URL> --seed "<SEED>"
+
+# Only show warnings and errors
+RUST_LOG=warn cargo run --release -- --ws <WS_URL> --seed "<SEED>"
+
+# Filter specific modules
+RUST_LOG=authorize_and_store=debug,subxt=info cargo run --release -- --ws <WS_URL>
+```
+
 **Note**: The example requires `bulletin_metadata.scale` to be generated before compilation. See the example's README for details.
 
 ## Testing with Submitters
