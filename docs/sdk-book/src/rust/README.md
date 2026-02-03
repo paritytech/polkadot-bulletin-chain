@@ -38,8 +38,11 @@ let signer = /* your PairSigner */;
 let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
 let client = AsyncBulletinClient::new(submitter);
 
-// Store data - complete workflow
-let result = client.store(data, None).await?;
+// Store data - complete workflow with builder pattern
+let result = client
+    .store(data)
+    .send()
+    .await?;
 ```
 
 Proceed to [Installation](./installation.md) to get started.

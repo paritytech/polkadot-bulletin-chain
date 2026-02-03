@@ -4,7 +4,32 @@ This guide shows how to store data using the `AsyncBulletinClient` with transact
 
 ## Quick Start
 
-The `store()` method automatically handles both small and large files:
+The `store()` method uses a builder pattern for a clean, fluent API:
+
+### Why Builder Pattern?
+
+The builder pattern provides:
+- **Fluent API**: Chain methods for clean, readable code
+- **Type safety**: Compile-time validation of options
+- **Discoverability**: IDE autocomplete shows all available options
+- **Flexibility**: Only specify options you need
+- **Clarity**: Intent is clear from method names
+
+Compare:
+```rust
+// Old API (still available but deprecated)
+client.store_with_options(data, StoreOptions { ... }, Some(callback)).await?;
+
+// New builder API (recommended)
+client
+    .store(data)
+    .with_codec(CidCodec::DagPb)
+    .with_callback(callback)
+    .send()
+    .await?;
+```
+
+### Basic Example
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -19,9 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
     let client = AsyncBulletinClient::new(submitter);
 
-    // 2. Prepare and store data
+    // 2. Prepare and store data with builder pattern
     let data = b"Hello, Bulletin!".to_vec();
-    let result = client.store(data, None).await?;
+    let result = client
+        .store(data)
+        .send()
+        .await?;
 
     // 3. Get results
     println!("Stored successfully!");
@@ -65,56 +93,59 @@ let client = AsyncBulletinClient::new(submitter);
 let data = b"Hello, Bulletin!".to_vec();
 ```
 
-### 4. Configure Options
+### 4. Store with Builder Pattern
 
-Customize CID generation:
-
-```rust
-let options = StoreOptions {
-    cid_codec: CidCodec::Raw,           // or DagPb, DagCbor
-    hash_algorithm: HashAlgorithm::Blake2b256, // or Sha2_256, etc.
-};
-```
-
-Or use defaults:
+The `store()` method returns a builder for fluent configuration:
 
 ```rust
-let options = StoreOptions::default(); // Raw codec, Blake2b-256
+// Simple storage with defaults
+let result = client
+    .store(data)
+    .send()
+    .await?;
+
+// Customize CID codec
+let result = client
+    .store(data)
+    .with_codec(CidCodec::DagPb)
+    .send()
+    .await?;
+
+// Customize hash algorithm
+let result = client
+    .store(data)
+    .with_hash_algorithm(HashAlgorithm::Sha256)
+    .send()
+    .await?;
+
+// Combine multiple options
+let result = client
+    .store(data)
+    .with_codec(CidCodec::DagCbor)
+    .with_hash_algorithm(HashAlgorithm::Blake2b256)
+    .with_finalization(true)
+    .send()
+    .await?;
+
+// With progress callback for chunked uploads
+let result = client
+    .store(large_data)
+    .with_callback(|event| {
+        println!("Progress: {:?}", event);
+    })
+    .send()
+    .await?;
 ```
 
-### 5. Store and Wait
+The builder automatically handles:
+- Data validation
+- Authorization checks (if configured)
+- Automatic chunking for large files (> 2 MiB by default)
+- CID calculation
+- Transaction submission
+- Finalization wait
 
-The `store()` method automatically handles everything:
-- Validates data size
-- Checks authorization (if configured)
-- Automatically chunks large files (> 2 MiB by default)
-- Calculates CID(s)
-- Submits transaction(s)
-- Waits for finalization
-
-```rust
-// For small files (< 2 MiB): single transaction
-// For large files (> 2 MiB): automatic chunking
-let result = client.store(data, None).await?;
-
-// With custom options (advanced users)
-let result = client.store_with_options(data, options, None).await?;
-
-// With progress tracking for large files
-let result = client.store(data, Some(|event| {
-    match event {
-        ProgressEvent::ChunkCompleted { index, total, .. } => {
-            println!("Chunk {}/{} uploaded", index + 1, total);
-        }
-        ProgressEvent::Completed { .. } => {
-            println!("Upload complete!");
-        }
-        _ => {}
-    }
-})).await?;
-```
-
-### 6. Handle Result
+### 5. Handle Result
 
 ```rust
 println!("CID: {}", hex::encode(&result.cid));
@@ -141,10 +172,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
     let client = AsyncBulletinClient::new(submitter);
 
-    // Store data
+    // Store data with builder pattern
     let data = format!("Hello from Rust SDK at {}", chrono::Utc::now());
     let result = client
-        .store(data.as_bytes().to_vec(), None)
+        .store(data.as_bytes().to_vec())
+        .send()
         .await?;
 
     println!("✅ Stored successfully!");
@@ -173,8 +205,11 @@ let client = AsyncBulletinClient::new(submitter)
 
 // 2. Upload - authorization is checked automatically
 let data = b"Hello, Bulletin!".to_vec();
-let result = client.store(data, None).await?;
-//                       ⬆️ Queries blockchain first, fails fast if insufficient auth
+let result = client
+    .store(data)
+    .send()
+    .await?;
+//  ⬆️ Queries blockchain first, fails fast if insufficient auth
 ```
 
 ### What Gets Checked
@@ -210,7 +245,7 @@ let client = AsyncBulletinClient::with_config(submitter, config)
 
 ```rust
 // Insufficient authorization fails fast
-match client.store(data, None).await {
+match client.store(data).send().await {
     Err(Error::InsufficientAuthorization { need, available }) => {
         eprintln!("Need {} bytes but only {} available", need, available);
         eprintln!("Please authorize your account first!");
@@ -250,7 +285,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // client.authorize_account(account, txs, bytes).await?;
 
     // Store - will check authorization automatically
-    match client.store(data, None).await {
+    match client.store(data).send().await {
         Ok(result) => {
             println!("✅ Stored: {}", hex::encode(&result.cid));
         }
@@ -273,7 +308,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Error Handling
 
 ```rust
-match client.store(data, None).await {
+match client.store(data).send().await {
     Ok(result) => {
         println!("Success! CID: {}", hex::encode(&result.cid));
     }

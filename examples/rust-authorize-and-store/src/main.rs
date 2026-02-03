@@ -433,11 +433,12 @@ async fn main() -> Result<()> {
 		.map_err(|e| anyhow!("Failed to authorize account: {e:?}"))?;
 	info!("Account authorized successfully!");
 
-	// Step 2: Store data using the SDK
+	// Step 2: Store data using the SDK with builder pattern
 	info!("\nStep 2: Storing data...");
 	let data_to_store = format!("Hello from Bulletin SDK at {}", chrono_lite());
 	let result = client
-		.store(data_to_store.as_bytes().to_vec(), None)
+		.store(data_to_store.as_bytes().to_vec())
+		.send()
 		.await
 		.map_err(|e| anyhow!("Failed to store data: {e:?}"))?;
 
