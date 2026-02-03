@@ -2,7 +2,9 @@
 
 This example demonstrates using the `bulletin-sdk-rust` with a subxt-based TransactionSubmitter.
 
-**⚠️  Note**: This example is excluded from the main workspace due to dependency conflicts between `subxt 0.37` and the polkadot-sdk dependencies. Build it separately from its directory.
+**⚠️  Status**: This example is currently incomplete and requires metadata generation from a running node before it can be compiled and tested. It has been updated to use subxt 0.37 metadata codegen but the API compatibility still needs verification with actual runtime metadata.
+
+**Note**: This example is excluded from the main workspace due to dependency conflicts between `subxt 0.37` and the polkadot-sdk dependencies. Build it separately from its directory.
 
 ## Prerequisites
 
