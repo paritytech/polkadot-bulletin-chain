@@ -62,11 +62,6 @@ std = [
 	"unsigned-varint/std",
 ]
 
-# Enable for ink! smart contract compatibility
-ink = [
-	"codec/max-encoded-len",
-]
-
 # Enable DAG serialization features
 serde-support = ["serde"]
 
