@@ -9,6 +9,7 @@
 use crate::{
 	authorization::AuthorizationManager,
 	chunker::{Chunker, FixedSizeChunker},
+	cid::{CidCodec, HashAlgorithm},
 	dag::{DagBuilder, UnixFsDagBuilder},
 	submit::{TransactionReceipt, TransactionSubmitter},
 	types::{
@@ -45,6 +46,72 @@ impl Default for AsyncClientConfig {
 			check_authorization_before_upload: true,
 			chunking_threshold: 2 * 1024 * 1024, // 2 MiB
 		}
+	}
+}
+
+/// Builder for store operations with fluent API.
+///
+/// # Example
+///
+/// ```ignore
+/// let result = client
+///     .store(data)
+///     .with_codec(CidCodec::DagPb)
+///     .with_hash_algorithm(HashAlgorithm::Sha256)
+///     .with_callback(|event| {
+///         println!("Progress: {:?}", event);
+///     })
+///     .send()
+///     .await?;
+/// ```
+pub struct StoreBuilder<'a, S: TransactionSubmitter> {
+	client: &'a AsyncBulletinClient<S>,
+	data: Vec<u8>,
+	options: StoreOptions,
+	callback: Option<ProgressCallback>,
+}
+
+impl<'a, S: TransactionSubmitter> StoreBuilder<'a, S> {
+	/// Create a new store builder.
+	fn new(client: &'a AsyncBulletinClient<S>, data: Vec<u8>) -> Self {
+		Self { client, data, options: StoreOptions::default(), callback: None }
+	}
+
+	/// Set the CID codec.
+	pub fn with_codec(mut self, codec: CidCodec) -> Self {
+		self.options.cid_codec = codec;
+		self
+	}
+
+	/// Set the hash algorithm.
+	pub fn with_hash_algorithm(mut self, algorithm: HashAlgorithm) -> Self {
+		self.options.hash_algorithm = algorithm;
+		self
+	}
+
+	/// Set whether to wait for finalization.
+	pub fn with_finalization(mut self, wait: bool) -> Self {
+		self.options.wait_for_finalization = wait;
+		self
+	}
+
+	/// Set custom store options.
+	pub fn with_options(mut self, options: StoreOptions) -> Self {
+		self.options = options;
+		self
+	}
+
+	/// Set progress callback for chunked uploads.
+	pub fn with_callback(mut self, callback: ProgressCallback) -> Self {
+		self.callback = Some(callback);
+		self
+	}
+
+	/// Execute the store operation.
+	///
+	/// This consumes the builder and performs the actual storage operation.
+	pub async fn send(self) -> Result<StoreResult> {
+		self.client.store_with_options(self.data, self.options, self.callback).await
 	}
 }
 
@@ -106,24 +173,47 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		self.account.clone().or_else(|| self.submitter.signer_account())
 	}
 
-	/// Store data on Bulletin Chain with default options.
+	/// Store data on Bulletin Chain using builder pattern.
 	///
-	/// Uses default CID codec (raw) and hash algorithm (blake2b-256).
-	/// Automatically chunks data if it exceeds the configured threshold.
+	/// Returns a builder that allows fluent configuration of store options.
 	///
-	/// This handles the complete workflow:
-	/// 1. Check authorization (if enabled)
-	/// 2. Decide whether to chunk based on data size
-	/// 3. Calculate CID(s)
-	/// 4. Submit transaction(s)
-	/// 5. Wait for finalization
+	/// # Example
+	///
+	/// ```ignore
+	/// use bulletin_sdk_rust::{AsyncBulletinClient, CidCodec, HashAlgorithm};
+	///
+	/// let result = client
+	///     .store(data)
+	///     .with_codec(CidCodec::DagPb)
+	///     .with_hash_algorithm(HashAlgorithm::Sha256)
+	///     .with_callback(|event| {
+	///         println!("Progress: {:?}", event);
+	///     })
+	///     .send()
+	///     .await?;
+	/// ```
 	///
 	/// # Arguments
 	///
 	/// * `data` - Data to store
-	/// * `progress_callback` - Optional callback for progress tracking (only called for chunked
-	///   uploads)
-	pub async fn store(
+	pub fn store(&self, data: Vec<u8>) -> StoreBuilder<S> {
+		StoreBuilder::new(self, data)
+	}
+
+	/// Store data on Bulletin Chain with default options (legacy API).
+	///
+	/// **Deprecated**: Use the builder pattern via `store()` instead:
+	/// ```ignore
+	/// client.store(data).send().await
+	/// ```
+	///
+	/// Uses default CID codec (raw) and hash algorithm (blake2b-256).
+	/// Automatically chunks data if it exceeds the configured threshold.
+	#[deprecated(
+		since = "0.2.0",
+		note = "Use builder pattern: client.store(data).with_callback(cb).send().await"
+	)]
+	pub async fn store_simple(
 		&self,
 		data: Vec<u8>,
 		progress_callback: Option<ProgressCallback>,
@@ -131,7 +221,10 @@ impl<S: TransactionSubmitter> AsyncBulletinClient<S> {
 		self.store_with_options(data, StoreOptions::default(), progress_callback).await
 	}
 
-	/// Store data on Bulletin Chain with custom options.
+	/// Store data on Bulletin Chain with custom options (internal, used by builder).
+	///
+	/// **Note**: This method is public for use by the builder but users should prefer
+	/// the builder pattern via `store()`.
 	///
 	/// Allows specifying custom CID codec, hash algorithm, and finalization behavior.
 	/// Automatically chunks data if it exceeds the configured threshold.

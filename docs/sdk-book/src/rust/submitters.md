@@ -46,7 +46,7 @@ let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
 let client = AsyncBulletinClient::new(submitter);
 
 // Now use the client
-let result = client.store(data, None).await?;
+let result = client.store(data).send().await?;
 ```
 
 **Advanced: Pre-connected Client**
@@ -89,7 +89,7 @@ let submitter = MockSubmitter::new();
 let client = AsyncBulletinClient::new(submitter);
 
 // Test your code without connecting to a node
-let result = client.store(data, None).await?;
+let result = client.store(data).send().await?;
 
 // Mock generates fake receipts
 println!("Mock block: {}", result.block_number.unwrap());
@@ -102,7 +102,7 @@ let submitter = MockSubmitter::failing();
 let client = AsyncBulletinClient::new(submitter);
 
 // All operations will fail with mock errors
-let result = client.store(data, options).await; // Returns Err
+let result = client.store(data).send().await; // Returns Err
 ```
 
 **Mock Authorization Support**:
@@ -130,7 +130,7 @@ let client = AsyncBulletinClient::new(submitter)
     .with_account(account);
 
 // Upload - authorization will be checked automatically
-let result = client.store(data, None).await?;
+let result = client.store(data).send().await?;
 ```
 
 ## Authorization Queries
@@ -385,7 +385,7 @@ mod tests {
         let client = AsyncBulletinClient::new(submitter);
 
         let data = b"test data".to_vec();
-        let result = client.store(data, None).await;
+        let result = client.store(data).send().await;
 
         assert!(result.is_ok());
     }
@@ -415,7 +415,7 @@ async fn test_real_node() {
     let client = AsyncBulletinClient::new(submitter);
 
     let data = b"integration test".to_vec();
-    let result = client.store(data, None).await;
+    let result = client.store(data).send().await;
 
     assert!(result.is_ok());
 }
