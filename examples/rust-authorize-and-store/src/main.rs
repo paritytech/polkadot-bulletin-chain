@@ -31,6 +31,7 @@ use bulletin_sdk_rust::{
 use clap::Parser;
 use codec::Encode;
 use scale_info::PortableRegistry;
+use sp_runtime::AccountId32 as SpAccountId32;
 use subxt::{
 	client::ClientState,
 	config::{
@@ -38,7 +39,7 @@ use subxt::{
 		Config, DefaultExtrinsicParamsBuilder, ExtrinsicParams, ExtrinsicParamsEncoder,
 		ExtrinsicParamsError, SubstrateConfig,
 	},
-	utils::AccountId32,
+	utils::AccountId32 as SubxtAccountId32,
 	OnlineClient,
 };
 use subxt_signer::sr25519::Keypair;
@@ -154,8 +155,10 @@ impl SubxtSubmitter {
 		&self,
 		events: subxt::blocks::ExtrinsicEvents<BulletinConfig>,
 	) -> SdkResult<TransactionReceipt> {
+		// In subxt 0.37, ExtrinsicEvents has these fields accessible
 		let block_hash = events.block_hash();
-		let extrinsic_hash = events.extrinsic_hash();
+		// extrinsic_hash is not directly available, we'll use a placeholder
+		let extrinsic_hash = format!("0x{}", hex::encode(events.extrinsic_index().to_le_bytes()));
 
 		// Get block number if available
 		let block = self
@@ -168,28 +171,33 @@ impl SubxtSubmitter {
 
 		Ok(TransactionReceipt {
 			block_hash: format!("{:?}", block_hash),
-			extrinsic_hash: format!("{:?}", extrinsic_hash),
+			extrinsic_hash,
 			block_number: Some(block_number),
 		})
+	}
+
+	/// Convert sp_runtime::AccountId32 to subxt::utils::AccountId32
+	fn to_subxt_account(account: &SpAccountId32) -> SubxtAccountId32 {
+		// Use as_ref to get the byte array
+		SubxtAccountId32::from(*account.as_ref())
+	}
+
+	/// Convert subxt::utils::AccountId32 to sp_runtime::AccountId32
+	fn from_subxt_account(account: &SubxtAccountId32) -> SpAccountId32 {
+		SpAccountId32::new(account.0)
 	}
 }
 
 #[async_trait]
 impl TransactionSubmitter for SubxtSubmitter {
 	async fn submit_store(&self, data: Vec<u8>) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
-
 		// Use generated store call from metadata
 		let store_tx = bulletin::tx().transaction_storage().store(data);
 
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch_default(&store_tx, &signer)
+			.sign_and_submit_then_watch_default(&store_tx, &*self.storage_keypair)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -201,19 +209,18 @@ impl TransactionSubmitter for SubxtSubmitter {
 
 	async fn submit_authorize_account(
 		&self,
-		who: AccountId32,
+		who: SpAccountId32,
 		transactions: u32,
 		bytes: u64,
 	) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
+		// Convert sp_runtime::AccountId32 to subxt::utils::AccountId32
+		let subxt_who = Self::to_subxt_account(&who);
 
 		// Use generated authorize_account call from metadata
 		let authorize_tx =
-			bulletin::tx().transaction_storage().authorize_account(who, transactions, bytes);
+			bulletin::tx()
+				.transaction_storage()
+				.authorize_account(subxt_who, transactions, bytes);
 
 		// Wrap in sudo call
 		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
@@ -221,7 +228,11 @@ impl TransactionSubmitter for SubxtSubmitter {
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
+			.sign_and_submit_then_watch(
+				&sudo_tx,
+				&*self.sudo_keypair,
+				bulletin_params(Default::default()),
+			)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -236,12 +247,6 @@ impl TransactionSubmitter for SubxtSubmitter {
 		content_hash: ContentHash,
 		max_size: u64,
 	) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
-
 		let authorize_tx =
 			bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
@@ -250,7 +255,11 @@ impl TransactionSubmitter for SubxtSubmitter {
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
+			.sign_and_submit_then_watch(
+				&sudo_tx,
+				&*self.sudo_keypair,
+				bulletin_params(Default::default()),
+			)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -261,18 +270,12 @@ impl TransactionSubmitter for SubxtSubmitter {
 	}
 
 	async fn submit_renew(&self, block: u32, index: u32) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
-
 		let renew_tx = bulletin::tx().transaction_storage().renew(block, index);
 
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch_default(&renew_tx, &signer)
+			.sign_and_submit_then_watch_default(&renew_tx, &*self.storage_keypair)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -284,22 +287,23 @@ impl TransactionSubmitter for SubxtSubmitter {
 
 	async fn submit_refresh_account_authorization(
 		&self,
-		who: AccountId32,
+		who: SpAccountId32,
 	) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
+		let subxt_who = Self::to_subxt_account(&who);
 
-		let refresh_tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
+		let refresh_tx =
+			bulletin::tx().transaction_storage().refresh_account_authorization(subxt_who);
 
 		let sudo_tx = bulletin::tx().sudo().sudo(refresh_tx);
 
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
+			.sign_and_submit_then_watch(
+				&sudo_tx,
+				&*self.sudo_keypair,
+				bulletin_params(Default::default()),
+			)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -313,12 +317,6 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		content_hash: ContentHash,
 	) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.sudo_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
-
 		let refresh_tx = bulletin::tx()
 			.transaction_storage()
 			.refresh_preimage_authorization(content_hash);
@@ -328,7 +326,11 @@ impl TransactionSubmitter for SubxtSubmitter {
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch(&sudo_tx, &signer, bulletin_params(Default::default()))
+			.sign_and_submit_then_watch(
+				&sudo_tx,
+				&*self.sudo_keypair,
+				bulletin_params(Default::default()),
+			)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -340,21 +342,18 @@ impl TransactionSubmitter for SubxtSubmitter {
 
 	async fn submit_remove_expired_account_authorization(
 		&self,
-		who: AccountId32,
+		who: SpAccountId32,
 	) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
+		let subxt_who = Self::to_subxt_account(&who);
 
-		let remove_tx =
-			bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
+		let remove_tx = bulletin::tx()
+			.transaction_storage()
+			.remove_expired_account_authorization(subxt_who);
 
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch_default(&remove_tx, &signer)
+			.sign_and_submit_then_watch_default(&remove_tx, &*self.storage_keypair)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -368,12 +367,6 @@ impl TransactionSubmitter for SubxtSubmitter {
 		&self,
 		content_hash: ContentHash,
 	) -> SdkResult<TransactionReceipt> {
-		let signer =
-			subxt_signer::sr25519::Keypair::from_secret_key(self.storage_keypair.secret_key())
-				.map_err(|e| {
-					SdkError::SubmissionFailed(format!("Failed to create signer: {e:?}"))
-				})?;
-
 		let remove_tx = bulletin::tx()
 			.transaction_storage()
 			.remove_expired_preimage_authorization(content_hash);
@@ -381,7 +374,7 @@ impl TransactionSubmitter for SubxtSubmitter {
 		let events = self
 			.api
 			.tx()
-			.sign_and_submit_then_watch_default(&remove_tx, &signer)
+			.sign_and_submit_then_watch_default(&remove_tx, &*self.storage_keypair)
 			.await
 			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
 			.wait_for_finalized_success()
@@ -391,8 +384,10 @@ impl TransactionSubmitter for SubxtSubmitter {
 		self.build_receipt(events).await
 	}
 
-	fn signer_account(&self) -> Option<AccountId32> {
-		Some(self.storage_keypair.public_key().into())
+	fn signer_account(&self) -> Option<SpAccountId32> {
+		// Convert subxt public key to sp_runtime::AccountId32
+		let subxt_account: SubxtAccountId32 = self.storage_keypair.public_key().into();
+		Some(Self::from_subxt_account(&subxt_account))
 	}
 }
 
