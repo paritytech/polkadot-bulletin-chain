@@ -12204,9 +12204,12 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-runtime 31.0.1",
+ "sp-tracing 16.0.0 (git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5)",
  "subxt 0.37.0",
  "subxt-signer 0.37.0",
  "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.22",
 ]
 
 [[package]]

@@ -15,6 +15,9 @@ subxt = { version = "0.37", features = ["substrate-compat"] }
 subxt-signer = { version = "0.37", features = ["sr25519", "subxt"] }
 # Use matching sp-runtime from git to ensure type compatibility with SDK
 sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5" }
+sp-tracing = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5" }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
 anyhow = "1.0"

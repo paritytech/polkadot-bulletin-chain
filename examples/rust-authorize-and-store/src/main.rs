@@ -43,6 +43,8 @@ use subxt::{
 	OnlineClient,
 };
 use subxt_signer::sr25519::Keypair;
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
 #[command(name = "authorize-and-store")]
@@ -393,18 +395,25 @@ impl TransactionSubmitter for SubxtSubmitter {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+	// Initialize tracing subscriber
+	let subscriber = FmtSubscriber::builder()
+		.with_max_level(Level::INFO)
+		.with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+		.finish();
+	tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+
 	let args = Args::parse();
 
 	// Parse keypair from seed
 	let keypair = keypair_from_seed(&args.seed)?;
-	println!("Using account: {}", hex::encode(keypair.public_key().0));
+	info!("Using account: {}", hex::encode(keypair.public_key().0));
 
 	// Connect to Bulletin Chain node
-	println!("Connecting to {}...", args.ws);
+	info!("Connecting to {}...", args.ws);
 	let api = OnlineClient::<BulletinConfig>::from_url(&args.ws)
 		.await
 		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
-	println!("Connected successfully!");
+	info!("Connected successfully!");
 
 	// Create submitter (Alice as sudo, same account for storage)
 	let submitter = SubxtSubmitter::new(api, keypair.clone(), keypair);
@@ -413,7 +422,7 @@ async fn main() -> Result<()> {
 	let client = AsyncBulletinClient::new(submitter);
 
 	// Step 1: Authorize the account to store data
-	println!("\nStep 1: Authorizing account...");
+	info!("\nStep 1: Authorizing account...");
 	client
 		.authorize_account(
 			keypair_from_seed(&args.seed)?.public_key().into(),
@@ -422,21 +431,21 @@ async fn main() -> Result<()> {
 		)
 		.await
 		.map_err(|e| anyhow!("Failed to authorize account: {e:?}"))?;
-	println!("Account authorized successfully!");
+	info!("Account authorized successfully!");
 
 	// Step 2: Store data using the SDK
-	println!("\nStep 2: Storing data...");
+	info!("\nStep 2: Storing data...");
 	let data_to_store = format!("Hello from Bulletin SDK at {}", chrono_lite());
 	let result = client
 		.store(data_to_store.as_bytes().to_vec(), None)
 		.await
 		.map_err(|e| anyhow!("Failed to store data: {e:?}"))?;
 
-	println!("Data stored successfully!");
-	println!("  CID: {}", hex::encode(&result.cid));
-	println!("  Size: {} bytes", result.size);
+	info!("Data stored successfully!");
+	info!("  CID: {}", hex::encode(&result.cid));
+	info!("  Size: {} bytes", result.size);
 
-	println!("\n\nTest passed!");
+	info!("\n\nTest passed!");
 
 	Ok(())
 }
