@@ -13,7 +13,6 @@
 //! - **Authorization Management**: Helper functions for account and preimage authorization
 //! - **Progress Tracking**: Callback-based progress events for uploads
 //! - **no_std Compatible**: Core functionality works in no_std environments
-//! - **ink! Support**: Use in smart contracts with the `ink` feature
 //!
 //! ## Usage
 //!
@@ -60,7 +59,6 @@
 //! ## Feature Flags
 //!
 //! - `std` (default): Enable standard library support and subxt helpers
-//! - `ink`: Enable ink! smart contract compatibility
 //! - `serde-support`: Enable serialization support for DAG structures
 //!
 //! ## no_std Support

@@ -8,7 +8,7 @@ These SDKs provide high-level abstractions for interacting with the Bulletin Cha
 
 | Language | Package | Status | Description |
 |----------|---------|--------|-------------|
-| **Rust** | `bulletin-sdk-rust` | Alpha | Native Rust client, supports `std` and `no_std` (WASM/ink!) |
+| **Rust** | `bulletin-sdk-rust` | Alpha | Native Rust client, supports `std` and `no_std` (WASM) |
 | **TypeScript** | `@bulletin/sdk` | Alpha | JS/TS client for Node.js and Browser, integrates with PAPI |
 
 ## What is Bulletin Chain?

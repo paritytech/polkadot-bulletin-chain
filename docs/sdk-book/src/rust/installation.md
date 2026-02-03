@@ -14,7 +14,6 @@ The SDK exposes several feature flags to optimize your build:
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `std`   | Yes     | Enables standard library support. Disable for `no_std`. |
-| `ink`   | No      | Enables compatibility with ink! smart contracts. |
 | `serde-support` | No | Adds `Serialize`/`Deserialize` support for types. |
 
 ## Subxt Integration

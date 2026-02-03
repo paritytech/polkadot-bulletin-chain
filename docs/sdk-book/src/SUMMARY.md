@@ -11,7 +11,7 @@
     - [Basic Storage](./rust/basic-storage.md)
     - [Chunked Uploads](./rust/chunked-uploads.md)
     - [Authorization](./rust/authorization.md)
-    - [no_std & ink!](./rust/no_std.md)
+    - [no_std Support](./rust/no_std.md)
 - [TypeScript SDK](./typescript/README.md)
     - [Installation](./typescript/installation.md)
     - [Basic Storage](./typescript/basic-storage.md)

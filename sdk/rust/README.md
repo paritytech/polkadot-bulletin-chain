@@ -130,7 +130,6 @@ See [`src/submitters/README.md`](src/submitters/README.md) for detailed guidance
 - ✅ Authorization management
 - ✅ Progress tracking
 - ✅ no_std compatible core
-- ✅ ink! smart contract support
 
 ## License
 
