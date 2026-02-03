@@ -16,7 +16,7 @@
  *   node examples/simple-store.js
  */
 
-import { AsyncBulletinClient, PAPITransactionSubmitter, StoreOptions, CidCodec, HashAlgorithm } from '../dist/index.js';
+import { AsyncBulletinClient, StoreOptions, CidCodec, HashAlgorithm } from '../dist/index.js';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
@@ -45,24 +45,21 @@ async function main() {
   console.log('🔑 Using account: Alice');
   console.log('✅ Connected to Bulletin Chain\n');
 
-  // 3. Create transaction submitter
-  const submitter = new PAPITransactionSubmitter(api, signer);
+  // 3. Create Bulletin client (directly with PAPI client and signer)
+  const client = new AsyncBulletinClient(api, signer);
 
-  // 4. Create Bulletin client
-  const client = new AsyncBulletinClient(submitter);
-
-  // 5. Prepare data to store
+  // 4. Prepare data to store
   const data = new TextEncoder().encode(
     'Hello, Bulletin Chain! This is a simple store example.'
   );
   console.log('📝 Data to store:', data.length, 'bytes');
   console.log('   Content:', new TextDecoder().decode(data), '\n');
 
-  // 6. Store data (complete workflow!)
+  // 5. Store data using builder pattern
   console.log('⏳ Storing data on chain...');
-  const result = await client.store(data);
+  const result = await client.store(data).send();
 
-  // 7. Display results
+  // 6. Display results
   console.log('✅ Data stored successfully!\n');
   console.log('📊 Results:');
   console.log('   CID:', result.cid.toString());

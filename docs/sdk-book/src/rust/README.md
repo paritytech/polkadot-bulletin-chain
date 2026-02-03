@@ -8,27 +8,27 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 ## Key Features
 
-- **Complete Transaction Support**: Built-in submitters for `subxt` and mock testing
-- **Flexible Architecture**: Use `AsyncBulletinClient` for full automation or prepare operations manually
-- **Multiple Submitter Options**: SubxtSubmitter, MockSubmitter, or create your own
-- **Connection Management**: Simple `from_url()` constructor handles WebSocket connections
-- **Testing Support**: MockSubmitter allows testing without a blockchain node
+- **Direct subxt Integration**: Tightly coupled to `subxt` for type-safe blockchain interaction
+- **Flexible Architecture**: Use `AsyncBulletinClient` for full automation or `BulletinClient` for manual preparation
+- **Builder Pattern**: Fluent API for configuring store operations
+- **Mock Testing**: `MockBulletinClient` allows testing without a blockchain node
+- **Runtime Metadata**: Users configure subxt with their own metadata for maximum flexibility
 
 ## Modules
 
 - `async_client`: High-level async client with transaction submission (`AsyncBulletinClient`)
+- `mock_client`: Mock client for testing without blockchain (`MockBulletinClient`)
 - `client`: Core client for operation preparation (`BulletinClient`)
-- `submitters`: Transaction submitter implementations (SubxtSubmitter, MockSubmitter)
 - `chunker`: Splits data into chunks (`FixedSizeChunker`)
 - `cid`: CID calculation utilities
 - `storage`: Transaction preparation helpers
 - `authorization`: Authorization management
-- `submit`: TransactionSubmitter trait definition
 
 ## Quick Start
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use subxt::{OnlineClient, PolkadotConfig};
 use subxt_signer::sr25519::dev;
 
 let ws_url = std::env::var("BULLETIN_WS_URL")
@@ -38,12 +38,14 @@ let ws_url = std::env::var("BULLETIN_WS_URL")
 // In production, use: Keypair::from_phrase() with your seed phrase
 let signer = dev::alice();
 
-// Connect and create client
-// Note: The submitter contains the signer for transaction signing
-let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
-let client = AsyncBulletinClient::new(submitter);
+// Connect to the blockchain using subxt
+// Users must configure subxt with their own runtime metadata
+let api = OnlineClient::<PolkadotConfig>::from_url(&ws_url).await?;
 
-// Store data - complete workflow with builder pattern
+// Create SDK client with subxt client
+let client = AsyncBulletinClient::new(api);
+
+// Store data using builder pattern
 let result = client
     .store(data)
     .send()
@@ -52,26 +54,23 @@ let result = client
 
 ### Using Multiple Accounts
 
-If you need to use different accounts, create separate clients or submitters:
+If you need to use different accounts, you need to handle signing at the transaction level.
+The SDK client uses subxt directly, so you control the signer when creating transactions.
+
+For testing without a blockchain, use the `MockBulletinClient`:
 
 ```rust
-use subxt_signer::sr25519::dev;
+use bulletin_sdk_rust::prelude::*;
 
-// Client for Alice (e.g., for sudo operations)
-let alice = dev::alice();
-let alice_submitter = SubxtSubmitter::from_url(&ws_url, alice).await?;
-let alice_client = AsyncBulletinClient::new(alice_submitter);
+// Create mock client (no blockchain required)
+let client = MockBulletinClient::new();
 
-// Client for Bob (e.g., for regular storage)
-let bob = dev::bob();
-let bob_submitter = SubxtSubmitter::from_url(&ws_url, bob).await?;
-let bob_client = AsyncBulletinClient::new(bob_submitter);
+// Store data - calculates real CIDs but doesn't submit to chain
+let result = client.store(data).send().await?;
 
-// Use alice_client for authorization
-alice_client.authorize_account(bob.public_key().into(), 100, 10_000_000).await?;
-
-// Use bob_client for storing data
-let result = bob_client.store(data).send().await?;
+// Verify operations performed
+let ops = client.operations();
+assert_eq!(ops.len(), 1);
 ```
 
 ### Production Signer Setup

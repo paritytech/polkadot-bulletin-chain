@@ -87,17 +87,13 @@ pub mod storage;
 pub mod types;
 pub mod utils;
 
-// Transaction submission (std-only)
-#[cfg(feature = "std")]
-pub mod submit;
-
-// Transaction submitters for different client libraries (std-only)
-#[cfg(feature = "std")]
-pub mod submitters;
-
 // Async client with full transaction support (std-only)
 #[cfg(feature = "std")]
 pub mod async_client;
+
+// Mock client for testing (std-only)
+#[cfg(feature = "std")]
+pub mod mock_client;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
@@ -133,13 +129,10 @@ pub mod prelude {
 	};
 
 	#[cfg(feature = "std")]
-	pub use crate::async_client::{AsyncBulletinClient, AsyncClientConfig};
+	pub use crate::async_client::{AsyncBulletinClient, AsyncClientConfig, StoreBuilder};
 
 	#[cfg(feature = "std")]
-	pub use crate::submit::{Call, TransactionBuilder, TransactionReceipt, TransactionSubmitter};
-
-	#[cfg(feature = "std")]
-	pub use crate::submitters::{MockSubmitter, SubxtSubmitter};
+	pub use crate::mock_client::{MockBulletinClient, MockClientConfig, MockOperation};
 }
 
 #[cfg(test)]

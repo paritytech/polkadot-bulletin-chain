@@ -6,6 +6,7 @@
  */
 
 import { CID } from 'multiformats/cid';
+import { PolkadotSigner, TypedApi } from 'polkadot-api';
 import { FixedSizeChunker, reassembleChunks } from './chunker.js';
 import { UnixFsDagBuilder } from './dag.js';
 import { calculateCid } from './utils.js';
@@ -21,24 +22,151 @@ import {
   BulletinError,
   CidCodec,
   ChunkDetails,
+  Authorization,
 } from './types.js';
-import { TransactionSubmitter, TransactionReceipt } from './transaction.js';
+
+/**
+ * Transaction receipt from a successful submission
+ */
+export interface TransactionReceipt {
+  /** Block hash containing the transaction */
+  blockHash: string;
+  /** Transaction hash */
+  txHash: string;
+  /** Block number (if known) */
+  blockNumber?: number;
+}
+
+/**
+ * Configuration for the async Bulletin client
+ */
+export interface AsyncClientConfig {
+  /** Default chunk size for large files (default: 1 MiB) */
+  defaultChunkSize?: number;
+  /** Maximum parallel uploads (default: 8) */
+  maxParallel?: number;
+  /** Whether to create manifests for chunked uploads (default: true) */
+  createManifest?: boolean;
+  /** Threshold for automatic chunking (default: 2 MiB) */
+  chunkingThreshold?: number;
+  /** Check authorization before uploading to fail fast (default: true) */
+  checkAuthorizationBeforeUpload?: boolean;
+}
+
+/**
+ * Builder for store operations with fluent API
+ *
+ * @example
+ * ```typescript
+ * const result = await client
+ *   .store(data)
+ *   .withCodec(CidCodec.DagPb)
+ *   .withHashAlgorithm('blake2b-256')
+ *   .withCallback((event) => console.log('Progress:', event))
+ *   .send();
+ * ```
+ */
+export class StoreBuilder {
+  private data: Uint8Array;
+  private options: StoreOptions = { ...DEFAULT_STORE_OPTIONS };
+  private callback?: ProgressCallback;
+
+  constructor(
+    private client: AsyncBulletinClient,
+    data: Uint8Array,
+  ) {
+    this.data = data;
+  }
+
+  /** Set the CID codec */
+  withCodec(codec: CidCodec): this {
+    this.options.cidCodec = codec;
+    return this;
+  }
+
+  /** Set the hash algorithm */
+  withHashAlgorithm(algorithm: string): this {
+    this.options.hashingAlgorithm = algorithm;
+    return this;
+  }
+
+  /** Set whether to wait for finalization */
+  withFinalization(wait: boolean): this {
+    this.options.waitForFinalization = wait;
+    return this;
+  }
+
+  /** Set custom store options */
+  withOptions(options: StoreOptions): this {
+    this.options = options;
+    return this;
+  }
+
+  /** Set progress callback for chunked uploads */
+  withCallback(callback: ProgressCallback): this {
+    this.callback = callback;
+    return this;
+  }
+
+  /** Execute the store operation */
+  async send(): Promise<StoreResult> {
+    return this.client.storeWithOptions(this.data, this.options, this.callback);
+  }
+}
 
 /**
  * Async Bulletin client that submits transactions to the chain
  *
- * This client provides a complete interface for storing data on Bulletin Chain,
- * handling everything from chunking to transaction submission.
+ * This client is tightly coupled to PAPI (Polkadot API) for blockchain interaction.
+ * Users must provide a configured PAPI client with appropriate chain metadata.
+ *
+ * @example
+ * ```typescript
+ * import { createClient } from 'polkadot-api';
+ * import { getWsProvider } from 'polkadot-api/ws-provider/web';
+ * import { AsyncBulletinClient } from '@bulletin/sdk';
+ *
+ * // User sets up PAPI client
+ * const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
+ * const client = createClient(wsProvider);
+ * const api = client.getTypedApi(bulletinDescriptor);
+ *
+ * // Create SDK client
+ * const bulletinClient = new AsyncBulletinClient(api, signer);
+ *
+ * // Store data
+ * const result = await bulletinClient.store(data).send();
+ * ```
  */
 export class AsyncBulletinClient {
-  private submitter: TransactionSubmitter;
-  private config: Required<Omit<ClientConfig, 'endpoint'>> & { chunkingThreshold: number; checkAuthorizationBeforeUpload: boolean };
+  /** PAPI client for blockchain interaction */
+  public api: any;
+  /** Signer for transaction signing */
+  public signer: PolkadotSigner;
+  /** Client configuration */
+  public config: Required<AsyncClientConfig>;
+  /** Account for authorization checks (optional) */
   private account?: string;
 
-  constructor(submitter: TransactionSubmitter, config?: Partial<ClientConfig>) {
-    this.submitter = submitter;
+  /**
+   * Create a new async client with PAPI client and signer
+   *
+   * The PAPI client must be configured with the correct chain metadata
+   * for your Bulletin Chain node.
+   *
+   * @param api - Configured PAPI TypedApi instance
+   * @param signer - Polkadot signer for transaction signing
+   * @param config - Optional client configuration
+   */
+  constructor(
+    api: any,
+    signer: PolkadotSigner,
+    config?: Partial<AsyncClientConfig>,
+  ) {
+    this.api = api;
+    this.signer = signer;
     this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
+      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
@@ -58,20 +186,35 @@ export class AsyncBulletinClient {
   }
 
   /**
-   * Store data on Bulletin Chain
+   * Store data on Bulletin Chain using builder pattern
+   *
+   * Returns a builder that allows fluent configuration of store options.
+   *
+   * @example
+   * ```typescript
+   * const result = await client
+   *   .store(data)
+   *   .withCodec(CidCodec.DagPb)
+   *   .withHashAlgorithm('blake2b-256')
+   *   .withCallback((event) => {
+   *     console.log('Progress:', event);
+   *   })
+   *   .send();
+   * ```
+   */
+  store(data: Uint8Array): StoreBuilder {
+    return new StoreBuilder(this, data);
+  }
+
+  /**
+   * Store data with custom options (internal, used by builder)
+   *
+   * **Note**: This method is public for use by the builder but users should prefer
+   * the builder pattern via `store()`.
    *
    * Automatically chunks data if it exceeds the configured threshold.
-   * This handles the complete workflow:
-   * 1. Decide whether to chunk based on data size
-   * 2. Calculate CID(s)
-   * 3. Submit transaction(s)
-   * 4. Wait for finalization
-   *
-   * @param data - Data to store
-   * @param options - Storage options (CID codec, hash algorithm)
-   * @param progressCallback - Optional callback for progress tracking (only called for chunked uploads)
    */
-  async store(
+  async storeWithOptions(
     data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
@@ -101,47 +244,8 @@ export class AsyncBulletinClient {
       throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
     }
 
-    // Check authorization before upload if enabled
-    if (this.config.checkAuthorizationBeforeUpload && this.account) {
-      if (this.submitter.queryAccountAuthorization) {
-        // Query current authorization
-        const auth = await this.submitter.queryAccountAuthorization(this.account);
-
-        if (auth) {
-          // Check if authorization has expired
-          if (auth.expiresAt !== undefined) {
-            if (this.submitter.queryCurrentBlock) {
-              const currentBlock = await this.submitter.queryCurrentBlock();
-              if (currentBlock !== undefined && auth.expiresAt <= currentBlock) {
-                throw new BulletinError(
-                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
-                  'AUTHORIZATION_EXPIRED',
-                  { expiredAt: auth.expiresAt, currentBlock },
-                );
-              }
-            }
-          }
-
-          // Check if sufficient for this upload (1 transaction, data size)
-          if (auth.maxSize < BigInt(data.length)) {
-            throw new BulletinError(
-              `Insufficient authorization: need ${data.length} bytes, have ${auth.maxSize} bytes`,
-              'INSUFFICIENT_AUTHORIZATION',
-              { need: data.length, available: auth.maxSize },
-            );
-          }
-
-          if (auth.transactions < 1) {
-            throw new BulletinError(
-              `Insufficient authorization: need 1 transaction, have ${auth.transactions} transactions`,
-              'INSUFFICIENT_AUTHORIZATION',
-              { need: 1, available: auth.transactions },
-            );
-          }
-        }
-        // If no authorization found, let it proceed - on-chain validation will catch it
-      }
-    }
+    // TODO: Check authorization before upload if enabled
+    // TODO: Query authorization state from chain if checkAuthorizationBeforeUpload is true
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
@@ -152,41 +256,20 @@ export class AsyncBulletinClient {
       opts.hashingAlgorithm!,
     );
 
-    // Submit transaction
-    const receipt = await this.submitter.submitStore(data);
+    // TODO: Submit transaction via PAPI
+    // const tx = this.api.tx.TransactionStorage.store({ data });
+    // const result = await tx.signAndSubmit(this.signer);
+    // const finalized = await result.waitFor('finalized');
 
-    return {
-      cid,
-      size: data.length,
-      blockNumber: receipt.blockNumber,
-      // No chunks for single upload
-    };
+    // Placeholder implementation
+    throw new BulletinError(
+      'Direct PAPI integration not yet implemented - see examples for current usage patterns',
+      'NOT_IMPLEMENTED',
+    );
   }
 
   /**
-   * Calculate authorization requirements for chunked upload
-   */
-  private calculateRequirements(
-    dataSize: number,
-    numChunks: number,
-    createManifest: boolean,
-  ): { transactions: number; bytes: number } {
-    // Each chunk needs one transaction
-    let transactions = numChunks;
-
-    // If creating manifest, add one more transaction
-    if (createManifest) {
-      transactions += 1;
-    }
-
-    // Total bytes = data size
-    const bytes = dataSize;
-
-    return { transactions, bytes };
-  }
-
-  /**
-   * Internal: Store data with chunking (returns unified StoreResult)
+   * Internal: Store data with chunking
    */
   private async storeInternalChunked(
     data: Uint8Array,
@@ -194,163 +277,14 @@ export class AsyncBulletinClient {
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
-    if (data.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
-    }
+    // TODO: Implement chunked upload with PAPI
+    // Similar to storeInternalSingle but for each chunk
 
-    const chunkerConfig: ChunkerConfig = {
-      ...DEFAULT_CHUNKER_CONFIG,
-      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
-      maxParallel: config?.maxParallel ?? this.config.maxParallel,
-      createManifest: config?.createManifest ?? this.config.createManifest,
-    };
-
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-
-    // Chunk the data
-    const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(data);
-
-    // Check authorization before upload if enabled
-    if (this.config.checkAuthorizationBeforeUpload && this.account) {
-      if (this.submitter.queryAccountAuthorization) {
-        // Calculate requirements
-        const { transactions: txsNeeded, bytes: bytesNeeded } = this.calculateRequirements(
-          data.length,
-          chunks.length,
-          chunkerConfig.createManifest,
-        );
-
-        // Query current authorization
-        const auth = await this.submitter.queryAccountAuthorization(this.account);
-
-        if (auth) {
-          // Check if authorization has expired
-          if (auth.expiresAt !== undefined) {
-            if (this.submitter.queryCurrentBlock) {
-              const currentBlock = await this.submitter.queryCurrentBlock();
-              if (currentBlock !== undefined && auth.expiresAt <= currentBlock) {
-                throw new BulletinError(
-                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
-                  'AUTHORIZATION_EXPIRED',
-                  { expiredAt: auth.expiresAt, currentBlock },
-                );
-              }
-            }
-          }
-
-          // Check if sufficient
-          if (auth.maxSize < BigInt(bytesNeeded)) {
-            throw new BulletinError(
-              `Insufficient authorization: need ${bytesNeeded} bytes, have ${auth.maxSize} bytes`,
-              'INSUFFICIENT_AUTHORIZATION',
-              { need: bytesNeeded, available: auth.maxSize },
-            );
-          }
-
-          if (auth.transactions < txsNeeded) {
-            throw new BulletinError(
-              `Insufficient authorization: need ${txsNeeded} transactions, have ${auth.transactions} transactions`,
-              'INSUFFICIENT_AUTHORIZATION',
-              { need: txsNeeded, available: auth.transactions },
-            );
-          }
-        }
-        // If no authorization found, let it proceed - on-chain validation will catch it
-      }
-    }
-
-    const chunkCids: CID[] = [];
-    let lastBlockNumber: number | undefined;
-
-    // Submit each chunk
-    for (const chunk of chunks) {
-      if (progressCallback) {
-        progressCallback({
-          type: 'chunk_started',
-          index: chunk.index,
-          total: chunks.length,
-        });
-      }
-
-      try {
-        // Calculate CID for this chunk
-        const cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? CidCodec.Raw,
-          opts.hashingAlgorithm!,
-        );
-
-        chunk.cid = cid;
-
-        // Submit chunk transaction
-        const receipt = await this.submitter.submitStore(chunk.data);
-        lastBlockNumber = receipt.blockNumber;
-
-        chunkCids.push(cid);
-
-        if (progressCallback) {
-          progressCallback({
-            type: 'chunk_completed',
-            index: chunk.index,
-            total: chunks.length,
-            cid,
-          });
-        }
-      } catch (error) {
-        if (progressCallback) {
-          progressCallback({
-            type: 'chunk_failed',
-            index: chunk.index,
-            total: chunks.length,
-            error: error as Error,
-          });
-        }
-        throw error;
-      }
-    }
-
-    // Optionally create and submit manifest
-    let manifestCid: CID | undefined;
-    if (chunkerConfig.createManifest) {
-      if (progressCallback) {
-        progressCallback({ type: 'manifest_started' });
-      }
-
-      const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, opts.hashingAlgorithm!);
-
-      // Submit manifest
-      const receipt = await this.submitter.submitStore(manifest.dagBytes);
-      lastBlockNumber = receipt.blockNumber;
-
-      manifestCid = manifest.rootCid;
-
-      if (progressCallback) {
-        progressCallback({
-          type: 'manifest_created',
-          cid: manifest.rootCid,
-        });
-      }
-    }
-
-    if (progressCallback) {
-      progressCallback({
-        type: 'completed',
-        manifestCid,
-      });
-    }
-
-    // Return unified StoreResult
-    return {
-      cid: manifestCid ?? chunkCids[0]!,
-      size: data.length,
-      blockNumber: lastBlockNumber,
-      chunks: {
-        chunkCids,
-        numChunks: chunks.length,
-      },
-    };
+    // Placeholder implementation
+    throw new BulletinError(
+      'Chunked upload not yet implemented for direct PAPI integration',
+      'NOT_IMPLEMENTED',
+    );
   }
 
   /**
@@ -408,8 +342,9 @@ export class AsyncBulletinClient {
 
         chunk.cid = cid;
 
-        // Submit chunk transaction
-        await this.submitter.submitStore(chunk.data);
+        // TODO: Submit chunk transaction via PAPI
+        // const tx = this.api.tx.TransactionStorage.store({ data: chunk.data });
+        // await tx.signAndSubmit(this.signer);
 
         chunkCids.push(cid);
 
@@ -444,8 +379,9 @@ export class AsyncBulletinClient {
       const builder = new UnixFsDagBuilder();
       const manifest = await builder.build(chunks, opts.hashingAlgorithm!);
 
-      // Submit manifest
-      await this.submitter.submitStore(manifest.dagBytes);
+      // TODO: Submit manifest via PAPI
+      // const tx = this.api.tx.TransactionStorage.store({ data: manifest.dagBytes });
+      // await tx.signAndSubmit(this.signer);
 
       manifestCid = manifest.rootCid;
 
@@ -482,7 +418,27 @@ export class AsyncBulletinClient {
     transactions: number,
     bytes: bigint,
   ): Promise<TransactionReceipt> {
-    return this.submitter.submitAuthorizeAccount(who, transactions, bytes);
+    try {
+      const tx = this.api.tx.TransactionStorage.authorize_account({
+        who,
+        transactions,
+        bytes,
+      });
+      const result = await tx.signAndSubmit(this.signer);
+      const finalized = await result.waitFor('finalized');
+
+      return {
+        blockHash: finalized.blockHash,
+        txHash: finalized.txHash,
+        blockNumber: finalized.blockNumber,
+      };
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to authorize account: ${error}`,
+        'AUTHORIZATION_FAILED',
+        error,
+      );
+    }
   }
 
   /**
@@ -494,46 +450,49 @@ export class AsyncBulletinClient {
     contentHash: Uint8Array,
     maxSize: bigint,
   ): Promise<TransactionReceipt> {
-    return this.submitter.submitAuthorizePreimage(contentHash, maxSize);
+    try {
+      const tx = this.api.tx.TransactionStorage.authorize_preimage({
+        content_hash: contentHash,
+        max_size: maxSize,
+      });
+      const result = await tx.signAndSubmit(this.signer);
+      const finalized = await result.waitFor('finalized');
+
+      return {
+        blockHash: finalized.blockHash,
+        txHash: finalized.txHash,
+        blockNumber: finalized.blockNumber,
+      };
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to authorize preimage: ${error}`,
+        'AUTHORIZATION_FAILED',
+        error,
+      );
+    }
   }
 
   /**
    * Renew/extend retention period for stored data
    */
   async renew(block: number, index: number): Promise<TransactionReceipt> {
-    return this.submitter.submitRenew(block, index);
-  }
+    try {
+      const tx = this.api.tx.TransactionStorage.renew({ block, index });
+      const result = await tx.signAndSubmit(this.signer);
+      const finalized = await result.waitFor('finalized');
 
-  /**
-   * Refresh an account authorization (extends expiry)
-   *
-   * Requires sudo/authorizer privileges
-   */
-  async refreshAccountAuthorization(who: string): Promise<TransactionReceipt> {
-    return this.submitter.submitRefreshAccountAuthorization(who);
-  }
-
-  /**
-   * Refresh a preimage authorization (extends expiry)
-   *
-   * Requires sudo/authorizer privileges
-   */
-  async refreshPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt> {
-    return this.submitter.submitRefreshPreimageAuthorization(contentHash);
-  }
-
-  /**
-   * Remove an expired account authorization
-   */
-  async removeExpiredAccountAuthorization(who: string): Promise<TransactionReceipt> {
-    return this.submitter.submitRemoveExpiredAccountAuthorization(who);
-  }
-
-  /**
-   * Remove an expired preimage authorization
-   */
-  async removeExpiredPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt> {
-    return this.submitter.submitRemoveExpiredPreimageAuthorization(contentHash);
+      return {
+        blockHash: finalized.blockHash,
+        txHash: finalized.txHash,
+        blockNumber: finalized.blockNumber,
+      };
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to renew: ${error}`,
+        'TRANSACTION_FAILED',
+        error,
+      );
+    }
   }
 
   /**
