@@ -357,7 +357,15 @@ RUST_LOG=warn cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 
 # Filter specific modules
 RUST_LOG=authorize_and_store=debug,subxt=info cargo run --release -- --ws <WS_URL>
+
+# Save logs to file
+RUST_LOG=debug cargo run --release -- --ws <WS_URL> 2>&1 | tee output.log
+
+# Filter output in real-time
+RUST_LOG=info cargo run --release -- --ws <WS_URL> 2>&1 | grep -i "cid\|error"
 ```
+
+Log levels: `error`, `warn`, `info` (default), `debug`, `trace`
 
 **Note**: The example requires `bulletin_metadata.scale` to be generated before compilation. See the example's README for details.
 
