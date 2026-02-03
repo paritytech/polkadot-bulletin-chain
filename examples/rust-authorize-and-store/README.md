@@ -2,6 +2,8 @@
 
 This example demonstrates using the `bulletin-sdk-rust` with a subxt-based TransactionSubmitter.
 
+**⚠️  Note**: This example is excluded from the main workspace due to dependency conflicts between `subxt 0.37` and the polkadot-sdk dependencies. Build it separately from its directory.
+
 ## Prerequisites
 
 1. **Running Bulletin Chain node**: You need a running Bulletin Chain node with WebSocket endpoint available
