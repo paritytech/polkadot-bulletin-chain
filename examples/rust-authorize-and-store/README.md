@@ -38,6 +38,8 @@ This example demonstrates using the `bulletin-sdk-rust` with a subxt-based Trans
 
 ## Usage
 
+### Basic Usage
+
 ```bash
 cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 ```
@@ -45,6 +47,50 @@ cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 Where:
 - `<WS_URL>`: WebSocket URL of your Bulletin Chain node (default: `ws://localhost:10000`)
 - `<SEED>`: Account seed phrase or dev seed like `//Alice` (default: `//Alice`)
+
+### Controlling Log Output
+
+This example uses `tracing` for structured logging. You can control the log level using the `RUST_LOG` environment variable:
+
+**Default output (INFO level):**
+```bash
+cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+```
+
+**Debug output (more verbose):**
+```bash
+RUST_LOG=debug cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+```
+
+**Trace output (most verbose):**
+```bash
+RUST_LOG=trace cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+```
+
+**Filter by module (only this example's logs at debug level):**
+```bash
+RUST_LOG=authorize_and_store=debug cargo run --release -- --ws ws://localhost:10000
+```
+
+**Multiple filters (example at debug, subxt at info):**
+```bash
+RUST_LOG=authorize_and_store=debug,subxt=info cargo run --release -- --ws ws://localhost:10000
+```
+
+**Quiet mode (warnings and errors only):**
+```bash
+RUST_LOG=warn cargo run --release -- --ws ws://localhost:10000
+```
+
+### Log Level Guide
+
+- `error` - Only errors
+- `warn` - Errors and warnings
+- `info` - Normal operation info (default)
+- `debug` - Detailed debugging information
+- `trace` - Very detailed trace information
+
+For more information on filtering syntax, see the [tracing-subscriber documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
 
 ## How it Works
 
