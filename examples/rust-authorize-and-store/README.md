@@ -90,6 +90,54 @@ RUST_LOG=warn cargo run --release -- --ws ws://localhost:10000
 - `debug` - Detailed debugging information
 - `trace` - Very detailed trace information
 
+### Advanced Command-Line Usage
+
+**Save logs to a file:**
+```bash
+RUST_LOG=debug cargo run --release -- --ws ws://localhost:10000 2>&1 | tee output.log
+```
+
+**Filter and search logs:**
+```bash
+# Show only lines containing "CID"
+RUST_LOG=info cargo run --release -- --ws ws://localhost:10000 2>&1 | grep CID
+
+# Search through saved logs
+grep -i "error\|failed" output.log
+```
+
+**Disable color output (for log files):**
+```bash
+NO_COLOR=1 RUST_LOG=info cargo run --release -- --ws ws://localhost:10000
+```
+
+**Combine with timestamp:**
+```bash
+RUST_LOG=info cargo run --release -- --ws ws://localhost:10000 2>&1 | ts '[%Y-%m-%d %H:%M:%S]'
+```
+
+**Real-time monitoring with less:**
+```bash
+RUST_LOG=debug cargo run --release -- --ws ws://localhost:10000 2>&1 | less -R
+```
+
+### Example Output
+
+With `RUST_LOG=info` (default), you'll see output like:
+```
+INFO Using account: d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d
+INFO Connecting to ws://localhost:10000...
+INFO Connected successfully!
+INFO
+Step 1: Authorizing account...
+INFO Account authorized successfully!
+INFO
+Step 2: Storing data...
+INFO Data stored successfully!
+INFO   CID: 1220a4e9...
+INFO   Size: 42 bytes
+```
+
 For more information on filtering syntax, see the [tracing-subscriber documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
 
 ## How it Works
