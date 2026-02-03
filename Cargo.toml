@@ -184,6 +184,10 @@ members = [
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
 ]
+# Exclude rust-authorize-and-store due to subxt 0.37 dependency conflict
+# Build it separately: cd examples/rust-authorize-and-store && cargo build
+exclude = ["examples/rust-authorize-and-store"]
+
 [profile.release]
 # Polkadot runtime requires unwinding.
 opt-level = 3
