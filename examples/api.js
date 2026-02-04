@@ -120,19 +120,19 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
     // Add custom `TransactionExtension` for codec, if specified.
     const txOpts = {};
     let expectedCid;
-    if (cidCodec != null && mhCode != null) {
-        txOpts.customSignedExtensions = {
-            ProvideCidConfig: {
-                value: {
-                    codec: BigInt(cidCodec),
-                    hashing: toHashingEnum(mhCode),
-                }
-            }
-        };
-        expectedCid = await cidFromBytes(data, cidCodec, mhCode);
-    } else {
+    // if (cidCodec != null && mhCode != null) {
+    //     txOpts.customSignedExtensions = {
+    //         ProvideCidConfig: {
+    //             value: {
+    //                 codec: BigInt(cidCodec),
+    //                 hashing: toHashingEnum(mhCode),
+    //             }
+    //         }
+    //     };
+    //     expectedCid = await cidFromBytes(data, cidCodec, mhCode);
+    // } else {
         expectedCid = await cidFromBytes(data);
-    }
+    // }
 
     const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
     const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);

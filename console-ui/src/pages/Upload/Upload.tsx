@@ -110,16 +110,16 @@ export function Upload() {
 
       // Build transaction options with custom extension if non-default config
       const txOpts: Record<string, unknown> = {};
-      if (hashAlgorithm !== "blake2b256" || cidCodec !== "raw") {
-        txOpts.customSignedExtensions = {
-          ProvideCidConfig: {
-            value: {
-              codec: BigInt(codecConfig.codec),
-              hashing: toHashingEnum(hashConfig.mhCode),
-            },
-          },
-        };
-      }
+      // if (hashAlgorithm !== "blake2b256" || cidCodec !== "raw") {
+      //   txOpts.customSignedExtensions = {
+      //     ProvideCidConfig: {
+      //       value: {
+      //         codec: BigInt(codecConfig.codec),
+      //         hashing: toHashingEnum(hashConfig.mhCode),
+      //       },
+      //     },
+      //   };
+      // }
 
       // Create and submit transaction
       const tx = api.tx.TransactionStorage.store({
