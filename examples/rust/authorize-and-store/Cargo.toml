@@ -9,9 +9,9 @@ name = "authorize-and-store"
 path = "src/main.rs"
 
 [dependencies]
-# Subxt for blockchain interaction
-subxt = { version = "0.37", features = ["substrate-compat"] }
-subxt-signer = { version = "0.37", features = ["sr25519", "subxt"] }
+# Subxt for blockchain interaction (0.38+ required for V15 metadata)
+subxt = { version = "0.38", features = ["substrate-compat"] }
+subxt-signer = { version = "0.38", features = ["sr25519", "subxt"] }
 
 # Polkadot SDK dependencies
 sp-tracing = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5" }
