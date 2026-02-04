@@ -22,7 +22,7 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use std::str::FromStr;
 use subxt::{
-	config::PolkadotConfig,
+	config::{DefaultExtrinsicParamsBuilder, PolkadotConfig},
 	utils::AccountId32,
 	OnlineClient,
 };
@@ -48,9 +48,13 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-// Note: In subxt 0.38+, extrinsic params are auto-discovered from metadata
-// using PolkadotConfig. The sign_and_submit_then_watch_default method
-// automatically includes Bulletin's custom ProvideCidConfig extension.
+/// Build default extrinsic params using PolkadotConfig.
+///
+/// PolkadotConfig auto-discovers all signed extensions from runtime metadata,
+/// including Bulletin's custom ProvideCidConfig extension.
+fn bulletin_params() -> <PolkadotConfig as subxt::Config>::ExtrinsicParams {
+	DefaultExtrinsicParamsBuilder::<PolkadotConfig>::new().build()
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -88,21 +92,16 @@ async fn main() -> Result<()> {
 	// Wrap in sudo call (Alice is sudo in dev mode)
 	let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
 
-	let tx_in_block = api
+	let result = api
 		.tx()
-		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
+		.sign_and_submit_then_watch(&sudo_tx, &keypair, bulletin_params())
 		.await
 		.map_err(|e| anyhow!("Failed to submit authorization: {e:?}"))?
-		.wait_for_finalized()
-		.await
-		.map_err(|e| anyhow!("Authorization transaction not finalized: {e:?}"))?;
-
-	let _events = tx_in_block
-		.wait_for_success()
+		.wait_for_finalized_success()
 		.await
 		.map_err(|e| anyhow!("Authorization transaction failed: {e:?}"))?;
 
-	info!("Account authorized successfully!");
+	info!("Account authorized successfully! Block: {}", result.block_hash());
 
 	// Step 2: Store data
 	info!("\nStep 2: Storing data...");
@@ -111,21 +110,16 @@ async fn main() -> Result<()> {
 
 	let store_tx = bulletin::tx().transaction_storage().store(data_to_store.as_bytes().to_vec());
 
-	let tx_in_block = api
+	let result = api
 		.tx()
-		.sign_and_submit_then_watch_default(&store_tx, &keypair)
+		.sign_and_submit_then_watch(&store_tx, &keypair, bulletin_params())
 		.await
 		.map_err(|e| anyhow!("Failed to submit store: {e:?}"))?
-		.wait_for_finalized()
-		.await
-		.map_err(|e| anyhow!("Store transaction not finalized: {e:?}"))?;
-
-	let block_hash = tx_in_block.block_hash();
-	let events = tx_in_block
-		.wait_for_success()
+		.wait_for_finalized_success()
 		.await
 		.map_err(|e| anyhow!("Store transaction failed: {e:?}"))?;
 
+	let block_hash = result.block_hash();
 	let block = api
 		.blocks()
 		.at(block_hash)
@@ -135,9 +129,10 @@ async fn main() -> Result<()> {
 	info!("Data stored successfully!");
 	info!("  Block number: {}", block.number());
 	info!("  Block hash: {:?}", block_hash);
+	info!("  Extrinsic index: {}", result.extrinsic_index());
 
 	// Find the Stored event to get the CID
-	let stored_event = events
+	let stored_event = result
 		.find_first::<bulletin::transaction_storage::events::Stored>()
 		.map_err(|e| anyhow!("Failed to find Stored event: {e:?}"))?;
 
