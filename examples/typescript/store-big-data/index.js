@@ -9,7 +9,6 @@ import { buildUnixFSDagPB, cidFromBytes } from "../cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
-    HTTP_IPFS_API,
     newSigner,
     fileToDisk,
     filesAreEqual,
@@ -19,11 +18,12 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed]
+// Command line arguments: [ws_url] [seed] [http_ipfs_api]
 // Note: --signer-disc=XX flag is also supported for parallel runs
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API_URL = args[2] || 'http://127.0.0.1:5011';
 
 // -------------------- queue --------------------
 const queue = [];
@@ -113,7 +113,7 @@ export async function storeChunkedFile(api, filePath) {
 
 // Connect to a local IPFS gateway (e.g. Kubo)
 const ipfs = create({
-    url: 'http://127.0.0.1:5001', // Local IPFS API
+    url: HTTP_IPFS_API_URL, // IPFS HTTP API (for ipfs-http-client)
 });
 
 // Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
@@ -182,7 +182,7 @@ async function main() {
         let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
         let cid = await store(bulletinAPI, signers[0].signer, dagBytes);
         console.log(`Downloading...${cid} / ${rootCid}`);
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, rootCid);
+        let downloadedContent = await fetchCid(HTTP_IPFS_API_URL, rootCid);
         console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
         await fileToDisk(downloadedFileByDagPath, downloadedContent);
         filesAreEqual(filePath, downloadedFileByDagPath);
