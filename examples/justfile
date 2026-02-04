@@ -402,14 +402,17 @@ setup-services test_dir runtime: npm-install
     just papi-generate
 
     # Start IPFS
-    echo "🔧 Tearing down Docker services if they are running..."
-    just ipfs-shutdown "{{ test_dir }}"
-    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
-    just ipfs-start "{{ test_dir }}"
-    just ipfs-connect "{{ runtime }}"
-    just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
-
-    echo "✅ Services setup complete (Docker mode)"
+    if [ -n "$SKIP_IPFS" ]; then
+        echo "⏭️  Skipping IPFS setup (SKIP_IPFS set)"
+    else
+        echo "🔧 Tearing down Docker services if they are running..."
+        just ipfs-shutdown "{{ test_dir }}"
+        echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
+        just ipfs-start "{{ test_dir }}"
+        just ipfs-connect "{{ runtime }}"
+        just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+        echo "✅ Services setup complete (Docker mode)"
+    fi
 
 # Stop all Docker services
 teardown-services test_dir:

@@ -151,6 +151,10 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
 
+      - name: Test authorize-preimage-and-store ws (Westend parachain)
+        working-directory: examples
+        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
+
       - name: Test authorize-and-store smoldot (Westend parachain)
         working-directory: examples
         run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"

@@ -1,0 +1,15 @@
+[package]
+name = "authorize-preimage-subxt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+subxt = "0.43.1"
+subxt-core = "0.43.0"
+subxt-signer = "0.43.0"
+sp-core = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+
+
+

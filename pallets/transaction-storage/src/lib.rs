@@ -353,14 +353,13 @@ pub mod pallet {
 		})]
 		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			let (is_authorized, is_unsigned) = match origin.into() {
-				Ok(frame_system::RawOrigin::Authorized) => (true, false),
-				Ok(frame_system::RawOrigin::None) => (false, true),
-				_ => (false, false),
-			};
-			if is_authorized || is_unsigned {
-				Self::check_unsigned_store(data.as_slice(), true)
-					.map_err(Self::dispatch_error_from_validity)?;
+			match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => {
+					Self::check_unsigned_store(data.as_slice(), true)
+						.map_err(Self::dispatch_error_from_validity)?;
+				},
+				Ok(frame_system::RawOrigin::Signed(_)) => {},
+				_ => return Err(DispatchError::BadOrigin.into()),
 			}
 
 			// In the case of a regular unsigned transaction, this should have been checked by
@@ -433,14 +432,13 @@ pub mod pallet {
 			block: BlockNumberFor<T>,
 			index: u32,
 		) -> DispatchResultWithPostInfo {
-			let (is_authorized, is_unsigned) = match origin.into() {
-				Ok(frame_system::RawOrigin::Authorized) => (true, false),
-				Ok(frame_system::RawOrigin::None) => (false, true),
-				_ => (false, false),
-			};
-			if is_authorized || is_unsigned {
-				Self::check_unsigned_renew(&block, &index, true)
-					.map_err(Self::dispatch_error_from_validity)?;
+			match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => {
+					Self::check_unsigned_renew(&block, &index, true)
+						.map_err(Self::dispatch_error_from_validity)?;
+				},
+				Ok(frame_system::RawOrigin::Signed(_)) => {},
+				_ => return Err(DispatchError::BadOrigin.into()),
 			}
 
 			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
@@ -779,19 +777,6 @@ pub mod pallet {
 
 		fn is_inherent(call: &Self::Call) -> bool {
 			matches!(call, Call::check_proof { .. })
-		}
-	}
-
-	#[pallet::validate_unsigned]
-	impl<T: Config> ValidateUnsigned for Pallet<T> {
-		type Call = Call<T>;
-
-		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
-			Self::check_unsigned_call(call)
-		}
-
-		fn pre_dispatch(_call: &Self::Call) -> Result<(), TransactionValidityError> {
-			Ok(())
 		}
 	}
 
@@ -1135,19 +1120,6 @@ pub mod pallet {
 						.priority(T::RemoveExpiredAuthorizationPriority::get())
 						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 			.into())
-		}
-
-		fn check_unsigned_call(call: &Call<T>) -> Result<ValidTransaction, TransactionValidityError> {
-			match call {
-				Call::<T>::store { data } => Self::check_unsigned_store(data.as_slice(), false),
-				Call::<T>::renew { block, index } =>
-					Self::check_unsigned_renew(block, index, false),
-				Call::<T>::remove_expired_account_authorization { who } =>
-					Self::check_unsigned_remove_expired_account(who),
-				Call::<T>::remove_expired_preimage_authorization { content_hash } =>
-					Self::check_unsigned_remove_expired_preimage_authorization(content_hash),
-				_ => Err(InvalidTransaction::Call.into()),
-			}
 		}
 
 		fn check_signed(
