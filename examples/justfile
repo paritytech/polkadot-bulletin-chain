@@ -484,7 +484,7 @@ run-all-tests test_dir runtime:
     just run-test-rust authorize-and-store "{{ test_dir }}"
     just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "smoldot"
     just run-test-ts store-chunked-data "{{ test_dir }}" "{{ runtime }}"
-    just run-test-ts store-big-data "{{ test_dir }}" "{{ runtime }}"
+    just run-test-ts store-big-data "{{ test_dir }}" "{{ runtime }}" "papi" "ws://localhost:10000" "//Alice" "http://127.0.0.1:5011"
     just run-test-ts authorize-preimage-and-store "{{ test_dir }}" "{{ runtime }}"
 
     echo "✅ All tests passed!"
