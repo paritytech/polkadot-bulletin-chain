@@ -22,7 +22,7 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use std::str::FromStr;
 use subxt::{
-	config::PolkadotConfig,
+	config::SubstrateConfig,
 	utils::AccountId32,
 	OnlineClient,
 };
@@ -64,10 +64,10 @@ async fn main() -> Result<()> {
 	let account_id: AccountId32 = keypair.public_key().into();
 	info!("Using account: {}", account_id);
 
-	// Connect to Bulletin Chain node using PolkadotConfig
-	// This auto-discovers signed extensions from metadata
+	// Connect to Bulletin Chain node using SubstrateConfig
+	// SubstrateConfig uses basic extrinsic params without auto-discovering custom extensions
 	info!("Connecting to {}...", args.ws);
-	let api = OnlineClient::<PolkadotConfig>::from_url(&args.ws)
+	let api = OnlineClient::<SubstrateConfig>::from_url(&args.ws)
 		.await
 		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
 	info!("Connected successfully!");
