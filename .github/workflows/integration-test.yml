@@ -116,7 +116,12 @@ jobs:
         run: cargo install just --locked || true
 
       - name: Install subxt-cli
-        run: cargo install subxt-cli --locked || true
+        run: |
+          if ! command -v subxt &> /dev/null; then
+            cargo install subxt-cli --locked
+          else
+            echo "subxt-cli already installed"
+          fi
 
       - name: Cache Polkadot SDK binaries
         uses: actions/cache@v5
