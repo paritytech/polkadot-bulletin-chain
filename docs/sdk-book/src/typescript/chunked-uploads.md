@@ -46,7 +46,7 @@ const client = new AsyncBulletinClient(submitter, {
 
 ## Advanced: Manual Chunking
 
-For advanced use cases where you need detailed control over chunking, use `storeChunked()`:
+For advanced use cases where you need explicit control over chunking parameters, use `storeChunked()`:
 
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
@@ -56,7 +56,7 @@ const client = new AsyncBulletinClient(submitter);
 
 const largeFile = new Uint8Array(100 * 1024 * 1024); // 100 MB
 
-// Configure chunking
+// Configure chunking explicitly
 const config = {
     chunkSize: 1024 * 1024,  // 1 MiB chunks
     maxParallel: 8,           // Upload 8 chunks in parallel
@@ -86,7 +86,7 @@ const progressCallback = (event) => {
     }
 };
 
-// Upload with automatic chunking and progress tracking
+// Upload with manual chunking configuration and progress tracking
 const result = await client.storeChunked(
     largeFile,
     config,
