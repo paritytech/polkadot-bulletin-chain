@@ -9,6 +9,7 @@ import { buildUnixFSDagPB, cidFromBytes } from "../cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
+    DEFAULT_IPFS_GATEWAY_URL,
     newSigner,
     fileToDisk,
     filesAreEqual,
@@ -18,7 +19,8 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed] [http_ipfs_api]
+// Command line arguments: [ws_url] [seed] [http_ipfs_api_url]
+// Note: http_ipfs_api_url is for ipfs-http-client (port 5011), fetchCid uses gateway from common.js (port 8283)
 // Note: --signer-disc=XX flag is also supported for parallel runs
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
@@ -182,7 +184,7 @@ async function main() {
         let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
         let cid = await store(bulletinAPI, signers[0].signer, dagBytes);
         console.log(`Downloading...${cid} / ${rootCid}`);
-        let downloadedContent = await fetchCid(HTTP_IPFS_API_URL, rootCid);
+        let downloadedContent = await fetchCid(DEFAULT_IPFS_GATEWAY_URL, rootCid);
         console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
         await fileToDisk(downloadedFileByDagPath, downloadedContent);
         filesAreEqual(filePath, downloadedFileByDagPath);
