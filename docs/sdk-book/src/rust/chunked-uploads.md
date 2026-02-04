@@ -57,9 +57,7 @@ let client = AsyncBulletinClient::with_config(submitter, config);
 
 ## Advanced: Manual Chunking
 
-For advanced use cases where you need detailed control over chunking, use `store_chunked()`:
-
-## Quick Start
+For advanced use cases where you need explicit control over chunking parameters, use `store_chunked()`:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -78,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let large_data = std::fs::read("large-file.bin")?;
     println!("File size: {} bytes", large_data.len());
 
-    // Configure chunking
+    // Configure chunking explicitly
     let config = ChunkerConfig {
         chunk_size: 1024 * 1024,  // 1 MiB chunks
         max_parallel: 8,           // Upload 8 chunks in parallel
@@ -109,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Upload with automatic chunking and progress tracking
+    // Upload with manual chunking configuration and progress tracking
     let result = client
         .store_chunked(
             &large_data,
