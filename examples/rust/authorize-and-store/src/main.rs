@@ -83,7 +83,8 @@ async fn main() -> Result<()> {
 	// Build the inner call as a runtime type
 	use bulletin::runtime_types;
 
-	let authorize_call = runtime_types::polkadot_bulletin_chain_runtime::RuntimeCall::TransactionStorage(
+	// Use bulletin_westend_runtime as that's what the metadata contains
+	let authorize_call = runtime_types::bulletin_westend_runtime::RuntimeCall::TransactionStorage(
 		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
 			who: account_id.clone(),
 			transactions: 100,
