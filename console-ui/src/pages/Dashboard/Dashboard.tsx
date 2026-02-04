@@ -1,0 +1,204 @@
+import { Link } from "react-router-dom";
+import { Upload, Download, Search, Shield, Database, Activity } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { AuthorizationCard } from "@/components/AuthorizationCard";
+import { useChainState } from "@/state/chain.state";
+import { useSelectedAccount } from "@/state/wallet.state";
+import { formatAddress, formatBlockNumber } from "@/utils/format";
+
+function QuickActions() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Activity className="h-5 w-5" />
+          Quick Actions
+        </CardTitle>
+        <CardDescription>Common operations</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-3">
+          <Link to="/upload">
+            <Button variant="outline" className="w-full justify-start">
+              <Upload className="h-4 w-4 mr-2" />
+              Upload Data
+            </Button>
+          </Link>
+          <Link to="/download">
+            <Button variant="outline" className="w-full justify-start">
+              <Download className="h-4 w-4 mr-2" />
+              Download by CID
+            </Button>
+          </Link>
+          <Link to="/explorer">
+            <Button variant="outline" className="w-full justify-start">
+              <Search className="h-4 w-4 mr-2" />
+              Explore Blocks
+            </Button>
+          </Link>
+          <Link to="/authorizations">
+            <Button variant="outline" className="w-full justify-start">
+              <Shield className="h-4 w-4 mr-2" />
+              View Authorizations
+            </Button>
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChainInfoCard() {
+  const { status, chainName, tokenSymbol, blockNumber, network } = useChainState();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="h-5 w-5" />
+          Chain Info
+        </CardTitle>
+        <CardDescription>Current network status</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Network</span>
+            <Badge variant="secondary">{network.name}</Badge>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Status</span>
+            <Badge
+              variant={
+                status === "connected"
+                  ? "success"
+                  : status === "connecting"
+                  ? "warning"
+                  : "secondary"
+              }
+            >
+              {status}
+            </Badge>
+          </div>
+          {chainName && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Runtime</span>
+              <span className="text-sm font-mono">{chainName}</span>
+            </div>
+          )}
+          {blockNumber !== undefined && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Block</span>
+              <span className="text-sm font-mono">{formatBlockNumber(blockNumber)}</span>
+            </div>
+          )}
+          {tokenSymbol && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Token</span>
+              <span className="text-sm">{tokenSymbol}</span>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AccountCard() {
+  const selectedAccount = useSelectedAccount();
+
+  if (!selectedAccount) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>Connect a wallet to get started</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link to="/accounts">
+            <Button className="w-full">Connect Wallet</Button>
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connected Account</CardTitle>
+        <CardDescription>{selectedAccount.name || "Unknown"}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <p className="font-mono text-sm break-all">
+            {formatAddress(selectedAccount.address, 8)}
+          </p>
+          <Link to="/accounts">
+            <Button variant="outline" size="sm" className="w-full">
+              Manage Accounts
+            </Button>
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function WelcomeCard() {
+  return (
+    <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
+      <CardHeader>
+        <CardTitle className="text-2xl">Welcome to Bulletin Chain Console</CardTitle>
+        <CardDescription className="text-base">
+          Store and retrieve data on the Polkadot Bulletin Chain with IPFS integration
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid sm:grid-cols-3 gap-4 text-sm">
+          <div className="space-y-1">
+            <p className="font-medium">Decentralized Storage</p>
+            <p className="text-muted-foreground">
+              Store data with proof-of-storage guarantees
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">IPFS Compatible</p>
+            <p className="text-muted-foreground">
+              Access stored data via standard IPFS CIDs
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">Authorization Based</p>
+            <p className="text-muted-foreground">
+              Manage storage quotas and permissions
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function Dashboard() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-muted-foreground">
+          Overview of your Bulletin Chain activity
+        </p>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <WelcomeCard />
+        <AccountCard />
+        <ChainInfoCard />
+        <AuthorizationCard />
+        <QuickActions />
+      </div>
+    </div>
+  );
+}
