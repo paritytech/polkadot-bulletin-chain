@@ -1,12 +1,13 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-//! Simple Rust example for authorize and store on Bulletin Chain using bulletin-sdk-rust.
+//! Authorize and store data on Bulletin Chain using subxt.
 //!
-//! This example demonstrates using the SDK's AsyncBulletinClient with a subxt-based
-//! TransactionSubmitter to:
-//! 1. Authorize an account to store data
-//! 2. Store data on the Bulletin Chain
+//! This example demonstrates:
+//! 1. Using PolkadotConfig with auto-discovered signed extensions from metadata
+//! 2. Auto-discovery of Bulletin's custom ProvideCidConfig extension
+//! 3. Authorizing an account to store data
+//! 4. Storing data on the Bulletin Chain
 //!
 //! ## Setup
 //!
@@ -17,29 +18,12 @@
 //!
 //!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
 
-use std::{str::FromStr, sync::Arc};
-
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
-use bulletin_sdk_rust::{
-	async_client::AsyncBulletinClient,
-	cid::ContentHash,
-	submit::{TransactionReceipt, TransactionSubmitter},
-	types::Error as SdkError,
-	Result as SdkResult,
-};
 use clap::Parser;
-use codec::Encode;
-use scale_info::PortableRegistry;
-use sp_runtime::AccountId32 as SpAccountId32;
+use std::str::FromStr;
 use subxt::{
-	client::ClientState,
-	config::{
-		signed_extensions::{self, SignedExtension},
-		Config, DefaultExtrinsicParamsBuilder, ExtrinsicParams, ExtrinsicParamsEncoder,
-		ExtrinsicParamsError, SubstrateConfig,
-	},
-	utils::AccountId32 as SubxtAccountId32,
+	config::{DefaultExtrinsicParamsBuilder, PolkadotConfig},
+	utils::AccountId32,
 	OnlineClient,
 };
 use subxt_signer::sr25519::Keypair;
@@ -48,7 +32,7 @@ use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
 #[command(name = "authorize-and-store")]
-#[command(about = "Authorize and store data on Bulletin Chain using bulletin-sdk-rust")]
+#[command(about = "Authorize and store data on Bulletin Chain using subxt")]
 struct Args {
 	/// WebSocket URL of the Bulletin Chain node
 	#[arg(long, default_value = "ws://localhost:10000")]
@@ -64,333 +48,13 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-/// Custom Config for Bulletin Chain extending SubstrateConfig with ProvideCidConfig extension
-pub enum BulletinConfig {}
 
-impl Config for BulletinConfig {
-	type Hash = <SubstrateConfig as Config>::Hash;
-	type AccountId = <SubstrateConfig as Config>::AccountId;
-	type Address = <SubstrateConfig as Config>::Address;
-	type Signature = <SubstrateConfig as Config>::Signature;
-	type Hasher = <SubstrateConfig as Config>::Hasher;
-	type Header = <SubstrateConfig as Config>::Header;
-	type ExtrinsicParams = signed_extensions::AnyOf<
-		Self,
-		(
-			signed_extensions::CheckSpecVersion,
-			signed_extensions::CheckTxVersion,
-			signed_extensions::CheckNonce,
-			signed_extensions::CheckGenesis<Self>,
-			signed_extensions::CheckMortality<Self>,
-			signed_extensions::ChargeAssetTxPayment<Self>,
-			signed_extensions::ChargeTransactionPayment,
-			signed_extensions::CheckMetadataHash,
-			ProvideCidConfigExt, // Bulletin Chain's custom extension
-		),
-	>;
-	type AssetId = <SubstrateConfig as Config>::AssetId;
-}
-
-/// Custom signed extension for Bulletin Chain's ProvideCidConfig.
+/// Build default extrinsic params using PolkadotConfig.
 ///
-/// This extension is required by the TransactionStorage pallet to configure CID codec
-/// and hash algorithm. For non-store calls, this encodes as Option::None.
-pub struct ProvideCidConfigExt;
-
-impl<T: Config> SignedExtension<T> for ProvideCidConfigExt {
-	type Decoded = ();
-
-	fn matches(identifier: &str, _type_id: u32, _types: &PortableRegistry) -> bool {
-		identifier == "ProvideCidConfig"
-	}
-}
-
-impl<T: Config> ExtrinsicParams<T> for ProvideCidConfigExt {
-	type Params = ();
-
-	fn new(_client: &ClientState<T>, _params: Self::Params) -> Result<Self, ExtrinsicParamsError> {
-		Ok(ProvideCidConfigExt)
-	}
-}
-
-impl ExtrinsicParamsEncoder for ProvideCidConfigExt {
-	fn encode_extra_to(&self, v: &mut Vec<u8>) {
-		// Encode Option::None for non-store calls (no CID config needed)
-		Option::<()>::None.encode_to(v);
-	}
-
-	fn encode_additional_to(&self, _v: &mut Vec<u8>) {
-		// No additional signed data
-	}
-}
-
-/// Helper to build extrinsic params with our custom extension
-fn bulletin_params(
-	params: DefaultExtrinsicParamsBuilder<BulletinConfig>,
-) -> <<BulletinConfig as Config>::ExtrinsicParams as ExtrinsicParams<BulletinConfig>>::Params {
-	let (a, b, c, d, e, f, g, h) = params.build();
-	(a, b, c, d, e, f, g, h, ())
-}
-
-/// Subxt-based implementation of TransactionSubmitter for the SDK
-struct SubxtSubmitter {
-	api: OnlineClient<BulletinConfig>,
-	sudo_keypair: Arc<Keypair>,
-	storage_keypair: Arc<Keypair>,
-}
-
-impl SubxtSubmitter {
-	fn new(
-		api: OnlineClient<BulletinConfig>,
-		sudo_keypair: Keypair,
-		storage_keypair: Keypair,
-	) -> Self {
-		Self {
-			api,
-			sudo_keypair: Arc::new(sudo_keypair),
-			storage_keypair: Arc::new(storage_keypair),
-		}
-	}
-
-	/// Build a TransactionReceipt from subxt's ExtrinsicEvents
-	async fn build_receipt(
-		&self,
-		events: subxt::blocks::ExtrinsicEvents<BulletinConfig>,
-	) -> SdkResult<TransactionReceipt> {
-		// In subxt 0.37, ExtrinsicEvents has these fields accessible
-		let block_hash = events.block_hash();
-		// extrinsic_hash is not directly available, we'll use a placeholder
-		let extrinsic_hash = format!("0x{}", hex::encode(events.extrinsic_index().to_le_bytes()));
-
-		// Get block number if available
-		let block = self
-			.api
-			.blocks()
-			.at(block_hash)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to get block: {e:?}")))?;
-		let block_number = block.number();
-
-		Ok(TransactionReceipt {
-			block_hash: format!("{:?}", block_hash),
-			extrinsic_hash,
-			block_number: Some(block_number),
-		})
-	}
-
-	/// Convert sp_runtime::AccountId32 to subxt::utils::AccountId32
-	fn to_subxt_account(account: &SpAccountId32) -> SubxtAccountId32 {
-		// Use as_ref to get the byte array
-		SubxtAccountId32::from(*account.as_ref())
-	}
-
-	/// Convert subxt::utils::AccountId32 to sp_runtime::AccountId32
-	fn from_subxt_account(account: &SubxtAccountId32) -> SpAccountId32 {
-		SpAccountId32::new(account.0)
-	}
-}
-
-#[async_trait]
-impl TransactionSubmitter for SubxtSubmitter {
-	async fn submit_store(&self, data: Vec<u8>) -> SdkResult<TransactionReceipt> {
-		// Use generated store call from metadata
-		let store_tx = bulletin::tx().transaction_storage().store(data);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch_default(&store_tx, &*self.storage_keypair)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_authorize_account(
-		&self,
-		who: SpAccountId32,
-		transactions: u32,
-		bytes: u64,
-	) -> SdkResult<TransactionReceipt> {
-		// Convert sp_runtime::AccountId32 to subxt::utils::AccountId32
-		let subxt_who = Self::to_subxt_account(&who);
-
-		// Use generated authorize_account call from metadata
-		let authorize_tx =
-			bulletin::tx()
-				.transaction_storage()
-				.authorize_account(subxt_who, transactions, bytes);
-
-		// Wrap in sudo call
-		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				&*self.sudo_keypair,
-				bulletin_params(Default::default()),
-			)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_authorize_preimage(
-		&self,
-		content_hash: ContentHash,
-		max_size: u64,
-	) -> SdkResult<TransactionReceipt> {
-		let authorize_tx =
-			bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
-
-		let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				&*self.sudo_keypair,
-				bulletin_params(Default::default()),
-			)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_renew(&self, block: u32, index: u32) -> SdkResult<TransactionReceipt> {
-		let renew_tx = bulletin::tx().transaction_storage().renew(block, index);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch_default(&renew_tx, &*self.storage_keypair)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_refresh_account_authorization(
-		&self,
-		who: SpAccountId32,
-	) -> SdkResult<TransactionReceipt> {
-		let subxt_who = Self::to_subxt_account(&who);
-
-		let refresh_tx =
-			bulletin::tx().transaction_storage().refresh_account_authorization(subxt_who);
-
-		let sudo_tx = bulletin::tx().sudo().sudo(refresh_tx);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				&*self.sudo_keypair,
-				bulletin_params(Default::default()),
-			)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_refresh_preimage_authorization(
-		&self,
-		content_hash: ContentHash,
-	) -> SdkResult<TransactionReceipt> {
-		let refresh_tx = bulletin::tx()
-			.transaction_storage()
-			.refresh_preimage_authorization(content_hash);
-
-		let sudo_tx = bulletin::tx().sudo().sudo(refresh_tx);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch(
-				&sudo_tx,
-				&*self.sudo_keypair,
-				bulletin_params(Default::default()),
-			)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_remove_expired_account_authorization(
-		&self,
-		who: SpAccountId32,
-	) -> SdkResult<TransactionReceipt> {
-		let subxt_who = Self::to_subxt_account(&who);
-
-		let remove_tx = bulletin::tx()
-			.transaction_storage()
-			.remove_expired_account_authorization(subxt_who);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch_default(&remove_tx, &*self.storage_keypair)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	async fn submit_remove_expired_preimage_authorization(
-		&self,
-		content_hash: ContentHash,
-	) -> SdkResult<TransactionReceipt> {
-		let remove_tx = bulletin::tx()
-			.transaction_storage()
-			.remove_expired_preimage_authorization(content_hash);
-
-		let events = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch_default(&remove_tx, &*self.storage_keypair)
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Failed to submit: {e:?}")))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| SdkError::SubmissionFailed(format!("Transaction failed: {e:?}")))?;
-
-		self.build_receipt(events).await
-	}
-
-	fn signer_account(&self) -> Option<SpAccountId32> {
-		// Convert subxt public key to sp_runtime::AccountId32
-		let subxt_account: SubxtAccountId32 = self.storage_keypair.public_key().into();
-		Some(Self::from_subxt_account(&subxt_account))
-	}
+/// PolkadotConfig auto-discovers all signed extensions from runtime metadata,
+/// including Bulletin's custom ProvideCidConfig extension.
+fn bulletin_params() -> <PolkadotConfig as subxt::Config>::ExtrinsicParams {
+	DefaultExtrinsicParamsBuilder::<PolkadotConfig>::new().build()
 }
 
 #[tokio::main]
@@ -400,53 +64,91 @@ async fn main() -> Result<()> {
 		.with_max_level(Level::INFO)
 		.with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
 		.finish();
-	tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+	tracing::subscriber::set_global_default(subscriber)
+		.expect("Failed to set tracing subscriber");
 
 	let args = Args::parse();
 
 	// Parse keypair from seed
 	let keypair = keypair_from_seed(&args.seed)?;
-	info!("Using account: {}", hex::encode(keypair.public_key().0));
+	let account_id: AccountId32 = keypair.public_key().into();
+	info!("Using account: {}", account_id);
 
-	// Connect to Bulletin Chain node
+	// Connect to Bulletin Chain node using PolkadotConfig
+	// This auto-discovers signed extensions from metadata
 	info!("Connecting to {}...", args.ws);
-	let api = OnlineClient::<BulletinConfig>::from_url(&args.ws)
+	let api = OnlineClient::<PolkadotConfig>::from_url(&args.ws)
 		.await
 		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
 	info!("Connected successfully!");
 
-	// Create submitter (Alice as sudo, same account for storage)
-	let submitter = SubxtSubmitter::new(api, keypair.clone(), keypair);
-
-	// Create SDK client with the submitter
-	let client = AsyncBulletinClient::new(submitter);
-
-	// Step 1: Authorize the account to store data
+	// Step 1: Authorize the account to store data (requires sudo)
 	info!("\nStep 1: Authorizing account...");
-	client
-		.authorize_account(
-			keypair_from_seed(&args.seed)?.public_key().into(),
-			100,               // 100 transactions
-			100 * 1024 * 1024, // 100 MB
-		)
-		.await
-		.map_err(|e| anyhow!("Failed to authorize account: {e:?}"))?;
-	info!("Account authorized successfully!");
 
-	// Step 2: Store data using the SDK with builder pattern
-	info!("\nStep 2: Storing data...");
-	let data_to_store = format!("Hello from Bulletin SDK at {}", chrono_lite());
-	let result = client
-		.store(data_to_store.as_bytes().to_vec())
-		.send()
+	let authorize_tx = bulletin::tx().transaction_storage().authorize_account(
+		account_id.clone(),
+		100,               // 100 transactions
+		100 * 1024 * 1024, // 100 MB
+	);
+
+	// Wrap in sudo call (Alice is sudo in dev mode)
+	let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
+
+	let result = api
+		.tx()
+		.sign_and_submit_then_watch(&sudo_tx, &keypair, bulletin_params())
 		.await
-		.map_err(|e| anyhow!("Failed to store data: {e:?}"))?;
+		.map_err(|e| anyhow!("Failed to submit authorization: {e:?}"))?
+		.wait_for_finalized_success()
+		.await
+		.map_err(|e| anyhow!("Authorization transaction failed: {e:?}"))?;
+
+	info!(
+		"Account authorized successfully! Block hash: {:?}",
+		result.block_hash()
+	);
+
+	// Step 2: Store data
+	info!("\nStep 2: Storing data...");
+	let data_to_store = format!("Hello from Bulletin Chain at {}", chrono_lite());
+	info!("Data: {}", data_to_store);
+
+	let store_tx = bulletin::tx()
+		.transaction_storage()
+		.store(data_to_store.as_bytes().to_vec());
+
+	let result = api
+		.tx()
+		.sign_and_submit_then_watch(&store_tx, &keypair, bulletin_params())
+		.await
+		.map_err(|e| anyhow!("Failed to submit store: {e:?}"))?
+		.wait_for_finalized_success()
+		.await
+		.map_err(|e| anyhow!("Store transaction failed: {e:?}"))?;
+
+	let block_hash = result.block_hash();
+	let block = api
+		.blocks()
+		.at(block_hash)
+		.await
+		.map_err(|e| anyhow!("Failed to get block: {e:?}"))?;
 
 	info!("Data stored successfully!");
-	info!("  CID: {}", hex::encode(&result.cid));
-	info!("  Size: {} bytes", result.size);
+	info!("  Block number: {}", block.number());
+	info!("  Block hash: {:?}", block_hash);
+	info!("  Extrinsic index: {}", result.extrinsic_index());
 
-	info!("\n\nTest passed!");
+	// Find the Stored event to get the CID
+	let stored_event = result
+		.find_first::<bulletin::transaction_storage::events::Stored>()
+		.map_err(|e| anyhow!("Failed to find Stored event: {e:?}"))?;
+
+	if let Some(event) = stored_event {
+		info!("  CID: {}", hex::encode(&event.content_hash));
+		info!("  Size: {} bytes", event.size);
+	}
+
+	info!("\n✅ Test passed!");
 
 	Ok(())
 }
