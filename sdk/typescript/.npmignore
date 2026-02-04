@@ -16,12 +16,10 @@ node_modules/
 coverage/
 .nyc_output/
 
-# Git files
+# Git and CI/CD files
 .git/
 .gitignore
 .github/
-
-# CI/CD
 .circleci/
 .travis.yml
 appveyor.yml

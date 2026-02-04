@@ -29,6 +29,7 @@ import {
     waitForChainReady,
 } from './typescript/common.js';
 import { AsyncBulletinClient, Binary } from '../sdk/typescript/dist/index.js';
+import { PerformanceMetrics } from './metrics.js';
 
 // Command line arguments
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -36,15 +37,7 @@ const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
 
 // Performance metrics
-const metrics = {
-    startTime: 0,
-    endTime: 0,
-    uploadDuration: 0,
-    fileSize: 0,
-    numChunks: 0,
-    throughputMBps: 0,
-    retrievalDuration: 0,
-};
+const metrics = new PerformanceMetrics();
 
 // Connect to local IPFS gateway
 const ipfs = create({
@@ -73,8 +66,8 @@ async function main() {
         generateTextImage(filePath, 'SDK Test - ' + new Date().toISOString(), 'big');
 
         const fileData = fs.readFileSync(filePath);
-        metrics.fileSize = fileData.length;
-        console.log(`📁 Test file size: ${(metrics.fileSize / 1024 / 1024).toFixed(2)} MB\n`);
+        metrics.setFileSize(fileData.length);
+        console.log(`📁 Test file size: ${(fileData.length / 1024 / 1024).toFixed(2)} MB\n`);
 
         // Initialize PAPI client
         console.log('🔧 Initializing Polkadot API client...');
@@ -115,7 +108,7 @@ async function main() {
         console.log('⏳ Uploading file with SDK (automatic chunking)...\n');
         let chunksCompleted = 0;
 
-        metrics.startTime = Date.now();
+        metrics.startUpload();
 
         const result = await sdkClient.store(
             fileData,
@@ -124,7 +117,7 @@ async function main() {
                 switch (event.type) {
                     case 'chunk_started':
                         if (chunksCompleted === 0) {
-                            metrics.numChunks = event.total;
+                            metrics.setNumChunks(event.total);
                             console.log(`   📦 Chunking into ${event.total} chunks...`);
                         }
                         break;
@@ -150,23 +143,17 @@ async function main() {
             }
         );
 
-        metrics.endTime = Date.now();
-        metrics.uploadDuration = (metrics.endTime - metrics.startTime) / 1000; // seconds
-        metrics.throughputMBps = (metrics.fileSize / 1024 / 1024) / metrics.uploadDuration;
+        metrics.endUpload();
 
         console.log('\n╔════════════════════════════════════════════════╗');
         console.log('║            Upload Performance Metrics          ║');
         console.log('╚════════════════════════════════════════════════╝');
-        console.log(`📊 File size:      ${(metrics.fileSize / 1024 / 1024).toFixed(2)} MB`);
-        console.log(`📦 Chunks:         ${metrics.numChunks}`);
-        console.log(`⏱️  Duration:       ${metrics.uploadDuration.toFixed(2)}s`);
-        console.log(`🚀 Throughput:     ${metrics.throughputMBps.toFixed(2)} MB/s`);
         console.log(`📝 Final CID:      ${result.cid.toString()}`);
         if (result.chunks) {
             console.log(`🔗 Manifest CID:   ${result.chunks.manifestCid?.toString() || 'N/A'}`);
             console.log(`📑 Chunk CIDs:     ${result.chunks.chunkCids.length} CIDs`);
         }
-        console.log('');
+        metrics.print();
 
         // Validate retrieval via IPFS
         console.log('🔍 Validating data retrieval...\n');
@@ -185,15 +172,16 @@ async function main() {
             }
 
             const downloadedContent = Buffer.concat(downloadedChunks);
-            metrics.retrievalDuration = (Date.now() - retrievalStart) / 1000;
+            const retrievalDuration = Date.now() - retrievalStart;
+            metrics.setRetrievalDuration(retrievalDuration);
 
-            console.log(`   ✓ Downloaded ${downloadedContent.length} bytes in ${metrics.retrievalDuration.toFixed(2)}s`);
+            console.log(`   ✓ Downloaded ${downloadedContent.length} bytes in ${(retrievalDuration / 1000).toFixed(2)}s`);
 
             await fileToDisk(downloadedFilePath, downloadedContent);
             filesAreEqual(filePath, downloadedFilePath);
 
             assert.strictEqual(
-                metrics.fileSize,
+                fileData.length,
                 downloadedContent.length,
                 '❌ Downloaded file size mismatch!'
             );
@@ -220,22 +208,12 @@ async function main() {
             filesAreEqual(filePath, downloadedChunksPath);
 
             assert.strictEqual(
-                metrics.fileSize,
+                fileData.length,
                 fullBuffer.length,
                 '❌ Reassembled file size mismatch!'
             );
             console.log('   ✅ Content matches original file (via chunks)\n');
         }
-
-        // Final summary
-        console.log('╔════════════════════════════════════════════════╗');
-        console.log('║              Test Summary                      ║');
-        console.log('╚════════════════════════════════════════════════╝');
-        console.log(`✅ Upload:         ${metrics.throughputMBps.toFixed(2)} MB/s`);
-        console.log(`✅ Retrieval:      ${(metrics.fileSize / 1024 / 1024 / metrics.retrievalDuration).toFixed(2)} MB/s`);
-        console.log(`✅ Chunks:         ${metrics.numChunks} chunks`);
-        console.log(`✅ Validation:     All checks passed`);
-        console.log('');
 
         console.log('\n✅✅✅ TypeScript SDK Test PASSED! ✅✅✅\n');
         resultCode = 0;

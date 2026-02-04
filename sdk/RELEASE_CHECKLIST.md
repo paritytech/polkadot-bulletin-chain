@@ -2,6 +2,22 @@
 
 Quick reference for releasing the Bulletin SDK packages.
 
+## Release Automation
+
+The release process is fully automated via GitHub Actions (`.github/workflows/release-sdk.yml`):
+
+**Trigger**: Push a tag matching `sdk-v*.*.*` (e.g., `sdk-v0.1.0`)
+
+**Automated steps**:
+1. Validates versions in Cargo.toml and package.json match the tag
+2. Builds and tests both Rust and TypeScript SDKs
+3. Publishes to crates.io (Rust) and npm (TypeScript)
+4. Creates GitHub Release with auto-generated notes
+
+**Required secrets** (configured in GitHub):
+- `CARGO_REGISTRY_TOKEN` - For crates.io publishing
+- `NPM_TOKEN` - For npm publishing
+
 ## Pre-Release
 
 - [ ] All tests passing locally
