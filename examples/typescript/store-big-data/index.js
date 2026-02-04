@@ -4,8 +4,8 @@ import fs from 'fs'
 import os from "os";
 import path from "path";
 import assert from "assert";
-import { authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
-import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
+import { authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK } from "../api.js";
+import { buildUnixFSDagPB, cidFromBytes } from "../cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
@@ -14,10 +14,10 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
-} from "./common.js";
+} from "../common.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed]
 // Note: --signer-disc=XX flag is also supported for parallel runs

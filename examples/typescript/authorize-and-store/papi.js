@@ -2,10 +2,10 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { setupKeyringAndSigners } from './common.js';
-import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from '../api.js';
+import { setupKeyringAndSigners } from '../common.js';
+import { cidFromBytes } from "../cid_dag_metadata.js";
+import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed]
 const args = process.argv.slice(2);

@@ -1,226 +1,311 @@
-# How to Run
+# Polkadot Bulletin Chain - Examples
 
-## Using `just`
+This directory contains examples demonstrating how to interact with Polkadot Bulletin Chain using different SDKs and languages.
 
-[`just`](https://github.com/casey/just) is a command runner (similar to `make`) that helps execute project tasks.
+## Directory Structure
 
-Install just with: 
-- `cargo install just`, if you have cargo package manager,
-- `brew install just`, if you're on Mac OS and have `brew` package manager installed,
-- `sudo apt install just`, if you're using a Linux distribution.  
-
-### Run prerequisites
-
-It's only needed once after checkout or when dependencies change:
-- `just build`
-- `just npm-install`
-
-### Run full workflow example
-- `just run-authorize-and-store papi` - for PAPI,
-- `just run-authorize-and-store pjs` - for PJS.
-
-#### Run individual commands for manual testing
-- `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
-- `just ipfs-init` - Initialize IPFS (if needed),
-- `just ipfs-start` - Start IPFS daemon,
-- `just bulletin-solo-zombienet-start` - Start zombienet,
-- `just ipfs-connect` - Connect to IPFS nodes,
-- `just ipfs-reconnect-start` - Start IPFS reconnect script,
-- `just papi-generate` - Generate PAPI descriptors,
-- `just run-example papi` - Run example with PAPI or PJS,
-- `just teardown-services` - Stop all services
-
-## Manually
-
-
-```shell
-cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
+```
+examples/
+├── typescript/              # TypeScript/JavaScript examples
+│   ├── authorize-and-store/ # Basic authorization and storage
+│   ├── store-chunked-data/  # Large file chunking example
+│   ├── store-big-data/      # Big data handling
+│   ├── authorize-preimage-and-store/  # Preimage authorization
+│   └── *.js                 # Shared utilities (api.js, common.js, etc.)
+├── rust/                    # Rust examples
+│   └── authorize-and-store/ # Rust subxt example
+└── justfile                 # Task automation
 ```
 
-### Download Zombienet
+## Quick Start
 
-```shell
-OS="$(uname -s)"
-ARCH="$(uname -m)"
+### Prerequisites
 
-if [ "$OS" = "Linux" ]; then
-  zb_os=linux
-else
-  zb_os=macos
-fi
-
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-  zb_arch=arm64
-else
-  zb_arch=x64
-fi
-
-zb_bin="zombienet-${zb_os}-${zb_arch}"
-
-wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/${zb_bin}"
-chmod +x "${zb_bin}"
+Install `just` command runner:
+```bash
+cargo install just      # Using cargo
+brew install just       # Using Homebrew (macOS)
+sudo apt install just   # Using apt (Linux)
 ```
 
-### Run Kubo
+### Run Examples
 
-#### Execute Locally
+#### TypeScript Examples
 
-```shell
+```bash
+# Install dependencies
+cd examples
+just npm-install
+
+# Run authorize-and-store example (WebSocket mode)
+just run-authorize-and-store bulletin-westend-runtime papi
+
+# Run authorize-and-store example (Smoldot light client mode)
+just run-authorize-and-store bulletin-westend-runtime smoldot
+
+# Run specific TypeScript example
+just run-test-ts store-chunked-data <test_dir> <runtime>
+just run-test-ts store-big-data <test_dir> <runtime>
+just run-test-ts authorize-preimage-and-store <test_dir> <runtime>
+```
+
+#### Rust Examples
+
+```bash
+# Run Rust authorize-and-store example
+just run-test-rust authorize-and-store <test_dir>
+
+# With custom parameters
+just run-test-rust authorize-and-store <test_dir> ws://localhost:9944 "//Bob"
+```
+
+## Available Examples
+
+### TypeScript Examples
+
+Located in `typescript/` directory:
+
+1. **authorize-and-store** - Basic workflow demonstrating account authorization and data storage
+   - `papi.js` - WebSocket RPC connection
+   - `smoldot.js` - Light client connection
+
+2. **store-chunked-data** - Store large files using automatic chunking with DAG-PB manifest
+
+3. **store-big-data** - Handle very large files with parallel chunk uploads
+
+4. **authorize-preimage-and-store** - Content-addressed authorization using preimage hashes
+
+### Rust Examples
+
+Located in `rust/` directory:
+
+1. **authorize-and-store** - Demonstrates using subxt with Polkadot Bulletin Chain
+   - Auto-discovers signed extensions from metadata
+   - Shows proper authorization flow
+   - Direct blockchain interaction
+
+## Justfile Commands
+
+### Running Examples
+
+```bash
+# Run TypeScript example
+just run-test-ts <example-name> <test_dir> <runtime> [mode]
+# Examples:
+#   just run-test-ts authorize-and-store ./test bulletin-westend-runtime papi
+#   just run-test-ts store-chunked-data ./test bulletin-polkadot-runtime
+
+# Run Rust example
+just run-test-rust <example-name> <test_dir> [ws_url] [seed]
+# Examples:
+#   just run-test-rust authorize-and-store ./test
+#   just run-test-rust authorize-and-store ./test ws://localhost:9944 "//Bob"
+```
+
+### Full Workflow Commands
+
+These commands handle setup, running the example, and teardown:
+
+```bash
+# Default - run authorize-and-store with full setup/teardown
+just
+
+# Run authorize-and-store with PAPI (WebSocket)
+just run-authorize-and-store bulletin-westend-runtime papi
+
+# Run authorize-and-store with Smoldot (light client)
+just run-authorize-and-store bulletin-westend-runtime smoldot
+```
+
+### Service Management
+
+```bash
+# Start all services (IPFS, zombienet, etc.)
+just setup-services <test_dir> <runtime>
+
+# Stop all services
+just teardown-services <test_dir>
+
+# Run all tests (requires services to be running)
+just run-all-tests <test_dir> <runtime>
+```
+
+## Manual Setup
+
+If you prefer to run examples manually without `just`:
+
+### 1. Setup Dependencies
+
+```bash
+# Install TypeScript dependencies
+cd examples/typescript
+npm install
+cd ..
+
+# Generate PAPI descriptors
+cd typescript
+npx papi add -w ws://localhost:10000 bulletin
+npx papi
+```
+
+### 2. Start Services
+
+#### IPFS Setup
+
+**Local Kubo:**
+```bash
 wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_darwin-arm64.tar.gz
 tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
-./kubo/ipfs version
 ./kubo/ipfs init
-./kubo/ipfs daemon &   # run in the background
+./kubo/ipfs daemon &
 ```
 
-#### Use Docker
-
-* Use `host.docker.internal` (macOS/Windows) or `172.17.0.1` (Linux) for swarm connections
-
-```shell
+**Docker:**
+```bash
 docker pull ipfs/kubo:latest
-docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080 -p 5001:5001 ipfs/kubo:latest
-docker logs -f ipfs-node
+docker run -d --name ipfs-node \
+  -v ipfs-data:/data/ipfs \
+  -p 4001:4001 -p 8080:8080 -p 5001:5001 \
+  ipfs/kubo:latest
 ```
 
-### Run Bulletin Solochain with `--ipfs-server`
+#### Bulletin Chain Setup
 
-```shell
-# Bulletin Solochain
-
-```shell
-# cd polkadot-bulletin-chain   # make you are in this directory
+**Solochain (bulletin-polkadot-runtime):**
+```bash
 cargo build --release -p polkadot-bulletin-chain
-
 POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
-
-### Connect IPFS Nodes
-
-```shell
-# Uses Kubo
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-# connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
-
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-# connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
+  zombienet -p native spawn ./zombienet/bulletin-polkadot-local.toml
 ```
 
-```shell
-# Uses Docker on macOS/Windows (use dns4/host.docker.internal)
-docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+**Parachain (bulletin-westend-runtime):**
+```bash
+# Setup prerequisites (one-time)
+just setup-parachain-prerequisites
 
-# Uses Docker on Linux (use ip4/172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-```
-
-```shell
-# Runs a script that reconnects every 2 seconds
-# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
-./scripts/ipfs-reconnect-solo.sh
-```
-
-### Run Bulletin (Westend) Parachain with `--ipfs-server`
-
-#### Prerequisites 
-
-```shell
-mkdir -p ~/local_bridge_testing/bin
-
-# Ensures `polkadot` and `polkadot-parachain` exist
-git clone https://github.com/paritytech/polkadot-sdk.git
-# TODO: unless not merged: https://github.com/paritytech/polkadot-sdk/pull/10370
-git reset --hard origin/bko-bulletin-para-support
-cd polkadot-sdk
-
-cargo build -p polkadot -r
-ls -la target/release/polkadot
-cp target/release/polkadot ~/local_bridge_testing/bin
-cp target/release/polkadot-prepare-worker ~/local_bridge_testing/bin
-cp target/release/polkadot-execute-worker ~/local_bridge_testing/bin
-~/local_bridge_testing/bin/polkadot --version
-# polkadot 1.20.2-165ba47dc91 or higher
-
-cargo build -p polkadot-parachain-bin -r
-ls -la target/release/polkadot-parachain
-cp target/release/polkadot-parachain ~/local_bridge_testing/bin
-~/local_bridge_testing/bin/polkadot-parachain --version
-# polkadot-parachain 1.20.2-165ba47dc91 or higher
-```
-
-#### Launch Parachain
-
-```shell
-# Bulletin Parachain (Westend)
+# Launch parachain
 ./scripts/create_bulletin_westend_spec.sh
-POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
-  POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-westend-local.toml
+POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot \
+  POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-parachain \
+  zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
 ```
 
 #### Connect IPFS Nodes
 
-```shell
-# Uses Kubo
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-# connect 12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ success
-
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-# connect 12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ success
-```
-
-```shell
-# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-```
-
-```shell
-# Runs a script that reconnects every 2 seconds
-# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
-./scripts/ipfs-reconnect-westend.sh
-```
-
-### Trigger Authorize, Store and IPFS Get
-
-#### Example for Simple Authorizing and Store
-
-
-##### Using Modern PAPI (Polkadot API)
+**Local Kubo:**
 ```bash
-cd examples
-npm install
-
-# First, generate the PAPI descriptors:
-#  (Generate TypeScript types in `.papi/descriptors/`)
-#  (Create metadata files in `.papi/metadata/bulletin.scale`)
-# Generate PAPI descriptors using local node:
-#   npx papi add -w ws://localhost:10000 bulletin
-#   npx papi
-# or:
-npm run papi:generate
-# or if you already have .papi folder you can always update it
-npm run papi:update
-
-# Then run the PAPI version (from the examples directory)
-node authorize_and_store_papi.js
+./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/<peer-id>
+./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/<peer-id>
 ```
 
-#### Example for Multipart / Chunked Content / Big Files
-
-The code stores one file, splits it into chunks, and then uploads those chunks to Bulletin.
-
-It collects all the partial CIDs for each chunk and saves them as a custom metadata JSON file in Bulletin.
-
-Now we have two examples:
-1. **Manual reconstruction** — return the metadata and chunk CIDs, then reconstruct the original file manually.
-2. **IPFS DAG feature** —
-    * converts the metadata into a DAG-PB descriptor,
-    * stores it directly in IPFS,
-    * and allows fetching the entire file using a single root CID from an IPFS HTTP gateway (for example: `http://localhost:8080/ipfs/QmW2WQi7j6c7UgJTarActp7tDNikE4B2qXtFCfLPdsgaTQ`).
-
-```shell
-node store_chunked_data.js
+**Docker (macOS/Windows):**
+```bash
+docker exec -it ipfs-node ipfs swarm connect \
+  /dns4/host.docker.internal/tcp/10001/ws/p2p/<peer-id>
 ```
+
+**Docker (Linux):**
+```bash
+docker exec -it ipfs-node ipfs swarm connect \
+  /ip4/172.17.0.1/tcp/10001/ws/p2p/<peer-id>
+```
+
+### 3. Run Examples
+
+**TypeScript:**
+```bash
+cd examples/typescript
+
+# Authorize and store (PAPI)
+node authorize-and-store/papi.js
+
+# Store chunked data
+node store-chunked-data/index.js
+
+# Store big data
+node store-big-data/index.js
+
+# Authorize preimage and store
+node authorize-preimage-and-store/index.js
+```
+
+**Rust:**
+```bash
+cd examples/rust/authorize-and-store
+
+# Generate metadata first
+./fetch_metadata.sh ws://localhost:10000
+
+# Build and run
+cargo build --release
+./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Alice"
+```
+
+## Command Line Arguments
+
+### TypeScript Examples
+
+**authorize-and-store/papi.js:**
+```bash
+node authorize-and-store/papi.js [ws_url] [seed]
+# Example: node authorize-and-store/papi.js ws://localhost:9944 "//Bob"
+```
+
+**authorize-and-store/smoldot.js:**
+```bash
+node authorize-and-store/smoldot.js [relay_chainspec_path] [parachain_chainspec_path]
+```
+
+**store-chunked-data/index.js:**
+```bash
+node store-chunked-data/index.js [ws_url] [seed]
+```
+
+**store-big-data/index.js:**
+```bash
+node store-big-data/index.js [ws_url] [seed]
+```
+
+**authorize-preimage-and-store/index.js:**
+```bash
+node authorize-preimage-and-store/index.js [ws_url] [seed] [http_ipfs_api]
+```
+
+### Rust Examples
+
+**authorize-and-store:**
+```bash
+./target/release/authorize-and-store --ws <websocket_url> --seed <seed_phrase>
+# Example: ./target/release/authorize-and-store --ws ws://localhost:9944 --seed "//Bob"
+```
+
+## Learn More
+
+- **TypeScript SDK**: See `../sdk/typescript/` for the high-level Bulletin SDK
+- **Rust SDK**: See `../sdk/rust/` for the Rust SDK implementation
+- **Documentation**: See `../docs/sdk-book/` for comprehensive SDK documentation
+
+## Troubleshooting
+
+**PAPI descriptors not found:**
+```bash
+cd typescript
+npx papi add -w ws://localhost:10000 bulletin
+npx papi
+```
+
+**IPFS connection issues:**
+- Ensure IPFS daemon is running
+- Check firewall settings for ports 4001, 8080, 5001
+- Verify peer IDs match your node configuration
+
+**Metadata errors (Rust):**
+```bash
+cd rust/authorize-and-store
+./fetch_metadata.sh ws://localhost:10000
+```
+
+**Port conflicts:**
+- Default Bulletin solochain: ws://localhost:10000
+- Default Bulletin parachain: ws://localhost:10000
+- IPFS: 4001 (swarm), 8080 (gateway), 5001 (API)

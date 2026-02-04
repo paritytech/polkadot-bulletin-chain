@@ -6,13 +6,13 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, HTTP_IPFS_API } from './common.js'
-import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
-import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, HTTP_IPFS_API } from '../common.js'
+import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "../api.js";
+import { buildUnixFSDagPB, cidFromBytes, convertCid } from "../cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { Binary } from '@polkadot-api/substrate-bindings';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
 // ---- CONFIG ----
 const NODE_WS = 'ws://localhost:10000';
