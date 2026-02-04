@@ -17,7 +17,7 @@
  */
 
 import { AsyncBulletinClient, StoreOptions, CidCodec, HashAlgorithm } from '../dist/index.js';
-import { createClient } from 'polkadot-api';
+import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
@@ -48,12 +48,11 @@ async function main() {
   // 3. Create Bulletin client (directly with PAPI client and signer)
   const client = new AsyncBulletinClient(api, signer);
 
-  // 4. Prepare data to store
-  const data = new TextEncoder().encode(
-    'Hello, Bulletin Chain! This is a simple store example.'
-  );
-  console.log('📝 Data to store:', data.length, 'bytes');
-  console.log('   Content:', new TextDecoder().decode(data), '\n');
+  // 4. Prepare data to store using PAPI's Binary class
+  const message = 'Hello, Bulletin Chain! This is a simple store example.';
+  const data = Binary.fromText(message);
+  console.log('📝 Data to store:', data.asBytes().length, 'bytes');
+  console.log('   Content:', message, '\n');
 
   // 5. Store data using builder pattern
   console.log('⏳ Storing data on chain...');

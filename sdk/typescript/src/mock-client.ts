@@ -12,6 +12,7 @@
  */
 
 import { CID } from 'multiformats/cid';
+import { Binary } from 'polkadot-api';
 import { calculateCid } from './utils.js';
 import {
   StoreOptions,
@@ -54,9 +55,10 @@ export class MockStoreBuilder {
 
   constructor(
     private client: MockBulletinClient,
-    data: Uint8Array,
+    data: Binary | Uint8Array,
   ) {
-    this.data = data;
+    // Convert Binary to Uint8Array if needed
+    this.data = data instanceof Uint8Array ? data : data.asBytes();
   }
 
   /** Set the CID codec */
@@ -168,8 +170,10 @@ export class MockBulletinClient {
 
   /**
    * Store data using builder pattern
+   *
+   * @param data - Data to store (PAPI Binary or Uint8Array)
    */
-  store(data: Uint8Array): MockStoreBuilder {
+  store(data: Binary | Uint8Array): MockStoreBuilder {
     return new MockStoreBuilder(this, data);
   }
 
@@ -177,11 +181,14 @@ export class MockBulletinClient {
    * Store data with custom options (internal, used by builder)
    */
   async storeWithOptions(
-    data: Uint8Array,
+    data: Binary | Uint8Array,
     options?: StoreOptions,
     _progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
-    if (data.length === 0) {
+    // Convert Binary to Uint8Array if needed
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+
+    if (dataBytes.length === 0) {
       throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
     }
 
@@ -206,7 +213,7 @@ export class MockBulletinClient {
 
     // Calculate CID (this is real, not mocked)
     const cid = await calculateCid(
-      data,
+      dataBytes,
       opts.cidCodec ?? CidCodec.Raw,
       opts.hashingAlgorithm!,
     );
@@ -214,14 +221,14 @@ export class MockBulletinClient {
     // Record the operation
     this.operations.push({
       type: 'store',
-      dataSize: data.length,
+      dataSize: dataBytes.length,
       cid: cid.toString(),
     });
 
     // Return a mock receipt
     return {
       cid,
-      size: data.length,
+      size: dataBytes.length,
       blockNumber: 1,
     };
   }

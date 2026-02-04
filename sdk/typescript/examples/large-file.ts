@@ -18,7 +18,7 @@
  */
 
 import { AsyncBulletinClient, StoreOptions } from '../dist/index.js';
-import { createClient } from 'polkadot-api';
+import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
@@ -38,10 +38,11 @@ async function main() {
 
   console.log('📁 Reading file:', filePath);
 
-  // 2. Read file data
-  const data = await readFile(filePath);
-  const sizeMB = data.length / 1048576;
-  console.log(`📊 File size: ${data.length} bytes (${sizeMB.toFixed(2)} MB)\n`);
+  // 2. Read file data and convert to PAPI Binary
+  const fileBuffer = await readFile(filePath);
+  const data = Binary.fromBytes(fileBuffer);
+  const sizeMB = fileBuffer.length / 1048576;
+  console.log(`📊 File size: ${fileBuffer.length} bytes (${sizeMB.toFixed(2)} MB)\n`);
 
   // 3. Setup connection
   console.log('📡 Connecting to Bulletin Chain at ws://localhost:9944...');
@@ -62,7 +63,7 @@ async function main() {
   });
 
   // 5. Estimate authorization needed
-  const estimate = client.estimateAuthorization(data.length);
+  const estimate = client.estimateAuthorization(data.asBytes().length);
   console.log('📋 Authorization estimate:');
   console.log('   Transactions needed:', estimate.transactions);
   console.log('   Total bytes:', estimate.bytes, `(${(estimate.bytes / 1048576).toFixed(2)} MB)\n`);

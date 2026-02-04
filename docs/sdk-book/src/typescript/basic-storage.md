@@ -1,28 +1,27 @@
 # Basic Storage
 
-This guide shows how to store data using the `AsyncBulletinClient` with transaction submitters.
+This guide shows how to store data using the `AsyncBulletinClient` with direct PAPI integration.
 
 ## Quick Start
 
-The `store()` method automatically handles both small and large files:
+The `store()` method with builder pattern automatically handles both small and large files:
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
-import { createClient } from 'polkadot-api';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
 // 1. Connect to Bulletin Chain
 const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
-const api = papiClient.getTypedApi(/* your chain descriptors */);
+const api = papiClient.getTypedApi(bulletinDescriptor);
 
-// 2. Create submitter and client
-const submitter = new PAPITransactionSubmitter(api, signer);
-const client = new AsyncBulletinClient(submitter);
+// 2. Create client with PAPI client and signer
+const client = new AsyncBulletinClient(api, signer);
 
-// 3. Store data (automatically chunks if > 2 MiB)
-const data = new TextEncoder().encode('Hello, Bulletin Chain!');
-const result = await client.store(data);
+// 3. Store data using builder pattern (automatically chunks if > 2 MiB)
+const data = Binary.fromText('Hello, Bulletin Chain!');
+const result = await client.store(data).send();
 
 console.log('✅ Stored successfully!');
 console.log('   CID:', result.cid.toString());
@@ -33,32 +32,53 @@ console.log('   Size:', result.size, 'bytes');
 
 ### 1. Setup Connection
 
-First, create a transaction submitter. The submitter handles all blockchain communication:
+First, create a PAPI client and get the typed API:
 
 ```typescript
-import { PAPITransactionSubmitter } from '@bulletin/sdk';
 import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
 // Connect to chain
 const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
-const api = papiClient.getTypedApi(/* descriptors */);
 
-// Create submitter
-const submitter = new PAPITransactionSubmitter(api, signer);
+// Get typed API (requires chain descriptors)
+const api = papiClient.getTypedApi(bulletinDescriptor);
 ```
 
 ### 2. Create Client
 
-Wrap the submitter with `AsyncBulletinClient`:
+Create the SDK client with PAPI client and signer:
 
 ```typescript
-const client = new AsyncBulletinClient(submitter);
+import { AsyncBulletinClient } from '@bulletin/sdk';
+
+const client = new AsyncBulletinClient(api, signer);
 ```
 
-### 3. Store Data
+### 3. Prepare Data
 
-The `store()` method automatically handles everything:
+Use PAPI's `Binary` class to handle data:
+
+```typescript
+import { Binary } from 'polkadot-api';
+
+// From text
+const data = Binary.fromText('Hello, Bulletin!');
+
+// From hex string
+const data = Binary.fromHex('0x48656c6c6f');
+
+// From Uint8Array
+const data = Binary.fromBytes(new Uint8Array([72, 101, 108, 108, 111]));
+
+// From Buffer (Node.js)
+const data = Binary.fromBytes(Buffer.from('Hello'));
+```
+
+### 4. Store Data
+
+The `store()` method with builder pattern handles everything:
 - Validates data size
 - Checks authorization (if configured)
 - Automatically chunks large files (> 2 MiB by default)
@@ -67,21 +87,31 @@ The `store()` method automatically handles everything:
 - Waits for finalization
 
 ```typescript
-// For small files (< 2 MiB): single transaction
-// For large files (> 2 MiB): automatic chunking
-const result = await client.store(data);
+// Basic store
+const result = await client.store(data).send();
+
+// With custom options
+const result = await client
+    .store(data)
+    .withCodec(CidCodec.Raw)
+    .withHashAlgorithm('blake2b-256')
+    .withFinalization(true)
+    .send();
 
 // With progress tracking for large files
-const result = await client.store(data, undefined, (event) => {
-    if (event.type === 'chunk_completed') {
-        console.log(`Chunk ${event.index + 1}/${event.total} uploaded`);
-    } else if (event.type === 'completed') {
-        console.log('Upload complete!');
-    }
-});
+const result = await client
+    .store(data)
+    .withCallback((event) => {
+        if (event.type === 'chunk_completed') {
+            console.log(`Chunk ${event.index + 1}/${event.total} uploaded`);
+        } else if (event.type === 'completed') {
+            console.log('Upload complete!');
+        }
+    })
+    .send();
 ```
 
-### 4. Handle Result
+### 5. Handle Result
 
 ```typescript
 console.log('CID:', result.cid.toString());
@@ -103,17 +133,17 @@ By default, the SDK checks authorization **before** uploading to fail fast and a
 
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
+import { Binary } from 'polkadot-api';
 
 // 1. Create client with your account
-const submitter = new PAPITransactionSubmitter(api, signer);
 const account = 'your-account-address';
 
-const client = new AsyncBulletinClient(submitter)
+const client = new AsyncBulletinClient(api, signer)
     .withAccount(account);  // Set the account for auth checking
 
 // 2. Upload - authorization is checked automatically
-const data = new TextEncoder().encode('Hello, Bulletin!');
-const result = await client.store(data);
+const data = Binary.fromText('Hello, Bulletin!');
+const result = await client.store(data).send();
 //                       ⬆️ Queries blockchain first, fails fast if insufficient auth
 ```
 
@@ -131,7 +161,7 @@ Before submitting the transaction, the SDK:
 If you want to skip the check (e.g., you know authorization exists):
 
 ```typescript
-const client = new AsyncBulletinClient(submitter, {
+const client = new AsyncBulletinClient(api, signer, {
     checkAuthorizationBeforeUpload: false,  // Disable checking
 }).withAccount(account);
 ```
@@ -139,16 +169,20 @@ const client = new AsyncBulletinClient(submitter, {
 ### Error Example
 
 ```typescript
+import { BulletinError } from '@bulletin/sdk';
+
 try {
-    const result = await client.store(data);
+    const result = await client.store(data).send();
     console.log('Success!');
 } catch (error) {
-    if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-        console.error('Need more authorization!');
-        console.error('Details:', error.cause);
-    } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-        console.error('Authorization expired!');
-        console.error('Details:', error.cause);
+    if (error instanceof BulletinError) {
+        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
+            console.error('Need more authorization!');
+            console.error('Details:', error.details);
+        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
+            console.error('Authorization expired!');
+            console.error('Details:', error.details);
+        }
     } else {
         console.error('Error:', error);
     }
@@ -158,23 +192,22 @@ try {
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
-import { createClient } from 'polkadot-api';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
 const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
-const api = papiClient.getTypedApi(/* descriptors */);
+const api = papiClient.getTypedApi(bulletinDescriptor);
 
 // Create client with account for authorization checking
-const submitter = new PAPITransactionSubmitter(api, signer);
 const account = 'your-account-address';
-const client = new AsyncBulletinClient(submitter)
+const client = new AsyncBulletinClient(api, signer)
     .withAccount(account);
 
 // Estimate what's needed
-const data = new Uint8Array(5_000_000); // 5 MB
-const estimate = client.estimateAuthorization(data.length);
+const data = Binary.fromBytes(new Uint8Array(5_000_000)); // 5 MB
+const estimate = client.estimateAuthorization(data.asBytes().length);
 console.log('Need authorization for', estimate.transactions, 'txs and', estimate.bytes, 'bytes');
 
 // Authorize (if needed - requires sudo)
@@ -182,50 +215,84 @@ console.log('Need authorization for', estimate.transactions, 'txs and', estimate
 
 try {
     // Store - will check authorization automatically
-    const result = await client.store(data);
+    const result = await client.store(data).send();
     console.log('✅ Stored:', result.cid.toString());
 } catch (error) {
-    if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-        console.error('❌ Insufficient authorization');
-        console.error('   Please authorize your account first');
-    } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-        console.error('❌ Authorization expired');
-        console.error('   Please refresh your authorization');
+    if (error instanceof BulletinError) {
+        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
+            console.error('❌ Insufficient authorization');
+            console.error('   Please authorize your account first');
+        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
+            console.error('❌ Authorization expired');
+            console.error('   Please refresh your authorization');
+        }
     } else {
-        console.error('❌ Error:', error.message);
+        console.error('❌ Error:', error);
     }
 }
+```
+
+## Working with Different Data Types
+
+### Text Data
+
+```typescript
+import { Binary } from 'polkadot-api';
+
+const data = Binary.fromText('Hello, Bulletin Chain!');
+const result = await client.store(data).send();
+```
+
+### Binary Data
+
+```typescript
+// From Uint8Array
+const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+const data = Binary.fromBytes(bytes);
+const result = await client.store(data).send();
+```
+
+### File Data (Node.js)
+
+```typescript
+import { readFile } from 'fs/promises';
+import { Binary } from 'polkadot-api';
+
+const fileBuffer = await readFile('document.pdf');
+const data = Binary.fromBytes(fileBuffer);
+const result = await client.store(data).send();
+```
+
+### JSON Data
+
+```typescript
+import { Binary } from 'polkadot-api';
+
+const jsonData = { message: 'Hello', timestamp: Date.now() };
+const jsonString = JSON.stringify(jsonData);
+const data = Binary.fromText(jsonString);
+const result = await client.store(data).send();
 ```
 
 ## Testing Without a Node
 
-For unit tests, implement a mock submitter:
+For unit tests, use the `MockBulletinClient`:
 
 ```typescript
-class MockSubmitter implements TransactionSubmitter {
-    async submitStore(data: Uint8Array) {
-        return {
-            blockHash: '0xmock',
-            txHash: '0xmock',
-            blockNumber: 1,
-        };
-    }
+import { MockBulletinClient } from '@bulletin/sdk';
+import { Binary } from 'polkadot-api';
 
-    // Implement other required methods...
+// Create mock client (no blockchain required)
+const client = new MockBulletinClient();
 
-    // Optional: implement query methods for testing authorization
-    async queryAccountAuthorization(who: string) {
-        return {
-            scope: AuthorizationScope.Account,
-            transactions: 100,
-            maxSize: BigInt(10_000_000),
-            expiresAt: undefined,
-        };
-    }
-}
+// Store data - calculates real CIDs but doesn't submit to chain
+const data = Binary.fromText('Test data');
+const result = await client.store(data).send();
 
-// Use in tests
-const submitter = new MockSubmitter();
-const client = new AsyncBulletinClient(submitter);
-const result = await client.store(testData);
+// Verify operations performed
+const ops = client.getOperations();
+expect(ops).toHaveLength(1);
+expect(ops[0].type).toBe('store');
 ```
+
+See the [Mock Testing](../rust/mock-testing.md) guide for more details.

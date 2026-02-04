@@ -6,7 +6,7 @@
  */
 
 import { CID } from 'multiformats/cid';
-import { PolkadotSigner, TypedApi } from 'polkadot-api';
+import { PolkadotSigner, TypedApi, Binary } from 'polkadot-api';
 import { FixedSizeChunker, reassembleChunks } from './chunker.js';
 import { UnixFsDagBuilder } from './dag.js';
 import { calculateCid } from './utils.js';
@@ -58,8 +58,10 @@ export interface AsyncClientConfig {
  *
  * @example
  * ```typescript
+ * import { Binary } from 'polkadot-api';
+ *
  * const result = await client
- *   .store(data)
+ *   .store(Binary.fromText('Hello'))
  *   .withCodec(CidCodec.DagPb)
  *   .withHashAlgorithm('blake2b-256')
  *   .withCallback((event) => console.log('Progress:', event))
@@ -73,9 +75,10 @@ export class StoreBuilder {
 
   constructor(
     private client: AsyncBulletinClient,
-    data: Uint8Array,
+    data: Binary | Uint8Array,
   ) {
-    this.data = data;
+    // Convert Binary to Uint8Array if needed
+    this.data = data instanceof Uint8Array ? data : data.asBytes();
   }
 
   /** Set the CID codec */
@@ -190,19 +193,29 @@ export class AsyncBulletinClient {
    *
    * Returns a builder that allows fluent configuration of store options.
    *
+   * @param data - Data to store (PAPI Binary or Uint8Array)
+   *
    * @example
    * ```typescript
+   * import { Binary } from 'polkadot-api';
+   *
+   * // Using PAPI's Binary class (recommended)
    * const result = await client
-   *   .store(data)
+   *   .store(Binary.fromText('Hello, Bulletin!'))
    *   .withCodec(CidCodec.DagPb)
    *   .withHashAlgorithm('blake2b-256')
    *   .withCallback((event) => {
    *     console.log('Progress:', event);
    *   })
    *   .send();
+   *
+   * // Or with Uint8Array
+   * const result = await client
+   *   .store(new Uint8Array([1, 2, 3]))
+   *   .send();
    * ```
    */
-  store(data: Uint8Array): StoreBuilder {
+  store(data: Binary | Uint8Array): StoreBuilder {
     return new StoreBuilder(this, data);
   }
 
@@ -215,21 +228,23 @@ export class AsyncBulletinClient {
    * Automatically chunks data if it exceeds the configured threshold.
    */
   async storeWithOptions(
-    data: Uint8Array,
+    data: Binary | Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
-    if (data.length === 0) {
+    // Convert Binary to Uint8Array if needed
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    if (dataBytes.length === 0) {
       throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
     }
 
     // Decide whether to chunk based on threshold
-    if (data.length > this.config.chunkingThreshold) {
+    if (dataBytes.length > this.config.chunkingThreshold) {
       // Large data - use chunking
-      return this.storeInternalChunked(data, undefined, options, progressCallback);
+      return this.storeInternalChunked(dataBytes, undefined, options, progressCallback);
     } else {
       // Small data - single transaction
-      return this.storeInternalSingle(data, options);
+      return this.storeInternalSingle(dataBytes, options);
     }
   }
 
@@ -296,14 +311,19 @@ export class AsyncBulletinClient {
    * 3. Submit each chunk as a separate transaction
    * 4. Create and submit DAG-PB manifest (if enabled)
    * 5. Return all CIDs and receipt information
+   *
+   * @param data - Data to store (PAPI Binary or Uint8Array)
    */
   async storeChunked(
-    data: Uint8Array,
+    data: Binary | Uint8Array,
     config?: Partial<ChunkerConfig>,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<ChunkedStoreResult> {
-    if (data.length === 0) {
+    // Convert Binary to Uint8Array if needed
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+
+    if (dataBytes.length === 0) {
       throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
     }
 
@@ -318,7 +338,7 @@ export class AsyncBulletinClient {
 
     // Chunk the data
     const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(data);
+    const chunks = chunker.chunk(dataBytes);
 
     const chunkCids: CID[] = [];
 
@@ -403,7 +423,7 @@ export class AsyncBulletinClient {
     return {
       chunkCids,
       manifestCid,
-      totalSize: data.length,
+      totalSize: dataBytes.length,
       numChunks: chunks.length,
     };
   }
