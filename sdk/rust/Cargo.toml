@@ -6,6 +6,14 @@ authors = ["Parity Technologies <admin@parity.io>"]
 license = "GPL-3.0-or-later"
 description = "Off-chain client SDK for Polkadot Bulletin Chain"
 repository = "https://github.com/paritytech/polkadot-bulletin-chain"
+homepage = "https://github.com/paritytech/polkadot-bulletin-chain"
+# documentation = "https://docs.rs/bulletin-sdk-rust"  # Will be available after first crates.io publish
+readme = "README.md"
+keywords = ["blockchain", "bulletin", "ipfs", "polkadot", "storage"]
+categories = ["api-bindings", "cryptography::cryptocurrencies", "no-std"]
+# Note: examples/ and tests/ are excluded by default when publishing to crates.io
+# .github/ exclusion prevents CI configs from being packaged
+exclude = [".github/"]
 
 [dependencies]
 # Core dependencies (no_std compatible)

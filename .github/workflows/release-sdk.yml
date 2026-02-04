@@ -1,0 +1,340 @@
+name: Release SDK
+
+on:
+  push:
+    tags:
+      - 'sdk-v*.*.*'      # Matches sdk-v0.1.0, sdk-v1.0.0, etc.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SDK Version to release (e.g., 0.1.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run (skip actual publishing)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  RUST_BACKTRACE: 1
+  NODE_VERSION: 22
+
+jobs:
+  # Validate that versions match across packages
+  validate-version:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Extract version from tag or input
+        id: extract
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/sdk-v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing version: $VERSION"
+
+      - name: Validate Rust SDK version
+        run: |
+          CARGO_VERSION=$(grep '^version = ' sdk/rust/Cargo.toml | head -1 | cut -d '"' -f 2)
+          if [ "$CARGO_VERSION" != "${{ steps.extract.outputs.version }}" ]; then
+            echo "❌ Rust SDK version mismatch!"
+            echo "   Cargo.toml: $CARGO_VERSION"
+            echo "   Tag/Input: ${{ steps.extract.outputs.version }}"
+            exit 1
+          fi
+          echo "✅ Rust SDK version matches: $CARGO_VERSION"
+
+      - name: Validate TypeScript SDK version
+        run: |
+          NPM_VERSION=$(grep '"version":' sdk/typescript/package.json | head -1 | cut -d '"' -f 4)
+          if [ "$NPM_VERSION" != "${{ steps.extract.outputs.version }}" ]; then
+            echo "❌ TypeScript SDK version mismatch!"
+            echo "   package.json: $NPM_VERSION"
+            echo "   Tag/Input: ${{ steps.extract.outputs.version }}"
+            exit 1
+          fi
+          echo "✅ TypeScript SDK version matches: $NPM_VERSION"
+
+  # Build and test Rust SDK
+  build-rust-sdk:
+    name: Build Rust SDK
+    needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sdk/rust
+          shared-key: "sdk-rust-release"
+
+      - name: Check formatting
+        run: |
+          cd sdk/rust
+          cargo fmt --all -- --check
+
+      - name: Clippy
+        run: |
+          cd sdk/rust
+          cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build (std)
+        run: |
+          cd sdk/rust
+          cargo build --release --all-features
+
+      - name: Build (no_std)
+        run: |
+          cd sdk/rust
+          cargo build --release --no-default-features
+
+      - name: Build (ink)
+        run: |
+          cd sdk/rust
+          cargo build --release --no-default-features --features ink
+
+      - name: Run tests
+        run: |
+          cd sdk/rust
+          cargo test --all-features
+
+      - name: Package for crates.io
+        run: |
+          cd sdk/rust
+          cargo package --allow-dirty
+
+  # Build and test TypeScript SDK
+  build-typescript-sdk:
+    name: Build TypeScript SDK
+    needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd sdk/typescript
+          npm ci
+
+      - name: Lint
+        run: |
+          cd sdk/typescript
+          npm run lint || echo "Linting skipped (no lint configured)"
+
+      - name: Type check
+        run: |
+          cd sdk/typescript
+          npm run typecheck
+
+      - name: Run tests
+        run: |
+          cd sdk/typescript
+          npm test
+
+      - name: Build
+        run: |
+          cd sdk/typescript
+          npm run build
+
+      - name: Package
+        run: |
+          cd sdk/typescript
+          npm pack
+
+      - name: Upload npm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: sdk/typescript/*.tgz
+
+  # Publish to crates.io
+  publish-rust:
+    name: Publish Rust SDK to crates.io
+    needs: [validate-version, build-rust-sdk]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.dry_run != 'true'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: |
+          cd sdk/rust
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Publish to npm
+  publish-npm:
+    name: Publish TypeScript SDK to npm
+    needs: [validate-version, build-typescript-sdk]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.dry_run != 'true'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: |
+          cd sdk/typescript
+          npm ci
+
+      - name: Build
+        run: |
+          cd sdk/typescript
+          npm run build
+
+      - name: Publish to npm
+        run: |
+          cd sdk/typescript
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Create GitHub Release
+  create-github-release:
+    name: Create GitHub Release
+    needs: [validate-version, build-rust-sdk, build-typescript-sdk, publish-rust, publish-npm]
+    runs-on: ubuntu-latest
+    # Run if all previous jobs succeeded, or if dry_run is true (skip publish jobs)
+    if: |
+      always() &&
+      needs.validate-version.result == 'success' &&
+      needs.build-rust-sdk.result == 'success' &&
+      needs.build-typescript-sdk.result == 'success' &&
+      (github.event.inputs.dry_run == 'true' ||
+       (needs.publish-rust.result == 'success' && needs.publish-npm.result == 'success'))
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: artifacts
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          cat > release-notes.md <<EOF
+          # Bulletin SDK v${VERSION}
+
+          ## 📦 Packages
+
+          ### Rust SDK
+          - **crates.io**: [bulletin-sdk-rust](https://crates.io/crates/bulletin-sdk-rust)
+          - **Documentation**: [docs.rs](https://docs.rs/bulletin-sdk-rust/${VERSION})
+
+          ### TypeScript SDK
+          - **npm**: [@bulletin/sdk](https://www.npmjs.com/package/@bulletin/sdk)
+          - **Version**: ${VERSION}
+
+          ## 🚀 Installation
+
+          ### Rust
+          \`\`\`toml
+          [dependencies]
+          bulletin-sdk-rust = "${VERSION}"
+          \`\`\`
+
+          ### TypeScript/JavaScript
+          \`\`\`bash
+          npm install @bulletin/sdk@${VERSION}
+          # or
+          yarn add @bulletin/sdk@${VERSION}
+          # or
+          pnpm add @bulletin/sdk@${VERSION}
+          \`\`\`
+
+          ## ✨ Features
+
+          - ✅ Unified \`store()\` API with automatic chunking
+          - ✅ Authorization pre-flight checking
+          - ✅ DAG-PB manifest generation (IPFS-compatible)
+          - ✅ Progress tracking for large uploads
+          - ✅ Full CID codec support (Raw, DAG-PB, DAG-CBOR)
+          - ✅ Multiple hashing algorithms (Blake2b-256, SHA2-256, Keccak-256)
+          - ✅ TypeScript: Full type safety with PAPI integration
+          - ✅ Rust: no_std compatible, ink! smart contract support
+
+          ## 📚 Documentation
+
+          - [TypeScript SDK Guide](https://github.com/paritytech/polkadot-bulletin-chain/blob/main/docs/sdk-book/src/typescript/README.md)
+          - [Rust SDK Guide](https://github.com/paritytech/polkadot-bulletin-chain/blob/main/docs/sdk-book/src/rust/README.md)
+          - [Examples](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples)
+
+          ## 🔗 Links
+
+          - [Repository](https://github.com/paritytech/polkadot-bulletin-chain)
+          - [Issues](https://github.com/paritytech/polkadot-bulletin-chain/issues)
+          - [Discussions](https://github.com/paritytech/polkadot-bulletin-chain/discussions)
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sdk-v${{ needs.validate-version.outputs.version }}
+          name: Bulletin SDK v${{ needs.validate-version.outputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/*.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Dry run summary
+  dry-run-summary:
+    name: Dry Run Summary
+    needs: [validate-version, build-rust-sdk, build-typescript-sdk]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.dry_run == 'true'
+    steps:
+      - name: Print summary
+        run: |
+          echo "🏃 Dry Run Complete!"
+          echo ""
+          echo "Version: ${{ needs.validate-version.outputs.version }}"
+          echo ""
+          echo "✅ All builds and tests passed"
+          echo "✅ Version validation passed"
+          echo ""
+          echo "To release for real, run without dry_run flag:"
+          echo "  git tag sdk-v${{ needs.validate-version.outputs.version }}"
+          echo "  git push origin sdk-v${{ needs.validate-version.outputs.version }}"

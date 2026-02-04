@@ -21,6 +21,7 @@ import {
   ProgressCallback,
   BulletinError,
   CidCodec,
+  HashAlgorithm,
   ChunkDetails,
   Authorization,
 } from './types.js';
@@ -88,7 +89,7 @@ export class StoreBuilder {
   }
 
   /** Set the hash algorithm */
-  withHashAlgorithm(algorithm: string): this {
+  withHashAlgorithm(algorithm: HashAlgorithm): this {
     this.options.hashingAlgorithm = algorithm;
     return this;
   }
