@@ -1066,9 +1066,9 @@ pub mod pallet {
 			Self::check_authorization(AuthorizationScope::Preimage(hash), size as u32, consume)?;
 
 			Ok(ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-					.and_provides(hash)
-					.priority(T::StoreRenewPriority::get())
-					.longevity(T::StoreRenewLongevity::get())
+				.and_provides(hash)
+				.priority(T::StoreRenewPriority::get())
+				.longevity(T::StoreRenewLongevity::get())
 				.into())
 		}
 
@@ -1077,8 +1077,8 @@ pub mod pallet {
 			consume: bool,
 		) -> Result<ValidTransaction, TransactionValidityError> {
 			Self::check_store_renew_unsigned(
-					data.len(),
-					|| sp_io::hashing::blake2_256(data),
+				data.len(),
+				|| sp_io::hashing::blake2_256(data),
 				consume,
 			)
 		}
@@ -1089,36 +1089,32 @@ pub mod pallet {
 			consume: bool,
 		) -> Result<ValidTransaction, TransactionValidityError> {
 			let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-			Self::check_store_renew_unsigned(
-				info.size as usize,
-				|| info.content_hash,
-				consume,
-			)
+			Self::check_store_renew_unsigned(info.size as usize, || info.content_hash, consume)
 		}
 
 		fn check_unsigned_remove_expired_account(
 			who: &T::AccountId,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-					Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
+			Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
 			Ok(ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExpiredAccountAuthorization",
-						)
-						.and_provides(who)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+				"TransactionStorageRemoveExpiredAccountAuthorization",
+			)
+			.and_provides(who)
+			.priority(T::RemoveExpiredAuthorizationPriority::get())
+			.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 			.into())
 		}
 
 		fn check_unsigned_remove_expired_preimage_authorization(
 			hash: &ContentHash,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-					Self::check_authorization_expired(AuthorizationScope::Preimage(*hash))?;
+			Self::check_authorization_expired(AuthorizationScope::Preimage(*hash))?;
 			Ok(ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExpiredPreimageAuthorization",
-						)
-						.and_provides(hash)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+				"TransactionStorageRemoveExpiredPreimageAuthorization",
+			)
+			.and_provides(hash)
+			.priority(T::RemoveExpiredAuthorizationPriority::get())
+			.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 			.into())
 		}
 
