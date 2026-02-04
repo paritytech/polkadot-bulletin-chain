@@ -28,9 +28,8 @@ hex = "0.4"
 codec = { package = "parity-scale-codec", version = "3.6", features = ["derive"] }
 scale-info = "2.11"
 
-# Patch to resolve unicode-normalization conflict
-# subxt 0.37 requires =0.1.22 via parity-bip39 2.0.1
-# polkadot-sdk requires ^0.1.22 (locked to 0.1.25) via bip39 2.2.2
-# Use git source to override crates.io version
-[patch.crates-io]
-unicode-normalization = { git = "https://github.com/unicode-rs/unicode-normalization.git", tag = "0.1.22" }
+# Note: unicode-normalization patch was removed as the conflict
+# between subxt 0.37 and polkadot-sdk dependencies has been resolved
+# in recent versions. If build fails, we can specify a working version.
+# [patch.crates-io]
+# unicode-normalization = { version = "0.1.22" }
