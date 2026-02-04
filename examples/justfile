@@ -353,6 +353,7 @@ papi-generate ws_url="ws://localhost:10000": npm-install
     set -e
 
     echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
+    cd typescript
     npx papi add -w "{{ ws_url }}" bulletin
 
 # Setup all services using Docker for IPFS
