@@ -43,8 +43,8 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, Randomness,
-		StorageInfo,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, OriginTrait,
+		Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
@@ -354,6 +354,7 @@ impl pallet_transaction_storage::Config for Runtime {
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
+	type AuthorizedOrigin = pallet_transaction_storage::EnsureAuthorized<Runtime>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
@@ -530,7 +531,7 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 
 	fn validate(
 		&self,
-		origin: RuntimeOrigin,
+		mut origin: RuntimeOrigin,
 		call: &RuntimeCall,
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
@@ -538,21 +539,35 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?.clone();
 
 		let validity = match call {
 			// Transaction storage call
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			RuntimeCall::TransactionStorage(inner_call) => {
+				let (valid_tx, auth_type) =
+					TransactionStorage::validate_signed(&who, inner_call)?;
+
+				// Transform origin to carry authorization info
+				origin.set_caller_from(
+					pallet_transaction_storage::Origin::<Runtime>::Authorized {
+						who: who.clone(),
+						authorization: auth_type,
+					},
+				);
+
+				valid_tx
+			},
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
+				ValidatorSet::validate_set_keys(&who)?;
+				ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
-				}),
-			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+				}
+			},
+			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(&who)?,
 
 			// Bridge-related calls
 			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
@@ -572,48 +587,51 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			}) |
 			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-
-			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
-				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
-					.map_err(|_| InvalidTransaction::BadSigner.into())
-					.map(|()| ValidTransaction {
-						priority: BridgeTxPriority::get(),
-						longevity: BridgeTxLongevity::get(),
-						..Default::default()
-					}),
-
-			// Sudo calls
-			RuntimeCall::Proxy(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::Sudo(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::Utility(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(ValidTransaction {
-					priority: SudoPriority::get(),
+			) => {
+				RelayerSet::validate_bridge_tx(&who)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
 					longevity: BridgeTxLongevity::get(),
 					..Default::default()
-				}),
+				}
+			},
+
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) => {
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}
+			},
+
+			// Sudo calls
+			RuntimeCall::Proxy(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::Sudo(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::Utility(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
 
 			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
-		}?;
+			_ => return Err(InvalidTransaction::Call.into()),
+		};
 
 		Ok((validity, (), origin))
 	}
@@ -626,53 +644,72 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
 		match call {
 			// Transaction storage validation
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+			// The origin may have been transformed to a custom pallet origin in validate(),
+			// so we need to extract the account from there.
+			RuntimeCall::TransactionStorage(inner_call) => {
+				let who = match origin.clone().into() {
+					Ok(pallet_transaction_storage::Origin::<Runtime>::Authorized {
+						who, ..
+					}) => who,
+					Err(origin) => origin
+						.as_system_origin_signer()
+						.ok_or(InvalidTransaction::BadSigner)?
+						.clone(),
+				};
+				let _ = TransactionStorage::pre_dispatch_signed(&who, inner_call)?;
+				Ok(None)
+			},
 
-			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
-			RuntimeCall::Session(SessionCall::purge_keys {}) =>
-				validate_purge_keys(who).map(|_| None),
+			// All other calls use standard system origin
+			_ => {
+				let who =
+					origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+				match call {
+					// Session key management
+					RuntimeCall::Session(SessionCall::set_keys { .. }) =>
+						ValidatorSet::pre_dispatch_set_keys(who).map(|()| None),
+					RuntimeCall::Session(SessionCall::purge_keys {}) =>
+						validate_purge_keys(who).map(|_| None),
 
-			// Bridge-related calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof_ex {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads { .. },
-			) |
-			RuntimeCall::BridgePolkadotParachains(
-				BridgeParachainsCall::submit_parachain_heads_ex { .. },
-			) |
-			RuntimeCall::BridgePolkadotMessages(BridgeMessagesCall::receive_messages_proof {
-				..
-			}) |
-			RuntimeCall::BridgePolkadotMessages(
-				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
+					// Bridge-related calls
+					RuntimeCall::BridgePolkadotGrandpa(
+						BridgeGrandpaCall::submit_finality_proof { .. },
+					) |
+					RuntimeCall::BridgePolkadotGrandpa(
+						BridgeGrandpaCall::submit_finality_proof_ex { .. },
+					) |
+					RuntimeCall::BridgePolkadotParachains(
+						BridgeParachainsCall::submit_parachain_heads { .. },
+					) |
+					RuntimeCall::BridgePolkadotParachains(
+						BridgeParachainsCall::submit_parachain_heads_ex { .. },
+					) |
+					RuntimeCall::BridgePolkadotMessages(
+						BridgeMessagesCall::receive_messages_proof { .. },
+					) |
+					RuntimeCall::BridgePolkadotMessages(
+						BridgeMessagesCall::receive_messages_delivery_proof { .. },
+					) => RelayerSet::validate_bridge_tx(who).map(|()| Some(who.clone())),
 
-			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
-				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
-					.map_err(|_| InvalidTransaction::BadSigner.into())
-					.map(|()| Some(who.clone())),
+					// Bridge-privileged calls
+					RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+						BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+							.map_err(|_| InvalidTransaction::BadSigner.into())
+							.map(|()| Some(who.clone())),
 
-			// Sudo calls
-			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
-			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
-			RuntimeCall::Utility(_) => Ok(Some(who.clone())),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(Some(who.clone())),
+					// Sudo calls
+					RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
+					RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
+					RuntimeCall::Utility(_) => Ok(Some(who.clone())),
+					RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
+						Ok(Some(who.clone())),
 
-			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
+					// All other calls are invalid
+					_ => Err(InvalidTransaction::Call.into()),
+				}
+			},
 		}
 	}
 

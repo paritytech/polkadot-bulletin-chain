@@ -22,8 +22,8 @@ use super::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
 	},
-	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
-	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
+	AuthorizationExtent, AuthorizationScope, AuthorizationType, Event, TransactionInfo,
+	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{
 	prelude::{frame_system::RawOrigin, *},
@@ -79,7 +79,9 @@ fn uses_account_authorization() {
 			TransactionStorage::pre_dispatch_signed(&5, &call),
 			InvalidTransaction::Payment,
 		);
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&caller, &call));
+		// Verify auth type is Account
+		let auth_type = TransactionStorage::pre_dispatch_signed(&caller, &call).unwrap();
+		assert_eq!(auth_type, AuthorizationType::Account);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent { transactions: 1, bytes: 1 }
@@ -434,8 +436,11 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 
 		// Store the pre-authorized content using a signed transaction
 		let call = Call::store { data: data.clone() };
-		assert_ok!(TransactionStorage::validate_signed(&who, &call));
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		// Verify auth type is Preimage
+		let (_, auth_type) = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert_eq!(auth_type, AuthorizationType::Preimage);
+		let auth_type = TransactionStorage::pre_dispatch_signed(&who, &call).unwrap();
+		assert_eq!(auth_type, AuthorizationType::Preimage);
 
 		// Verify: preimage authorization was consumed, not account authorization
 		assert_eq!(
@@ -485,7 +490,9 @@ fn signed_store_falls_back_to_account_authorization() {
 
 		// Store content that doesn't have preimage authorization
 		let call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		// Verify auth type is Account (fallback)
+		let auth_type = TransactionStorage::pre_dispatch_signed(&who, &call).unwrap();
+		assert_eq!(auth_type, AuthorizationType::Account);
 
 		// Verify: account authorization was consumed since no preimage auth for this content
 		assert_eq!(
@@ -532,7 +539,9 @@ fn signed_renew_uses_account_authorization() {
 		// Renew the stored data using signed transaction.
 		// Since preimage authorization was consumed during store, renew falls back to account.
 		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		// Verify auth type is Account
+		let auth_type = TransactionStorage::pre_dispatch_signed(&who, &renew_call).unwrap();
+		assert_eq!(auth_type, AuthorizationType::Account);
 
 		// Verify: account authorization was consumed for renew
 		assert_eq!(
@@ -584,7 +593,9 @@ fn signed_renew_prefers_preimage_authorization() {
 
 		// Renew using signed transaction - should prefer preimage authorization
 		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		// Verify auth type is Preimage
+		let auth_type = TransactionStorage::pre_dispatch_signed(&who, &renew_call).unwrap();
+		assert_eq!(auth_type, AuthorizationType::Preimage);
 
 		// Verify: preimage authorization was consumed, account authorization unchanged
 		assert_eq!(

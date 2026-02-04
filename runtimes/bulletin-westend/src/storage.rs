@@ -56,6 +56,7 @@ impl pallet_transaction_storage::Config for Runtime {
 		// People chain can also handle authorizations.
 		EnsureXcm<Equals<PeopleLocation>>,
 	>;
+	type AuthorizedOrigin = pallet_transaction_storage::EnsureAuthorized<Runtime>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;

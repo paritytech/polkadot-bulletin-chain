@@ -44,7 +44,9 @@ use frame_support::{
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin},
+	traits::{
+		ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, OriginTrait, TransformOrigin,
+	},
 	weights::{ConstantMultiplier, Weight},
 	PalletId,
 };
@@ -71,7 +73,8 @@ use sp_runtime::{
 		PostDispatchInfoOf,
 	},
 	transaction_validity::{
-		TransactionSource, TransactionValidity, TransactionValidityError, ValidTransaction,
+		InvalidTransaction, TransactionSource, TransactionValidity, TransactionValidityError,
+		ValidTransaction,
 	},
 	ApplyExtrinsicResult, MultiAddress, Perbill,
 };
@@ -303,7 +306,7 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 
 	fn validate(
 		&self,
-		origin: RuntimeOrigin,
+		mut origin: RuntimeOrigin,
 		call: &RuntimeCall,
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
@@ -313,16 +316,27 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
 		// Only enforce special validation for transaction storage calls; pass through others.
 		let who = match origin.as_system_origin_signer() {
-			Some(who) => who,
+			Some(who) => who.clone(),
 			None => return Ok((ValidTransaction::default(), (), origin)),
 		};
 
 		let validity = match call {
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			RuntimeCall::TransactionStorage(inner_call) => {
+				let (valid_tx, auth_type) = TransactionStorage::validate_signed(&who, inner_call)?;
 
-			_ => Ok(ValidTransaction::default()),
-		}?;
+				// Transform origin to carry authorization info
+				origin.set_caller_from(
+					pallet_transaction_storage::Origin::<Runtime>::Authorized {
+						who,
+						authorization: auth_type,
+					},
+				);
+
+				valid_tx
+			},
+
+			_ => ValidTransaction::default(),
+		};
 
 		Ok((validity, (), origin))
 	}
@@ -336,10 +350,23 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		// Only enforce pre-dispatch for transaction storage calls; pass through others.
-		if let Some(who) = origin.as_system_origin_signer() {
-			if let RuntimeCall::TransactionStorage(inner_call) = call {
-				TransactionStorage::pre_dispatch_signed(who, inner_call)?;
-			}
+		match call {
+			// Transaction storage validation
+			// The origin may have been transformed to a custom pallet origin in validate(),
+			// so we need to extract the account from there.
+			RuntimeCall::TransactionStorage(inner_call) => {
+				let who = match origin.clone().into() {
+					Ok(pallet_transaction_storage::Origin::<Runtime>::Authorized {
+						who, ..
+					}) => who,
+					Err(origin) => origin
+						.as_system_origin_signer()
+						.ok_or(InvalidTransaction::BadSigner)?
+						.clone(),
+				};
+				let _ = TransactionStorage::pre_dispatch_signed(&who, inner_call)?;
+			},
+			_ => {},
 		}
 		Ok(())
 	}
