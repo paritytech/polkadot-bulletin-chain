@@ -462,6 +462,16 @@ run-test-rust example test_dir ws_url="ws://localhost:10000" seed="//Alice":
     echo "   WS URL: {{ ws_url }}"
     echo "   Seed: {{ seed }}"
 
+    # Fetch metadata from running node (required for subxt compilation)
+    cd "rust/{{ example }}"
+    if [ ! -f "bulletin_metadata.scale" ] || [ "$(find bulletin_metadata.scale -mmin +60 2>/dev/null)" ]; then
+        echo "📥 Fetching metadata from {{ ws_url }}..."
+        ./fetch_metadata.sh "{{ ws_url }}"
+    else
+        echo "✓ Using existing metadata file (less than 60 minutes old)"
+    fi
+    cd ../..
+
     # Build the Rust binary
     ROOT_DIR="{{ justfile_directory() }}/.."
     EXAMPLE_NAME=$(echo "{{ example }}" | tr '-' '_')

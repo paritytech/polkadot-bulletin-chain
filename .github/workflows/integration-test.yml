@@ -115,6 +115,9 @@ jobs:
       - name: Install just
         run: cargo install just --locked || true
 
+      - name: Install subxt-cli
+        run: cargo install subxt-cli --locked || true
+
       - name: Cache Polkadot SDK binaries
         uses: actions/cache@v5
         id: polkadot-sdk-cache
