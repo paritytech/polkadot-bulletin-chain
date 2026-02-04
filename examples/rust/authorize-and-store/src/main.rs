@@ -4,10 +4,9 @@
 //! Authorize and store data on Bulletin Chain using subxt.
 //!
 //! This example demonstrates:
-//! 1. Using PolkadotConfig with auto-discovered signed extensions from metadata
-//! 2. Auto-discovery of Bulletin's custom ProvideCidConfig extension
-//! 3. Authorizing an account to store data
-//! 4. Storing data on the Bulletin Chain
+//! 1. Using SubstrateConfig with custom ProvideCidConfig extension
+//! 2. Authorizing an account to store data
+//! 3. Storing data on the Bulletin Chain
 //!
 //! ## Setup
 //!
@@ -20,10 +19,19 @@
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use codec::{Compact, Encode};
+use codec::Encode;
 use std::str::FromStr;
 use subxt::{
-	config::{Config, ExtrinsicParams, SubstrateConfig},
+	client::ClientState,
+	config::{
+		signed_extensions::{
+			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis, CheckMortality,
+			CheckNonce, CheckSpecVersion, CheckTxVersion, CheckMetadataHash,
+		},
+		substrate::SubstrateConfig,
+		Config, ExtrinsicParams, ExtrinsicParamsEncoder,
+	},
+	error::ExtrinsicParamsError,
 	utils::AccountId32,
 	OnlineClient,
 };
@@ -49,51 +57,66 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-/// Custom extrinsic params that includes ProvideCidConfig extension
-/// This matches Bulletin Chain's transaction extensions
-#[derive(Debug, Clone, Encode)]
-struct BulletinParams {
-	era: sp_runtime::generic::Era,
-	#[codec(compact)]
-	nonce: u64,
-	#[codec(compact)]
-	tip: u128,
-	// ProvideCidConfig is Option<CidConfig> - we encode None (0x00)
-	provide_cid_config: Option<()>,
-}
+/// Custom signed extension for Bulletin Chain's ProvideCidConfig.
+/// This extension is Option<CidConfig> - we always encode None (0x00).
+#[derive(Debug, Clone)]
+pub struct ProvideCidConfig;
 
-impl ExtrinsicParams<sp_core::H256, u64> for BulletinParams {
-	type OtherParams = ();
+impl<T: Config> ExtrinsicParams<T> for ProvideCidConfig {
+	type Params = ();
 
 	fn new(
-		_spec_version: u32,
-		_tx_version: u32,
-		nonce: u64,
-		_genesis_hash: sp_core::H256,
-		_other_params: Self::OtherParams,
-	) -> Self {
-		Self {
-			era: sp_runtime::generic::Era::Immortal,
-			nonce,
-			tip: 0,
-			provide_cid_config: None, // Always None for default CID calculation
-		}
+		_client: &ClientState<T>,
+		_params: Self::Params,
+	) -> Result<Self, ExtrinsicParamsError> {
+		Ok(ProvideCidConfig)
 	}
 }
 
-/// Custom config for Bulletin Chain that uses our custom extrinsic params
-#[derive(Clone)]
-enum BulletinConfig {}
+impl ExtrinsicParamsEncoder for ProvideCidConfig {
+	fn encode_extra_to(&self, v: &mut Vec<u8>) {
+		// Encode Option<CidConfig>::None = 0x00
+		None::<()>.encode_to(v);
+	}
+}
+
+impl<T: Config> subxt::config::SignedExtension<T> for ProvideCidConfig {
+	type Decoded = ();
+	fn matches(identifier: &str, _type_id: u32, _types: &scale_info::PortableRegistry) -> bool {
+		identifier == "ProvideCidConfig"
+	}
+}
+
+/// Custom extrinsic params that includes ProvideCidConfig extension.
+/// Uses AnyOf to dynamically select the right extensions based on metadata.
+pub type BulletinExtrinsicParams<T> = AnyOf<
+	T,
+	(
+		CheckSpecVersion,
+		CheckTxVersion,
+		CheckNonce,
+		CheckGenesis<T>,
+		CheckMortality<T>,
+		ChargeAssetTxPayment<T>,
+		ChargeTransactionPayment,
+		CheckMetadataHash,
+		ProvideCidConfig,
+	),
+>;
+
+/// Custom config for Bulletin Chain that adds ProvideCidConfig support.
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum BulletinConfig {}
 
 impl Config for BulletinConfig {
-	type Hash = sp_core::H256;
-	type AccountId = AccountId32;
-	type Address = sp_runtime::MultiAddress<Self::AccountId, u32>;
-	type Signature = sp_runtime::MultiSignature;
-	type Hasher = sp_runtime::traits::BlakeTwo256;
-	type Header = sp_runtime::generic::Header<u32, Self::Hasher>;
-	type ExtrinsicParams = BulletinParams;
-	type AssetId = u32;
+	type Hash = <SubstrateConfig as Config>::Hash;
+	type AccountId = <SubstrateConfig as Config>::AccountId;
+	type Address = <SubstrateConfig as Config>::Address;
+	type Signature = <SubstrateConfig as Config>::Signature;
+	type Hasher = <SubstrateConfig as Config>::Hasher;
+	type Header = <SubstrateConfig as Config>::Header;
+	type ExtrinsicParams = BulletinExtrinsicParams<Self>;
+	type AssetId = <SubstrateConfig as Config>::AssetId;
 }
 
 #[tokio::main]
@@ -133,15 +156,14 @@ async fn main() -> Result<()> {
 			who: account_id.clone(),
 			transactions: 100,
 			bytes: 100 * 1024 * 1024,
-		}
+		},
 	);
 
 	// Wrap in sudo call (Alice is sudo in dev mode)
 	let sudo_tx = bulletin::tx().sudo().sudo(authorize_call);
 
-	api
-		.tx()
-		.sign_and_submit_then_watch(&sudo_tx, &keypair, Default::default())
+	api.tx()
+		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
 		.await
 		.map_err(|e| anyhow!("Failed to submit authorization: {e:?}"))?
 		.wait_for_finalized_success()
@@ -155,11 +177,13 @@ async fn main() -> Result<()> {
 	let data_to_store = format!("Hello from Bulletin Chain at {}", chrono_lite());
 	info!("Data: {}", data_to_store);
 
-	let store_tx = bulletin::tx().transaction_storage().store(data_to_store.as_bytes().to_vec());
+	let store_tx = bulletin::tx()
+		.transaction_storage()
+		.store(data_to_store.as_bytes().to_vec());
 
 	let tx_progress = api
 		.tx()
-		.sign_and_submit_then_watch(&store_tx, &keypair, Default::default())
+		.sign_and_submit_then_watch_default(&store_tx, &keypair)
 		.await
 		.map_err(|e| anyhow!("Failed to submit store: {e:?}"))?;
 
@@ -198,7 +222,7 @@ async fn main() -> Result<()> {
 		info!("  Size: {} bytes", data_to_store.len());
 	}
 
-	info!("\n✅ Test passed!");
+	info!("\nTest passed!");
 
 	Ok(())
 }
