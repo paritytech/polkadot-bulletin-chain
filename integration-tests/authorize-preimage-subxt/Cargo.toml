@@ -9,7 +9,3 @@ subxt-core = "0.43.0"
 subxt-signer = "0.43.0"
 sp-core = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-
-
-
-
