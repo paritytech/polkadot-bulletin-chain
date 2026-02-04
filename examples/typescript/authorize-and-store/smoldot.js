@@ -4,10 +4,10 @@ import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store } from './api.js';
-import { setupKeyringAndSigners, waitForChainReady } from './common.js';
-import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { authorizeAccount, fetchCid, store } from '../api.js';
+import { setupKeyringAndSigners, waitForChainReady } from '../common.js';
+import { cidFromBytes } from "../cid_dag_metadata.js";
+import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
