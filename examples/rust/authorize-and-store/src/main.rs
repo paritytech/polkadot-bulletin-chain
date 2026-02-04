@@ -48,7 +48,6 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-
 /// Build default extrinsic params using PolkadotConfig.
 ///
 /// PolkadotConfig auto-discovers all signed extensions from runtime metadata,
@@ -64,8 +63,7 @@ async fn main() -> Result<()> {
 		.with_max_level(Level::INFO)
 		.with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
 		.finish();
-	tracing::subscriber::set_global_default(subscriber)
-		.expect("Failed to set tracing subscriber");
+	tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
 	let args = Args::parse();
 
@@ -103,19 +101,14 @@ async fn main() -> Result<()> {
 		.await
 		.map_err(|e| anyhow!("Authorization transaction failed: {e:?}"))?;
 
-	info!(
-		"Account authorized successfully! Block hash: {:?}",
-		result.block_hash()
-	);
+	info!("Account authorized successfully! Block hash: {:?}", result.block_hash());
 
 	// Step 2: Store data
 	info!("\nStep 2: Storing data...");
 	let data_to_store = format!("Hello from Bulletin Chain at {}", chrono_lite());
 	info!("Data: {}", data_to_store);
 
-	let store_tx = bulletin::tx()
-		.transaction_storage()
-		.store(data_to_store.as_bytes().to_vec());
+	let store_tx = bulletin::tx().transaction_storage().store(data_to_store.as_bytes().to_vec());
 
 	let result = api
 		.tx()

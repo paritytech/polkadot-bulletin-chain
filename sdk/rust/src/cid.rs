@@ -27,9 +27,8 @@ pub fn hash_algorithm_to_pallet(algo: HashAlgorithm) -> Result<HashingAlgorithm>
 	match algo {
 		HashAlgorithm::Blake2b256 => Ok(HashingAlgorithm::Blake2b256),
 		HashAlgorithm::Sha2_256 => Ok(HashingAlgorithm::Sha2_256),
-		HashAlgorithm::Sha2_512 => {
-			Err(Error::UnsupportedHashAlgorithm("SHA2-512 is not supported by the pallet".into()))
-		},
+		HashAlgorithm::Sha2_512 =>
+			Err(Error::UnsupportedHashAlgorithm("SHA2-512 is not supported by the pallet".into())),
 		HashAlgorithm::Keccak256 => Ok(HashingAlgorithm::Keccak256),
 	}
 }

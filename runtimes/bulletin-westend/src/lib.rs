@@ -318,9 +318,8 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 		};
 
 		let validity = match call {
-			RuntimeCall::TransactionStorage(inner_call) => {
-				TransactionStorage::validate_signed(who, inner_call)
-			},
+			RuntimeCall::TransactionStorage(inner_call) =>
+				TransactionStorage::validate_signed(who, inner_call),
 
 			_ => Ok(ValidTransaction::default()),
 		}?;
