@@ -48,10 +48,6 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-// Note: In subxt 0.37, we use Default::default() for extrinsic params.
-// PolkadotConfig auto-discovers all signed extensions from runtime metadata,
-// including Bulletin's custom ProvideCidConfig extension.
-
 #[tokio::main]
 async fn main() -> Result<()> {
 	// Initialize tracing subscriber
@@ -97,7 +93,7 @@ async fn main() -> Result<()> {
 
 	api
 		.tx()
-		.sign_and_submit_then_watch(&sudo_tx, &keypair, Default::default())
+		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
 		.await
 		.map_err(|e| anyhow!("Failed to submit authorization: {e:?}"))?
 		.wait_for_finalized_success()
@@ -115,7 +111,7 @@ async fn main() -> Result<()> {
 
 	let tx_progress = api
 		.tx()
-		.sign_and_submit_then_watch(&store_tx, &keypair, Default::default())
+		.sign_and_submit_then_watch_default(&store_tx, &keypair)
 		.await
 		.map_err(|e| anyhow!("Failed to submit store: {e:?}"))?;
 
