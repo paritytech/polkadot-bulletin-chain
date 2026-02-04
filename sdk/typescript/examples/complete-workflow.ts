@@ -83,7 +83,8 @@ async function main() {
   const storeResult = await bobClient.store(data).send();
   console.log('✅ Data stored!');
   console.log('   CID:', storeResult.cid.toString());
-  console.log('   Block:', storeResult.blockNumber, '\n');
+  console.log('   Block:', storeResult.blockNumber);
+  console.log('   Extrinsic Index:', storeResult.extrinsicIndex, '\n');
 
   // 4. Preimage Authorization Workflow
   console.log('═══ Preimage Authorization Workflow ═══\n');
@@ -126,18 +127,26 @@ async function main() {
   // 6. Renew Data Workflow
   console.log('═══ Renew Data Workflow ═══\n');
 
-  if (storeResult.blockNumber) {
+  if (storeResult.blockNumber !== undefined && storeResult.extrinsicIndex !== undefined) {
     console.log('🔄 Renewing stored data...');
     console.log('   Original block:', storeResult.blockNumber);
+    console.log('   Extrinsic index:', storeResult.extrinsicIndex);
 
     try {
-      const renewReceipt = await bobClient.renew(storeResult.blockNumber, 0);
+      // Use the extrinsic index from the Stored event (not hardcoded!)
+      const renewReceipt = await bobClient.renew(storeResult.blockNumber, storeResult.extrinsicIndex);
       console.log('✅ Data renewed!');
       console.log('   Block:', renewReceipt.blockHash, '\n');
     } catch (error) {
       console.log('ℹ️  Could not renew (may not be renewable yet)');
       console.log('   Error:', (error as Error).message, '\n');
     }
+  } else {
+    console.log('ℹ️  Skipping renew - missing block number or extrinsic index');
+    console.log('   Block number:', storeResult.blockNumber);
+    console.log('   Extrinsic index:', storeResult.extrinsicIndex);
+    console.log('\n   💡 The extrinsic index comes from the Stored event emitted by the pallet.');
+    console.log('      It identifies the transaction\'s position within the block.\n');
   }
 
   // 7. Remove Expired Authorization Workflow

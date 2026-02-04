@@ -11,9 +11,9 @@
  * - Development and prototyping
  */
 
-import { CID } from 'multiformats/cid';
-import { Binary } from 'polkadot-api';
-import { calculateCid } from './utils.js';
+import { CID } from "multiformats/cid";
+import { Binary } from "polkadot-api";
+import { calculateCid } from "./utils.js";
 import {
   StoreOptions,
   DEFAULT_STORE_OPTIONS,
@@ -24,8 +24,12 @@ import {
   ProgressCallback,
   BulletinError,
   CidCodec,
-} from './types.js';
-import { TransactionReceipt, AsyncClientConfig, StoreBuilder } from './async-client.js';
+} from "./types.js";
+import {
+  TransactionReceipt,
+  AsyncClientConfig,
+  StoreBuilder,
+} from "./async-client.js";
 
 /**
  * Configuration for the mock Bulletin client
@@ -41,9 +45,14 @@ export interface MockClientConfig extends AsyncClientConfig {
  * Record of a mock operation performed
  */
 export type MockOperation =
-  | { type: 'store'; dataSize: number; cid: string }
-  | { type: 'authorize_account'; who: string; transactions: number; bytes: bigint }
-  | { type: 'authorize_preimage'; contentHash: Uint8Array; maxSize: bigint };
+  | { type: "store"; dataSize: number; cid: string }
+  | {
+      type: "authorize_account";
+      who: string;
+      transactions: number;
+      bytes: bigint;
+    }
+  | { type: "authorize_preimage"; contentHash: Uint8Array; maxSize: bigint };
 
 /**
  * Builder for mock store operations with fluent API
@@ -122,7 +131,9 @@ export class MockStoreBuilder {
  */
 export class MockBulletinClient {
   /** Client configuration */
-  public config: Required<Omit<MockClientConfig, 'simulateAuthFailure' | 'simulateStorageFailure'>> & {
+  public config: Required<
+    Omit<MockClientConfig, "simulateAuthFailure" | "simulateStorageFailure">
+  > & {
     simulateAuthFailure: boolean;
     simulateStorageFailure: boolean;
   };
@@ -140,7 +151,8 @@ export class MockBulletinClient {
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true,
+      checkAuthorizationBeforeUpload:
+        config?.checkAuthorizationBeforeUpload ?? true,
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
     };
@@ -189,14 +201,17 @@ export class MockBulletinClient {
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
 
     if (dataBytes.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     // Simulate authorization check failure
-    if (this.config.checkAuthorizationBeforeUpload && this.config.simulateAuthFailure) {
+    if (
+      this.config.checkAuthorizationBeforeUpload &&
+      this.config.simulateAuthFailure
+    ) {
       throw new BulletinError(
-        'Insufficient authorization: need 100 bytes, have 0 bytes',
-        'INSUFFICIENT_AUTHORIZATION',
+        "Insufficient authorization: need 100 bytes, have 0 bytes",
+        "INSUFFICIENT_AUTHORIZATION",
         { need: 100, available: 0 },
       );
     }
@@ -204,8 +219,8 @@ export class MockBulletinClient {
     // Simulate storage failure
     if (this.config.simulateStorageFailure) {
       throw new BulletinError(
-        'Simulated storage failure',
-        'TRANSACTION_FAILED',
+        "Simulated storage failure",
+        "TRANSACTION_FAILED",
       );
     }
 
@@ -220,7 +235,7 @@ export class MockBulletinClient {
 
     // Record the operation
     this.operations.push({
-      type: 'store',
+      type: "store",
       dataSize: dataBytes.length,
       cid: cid.toString(),
     });
@@ -243,21 +258,23 @@ export class MockBulletinClient {
   ): Promise<TransactionReceipt> {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
-        'Simulated authorization failure',
-        'AUTHORIZATION_FAILED',
+        "Simulated authorization failure",
+        "AUTHORIZATION_FAILED",
       );
     }
 
     this.operations.push({
-      type: 'authorize_account',
+      type: "authorize_account",
       who,
       transactions,
       bytes,
     });
 
     return {
-      blockHash: '0x0000000000000000000000000000000000000000000000000000000000000001',
-      txHash: '0x0000000000000000000000000000000000000000000000000000000000000002',
+      blockHash:
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+      txHash:
+        "0x0000000000000000000000000000000000000000000000000000000000000002",
       blockNumber: 1,
     };
   }
@@ -271,20 +288,22 @@ export class MockBulletinClient {
   ): Promise<TransactionReceipt> {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
-        'Simulated authorization failure',
-        'AUTHORIZATION_FAILED',
+        "Simulated authorization failure",
+        "AUTHORIZATION_FAILED",
       );
     }
 
     this.operations.push({
-      type: 'authorize_preimage',
+      type: "authorize_preimage",
       contentHash,
       maxSize,
     });
 
     return {
-      blockHash: '0x0000000000000000000000000000000000000000000000000000000000000001',
-      txHash: '0x0000000000000000000000000000000000000000000000000000000000000002',
+      blockHash:
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+      txHash:
+        "0x0000000000000000000000000000000000000000000000000000000000000002",
       blockNumber: 1,
     };
   }
@@ -292,7 +311,10 @@ export class MockBulletinClient {
   /**
    * Estimate authorization needed for storing data
    */
-  estimateAuthorization(dataSize: number): { transactions: number; bytes: number } {
+  estimateAuthorization(dataSize: number): {
+    transactions: number;
+    bytes: number;
+  } {
     const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize);
     let transactions = numChunks;
     let bytes = dataSize;

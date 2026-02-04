@@ -6,11 +6,11 @@
  * for creating IPFS-compatible manifests
  */
 
-import { CID } from 'multiformats/cid';
-import * as dagPB from '@ipld/dag-pb';
-import { UnixFS } from 'ipfs-unixfs';
-import { Chunk, BulletinError, HashAlgorithm } from './types.js';
-import { calculateCid } from './utils.js';
+import { CID } from "multiformats/cid";
+import * as dagPB from "@ipld/dag-pb";
+import { UnixFS } from "ipfs-unixfs";
+import { Chunk, BulletinError, HashAlgorithm } from "./types.js";
+import { calculateCid } from "./utils.js";
 
 /**
  * DAG-PB manifest representing a file composed of multiple chunks
@@ -38,7 +38,10 @@ export class UnixFsDagBuilder {
     hashAlgorithm: HashAlgorithm = HashAlgorithm.Blake2b256,
   ): Promise<DagManifest> {
     if (!chunks || chunks.length === 0) {
-      throw new BulletinError('Cannot build DAG from empty chunks', 'EMPTY_DATA');
+      throw new BulletinError(
+        "Cannot build DAG from empty chunks",
+        "EMPTY_DATA",
+      );
     }
 
     // Ensure all chunks have CIDs
@@ -46,7 +49,7 @@ export class UnixFsDagBuilder {
       if (!chunk.cid) {
         throw new BulletinError(
           `Chunk at index ${chunk.index} does not have a CID`,
-          'DAG_ENCODING_FAILED',
+          "DAG_ENCODING_FAILED",
         );
       }
       return chunk.cid;
@@ -58,7 +61,7 @@ export class UnixFsDagBuilder {
 
     // Build UnixFS file metadata (no inline data here)
     const fileData = new UnixFS({
-      type: 'file',
+      type: "file",
       blockSizes,
     });
 
@@ -66,7 +69,7 @@ export class UnixFsDagBuilder {
     const dagNode = dagPB.prepare({
       Data: fileData.marshal(),
       Links: chunks.map((chunk, i) => ({
-        Name: '',
+        Name: "",
         Tsize: chunk.data.length,
         Hash: chunkCids[i],
       })),
@@ -97,12 +100,12 @@ export class UnixFsDagBuilder {
       const dagNode = dagPB.decode(dagBytes);
 
       if (!dagNode.Data) {
-        throw new Error('DAG node has no data');
+        throw new Error("DAG node has no data");
       }
 
       const unixfs = UnixFS.unmarshal(dagNode.Data);
 
-      if (unixfs.type !== 'file') {
+      if (unixfs.type !== "file") {
         throw new Error(`Expected file type, got ${unixfs.type}`);
       }
 
@@ -116,7 +119,7 @@ export class UnixFsDagBuilder {
     } catch (error) {
       throw new BulletinError(
         `Failed to parse DAG-PB manifest: ${error}`,
-        'DAG_DECODING_FAILED',
+        "DAG_DECODING_FAILED",
         error,
       );
     }

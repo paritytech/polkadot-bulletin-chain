@@ -5,11 +5,11 @@
  * Async client with full transaction submission support
  */
 
-import { CID } from 'multiformats/cid';
-import { PolkadotSigner, TypedApi, Binary } from 'polkadot-api';
-import { FixedSizeChunker, reassembleChunks } from './chunker.js';
-import { UnixFsDagBuilder } from './dag.js';
-import { calculateCid } from './utils.js';
+import { CID } from "multiformats/cid";
+import { PolkadotSigner, TypedApi, Binary } from "polkadot-api";
+import { FixedSizeChunker, reassembleChunks } from "./chunker.js";
+import { UnixFsDagBuilder } from "./dag.js";
+import { calculateCid } from "./utils.js";
 import {
   ClientConfig,
   StoreOptions,
@@ -23,7 +23,7 @@ import {
   CidCodec,
   ChunkDetails,
   Authorization,
-} from './types.js';
+} from "./types.js";
 
 /**
  * Transaction receipt from a successful submission
@@ -173,7 +173,8 @@ export class AsyncBulletinClient {
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true,
+      checkAuthorizationBeforeUpload:
+        config?.checkAuthorizationBeforeUpload ?? true,
     };
   }
 
@@ -235,13 +236,18 @@ export class AsyncBulletinClient {
     // Convert Binary to Uint8Array if needed
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
     if (dataBytes.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     // Decide whether to chunk based on threshold
     if (dataBytes.length > this.config.chunkingThreshold) {
       // Large data - use chunking
-      return this.storeInternalChunked(dataBytes, undefined, options, progressCallback);
+      return this.storeInternalChunked(
+        dataBytes,
+        undefined,
+        options,
+        progressCallback,
+      );
     } else {
       // Small data - single transaction
       return this.storeInternalSingle(dataBytes, options);
@@ -256,7 +262,7 @@ export class AsyncBulletinClient {
     options?: StoreOptions,
   ): Promise<StoreResult> {
     if (data.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     // TODO: Check authorization before upload if enabled
@@ -273,13 +279,26 @@ export class AsyncBulletinClient {
 
     // TODO: Submit transaction via PAPI
     // const tx = this.api.tx.TransactionStorage.store({ data });
-    // const result = await tx.signAndSubmit(this.signer);
+    // const result = await tx.signSubmitAndWatch(this.signer);
     // const finalized = await result.waitFor('finalized');
+    //
+    // Extract extrinsic index from the Stored event:
+    // The pallet emits: Stored { index: u32, content_hash: ContentHash, cid: Option<Cid> }
+    // You need to:
+    // 1. Find the Stored event in finalized.events
+    // 2. Extract the `index` field from the event
+    // 3. Return it as `extrinsicIndex` in StoreResult
+    //
+    // Example:
+    // const storedEvent = finalized.events.find(e =>
+    //   e.section === 'TransactionStorage' && e.method === 'Stored'
+    // );
+    // const extrinsicIndex = storedEvent?.data.index;
 
     // Placeholder implementation
     throw new BulletinError(
-      'Direct PAPI integration not yet implemented - see examples for current usage patterns',
-      'NOT_IMPLEMENTED',
+      "Direct PAPI integration not yet implemented - see examples for current usage patterns",
+      "NOT_IMPLEMENTED",
     );
   }
 
@@ -297,8 +316,8 @@ export class AsyncBulletinClient {
 
     // Placeholder implementation
     throw new BulletinError(
-      'Chunked upload not yet implemented for direct PAPI integration',
-      'NOT_IMPLEMENTED',
+      "Chunked upload not yet implemented for direct PAPI integration",
+      "NOT_IMPLEMENTED",
     );
   }
 
@@ -324,7 +343,7 @@ export class AsyncBulletinClient {
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
 
     if (dataBytes.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     const chunkerConfig: ChunkerConfig = {
@@ -346,7 +365,7 @@ export class AsyncBulletinClient {
     for (const chunk of chunks) {
       if (progressCallback) {
         progressCallback({
-          type: 'chunk_started',
+          type: "chunk_started",
           index: chunk.index,
           total: chunks.length,
         });
@@ -370,7 +389,7 @@ export class AsyncBulletinClient {
 
         if (progressCallback) {
           progressCallback({
-            type: 'chunk_completed',
+            type: "chunk_completed",
             index: chunk.index,
             total: chunks.length,
             cid,
@@ -379,7 +398,7 @@ export class AsyncBulletinClient {
       } catch (error) {
         if (progressCallback) {
           progressCallback({
-            type: 'chunk_failed',
+            type: "chunk_failed",
             index: chunk.index,
             total: chunks.length,
             error: error as Error,
@@ -393,7 +412,7 @@ export class AsyncBulletinClient {
     let manifestCid: CID | undefined;
     if (chunkerConfig.createManifest) {
       if (progressCallback) {
-        progressCallback({ type: 'manifest_started' });
+        progressCallback({ type: "manifest_started" });
       }
 
       const builder = new UnixFsDagBuilder();
@@ -407,7 +426,7 @@ export class AsyncBulletinClient {
 
       if (progressCallback) {
         progressCallback({
-          type: 'manifest_created',
+          type: "manifest_created",
           cid: manifest.rootCid,
         });
       }
@@ -415,7 +434,7 @@ export class AsyncBulletinClient {
 
     if (progressCallback) {
       progressCallback({
-        type: 'completed',
+        type: "completed",
         manifestCid,
       });
     }
@@ -445,7 +464,7 @@ export class AsyncBulletinClient {
         bytes,
       });
       const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor('finalized');
+      const finalized = await result.waitFor("finalized");
 
       return {
         blockHash: finalized.blockHash,
@@ -455,7 +474,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to authorize account: ${error}`,
-        'AUTHORIZATION_FAILED',
+        "AUTHORIZATION_FAILED",
         error,
       );
     }
@@ -476,7 +495,7 @@ export class AsyncBulletinClient {
         max_size: maxSize,
       });
       const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor('finalized');
+      const finalized = await result.waitFor("finalized");
 
       return {
         blockHash: finalized.blockHash,
@@ -486,7 +505,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to authorize preimage: ${error}`,
-        'AUTHORIZATION_FAILED',
+        "AUTHORIZATION_FAILED",
         error,
       );
     }
@@ -499,7 +518,7 @@ export class AsyncBulletinClient {
     try {
       const tx = this.api.tx.TransactionStorage.renew({ block, index });
       const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor('finalized');
+      const finalized = await result.waitFor("finalized");
 
       return {
         blockHash: finalized.blockHash,
@@ -509,7 +528,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to renew: ${error}`,
-        'TRANSACTION_FAILED',
+        "TRANSACTION_FAILED",
         error,
       );
     }
@@ -518,7 +537,10 @@ export class AsyncBulletinClient {
   /**
    * Estimate authorization needed for storing data
    */
-  estimateAuthorization(dataSize: number): { transactions: number; bytes: number } {
+  estimateAuthorization(dataSize: number): {
+    transactions: number;
+    bytes: number;
+  } {
     const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize);
     let transactions = numChunks;
     let bytes = dataSize;

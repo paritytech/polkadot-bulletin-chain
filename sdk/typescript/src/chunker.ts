@@ -5,7 +5,12 @@
  * Data chunking utilities for splitting large files into smaller pieces
  */
 
-import { Chunk, ChunkerConfig, DEFAULT_CHUNKER_CONFIG, BulletinError } from './types.js';
+import {
+  Chunk,
+  ChunkerConfig,
+  DEFAULT_CHUNKER_CONFIG,
+  BulletinError,
+} from "./types.js";
 
 /** Maximum chunk size allowed (2 MiB, matches Bitswap limit) */
 export const MAX_CHUNK_SIZE = 2 * 1024 * 1024;
@@ -22,14 +27,14 @@ export class FixedSizeChunker {
     // Validate configuration
     if (this.config.chunkSize <= 0) {
       throw new BulletinError(
-        'Chunk size must be greater than 0',
-        'INVALID_CONFIG',
+        "Chunk size must be greater than 0",
+        "INVALID_CONFIG",
       );
     }
     if (this.config.chunkSize > MAX_CHUNK_SIZE) {
       throw new BulletinError(
         `Chunk size ${this.config.chunkSize} exceeds maximum allowed size of ${MAX_CHUNK_SIZE}`,
-        'CHUNK_TOO_LARGE',
+        "CHUNK_TOO_LARGE",
       );
     }
   }
@@ -39,7 +44,7 @@ export class FixedSizeChunker {
    */
   chunk(data: Uint8Array): Chunk[] {
     if (data.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     const chunks: Chunk[] = [];
@@ -81,7 +86,7 @@ export class FixedSizeChunker {
  */
 export function reassembleChunks(chunks: Chunk[]): Uint8Array {
   if (chunks.length === 0) {
-    throw new BulletinError('Cannot reassemble empty chunks', 'EMPTY_DATA');
+    throw new BulletinError("Cannot reassemble empty chunks", "EMPTY_DATA");
   }
 
   // Validate chunk indices are sequential
@@ -89,7 +94,7 @@ export function reassembleChunks(chunks: Chunk[]): Uint8Array {
     if (chunks[i].index !== i) {
       throw new BulletinError(
         `Chunk index mismatch: expected ${i}, got ${chunks[i].index}`,
-        'CHUNKING_FAILED',
+        "CHUNKING_FAILED",
       );
     }
   }

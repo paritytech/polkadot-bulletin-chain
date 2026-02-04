@@ -10,17 +10,17 @@
  * @packageDocumentation
  */
 
-export * from './types.js';
-export * from './chunker.js';
-export * from './dag.js';
-export * from './utils.js';
-export * from './client.js';
-export * from './async-client.js';
-export * from './mock-client.js';
+export * from "./types.js";
+export * from "./chunker.js";
+export * from "./dag.js";
+export * from "./utils.js";
+export * from "./client.js";
+export * from "./async-client.js";
+export * from "./mock-client.js";
 
-export { CID } from 'multiformats/cid';
+export { CID } from "multiformats/cid";
 
 /**
  * SDK version
  */
-export const VERSION = '0.1.0';
+export const VERSION = "0.1.0";

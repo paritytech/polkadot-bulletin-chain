@@ -5,10 +5,10 @@
  * High-level client for interacting with Bulletin Chain
  */
 
-import { CID } from 'multiformats/cid';
-import { FixedSizeChunker, reassembleChunks } from './chunker.js';
-import { UnixFsDagBuilder } from './dag.js';
-import { calculateCid } from './utils.js';
+import { CID } from "multiformats/cid";
+import { FixedSizeChunker, reassembleChunks } from "./chunker.js";
+import { UnixFsDagBuilder } from "./dag.js";
+import { calculateCid } from "./utils.js";
 import {
   ClientConfig,
   StoreOptions,
@@ -21,7 +21,7 @@ import {
   BulletinError,
   Chunk,
   CidCodec,
-} from './types.js';
+} from "./types.js";
 
 /**
  * High-level client for Bulletin Chain operations
@@ -42,7 +42,8 @@ export class BulletinClient {
       maxParallel: config.maxParallel ?? 8,
       createManifest: config.createManifest ?? true,
       chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
-      checkAuthorizationBeforeUpload: config.checkAuthorizationBeforeUpload ?? true,
+      checkAuthorizationBeforeUpload:
+        config.checkAuthorizationBeforeUpload ?? true,
     };
   }
 
@@ -56,7 +57,7 @@ export class BulletinClient {
     options?: StoreOptions,
   ): Promise<{ data: Uint8Array; cid: CID }> {
     if (data.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
@@ -87,7 +88,7 @@ export class BulletinClient {
     manifest?: { data: Uint8Array; cid: CID };
   }> {
     if (data.length === 0) {
-      throw new BulletinError('Data cannot be empty', 'EMPTY_DATA');
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
 
     const chunkerConfig: ChunkerConfig = {
@@ -107,7 +108,7 @@ export class BulletinClient {
     for (const chunk of chunks) {
       if (progressCallback) {
         progressCallback({
-          type: 'chunk_started',
+          type: "chunk_started",
           index: chunk.index,
           total: chunks.length,
         });
@@ -122,7 +123,7 @@ export class BulletinClient {
 
         if (progressCallback) {
           progressCallback({
-            type: 'chunk_completed',
+            type: "chunk_completed",
             index: chunk.index,
             total: chunks.length,
             cid: chunk.cid,
@@ -131,7 +132,7 @@ export class BulletinClient {
       } catch (error) {
         if (progressCallback) {
           progressCallback({
-            type: 'chunk_failed',
+            type: "chunk_failed",
             index: chunk.index,
             total: chunks.length,
             error: error as Error,
@@ -145,7 +146,7 @@ export class BulletinClient {
     let manifest: { data: Uint8Array; cid: CID } | undefined;
     if (chunkerConfig.createManifest) {
       if (progressCallback) {
-        progressCallback({ type: 'manifest_started' });
+        progressCallback({ type: "manifest_started" });
       }
 
       const builder = new UnixFsDagBuilder();
@@ -158,7 +159,7 @@ export class BulletinClient {
 
       if (progressCallback) {
         progressCallback({
-          type: 'manifest_created',
+          type: "manifest_created",
           cid: dagManifest.rootCid,
         });
       }
@@ -166,7 +167,7 @@ export class BulletinClient {
 
     if (progressCallback) {
       progressCallback({
-        type: 'completed',
+        type: "completed",
         manifestCid: manifest?.cid,
       });
     }
@@ -179,7 +180,10 @@ export class BulletinClient {
    *
    * Returns (num_transactions, total_bytes) needed for authorization
    */
-  estimateAuthorization(dataSize: number): { transactions: number; bytes: number } {
+  estimateAuthorization(dataSize: number): {
+    transactions: number;
+    bytes: number;
+  } {
     const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize);
     let transactions = numChunks;
     let bytes = dataSize;

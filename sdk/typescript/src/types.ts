@@ -5,7 +5,7 @@
  * Common types and interfaces for the Bulletin SDK
  */
 
-import { CID } from 'multiformats/cid';
+import { CID } from "multiformats/cid";
 
 /**
  * CID codec types supported by Bulletin Chain
@@ -114,6 +114,10 @@ export interface StoreResult {
   size: number;
   /** Block number where data was stored (if known) */
   blockNumber?: number;
+  /** Extrinsic index within the block (required for renew operations)
+   * This value comes from the `Stored` event's `index` field
+   */
+  extrinsicIndex?: number;
   /** Chunk details (only present for chunked uploads) */
   chunks?: ChunkDetails;
 }
@@ -137,9 +141,9 @@ export interface ChunkedStoreResult {
  */
 export enum AuthorizationScope {
   /** Account-based authorization (more flexible) */
-  Account = 'Account',
+  Account = "Account",
   /** Preimage-based authorization (content-addressed) */
-  Preimage = 'Preimage',
+  Preimage = "Preimage",
 }
 
 /**
@@ -160,12 +164,12 @@ export interface Authorization {
  * Progress event types
  */
 export type ProgressEvent =
-  | { type: 'chunk_started'; index: number; total: number }
-  | { type: 'chunk_completed'; index: number; total: number; cid: CID }
-  | { type: 'chunk_failed'; index: number; total: number; error: Error }
-  | { type: 'manifest_started' }
-  | { type: 'manifest_created'; cid: CID }
-  | { type: 'completed'; manifestCid?: CID };
+  | { type: "chunk_started"; index: number; total: number }
+  | { type: "chunk_completed"; index: number; total: number; cid: CID }
+  | { type: "chunk_failed"; index: number; total: number; error: Error }
+  | { type: "manifest_started" }
+  | { type: "manifest_created"; cid: CID }
+  | { type: "completed"; manifestCid?: CID };
 
 /**
  * Progress callback type
@@ -182,7 +186,7 @@ export class BulletinError extends Error {
     public readonly cause?: unknown,
   ) {
     super(message);
-    this.name = 'BulletinError';
+    this.name = "BulletinError";
   }
 }
 

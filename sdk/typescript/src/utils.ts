@@ -5,11 +5,11 @@
  * Utility functions for CID calculation and data manipulation
  */
 
-import { CID } from 'multiformats/cid';
-import * as digest from 'multiformats/hashes/digest';
-import { blake2AsU8a, sha256AsU8a } from '@polkadot/util-crypto';
-import { HashAlgorithm, BulletinError } from './types.js';
-import { MAX_CHUNK_SIZE } from './chunker.js';
+import { CID } from "multiformats/cid";
+import * as digest from "multiformats/hashes/digest";
+import { blake2AsU8a, sha256AsU8a } from "@polkadot/util-crypto";
+import { HashAlgorithm, BulletinError } from "./types.js";
+import { MAX_CHUNK_SIZE } from "./chunker.js";
 
 /**
  * Calculate content hash using the specified algorithm
@@ -32,13 +32,13 @@ export async function getContentHash(
       // Note: Keccak256 requires additional library
       // Users should integrate with pallet's hashing via PAPI
       throw new BulletinError(
-        'Keccak256 hashing requires integration with the pallet via PAPI',
-        'UNSUPPORTED_HASH_ALGORITHM',
+        "Keccak256 hashing requires integration with the pallet via PAPI",
+        "UNSUPPORTED_HASH_ALGORITHM",
       );
     default:
       throw new BulletinError(
         `Unsupported hash algorithm: ${hashAlgorithm}`,
-        'INVALID_HASH_ALGORITHM',
+        "INVALID_HASH_ALGORITHM",
       );
   }
 }
@@ -65,7 +65,7 @@ export async function calculateCid(
   } catch (error) {
     throw new BulletinError(
       `Failed to calculate CID: ${error}`,
-      'CID_CALCULATION_FAILED',
+      "CID_CALCULATION_FAILED",
       error,
     );
   }
@@ -87,7 +87,7 @@ export function parseCid(cidString: string): CID {
   } catch (error) {
     throw new BulletinError(
       `Failed to parse CID: ${error}`,
-      'INVALID_CID',
+      "INVALID_CID",
       error,
     );
   }
@@ -102,7 +102,7 @@ export function cidFromBytes(bytes: Uint8Array): CID {
   } catch (error) {
     throw new BulletinError(
       `Failed to decode CID from bytes: ${error}`,
-      'INVALID_CID',
+      "INVALID_CID",
       error,
     );
   }
@@ -119,7 +119,7 @@ export function cidToBytes(cid: CID): Uint8Array {
  * Convert hex string to Uint8Array
  */
 export function hexToBytes(hex: string): Uint8Array {
-  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
   const bytes = new Uint8Array(cleanHex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(cleanHex.slice(i * 2, i * 2 + 2), 16);
@@ -131,9 +131,12 @@ export function hexToBytes(hex: string): Uint8Array {
  * Convert Uint8Array to hex string
  */
 export function bytesToHex(bytes: Uint8Array): string {
-  return '0x' + Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return (
+    "0x" +
+    Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+  );
 }
 
 /**
@@ -146,11 +149,11 @@ export function bytesToHex(bytes: Uint8Array): string {
  * ```
  */
 export function formatBytes(bytes: number, decimals: number = 2): string {
-  if (bytes === 0) return '0 Bytes';
+  if (bytes === 0) return "0 Bytes";
 
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
 
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
@@ -164,13 +167,16 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
  */
 export function validateChunkSize(size: number): void {
   if (size <= 0) {
-    throw new BulletinError('Chunk size must be positive', 'INVALID_CHUNK_SIZE');
+    throw new BulletinError(
+      "Chunk size must be positive",
+      "INVALID_CHUNK_SIZE",
+    );
   }
 
   if (size > MAX_CHUNK_SIZE) {
     throw new BulletinError(
       `Chunk size ${formatBytes(size)} exceeds maximum ${formatBytes(MAX_CHUNK_SIZE)}`,
-      'CHUNK_TOO_LARGE'
+      "CHUNK_TOO_LARGE",
     );
   }
 }
@@ -222,7 +228,7 @@ export function estimateFees(dataSize: number): bigint {
   const BASE_FEE = 1_000_000n; // Base transaction fee
   const PER_BYTE_FEE = 100n; // Fee per byte
 
-  return BASE_FEE + (BigInt(dataSize) * PER_BYTE_FEE);
+  return BASE_FEE + BigInt(dataSize) * PER_BYTE_FEE;
 }
 
 /**
@@ -242,13 +248,9 @@ export async function retry<T>(
     maxRetries?: number;
     delayMs?: number;
     exponentialBackoff?: boolean;
-  } = {}
+  } = {},
 ): Promise<T> {
-  const {
-    maxRetries = 3,
-    delayMs = 1000,
-    exponentialBackoff = true,
-  } = options;
+  const { maxRetries = 3, delayMs = 1000, exponentialBackoff = true } = options;
 
   let lastError: Error | undefined;
 
@@ -268,7 +270,7 @@ export async function retry<T>(
     }
   }
 
-  throw lastError || new Error('Retry failed');
+  throw lastError || new Error("Retry failed");
 }
 
 /**
@@ -280,7 +282,7 @@ export async function retry<T>(
  * ```
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -317,13 +319,13 @@ export function batch<T>(array: T[], size: number): T[][] {
  */
 export async function limitConcurrency<T>(
   tasks: (() => Promise<T>)[],
-  limit: number
+  limit: number,
 ): Promise<T[]> {
   const results: T[] = [];
   const executing: Promise<void>[] = [];
 
   for (const task of tasks) {
-    const promise = task().then(result => {
+    const promise = task().then((result) => {
       results.push(result);
     });
 
@@ -332,7 +334,7 @@ export async function limitConcurrency<T>(
     if (executing.length >= limit) {
       await Promise.race(executing);
       const index = await Promise.race(
-        executing.map((p, i) => p.then(() => i))
+        executing.map((p, i) => p.then(() => i)),
       );
       executing.splice(index, 1);
     }
@@ -397,7 +399,7 @@ export function createProgressTracker(total: number) {
  * ```
  */
 export async function measureTime<T>(
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
 ): Promise<[T, number]> {
   const start = Date.now();
   const result = await fn();
@@ -460,7 +462,7 @@ export function isValidSS58(address: string): boolean {
 export function truncate(
   str: string,
   maxLength: number,
-  ellipsis: string = '...'
+  ellipsis: string = "...",
 ): string {
   if (str.length <= maxLength) {
     return str;
@@ -470,7 +472,7 @@ export function truncate(
   // Correctly handle odd/even splits so the total length equals maxLength
   const front = str.slice(0, Math.ceil((maxLength - ellipsis.length) / 2));
   const back = str.slice(-Math.floor((maxLength - ellipsis.length) / 2));
-  
+
   return front + ellipsis + back;
 }
 
@@ -490,14 +492,18 @@ export function deepClone<T>(obj: T): T {
  * Check if code is running in Node.js environment
  */
 export function isNode(): boolean {
-  return typeof process !== 'undefined' &&
+  return (
+    typeof process !== "undefined" &&
     process.versions != null &&
-    process.versions.node != null;
+    process.versions.node != null
+  );
 }
 
 /**
  * Check if code is running in browser environment
  */
 export function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  return (
+    typeof window !== "undefined" && typeof window.document !== "undefined"
+  );
 }

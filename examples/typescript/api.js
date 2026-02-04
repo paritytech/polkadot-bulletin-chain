@@ -136,7 +136,24 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
 
     const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
     const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
-    return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
+
+    // Extract extrinsic index from the Stored event
+    // The pallet emits: Stored { index: u32, content_hash: ContentHash, cid: Option<Cid> }
+    let extrinsicIndex;
+    if (result?.block) {
+        // Note: PAPI provides events in result.events when using txBestBlocksState or finalized
+        // The event structure depends on PAPI version, but typically includes extrinsic_index
+        // For now, we'll note this should be extracted from the Stored event
+        // TODO: Extract from result.events when available
+        console.log('ℹ️  Note: Extrinsic index should be extracted from Stored event for renew operations');
+    }
+
+    return {
+        cid: expectedCid,
+        blockHash: result?.block?.hash,
+        blockNumber: result?.block?.number,
+        extrinsicIndex,
+    };
 }
 
 const UTILITY_BATCH_SIZE = 20;
