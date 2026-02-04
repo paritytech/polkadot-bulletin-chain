@@ -79,14 +79,20 @@ async fn main() -> Result<()> {
 	// Step 1: Authorize the account to store data (requires sudo)
 	info!("\nStep 1: Authorizing account...");
 
-	let authorize_tx = bulletin::tx().transaction_storage().authorize_account(
-		account_id.clone(),
-		100,               // 100 transactions
-		100 * 1024 * 1024, // 100 MB
+	// In subxt 0.37, to wrap a call in sudo, we need to manually construct the RuntimeCall
+	// Build the inner call as a runtime type
+	use bulletin::runtime_types;
+
+	let authorize_call = runtime_types::polkadot_bulletin_chain_runtime::RuntimeCall::TransactionStorage(
+		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
+			who: account_id.clone(),
+			transactions: 100,
+			bytes: 100 * 1024 * 1024,
+		}
 	);
 
 	// Wrap in sudo call (Alice is sudo in dev mode)
-	let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx);
+	let sudo_tx = bulletin::tx().sudo().sudo(authorize_call);
 
 	api
 		.tx()
@@ -133,14 +139,18 @@ async fn main() -> Result<()> {
 	info!("  Block number: {}", block.number());
 	info!("  Block hash: {:?}", block_hash);
 
-	// Find the Stored event to get the CID
+	// Find the Stored event to get the CID and index
 	let stored_event = events
 		.find_first::<bulletin::transaction_storage::events::Stored>()
 		.map_err(|e| anyhow!("Failed to find Stored event: {e:?}"))?;
 
 	if let Some(event) = stored_event {
-		info!("  CID: {}", hex::encode(&event.content_hash));
-		info!("  Size: {} bytes", event.size);
+		info!("  Content Hash: {}", hex::encode(&event.content_hash));
+		info!("  Extrinsic Index: {}", event.index);
+		if let Some(cid_bytes) = &event.cid {
+			info!("  CID (bytes): {}", hex::encode(cid_bytes));
+		}
+		info!("  Size: {} bytes", data_to_store.len());
 	}
 
 	info!("\n✅ Test passed!");
