@@ -27,14 +27,14 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './typescript/.papi/descriptors/dist/index.mjs';
 import {
     setupKeyringAndSigners,
     generateTextImage,
     waitForChainReady,
-} from './common.js';
-import { storeChunkedFile } from './store_big_data.js';
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '../sdk/typescript/dist/index.js';
+} from './typescript/common.js';
+import { storeChunkedFile } from './typescript/store-big-data/index.js';
+import { AsyncBulletinClient, Binary } from '../sdk/typescript/dist/index.js';
 
 // Command line arguments
 const args = process.argv.slice(2);
@@ -166,16 +166,15 @@ async function testTypeScriptSDK(client, bulletinAPI, fileData, whoAddress, whoS
             stdio: 'inherit',
         });
 
-        // Create SDK client
+        // Create SDK client (directly with PAPI client and signer)
         console.log('📦 Initializing AsyncBulletinClient...');
-        const submitter = new PAPITransactionSubmitter(bulletinAPI, whoSigner);
-        const sdkClient = new AsyncBulletinClient(submitter, {
+        const sdkClient = new AsyncBulletinClient(bulletinAPI, whoSigner, {
             defaultChunkSize: 1024 * 1024,
             maxParallel: 8,
             createManifest: true,
             chunkingThreshold: 2 * 1024 * 1024,
             checkAuthorizationBeforeUpload: true,
-        }).withAccount(whoAddress);
+        });
 
         // Authorize account
         const estimate = sdkClient.estimateAuthorization(fileData.length);
