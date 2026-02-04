@@ -18,7 +18,7 @@
  */
 
 import { AsyncBulletinClient, StoreOptions } from '../dist/index.js';
-import { createClient } from 'polkadot-api';
+import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
@@ -74,9 +74,10 @@ async function main() {
   // Create client for Bob
   const bobClient = new AsyncBulletinClient(api, bobSigner);
 
-  const data = new TextEncoder().encode('Hello from Bob! This data is stored with proper authorization.');
-  console.log('📝 Data:', new TextDecoder().decode(data));
-  console.log('   Size:', data.length, 'bytes\n');
+  const message = 'Hello from Bob! This data is stored with proper authorization.';
+  const data = Binary.fromText(message);
+  console.log('📝 Data:', message);
+  console.log('   Size:', data.asBytes().length, 'bytes\n');
 
   console.log('⏳ Storing data...');
   const storeResult = await bobClient.store(data).send();
@@ -87,17 +88,18 @@ async function main() {
   // 4. Preimage Authorization Workflow
   console.log('═══ Preimage Authorization Workflow ═══\n');
 
-  const specificData = new TextEncoder().encode('This specific content is authorized by hash');
-  const contentHash = blake2b256(specificData);
+  const specificMessage = 'This specific content is authorized by hash';
+  const specificData = Binary.fromText(specificMessage);
+  const contentHash = blake2b256(specificData.asBytes());
 
   console.log('📝 Content to authorize:');
-  console.log('   Data:', new TextDecoder().decode(specificData));
+  console.log('   Data:', specificMessage);
   console.log('   Hash:', Buffer.from(contentHash).toString('hex').substring(0, 16) + '...', '\n');
 
   console.log('⏳ Authorizing preimage...');
   const preimageReceipt = await aliceClient.authorizePreimage(
     contentHash,
-    BigInt(specificData.length)
+    BigInt(specificData.asBytes().length)
   );
   console.log('✅ Preimage authorized!');
   console.log('   Block:', preimageReceipt.blockHash, '\n');
