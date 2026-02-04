@@ -20,9 +20,10 @@
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use codec::{Compact, Encode};
 use std::str::FromStr;
 use subxt::{
-	config::SubstrateConfig,
+	config::{Config, ExtrinsicParams, SubstrateConfig},
 	utils::AccountId32,
 	OnlineClient,
 };
@@ -48,6 +49,53 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
+/// Custom extrinsic params that includes ProvideCidConfig extension
+/// This matches Bulletin Chain's transaction extensions
+#[derive(Debug, Clone, Encode)]
+struct BulletinParams {
+	era: sp_runtime::generic::Era,
+	#[codec(compact)]
+	nonce: u64,
+	#[codec(compact)]
+	tip: u128,
+	// ProvideCidConfig is Option<CidConfig> - we encode None (0x00)
+	provide_cid_config: Option<()>,
+}
+
+impl ExtrinsicParams<sp_core::H256, u64> for BulletinParams {
+	type OtherParams = ();
+
+	fn new(
+		_spec_version: u32,
+		_tx_version: u32,
+		nonce: u64,
+		_genesis_hash: sp_core::H256,
+		_other_params: Self::OtherParams,
+	) -> Self {
+		Self {
+			era: sp_runtime::generic::Era::Immortal,
+			nonce,
+			tip: 0,
+			provide_cid_config: None, // Always None for default CID calculation
+		}
+	}
+}
+
+/// Custom config for Bulletin Chain that uses our custom extrinsic params
+#[derive(Clone)]
+enum BulletinConfig {}
+
+impl Config for BulletinConfig {
+	type Hash = sp_core::H256;
+	type AccountId = AccountId32;
+	type Address = sp_runtime::MultiAddress<Self::AccountId, u32>;
+	type Signature = sp_runtime::MultiSignature;
+	type Hasher = sp_runtime::traits::BlakeTwo256;
+	type Header = sp_runtime::generic::Header<u32, Self::Hasher>;
+	type ExtrinsicParams = BulletinParams;
+	type AssetId = u32;
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
 	// Initialize tracing subscriber
@@ -64,10 +112,10 @@ async fn main() -> Result<()> {
 	let account_id: AccountId32 = keypair.public_key().into();
 	info!("Using account: {}", account_id);
 
-	// Connect to Bulletin Chain node using SubstrateConfig
-	// SubstrateConfig uses basic extrinsic params without auto-discovering custom extensions
+	// Connect to Bulletin Chain node using our custom BulletinConfig
+	// BulletinConfig includes ProvideCidConfig in extrinsic params
 	info!("Connecting to {}...", args.ws);
-	let api = OnlineClient::<SubstrateConfig>::from_url(&args.ws)
+	let api = OnlineClient::<BulletinConfig>::from_url(&args.ws)
 		.await
 		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
 	info!("Connected successfully!");
@@ -93,7 +141,7 @@ async fn main() -> Result<()> {
 
 	api
 		.tx()
-		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
+		.sign_and_submit_then_watch(&sudo_tx, &keypair, Default::default())
 		.await
 		.map_err(|e| anyhow!("Failed to submit authorization: {e:?}"))?
 		.wait_for_finalized_success()
@@ -111,7 +159,7 @@ async fn main() -> Result<()> {
 
 	let tx_progress = api
 		.tx()
-		.sign_and_submit_then_watch_default(&store_tx, &keypair)
+		.sign_and_submit_then_watch(&store_tx, &keypair, Default::default())
 		.await
 		.map_err(|e| anyhow!("Failed to submit store: {e:?}"))?;
 
