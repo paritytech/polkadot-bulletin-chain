@@ -172,7 +172,6 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [workspace]
 resolver = "2"
 members = [
-	"examples/rust-authorize-and-store",
 	"node",
 	"pallets/common",
 	"pallets/relayer-set",
@@ -184,9 +183,10 @@ members = [
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
 ]
-# Exclude rust-authorize-and-store due to subxt 0.37 dependency conflict
-# Build it separately: cd examples/rust-authorize-and-store && cargo build
-exclude = ["examples/rust-authorize-and-store"]
+# Exclude rust/authorize-and-store example - it uses subxt directly with metadata codegen
+# and is not part of the main workspace build. Build it separately:
+# cd examples/rust/authorize-and-store && cargo build --release
+exclude = ["examples/rust/authorize-and-store"]
 
 [profile.release]
 # Polkadot runtime requires unwinding.

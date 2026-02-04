@@ -14,8 +14,7 @@ use {
 	crate::{
 		authorization::AuthorizationManager,
 		types::{
-			ChunkerConfig, CidCodec, Error, HashAlgorithm, ProgressCallback, Result, StoreOptions,
-			StoreResult,
+			CidCodec, Error, HashAlgorithm, ProgressCallback, Result, StoreOptions, StoreResult,
 		},
 	},
 	alloc::{
@@ -233,10 +232,10 @@ impl MockBulletinClient {
 		let cid_bytes = crate::cid::cid_to_bytes(&cid)?;
 
 		// Record the operation
-		self.operations.lock().unwrap().push(MockOperation::Store {
-			data_size: data.len(),
-			cid: format!("{:?}", cid),
-		});
+		self.operations
+			.lock()
+			.unwrap()
+			.push(MockOperation::Store { data_size: data.len(), cid: format!("{cid:?}") });
 
 		// Return a mock receipt
 		Ok(StoreResult {
@@ -297,8 +296,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_mock_auth_failure() {
-		let mut config = MockClientConfig::default();
-		config.simulate_auth_failure = true;
+		let config = MockClientConfig { simulate_auth_failure: true, ..Default::default() };
 
 		let client = MockBulletinClient::with_config(config);
 		let data = b"Test data".to_vec();
@@ -306,16 +304,12 @@ mod tests {
 		let result = client.store(data).send().await;
 
 		assert!(result.is_err());
-		assert!(matches!(
-			result.unwrap_err(),
-			Error::InsufficientAuthorization { .. }
-		));
+		assert!(matches!(result.unwrap_err(), Error::InsufficientAuthorization { .. }));
 	}
 
 	#[tokio::test]
 	async fn test_mock_storage_failure() {
-		let mut config = MockClientConfig::default();
-		config.simulate_storage_failure = true;
+		let config = MockClientConfig { simulate_storage_failure: true, ..Default::default() };
 
 		let client = MockBulletinClient::with_config(config);
 		let data = b"Test data".to_vec();

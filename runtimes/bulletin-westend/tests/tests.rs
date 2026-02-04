@@ -211,8 +211,8 @@ fn transaction_storage_runtime_sizes() {
 			// On the Westend, very large extrinsics may be rejected earlier for exhausting
 			// resources (block length/weight) before reaching the pallet's BAD_DATA_SIZE check.
 			assert!(
-				res == Err(pallet_transaction_storage::BAD_DATA_SIZE.into())
-					|| res == Err(InvalidTransaction::ExhaustsResources.into()),
+				res == Err(pallet_transaction_storage::BAD_DATA_SIZE.into()) ||
+					res == Err(InvalidTransaction::ExhaustsResources.into()),
 				"unexpected error: {res:?}"
 			);
 		});

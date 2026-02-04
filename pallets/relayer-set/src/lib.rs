@@ -186,10 +186,9 @@ impl<T: Config> Pallet<T> {
 	/// Call after a failed bridge transaction signed by `who`.
 	pub fn post_dispatch_failed_bridge_tx(who: &T::AccountId) {
 		Relayers::<T>::mutate(who, |relayer| match relayer {
-			Some(relayer) => {
+			Some(relayer) =>
 				relayer.min_bridge_tx_block = frame_system::Pallet::<T>::block_number()
-					.saturating_add(T::BridgeTxFailCooldownBlocks::get())
-			},
+					.saturating_add(T::BridgeTxFailCooldownBlocks::get()),
 			None => log::warn!(
 				target: LOG_TARGET,
 				"Could not find signer {who:?} of failed bridge transaction in relayer set"

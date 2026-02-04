@@ -194,8 +194,8 @@ where
 {
 	fn contains(asset: &Asset, origin: &Location) -> bool {
 		let loc = Origin::get();
-		&loc == origin
-			&& matches!(
+		&loc == origin &&
+			matches!(
 				asset,
 				Asset {
 					id: AssetId(asset_id_location),

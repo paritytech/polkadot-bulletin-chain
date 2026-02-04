@@ -82,9 +82,8 @@ where
 		_source: TransactionSource,
 	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
 		match (self.0.as_ref(), call.is_sub_type()) {
-			(Some(cid_config), Some(Call::store { .. })) => {
-				Ok((Default::default(), Some(cid_config.clone()), origin))
-			},
+			(Some(cid_config), Some(Call::store { .. })) =>
+				Ok((Default::default(), Some(cid_config.clone()), origin)),
 			(Some(_), _) => {
 				// All other calls are invalid with cid_codec.
 				Err(InvalidTransaction::Call.into())
