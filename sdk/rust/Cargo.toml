@@ -10,7 +10,9 @@ repository = "https://github.com/paritytech/polkadot-bulletin-chain"
 [dependencies]
 # Core dependencies (no_std compatible)
 codec = { workspace = true, default-features = false }
-scale-info = { workspace = true, default-features = false, features = ["derive"] }
+scale-info = { workspace = true, default-features = false, features = [
+	"derive",
+] }
 
 # IPFS CID support
 cid = { version = "0.11", default-features = false, features = ["alloc"] }
@@ -26,7 +28,10 @@ sp-runtime = { workspace = true, default-features = false }
 sp-io = { workspace = true, default-features = false }
 
 # Serialization for DAG-PB
-serde = { version = "1.0", default-features = false, features = ["alloc", "derive"], optional = true }
+serde = { version = "1.0", default-features = false, features = [
+	"alloc",
+	"derive",
+], optional = true }
 
 # Error handling (std-only)
 thiserror = { version = "2.0", optional = true }
