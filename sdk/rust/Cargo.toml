@@ -9,12 +9,12 @@ repository = "https://github.com/paritytech/polkadot-bulletin-chain"
 homepage = "https://github.com/paritytech/polkadot-bulletin-chain"
 documentation = "https://docs.rs/bulletin-sdk-rust"
 readme = "README.md"
-keywords = ["polkadot", "bulletin", "blockchain", "storage", "ipfs"]
+keywords = ["blockchain", "bulletin", "ipfs", "polkadot", "storage"]
 categories = ["api-bindings", "cryptography", "no-std"]
 exclude = [
-    ".github/",
-    "tests/",
-    "examples/",
+	".github/",
+	"examples/",
+	"tests/",
 ]
 
 [dependencies]
