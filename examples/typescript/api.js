@@ -43,7 +43,7 @@ export async function authorizeAccount(
             const accountTransactions = authValue.transactions;
             const accountBytes = authValue.bytes;
 
-            if (accountTransactions > transactions && accountBytes > bytes) {
+            if (accountTransactions >= transactions && accountBytes >= bytes) {
                 console.log('✅ Account authorization is sufficient.');
                 continue;
             }
@@ -135,8 +135,8 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
     }
 
     const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
-    await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
-    return expectedCid;
+    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
+    return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
 const UTILITY_BATCH_SIZE = 20;
@@ -254,7 +254,7 @@ export async function storeChunkedFile(typedApi, signer, filePath, chunkSize) {
     for (let i = 0; i < chunks.length; i++) {
         const { cid: expectedCid, bytes } = chunks[i];
         console.log(`📤 Storing chunk #${i + 1} CID: ${expectedCid}`);
-        let cid = await store(typedApi, signer, bytes);
+        let { cid } = await store(typedApi, signer, bytes);
         assert.deepStrictEqual(expectedCid, cid);
         console.log(`✅ Stored chunk #${i + 1} and CID equals!`);
     }

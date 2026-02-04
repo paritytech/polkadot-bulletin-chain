@@ -170,6 +170,11 @@ jobs:
           shared-key: "bulletin-cache-benchmarks"
           save-if: ${{ github.ref == 'refs/heads/main' }}
       
+      - name: Create directory for binary and add to PATH
+        run: |
+          mkdir -p $FRAME_OMNI_BENCHER_BIN_DIR
+          echo "${FRAME_OMNI_BENCHER_BIN_DIR}" >> $GITHUB_PATH
+
       - name: Cache frame-omni-bencher
         uses: actions/cache@v5
         id: frame-omni-bencher-cache
@@ -180,20 +185,16 @@ jobs:
       - name: Download frame-omni-bencher
         if: steps.frame-omni-bencher-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p $FRAME_OMNI_BENCHER_BIN_DIR
           cd $FRAME_OMNI_BENCHER_BIN_DIR
           echo "Downloading frame-omni-bencher..."
           curl -L -o frame-omni-bencher "https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
           chmod +x frame-omni-bencher
           ./frame-omni-bencher --version
-          echo "${FRAME_OMNI_BENCHER_BIN_DIR}" >> $GITHUB_PATH
 
       - name: Run benchmarks (Westend parachain)
         run: |
-          echo "Running benchmarks for Westend parachain..."
           python3 ./scripts/cmd/cmd.py bench --runtime bulletin-westend --steps 2 --repeat 1
-          echo "Benchmarks for Westend parachain completed."
-          
-          echo "Running production check for Westend parachain..."
+
+      - name: Run production check for Westend parachain
+        run: |
           cargo check --profile production -p bulletin-westend-runtime
-          echo "Production check for Westend parachain completed."
