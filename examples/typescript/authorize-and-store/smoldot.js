@@ -13,7 +13,6 @@ import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
 const SYNC_WAIT_SEC = 30;
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 const TCP_BOOTNODE_REGEX = /^(\/ip[46]\/[^/]+)\/tcp\/(\d+)\/p2p\/(.+)$/;
 const WS_BOOTNODE_REGEX = /\/tcp\/\d+\/ws\/p2p\//;
@@ -95,19 +94,22 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
 
 async function main() {
     await cryptoWaitReady();
-    
+
     // Get chainspec path from command line argument (required - main chain: relay for para, or solo)
     const chainSpecPath = process.argv[2];
     if (!chainSpecPath) {
         console.error('❌ Error: Chain spec path is required as first argument');
-        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path]');
-        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path>');
-        console.error('  For solochains: <solo-chain-spec-path>');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [http_ipfs_api]');
+        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [http_ipfs_api]');
+        console.error('  For solochains: <solo-chain-spec-path> [http_ipfs_api]');
         process.exit(1);
     }
-    
+
     // Optional parachain chainspec path (only needed for parachains)
     const parachainSpecPath = process.argv[3] || null;
+
+    // Optional IPFS API URL (defaults to non-standard port 8283 to avoid conflicts)
+    const HTTP_IPFS_API = process.argv[4] || 'http://127.0.0.1:8283';
     
     let sd, client, resultCode;
     try {

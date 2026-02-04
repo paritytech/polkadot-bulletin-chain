@@ -92,7 +92,7 @@ All examples support command-line arguments but have sensible defaults:
 
 - **WebSocket URL**: `ws://localhost:10000`
 - **Seed**: `//Alice` (sudo account for authorization)
-- **IPFS HTTP API**: `http://127.0.0.1:8080`
+- **IPFS HTTP API**: `http://127.0.0.1:8283` (non-standard port to avoid conflicts)
 
 ## Requirements
 
