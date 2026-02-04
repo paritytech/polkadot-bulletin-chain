@@ -14,8 +14,13 @@ import { getWsProvider } from "polkadot-api/ws-provider";
 import { Binary } from '@polkadot-api/substrate-bindings';
 import { bulletin } from '../.papi/descriptors/dist/index.mjs';
 
+// Command line arguments: [ws_url] [seed] [http_ipfs_api]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+// Note: http_ipfs_api arg is accepted but HTTP_IPFS_API from common.js is used (port 8283)
+
 // ---- CONFIG ----
-const NODE_WS = 'ws://localhost:10000';
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 // -----------------
 
@@ -167,7 +172,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Chunkedsigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
         // Authorize an account.
         await authorizeAccount(
@@ -209,10 +214,10 @@ async function main() {
         );
         console.log('🧱 DAG stored on IPFS with CID:', rawDagCid.toString())
         console.log('\n🌐 Try opening in browser:')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
-        console.log('   (You’ll see binary content since this is an image)')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rawDagCid.toString()}`)
-        console.log('   (You’ll see the encoded DAG descriptor content)')
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
+        console.log('   (You'll see binary content since this is an image)')
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
+        console.log('   (You'll see the encoded DAG descriptor content)')
 
         // Download the content from IPFS HTTP gateway
         const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
