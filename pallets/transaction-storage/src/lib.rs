@@ -1088,12 +1088,12 @@ pub mod pallet {
 			index: &u32,
 			consume: bool,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					Self::check_store_renew_unsigned(
-						info.size as usize,
-						|| info.content_hash.into(),
+			let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
+			Self::check_store_renew_unsigned(
+				info.size as usize,
+				|| info.content_hash,
 				consume,
-					)
+			)
 		}
 
 		fn check_unsigned_remove_expired_account(
@@ -1127,8 +1127,8 @@ pub mod pallet {
 			call: &Call<T>,
 			consume: bool,
 		) -> Result<ValidTransaction, TransactionValidityError> {
-			let size = match call {
-				Call::<T>::store { data } => data.len(),
+			let (size, content_hash) = match call {
+				Call::<T>::store { data } => (data.len(), sp_io::hashing::blake2_256(data)),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash)
