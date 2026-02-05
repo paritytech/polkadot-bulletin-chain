@@ -79,6 +79,14 @@ Produces:
 
 **If `<UPGRADE_METHOD>` = sudo:**
 
+**Option A - Automated (Recommended):**
+```shell
+cd examples
+gh release download <TAG> -p "*westend*.wasm" -D .
+node upgrade_runtime.js "<SUDO_SEED>" ./bulletin_westend_runtime.compact.compressed.wasm <RPC>
+```
+
+**Option B - Manual via polkadot.js:**
 1. Download `<WASM_ARTIFACT>` from [Releases](https://github.com/paritytech/polkadot-bulletin-chain/releases)
 2. Open `https://polkadot.js.org/apps/?rpc=<RPC>#/extrinsics`
 3. Submit: `sudo.sudo(system.setCode(code))` → upload WASM
