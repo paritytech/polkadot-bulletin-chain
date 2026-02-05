@@ -41,7 +41,11 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
    node upgrade_runtime.js "<SEED>" ./path/to/runtime.wasm --network <network>
    ```
 
-6. **Verify**: `node upgrade_runtime.js --verify-only --network <network>`
+6. **Verify**: Confirm `spec_version` matches the new version:
+   ```bash
+   node upgrade_runtime.js --verify-only --network <network>
+   ```
+   Expected output should show the bumped `spec_version`. If it doesn't match, the upgrade failed.
 
 ## Upgrade Script Reference
 

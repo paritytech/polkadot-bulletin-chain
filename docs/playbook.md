@@ -66,14 +66,14 @@ node upgrade_runtime.js "<SUDO_SEED>" ./bulletin_westend_runtime.compact.compres
 1. Download `<WASM_ARTIFACT>` from [Releases](https://github.com/paritytech/polkadot-bulletin-chain/releases)
 2. Open `https://polkadot.js.org/apps/?rpc=<RPC>#/extrinsics`
 3. Submit: `sudo.sudo(system.setCode(code))` → upload WASM
-4. Verify: Chain State → `system.lastRuntimeUpgrade()`
+4. Verify: Chain State → `system.lastRuntimeUpgrade()` shows new `spec_version`
 
 **If `<UPGRADE_METHOD>` = authorize:**
 
 1. Get Blake2-256 hash from [release notes](https://github.com/paritytech/polkadot-bulletin-chain/releases)
 2. Submit via governance: `system.authorizeUpgrade(0x<HASH>)`
 3. Once authorized, download `<WASM_ARTIFACT>` and submit: `system.applyAuthorizedUpgrade(code)`
-4. Verify: Chain State → `system.lastRuntimeUpgrade()`
+4. Verify: Chain State → `system.lastRuntimeUpgrade()` shows new `spec_version`
 
 ---
 
