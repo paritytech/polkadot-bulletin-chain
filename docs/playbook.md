@@ -27,16 +27,26 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 };
 ```
 
-### Step 3: Commit, Tag & Push
+### Step 3: Create a PR with the Version Bump
 
 ```shell
+git checkout -b bump-<RUNTIME>-spec-version-<VERSION> origin/main
 git add runtimes/
 git commit -m "Bump <RUNTIME> spec_version to <VERSION>"
-git tag v<VERSION>
-git push origin main --tags
+git push -u origin bump-<RUNTIME>-spec-version-<VERSION>
+gh pr create --title "Bump <RUNTIME> spec_version to <VERSION>"
 ```
 
-### Step 4: Build / Wait for CI
+### Step 4: Merge PR & Tag the Release
+
+```shell
+gh pr merge <PR_NUMBER> --merge
+git checkout main && git pull
+git tag v<VERSION>
+git push origin --tags
+```
+
+### Step 5: Build / Wait for CI
 
 **For Testnet (manual build):**
 ```shell
@@ -51,7 +61,7 @@ Produces:
 - `<WASM_ARTIFACT>`
 - Blake2-256 hash in release notes
 
-### Step 5: Apply Runtime Upgrade
+### Step 6: Apply Runtime Upgrade
 
 **If `<UPGRADE_METHOD>` = sudo:**
 

@@ -24,24 +24,33 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
    - westend/paseo/pop: `runtimes/bulletin-westend/src/lib.rs`
    - polkadot: `runtimes/bulletin-polkadot/src/lib.rs`
 
-3. **Commit & push**:
+3. **Create a PR** with the version bump:
    ```bash
+   git checkout -b bump-<runtime>-spec-version-<VERSION> origin/main
    git add runtimes/ runtime/
    git commit -m "Bump <runtime> spec_version to <VERSION>"
-   git tag v<VERSION>
-   git push origin main --tags
+   git push -u origin bump-<runtime>-spec-version-<VERSION>
+   gh pr create --title "Bump <runtime> spec_version to <VERSION>"
    ```
 
-4. **Build/Download WASM**:
-   - testnet: `cargo build --profile production -p polkadot-bulletin-chain-runtime --features on-chain-release-build`
-   - others: wait for CI, then `gh release download <TAG> -p "*.wasm" -D .`
+4. **Merge the PR** and **tag the release** on main:
+   ```bash
+   gh pr merge <PR_NUMBER> --merge
+   git checkout main && git pull
+   git tag v<VERSION>
+   git push origin --tags
+   ```
 
-5. **Upgrade**: Use the upgrade script in `examples/`:
+5. **Build/Download WASM**:
+   - testnet: `cargo build --profile production -p polkadot-bulletin-chain-runtime --features on-chain-release-build`
+   - others: wait for the [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml), then `gh release download <TAG> -p "*.wasm" -D .`
+
+6. **Upgrade**: Use the upgrade script in `examples/`:
    ```bash
    node upgrade_runtime.js "<SEED>" ./path/to/runtime.wasm --network <network>
    ```
 
-6. **Verify**: Confirm `spec_version` matches the new version:
+7. **Verify**: Confirm `spec_version` matches the new version:
    ```bash
    node upgrade_runtime.js --verify-only --network <network>
    ```
