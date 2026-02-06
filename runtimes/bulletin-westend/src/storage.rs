@@ -17,41 +17,23 @@
 //! Storage-specific configurations.
 
 use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, EnsureOrigin, Equals},
+	traits::{EitherOfDiverse, Equals, SortedMembers},
 };
+use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
 use pallets_common::NoCurrency;
+use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
 
-/// Alice's well-known account ID bytes (Sr25519).
-/// SS58: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
-const ALICE_ACCOUNT_ID: [u8; 32] = [
-	0xd4, 0x35, 0x93, 0xc7, 0x15, 0xfd, 0xd3, 0x1c, 0x61, 0x14, 0x1a, 0xbd, 0x04, 0xa9, 0x9f, 0xd6,
-	0x82, 0x2c, 0x85, 0x58, 0x85, 0x4c, 0xcd, 0xe3, 0x9a, 0x56, 0x84, 0xe7, 0xa5, 0x6d, 0xa2, 0x7d,
-];
-
-/// Ensures that the origin is the well-known Alice test account.
-pub struct EnsureAlice;
-impl<OuterOrigin> EnsureOrigin<OuterOrigin> for EnsureAlice
-where
-	OuterOrigin: Into<Result<frame_system::RawOrigin<AccountId>, OuterOrigin>> + Clone,
-{
-	type Success = ();
-
-	fn try_origin(o: OuterOrigin) -> Result<Self::Success, OuterOrigin> {
-		let alice_account = AccountId::from(ALICE_ACCOUNT_ID);
-		o.clone().into().and_then(|raw_origin| match raw_origin {
-			frame_system::RawOrigin::Signed(who) if who == alice_account => Ok(()),
-			_ => Err(o),
-		})
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn try_successful_origin() -> Result<OuterOrigin, ()> {
-		Err(())
+/// Provides Alice's account ID for use with `EnsureSignedBy`.
+pub struct AliceAccountId;
+impl SortedMembers<AccountId> for AliceAccountId {
+	fn sorted_members() -> Vec<AccountId> {
+		alloc::vec![Sr25519Keyring::Alice.to_account_id()]
 	}
 }
 
@@ -87,7 +69,7 @@ impl pallet_transaction_storage::Config for Runtime {
 			EnsureXcm<Equals<PeopleLocation>>,
 		>,
 		// Alice can also authorize for testing purposes.
-		EnsureAlice,
+		EnsureSignedBy<AliceAccountId, Self::AccountId>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
