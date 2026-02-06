@@ -29,9 +29,9 @@ use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
 
-/// Provides Alice's account ID for use with `EnsureSignedBy`.
-pub struct AliceAccountId;
-impl SortedMembers<AccountId> for AliceAccountId {
+/// Provides test accounts for use with `EnsureSignedBy`.
+pub struct TestAccounts;
+impl SortedMembers<AccountId> for TestAccounts {
 	fn sorted_members() -> Vec<AccountId> {
 		alloc::vec![Sr25519Keyring::Alice.to_account_id()]
 	}
@@ -68,8 +68,8 @@ impl pallet_transaction_storage::Config for Runtime {
 			// People chain can also handle authorizations.
 			EnsureXcm<Equals<PeopleLocation>>,
 		>,
-		// Alice can also authorize for testing purposes.
-		EnsureSignedBy<AliceAccountId, Self::AccountId>,
+		// Test accounts can also authorize for testing purposes.
+		EnsureSignedBy<TestAccounts, Self::AccountId>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
