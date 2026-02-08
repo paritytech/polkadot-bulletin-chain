@@ -79,7 +79,7 @@ async function processJob(typedApi, workerId, signer, chunk) {
         `Worker ${workerId} submitting tx for chunk ${chunk.cid} of size ${chunk.len} bytes`
     );
 
-    let cid = await store(typedApi, signer.signer, chunk.bytes);
+    let { cid } = await store(typedApi, signer.signer, chunk.bytes);
     pushToResultQueue(cid);
     console.log(`Worker ${workerId} tx included in the block with CID: ${cid}`);
 }
@@ -182,7 +182,7 @@ async function main() {
 
         console.log(`Storing DAG...`);
         let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
-        let cid = await store(bulletinAPI, signers[0].signer, dagBytes);
+        let { cid } = await store(bulletinAPI, signers[0].signer, dagBytes);
         console.log(`Downloading...${cid} / ${rootCid}`);
         let downloadedContent = await fetchCid(DEFAULT_IPFS_GATEWAY_URL, rootCid);
         console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
