@@ -141,14 +141,14 @@ async function main() {
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, whoSigner, dataToStore);
-        console.log("✅ Data stored successfully with CID:", cid);
+        const storeResult = await store(bulletinAPI, whoSigner, dataToStore);
+        console.log("✅ Data stored successfully with CID:", storeResult);
 
         // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        let downloadedContent = await fetchCid(HTTP_IPFS_API, storeResult.cid);
         console.log("✅ Downloaded content:", downloadedContent.toString());
         assert.deepStrictEqual(
-            cid,
+            storeResult.cid,
             expectedCid,
             '❌ expectedCid does not match cid!'
         );
