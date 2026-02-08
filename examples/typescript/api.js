@@ -118,14 +118,16 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
     console.log('⬆️ Storing data with length=', data.length);
 
     // Add custom `TransactionExtension` for codec, if specified.
-    const txOpts = {};
+    let txOpts = undefined;
     let expectedCid;
     if (cidCodec != null && mhCode != null) {
-        txOpts.customSignedExtensions = {
-            ProvideCidConfig: {
-                value: {
-                    codec: BigInt(cidCodec),
-                    hashing: toHashingEnum(mhCode),
+        txOpts = {
+            customSignedExtensions: {
+                ProvideCidConfig: {
+                    value: {
+                        codec: BigInt(cidCodec),
+                        hashing: toHashingEnum(mhCode),
+                    }
                 }
             }
         };
@@ -178,7 +180,7 @@ const TX_MODE_CONFIG = {
     },
 };
 
-async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
+async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = undefined) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
         throw new Error(`Unhandled txMode: ${txMode}`);
@@ -190,13 +192,16 @@ async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN
         console.log(`⬆️ Submitting unsigned ${txName}`);
         // TODO: https://github.com/polkadot-api/polkadot-api/issues/760
         // const bareTx = await tx.getBareTx(txOpts);
-        if (Object.keys(txOpts).length > 0) {
+        if (txOpts !== undefined && Object.keys(txOpts).length > 0) {
             throw new Error(`txOpts not supported for unsigned transactions (getBareTx doesn't accept options). See: https://github.com/polkadot-api/polkadot-api/issues/760`);
         }
         const bareTx = await tx.getBareTx();
         observable = client.submitAndWatch(bareTx);
     } else {
-        observable = tx.signSubmitAndWatch(signer, txOpts);
+        // Only pass txOpts if it's defined (not undefined)
+        observable = txOpts !== undefined
+            ? tx.signSubmitAndWatch(signer, txOpts)
+            : tx.signSubmitAndWatch(signer);
     }
 
     return new Promise((resolve, reject) => {
