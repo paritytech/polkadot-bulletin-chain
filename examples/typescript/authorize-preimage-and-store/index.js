@@ -58,7 +58,7 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
     }
 
     // Store data
-    const cid = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
+    const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
     console.log("✅ Data stored successfully with CID:", cid.toString());
 
     // Read back from IPFS

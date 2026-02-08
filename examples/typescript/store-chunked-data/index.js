@@ -92,10 +92,10 @@ export async function storeMetadata(typedApi, signer, chunks) {
     console.log(`🧾 Metadata size: ${jsonBytes.length} bytes`);
 
     // 2️⃣ Store JSON bytes in Bulletin
-    const metadataCid = await store(typedApi, signer, jsonBytes);
-    console.log('🧩 Metadata CID:', metadataCid.toString());
+    const storeResult = await store(typedApi, signer, jsonBytes);
+    console.log('🧩 Metadata CID:', storeResult.cid.toString());
 
-    return { metadataCid };
+    return { metadataCid: storeResult.cid };
 }
 
 /**
@@ -143,7 +143,8 @@ async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
     // Store DAG bytes in Bulletin using PAPI store function
-    const rawDagCid = await store(typedApi, whoSigner, dagFileBytes);
+    const storeResult = await store(typedApi, whoSigner, dagFileBytes);
+    const rawDagCid = storeResult.cid;
     console.log('📤 DAG proof "bytes" stored in Bulletin with CID:', rawDagCid.toString());
 
     // This can be a serious pallet, this is just a demonstration.
