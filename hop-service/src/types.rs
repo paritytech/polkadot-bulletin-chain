@@ -31,15 +31,26 @@ pub struct HopPoolEntry {
 	pub expires_at: HopBlockNumber,
 	/// Size in bytes
 	pub size: u64,
+	/// Ephemeral ed25519 public keys of intended recipients.
+	/// Each recipient claims by signing the content hash with their corresponding private key.
+	pub recipients: Vec<[u8; 32]>,
+	/// Tracks which recipients have claimed (by index into `recipients`).
+	pub claimed: Vec<bool>,
 }
 
 impl HopPoolEntry {
 	/// Create a new pool entry
-	pub fn new(data: Vec<u8>, added_at: HopBlockNumber, retention_blocks: u32) -> Self {
+	pub fn new(
+		data: Vec<u8>,
+		added_at: HopBlockNumber,
+		retention_blocks: u32,
+		recipients: Vec<[u8; 32]>,
+	) -> Self {
 		let size = data.len() as u64;
 		let expires_at = added_at.saturating_add(retention_blocks);
+		let claimed = vec![false; recipients.len()];
 
-		Self { data, added_at, expires_at, size }
+		Self { data, added_at, expires_at, size, recipients, claimed }
 	}
 }
 
@@ -53,6 +64,16 @@ pub struct PoolStatus {
 	pub total_bytes: u64,
 	/// Maximum bytes allowed
 	pub max_bytes: u64,
+}
+
+/// Result of a successful `hop_submit` call
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitResult {
+	/// The content hash of the submitted data
+	pub hash: sp_core::Bytes,
+	/// Current pool status after the submission
+	pub pool_status: PoolStatus,
 }
 
 /// HOP errors
@@ -75,6 +96,18 @@ pub enum HopError {
 
 	#[error("Encoding error: {0}")]
 	Encoding(String),
+
+	#[error("Invalid signature")]
+	InvalidSignature,
+
+	#[error("Not an intended recipient")]
+	NotRecipient,
+
+	#[error("At least one recipient public key is required")]
+	NoRecipients,
+
+	#[error("Invalid recipient public key: expected 32 bytes, got {0}")]
+	InvalidRecipientKey(usize),
 }
 
 impl From<HopError> for jsonrpsee::types::ErrorObjectOwned {
@@ -86,14 +119,18 @@ impl From<HopError> for jsonrpsee::types::ErrorObjectOwned {
 			HopError::NotFound => 1004,
 			HopError::EmptyData => 1005,
 			HopError::Encoding(_) => 1006,
+			HopError::InvalidSignature => 1009,
+			HopError::NotRecipient => 1010,
+			HopError::NoRecipients => 1011,
+			HopError::InvalidRecipientKey(_) => 1012,
 		};
 
 		jsonrpsee::types::ErrorObject::owned(code, err.to_string(), None::<()>)
 	}
 }
 
-/// Maximum data size (8 MiB): matches transaction-storage pallet
-pub const MAX_DATA_SIZE: u64 = 8 * 1024 * 1024;
+/// Maximum data size (64 MiB)
+pub const MAX_DATA_SIZE: u64 = 64 * 1024 * 1024;
 
 /// Default retention period in blocks (24 hours at 6 seconds per block = 14,400 blocks)
 pub const DEFAULT_RETENTION_BLOCKS: u32 = 14_400;

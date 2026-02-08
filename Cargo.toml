@@ -88,6 +88,7 @@ sp-offchain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b
 sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
 sp-session = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
 sp-std = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
+sp-statement-store = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
 sp-storage = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
 sp-timestamp = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
 sp-tracing = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "b2bcb74b13f1a1e082f701e3e05ce1be44d16790", default-features = false }
@@ -173,6 +174,7 @@ members = [
 	"runtime",
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
+	"tests/hop-e2e",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.

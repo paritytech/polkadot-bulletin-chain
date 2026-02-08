@@ -17,7 +17,7 @@
 //! # HOP (Hand-Off Protocol) Service
 //!
 //! Ephemeral data pool service for Substrate nodes. Provides 24-hour in-memory
-//! storage with RPC interface and Bitswap retrieval.
+//! storage with an RPC interface for submission and retrieval.
 //!
 //! ## Overview
 //!
@@ -30,7 +30,6 @@
 //! - **In-memory data pool** with configurable size limits
 //! - **24-hour retention** (configurable in blocks)
 //! - **RPC interface** for data submission and retrieval
-//! - **Bitswap protocol** support for IPFS-style content addressing
 //! - **Content-addressed storage** using Blake2-256 hashes
 //!
 //! ## Integration Guide
@@ -77,9 +76,8 @@
 //!
 //! ## RPC Methods
 //!
-//! - `hop_submit(data: Bytes) -> Bytes` - Submit data, returns hash
-//! - `hop_get(hash: Bytes) -> Option<Bytes>` - Retrieve and delete data
-//! - `hop_has(hash: Bytes) -> bool` - Check if data exists
+//! - `hop_submit(data: Bytes, recipients: Vec<Bytes>) -> SubmitResult` - Submit data with recipient keys, returns hash + pool status
+//! - `hop_claim(hash: Bytes, signature: Bytes) -> Bytes` - Claim data with ed25519 signature
 //! - `hop_poolStatus() -> PoolStatus` - Get pool statistics
 //!
 //! ## CLI Flags
@@ -100,4 +98,4 @@ pub use cli::HopParams;
 pub use pool::HopDataPool;
 pub use primitives::{HopBlockNumber, HopHash};
 pub use rpc::{HopApiServer, HopRpcServer};
-pub use types::{HopError, HopPoolEntry, PoolStatus};
+pub use types::{HopError, HopPoolEntry, PoolStatus, SubmitResult};

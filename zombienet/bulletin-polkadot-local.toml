@@ -11,11 +11,11 @@ name = "alice"
 p2p_port = 10001
 rpc_port = 10000
 validator = true
-args = ["--ipfs-server", "-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace,litep2p::crypto::noise=debug"]
+args = ["--ipfs-server", "--enable-hop", "--rpc-max-request-size=150", "--rpc-max-response-size=150", "-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace,litep2p::crypto::noise=debug,hop=debug"]
 
 [[relaychain.nodes]]
 name = "bob"
 p2p_port = 12347
 rpc_port = 12346
 validator = true
-args = ["-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace,litep2p::crypto::noise=debug"]
+args = ["--enable-hop", "--rpc-max-request-size=150", "--rpc-max-response-size=150", "-lruntime=trace,bitswap=trace,sub-libp2p::bitswap=trace,litep2p=trace,litep2p::crypto::noise=debug,hop=debug"]

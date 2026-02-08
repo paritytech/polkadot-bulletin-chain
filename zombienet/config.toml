@@ -11,9 +11,10 @@ name = "alice"
 rpc_port = 10000
 p2p_port = 37999
 validator = true
-args = ["--ipfs-server", "-lruntime=trace", "-lxcm=trace"]
+args = ["--ipfs-server", "--enable-hop", "--rpc-max-request-size=150", "--rpc-max-response-size=150", "-lruntime=trace,xcm=trace,hop=debug"]
 
 [[relaychain.nodes]]
 name = "bob"
 rpc_port = 10001
 validator = true
+args = ["--enable-hop", "--rpc-max-request-size=150", "--rpc-max-response-size=150", "-lruntime=trace,hop=debug"]

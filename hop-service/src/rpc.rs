@@ -19,7 +19,7 @@
 use crate::{
 	pool::HopDataPool,
 	primitives::HopHash,
-	types::PoolStatus,
+	types::{HopError, PoolStatus, SubmitResult},
 };
 use jsonrpsee::{
 	core::{async_trait, RpcResult},
@@ -39,31 +39,26 @@ pub trait HopApi<BlockHash> {
 	///
 	/// # Arguments
 	/// * `data`: The data to store, in bytes
+	/// * `recipients`: List of ephemeral ed25519 public keys (32 bytes each)
 	///
 	/// # Returns
-	/// The hash of the data, in bytes
+	/// The content hash and current pool status
 	#[method(name = "hop_submit")]
-	fn submit(&self, data: Bytes) -> RpcResult<Bytes>;
+	fn submit(&self, data: Bytes, recipients: Vec<Bytes>) -> RpcResult<SubmitResult>;
 
-	/// Get some data from the data pool by hash, delete it afterwards
+	/// Claim data from the data pool by hash
+	///
+	/// Requires a signature over the hash using the ephemeral private key
+	/// corresponding to one of the recipient public keys.
 	///
 	/// # Arguments
-	/// * `hash`: The hash of the data, in bytes
+	/// * `hash`: The hash of the data, in bytes (32 bytes)
+	/// * `signature`: Ed25519 signature over the hash (64 bytes)
 	///
 	/// # Returns
-	/// Some(data) if it's present in the pool, None if not
-	#[method(name = "hop_get")]
-	fn get(&self, hash: Bytes) -> RpcResult<Option<Bytes>>;
-
-	/// Check if some data exists in the data pool
-	///
-	/// # Arguments
-	/// * `hash`: The hash of the data, in bytes
-	///
-	/// # Returns
-	/// Whether the data exists or not in the pool
-	#[method(name = "hop_has")]
-	fn has(&self, hash: Bytes) -> RpcResult<bool>;
+	/// The data if the signature matches an unclaimed recipient
+	#[method(name = "hop_claim")]
+	fn claim(&self, hash: Bytes, signature: Bytes) -> RpcResult<Bytes>;
 
 	/// Get data pool status
 	///
@@ -105,25 +100,29 @@ where
 	Block: BlockT,
 	C: HeaderBackend<Block> + ProvideRuntimeApi<Block> + Send + Sync + 'static,
 {
-	fn submit(&self, data: Bytes) -> RpcResult<Bytes> {
+	fn submit(&self, data: Bytes, recipients: Vec<Bytes>) -> RpcResult<SubmitResult> {
+		// Parse and validate recipient keys
+		let recipient_keys: Vec<[u8; 32]> = recipients
+			.into_iter()
+			.map(|r| {
+				let bytes: [u8; 32] = r.0.as_slice().try_into().map_err(|_| {
+					ErrorObjectOwned::from(HopError::InvalidRecipientKey(r.0.len()))
+				})?;
+				Ok(bytes)
+			})
+			.collect::<RpcResult<Vec<_>>>()?;
+
 		// We need the current block number to know when the timeout is reached.
 		let current_block = self.client.info().best_number.saturated_into::<u32>();
-		let hash = self.pool.insert(data.0, current_block)?;
-		Ok(Bytes(hash.0.to_vec()))
+		let hash = self.pool.insert(data.0, current_block, recipient_keys)?;
+		let pool_status = self.pool.status();
+		Ok(SubmitResult { hash: Bytes(hash.0.to_vec()), pool_status })
 	}
 
-	fn get(&self, hash: Bytes) -> RpcResult<Option<Bytes>> {
+	fn claim(&self, hash: Bytes, signature: Bytes) -> RpcResult<Bytes> {
 		let hash = Self::bytes_to_hash(hash)?;
-		let data = self.pool.get(&hash).map(|data| Bytes(data));
-		// We delete the data when someone requests it.
-		// TODO: Make sure we only delete it when its intended recipient retrieves it.
-		self.pool.remove(&hash)?;
-		Ok(data)
-	}
-
-	fn has(&self, hash: Bytes) -> RpcResult<bool> {
-		let hash_array = Self::bytes_to_hash(hash)?;
-		Ok(self.pool.has(&hash_array))
+		let data = self.pool.claim(&hash, &signature.0)?;
+		Ok(Bytes(data))
 	}
 
 	fn pool_status(&self) -> RpcResult<PoolStatus> {

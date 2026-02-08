@@ -1,0 +1,35 @@
+[package]
+name = "hop-e2e"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+publish = false
+description = "E2E test for HOP chat attachment flow (Alice → Bob)"
+
+[[bin]]
+name = "hop-e2e"
+path = "src/main.rs"
+
+[dependencies]
+# Subxt RPC client
+subxt = { path = "../../../subxt/subxt", default-features = false, features = ["jsonrpsee", "native"] }
+subxt-rpcs = { path = "../../../subxt/rpcs", default-features = false, features = ["jsonrpsee", "native"] }
+
+# Substrate primitives
+sp-core = { workspace = true, default-features = true }
+sp-statement-store = { workspace = true, default-features = true }
+codec = { workspace = true }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Crypto
+aes-gcm = "0.10"
+rand = "0.8"
+
+# Utilities
+hex = { workspace = true }
