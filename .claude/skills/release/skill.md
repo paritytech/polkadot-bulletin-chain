@@ -40,8 +40,7 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
    git push origin --tags
    ```
 
-5. **Build/Download WASM**:
-   - testnet: `cargo build --profile production -p polkadot-bulletin-chain-runtime --features on-chain-release-build`
+5. **Download WASM**:
    - others: wait for the [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml), then `gh release download <TAG> -p "*.wasm" -D .`
 
 6. **Upgrade**: Use the upgrade script in `examples/`:
