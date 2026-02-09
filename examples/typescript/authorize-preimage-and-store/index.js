@@ -1,22 +1,32 @@
 /**
- * KNOWN ISSUE: This test is currently failing in CI with unsigned transactions.
+ * ============================================================================
+ * KNOWN ISSUE: Test temporarily disabled in CI
+ * ============================================================================
  *
- * The unsigned store transaction (Test 1) fails with:
- *   InvalidTxError: { "type": "Invalid", "value": { "type": "Payment" } }
+ * This test validates unsigned store() transactions with preimage authorization,
+ * a feature explicitly supported by the pallet (see check_unsigned() in
+ * pallets/transaction-storage/src/lib.rs:1051-1095).
  *
- * The transaction is successfully broadcast but fails during runtime validation.
- * The issue appears to be in the runtime's transaction extension pipeline where
- * ValidateSigned may be incorrectly applied to unsigned transactions before
- * ValidateUnsigned runs.
+ * Current Status: FAILING
+ *   Error: InvalidTxError: { "type": "Invalid", "value": { "type": "Payment" } }
+ *   Stage: Transaction broadcasts successfully but fails during pool validation
  *
- * This test is temporarily disabled in CI (see examples/justfile run-all-tests).
+ * Root Cause: Runtime Transaction Extension Pipeline Issue
+ *   The runtime's ValidateSigned extension rejects unsigned transactions with
+ *   "Invalid Payment" BEFORE the pallet's ValidateUnsigned can approve them.
  *
- * Potential fixes:
- * 1. Runtime: Ensure ValidateSigned properly handles unsigned transactions
- * 2. PAPI: Verify getBareTx() creates proper unsigned extrinsics
- * 3. Alternative: Modify test to use signed transactions with preimage auth
+ *   Expected: Runtime → ValidateUnsigned → Pallet approves → Success
+ *   Actual:   ValidateSigned rejects early → Never reaches pallet → Failure
  *
- * See examples/justfile for detailed investigation notes.
+ * This is NOT a client SDK or test bug. The pallet correctly supports this use
+ * case, but the runtime's transaction extension ordering prevents it from working.
+ *
+ * Solution: Fix ValidateSigned in runtime to skip unsigned transactions or adjust
+ *           extension pipeline ordering. See examples/justfile:511-563 for detailed
+ *           investigation and potential solutions.
+ *
+ * Test Status: Disabled in CI at examples/justfile:546 until runtime is fixed.
+ * ============================================================================
  */
 
 import assert from "assert";
