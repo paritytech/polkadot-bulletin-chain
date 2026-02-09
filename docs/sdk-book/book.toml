@@ -6,4 +6,3 @@ src = "src"
 title = "Polkadot Bulletin SDK Documentation"
 
 [output.html]
-additional-css = ["custom.css"]
