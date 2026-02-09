@@ -1,32 +1,16 @@
 /**
- * ============================================================================
- * KNOWN ISSUE: Test temporarily disabled in CI
- * ============================================================================
+ * Preimage Authorization and Store Test
  *
  * This test validates unsigned store() transactions with preimage authorization,
  * a feature explicitly supported by the pallet (see check_unsigned() in
  * pallets/transaction-storage/src/lib.rs:1051-1095).
  *
- * Current Status: FAILING
- *   Error: InvalidTxError: { "type": "Invalid", "value": { "type": "Payment" } }
- *   Stage: Transaction broadcasts successfully but fails during pool validation
+ * Test Cases:
+ *   1. Unsigned store with preimage auth (no fees)
+ *   2. Signed store with preimage auth and custom CID config
  *
- * Root Cause: Runtime Transaction Extension Pipeline Issue
- *   The runtime's ValidateSigned extension rejects unsigned transactions with
- *   "Invalid Payment" BEFORE the pallet's ValidateUnsigned can approve them.
- *
- *   Expected: Runtime → ValidateUnsigned → Pallet approves → Success
- *   Actual:   ValidateSigned rejects early → Never reaches pallet → Failure
- *
- * This is NOT a client SDK or test bug. The pallet correctly supports this use
- * case, but the runtime's transaction extension ordering prevents it from working.
- *
- * Solution: Fix ValidateSigned in runtime to skip unsigned transactions or adjust
- *           extension pipeline ordering. See examples/justfile:511-563 for detailed
- *           investigation and potential solutions.
- *
- * Test Status: Disabled in CI at examples/justfile:546 until runtime is fixed.
- * ============================================================================
+ * The pallet prefers preimage authorization over account authorization when both
+ * are available, as it's more specific (content-addressed).
  */
 
 import assert from "assert";
