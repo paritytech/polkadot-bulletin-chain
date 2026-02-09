@@ -109,6 +109,12 @@ const result = await client.store(data);
 
 See [typescript/README.md](typescript/README.md) for details.
 
+## Release & Publishing
+
+📦 **Release automation**: [RELEASE_AUTOMATION_SUMMARY.md](RELEASE_AUTOMATION_SUMMARY.md)
+
+Complete automated release pipeline for publishing both SDKs to crates.io, npm, and GitHub Releases with version validation, testing, and automated tagging.
+
 ## License
 
 GPL-3.0-or-later WITH Classpath-exception-2.0
