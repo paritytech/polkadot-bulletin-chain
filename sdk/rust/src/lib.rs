@@ -95,6 +95,10 @@ pub mod async_client;
 #[cfg(feature = "std")]
 pub mod mock_client;
 
+// Subxt configuration and custom signed extensions (std-only)
+#[cfg(feature = "std")]
+pub mod subxt_config;
+
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
 pub use types::{
@@ -133,6 +137,9 @@ pub mod prelude {
 
 	#[cfg(feature = "std")]
 	pub use crate::mock_client::{MockBulletinClient, MockClientConfig, MockOperation};
+
+	#[cfg(feature = "std")]
+	pub use crate::subxt_config::{BulletinConfig, BulletinExtrinsicParams, ProvideCidConfig};
 }
 
 #[cfg(test)]

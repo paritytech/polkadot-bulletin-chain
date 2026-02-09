@@ -9,6 +9,9 @@ name = "authorize-and-store"
 path = "src/main.rs"
 
 [dependencies]
+# Bulletin SDK (provides BulletinConfig and ProvideCidConfig)
+bulletin-sdk-rust = { path = "../../../sdk/rust" }
+
 # Subxt for blockchain interaction
 # Using 0.37 with V14 metadata format (stable, well-tested)
 subxt = { version = "0.37", features = ["substrate-compat"] }
