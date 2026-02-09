@@ -27,11 +27,6 @@ import { Binary } from 'polkadot-api';
 
 // Network configurations
 const NETWORKS = {
-    testnet: {
-        rpc: 'ws://localhost:9944',
-        method: 'sudo',
-        runtime: 'polkadot-bulletin-chain'
-    },
     westend: {
         rpc: 'wss://westend-bulletin-rpc.polkadot.io',
         method: 'sudo',
