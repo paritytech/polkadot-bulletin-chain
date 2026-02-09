@@ -23,7 +23,7 @@ This authorizes a specific **piece of data** (identified by its hash) to be stor
 
 ## SDK Helpers
 
-The SDK provides `estimate_authorization` / `estimateAuthorization` to help you calculate how many transactions and bytes you need to authorize.
+The SDK provides `estimate_authorization` / `estimateAuthorization` to help you calculate the required values for authorization: the number of transactions and total bytes needed.
 
 **Example Calculation:**
 If you want to store a 100 MiB file with 1 MiB chunks:
