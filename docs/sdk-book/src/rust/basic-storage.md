@@ -212,10 +212,13 @@ use bulletin_sdk_rust::prelude::*;
 
 // 1. Create client with your account
 let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;
-let account = AccountId32::from(/* your account */);
+
+// Note: In most cases, you can get the account from your signer/keypair.
+// We pass it separately to support advanced scenarios (multisig, delegated auth, etc.)
+let account = signer.account_id(); // Or AccountId32::from(keypair.public())
 
 let client = AsyncBulletinClient::new(submitter)
-    .with_account(account);  // Set the account for auth checking
+    .with_account(account);  // Enable automatic authorization checking
 
 // 2. Upload - authorization is checked automatically
 let data = b"Hello, Bulletin!".to_vec();
@@ -234,14 +237,17 @@ Before submitting the transaction, the SDK:
 3. **Fails immediately** if insufficient (no transaction fees wasted!)
 4. **Proceeds** only if authorization is sufficient
 
-### Disable Authorization Checking
+### Disable Authorization Checking (Advanced)
 
-You might want to skip pre-flight authorization checking in these scenarios:
+> **Note**: Authorization checking is enabled by default and is recommended for most use cases. It prevents wasted transaction fees by failing early if you lack authorization.
 
-- **Performance**: Avoid extra query when doing many sequential uploads (authorization was already verified)
-- **Testing**: Test on-chain authorization validation directly
-- **Offline preparation**: Prepare transactions offline for later broadcast
-- **Batch operations**: Already checked authorization once for the entire batch
+In rare scenarios, you might want to skip pre-flight authorization checking:
+
+- **High-frequency uploads**: When uploading many small files sequentially and the query overhead matters (< 100ms per upload). You've already verified authorization manually and trust it's sufficient.
+- **Testing**: When you specifically want to test on-chain authorization validation errors.
+- **Offline signing**: When preparing transactions offline for later broadcast where the blockchain isn't accessible.
+
+**Trade-off**: Disabling the check saves ~100ms per upload but risks submitting transactions that fail on-chain (wasting transaction fees).
 
 ```rust
 use bulletin_sdk_rust::async_client::AsyncClientConfig;
