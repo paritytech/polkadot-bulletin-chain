@@ -27,3 +27,8 @@ codec = { package = "parity-scale-codec", version = "3.6", features = [
 	"derive",
 ] }
 scale-info = "2.11"
+
+[features]
+default = ["polkadot-runtime"]
+polkadot-runtime = []
+westend-runtime = []

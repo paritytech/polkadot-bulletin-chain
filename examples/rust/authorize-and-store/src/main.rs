@@ -146,13 +146,31 @@ async fn main() -> Result<()> {
 	// Step 1: Authorize the account to store data (requires sudo)
 	info!("\nStep 1: Authorizing account...");
 
-	// Build the authorize_account transaction
-	let authorize_tx = bulletin::tx()
-		.transaction_storage()
-		.authorize_account(account_id.clone(), 100, 100 * 1024 * 1024);
+	// In subxt 0.37, to wrap a call in sudo, we need to construct the RuntimeCall manually.
+	// The runtime type depends on which node we're connected to (polkadot vs westend).
+	// Use feature flags to select the correct runtime at compile time.
+	use bulletin::runtime_types;
+
+	#[cfg(feature = "polkadot-runtime")]
+	let authorize_call = runtime_types::bulletin_polkadot_runtime::RuntimeCall::TransactionStorage(
+		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
+			who: account_id.clone(),
+			transactions: 100,
+			bytes: 100 * 1024 * 1024,
+		},
+	);
+
+	#[cfg(feature = "westend-runtime")]
+	let authorize_call = runtime_types::bulletin_westend_runtime::RuntimeCall::TransactionStorage(
+		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
+			who: account_id.clone(),
+			transactions: 100,
+			bytes: 100 * 1024 * 1024,
+		},
+	);
 
 	// Wrap in sudo call (Alice is sudo in dev mode)
-	let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx.decodedCall);
+	let sudo_tx = bulletin::tx().sudo().sudo(authorize_call);
 
 	api.tx()
 		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
