@@ -146,21 +146,13 @@ async fn main() -> Result<()> {
 	// Step 1: Authorize the account to store data (requires sudo)
 	info!("\nStep 1: Authorizing account...");
 
-	// In subxt 0.37, to wrap a call in sudo, we need to manually construct the RuntimeCall
-	// Build the inner call as a runtime type
-	use bulletin::runtime_types;
-
-	// Use bulletin_westend_runtime as that's what the metadata contains
-	let authorize_call = runtime_types::bulletin_westend_runtime::RuntimeCall::TransactionStorage(
-		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
-			who: account_id.clone(),
-			transactions: 100,
-			bytes: 100 * 1024 * 1024,
-		},
-	);
+	// Build the authorize_account transaction
+	let authorize_tx = bulletin::tx()
+		.transaction_storage()
+		.authorize_account(account_id.clone(), 100, 100 * 1024 * 1024);
 
 	// Wrap in sudo call (Alice is sudo in dev mode)
-	let sudo_tx = bulletin::tx().sudo().sudo(authorize_call);
+	let sudo_tx = bulletin::tx().sudo().sudo(authorize_tx.decodedCall);
 
 	api.tx()
 		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
