@@ -2190,6 +2190,7 @@ dependencies = [
  "subxt 0.37.0",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "unsigned-varint 0.8.0",
 ]
 

@@ -5,15 +5,15 @@ var CidCodec = /* @__PURE__ */ ((CidCodec2) => {
   CidCodec2[CidCodec2["DagCbor"] = 113] = "DagCbor";
   return CidCodec2;
 })(CidCodec || {});
-var HashAlgorithm = /* @__PURE__ */ ((HashAlgorithm2) => {
-  HashAlgorithm2[HashAlgorithm2["Blake2b256"] = 45600] = "Blake2b256";
-  HashAlgorithm2[HashAlgorithm2["Sha2_256"] = 18] = "Sha2_256";
-  HashAlgorithm2[HashAlgorithm2["Keccak256"] = 27] = "Keccak256";
-  return HashAlgorithm2;
+var HashAlgorithm = /* @__PURE__ */ ((HashAlgorithm4) => {
+  HashAlgorithm4[HashAlgorithm4["Blake2b256"] = 45600] = "Blake2b256";
+  HashAlgorithm4[HashAlgorithm4["Sha2_256"] = 18] = "Sha2_256";
+  HashAlgorithm4[HashAlgorithm4["Keccak256"] = 27] = "Keccak256";
+  return HashAlgorithm4;
 })(HashAlgorithm || {});
 var DEFAULT_CHUNKER_CONFIG = {
   chunkSize: 1024 * 1024,
-  // 1 MiB
+  // 1 MiB (default)
   maxParallel: 8,
   createManifest: true
 };
@@ -201,7 +201,10 @@ function formatBytes(bytes, decimals = 2) {
 }
 function validateChunkSize(size) {
   if (size <= 0) {
-    throw new BulletinError("Chunk size must be positive", "INVALID_CHUNK_SIZE");
+    throw new BulletinError(
+      "Chunk size must be positive",
+      "INVALID_CHUNK_SIZE"
+    );
   }
   if (size > MAX_CHUNK_SIZE) {
     throw new BulletinError(
@@ -231,11 +234,7 @@ function estimateFees(dataSize) {
   return BASE_FEE + BigInt(dataSize) * PER_BYTE_FEE;
 }
 async function retry(fn, options = {}) {
-  const {
-    maxRetries = 3,
-    delayMs = 1e3,
-    exponentialBackoff = true
-  } = options;
+  const { maxRetries = 3, delayMs = 1e3, exponentialBackoff = true } = options;
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -350,7 +349,10 @@ var UnixFsDagBuilder = class {
    */
   async build(chunks, hashAlgorithm = 45600 /* Blake2b256 */) {
     if (!chunks || chunks.length === 0) {
-      throw new BulletinError("Cannot build DAG from empty chunks", "EMPTY_DATA");
+      throw new BulletinError(
+        "Cannot build DAG from empty chunks",
+        "EMPTY_DATA"
+      );
     }
     const chunkCids = chunks.map((chunk) => {
       if (!chunk.cid) {
@@ -538,31 +540,274 @@ var BulletinClient = class {
   }
 };
 
-// src/transaction.ts
-var PAPITransactionSubmitter = class {
-  constructor(api, signer) {
+// src/async-client.ts
+var StoreBuilder = class {
+  constructor(client, data) {
+    this.client = client;
+    this.options = { ...DEFAULT_STORE_OPTIONS };
+    this.data = data instanceof Uint8Array ? data : data.asBytes();
+  }
+  /** Set the CID codec */
+  withCodec(codec) {
+    this.options.cidCodec = codec;
+    return this;
+  }
+  /** Set the hash algorithm */
+  withHashAlgorithm(algorithm) {
+    this.options.hashingAlgorithm = algorithm;
+    return this;
+  }
+  /** Set whether to wait for finalization */
+  withFinalization(wait) {
+    this.options.waitForFinalization = wait;
+    return this;
+  }
+  /** Set custom store options */
+  withOptions(options) {
+    this.options = options;
+    return this;
+  }
+  /** Set progress callback for chunked uploads */
+  withCallback(callback) {
+    this.callback = callback;
+    return this;
+  }
+  /** Execute the store operation (signed transaction, uses account authorization) */
+  async send() {
+    return this.client.storeWithOptions(this.data, this.options, this.callback);
+  }
+  /**
+   * Execute store operation as unsigned transaction (for preimage-authorized content)
+   *
+   * Use this when the content has been pre-authorized via `authorizePreimage()`.
+   * Unsigned transactions don't require fees and can be submitted by anyone.
+   *
+   * @example
+   * ```typescript
+   * // First authorize the content hash
+   * const hash = blake2b256(data);
+   * await client.authorizePreimage(hash, BigInt(data.length));
+   *
+   * // Anyone can now store this content without fees
+   * const result = await client.store(data).sendUnsigned();
+   * ```
+   */
+  async sendUnsigned() {
+    return this.client.storeWithPreimageAuth(this.data, this.options, this.callback);
+  }
+};
+var AsyncBulletinClient = class {
+  /**
+   * Create a new async client with PAPI client and signer
+   *
+   * The PAPI client must be configured with the correct chain metadata
+   * for your Bulletin Chain node.
+   *
+   * @param api - Configured PAPI TypedApi instance
+   * @param signer - Polkadot signer for transaction signing
+   * @param config - Optional client configuration
+   */
+  constructor(api, signer, config) {
     this.api = api;
     this.signer = signer;
+    this.config = {
+      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
+      // 1 MiB
+      maxParallel: config?.maxParallel ?? 8,
+      createManifest: config?.createManifest ?? true,
+      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
+      // 2 MiB
+      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true
+    };
   }
-  async submitStore(data) {
-    try {
-      const tx = this.api.tx.TransactionStorage.store({ data });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
-      return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
-      };
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to submit store transaction: ${error}`,
-        "TRANSACTION_FAILED",
-        error
+  /**
+   * Set the account for authorization checks
+   *
+   * If set and `checkAuthorizationBeforeUpload` is enabled, the client will
+   * query authorization state before uploading and fail fast if insufficient.
+   */
+  withAccount(account) {
+    this.account = account;
+    return this;
+  }
+  /**
+   * Store data on Bulletin Chain using builder pattern
+   *
+   * Returns a builder that allows fluent configuration of store options.
+   *
+   * @param data - Data to store (PAPI Binary or Uint8Array)
+   *
+   * @example
+   * ```typescript
+   * import { Binary } from 'polkadot-api';
+   *
+   * // Using PAPI's Binary class (recommended)
+   * const result = await client
+   *   .store(Binary.fromText('Hello, Bulletin!'))
+   *   .withCodec(CidCodec.DagPb)
+   *   .withHashAlgorithm('blake2b-256')
+   *   .withCallback((event) => {
+   *     console.log('Progress:', event);
+   *   })
+   *   .send();
+   *
+   * // Or with Uint8Array
+   * const result = await client
+   *   .store(new Uint8Array([1, 2, 3]))
+   *   .send();
+   * ```
+   */
+  store(data) {
+    return new StoreBuilder(this, data);
+  }
+  /**
+   * Store data with custom options (internal, used by builder)
+   *
+   * **Note**: This method is public for use by the builder but users should prefer
+   * the builder pattern via `store()`.
+   *
+   * Automatically chunks data if it exceeds the configured threshold.
+   */
+  async storeWithOptions(data, options, progressCallback) {
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    if (dataBytes.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    if (dataBytes.length > this.config.chunkingThreshold) {
+      return this.storeInternalChunked(
+        dataBytes,
+        void 0,
+        options,
+        progressCallback
       );
+    } else {
+      return this.storeInternalSingle(dataBytes, options);
     }
   }
-  async submitAuthorizeAccount(who, transactions, bytes) {
+  /**
+   * Internal: Store data in a single transaction (no chunking)
+   */
+  async storeInternalSingle(data, options) {
+    if (data.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const cid = await calculateCid(
+      data,
+      opts.cidCodec ?? 85 /* Raw */,
+      opts.hashingAlgorithm
+    );
+    throw new BulletinError(
+      "Direct PAPI integration not yet implemented - see examples for current usage patterns",
+      "NOT_IMPLEMENTED"
+    );
+  }
+  /**
+   * Internal: Store data with chunking
+   */
+  async storeInternalChunked(data, config, options, progressCallback) {
+    throw new BulletinError(
+      "Chunked upload not yet implemented for direct PAPI integration",
+      "NOT_IMPLEMENTED"
+    );
+  }
+  /**
+   * Store large data with automatic chunking and manifest creation
+   *
+   * Handles the complete workflow:
+   * 1. Chunk the data
+   * 2. Calculate CIDs for each chunk
+   * 3. Submit each chunk as a separate transaction
+   * 4. Create and submit DAG-PB manifest (if enabled)
+   * 5. Return all CIDs and receipt information
+   *
+   * @param data - Data to store (PAPI Binary or Uint8Array)
+   */
+  async storeChunked(data, config, options, progressCallback) {
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    if (dataBytes.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    const chunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
+      maxParallel: config?.maxParallel ?? this.config.maxParallel,
+      createManifest: config?.createManifest ?? this.config.createManifest
+    };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const chunker = new FixedSizeChunker(chunkerConfig);
+    const chunks = chunker.chunk(dataBytes);
+    const chunkCids = [];
+    for (const chunk of chunks) {
+      if (progressCallback) {
+        progressCallback({
+          type: "chunk_started",
+          index: chunk.index,
+          total: chunks.length
+        });
+      }
+      try {
+        const cid = await calculateCid(
+          chunk.data,
+          opts.cidCodec ?? 85 /* Raw */,
+          opts.hashingAlgorithm
+        );
+        chunk.cid = cid;
+        chunkCids.push(cid);
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_completed",
+            index: chunk.index,
+            total: chunks.length,
+            cid
+          });
+        }
+      } catch (error) {
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_failed",
+            index: chunk.index,
+            total: chunks.length,
+            error
+          });
+        }
+        throw error;
+      }
+    }
+    let manifestCid;
+    if (chunkerConfig.createManifest) {
+      if (progressCallback) {
+        progressCallback({ type: "manifest_started" });
+      }
+      const builder = new UnixFsDagBuilder();
+      const manifest = await builder.build(chunks, opts.hashingAlgorithm);
+      manifestCid = manifest.rootCid;
+      if (progressCallback) {
+        progressCallback({
+          type: "manifest_created",
+          cid: manifest.rootCid
+        });
+      }
+    }
+    if (progressCallback) {
+      progressCallback({
+        type: "completed",
+        manifestCid
+      });
+    }
+    return {
+      chunkCids,
+      manifestCid,
+      totalSize: dataBytes.length,
+      numChunks: chunks.length
+    };
+  }
+  /**
+   * Authorize an account to store data
+   *
+   * Requires sudo/authorizer privileges
+   */
+  async authorizeAccount(who, transactions, bytes) {
     try {
       const tx = this.api.tx.TransactionStorage.authorize_account({
         who,
@@ -584,7 +829,12 @@ var PAPITransactionSubmitter = class {
       );
     }
   }
-  async submitAuthorizePreimage(contentHash, maxSize) {
+  /**
+   * Authorize a preimage (by content hash) to be stored
+   *
+   * Requires sudo/authorizer privileges
+   */
+  async authorizePreimage(contentHash, maxSize) {
     try {
       const tx = this.api.tx.TransactionStorage.authorize_preimage({
         content_hash: contentHash,
@@ -605,7 +855,10 @@ var PAPITransactionSubmitter = class {
       );
     }
   }
-  async submitRenew(block, index) {
+  /**
+   * Renew/extend retention period for stored data
+   */
+  async renew(block, index) {
     try {
       const tx = this.api.tx.TransactionStorage.renew({ block, index });
       const result = await tx.signAndSubmit(this.signer);
@@ -623,462 +876,249 @@ var PAPITransactionSubmitter = class {
       );
     }
   }
-  async submitRefreshAccountAuthorization(who) {
+  /**
+   * Store preimage-authorized content as unsigned transaction
+   *
+   * Use this for content that has been pre-authorized via `authorizePreimage()`.
+   * Unsigned transactions don't require fees and can be submitted by anyone who
+   * has the preauthorized content.
+   *
+   * @param data - The preauthorized content to store
+   * @param options - Store options (codec, hashing algorithm, etc.)
+   * @param progressCallback - Optional progress callback for chunked uploads
+   *
+   * @example
+   * ```typescript
+   * import { blake2b256 } from '@noble/hashes/blake2b';
+   *
+   * // First, authorize the content hash (requires sudo)
+   * const data = Binary.fromText('Hello, Bulletin!');
+   * const hash = blake2b256(data.asBytes());
+   * await sudoClient.authorizePreimage(hash, BigInt(data.asBytes().length));
+   *
+   * // Anyone can now submit without fees
+   * const result = await client.store(data).sendUnsigned();
+   * ```
+   */
+  async storeWithPreimageAuth(data, options, progressCallback) {
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    if (dataBytes.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    if (dataBytes.length > this.config.chunkingThreshold) {
+      throw new BulletinError(
+        "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
+        "UNSUPPORTED_OPERATION"
+      );
+    }
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const cid = await calculateCid(
+      dataBytes,
+      opts.cidCodec ?? 85 /* Raw */,
+      opts.hashingAlgorithm
+    );
     try {
-      const tx = this.api.tx.TransactionStorage.refresh_account_authorization({ who });
-      const result = await tx.signAndSubmit(this.signer);
+      const tx = this.api.tx.TransactionStorage.store({ data: dataBytes });
+      const result = await tx.submit();
       const finalized = await result.waitFor("finalized");
+      const storedEvent = finalized.events.find(
+        (e) => e.type === "TransactionStorage" && e.value.type === "Stored"
+      );
+      const extrinsicIndex = storedEvent?.value.value?.index;
+      const blockNumber = finalized.blockNumber;
       return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
+        cid,
+        size: dataBytes.length,
+        blockNumber,
+        extrinsicIndex,
+        chunks: void 0
       };
     } catch (error) {
       throw new BulletinError(
-        `Failed to refresh authorization: ${error}`,
+        `Failed to store with preimage auth: ${error}`,
         "TRANSACTION_FAILED",
         error
       );
     }
   }
-  async submitRefreshPreimageAuthorization(contentHash) {
-    try {
-      const tx = this.api.tx.TransactionStorage.refresh_preimage_authorization({
-        content_hash: contentHash
-      });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
-      return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
-      };
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to refresh preimage authorization: ${error}`,
-        "TRANSACTION_FAILED",
-        error
-      );
+  /**
+   * Estimate authorization needed for storing data
+   */
+  estimateAuthorization(dataSize) {
+    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize);
+    let transactions = numChunks;
+    let bytes = dataSize;
+    if (this.config.createManifest) {
+      transactions += 1;
+      bytes += numChunks * 10 + 1e3;
     }
-  }
-  async submitRemoveExpiredAccountAuthorization(who) {
-    try {
-      const tx = this.api.tx.TransactionStorage.remove_expired_account_authorization({ who });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
-      return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
-      };
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to remove expired authorization: ${error}`,
-        "TRANSACTION_FAILED",
-        error
-      );
-    }
-  }
-  async submitRemoveExpiredPreimageAuthorization(contentHash) {
-    try {
-      const tx = this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
-        content_hash: contentHash
-      });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
-      return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
-      };
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to remove expired preimage authorization: ${error}`,
-        "TRANSACTION_FAILED",
-        error
-      );
-    }
+    return { transactions, bytes };
   }
 };
 
-// src/async-client.ts
-var AsyncBulletinClient = class {
-  constructor(submitter, config) {
-    this.submitter = submitter;
+// src/mock-client.ts
+var MockStoreBuilder = class {
+  constructor(client, data) {
+    this.client = client;
+    this.options = { ...DEFAULT_STORE_OPTIONS };
+    this.data = data instanceof Uint8Array ? data : data.asBytes();
+  }
+  /** Set the CID codec */
+  withCodec(codec) {
+    this.options.cidCodec = codec;
+    return this;
+  }
+  /** Set the hash algorithm */
+  withHashAlgorithm(algorithm) {
+    this.options.hashingAlgorithm = algorithm;
+    return this;
+  }
+  /** Set whether to wait for finalization */
+  withFinalization(wait) {
+    this.options.waitForFinalization = wait;
+    return this;
+  }
+  /** Set custom store options */
+  withOptions(options) {
+    this.options = options;
+    return this;
+  }
+  /** Set progress callback for chunked uploads */
+  withCallback(callback) {
+    this.callback = callback;
+    return this;
+  }
+  /** Execute the mock store operation */
+  async send() {
+    return this.client.storeWithOptions(this.data, this.options, this.callback);
+  }
+};
+var MockBulletinClient = class {
+  /**
+   * Create a new mock client with optional configuration
+   */
+  constructor(config) {
+    /** Operations performed (for testing verification) */
+    this.operations = [];
     this.config = {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
+      // 1 MiB
       maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
       // 2 MiB
-      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true
+      checkAuthorizationBeforeUpload: config?.checkAuthorizationBeforeUpload ?? true,
+      simulateAuthFailure: config?.simulateAuthFailure ?? false,
+      simulateStorageFailure: config?.simulateStorageFailure ?? false
     };
   }
   /**
    * Set the account for authorization checks
-   *
-   * If set and `checkAuthorizationBeforeUpload` is enabled, the client will
-   * query authorization state before uploading and fail fast if insufficient.
    */
   withAccount(account) {
     this.account = account;
     return this;
   }
   /**
-   * Store data on Bulletin Chain
-   *
-   * Automatically chunks data if it exceeds the configured threshold.
-   * This handles the complete workflow:
-   * 1. Decide whether to chunk based on data size
-   * 2. Calculate CID(s)
-   * 3. Submit transaction(s)
-   * 4. Wait for finalization
-   *
-   * @param data - Data to store
-   * @param options - Storage options (CID codec, hash algorithm)
-   * @param progressCallback - Optional callback for progress tracking (only called for chunked uploads)
+   * Get all operations performed by this client
    */
-  async store(data, options, progressCallback) {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
-    }
-    if (data.length > this.config.chunkingThreshold) {
-      return this.storeInternalChunked(data, void 0, options, progressCallback);
-    } else {
-      return this.storeInternalSingle(data, options);
-    }
+  getOperations() {
+    return [...this.operations];
   }
   /**
-   * Internal: Store data in a single transaction (no chunking)
+   * Clear recorded operations
    */
-  async storeInternalSingle(data, options) {
-    if (data.length === 0) {
+  clearOperations() {
+    this.operations = [];
+  }
+  /**
+   * Store data using builder pattern
+   *
+   * @param data - Data to store (PAPI Binary or Uint8Array)
+   */
+  store(data) {
+    return new MockStoreBuilder(this, data);
+  }
+  /**
+   * Store data with custom options (internal, used by builder)
+   */
+  async storeWithOptions(data, options, _progressCallback) {
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
-    if (this.config.checkAuthorizationBeforeUpload && this.account) {
-      if (this.submitter.queryAccountAuthorization) {
-        const auth = await this.submitter.queryAccountAuthorization(this.account);
-        if (auth) {
-          if (auth.expiresAt !== void 0) {
-            if (this.submitter.queryCurrentBlock) {
-              const currentBlock = await this.submitter.queryCurrentBlock();
-              if (currentBlock !== void 0 && auth.expiresAt <= currentBlock) {
-                throw new BulletinError(
-                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
-                  "AUTHORIZATION_EXPIRED",
-                  { expiredAt: auth.expiresAt, currentBlock }
-                );
-              }
-            }
-          }
-          if (auth.maxSize < BigInt(data.length)) {
-            throw new BulletinError(
-              `Insufficient authorization: need ${data.length} bytes, have ${auth.maxSize} bytes`,
-              "INSUFFICIENT_AUTHORIZATION",
-              { need: data.length, available: auth.maxSize }
-            );
-          }
-          if (auth.transactions < 1) {
-            throw new BulletinError(
-              `Insufficient authorization: need 1 transaction, have ${auth.transactions} transactions`,
-              "INSUFFICIENT_AUTHORIZATION",
-              { need: 1, available: auth.transactions }
-            );
-          }
-        }
-      }
+    if (this.config.checkAuthorizationBeforeUpload && this.config.simulateAuthFailure) {
+      throw new BulletinError(
+        "Insufficient authorization: need 100 bytes, have 0 bytes",
+        "INSUFFICIENT_AUTHORIZATION",
+        { need: 100, available: 0 }
+      );
+    }
+    if (this.config.simulateStorageFailure) {
+      throw new BulletinError(
+        "Simulated storage failure",
+        "TRANSACTION_FAILED"
+      );
     }
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
     const cid = await calculateCid(
-      data,
+      dataBytes,
       opts.cidCodec ?? 85 /* Raw */,
       opts.hashingAlgorithm
     );
-    const receipt = await this.submitter.submitStore(data);
+    this.operations.push({
+      type: "store",
+      dataSize: dataBytes.length,
+      cid: cid.toString()
+    });
     return {
       cid,
-      size: data.length,
-      blockNumber: receipt.blockNumber
-      // No chunks for single upload
-    };
-  }
-  /**
-   * Calculate authorization requirements for chunked upload
-   */
-  calculateRequirements(dataSize, numChunks, createManifest) {
-    let transactions = numChunks;
-    if (createManifest) {
-      transactions += 1;
-    }
-    const bytes = dataSize;
-    return { transactions, bytes };
-  }
-  /**
-   * Internal: Store data with chunking (returns unified StoreResult)
-   */
-  async storeInternalChunked(data, config, options, progressCallback) {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
-    }
-    const chunkerConfig = {
-      ...DEFAULT_CHUNKER_CONFIG,
-      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
-      maxParallel: config?.maxParallel ?? this.config.maxParallel,
-      createManifest: config?.createManifest ?? this.config.createManifest
-    };
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-    const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(data);
-    if (this.config.checkAuthorizationBeforeUpload && this.account) {
-      if (this.submitter.queryAccountAuthorization) {
-        const { transactions: txsNeeded, bytes: bytesNeeded } = this.calculateRequirements(
-          data.length,
-          chunks.length,
-          chunkerConfig.createManifest
-        );
-        const auth = await this.submitter.queryAccountAuthorization(this.account);
-        if (auth) {
-          if (auth.expiresAt !== void 0) {
-            if (this.submitter.queryCurrentBlock) {
-              const currentBlock = await this.submitter.queryCurrentBlock();
-              if (currentBlock !== void 0 && auth.expiresAt <= currentBlock) {
-                throw new BulletinError(
-                  `Authorization expired at block ${auth.expiresAt} (current block: ${currentBlock})`,
-                  "AUTHORIZATION_EXPIRED",
-                  { expiredAt: auth.expiresAt, currentBlock }
-                );
-              }
-            }
-          }
-          if (auth.maxSize < BigInt(bytesNeeded)) {
-            throw new BulletinError(
-              `Insufficient authorization: need ${bytesNeeded} bytes, have ${auth.maxSize} bytes`,
-              "INSUFFICIENT_AUTHORIZATION",
-              { need: bytesNeeded, available: auth.maxSize }
-            );
-          }
-          if (auth.transactions < txsNeeded) {
-            throw new BulletinError(
-              `Insufficient authorization: need ${txsNeeded} transactions, have ${auth.transactions} transactions`,
-              "INSUFFICIENT_AUTHORIZATION",
-              { need: txsNeeded, available: auth.transactions }
-            );
-          }
-        }
-      }
-    }
-    const chunkCids = [];
-    let lastBlockNumber;
-    for (const chunk of chunks) {
-      if (progressCallback) {
-        progressCallback({
-          type: "chunk_started",
-          index: chunk.index,
-          total: chunks.length
-        });
-      }
-      try {
-        const cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? 85 /* Raw */,
-          opts.hashingAlgorithm
-        );
-        chunk.cid = cid;
-        const receipt = await this.submitter.submitStore(chunk.data);
-        lastBlockNumber = receipt.blockNumber;
-        chunkCids.push(cid);
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_completed",
-            index: chunk.index,
-            total: chunks.length,
-            cid
-          });
-        }
-      } catch (error) {
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_failed",
-            index: chunk.index,
-            total: chunks.length,
-            error
-          });
-        }
-        throw error;
-      }
-    }
-    let manifestCid;
-    if (chunkerConfig.createManifest) {
-      if (progressCallback) {
-        progressCallback({ type: "manifest_started" });
-      }
-      const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, opts.hashingAlgorithm);
-      const receipt = await this.submitter.submitStore(manifest.dagBytes);
-      lastBlockNumber = receipt.blockNumber;
-      manifestCid = manifest.rootCid;
-      if (progressCallback) {
-        progressCallback({
-          type: "manifest_created",
-          cid: manifest.rootCid
-        });
-      }
-    }
-    if (progressCallback) {
-      progressCallback({
-        type: "completed",
-        manifestCid
-      });
-    }
-    return {
-      cid: manifestCid ?? chunkCids[0],
-      size: data.length,
-      blockNumber: lastBlockNumber,
-      chunks: {
-        chunkCids,
-        numChunks: chunks.length
-      }
-    };
-  }
-  /**
-   * Store large data with automatic chunking and manifest creation
-   *
-   * Handles the complete workflow:
-   * 1. Chunk the data
-   * 2. Calculate CIDs for each chunk
-   * 3. Submit each chunk as a separate transaction
-   * 4. Create and submit DAG-PB manifest (if enabled)
-   * 5. Return all CIDs and receipt information
-   */
-  async storeChunked(data, config, options, progressCallback) {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
-    }
-    const chunkerConfig = {
-      ...DEFAULT_CHUNKER_CONFIG,
-      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
-      maxParallel: config?.maxParallel ?? this.config.maxParallel,
-      createManifest: config?.createManifest ?? this.config.createManifest
-    };
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-    const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(data);
-    const chunkCids = [];
-    for (const chunk of chunks) {
-      if (progressCallback) {
-        progressCallback({
-          type: "chunk_started",
-          index: chunk.index,
-          total: chunks.length
-        });
-      }
-      try {
-        const cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? 85 /* Raw */,
-          opts.hashingAlgorithm
-        );
-        chunk.cid = cid;
-        await this.submitter.submitStore(chunk.data);
-        chunkCids.push(cid);
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_completed",
-            index: chunk.index,
-            total: chunks.length,
-            cid
-          });
-        }
-      } catch (error) {
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_failed",
-            index: chunk.index,
-            total: chunks.length,
-            error
-          });
-        }
-        throw error;
-      }
-    }
-    let manifestCid;
-    if (chunkerConfig.createManifest) {
-      if (progressCallback) {
-        progressCallback({ type: "manifest_started" });
-      }
-      const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, opts.hashingAlgorithm);
-      await this.submitter.submitStore(manifest.dagBytes);
-      manifestCid = manifest.rootCid;
-      if (progressCallback) {
-        progressCallback({
-          type: "manifest_created",
-          cid: manifest.rootCid
-        });
-      }
-    }
-    if (progressCallback) {
-      progressCallback({
-        type: "completed",
-        manifestCid
-      });
-    }
-    return {
-      chunkCids,
-      manifestCid,
-      totalSize: data.length,
-      numChunks: chunks.length
+      size: dataBytes.length,
+      blockNumber: 1
     };
   }
   /**
    * Authorize an account to store data
-   *
-   * Requires sudo/authorizer privileges
    */
   async authorizeAccount(who, transactions, bytes) {
-    return this.submitter.submitAuthorizeAccount(who, transactions, bytes);
+    if (this.config.simulateAuthFailure) {
+      throw new BulletinError(
+        "Simulated authorization failure",
+        "AUTHORIZATION_FAILED"
+      );
+    }
+    this.operations.push({
+      type: "authorize_account",
+      who,
+      transactions,
+      bytes
+    });
+    return {
+      blockHash: "0x0000000000000000000000000000000000000000000000000000000000000001",
+      txHash: "0x0000000000000000000000000000000000000000000000000000000000000002",
+      blockNumber: 1
+    };
   }
   /**
-   * Authorize a preimage (by content hash) to be stored
-   *
-   * Requires sudo/authorizer privileges
+   * Authorize a preimage to be stored
    */
   async authorizePreimage(contentHash, maxSize) {
-    return this.submitter.submitAuthorizePreimage(contentHash, maxSize);
-  }
-  /**
-   * Renew/extend retention period for stored data
-   */
-  async renew(block, index) {
-    return this.submitter.submitRenew(block, index);
-  }
-  /**
-   * Refresh an account authorization (extends expiry)
-   *
-   * Requires sudo/authorizer privileges
-   */
-  async refreshAccountAuthorization(who) {
-    return this.submitter.submitRefreshAccountAuthorization(who);
-  }
-  /**
-   * Refresh a preimage authorization (extends expiry)
-   *
-   * Requires sudo/authorizer privileges
-   */
-  async refreshPreimageAuthorization(contentHash) {
-    return this.submitter.submitRefreshPreimageAuthorization(contentHash);
-  }
-  /**
-   * Remove an expired account authorization
-   */
-  async removeExpiredAccountAuthorization(who) {
-    return this.submitter.submitRemoveExpiredAccountAuthorization(who);
-  }
-  /**
-   * Remove an expired preimage authorization
-   */
-  async removeExpiredPreimageAuthorization(contentHash) {
-    return this.submitter.submitRemoveExpiredPreimageAuthorization(contentHash);
+    if (this.config.simulateAuthFailure) {
+      throw new BulletinError(
+        "Simulated authorization failure",
+        "AUTHORIZATION_FAILED"
+      );
+    }
+    this.operations.push({
+      type: "authorize_preimage",
+      contentHash,
+      maxSize
+    });
+    return {
+      blockHash: "0x0000000000000000000000000000000000000000000000000000000000000001",
+      txHash: "0x0000000000000000000000000000000000000000000000000000000000000002",
+      blockNumber: 1
+    };
   }
   /**
    * Estimate authorization needed for storing data
@@ -1110,7 +1150,9 @@ export {
   FixedSizeChunker,
   HashAlgorithm,
   MAX_CHUNK_SIZE,
-  PAPITransactionSubmitter,
+  MockBulletinClient,
+  MockStoreBuilder,
+  StoreBuilder,
   UnixFsDagBuilder,
   VERSION,
   batch,

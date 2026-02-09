@@ -1,6 +1,6 @@
 import { CID } from 'multiformats/cid';
 export { CID } from 'multiformats/cid';
-import { PolkadotSigner } from 'polkadot-api';
+import { PolkadotSigner, Binary } from 'polkadot-api';
 
 /**
  * Common types and interfaces for the Bulletin SDK
@@ -41,6 +41,9 @@ interface ChunkerConfig {
 }
 /**
  * Default chunker configuration
+ *
+ * Uses 1 MiB chunk size by default (safe and efficient for most use cases).
+ * Maximum allowed is 2 MiB (MAX_CHUNK_SIZE, Bitswap limit for IPFS compatibility).
  */
 declare const DEFAULT_CHUNKER_CONFIG: ChunkerConfig;
 /**
@@ -97,6 +100,10 @@ interface StoreResult {
     size: number;
     /** Block number where data was stored (if known) */
     blockNumber?: number;
+    /** Extrinsic index within the block (required for renew operations)
+     * This value comes from the `Stored` event's `index` field
+     */
+    extrinsicIndex?: number;
     /** Chunk details (only present for chunked uploads) */
     chunks?: ChunkDetails;
 }
@@ -139,26 +146,26 @@ interface Authorization {
  * Progress event types
  */
 type ProgressEvent = {
-    type: 'chunk_started';
+    type: "chunk_started";
     index: number;
     total: number;
 } | {
-    type: 'chunk_completed';
+    type: "chunk_completed";
     index: number;
     total: number;
     cid: CID;
 } | {
-    type: 'chunk_failed';
+    type: "chunk_failed";
     index: number;
     total: number;
     error: Error;
 } | {
-    type: 'manifest_started';
+    type: "manifest_started";
 } | {
-    type: 'manifest_created';
+    type: "manifest_created";
     cid: CID;
 } | {
-    type: 'completed';
+    type: "completed";
     manifestCid?: CID;
 };
 /**
@@ -527,10 +534,6 @@ declare class BulletinClient {
 }
 
 /**
- * Transaction submission for Bulletin Chain operations
- */
-
-/**
  * Transaction receipt from a successful submission
  */
 interface TransactionReceipt {
@@ -542,80 +545,115 @@ interface TransactionReceipt {
     blockNumber?: number;
 }
 /**
- * Transaction submitter interface
- *
- * Implement this to integrate with your signing and submission method
+ * Configuration for the async Bulletin client
  */
-interface TransactionSubmitter {
-    /** Submit a store transaction */
-    submitStore(data: Uint8Array): Promise<TransactionReceipt>;
-    /** Submit an authorize_account transaction */
-    submitAuthorizeAccount(who: string, transactions: number, bytes: bigint): Promise<TransactionReceipt>;
-    /** Submit an authorize_preimage transaction */
-    submitAuthorizePreimage(contentHash: Uint8Array, maxSize: bigint): Promise<TransactionReceipt>;
-    /** Submit a renew transaction */
-    submitRenew(block: number, index: number): Promise<TransactionReceipt>;
-    /** Submit a refresh_account_authorization transaction */
-    submitRefreshAccountAuthorization(who: string): Promise<TransactionReceipt>;
-    /** Submit a refresh_preimage_authorization transaction */
-    submitRefreshPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
-    /** Submit a remove_expired_account_authorization transaction */
-    submitRemoveExpiredAccountAuthorization(who: string): Promise<TransactionReceipt>;
-    /** Submit a remove_expired_preimage_authorization transaction */
-    submitRemoveExpiredPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
-    /**
-     * Query authorization state for an account
-     *
-     * Returns undefined if this submitter doesn't support queries or if no authorization exists.
-     */
-    queryAccountAuthorization?(who: string): Promise<Authorization | undefined>;
-    /**
-     * Query authorization state for a preimage
-     *
-     * Returns undefined if this submitter doesn't support queries or if no authorization exists.
-     */
-    queryPreimageAuthorization?(contentHash: Uint8Array): Promise<Authorization | undefined>;
-    /**
-     * Query the current block number
-     *
-     * Returns undefined if this submitter doesn't support queries.
-     */
-    queryCurrentBlock?(): Promise<number | undefined>;
+interface AsyncClientConfig {
+    /** Default chunk size for large files (default: 1 MiB) */
+    defaultChunkSize?: number;
+    /** Maximum parallel uploads (default: 8) */
+    maxParallel?: number;
+    /** Whether to create manifests for chunked uploads (default: true) */
+    createManifest?: boolean;
+    /** Threshold for automatic chunking (default: 2 MiB) */
+    chunkingThreshold?: number;
+    /** Check authorization before uploading to fail fast (default: true) */
+    checkAuthorizationBeforeUpload?: boolean;
 }
 /**
- * PAPI-based transaction submitter
+ * Builder for store operations with fluent API
  *
- * Complete implementation using Polkadot API (PAPI)
+ * @example
+ * ```typescript
+ * import { Binary } from 'polkadot-api';
  *
- * Note: Query methods (queryAccountAuthorization, queryPreimageAuthorization, queryCurrentBlock)
- * are not implemented by default. To enable authorization pre-flight checking, extend this class
- * and implement the query methods to query the blockchain state.
+ * const result = await client
+ *   .store(Binary.fromText('Hello'))
+ *   .withCodec(CidCodec.DagPb)
+ *   .withHashAlgorithm('blake2b-256')
+ *   .withCallback((event) => console.log('Progress:', event))
+ *   .send();
+ * ```
  */
-declare class PAPITransactionSubmitter implements TransactionSubmitter {
-    private api;
-    private signer;
-    constructor(api: any, signer: PolkadotSigner);
-    submitStore(data: Uint8Array): Promise<TransactionReceipt>;
-    submitAuthorizeAccount(who: string, transactions: number, bytes: bigint): Promise<TransactionReceipt>;
-    submitAuthorizePreimage(contentHash: Uint8Array, maxSize: bigint): Promise<TransactionReceipt>;
-    submitRenew(block: number, index: number): Promise<TransactionReceipt>;
-    submitRefreshAccountAuthorization(who: string): Promise<TransactionReceipt>;
-    submitRefreshPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
-    submitRemoveExpiredAccountAuthorization(who: string): Promise<TransactionReceipt>;
-    submitRemoveExpiredPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
+declare class StoreBuilder {
+    private client;
+    private data;
+    private options;
+    private callback?;
+    constructor(client: AsyncBulletinClient, data: Binary | Uint8Array);
+    /** Set the CID codec */
+    withCodec(codec: CidCodec): this;
+    /** Set the hash algorithm */
+    withHashAlgorithm(algorithm: HashAlgorithm): this;
+    /** Set whether to wait for finalization */
+    withFinalization(wait: boolean): this;
+    /** Set custom store options */
+    withOptions(options: StoreOptions): this;
+    /** Set progress callback for chunked uploads */
+    withCallback(callback: ProgressCallback): this;
+    /** Execute the store operation (signed transaction, uses account authorization) */
+    send(): Promise<StoreResult>;
+    /**
+     * Execute store operation as unsigned transaction (for preimage-authorized content)
+     *
+     * Use this when the content has been pre-authorized via `authorizePreimage()`.
+     * Unsigned transactions don't require fees and can be submitted by anyone.
+     *
+     * @example
+     * ```typescript
+     * // First authorize the content hash
+     * const hash = blake2b256(data);
+     * await client.authorizePreimage(hash, BigInt(data.length));
+     *
+     * // Anyone can now store this content without fees
+     * const result = await client.store(data).sendUnsigned();
+     * ```
+     */
+    sendUnsigned(): Promise<StoreResult>;
 }
-
 /**
  * Async Bulletin client that submits transactions to the chain
  *
- * This client provides a complete interface for storing data on Bulletin Chain,
- * handling everything from chunking to transaction submission.
+ * This client is tightly coupled to PAPI (Polkadot API) for blockchain interaction.
+ * Users must provide a configured PAPI client with appropriate chain metadata.
+ *
+ * @example
+ * ```typescript
+ * import { createClient } from 'polkadot-api';
+ * import { getWsProvider } from 'polkadot-api/ws-provider/web';
+ * import { AsyncBulletinClient } from '@bulletin/sdk';
+ *
+ * // User sets up PAPI client
+ * const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
+ * const client = createClient(wsProvider);
+ * const api = client.getTypedApi(bulletinDescriptor);
+ *
+ * // Create SDK client
+ * const bulletinClient = new AsyncBulletinClient(api, signer);
+ *
+ * // Store data
+ * const result = await bulletinClient.store(data).send();
+ * ```
  */
 declare class AsyncBulletinClient {
-    private submitter;
-    private config;
+    /** PAPI client for blockchain interaction */
+    api: any;
+    /** Signer for transaction signing */
+    signer: PolkadotSigner;
+    /** Client configuration */
+    config: Required<AsyncClientConfig>;
+    /** Account for authorization checks (optional) */
     private account?;
-    constructor(submitter: TransactionSubmitter, config?: Partial<ClientConfig>);
+    /**
+     * Create a new async client with PAPI client and signer
+     *
+     * The PAPI client must be configured with the correct chain metadata
+     * for your Bulletin Chain node.
+     *
+     * @param api - Configured PAPI TypedApi instance
+     * @param signer - Polkadot signer for transaction signing
+     * @param config - Optional client configuration
+     */
+    constructor(api: any, signer: PolkadotSigner, config?: Partial<AsyncClientConfig>);
     /**
      * Set the account for authorization checks
      *
@@ -624,30 +662,48 @@ declare class AsyncBulletinClient {
      */
     withAccount(account: string): this;
     /**
-     * Store data on Bulletin Chain
+     * Store data on Bulletin Chain using builder pattern
+     *
+     * Returns a builder that allows fluent configuration of store options.
+     *
+     * @param data - Data to store (PAPI Binary or Uint8Array)
+     *
+     * @example
+     * ```typescript
+     * import { Binary } from 'polkadot-api';
+     *
+     * // Using PAPI's Binary class (recommended)
+     * const result = await client
+     *   .store(Binary.fromText('Hello, Bulletin!'))
+     *   .withCodec(CidCodec.DagPb)
+     *   .withHashAlgorithm('blake2b-256')
+     *   .withCallback((event) => {
+     *     console.log('Progress:', event);
+     *   })
+     *   .send();
+     *
+     * // Or with Uint8Array
+     * const result = await client
+     *   .store(new Uint8Array([1, 2, 3]))
+     *   .send();
+     * ```
+     */
+    store(data: Binary | Uint8Array): StoreBuilder;
+    /**
+     * Store data with custom options (internal, used by builder)
+     *
+     * **Note**: This method is public for use by the builder but users should prefer
+     * the builder pattern via `store()`.
      *
      * Automatically chunks data if it exceeds the configured threshold.
-     * This handles the complete workflow:
-     * 1. Decide whether to chunk based on data size
-     * 2. Calculate CID(s)
-     * 3. Submit transaction(s)
-     * 4. Wait for finalization
-     *
-     * @param data - Data to store
-     * @param options - Storage options (CID codec, hash algorithm)
-     * @param progressCallback - Optional callback for progress tracking (only called for chunked uploads)
      */
-    store(data: Uint8Array, options?: StoreOptions, progressCallback?: ProgressCallback): Promise<StoreResult>;
+    storeWithOptions(data: Binary | Uint8Array, options?: StoreOptions, progressCallback?: ProgressCallback): Promise<StoreResult>;
     /**
      * Internal: Store data in a single transaction (no chunking)
      */
     private storeInternalSingle;
     /**
-     * Calculate authorization requirements for chunked upload
-     */
-    private calculateRequirements;
-    /**
-     * Internal: Store data with chunking (returns unified StoreResult)
+     * Internal: Store data with chunking
      */
     private storeInternalChunked;
     /**
@@ -659,8 +715,10 @@ declare class AsyncBulletinClient {
      * 3. Submit each chunk as a separate transaction
      * 4. Create and submit DAG-PB manifest (if enabled)
      * 5. Return all CIDs and receipt information
+     *
+     * @param data - Data to store (PAPI Binary or Uint8Array)
      */
-    storeChunked(data: Uint8Array, config?: Partial<ChunkerConfig>, options?: StoreOptions, progressCallback?: ProgressCallback): Promise<ChunkedStoreResult>;
+    storeChunked(data: Binary | Uint8Array, config?: Partial<ChunkerConfig>, options?: StoreOptions, progressCallback?: ProgressCallback): Promise<ChunkedStoreResult>;
     /**
      * Authorize an account to store data
      *
@@ -678,25 +736,154 @@ declare class AsyncBulletinClient {
      */
     renew(block: number, index: number): Promise<TransactionReceipt>;
     /**
-     * Refresh an account authorization (extends expiry)
+     * Store preimage-authorized content as unsigned transaction
      *
-     * Requires sudo/authorizer privileges
-     */
-    refreshAccountAuthorization(who: string): Promise<TransactionReceipt>;
-    /**
-     * Refresh a preimage authorization (extends expiry)
+     * Use this for content that has been pre-authorized via `authorizePreimage()`.
+     * Unsigned transactions don't require fees and can be submitted by anyone who
+     * has the preauthorized content.
      *
-     * Requires sudo/authorizer privileges
+     * @param data - The preauthorized content to store
+     * @param options - Store options (codec, hashing algorithm, etc.)
+     * @param progressCallback - Optional progress callback for chunked uploads
+     *
+     * @example
+     * ```typescript
+     * import { blake2b256 } from '@noble/hashes/blake2b';
+     *
+     * // First, authorize the content hash (requires sudo)
+     * const data = Binary.fromText('Hello, Bulletin!');
+     * const hash = blake2b256(data.asBytes());
+     * await sudoClient.authorizePreimage(hash, BigInt(data.asBytes().length));
+     *
+     * // Anyone can now submit without fees
+     * const result = await client.store(data).sendUnsigned();
+     * ```
      */
-    refreshPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
+    storeWithPreimageAuth(data: Binary | Uint8Array, options?: StoreOptions, progressCallback?: ProgressCallback): Promise<StoreResult>;
     /**
-     * Remove an expired account authorization
+     * Estimate authorization needed for storing data
      */
-    removeExpiredAccountAuthorization(who: string): Promise<TransactionReceipt>;
+    estimateAuthorization(dataSize: number): {
+        transactions: number;
+        bytes: number;
+    };
+}
+
+/**
+ * Configuration for the mock Bulletin client
+ */
+interface MockClientConfig extends AsyncClientConfig {
+    /** Simulate authorization failures (for testing error paths) */
+    simulateAuthFailure?: boolean;
+    /** Simulate storage failures (for testing error paths) */
+    simulateStorageFailure?: boolean;
+}
+/**
+ * Record of a mock operation performed
+ */
+type MockOperation = {
+    type: "store";
+    dataSize: number;
+    cid: string;
+} | {
+    type: "authorize_account";
+    who: string;
+    transactions: number;
+    bytes: bigint;
+} | {
+    type: "authorize_preimage";
+    contentHash: Uint8Array;
+    maxSize: bigint;
+};
+/**
+ * Builder for mock store operations with fluent API
+ */
+declare class MockStoreBuilder {
+    private client;
+    private data;
+    private options;
+    private callback?;
+    constructor(client: MockBulletinClient, data: Binary | Uint8Array);
+    /** Set the CID codec */
+    withCodec(codec: CidCodec): this;
+    /** Set the hash algorithm */
+    withHashAlgorithm(algorithm: HashAlgorithm): this;
+    /** Set whether to wait for finalization */
+    withFinalization(wait: boolean): this;
+    /** Set custom store options */
+    withOptions(options: StoreOptions): this;
+    /** Set progress callback for chunked uploads */
+    withCallback(callback: ProgressCallback): this;
+    /** Execute the mock store operation */
+    send(): Promise<StoreResult>;
+}
+/**
+ * Mock Bulletin client for testing
+ *
+ * This client simulates blockchain operations without requiring a running node.
+ * It calculates CIDs correctly and tracks operations but doesn't actually submit
+ * transactions to a chain.
+ *
+ * @example
+ * ```typescript
+ * import { MockBulletinClient } from '@bulletin/sdk';
+ *
+ * // Create mock client
+ * const client = new MockBulletinClient();
+ *
+ * // Store data (no blockchain required)
+ * const result = await client.store(data).send();
+ * console.log('Mock CID:', result.cid.toString());
+ *
+ * // Check what operations were performed
+ * const ops = client.getOperations();
+ * expect(ops).toHaveLength(1);
+ * ```
+ */
+declare class MockBulletinClient {
+    /** Client configuration */
+    config: Required<Omit<MockClientConfig, "simulateAuthFailure" | "simulateStorageFailure">> & {
+        simulateAuthFailure: boolean;
+        simulateStorageFailure: boolean;
+    };
+    /** Account for authorization checks (optional) */
+    private account?;
+    /** Operations performed (for testing verification) */
+    private operations;
     /**
-     * Remove an expired preimage authorization
+     * Create a new mock client with optional configuration
      */
-    removeExpiredPreimageAuthorization(contentHash: Uint8Array): Promise<TransactionReceipt>;
+    constructor(config?: Partial<MockClientConfig>);
+    /**
+     * Set the account for authorization checks
+     */
+    withAccount(account: string): this;
+    /**
+     * Get all operations performed by this client
+     */
+    getOperations(): MockOperation[];
+    /**
+     * Clear recorded operations
+     */
+    clearOperations(): void;
+    /**
+     * Store data using builder pattern
+     *
+     * @param data - Data to store (PAPI Binary or Uint8Array)
+     */
+    store(data: Binary | Uint8Array): MockStoreBuilder;
+    /**
+     * Store data with custom options (internal, used by builder)
+     */
+    storeWithOptions(data: Binary | Uint8Array, options?: StoreOptions, _progressCallback?: ProgressCallback): Promise<StoreResult>;
+    /**
+     * Authorize an account to store data
+     */
+    authorizeAccount(who: string, transactions: number, bytes: bigint): Promise<TransactionReceipt>;
+    /**
+     * Authorize a preimage to be stored
+     */
+    authorizePreimage(contentHash: Uint8Array, maxSize: bigint): Promise<TransactionReceipt>;
     /**
      * Estimate authorization needed for storing data
      */
@@ -720,4 +907,4 @@ declare class AsyncBulletinClient {
  */
 declare const VERSION = "0.1.0";
 
-export { AsyncBulletinClient, type Authorization, AuthorizationScope, BulletinClient, BulletinError, type Chunk, type ChunkDetails, type ChunkedStoreResult, type ChunkerConfig, CidCodec, type ClientConfig, DEFAULT_CHUNKER_CONFIG, DEFAULT_STORE_OPTIONS, type DagManifest, FixedSizeChunker, HashAlgorithm, MAX_CHUNK_SIZE, PAPITransactionSubmitter, type ProgressCallback, type ProgressEvent, type StoreOptions, type StoreResult, type TransactionReceipt, type TransactionSubmitter, UnixFsDagBuilder, VERSION, batch, bytesToHex, calculateCid, calculateThroughput, cidFromBytes, cidToBytes, convertCid, createProgressTracker, deepClone, estimateFees, formatBytes, formatThroughput, getContentHash, hexToBytes, isBrowser, isNode, isValidSS58, limitConcurrency, measureTime, optimalChunkSize, parseCid, reassembleChunks, retry, sleep, truncate, validateChunkSize };
+export { AsyncBulletinClient, type AsyncClientConfig, type Authorization, AuthorizationScope, BulletinClient, BulletinError, type Chunk, type ChunkDetails, type ChunkedStoreResult, type ChunkerConfig, CidCodec, type ClientConfig, DEFAULT_CHUNKER_CONFIG, DEFAULT_STORE_OPTIONS, type DagManifest, FixedSizeChunker, HashAlgorithm, MAX_CHUNK_SIZE, MockBulletinClient, type MockClientConfig, type MockOperation, MockStoreBuilder, type ProgressCallback, type ProgressEvent, StoreBuilder, type StoreOptions, type StoreResult, type TransactionReceipt, UnixFsDagBuilder, VERSION, batch, bytesToHex, calculateCid, calculateThroughput, cidFromBytes, cidToBytes, convertCid, createProgressTracker, deepClone, estimateFees, formatBytes, formatThroughput, getContentHash, hexToBytes, isBrowser, isNode, isValidSS58, limitConcurrency, measureTime, optimalChunkSize, parseCid, reassembleChunks, retry, sleep, truncate, validateChunkSize };

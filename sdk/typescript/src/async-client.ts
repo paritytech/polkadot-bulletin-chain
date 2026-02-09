@@ -134,7 +134,11 @@ export class StoreBuilder {
    * ```
    */
   async sendUnsigned(): Promise<StoreResult> {
-    return this.client.storeWithPreimageAuth(this.data, this.options, this.callback);
+    return this.client.storeWithPreimageAuth(
+      this.data,
+      this.options,
+      this.callback,
+    );
   }
 }
 
