@@ -13,7 +13,7 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 /release <network>
 ```
 
-**Networks**: `testnet`, `westend`, `paseo`, `pop`, `polkadot`
+**Networks**: `westend`, `paseo`, `pop`, `polkadot`
 
 ## Steps
 
