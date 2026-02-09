@@ -107,15 +107,13 @@ async function main() {
   console.log('✅ Preimage authorized!');
   console.log('   Block:', preimageReceipt.blockHash, '\n');
 
-  // Anyone can now store this specific content
-  // NOTE: Currently using signed transaction, but preimage-authorized content
-  // should ideally be submitted as an unsigned transaction (no fees, anyone can submit).
-  // TODO: SDK needs to support unsigned transaction submission for preimage auth.
-  console.log('⏳ Storing authorized preimage (currently using signed tx)...');
-  console.log('   ⚠️  Limitation: Should use unsigned tx for preimage auth');
-  const preimageResult = await bobClient.store(specificData).send();
-  console.log('✅ Preimage stored!');
-  console.log('   CID:', preimageResult.cid.toString(), '\n');
+  // Anyone can now store this specific content using unsigned transaction (no fees!)
+  console.log('⏳ Storing authorized preimage as unsigned transaction...');
+  console.log('   💡 Unsigned = no fees, anyone can submit');
+  const preimageResult = await bobClient.store(specificData).sendUnsigned();
+  console.log('✅ Preimage stored (unsigned tx)!');
+  console.log('   CID:', preimageResult.cid.toString());
+  console.log('   No transaction fees paid! ✨\n');
 
   // 5. Refresh Authorization Workflow
   console.log('═══ Refresh Authorization Workflow ═══\n');
@@ -185,25 +183,25 @@ async function main() {
   console.log('\n═══ Workflow Complete ═══\n');
   console.log('✅ Demonstrated operations:');
   console.log('   • Account authorization (Alice authorizes Bob)');
-  console.log('   • Data storage (Bob stores with authorization)');
+  console.log('   • Signed storage (Bob stores with account auth, pays fees)');
   console.log('   • Preimage authorization (content-addressed)');
-  console.log('   • Preimage storage (anyone can store authorized content)');
+  console.log('   • Unsigned storage (anyone stores preauthorized content, no fees!)');
   console.log('   • Refresh authorizations (extends expiry)');
   console.log('   • Renew stored data (extends retention)');
   console.log('   • Remove expired authorizations (cleanup)');
 
   console.log('\n💡 Best Practices:');
   console.log('   • Authorize before storing to ensure capacity');
-  console.log('   • Use account auth for dynamic content');
-  console.log('   • Use preimage auth when content is known ahead');
+  console.log('   • Use account auth for dynamic content (signed tx)');
+  console.log('   • Use preimage auth when content is known ahead (unsigned tx, no fees!)');
   console.log('   • Refresh authorizations before they expire');
   console.log('   • Renew important data before retention period ends');
   console.log('   • Clean up expired authorizations to free storage');
 
-  console.log('\n⚠️  Known Limitations:');
-  console.log('   • SDK currently uses signed transactions for preimage-authorized content');
-  console.log('   • Ideally should support unsigned transactions (no fees, anyone can submit)');
-  console.log('   • This is a TODO for future SDK enhancement');
+  console.log('\n💡 Signed vs Unsigned Transactions:');
+  console.log('   • Signed (.send()): Uses account authorization, requires fees');
+  console.log('   • Unsigned (.sendUnsigned()): Uses preimage authorization, no fees!');
+  console.log('   • Anyone can submit unsigned tx for preauthorized content');
 
   console.log('\n🎉 Complete workflow example finished!');
 
