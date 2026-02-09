@@ -59,7 +59,7 @@ jobs:
         with:
           lookup-only: true
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}-
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}
           fail-on-cache-miss: false
 
       - name: Install try-runtime-cli
@@ -68,6 +68,14 @@ jobs:
           curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.1/try-runtime-x86_64-unknown-linux-musl -o try-runtime
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
+
+      - name: Install jq
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        run: |
+          if ! command -v jq &> /dev/null; then
+            echo "Installing jq..."
+            apt-get update && apt-get install -y jq
+          fi
 
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
