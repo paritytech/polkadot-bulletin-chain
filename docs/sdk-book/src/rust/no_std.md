@@ -2,6 +2,8 @@
 
 The Rust SDK is designed to be compatible with `no_std` environments, making it ideal for use in constrained environments like embedded systems or WebAssembly runtimes.
 
+> **Important**: The `no_std` feature is for **data preparation and verification** only. You cannot call `store()` or `retrieve()` methods in no_std contexts. These high-level APIs require networking and async support which are only available with the `std` feature.
+
 ## Configuration
 
 Disable default features in your `Cargo.toml`:
@@ -15,9 +17,10 @@ bulletin-sdk-rust = { version = "0.1", default-features = false }
 
 When using the SDK without the `std` feature:
 
-- **Networking**: The SDK does not handle networking in `no_std`. You cannot use `subxt` or `tokio`.
-- **Async**: Async/await requires std library support.
-- **Functionality**: Core logic (chunking, CID calculation, DAG generation) works perfectly.
+- **No `store()` or `retrieve()`**: High-level client APIs require std for networking
+- **No Networking**: Cannot use `subxt` or connect to nodes
+- **No Async**: Async/await requires std library support
+- **Data Preparation Only**: Use for CID calculation, chunking, and verification
 
 ## What Works in `no_std`
 
@@ -70,13 +73,13 @@ fn prepare_chunks(data: &[u8]) -> Vec<Vec<u8>> {
 
 ## Use Cases
 
-**Embedded Systems**: Calculate CIDs on IoT devices before uploading to a gateway.
+**Embedded Systems**: Calculate CIDs on IoT devices before uploading via a gateway.
 
-**WASM Modules**: Use in WebAssembly modules for client-side data preparation.
+**WASM Modules**: Use in WebAssembly modules for client-side data preparation and verification.
 
-**Substrate Pallets**: Import core SDK functionality into Substrate pallets for on-chain verification.
+**Substrate Pallets**: Use CID calculation and chunking logic for **on-chain verification** (e.g., verify that submitted data matches a claimed CID). Note: You cannot use the `store()` API in pallets - that's for off-chain clients only.
 
-**Resource-Constrained Environments**: Run on systems without std library support.
+**Resource-Constrained Environments**: Run CID calculations on systems without std library support.
 
 ## Memory Considerations
 
