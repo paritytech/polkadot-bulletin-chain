@@ -70,8 +70,8 @@ std = [
 	"thiserror",
 	"tokio",
 	"tracing",
+	"tracing?/std",
 	"unsigned-varint/std",
-	"tracing?/std"
 ]
 
 # Enable DAG serialization features

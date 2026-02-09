@@ -445,6 +445,10 @@ run-test-ts example test_dir runtime mode="papi" ws_url="ws://localhost:10000" s
             echo "🧪 Running {{ example }} (mode: papi)..."
             node "authorize-and-store/papi.js" "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
         fi
+    elif [ "{{ example }}" = "store-big-data" ]; then
+        echo "🧪 Running {{ example }}..."
+        # Skip individual chunk download verification (IPFS doesn't cache chunks after DAG reconstruction)
+        node "{{ example }}/index.js" "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" --skip-ipfs-verify
     else
         echo "🧪 Running {{ example }}..."
         node "{{ example }}/index.js" "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"

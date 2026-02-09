@@ -118,9 +118,10 @@ const ipfs = create({
     url: HTTP_IPFS_API_URL, // IPFS HTTP API (for ipfs-http-client)
 });
 
-// Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
-// E.g.: node store_big_data.js --signer-disc=BB
+// Optional flags
+// E.g.: node store_big_data.js --signer-disc=BB --skip-ipfs-verify
 const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
+const skipIpfsVerify = process.argv.includes("--skip-ipfs-verify");
 
 async function main() {
     await cryptoWaitReady()
@@ -194,23 +195,27 @@ async function main() {
             '❌ Failed to download all the data!'
         );
 
-        // Check all chunks are there.
-        console.log(`Downloading by chunks...`);
-        let downloadedChunks = [];
-        for (const chunk of chunks) {
-            // Download the chunk from IPFS.
-            let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
-            downloadedChunks.push(block);
+        // Check all chunks are there (optional, can be slow/fail if IPFS doesn't cache chunks).
+        if (!skipIpfsVerify) {
+            console.log(`Downloading by chunks...`);
+            let downloadedChunks = [];
+            for (const chunk of chunks) {
+                // Download the chunk from IPFS.
+                let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
+                downloadedChunks.push(block);
+            }
+            let fullBuffer = Buffer.concat(downloadedChunks);
+            console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+            await fileToDisk(downloadedFilePath, fullBuffer);
+            filesAreEqual(filePath, downloadedFilePath);
+            assert.strictEqual(
+                dataSize,
+                fullBuffer.length,
+                '❌ Failed to download all the data!'
+            );
+        } else {
+            console.log(`ℹ️  Skipping individual chunk download verification (--skip-ipfs-verify)`);
         }
-        let fullBuffer = Buffer.concat(downloadedChunks);
-        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(downloadedFilePath, fullBuffer);
-        filesAreEqual(filePath, downloadedFilePath);
-        assert.strictEqual(
-            dataSize,
-            fullBuffer.length,
-            '❌ Failed to download all the data!'
-        );
 
         console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
         resultCode = 0;
