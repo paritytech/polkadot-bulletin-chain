@@ -1,3 +1,24 @@
+/**
+ * KNOWN ISSUE: This test is currently failing in CI with unsigned transactions.
+ *
+ * The unsigned store transaction (Test 1) fails with:
+ *   InvalidTxError: { "type": "Invalid", "value": { "type": "Payment" } }
+ *
+ * The transaction is successfully broadcast but fails during runtime validation.
+ * The issue appears to be in the runtime's transaction extension pipeline where
+ * ValidateSigned may be incorrectly applied to unsigned transactions before
+ * ValidateUnsigned runs.
+ *
+ * This test is temporarily disabled in CI (see examples/justfile run-all-tests).
+ *
+ * Potential fixes:
+ * 1. Runtime: Ensure ValidateSigned properly handles unsigned transactions
+ * 2. PAPI: Verify getBareTx() creates proper unsigned extrinsics
+ * 3. Alternative: Modify test to use signed transactions with preimage auth
+ *
+ * See examples/justfile for detailed investigation notes.
+ */
+
 import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
