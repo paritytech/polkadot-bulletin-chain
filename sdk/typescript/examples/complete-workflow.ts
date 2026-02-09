@@ -88,6 +88,8 @@ async function main() {
 
   // 4. Preimage Authorization Workflow
   console.log('═══ Preimage Authorization Workflow ═══\n');
+  console.log('💡 Preimage authorization allows ANYONE to submit specific preauthorized content');
+  console.log('   without account authorization. Storage can be submitted as unsigned transaction.\n');
 
   const specificMessage = 'This specific content is authorized by hash';
   const specificData = Binary.fromText(specificMessage);
@@ -106,8 +108,12 @@ async function main() {
   console.log('   Block:', preimageReceipt.blockHash, '\n');
 
   // Anyone can now store this specific content
-  console.log('⏳ Storing authorized preimage...');
-  const preimageResult = await bobClient.store(specificData);
+  // NOTE: Currently using signed transaction, but preimage-authorized content
+  // should ideally be submitted as an unsigned transaction (no fees, anyone can submit).
+  // TODO: SDK needs to support unsigned transaction submission for preimage auth.
+  console.log('⏳ Storing authorized preimage (currently using signed tx)...');
+  console.log('   ⚠️  Limitation: Should use unsigned tx for preimage auth');
+  const preimageResult = await bobClient.store(specificData).send();
   console.log('✅ Preimage stored!');
   console.log('   CID:', preimageResult.cid.toString(), '\n');
 
@@ -193,6 +199,11 @@ async function main() {
   console.log('   • Refresh authorizations before they expire');
   console.log('   • Renew important data before retention period ends');
   console.log('   • Clean up expired authorizations to free storage');
+
+  console.log('\n⚠️  Known Limitations:');
+  console.log('   • SDK currently uses signed transactions for preimage-authorized content');
+  console.log('   • Ideally should support unsigned transactions (no fees, anyone can submit)');
+  console.log('   • This is a TODO for future SDK enhancement');
 
   console.log('\n🎉 Complete workflow example finished!');
 
