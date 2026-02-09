@@ -20,7 +20,6 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 1. **Pre-checks** (optional): `cargo test && cargo clippy --all-targets --all-features --workspace -- -D warnings`
 
 2. **Bump spec_version** in the appropriate runtime file:
-   - testnet: `runtime/src/lib.rs`
    - westend/paseo/pop: `runtimes/bulletin-westend/src/lib.rs`
    - polkadot: `runtimes/bulletin-polkadot/src/lib.rs`
 
