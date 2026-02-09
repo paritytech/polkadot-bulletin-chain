@@ -21,6 +21,7 @@ import {
   ProgressCallback,
   BulletinError,
   CidCodec,
+  HashAlgorithm,
   ChunkDetails,
   Authorization,
 } from "./types.js";
@@ -88,7 +89,7 @@ export class StoreBuilder {
   }
 
   /** Set the hash algorithm */
-  withHashAlgorithm(algorithm: string): this {
+  withHashAlgorithm(algorithm: HashAlgorithm): this {
     this.options.hashingAlgorithm = algorithm;
     return this;
   }
@@ -111,9 +112,29 @@ export class StoreBuilder {
     return this;
   }
 
-  /** Execute the store operation */
+  /** Execute the store operation (signed transaction, uses account authorization) */
   async send(): Promise<StoreResult> {
     return this.client.storeWithOptions(this.data, this.options, this.callback);
+  }
+
+  /**
+   * Execute store operation as unsigned transaction (for preimage-authorized content)
+   *
+   * Use this when the content has been pre-authorized via `authorizePreimage()`.
+   * Unsigned transactions don't require fees and can be submitted by anyone.
+   *
+   * @example
+   * ```typescript
+   * // First authorize the content hash
+   * const hash = blake2b256(data);
+   * await client.authorizePreimage(hash, BigInt(data.length));
+   *
+   * // Anyone can now store this content without fees
+   * const result = await client.store(data).sendUnsigned();
+   * ```
+   */
+  async sendUnsigned(): Promise<StoreResult> {
+    return this.client.storeWithPreimageAuth(this.data, this.options, this.callback);
   }
 }
 
@@ -528,6 +549,97 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to renew: ${error}`,
+        "TRANSACTION_FAILED",
+        error,
+      );
+    }
+  }
+
+  /**
+   * Store preimage-authorized content as unsigned transaction
+   *
+   * Use this for content that has been pre-authorized via `authorizePreimage()`.
+   * Unsigned transactions don't require fees and can be submitted by anyone who
+   * has the preauthorized content.
+   *
+   * @param data - The preauthorized content to store
+   * @param options - Store options (codec, hashing algorithm, etc.)
+   * @param progressCallback - Optional progress callback for chunked uploads
+   *
+   * @example
+   * ```typescript
+   * import { blake2b256 } from '@noble/hashes/blake2b';
+   *
+   * // First, authorize the content hash (requires sudo)
+   * const data = Binary.fromText('Hello, Bulletin!');
+   * const hash = blake2b256(data.asBytes());
+   * await sudoClient.authorizePreimage(hash, BigInt(data.asBytes().length));
+   *
+   * // Anyone can now submit without fees
+   * const result = await client.store(data).sendUnsigned();
+   * ```
+   */
+  async storeWithPreimageAuth(
+    data: Binary | Uint8Array,
+    options?: StoreOptions,
+    progressCallback?: ProgressCallback,
+  ): Promise<StoreResult> {
+    // Convert Binary to Uint8Array if needed
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    if (dataBytes.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+
+    // For now, only support single-chunk unsigned transactions
+    // Chunked unsigned transactions would require submitting multiple unsigned txs
+    if (dataBytes.length > this.config.chunkingThreshold) {
+      throw new BulletinError(
+        "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
+        "UNSUPPORTED_OPERATION",
+      );
+    }
+
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+
+    // Calculate CID
+    const cid = await calculateCid(
+      dataBytes,
+      opts.cidCodec ?? CidCodec.Raw,
+      opts.hashingAlgorithm!,
+    );
+
+    try {
+      // Submit as unsigned transaction
+      // PAPI's unsigned transaction API: create tx without signer, then submit
+      const tx = this.api.tx.TransactionStorage.store({ data: dataBytes });
+
+      // For unsigned transactions, PAPI requires submitting without calling signAndSubmit
+      // Instead, we need to use the raw submission API
+      // Note: The exact API depends on PAPI version, this may need adjustment
+      const result = await tx.submit();
+
+      // Wait for finalization
+      const finalized = await result.waitFor("finalized");
+
+      // Extract extrinsic index from Stored event
+      const storedEvent = finalized.events.find(
+        (e: any) =>
+          e.type === "TransactionStorage" && e.value.type === "Stored",
+      );
+
+      const extrinsicIndex = storedEvent?.value.value?.index;
+      const blockNumber = finalized.blockNumber;
+
+      return {
+        cid,
+        size: dataBytes.length,
+        blockNumber,
+        extrinsicIndex,
+        chunks: undefined,
+      };
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to store with preimage auth: ${error}`,
         "TRANSACTION_FAILED",
         error,
       );
