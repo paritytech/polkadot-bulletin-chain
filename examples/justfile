@@ -492,8 +492,50 @@ run-test-rust example test_dir runtime="bulletin-polkadot-runtime" ws_url="ws://
     # Run the example
     "./rust/{{ example }}/target/release/{{ example }}" --ws "{{ ws_url }}" --seed "{{ seed }}"
 
+# ============================================================================
+# Test Categories - Run specific test suites independently
+# ============================================================================
+# These recipes allow running different test categories separately for easier
+# debugging and CI integration. Each can be run independently after services
+# are started with start-services.
+
+# Run TypeScript SDK tests (services must already be running)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   runtime - Runtime name
+test-ts-sdk test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    echo "🧪 Running TypeScript SDK tests..."
+    just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "papi"
+    just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "smoldot"
+    echo "✅ TypeScript SDK tests passed!"
+
+# Run Rust SDK tests (services must already be running)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   runtime - Runtime name
+test-rust-sdk test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    echo "🦀 Running Rust SDK tests..."
+    just run-test-rust authorize-and-store "{{ test_dir }}" "{{ runtime }}"
+    echo "✅ Rust SDK tests passed!"
+
+# Run TypeScript example tests (services must already be running)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   runtime - Runtime name
+test-ts-examples test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    echo "📝 Running TypeScript example tests..."
+    just run-test-ts store-chunked-data "{{ test_dir }}" "{{ runtime }}"
+    just run-test-ts store-big-data "{{ test_dir }}" "{{ runtime }}" "papi" "ws://localhost:10000" "//Alice" "http://127.0.0.1:5011"
+    echo "✅ TypeScript example tests passed!"
+
 # Run all tests (services must already be running via start-services)
-# This is a convenience recipe that runs all tests in sequence
+# This is a convenience recipe that runs all test categories in sequence
 # Parameters:
 #   test_dir - Test directory where services are running
 #   runtime - Runtime name for mode-specific tests (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
@@ -501,12 +543,9 @@ run-all-tests test_dir runtime:
     #!/usr/bin/env bash
     set -e
     echo "🧪 Running all tests..."
-
-    just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "papi"
-    just run-test-rust authorize-and-store "{{ test_dir }}" "{{ runtime }}"
-    just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "smoldot"
-    just run-test-ts store-chunked-data "{{ test_dir }}" "{{ runtime }}"
-    just run-test-ts store-big-data "{{ test_dir }}" "{{ runtime }}" "papi" "ws://localhost:10000" "//Alice" "http://127.0.0.1:5011"
+    just test-ts-sdk "{{ test_dir }}" "{{ runtime }}"
+    just test-rust-sdk "{{ test_dir }}" "{{ runtime }}"
+    just test-ts-examples "{{ test_dir }}" "{{ runtime }}"
 
     # ============================================================================
     # TEMPORARILY DISABLED: authorize-preimage-and-store test
