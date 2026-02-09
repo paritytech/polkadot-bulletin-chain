@@ -12,7 +12,7 @@ pnpm add @bulletin/sdk
 
 ## Dependencies
 
-You will likely also need the Polkadot API (PAPI) packages to connect to the chain:
+We recommend using Polkadot API (PAPI) to let the sdk interact with the chain:
 
 ```bash
 npm install polkadot-api
