@@ -43,6 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+> **Convenience Note**: Currently you need to provide your own progress callback. A future enhancement could provide a default progress handler like `.with_default_progress()` that automatically logs to tracing, so you don't need to write the match statement every time.
+
 ### Configuring Automatic Chunking
 
 You can configure the threshold and chunk size:
