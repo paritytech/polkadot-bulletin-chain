@@ -4,7 +4,7 @@
 //! Authorize and store data on Bulletin Chain using subxt.
 //!
 //! This example demonstrates:
-//! 1. Using SubstrateConfig with custom ProvideCidConfig extension
+//! 1. Using BulletinConfig with ProvideCidConfig extension from the SDK
 //! 2. Authorizing an account to store data
 //! 3. Storing data on the Bulletin Chain
 //!
@@ -18,23 +18,10 @@
 //!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
 
 use anyhow::{anyhow, Result};
+use bulletin_sdk_rust::subxt_config::BulletinConfig;
 use clap::Parser;
-use codec::Encode;
 use std::str::FromStr;
-use subxt::{
-	client::ClientState,
-	config::{
-		signed_extensions::{
-			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis, CheckMortality,
-			CheckNonce, CheckSpecVersion, CheckTxVersion, CheckMetadataHash,
-		},
-		substrate::SubstrateConfig,
-		Config, ExtrinsicParams, ExtrinsicParamsEncoder,
-	},
-	error::ExtrinsicParamsError,
-	utils::AccountId32,
-	OnlineClient,
-};
+use subxt::{utils::AccountId32, OnlineClient};
 use subxt_signer::sr25519::Keypair;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -57,67 +44,8 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-/// Custom signed extension for Bulletin Chain's ProvideCidConfig.
-/// This extension is Option<CidConfig> - we always encode None (0x00).
-#[derive(Debug, Clone)]
-pub struct ProvideCidConfig;
-
-impl<T: Config> ExtrinsicParams<T> for ProvideCidConfig {
-	type Params = ();
-
-	fn new(
-		_client: &ClientState<T>,
-		_params: Self::Params,
-	) -> Result<Self, ExtrinsicParamsError> {
-		Ok(ProvideCidConfig)
-	}
-}
-
-impl ExtrinsicParamsEncoder for ProvideCidConfig {
-	fn encode_extra_to(&self, v: &mut Vec<u8>) {
-		// Encode Option<CidConfig>::None = 0x00
-		None::<()>.encode_to(v);
-	}
-}
-
-impl<T: Config> subxt::config::SignedExtension<T> for ProvideCidConfig {
-	type Decoded = ();
-	fn matches(identifier: &str, _type_id: u32, _types: &scale_info::PortableRegistry) -> bool {
-		identifier == "ProvideCidConfig"
-	}
-}
-
-/// Custom extrinsic params that includes ProvideCidConfig extension.
-/// Uses AnyOf to dynamically select the right extensions based on metadata.
-pub type BulletinExtrinsicParams<T> = AnyOf<
-	T,
-	(
-		CheckSpecVersion,
-		CheckTxVersion,
-		CheckNonce,
-		CheckGenesis<T>,
-		CheckMortality<T>,
-		ChargeAssetTxPayment<T>,
-		ChargeTransactionPayment,
-		CheckMetadataHash,
-		ProvideCidConfig,
-	),
->;
-
-/// Custom config for Bulletin Chain that adds ProvideCidConfig support.
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum BulletinConfig {}
-
-impl Config for BulletinConfig {
-	type Hash = <SubstrateConfig as Config>::Hash;
-	type AccountId = <SubstrateConfig as Config>::AccountId;
-	type Address = <SubstrateConfig as Config>::Address;
-	type Signature = <SubstrateConfig as Config>::Signature;
-	type Hasher = <SubstrateConfig as Config>::Hasher;
-	type Header = <SubstrateConfig as Config>::Header;
-	type ExtrinsicParams = BulletinExtrinsicParams<Self>;
-	type AssetId = <SubstrateConfig as Config>::AssetId;
-}
+// Note: ProvideCidConfig and BulletinConfig are now provided by bulletin-sdk-rust
+// See sdk/rust/src/subxt_config.rs for implementation
 
 #[tokio::main]
 async fn main() -> Result<()> {
