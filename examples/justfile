@@ -632,7 +632,8 @@ run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http
     just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
 
-# Run store big data example.
+# Run store big data example with SDK.
+# Demonstrates automatic chunking, parallel uploads, and DAG-PB manifest generation.
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
 #   ws_url - WebSocket URL (default: ws://localhost:10000)

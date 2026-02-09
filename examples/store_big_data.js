@@ -1,219 +1,130 @@
+/**
+ * Store large files using the Bulletin TypeScript SDK
+ *
+ * This example demonstrates storing large files with automatic chunking,
+ * parallel uploads, and DAG-PB manifest generation using the SDK client.
+ */
+
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { create } from 'ipfs-http-client';
-import fs from 'fs'
-import os from "os";
-import path from "path";
-import assert from "assert";
-import { authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK } from "./api.js";
-import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import assert from 'assert';
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider';
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { AsyncBulletinClient, PAPITransactionSubmitter } from '../sdk/typescript/dist/index.js';
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
     HTTP_IPFS_API,
-    newSigner,
     fileToDisk,
     filesAreEqual,
     generateTextImage,
-} from "./common.js";
-import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+} from './common.js';
+import { authorizeAccount, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
 
-// Command line arguments: [ws_url] [seed]
-// Note: --signer-disc=XX flag is also supported for parallel runs
+// Command line arguments
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
 
-// -------------------- queue --------------------
-const queue = [];
-function pushToQueue(data) {
-    queue.push(data);
-}
-
-const resultQueue = [];
-function pushToResultQueue(data) {
-    resultQueue.push(data);
-}
-function waitForQueueLength(targetLength, timeoutMs = 300000) {
-    return new Promise((resolve, reject) => {
-        const start = Date.now();
-
-        const interval = setInterval(() => {
-            if (resultQueue.length >= targetLength) {
-                clearInterval(interval);
-                resolve(resultQueue.slice(0, targetLength));
-            } else if (Date.now() - start > timeoutMs) {
-                clearInterval(interval);
-                reject(new Error(`Timeout waiting for ${targetLength} entries in queue`));
-            }
-        }, 500); // check every 500ms
-    });
-}
-
-// -------------------- worker --------------------
-async function startWorker(typedApi, workerId, signer) {
-    console.log(`Worker ${workerId} started`);
-
-    while (true) {
-        const job = queue.shift();
-
-        if (!job) {
-            await sleep(500);
-            continue;
-        }
-
-        try {
-            await processJob(typedApi, workerId, signer, job);
-        } catch (err) {
-            console.error(`Worker ${workerId} failed job`, err);
-        }
-    }
-}
-
-// -------------------- job processing --------------------
-async function processJob(typedApi, workerId, signer, chunk) {
-    console.log(
-        `Worker ${workerId} submitting tx for chunk ${chunk.cid} of size ${chunk.len} bytes`
-    );
-
-    let cid = await store(typedApi, signer.signer, chunk.bytes);
-    pushToResultQueue(cid);
-    console.log(`Worker ${workerId} tx included in the block with CID: ${cid}`);
-}
-
-// -------------------- helpers --------------------
-function sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
-}
-
-/**
- * Read the file, chunk it and put to the queue for storing in Bulletin and return CIDs.
- * Returns { chunks }
- */
-export async function storeChunkedFile(api, filePath) {
-    // ---- 1️⃣ Read and split a file ----
-    const fileData = fs.readFileSync(filePath)
-    console.log(`📁 Read ${filePath}, size ${fileData.length} bytes`)
-
-    const chunks = []
-    for (let i = 0; i < fileData.length; i += CHUNK_SIZE) {
-        const chunk = fileData.subarray(i, i + CHUNK_SIZE)
-        const cid = await cidFromBytes(chunk)
-        chunks.push({ cid, bytes: chunk, len: chunk.length })
-    }
-    console.log(`✂️ Split into ${chunks.length} chunks`)
-
-    // ---- 2️⃣ Store chunks in Bulletin ----
-    for (let i = 0; i < chunks.length; i++) {
-        pushToQueue(chunks[i]);
-    }
-    return { chunks, dataSize: fileData.length };
-}
-
-// Connect to a local IPFS gateway (e.g. Kubo)
-const ipfs = create({
-    url: 'http://127.0.0.1:5001', // Local IPFS API
-});
-
-// Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
-// E.g.: node store_big_data.js --signer-disc=BB
-const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
+// Connect to local IPFS gateway
+const ipfs = create({ url: 'http://127.0.0.1:5001' });
 
 async function main() {
-    await cryptoWaitReady()
+    await cryptoWaitReady();
 
     console.log(`Connecting to: ${NODE_WS}`);
     console.log(`Using seed: ${SEED}`);
 
     let client, resultCode;
     try {
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletinimggen-"));
-        const filePath = path.join(tmpDir, "image.jpeg");
-        const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
-        const downloadedFileByDagPath = path.join(tmpDir, "downloadedByDag.jpeg");
-        generateTextImage(filePath, "Hello, Bulletin big - " + new Date().toString(), "big");
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulletinimggen-'));
+        const filePath = path.join(tmpDir, 'image.jpeg');
+        const downloadedFileByDagPath = path.join(tmpDir, 'downloadedByDag.jpeg');
+        const downloadedByChunksPath = path.join(tmpDir, 'downloadedByChunks.jpeg');
 
-        // Init WS PAPI client and typed api.
+        generateTextImage(filePath, 'Hello, Bulletin SDK - ' + new Date().toString(), 'big64');
+
+        // Initialize PAPI client
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
+        const { sudoSigner, whoSigner } = setupKeyringAndSigners(SEED, '//SDKSigner');
 
-        // Let's do parallelism with multiple accounts
-        const signers = Array.from({ length: 12 }, (_, i) => {
-            if (!signerDiscriminator) {
-                return newSigner(`//Signer${i + 1}`)
-            } else {
-                console.log(`Using signerDiscriminator: "//Signer${signerDiscriminator}${i + 1}"`);
-                return newSigner(`//Signer${signerDiscriminator}${i + 1}`)
-            }
-        });
-
-        // Authorize accounts.
+        // Authorize account for storage
+        console.log('📝 Authorizing account...');
         await authorizeAccount(
             bulletinAPI,
             sudoSigner,
-            signers.map(a => a.address),
+            whoSigner.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
             TX_MODE_FINALIZED_BLOCK,
         );
 
-        // Start 8 workers
-        signers.forEach((signer, i) => {
-            startWorker(bulletinAPI, i, signer);
-        });
+        // Create SDK client with transaction submitter
+        const submitter = new PAPITransactionSubmitter(bulletinAPI, whoSigner.signer);
+        const sdkClient = new AsyncBulletinClient(submitter);
 
-        // push data to queue
-        // Read the file, chunk it, store in Bulletin and return CIDs.
-        let { chunks, dataSize } = await storeChunkedFile(bulletinAPI, filePath);
+        // Read file
+        const fileData = fs.readFileSync(filePath);
+        console.log(`📁 File size: ${fileData.length} bytes`);
 
-        // wait for all chunks are stored
-        try {
-            console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
-            await waitForQueueLength(chunks.length);
-            console.log(`All chunks ${chunks.length} are stored!`);
-        } catch (err) {
-            console.error(err.message);
-            throw new Error('❌ Storing chunks failed! Error:' + err.message);
-        }
+        // Store with automatic chunking and parallel uploads
+        console.log('📤 Storing file with SDK (automatic chunking + parallel uploads)...');
+        const result = await sdkClient
+            .store(fileData)
+            .withChunking({
+                chunkSize: CHUNK_SIZE,
+                maxParallel: 8,
+                createManifest: true,
+            })
+            .withProgress((event) => {
+                if (event.type === 'chunk_completed') {
+                    console.log(`  ✓ Chunk ${event.chunkIndex + 1} stored (${event.bytesUploaded}/${event.totalBytes} bytes)`);
+                }
+            })
+            .submit();
 
-        console.log(`Storing DAG...`);
-        let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
-        let cid = await store(bulletinAPI, signers[0].signer, dagBytes);
-        console.log(`Downloading...${cid} / ${rootCid}`);
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, rootCid);
-        console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
+        console.log(`✅ Storage complete!`);
+        console.log(`   Chunks stored: ${result.chunks?.length || 0}`);
+        console.log(`   Manifest CID: ${result.manifestCid?.toString()}`);
+
+        // Download and verify via DAG-PB manifest
+        console.log('\n📥 Downloading via DAG-PB manifest...');
+        const downloadedContent = await fetchCid(HTTP_IPFS_API, result.manifestCid);
+        console.log(`✅ Downloaded: ${downloadedContent.length} bytes`);
         await fileToDisk(downloadedFileByDagPath, downloadedContent);
         filesAreEqual(filePath, downloadedFileByDagPath);
         assert.strictEqual(
-            dataSize,
+            fileData.length,
             downloadedContent.length,
-            '❌ Failed to download all the data!'
+            '❌ Downloaded size mismatch!'
         );
 
-        // Check all chunks are there.
-        console.log(`Downloading by chunks...`);
-        let downloadedChunks = [];
-        for (const chunk of chunks) {
-            // Download the chunk from IPFS.
-            let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
+        // Download and verify by individual chunks
+        console.log('\n📥 Downloading by individual chunks...');
+        const downloadedChunks = [];
+        for (const chunk of result.chunks) {
+            const block = await ipfs.block.get(chunk.cid, { timeout: 15000 });
             downloadedChunks.push(block);
         }
-        let fullBuffer = Buffer.concat(downloadedChunks);
-        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(downloadedFilePath, fullBuffer);
-        filesAreEqual(filePath, downloadedFilePath);
+        const fullBuffer = Buffer.concat(downloadedChunks);
+        console.log(`✅ Reconstructed: ${fullBuffer.length} bytes`);
+        await fileToDisk(downloadedByChunksPath, fullBuffer);
+        filesAreEqual(filePath, downloadedByChunksPath);
         assert.strictEqual(
-            dataSize,
+            fileData.length,
             fullBuffer.length,
-            '❌ Failed to download all the data!'
+            '❌ Reconstructed size mismatch!'
         );
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        console.log('\n\n\n✅✅✅ Test passed! ✅✅✅');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        console.error('❌ Error:', error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();
