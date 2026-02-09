@@ -508,42 +508,65 @@ run-all-tests test_dir runtime:
     just run-test-ts store-chunked-data "{{ test_dir }}" "{{ runtime }}"
     just run-test-ts store-big-data "{{ test_dir }}" "{{ runtime }}" "papi" "ws://localhost:10000" "//Alice" "http://127.0.0.1:5011"
 
-    # TODO: TEMPORARILY DISABLED - authorize-preimage-and-store test failing with unsigned transactions
+    # ============================================================================
+    # TEMPORARILY DISABLED: authorize-preimage-and-store test
+    # ============================================================================
     #
-    # Issue: The test's unsigned transactions are being rejected by the runtime with:
+    # Status: Test disabled due to runtime transaction extension pipeline issue
+    #
+    # Error Observed:
     #   InvalidTxError: { "type": "Invalid", "value": { "type": "Payment" } }
+    #   Transaction broadcasts successfully but fails during pool validation
     #
-    # Root Cause: When using PAPI's getBareTx() to create unsigned transactions, the runtime's
-    # ValidateSigned transaction extension is rejecting them with a Payment validation error.
-    # The transaction is successfully broadcast to the mempool but fails during validation.
+    # What Should Work:
+    #   The pallet explicitly supports unsigned store() transactions with preimage
+    #   authorization. See check_unsigned() at pallets/transaction-storage/src/lib.rs:1051-1095:
     #
-    # The pallet's ValidateUnsigned implementation looks correct and should handle unsigned
-    # store() calls with preimage authorization. The issue appears to be in how the runtime's
-    # transaction extension pipeline processes unsigned transactions - specifically the
-    # ValidateSigned extension may be incorrectly applied before ValidateUnsigned runs.
+    #     match call {
+    #       Call::<T>::store { data } => Self::check_store_renew_unsigned(...), // ✅ Allowed
+    #       ...
+    #     }
     #
-    # Potential Solutions:
-    # 1. Runtime Fix: Ensure ValidateSigned extension properly skips unsigned transactions
-    #    - Check that ValidateSigned::validate() returns early for unsigned origins
-    #    - Verify transaction extension ordering in TxExtension tuple
+    #   This is a legitimate use case: pre-authorize specific content by hash,
+    #   then allow anyone to store it unsigned.
     #
-    # 2. PAPI Fix: Investigate if getBareTx() is creating proper unsigned extrinsics
-    #    - Verify the extrinsic format matches runtime expectations
-    #    - Check if signature/payment fields are being set to None/default properly
+    # Root Cause - Transaction Extension Pipeline Issue:
+    #   The runtime's ValidateSigned extension (runtimes/bulletin-polkadot/src/lib.rs:513-643)
+    #   is rejecting unsigned transactions with "Invalid Payment" BEFORE the pallet's
+    #   ValidateUnsigned implementation gets a chance to validate them.
     #
-    # 3. Test Alternative: Modify test to use signed transactions with preimage auth
-    #    - The pallet supports signed transactions that prefer preimage authorization
-    #    - This would test the same authorization flow without unsigned transaction complexity
+    #   Expected flow: Runtime checks ValidateUnsigned → Pallet approves → Success
+    #   Actual flow:   ValidateSigned rejects early → Never reaches ValidateUnsigned → Failure
     #
-    # 4. Transaction Extension: Add SkipCheckIfFeeless or similar to bypass payment for authorized txs
-    #    - Similar to how some parachains handle feeless operations
+    # Potential Solutions (in order of preference):
+    #
+    #   1. Fix Runtime Extension Ordering [RECOMMENDED]
+    #      Problem: ValidateSigned runs before ValidateUnsigned for unsigned transactions
+    #      Solution: Ensure ValidateSigned::validate() returns early for unsigned origins
+    #                or adjust transaction extension pipeline ordering
+    #      Files: runtimes/bulletin-polkadot/src/lib.rs (ValidateSigned implementation)
+    #             runtimes/bulletin-westend/src/lib.rs (same for westend)
+    #
+    #   2. Investigate PAPI's getBareTx()
+    #      Problem: May not be creating properly formatted unsigned extrinsics
+    #      Solution: Verify extrinsic format matches runtime expectations
+    #      Impact: Would fix client-side if this is the issue
+    #
+    #   3. Use Signed Transactions (Workaround)
+    #      Problem: Bypasses testing unsigned transaction flow
+    #      Solution: Modify test to use signed txs with preimage auth (pallet supports both)
+    #      Impact: Tests authorization logic but not unsigned transaction handling
     #
     # References:
-    # - Pallet ValidateUnsigned: pallets/transaction-storage/src/lib.rs:747-763
-    # - ValidateSigned extension: runtimes/bulletin-polkadot/src/lib.rs:513-643
-    # - Test file: examples/typescript/authorize-preimage-and-store/index.js
+    #   - Pallet ValidateUnsigned: pallets/transaction-storage/src/lib.rs:747-763
+    #   - Pallet check_unsigned: pallets/transaction-storage/src/lib.rs:1051-1095
+    #   - Runtime ValidateSigned: runtimes/bulletin-polkadot/src/lib.rs:513-643
+    #   - Test file: examples/typescript/authorize-preimage-and-store/index.js (has warning)
+    #   - Test disabled: examples/justfile:511 (this comment)
     #
+    # To re-enable: Uncomment the line below after fixing the runtime extension issue
     # just run-test-ts authorize-preimage-and-store "{{ test_dir }}" "{{ runtime }}"
+    # ============================================================================
 
     echo "✅ All tests passed!"
 
