@@ -117,10 +117,10 @@ impl AuthorizationManager {
 	///
 	/// This calculates based on default chunk size (1 MiB).
 	pub fn estimate_authorization(&self, data_size: u64, create_manifest: bool) -> (u32, u64) {
-		const DEFAULT_CHUNK_SIZE: u64 = 1024 * 1024; // 1 MiB
+		use crate::chunker::DEFAULT_CHUNK_SIZE;
 
 		let num_chunks =
-			if data_size == 0 { 1 } else { data_size.div_ceil(DEFAULT_CHUNK_SIZE) as usize };
+			if data_size == 0 { 1 } else { data_size.div_ceil(DEFAULT_CHUNK_SIZE as u64) as usize };
 
 		self.calculate_requirements(data_size, num_chunks, create_manifest)
 	}

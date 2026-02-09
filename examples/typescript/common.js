@@ -9,6 +9,10 @@ import assert from "assert";
 export const DEFAULT_IPFS_API_URL = 'http://127.0.0.1:5011';     // IPFS HTTP API (for ipfs-http-client)
 export const DEFAULT_IPFS_GATEWAY_URL = 'http://127.0.0.1:8283'; // IPFS HTTP Gateway (for /ipfs/CID requests)
 export const HTTP_IPFS_API = DEFAULT_IPFS_GATEWAY_URL;           // Alias for backward compatibility
+
+// Default chunk size for examples (1 MiB)
+// Note: SDK supports up to 2 MiB (MAX_CHUNK_SIZE, Bitswap limit).
+// This is a safe default for demonstration purposes.
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
 

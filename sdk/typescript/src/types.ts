@@ -45,9 +45,12 @@ export interface ChunkerConfig {
 
 /**
  * Default chunker configuration
+ *
+ * Uses 1 MiB chunk size by default (safe and efficient for most use cases).
+ * Maximum allowed is 2 MiB (MAX_CHUNK_SIZE, Bitswap limit for IPFS compatibility).
  */
 export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
-  chunkSize: 1024 * 1024, // 1 MiB
+  chunkSize: 1024 * 1024, // 1 MiB (default)
   maxParallel: 8,
   createManifest: true,
 };

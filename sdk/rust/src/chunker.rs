@@ -9,13 +9,19 @@ use crate::types::{Chunk, ChunkerConfig, Error, Result};
 use alloc::vec::Vec;
 
 /// Maximum chunk size allowed (2 MiB, Bitswap limit for IPFS compatibility).
-/// Note: The pallet accepts up to 8 MiB, but we limit to 2 MiB for Bitswap.
+///
+/// The pallet technically accepts up to 8 MiB, but we enforce a 2 MiB limit
+/// for IPFS Bitswap compatibility. This ensures stored data can be efficiently
+/// retrieved via IPFS gateways.
 pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// Minimum chunk size (1 MiB).
 pub const MIN_CHUNK_SIZE: usize = 1024 * 1024;
 
 /// Default chunk size (1 MiB).
+///
+/// This provides a good balance between transaction overhead and throughput
+/// for most use cases. Users can configure up to MAX_CHUNK_SIZE (2 MiB).
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 
 /// Trait for chunking strategies.
