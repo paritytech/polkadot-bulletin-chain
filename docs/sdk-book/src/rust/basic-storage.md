@@ -2,6 +2,8 @@
 
 This guide shows how to store data using the `AsyncBulletinClient` with transaction submitters.
 
+> **Note on Logging**: All examples use `tracing` for structured logging. If you're integrating with Substrate runtime/node code, you can use `sp_tracing` instead for better compatibility with Substrate's logging infrastructure.
+
 ## Quick Start
 
 The `store()` method uses a builder pattern for a clean, fluent API:
@@ -33,9 +35,13 @@ client
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing subscriber for logging
+    tracing_subscriber::fmt::init();
+
     // 1. Connect to Bulletin Chain
     let ws_url = std::env::var("BULLETIN_WS_URL")
         .unwrap_or_else(|_| "ws://localhost:10000".to_string());
@@ -52,9 +58,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // 3. Get results
-    println!("Stored successfully!");
-    println!("  CID: {}", hex::encode(&result.cid));
-    println!("  Size: {} bytes", result.size);
+    info!("Stored successfully!");
+    info!(cid = %hex::encode(&result.cid), size = result.size, "Storage complete");
 
     Ok(())
 }
@@ -131,7 +136,7 @@ let result = client
 let result = client
     .store(large_data)
     .with_callback(|event| {
-        println!("Progress: {:?}", event);
+        tracing::debug!(?event, "Upload progress");
     })
     .send()
     .await?;
@@ -148,9 +153,12 @@ The builder automatically handles:
 ### 5. Handle Result
 
 ```rust
-println!("CID: {}", hex::encode(&result.cid));
-println!("Size: {} bytes", result.size);
-println!("Block: {:?}", result.block_number);
+tracing::info!(
+    cid = %hex::encode(&result.cid),
+    size = result.size,
+    block = ?result.block_number,
+    "Storage successful"
+);
 ```
 
 ## Complete Example
@@ -158,9 +166,13 @@ println!("Block: {:?}", result.block_number);
 ```rust
 use bulletin_sdk_rust::prelude::*;
 use std::env;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt::init();
+
     // Get WebSocket URL from environment or CLI
     let ws_url = env::var("BULLETIN_WS_URL")
         .unwrap_or_else(|_| "ws://localhost:10000".to_string());
@@ -179,9 +191,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .send()
         .await?;
 
-    println!("✅ Stored successfully!");
-    println!("   CID: {}", hex::encode(&result.cid));
-    println!("   Size: {} bytes", result.size);
+    info!(
+        cid = %hex::encode(&result.cid),
+        size = result.size,
+        "Stored successfully"
+    );
 
     Ok(())
 }
@@ -247,14 +261,17 @@ let client = AsyncBulletinClient::with_config(submitter, config)
 // Insufficient authorization fails fast
 match client.store(data).send().await {
     Err(Error::InsufficientAuthorization { need, available }) => {
-        eprintln!("Need {} bytes but only {} available", need, available);
-        eprintln!("Please authorize your account first!");
+        tracing::error!(
+            need_bytes = need,
+            available_bytes = available,
+            "Insufficient authorization - please authorize your account first"
+        );
     }
     Ok(result) => {
-        println!("Success!");
+        tracing::info!("Storage successful");
     }
     Err(e) => {
-        eprintln!("Error: {:?}", e);
+        tracing::error!(?e, "Storage failed");
     }
 }
 ```
@@ -263,9 +280,13 @@ match client.store(data).send().await {
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use tracing::{info, error};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing
+    tracing_subscriber::fmt::init();
+
     let ws_url = std::env::var("BULLETIN_WS_URL")
         .unwrap_or_else(|_| "ws://localhost:10000".to_string());
     let signer = /* your signer */;
@@ -279,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Estimate what's needed
     let data = std::fs::read("myfile.dat")?;
     let (txs, bytes) = client.estimate_authorization(data.len() as u64);
-    println!("Need authorization for {} txs and {} bytes", txs, bytes);
+    info!(transactions = txs, bytes = bytes, "Authorization needed");
 
     // Authorize (if needed)
     // client.authorize_account(account, txs, bytes).await?;
@@ -287,16 +308,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store - will check authorization automatically
     match client.store(data).send().await {
         Ok(result) => {
-            println!("✅ Stored: {}", hex::encode(&result.cid));
+            info!(cid = %hex::encode(&result.cid), "Stored successfully");
         }
         Err(Error::InsufficientAuthorization { need, available }) => {
-            eprintln!("❌ Insufficient authorization:");
-            eprintln!("   Need: {} bytes", need);
-            eprintln!("   Have: {} bytes", available);
+            error!(
+                need_bytes = need,
+                available_bytes = available,
+                "Insufficient authorization - please authorize your account first"
+            );
             return Err("Please authorize your account first".into());
         }
         Err(e) => {
-            eprintln!("❌ Error: {:?}", e);
+            error!(?e, "Storage failed");
             return Err(e.into());
         }
     }
@@ -310,16 +333,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 match client.store(data).send().await {
     Ok(result) => {
-        println!("Success! CID: {}", hex::encode(&result.cid));
+        tracing::info!(cid = %hex::encode(&result.cid), "Storage successful");
     }
     Err(Error::EmptyData) => {
-        eprintln!("Error: Cannot store empty data");
+        tracing::error!("Cannot store empty data");
     }
     Err(Error::SubmissionFailed(msg)) => {
-        eprintln!("Submission failed: {}", msg);
+        tracing::error!(reason = %msg, "Submission failed");
     }
     Err(e) => {
-        eprintln!("Unexpected error: {:?}", e);
+        tracing::error!(?e, "Unexpected error");
     }
 }
 ```
@@ -361,12 +384,16 @@ If you need more control, use the two-step approach:
 
 ```rust
 use bulletin_sdk_rust::client::BulletinClient;
+use tracing::info;
 
 let client = BulletinClient::new();
 let operation = client.prepare_store(data, options)?;
 
-println!("CID: {}", hex::encode(&operation.cid_bytes));
-println!("Data to submit: {} bytes", operation.data.len());
+info!(
+    cid = %hex::encode(&operation.cid_bytes),
+    size = operation.data.len(),
+    "Prepared store operation"
+);
 ```
 
 ### Step 2: Submit Manually
