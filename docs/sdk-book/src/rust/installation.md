@@ -16,9 +16,9 @@ The SDK exposes several feature flags to optimize your build:
 | `std`   | Yes     | Enables standard library support. Disable for `no_std`. |
 | `serde-support` | No | Adds `Serialize`/`Deserialize` support for types. |
 
-## Subxt Integration
+## Transaction Submission
 
-The SDK is a *client* library; it prepares data and calculations. To actually submit transactions to the blockchain, you typically use `subxt`.
+The SDK provides data preparation and CID calculation utilities. To submit transactions to the blockchain, you'll use `subxt` for blockchain interaction.
 
 Add `subxt` to your dependencies:
 
