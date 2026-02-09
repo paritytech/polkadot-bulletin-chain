@@ -71,6 +71,7 @@ std = [
 	"tokio",
 	"tracing",
 	"unsigned-varint/std",
+	"tracing?/std"
 ]
 
 # Enable DAG serialization features
