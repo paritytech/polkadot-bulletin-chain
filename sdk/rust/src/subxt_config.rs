@@ -12,8 +12,8 @@ use subxt::{
 	client::ClientState,
 	config::{
 		signed_extensions::{
-			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis, CheckMortality,
-			CheckNonce, CheckSpecVersion, CheckTxVersion, CheckMetadataHash,
+			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis, CheckMetadataHash,
+			CheckMortality, CheckNonce, CheckSpecVersion, CheckTxVersion,
 		},
 		substrate::SubstrateConfig,
 		Config, ExtrinsicParams, ExtrinsicParamsEncoder,
@@ -41,10 +41,7 @@ pub struct ProvideCidConfig;
 impl<T: Config> ExtrinsicParams<T> for ProvideCidConfig {
 	type Params = ();
 
-	fn new(
-		_client: &ClientState<T>,
-		_params: Self::Params,
-	) -> Result<Self, ExtrinsicParamsError> {
+	fn new(_client: &ClientState<T>, _params: Self::Params) -> Result<Self, ExtrinsicParamsError> {
 		Ok(ProvideCidConfig)
 	}
 }
@@ -122,6 +119,7 @@ impl Config for BulletinConfig {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use subxt::config::SignedExtension;
 
 	#[test]
 	fn test_provide_cid_config_encodes_none() {
@@ -135,16 +133,18 @@ mod tests {
 
 	#[test]
 	fn test_provide_cid_config_matches() {
+		// ProvideCidConfig matches the identifier "ProvideCidConfig"
 		assert!(ProvideCidConfig::matches::<BulletinConfig>(
 			"ProvideCidConfig",
 			0,
-			&scale_info::PortableRegistry::new(),
+			&scale_info::PortableRegistry { types: Default::default(), ..Default::default() },
 		));
 
+		// ProvideCidConfig does not match other identifiers
 		assert!(!ProvideCidConfig::matches::<BulletinConfig>(
 			"SomeOtherExtension",
 			0,
-			&scale_info::PortableRegistry::new(),
+			&scale_info::PortableRegistry { types: Default::default(), ..Default::default() },
 		));
 	}
 }
