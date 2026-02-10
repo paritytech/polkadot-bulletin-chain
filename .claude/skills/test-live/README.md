@@ -16,6 +16,8 @@ Test health, storage, and overall status of a live Bulletin chain deployment.
 | `paseo`   | `https://paseo-bulletin-rpc.polkadot.io`    |
 | Custom    | Any `https://` or `wss://` URL              |
 
+Health/check levels use HTTPS with `curl` - no extra dependencies needed. All checks are stateless JSON-RPC calls that don't require WebSocket subscriptions. The `smoke` level uses WSS via Node.js/PAPI for transaction submission.
+
 ## Test Levels
 
 Each level includes all checks from the levels above it.
@@ -30,9 +32,9 @@ Each level includes all checks from the levels above it.
 ## Examples
 
 ```bash
-/test-live westend                             # health check (default)
-/test-live paseo check                         # health + pallet verification
-/test-live westend smoke "my seed phrase"      # storage round-trip test
-/test-live paseo full "my seed phrase"         # all checks
-/test-live wss://custom-rpc.example.com health # custom endpoint
+/test-live westend                                # health check (default)
+/test-live paseo check                            # health + pallet verification
+/test-live westend smoke "my seed phrase"         # storage round-trip test
+/test-live paseo full "my seed phrase"            # all checks
+/test-live https://custom-rpc.example.com health  # custom endpoint
 ```

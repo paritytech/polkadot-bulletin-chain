@@ -35,9 +35,13 @@ Strip trailing slashes. If the user provides a `wss://` URL, convert it to `http
 
 If no network is provided, ask the user which network to test.
 
-## RPC Helper
+## Why HTTPS (not WSS)
 
-All levels use `curl` with JSON-RPC over HTTPS:
+Health and check levels use `curl` with JSON-RPC over HTTPS. All checks are stateless request/response calls that don't need WebSocket subscriptions. HTTPS works with `curl` out of the box - no extra dependencies like `websocat` or `wscat` needed.
+
+The `smoke` level uses WSS via the `justfile` recipes (Node.js/PAPI handles the WebSocket connection).
+
+RPC call pattern:
 ```bash
 curl -s -X POST -H "Content-Type: application/json" \
   -d '{"id":1,"jsonrpc":"2.0","method":"<METHOD>","params":[<PARAMS>]}' \
@@ -91,7 +95,7 @@ Present results as:
 | Runtime Version  | OK     | <specName> v<specVersion>       |
 | Peers            | OK     | N peers                         |
 | Syncing          | OK     | false                           |
-| Block Production | OK     | #X -> #Y (+Z in ~15s)          |
+| Block Production | OK     | #X -> #Y (+Z in ~30s)          |
 | Finalization     | OK     | Best: #X, Final: #Y, Gap: Z    |
 
 Overall: OK / WARN / FAIL
