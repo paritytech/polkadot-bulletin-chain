@@ -488,7 +488,7 @@ run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" see
 #   test_dir - Test directory where services are running
 #   ws_url - WebSocket URL of the Bulletin Chain node (default: ws://localhost:10000)
 #   seed - Seed phrase or dev seed (default: //Alice)
-run-test-rust example test_dir runtime="bulletin-polkadot-runtime" ws_url="ws://localhost:10000" seed="//Alice":
+run-test-rust example test_dir runtime ws_url="ws://localhost:10000" seed="//Alice":
     #!/usr/bin/env bash
     set -e
     echo "🦀 Running Rust {{ example }}..."
