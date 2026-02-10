@@ -158,19 +158,23 @@ jobs:
 
       - name: Test authorize-and-store ws (Westend parachain)
         working-directory: examples
-        run: just run-test-ts authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "papi"
+        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
 
       - name: Test authorize-and-store smoldot (Westend parachain)
         working-directory: examples
-        run: just run-test-ts authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"
+        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"
 
       - name: Test store-chunked-data (Westend parachain)
         working-directory: examples
-        run: just run-test-ts store-chunked-data "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
+        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
 
       - name: Test store-big-data (Westend parachain)
         working-directory: examples
-        run: just run-test-ts store-big-data "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
+        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
+
+      - name: Test authorize-preimage-and-store (Westend parachain)
+        working-directory: examples
+        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
       # SDK Client Tests
       - name: Test authorize-and-store Rust SDK (Westend parachain)
@@ -194,19 +198,23 @@ jobs:
 
       - name: Test authorize-and-store ws (Polkadot solochain)
         working-directory: examples
-        run: just run-test-ts authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "papi"
+        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "ws"
 
       - name: Test authorize-and-store smoldot (Polkadot solochain)
         working-directory: examples
-        run: just run-test-ts authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "smoldot"
+        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "smoldot"
 
       - name: Test store-chunked-data (Polkadot solochain)
         working-directory: examples
-        run: just run-test-ts store-chunked-data "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
+        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
 
       - name: Test store-big-data (Polkadot solochain)
         working-directory: examples
-        run: just run-test-ts store-big-data "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
+        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
+
+      - name: Test authorize-preimage-and-store (Polkadot solochain)
+        working-directory: examples
+        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
       # SDK Client Tests
       - name: Test authorize-and-store Rust SDK (Polkadot solochain)
