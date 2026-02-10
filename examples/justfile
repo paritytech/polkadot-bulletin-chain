@@ -1,9 +1,9 @@
 # Polkadot Bulletin Chain - Just Commands
-# 
+#
 # See README.md for usage instructions.
 
 # Default recipe - run the complete PAPI workflow test
-default: (run-authorize-and-store "bulletin-westend-runtime" "papi")
+default: (run-authorize-and-store "bulletin-westend-runtime" "ws")
 
 # Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
 # This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
@@ -84,7 +84,7 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
-    
+
     if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
@@ -203,7 +203,7 @@ _check-docker:
         echo "   Please install Docker Desktop from: https://www.docker.com/products/docker-desktop"
         exit 1
     fi
-    
+
     if ! docker ps &> /dev/null; then
         echo "❌ Error: Docker is not running."
         echo "   Please start Docker Desktop and try again."
@@ -309,12 +309,12 @@ ipfs-connect runtime:
 # Shutdown IPFS Docker container
 ipfs-shutdown test_dir:
     #!/usr/bin/env bash
-    
+
     echo "🛑 Shutting down IPFS Docker container..."
     docker stop ipfs-node 2>/dev/null || echo "   ⚠ Container not running or already stopped"
     docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
     docker volume rm ipfs-data 2>/dev/null || echo "   ⚠ Volume not found or already removed"
-    
+
     # Clean up container file if it exists
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
 
@@ -323,7 +323,7 @@ ipfs-reconnect-start test_dir runtime:
     #!/usr/bin/env bash
     set -e
     echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
-    
+
     # Use different reconnect script for westend
     ROOT_DIR="{{ justfile_directory() }}/.."
     cd "$ROOT_DIR"
@@ -337,7 +337,7 @@ ipfs-reconnect-start test_dir runtime:
         exit 1
     fi
     cd -
-    
+
     RECONNECT_PID=$!
     echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
     echo "   Reconnect PID: $RECONNECT_PID"
@@ -414,45 +414,78 @@ stop-services test_dir:
     just teardown-services "{{ test_dir }}"
     echo "✅ Services stopped"
 
-# Run TypeScript example (services must already be running via start-services)
+# Run authorize-and-store test only (services must already be running via start-services)
 # Parameters:
-#   example - Example name (e.g., "authorize-and-store", "store-chunked-data")
 #   test_dir - Test directory where services are running
 #   runtime - Runtime name for smoldot chainspec path resolution
-#   mode - Connection mode: "papi" (WebSocket RPC) or "smoldot" (light client)
-#   ws_url - WebSocket URL (default: ws://localhost:10000, only used in papi mode)
-#   seed - Account seed phrase or dev seed (default: //Alice, only used in papi mode)
+#   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
+#   ws_url - WebSocket URL (default: ws://localhost:10000, only used in ws mode)
+#   seed - Account seed phrase or dev seed (default: //Alice, only used in ws mode)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-ts example test_dir runtime mode="papi" ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
     cd typescript
 
-    if [ "{{ example }}" = "authorize-and-store" ]; then
-        if [ "{{ mode }}" = "smoldot" ]; then
-            echo "🧪 Running {{ example }} (mode: smoldot, runtime: {{ runtime }})..."
-            SCRIPT_PATH="authorize-and-store/smoldot.js"
-            # Run with chainspec paths for smoldot mode
-            if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-                RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
-                PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
-                node "$SCRIPT_PATH" "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
-            else
-                CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
-                node "$SCRIPT_PATH" "$CHAINSPEC_PATH" "" "{{ http_ipfs_api }}"
-            fi
-        else
-            echo "🧪 Running {{ example }} (mode: papi)..."
-            node "authorize-and-store/papi.js" "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
-        fi
-    elif [ "{{ example }}" = "store-big-data" ]; then
-        echo "🧪 Running {{ example }}..."
-        # Skip individual chunk download verification (IPFS doesn't cache chunks after DAG reconstruction)
-        node "{{ example }}/index.js" "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" --skip-ipfs-verify
+    if [ "{{ mode }}" = "smoldot" ]; then
+        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
+    elif [ "{{ mode }}" = "ws" ]; then
+        SCRIPT_NAME="authorize_and_store_papi.js"
     else
-        echo "🧪 Running {{ example }}..."
-        node "{{ example }}/index.js" "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
     fi
+
+    # Run the script with parameters
+    if [ "{{ mode }}" = "smoldot" ]; then
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
+        else
+            CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "{{ http_ipfs_api }}"
+        fi
+    else
+        node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    fi
+
+# Run store-chunked-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    cd typescript
+    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run store-big-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   image_size - Image size preset: small, big32, big64, big96 (default: big64)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
+run-test-store-big-data test_dir image_size="big64" ws_url="ws://localhost:10000" seed="//Alice" ipfs_gateway_url="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    cd typescript
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+
+# Run authorize-preimage-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    cd typescript
+    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
 
 # Run Rust example (services must already be running via start-services)
 # Parameters:
@@ -496,25 +529,6 @@ run-test-rust example test_dir runtime="bulletin-polkadot-runtime" ws_url="ws://
     # Run the example
     "./rust/{{ example }}/target/release/{{ example }}" --ws "{{ ws_url }}" --seed "{{ seed }}"
 
-# ============================================================================
-# Test Categories - Run specific test suites independently
-# ============================================================================
-# These recipes allow running different test categories separately for easier
-# debugging and CI integration. Each can be run independently after services
-# are started with start-services.
-
-# Run TypeScript SDK tests (services must already be running)
-# Parameters:
-#   test_dir - Test directory where services are running
-#   runtime - Runtime name
-test-ts-sdk test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-    echo "🧪 Running TypeScript SDK tests..."
-    just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "papi"
-    just run-test-ts authorize-and-store "{{ test_dir }}" "{{ runtime }}" "smoldot"
-    echo "✅ TypeScript SDK tests passed!"
-
 # Run Rust SDK tests (services must already be running)
 # Parameters:
 #   test_dir - Test directory where services are running
@@ -526,56 +540,51 @@ test-rust-sdk test_dir runtime:
     just run-test-rust authorize-and-store "{{ test_dir }}" "{{ runtime }}"
     echo "✅ Rust SDK tests passed!"
 
-# Run TypeScript example tests (services must already be running)
-# Parameters:
-#   test_dir - Test directory where services are running
-#   runtime - Runtime name
-test-ts-examples test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-    echo "📝 Running TypeScript example tests..."
-    just run-test-ts store-chunked-data "{{ test_dir }}" "{{ runtime }}"
-    just run-test-ts store-big-data "{{ test_dir }}" "{{ runtime }}" "papi" "ws://localhost:10000" "//Alice" "http://127.0.0.1:5011"
-    echo "✅ TypeScript example tests passed!"
-
-# Run all tests (services must already be running via start-services)
-# This is a convenience recipe that runs all test categories in sequence
-# Parameters:
-#   test_dir - Test directory where services are running
-#   runtime - Runtime name for mode-specific tests (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-all-tests test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-    echo "🧪 Running all tests..."
-    just test-ts-sdk "{{ test_dir }}" "{{ runtime }}"
-    just test-rust-sdk "{{ test_dir }}" "{{ runtime }}"
-    just test-ts-examples "{{ test_dir }}" "{{ runtime }}"
-
-    # Preimage authorization test with unsigned transactions
-    just run-test-ts authorize-preimage-and-store "{{ test_dir }}" "{{ runtime }}"
-
-    echo "✅ All tests passed!"
-
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
 # ============================================================================
 
 # Run authorize and store example with Docker IPFS
 # Parameters:
-#   mode - Connection mode: "papi" (WebSocket RPC node) or "smoldot" (light client)
+#   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-authorize-and-store runtime mode="papi": npm-install
+run-authorize-and-store runtime mode="ws": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting authorize and store workflow test (mode: {{ mode }}, runtime: {{ runtime }})..."
+    if [ "{{ mode }}" = "smoldot" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }})..."
+        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
+    elif [ "{{ mode }}" = "ws" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }})..."
+        SCRIPT_NAME="authorize_and_store_papi.js"
+    else
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
+    fi
 
     TEST_DIR="$(just compute-test-dir)"
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
-    just run-test-ts authorize-and-store "$TEST_DIR" "{{ runtime }}" "{{ mode }}"
+    cd typescript
+    # Run the script with parameters
+    if [ "{{ mode }}" = "smoldot" ]; then
+        # Set chainspec path based on runtime
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            # Parachain: relay chain (required) + parachain spec (optional)
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
+        else # bulletin-polkadot-runtime (solochain)
+            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "http://127.0.0.1:8283"
+        fi
+    else
+        node $SCRIPT_NAME "ws://localhost:10000" "//Alice" "http://127.0.0.1:8283"
+    fi
     EXAMPLE_EXIT=$?
+    cd ..
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -604,8 +613,10 @@ run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
+    cd typescript
     node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     EXAMPLE_EXIT=$?
+    cd ..
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -618,8 +629,7 @@ run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http
     just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
 
-# Run store big data example with SDK.
-# Demonstrates automatic chunking, parallel uploads, and DAG-PB manifest generation.
+# Run store big data example.
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
 #   ws_url - WebSocket URL (default: ws://localhost:10000)
@@ -635,8 +645,10 @@ run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipf
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
+    cd typescript
     node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     EXAMPLE_EXIT=$?
+    cd ..
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -665,8 +677,10 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
+    cd typescript
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     EXAMPLE_EXIT=$?
+    cd ..
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -705,6 +719,7 @@ _run-live-tests ws_url seed ipfs_gateway_url="http://127.0.0.1:8283" image_size=
     set -e
     echo "🌐 Running live tests against: {{ ws_url }}"
     just papi-generate "{{ ws_url }}"
+    cd typescript
     node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" --skip-authorize --skip-ipfs-verify
 
 # Run live tests against Westend Bulletin

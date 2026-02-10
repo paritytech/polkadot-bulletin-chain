@@ -1,32 +1,18 @@
-/**
- * Preimage Authorization and Store Test
- *
- * This test validates unsigned store() transactions with preimage authorization,
- * a feature explicitly supported by the pallet (see check_unsigned() in
- * pallets/transaction-storage/src/lib.rs:1051-1095).
- *
- * Test Cases:
- *   1. Unsigned store with preimage auth (no fees)
- *   2. Signed store with preimage auth and custom CID config
- *
- * The pallet prefers preimage authorization over account authorization when both
- * are available, as it's more specific (content-addressed).
- */
-
 import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK } from '../api.js';
-import { setupKeyringAndSigners, getContentHash } from '../common.js';
-import { cidFromBytes } from "../cid_dag_metadata.js";
-import { bulletin } from '../.papi/descriptors/dist/index.mjs';
+import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { setupKeyringAndSigners, getContentHash, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// Command line arguments: [ws_url] [seed] [http_ipfs_api]
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
-const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8283';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 /**
  * Run a preimage authorization + store test.
@@ -41,7 +27,7 @@ const HTTP_IPFS_API = args[2] || 'http://127.0.0.1:8283';
  * @param {object|null} client - Client for unsigned transactions
  */
 async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, signerAddress, cidCodec, mhCode, client) {
-    console.log(`\n========== ${testName} ==========\n`);
+    logSection(testName);
 
     // Data to store
     const dataToStore = `Hello, Bulletin - ${testName} - ${new Date().toString()}`;
@@ -57,28 +43,30 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         bulletinAPI,
         sudoSigner,
         contentHash,
-        BigInt(dataToStore.length)
+        BigInt(dataToStore.length),
+        TX_MODE_FINALIZED_BLOCK
     );
 
     // If signer is provided, also authorize the account (to increment inc_providers/inc_sufficients for `CheckNonce`).
     if (signer != null && signerAddress != null) {
-        console.log(`ℹ️ Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
+        logInfo(`Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
         await authorizeAccount(
             bulletinAPI,
             sudoSigner,
             signerAddress,
             10,        // dummy transactions
-            BigInt(10000)  // dummy bytes
+            BigInt(10000),  // dummy bytes
+            TX_MODE_FINALIZED_BLOCK
         );
     }
 
     // Store data
     const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
-    console.log("✅ Data stored successfully with CID:", cid.toString());
+    logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
     // Read back from IPFS
     const downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
-    console.log("✅ Downloaded content:", downloadedContent.toString());
+    logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
 
     // Verify CID matches
     assert.deepStrictEqual(
@@ -94,14 +82,14 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         '❌ Stored data does not match downloaded content!'
     );
 
-    console.log(`✅ Verified content!`);
+    logSuccess('Verified content!');
 }
 
 async function main() {
     await cryptoWaitReady();
 
-    console.log(`Connecting to: ${NODE_WS}`);
-    console.log(`Using seed: ${SEED}`);
+    logHeader('AUTHORIZE PREIMAGE AND STORE TEST');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
     let client, resultCode;
     try {
@@ -137,10 +125,11 @@ async function main() {
             client
         );
 
-        console.log(`\n\n\n✅✅✅ All tests passed! ✅✅✅`);
+        logTestResult(true, 'Authorize Preimage and Store Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();
