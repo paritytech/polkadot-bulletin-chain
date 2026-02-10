@@ -18,18 +18,32 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
+	cids::HashingAlgorithm,
 	mock::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
 	},
 	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
-	BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
+	BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
+use crate::migrations::v1::OldTransactionInfo;
+use codec::Encode;
 use polkadot_sdk_frame::{
+	deps::{
+		frame_support::{
+			storage::unhashed,
+			traits::{GetStorageVersion, OnRuntimeUpgrade},
+			BoundedVec,
+		},
+		sp_io, sp_runtime,
+	},
+	traits::StorageVersion,
 	prelude::{frame_system::RawOrigin, *},
 	testing_prelude::*,
 };
-use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
+use sp_transaction_storage_proof::{
+	num_chunks, random_chunk, registration::build_proof, CHUNK_SIZE,
+};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;
@@ -597,5 +611,162 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent { transactions: 1, bytes: 2000 },
 			"Account authorization should remain unchanged when preimage auth is used"
 		);
+	});
+}
+
+// ---- Migration tests ----
+
+/// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`
+/// storage slot for `block_num`.
+fn insert_old_format_transactions(block_num: u64, count: u32) {
+	let mut old_txs: Vec<OldTransactionInfo> = Vec::new();
+	let mut cumulative_chunks = 0u32;
+	for i in 0..count {
+		let data = vec![(i & 0xFF) as u8; 2000];
+		let chunks = num_chunks(data.len() as u32);
+		cumulative_chunks += chunks;
+		let chunk_vecs: Vec<Vec<u8>> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+		let root =
+			sp_io::trie::blake2_256_ordered_root(chunk_vecs, sp_runtime::StateVersion::V1);
+		old_txs.push(OldTransactionInfo {
+			chunk_root: root,
+			content_hash: sp_io::hashing::blake2_256(&data).into(),
+			size: data.len() as u32,
+			block_chunks: cumulative_chunks,
+		});
+	}
+	let bounded: BoundedVec<OldTransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+		old_txs.try_into().expect("within bounds");
+	let key = Transactions::hashed_key_for(block_num);
+	unhashed::put_raw(&key, &bounded.encode());
+}
+
+#[test]
+fn migration_v1_old_entries_only() {
+	new_test_ext().execute_with(|| {
+		// Simulate pre-migration state: on-chain version 0
+		StorageVersion::new(0).put::<TransactionStorage>();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
+
+		// Insert old-format entries at blocks 1, 2, 3
+		insert_old_format_transactions(1, 2);
+		insert_old_format_transactions(2, 1);
+		insert_old_format_transactions(3, 3);
+
+		// Can't decode with new type
+		assert!(Transactions::get(1).is_none());
+		assert!(Transactions::get(2).is_none());
+		assert!(Transactions::get(3).is_none());
+
+		// But raw bytes exist
+		assert!(Transactions::contains_key(1));
+		assert!(Transactions::contains_key(2));
+		assert!(Transactions::contains_key(3));
+
+		// Run migration
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+
+		// All entries now decode
+		let txs1 = Transactions::get(1).expect("should decode");
+		assert_eq!(txs1.len(), 2);
+		for tx in txs1.iter() {
+			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
+			assert_eq!(tx.cid_codec, 0x55);
+			assert_eq!(tx.size, 2000);
+		}
+
+		let txs2 = Transactions::get(2).expect("should decode");
+		assert_eq!(txs2.len(), 1);
+
+		let txs3 = Transactions::get(3).expect("should decode");
+		assert_eq!(txs3.len(), 3);
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+	});
+}
+
+#[test]
+fn migration_v1_new_entries_only() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<TransactionStorage>();
+		run_to_block(1, || None);
+
+		// Store via normal (new-format) code path
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		run_to_block(2, || None);
+
+		let original = Transactions::get(1).expect("should decode");
+		assert_eq!(original.len(), 1);
+
+		// Run migration
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+
+		// Entry unchanged
+		let after = Transactions::get(1).expect("should decode");
+		assert_eq!(original, after);
+	});
+}
+
+#[test]
+fn migration_v1_mixed_entries() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<TransactionStorage>();
+
+		// Old-format entry at block 5
+		insert_old_format_transactions(5, 2);
+		assert!(Transactions::get(5).is_none());
+
+		// New-format entry at block 10
+		run_to_block(10, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![42u8; 500]));
+		run_to_block(11, || None);
+		let new_entry_before = Transactions::get(10).expect("new format decodes");
+
+		// Run migration
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+
+		// Old entry transformed
+		let migrated = Transactions::get(5).expect("should now decode");
+		assert_eq!(migrated.len(), 2);
+		assert_eq!(migrated[0].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(migrated[0].cid_codec, 0x55);
+		assert_eq!(migrated[0].size, 2000);
+
+		// New entry preserved exactly
+		let new_entry_after = Transactions::get(10).expect("still decodes");
+		assert_eq!(new_entry_before, new_entry_after);
+	});
+}
+
+#[test]
+fn migration_v1_version_updated() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<TransactionStorage>();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(1));
+
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+	});
+}
+
+#[test]
+fn migration_v1_idempotent() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<TransactionStorage>();
+		insert_old_format_transactions(1, 1);
+
+		// First run: migrates
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+		let after_first = Transactions::get(1).expect("decodes");
+
+		// Second run: noop (version already 1)
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+		let after_second = Transactions::get(1).expect("still decodes");
+
+		assert_eq!(after_first, after_second);
 	});
 }
