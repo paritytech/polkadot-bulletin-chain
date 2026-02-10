@@ -110,7 +110,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: examples/typescript/package.json
+          cache-dependency-path: examples/package.json
 
       - name: Install just
         run: cargo install just --locked || true
