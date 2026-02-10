@@ -208,12 +208,12 @@ impl<T: Config> Pallet<T> {
 	fn do_add_validator(who: &T::AccountId) -> DispatchResult {
 		NumValidators::<T>::mutate(|num| {
 			if *num >= T::MaxAuthorities::get() {
-				return Err(Error::<T>::TooManyValidators);
+				return Err(Error::<T>::TooManyValidators)
 			}
 
 			Validators::<T>::mutate(who, |validator| {
 				if !validator.is_none() {
-					return Err(Error::<T>::Duplicate);
+					return Err(Error::<T>::Duplicate)
 				}
 				*validator = Some(Validator { min_set_keys_block: Zero::zero() });
 				Ok(())
@@ -232,7 +232,7 @@ impl<T: Config> Pallet<T> {
 	/// Returns `false` if `who` is not a validator.
 	fn do_remove_validator(who: &T::AccountId) -> bool {
 		if Validators::<T>::take(who).is_none() {
-			return false;
+			return false
 		}
 		NumValidators::<T>::mutate(|num| *num -= 1);
 
