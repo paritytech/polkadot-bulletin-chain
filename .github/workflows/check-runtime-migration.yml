@@ -190,7 +190,7 @@ jobs:
             --runtime $RUNTIME_BLOB_PATH \
             on-runtime-upgrade --checks=$CHECKS \
             $EXTRA_FLAGS \
-            live --uri ${{ matrix.runtime.uri }}"
+            snap --path snapshot.raw"
           
           echo "Running command:"
           echo "$COMMAND"
