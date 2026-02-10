@@ -181,6 +181,8 @@ async function upgradeWithSetCode(api, signer, wasmCode, dryRun) {
     const unsafeApi = api.getUnsafeApi();
 
     // Build the setCode call
+    // Note: Binary.fromBytes wraps raw bytes; polkadot-api handles SCALE encoding (including
+    // compact length prefix) internally when serializing the transaction.
     const setCodeCall = unsafeApi.tx.System.set_code({ code: Binary.fromBytes(wasmCode) }).decodedCall;
     const sudoTx = unsafeApi.tx.Sudo.sudo({ call: setCodeCall });
 
@@ -225,20 +227,23 @@ async function upgradeWithAuthorize(api, signer, wasmCode, codeHash, dryRun) {
 
     if (dryRun) {
         console.log('DRY RUN: Would submit authorize_upgrade');
-        console.log('DRY RUN: Would then submit apply_authorized_upgrade');
+        console.log('DRY RUN: Would then submit apply_authorized_upgrade (unsigned, no fees)');
         return true;
     }
 
     const result1 = await authorizeTx.signAndSubmit(signer);
     console.log(`  Authorized! Block: ${result1.block.hash}`);
 
-    // Step 2: Apply the authorized upgrade
-    console.log('\nStep 2: Applying authorized upgrade...');
+    // Step 2: Apply the authorized upgrade as an unsigned extrinsic.
+    // apply_authorized_upgrade supports ValidateUnsigned in the runtime, so no signer/fees needed.
+    // This avoids requiring the submitter to have funds for the large WASM payload.
+    console.log('\nStep 2: Applying authorized upgrade (unsigned)...');
     const applyTx = unsafeApi.tx.System.apply_authorized_upgrade({
         code: Binary.fromBytes(wasmCode)
     });
 
-    const result2 = await applyTx.signAndSubmit(signer);
+    const bareExtrinsic = await applyTx.getBareTx();
+    const result2 = await api.submit(bareExtrinsic);
     console.log(`  Applied! Block: ${result2.block.hash}`);
 
     return true;

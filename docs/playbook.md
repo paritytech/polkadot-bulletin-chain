@@ -6,7 +6,7 @@
 
 ## E2E Release Process
 
-Replace `<NETWORK>` with your target network from the table below.
+Replace `<NETWORK>` with your target: `westend`, `paseo`, `pop`, or `polkadot`.
 
 ### Step 1: Pre-release Checks
 
