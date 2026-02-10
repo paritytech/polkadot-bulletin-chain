@@ -4,23 +4,6 @@
 
 ---
 
-## Versioning Scheme
-
-The project uses **two separate version tracks** to clearly distinguish testnet and production releases:
-
-| Track | Networks | Format | Examples |
-|-------|----------|--------|----------|
-| **Testnet** | testnet, westend, paseo | `v0.0.X` | v0.0.4, v0.0.5, v0.0.6 |
-| **Production** | polkadot, pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
-
-**Rules:**
-- Testnet releases increment the **patch** component only: `v0.0.4` → `v0.0.5` → `v0.0.6` etc.
-- Production releases follow semver: bump **minor** (`v1.1.0` → `v1.2.0`) for new features, **patch** (`v1.1.0` → `v1.1.1`) for fixes.
-- A single git tag triggers CI for **all** runtimes in the matrix (westend, paseo, polkadot). The tag version determines which track the release belongs to.
-- Never use `v0.0.X` tags for production or `v1.x.y` tags for testnet-only releases.
-
----
-
 ## E2E Release Process
 
 Replace `<NETWORK>` with your target network from the table below.
@@ -56,9 +39,7 @@ gh pr create --title "Bump <RUNTIME> spec_version to <VERSION>"
 
 ### Step 4: Merge PR & Tag the Release
 
-Use the correct version track (see [Versioning Scheme](#versioning-scheme)):
-- **Testnet/Westend/Paseo**: `v0.0.X` (e.g., `v0.0.5`, `v0.0.6`)
-- **Polkadot/PoP**: `v1.x.y` (e.g., `v1.0.1`, `v1.1.0`)
+Tag using the correct version track — `v0.0.X` for testnets, `v1.x.y` for production (see [Versioning Scheme](#versioning-scheme)).
 
 ```shell
 gh pr merge <PR_NUMBER> --merge
@@ -235,3 +216,20 @@ just run-store-big-data <RUNTIME>-runtime
 **Notes:**
 - **Testnet** is the solochain runtime for local development (not a parachain, no relay chain)
 - **Westend/Paseo/PoP** share the same `bulletin-westend-runtime`
+
+---
+
+## Versioning Scheme
+
+Two separate version tracks for git tags:
+
+| Track | Networks | Format | Examples |
+|-------|----------|--------|----------|
+| **Testnet** | testnet, westend, paseo | `v0.0.X` | v0.0.4, v0.0.5, v0.0.6 |
+| **Production** | polkadot, pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
+
+**Rules:**
+- Testnet releases increment the **patch** component only: `v0.0.4` → `v0.0.5` → `v0.0.6`.
+- Production releases follow semver: bump **minor** for new features, **patch** for fixes.
+- A single git tag triggers CI for **all** runtimes in the matrix (westend, paseo, polkadot). The tag version determines which track the release belongs to.
+- Never use `v0.0.X` tags for production or `v1.x.y` tags for testnet-only releases.
