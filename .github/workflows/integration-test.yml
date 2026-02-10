@@ -177,9 +177,9 @@ jobs:
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
       # SDK Client Tests
-      - name: Test authorize-and-store Rust SDK (Westend parachain)
+      - name: Test Rust SDK (Westend parachain)
         working-directory: examples
-        run: just run-test-rust authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
+        run: just test-rust-sdk "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
 
       - name: Stop services (Westend parachain)
         if: always()
@@ -217,9 +217,9 @@ jobs:
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
       # SDK Client Tests
-      - name: Test authorize-and-store Rust SDK (Polkadot solochain)
+      - name: Test Rust SDK (Polkadot solochain)
         working-directory: examples
-        run: just run-test-rust authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
+        run: just test-rust-sdk "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
 
       - name: Stop services (Polkadot solochain)
         if: always()
