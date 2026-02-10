@@ -23,67 +23,52 @@ Parse `$ARGUMENTS` to extract:
 
 ## Networks
 
-Resolve the network name to an HTTPS RPC endpoint:
+Resolve the network name to a WSS endpoint:
 
-| Network   | HTTPS Endpoint                              | Para ID |
-|-----------|---------------------------------------------|---------|
-| westend   | `https://westend-bulletin-rpc.polkadot.io`  | 2487    |
-| paseo     | `https://paseo-bulletin-rpc.polkadot.io`    | TBD     |
+| Network   | WSS Endpoint                              | Para ID |
+|-----------|-------------------------------------------|---------|
+| westend   | `wss://westend-bulletin-rpc.polkadot.io`  | 2487    |
+| paseo     | `wss://paseo-bulletin-rpc.polkadot.io`    | TBD     |
 
-If the network argument doesn't match any known name, treat it as a custom HTTPS URL.
-Strip trailing slashes. If the user provides a `wss://` URL, convert it to `https://` for curl-based checks.
+If the network argument doesn't match any known name, treat it as a custom WSS URL.
+Strip trailing slashes. If the user provides an `https://` URL, convert it to `wss://`.
 
 If no network is provided, ask the user which network to test.
 
-## Why HTTPS (not WSS)
+## How checks work
 
-Health and check levels use `curl` with JSON-RPC over HTTPS. All checks are stateless request/response calls that don't need WebSocket subscriptions. HTTPS works with `curl` out of the box - no extra dependencies like `websocat` or `wscat` needed.
+Health and check levels use a PAPI-based Node.js script (`examples/health_check.js`) that connects via WebSocket and outputs structured JSON to stdout. Diagnostics go to stderr.
 
-The `smoke` level uses WSS via the `justfile` recipes (Node.js/PAPI handles the WebSocket connection).
-
-RPC call pattern:
-```bash
-curl -s -X POST -H "Content-Type: application/json" \
-  -d '{"id":1,"jsonrpc":"2.0","method":"<METHOD>","params":[<PARAMS>]}' \
-  <ENDPOINT>
-```
+The script is invoked via justfile recipes from the `examples/` directory. PAPI descriptors are regenerated from the live chain before each run to ensure the typed API matches the on-chain runtime.
 
 ## Test Levels
 
 ### 1. `health` (default) - Node health check
 
-No credentials required. Verifies the node is reachable, connected, and producing blocks.
+No credentials required. Run from the `examples/` directory:
 
-Run these checks (parallelize independent calls for speed):
+For known networks:
+```bash
+cd examples && just health-check-<network>
+```
 
-**a) RPC Connectivity + System Health** - `system_health`
-- Parse `peers`, `isSyncing`, `shouldHavePeers`
-- FAIL if endpoint unreachable (skip all remaining checks)
-- WARN if `peers < 2`
-- WARN if `isSyncing: true`
+For custom URLs:
+```bash
+cd examples && just health-check "<wss_url>"
+```
 
-**b) Chain Identity** - `system_chain`, `system_version`, `system_name`
-- Report chain name, node implementation, software version
+The script outputs JSON with these checks:
+- **rpc**: Endpoint connectivity (FAIL if unreachable)
+- **peers**: Peer count (WARN if < 2)
+- **syncing**: Sync status (WARN if syncing)
+- **chain**: Chain name, node name, node version
+- **runtime**: specName, specVersion, implVersion
+- **blockProduction**: Samples best block twice with ~30s gap. Retries once after another ~30s if no progress. FAIL if stalled after ~60s total.
+- **finalization**: Compares best vs finalized block number. OK if gap <= 10, WARN if > 10, FAIL if > 100.
 
-**c) Runtime Version** - `state_getRuntimeVersion`
-- Report `specName`, `specVersion`, `implVersion`
+Exit codes: 0 = all OK, 1 = any FAIL, 2 = connection error.
 
-**d) Block Production** - `chain_getHeader` (sample twice with a gap)
-- First call: record block number (hex -> decimal)
-- Wait ~30 seconds
-- Second call: record new block number
-- If unchanged, wait another ~30 seconds and try a third time
-- OK if block number increased at any point
-- WARN if block number unchanged after ~30s but increased after ~60s
-- **FAIL** only if block number unchanged after ~60s total (chain stalled)
-
-**e) Finalization** - `chain_getFinalizedHead` then `chain_getHeader` with that hash
-- Compare finalized block number to best block number
-- OK if gap <= 10 blocks
-- WARN if gap > 10 (finalization lagging)
-- FAIL if gap > 100 (finalization severely behind)
-
-Present results as:
+Parse the JSON output and present results as:
 
 ```
 ## <Network> Bulletin Chain - Health Check
@@ -105,54 +90,37 @@ If any check is FAIL or WARN, add a **Diagnosis** section with possible causes a
 
 ### 2. `check` - Read-only pallet verification
 
-No credentials required. Runs `health` first, then queries on-chain storage to verify the TransactionStorage pallet is configured and operational.
+No credentials required. Runs `health` checks plus pallet verification.
 
-After the health table, add these pallet checks using `state_getStorage` RPC. Storage keys use FRAME's Twox128 hashing on pallet and storage item names.
-
-**Storage key construction**: `twox128("TransactionStorage") + twox128("<StorageItem>")`
-
-Pre-computed key prefixes (TransactionStorage pallet):
-- `RetentionPeriod`: `0x` + `twox128("TransactionStorage")` + `twox128("RetentionPeriod")`
-- `ByteFee`: `0x` + `twox128("TransactionStorage")` + `twox128("ByteFee")`
-- `EntryFee`: `0x` + `twox128("TransactionStorage")` + `twox128("EntryFee")`
-
-To compute twox128 hashes, use `subxt` or compute them inline. Alternatively, query the metadata via `state_getMetadata` to confirm the pallet exists, or use a known-good shortcut:
-
-Query the runtime constants via `state_call` with `Metadata_metadata_versions` to verify the runtime is responsive, then use `state_getKeys` with the pallet prefix to verify storage items exist:
+For known networks:
 ```bash
-# Check if TransactionStorage pallet has any storage keys
-curl -s -X POST -H "Content-Type: application/json" \
-  -d '{"id":1,"jsonrpc":"2.0","method":"state_getKeysPaged","params":["0x3a636f6465",null,1]}' \
-  <ENDPOINT>
+cd examples && just health-check-<network> --check
 ```
 
-Perform these checks:
+For custom URLs:
+```bash
+cd examples && just health-check "<wss_url>" --check
+```
 
-**a) Pallet existence** - `state_getMetadata`
-- Fetch metadata, confirm it returns successfully (don't parse the full blob, just verify non-error response)
-- OK if metadata returned, FAIL if error
-
-**b) Recent storage activity** - `chain_getBlock` on the latest finalized block
-- Fetch the finalized block body
-- Check if any extrinsics reference the TransactionStorage pallet (pallet index 40)
-- OK if chain has recent storage activity, INFO if no storage txs in the latest block (this is normal)
-
-**c) Runtime constants** - `state_call` with `TransactionStorageApi_retention_period`
-- Call: `{"method":"state_call","params":["TransactionStorageApi_retention_period","0x"]}`
-- If the runtime API exists, decode the SCALE-encoded result (little-endian u32/u64 block count)
-- Report the retention period in blocks
-- WARN if the call fails (API may not be exposed)
+The `--check` flag adds pallet checks to the JSON output under the `pallet` key, using the PAPI typed API (automatic SCALE decoding, no manual storage key construction):
+- **retentionPeriod**: `TransactionStorage.RetentionPeriod` storage value (blocks)
+- **byteFee**: `TransactionStorage.ByteFee` storage value
+- **entryFee**: `TransactionStorage.EntryFee` storage value
+- **maxBlockTransactions**: `TransactionStorage.MaxBlockTransactions` constant
+- **maxTransactionSize**: `TransactionStorage.MaxTransactionSize` constant
 
 Present as an additional table after the health results:
 
 ```
 ## <Network> Bulletin Chain - Pallet Check
 
-| Check              | Status | Details                            |
-|--------------------|--------|------------------------------------|
-| Metadata           | OK     | Runtime metadata accessible        |
-| Storage Activity   | INFO   | No storage txs in latest block     |
-| Retention Period   | OK     | N blocks (~X days)                 |
+| Check                 | Status | Details                            |
+|-----------------------|--------|------------------------------------|
+| Retention Period      | OK     | N blocks (~X days)                 |
+| Byte Fee              | OK     | <value>                            |
+| Entry Fee             | OK     | <value>                            |
+| Max Block Transactions| OK     | N                                  |
+| Max Transaction Size  | OK     | N bytes (X MiB)                    |
 
 Overall: OK / WARN / FAIL
 ```
@@ -162,7 +130,7 @@ Overall: OK / WARN / FAIL
 Requires a seed phrase for a pre-authorized account. Runs `check` first, then submits a small storage test to verify the chain accepts and includes transactions.
 
 Steps:
-1. Run `check` level first
+1. Run `check` level first (using the justfile recipe with `--check`)
 2. If health or pallet checks have critical failures, stop early
 3. Resolve network to its `just` recipe name or WSS URL
 4. Run from the `examples/` directory:
@@ -170,8 +138,6 @@ Steps:
    - For custom URLs: `just _run-live-tests "<wss_url>" "<seed>" "http://127.0.0.1:8283" small`
 5. If seed is missing, ask the user for it
 6. Report results: throughput, blocks used, success/failure
-
-To convert HTTPS endpoint back to WSS for the justfile: replace `https://` with `wss://`.
 
 If the test fails with authorization errors, inform the user their account needs to be authorized via sudo on that network.
 
@@ -182,8 +148,8 @@ Stops early if any critical failure is detected at any level.
 
 ## Error Handling
 
-- If `curl` fails to connect, report the endpoint as unreachable and stop
+- If the health check script exits with code 2, report the endpoint as unreachable and stop
 - If `just` is not found, suggest: `cargo install just`
-- If npm dependencies missing in `examples/`, run `npm install` automatically
+- If npm dependencies missing in `examples/`, the justfile recipes run `npm install` automatically
 - Always show partial results - never fail silently
 - Mask seed phrases in any displayed commands (show first 4 chars + `...`)
