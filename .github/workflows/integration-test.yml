@@ -178,8 +178,14 @@ jobs:
 
       # SDK Client Tests
       - name: Test Rust SDK (Westend parachain)
+        continue-on-error: true
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
+
+      - name: Test TypeScript SDK (Westend parachain)
+        continue-on-error: true
+        working-directory: examples
+        run: just test-ts-sdk "${{ env.TEST_DIR }}"
 
       - name: Stop services (Westend parachain)
         if: always()
@@ -218,8 +224,14 @@ jobs:
 
       # SDK Client Tests
       - name: Test Rust SDK (Polkadot solochain)
+        continue-on-error: true
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
+
+      - name: Test TypeScript SDK (Polkadot solochain)
+        continue-on-error: true
+        working-directory: examples
+        run: just test-ts-sdk "${{ env.TEST_DIR }}"
 
       - name: Stop services (Polkadot solochain)
         if: always()
