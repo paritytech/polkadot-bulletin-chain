@@ -522,7 +522,7 @@ run-test-rust example test_dir runtime ws_url="ws://localhost:10000" seed="//Ali
     cargo build --release --manifest-path "rust/{{ example }}/Cargo.toml" --no-default-features --features "$RUNTIME_FEATURE"
 
     # Run the example
-    "./rust/{{ example }}/target/release/{{ example }}" --ws "{{ ws_url }}" --seed "{{ seed }}"
+    RUST_LOG=info "./rust/{{ example }}/target/release/{{ example }}" --ws "{{ ws_url }}" --seed "{{ seed }}"
 
 # Run Rust SDK tests (services must already be running)
 # Parameters:
