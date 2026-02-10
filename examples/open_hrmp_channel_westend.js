@@ -1,19 +1,19 @@
-// open_hrmp_channel_encode.js
+// open_hrmp_channel_westend.js
 //
 // Encodes and optionally submits an XCM message to open HRMP channel with a system parachain.
 //
 // Usage:
-//   node open_hrmp_channel_encode.js [parachain_ws] [relay_ws] [target_para_id] [--submit] [--seed <seed>]
+//   node open_hrmp_channel_westend.js [parachain_ws] [relay_ws] [target_para_id] [--submit] [--seed <seed>]
 //
 // Examples:
 //   # Encode only (dry run)
-//   node open_hrmp_channel_encode.js ws://localhost:10000 ws://localhost:9942 1000
+//   node open_hrmp_channel_westend.js ws://localhost:10000 ws://localhost:9942 1000
 //
 //   # Submit with default sudo (//Alice)
-//   node open_hrmp_channel_encode.js ws://localhost:10000 ws://localhost:9942 1000 --submit
+//   node open_hrmp_channel_westend.js ws://localhost:10000 ws://localhost:9942 1000 --submit
 //
 //   # Submit with custom seed
-//   node open_hrmp_channel_encode.js wss://westend-bulletin-rpc.polkadot.io wss://westend-rpc.polkadot.io 1000 --submit --seed "//Alice"
+//   node open_hrmp_channel_westend.js wss://westend-bulletin-rpc.polkadot.io wss://westend-rpc.polkadot.io 1000 --submit --seed "//Alice"
 
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
@@ -275,7 +275,7 @@ async function main() {
             console.log('  3. Submit with sudo account');
             console.log('');
             console.log('Or run with --submit flag:');
-            console.log(`  node open_hrmp_channel_encode.js ${PARACHAIN_WS} ${RELAY_WS} ${TARGET_PARA_ID} --submit`);
+            console.log(`  node open_hrmp_channel_westend.js ${PARACHAIN_WS} ${RELAY_WS} ${TARGET_PARA_ID} --submit`);
             console.log('');
         }
 
