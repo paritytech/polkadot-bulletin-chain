@@ -195,6 +195,19 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     echo "   Waiting for chain to start (180 seconds)..."
     sleep 180
 
+# Assign multiple coretime cores to a parachain on the relay chain via sudo.
+# Requires PAPI descriptors for the relay chain (run papi-generate-relay first).
+# Parameters:
+#   relay_ws_url - WebSocket URL of the relay chain node (default: ws://localhost:9942)
+#   para_id - Parachain ID to assign cores to (default: 2487)
+#   num_cores - Number of cores to assign (default: 3)
+#   seed - Sudo account seed (default: //Alice)
+assign-cores relay_ws_url="ws://localhost:9942" para_id="2487" num_cores="3" seed="//Alice": npm-install
+    #!/usr/bin/env bash
+    set -e
+    echo "Assigning {{ num_cores }} coretime cores to para {{ para_id }} on {{ relay_ws_url }}..."
+    node assign_cores.js "{{ relay_ws_url }}" "{{ para_id }}" "{{ num_cores }}" "{{ seed }}"
+
 # Check if Docker is available and running
 _check-docker:
     #!/usr/bin/env bash
@@ -355,6 +368,16 @@ papi-generate ws_url="ws://localhost:10000": npm-install
     echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
     npx papi add -w "{{ ws_url }}" bulletin
 
+# Generate PAPI descriptors for the relay chain (needed for assign-cores)
+# Parameters:
+#   relay_ws_url - WebSocket URL of the relay chain node (default: ws://localhost:9942)
+papi-generate-relay relay_ws_url="ws://localhost:9942": npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🔧 Generating PAPI descriptors for relay chain from {{ relay_ws_url }}..."
+    npx papi add -w "{{ relay_ws_url }}" westend
+
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
@@ -374,6 +397,12 @@ setup-services test_dir runtime: npm-install
 
     # Generate PAPI descriptors from running node.
     just papi-generate
+
+    # For parachain: generate relay chain descriptors and assign coretime cores
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        just papi-generate-relay
+        just assign-cores
+    fi
 
     # Start IPFS
     echo "🔧 Tearing down Docker services if they are running..."
