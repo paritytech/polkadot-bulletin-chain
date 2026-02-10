@@ -89,32 +89,11 @@ node upgrade_runtime.js "<SUDO_SEED>" ./bulletin_westend_runtime.compact.compres
 
 ---
 
-## Node Configuration
-
-**Testnet (solochain):**
-```shell
-./target/release/polkadot-bulletin-chain --dev --ipfs-server --validator
-```
-
-**Parachains (Westend/Paseo/PoP/Polkadot):**
-```shell
-polkadot-omni-node \
-  --chain <CHAIN_SPEC> \
-  --collator \
-  --ipfs-server \
-  -lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace \
-  -- --chain <RELAY_CHAIN>
-```
-
-**Required:** `--ipfs-server` for transaction storage.
-
----
-
 ## Test Against Live Network
 
 ```shell
 cd examples && npm install
-just run-tests-against-<NETWORK> "//Seed"
+just run-live-tests-<NETWORK> "//Seed"
 ```
 
 Currently supported: `westend`
@@ -153,25 +132,6 @@ cargo build --release -p <RUNTIME>-runtime --features runtime-benchmarks
 python3 scripts/cmd/cmd.py bench <RUNTIME>
 ```
 
-### Zombienet
-
-```shell
-# 1. Setup (one-time)
-cd examples && just setup-parachain-prerequisites
-curl -L -o zombienet https://github.com/paritytech/zombienet/releases/download/v1.3.138/zombienet-$(uname -s | tr '[:upper:]' '[:lower:]')-x64
-chmod +x zombienet
-
-# 2. Create chain spec
-./scripts/create_<RUNTIME>_spec.sh
-
-# 3. Spawn network
-POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot \
-POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node \
-./zombienet -p native spawn ./zombienet/<RUNTIME>-local.toml
-```
-
-**Local Endpoints:** Relay Alice `ws://localhost:9942` | Collator `ws://localhost:10000`
-
 ### Integration Tests
 
 ```shell
@@ -192,30 +152,6 @@ just run-store-big-data <RUNTIME>-runtime
 | Runtime upgrade fails | Verify Blake2-256 hash matches release notes |
 | IPFS not working | Ensure `--ipfs-server` flag, check: `grep bitswap collator.log` |
 | Verify hash locally | `b2sum -l 256 <wasm_file>` |
-
----
-
-## Network Configuration
-
-| Parameter | Testnet | Westend | Paseo | PoP | Polkadot |
-|-----------|---------|---------|-------|-----|----------|
-| **Runtime** | polkadot-bulletin-chain | bulletin-westend | bulletin-westend | bulletin-westend | bulletin-polkadot |
-| **Runtime File** | `runtime/src/lib.rs` | `runtimes/bulletin-westend/src/lib.rs` | ← same | ← same | `runtimes/bulletin-polkadot/src/lib.rs` |
-| **WASM Artifact** | manual build | `bulletin_westend_runtime...wasm` | ← same | ← same | `bulletin_polkadot_runtime...wasm` |
-| **Para ID** | N/A (solochain) | 2487 | TBD | TBD | TBD |
-| **RPC** | `ws://localhost:9944` | `wss://westend-bulletin-rpc.polkadot.io` | TBD | TBD | TBD |
-| **Relay Chain** | N/A (solochain) | westend | paseo | polkadot | polkadot |
-| **Upgrade Method** | sudo | sudo | sudo | authorize | authorize |
-| **Chain Spec** | `--dev` or `--chain local` | `bulletin-westend-spec.json` | `bulletin-paseo-spec.json` | `bulletin-pop-spec.json` | `bulletin-polkadot-spec.json` |
-| **CI Release** | ✗ manual | ✓ | ✓ | ✓ | ✓ |
-
-**Upgrade Methods:**
-- `sudo` = `sudo.sudo(system.setCode(code))` - testnets with sudo key
-- `authorize` = `system.authorizeUpgrade(hash)` + `system.applyAuthorizedUpgrade(code)` - production chains
-
-**Notes:**
-- **Testnet** is the solochain runtime for local development (not a parachain, no relay chain)
-- **Westend/Paseo/PoP** share the same `bulletin-westend-runtime`
 
 ---
 
