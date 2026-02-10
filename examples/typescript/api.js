@@ -136,12 +136,7 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
 
     const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
     const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
-
-    return {
-        cid: expectedCid,
-        blockHash: result?.block?.hash,
-        blockNumber: result?.block?.number,
-    };
+    return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
 const UTILITY_BATCH_SIZE = 20;

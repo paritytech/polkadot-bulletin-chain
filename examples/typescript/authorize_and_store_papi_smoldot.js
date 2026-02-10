@@ -4,10 +4,11 @@ import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store } from '../api.js';
-import { setupKeyringAndSigners, waitForChainReady } from '../common.js';
-import { cidFromBytes } from "../cid_dag_metadata.js";
-import { bulletin } from '../.papi/descriptors/dist/index.mjs';
+import { authorizeAccount, fetchCid, store } from './api.js';
+import { setupKeyringAndSigners, waitForChainReady, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
+import { cidFromBytes } from "./cid_dag_metadata.js";
+import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
@@ -95,21 +96,29 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
 async function main() {
     await cryptoWaitReady();
 
+    logHeader('AUTHORIZE AND STORE TEST (Smoldot Light Client)');
+
     // Get chainspec path from command line argument (required - main chain: relay for para, or solo)
     const chainSpecPath = process.argv[2];
     if (!chainSpecPath) {
-        console.error('❌ Error: Chain spec path is required as first argument');
-        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [http_ipfs_api]');
-        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [http_ipfs_api]');
-        console.error('  For solochains: <solo-chain-spec-path> [http_ipfs_api]');
+        logError('Chain spec path is required as first argument');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url]');
+        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url]');
+        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url]');
         process.exit(1);
     }
 
     // Optional parachain chainspec path (only needed for parachains)
     const parachainSpecPath = process.argv[3] || null;
+    // Optional IPFS API URL
+    const HTTP_IPFS_API = process.argv[4] || DEFAULT_IPFS_GATEWAY_URL;
 
-    // Optional IPFS API URL (defaults to non-standard port 8283 to avoid conflicts)
-    const HTTP_IPFS_API = process.argv[4] || 'http://127.0.0.1:8283';
+    logConfig({
+        'Mode': 'Smoldot Light Client',
+        'Chain Spec': chainSpecPath,
+        'Parachain Spec': parachainSpecPath || 'N/A (solochain)',
+        'IPFS API': HTTP_IPFS_API
+    });
     
     let sd, client, resultCode;
     try {
@@ -141,14 +150,14 @@ async function main() {
         );
 
         // Store data.
-        const storeResult = await store(bulletinAPI, whoSigner, dataToStore);
-        console.log("✅ Data stored successfully with CID:", storeResult);
+        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
+        logSuccess(`Data stored successfully with CID: ${cid}`);
 
         // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, storeResult.cid);
-        console.log("✅ Downloaded content:", downloadedContent.toString());
+        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
-            storeResult.cid,
+            cid,
             expectedCid,
             '❌ expectedCid does not match cid!'
         );
@@ -157,12 +166,13 @@ async function main() {
             downloadedContent.toString(),
             '❌ dataToStore does not match downloadedContent!'
         );
-        console.log(`✅ Verified content!`);
+        logSuccess('Verified content!');
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Authorize and Store Test (Smoldot)');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();
