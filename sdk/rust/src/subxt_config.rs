@@ -133,18 +133,23 @@ mod tests {
 
 	#[test]
 	fn test_provide_cid_config_matches() {
+		use scale_info::{PortableRegistry, Registry};
+
+		// Create an empty registry for testing
+		let registry = PortableRegistry::from(Registry::new());
+
 		// ProvideCidConfig matches the identifier "ProvideCidConfig"
-		assert!(ProvideCidConfig::matches::<BulletinConfig>(
+		assert!(<ProvideCidConfig as SignedExtension<BulletinConfig>>::matches(
 			"ProvideCidConfig",
 			0,
-			&scale_info::PortableRegistry { types: Default::default(), ..Default::default() },
+			&registry
 		));
 
 		// ProvideCidConfig does not match other identifiers
-		assert!(!ProvideCidConfig::matches::<BulletinConfig>(
+		assert!(!<ProvideCidConfig as SignedExtension<BulletinConfig>>::matches(
 			"SomeOtherExtension",
 			0,
-			&scale_info::PortableRegistry { types: Default::default(), ..Default::default() },
+			&registry
 		));
 	}
 }
