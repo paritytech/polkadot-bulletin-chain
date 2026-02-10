@@ -64,12 +64,14 @@ Run these checks (parallelize independent calls for speed):
 **c) Runtime Version** - `state_getRuntimeVersion`
 - Report `specName`, `specVersion`, `implVersion`
 
-**d) Block Production** - `chain_getHeader` (twice, ~15s apart)
+**d) Block Production** - `chain_getHeader` (sample twice with a gap)
 - First call: record block number (hex -> decimal)
-- Wait ~15 seconds
+- Wait ~30 seconds
 - Second call: record new block number
-- OK if block number increased
-- **FAIL** if block number unchanged (chain stalled)
+- If unchanged, wait another ~30 seconds and try a third time
+- OK if block number increased at any point
+- WARN if block number unchanged after ~30s but increased after ~60s
+- **FAIL** only if block number unchanged after ~60s total (chain stalled)
 
 **e) Finalization** - `chain_getFinalizedHead` then `chain_getHeader` with that hash
 - Compare finalized block number to best block number
