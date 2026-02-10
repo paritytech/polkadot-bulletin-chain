@@ -15,6 +15,22 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 
 **Networks**: `westend`, `paseo`, `pop`, `polkadot`
 
+## Versioning Scheme
+
+Two separate version tracks:
+
+| Track | Networks | Format | Examples |
+|-------|----------|--------|----------|
+| **Testnet** | testnet, westend, paseo | `v0.0.X` | v0.0.4 → v0.0.5 → v0.0.6 |
+| **Production** | polkadot, pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
+
+**Rules:**
+- Testnet releases: increment patch only (`v0.0.X` → `v0.0.X+1`)
+- Production releases: semver — minor for features, patch for fixes
+- Never mix tracks: no `v0.0.X` for production, no `v1.x.y` for testnets
+
+When determining the next version, check `git tag --sort=-v:refname` to find the latest tag in the appropriate track.
+
 ## Steps
 
 1. **Pre-checks** (optional): `cargo test && cargo clippy --all-targets --all-features --workspace -- -D warnings`
@@ -32,7 +48,9 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
    gh pr create --title "Bump <runtime> spec_version to <VERSION>"
    ```
 
-4. **Merge the PR** and **tag the release** on main:
+4. **Merge the PR** and **tag the release** on main using the correct version track:
+   - testnet/westend/paseo: `v0.0.X` (e.g., `v0.0.6`)
+   - polkadot/pop: `v1.x.y` (e.g., `v1.1.0`)
    ```bash
    gh pr merge <PR_NUMBER> --merge
    git checkout main && git pull
