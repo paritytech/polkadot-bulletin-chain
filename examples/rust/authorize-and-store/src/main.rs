@@ -23,7 +23,7 @@ use clap::Parser;
 use std::str::FromStr;
 use subxt::{utils::AccountId32, OnlineClient};
 use subxt_signer::sr25519::Keypair;
-use tracing::{info, Level};
+use tracing::info;
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
@@ -49,12 +49,11 @@ pub mod bulletin {}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	// Initialize tracing subscriber
-	let subscriber = FmtSubscriber::builder()
-		.with_max_level(Level::INFO)
-		.with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-		.finish();
-	tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+	// Initialize tracing subscriber (RUST_LOG env var overrides the default "info" level)
+	let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+		.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+		let subscriber = FmtSubscriber::builder().with_env_filter(env_filter).finish();
+		tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
 	let args = Args::parse();
 
