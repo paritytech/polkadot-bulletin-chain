@@ -552,6 +552,8 @@ test-ts-sdk test_dir ws_url="ws://localhost:10000" seed="//Alice":
     #!/usr/bin/env bash
     set -e
     echo "🧪 Running TypeScript SDK store-big-data test..."
+    # Install SDK dependencies (needed for @ipld/dag-pb, etc.)
+    cd ../sdk/typescript && npm install && cd -
     node typescript/store_big_data.js "{{ ws_url }}" "{{ seed }}" --skip-ipfs-verify
     echo "✅ TypeScript SDK store-big-data test passed!"
 
