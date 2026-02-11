@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
 
 	if let Some(event) = stored_event {
 		info!("  Content Hash: {}", hex::encode(&event.content_hash));
-		info!("  Extrinsic Index: {}", event.index);
+		info!("  Transaction Index In Block: {}", event.index);
 		if let Some(cid_bytes) = &event.cid {
 			info!("  CID (bytes): {}", hex::encode(cid_bytes));
 		}

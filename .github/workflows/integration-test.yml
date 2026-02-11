@@ -182,7 +182,6 @@ jobs:
 
       # SDK Client Tests
       - name: Test Rust SDK (Westend parachain)
-        continue-on-error: true
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "bulletin-westend-runtime"
 
@@ -232,7 +231,6 @@ jobs:
 
       # SDK Client Tests
       - name: Test Rust SDK (Polkadot solochain)
-        continue-on-error: true
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime"
 
