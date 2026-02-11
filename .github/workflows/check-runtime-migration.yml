@@ -79,7 +79,7 @@ jobs:
 
           for i in {1..10}; do
             echo "Snapshot creation attempt $i/10"
-            if try-runtime create-snapshot $URI_ARGS -- snapshot.raw; then
+            if try-runtime create-snapshot "$URI_ARGS" -- snapshot.raw; then
               if [ -f "snapshot.raw" ] && [ -s "snapshot.raw" ]; then
                 echo "Snapshot created successfully"
                 break
@@ -87,7 +87,7 @@ jobs:
             fi
             echo "Snapshot creation failed, attempt $i/10"
             rm -f snapshot.raw
-            if [ $i -eq 10 ]; then
+            if [ "$i" -eq 10 ]; then
               echo "All snapshot creation attempts failed"
               exit 1
             fi
@@ -97,7 +97,7 @@ jobs:
       - name: Get Date
         id: get-date
         run: |
-          echo "today=$(/bin/date -u "+%Y%m%d")" >> $GITHUB_OUTPUT
+          echo "today=$(/bin/date -u "+%Y%m%d")" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Save snapshot to cache
@@ -162,6 +162,7 @@ jobs:
 
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
+          PACKAGE_NAME: ${{ matrix.runtime.package }}
           EXTRA_FLAGS: ${{ env.EXTRA_FLAGS }}
           CHECKS: ${{ env.CHECKS }}
         run: |
@@ -169,7 +170,7 @@ jobs:
 
           FEATURES="--features try-runtime"
           echo "Setting features: ${FEATURES}"
-          cargo build --release -p ${{ matrix.runtime.package }} $FEATURES -q --locked
+          cargo build --release -p ${{ matrix.runtime.package }} "$FEATURES" -q --locked
 
           PACKAGE_NAME=${{ matrix.runtime.package }}
           RUNTIME_BLOB_NAME=$(echo $PACKAGE_NAME | sed 's/-/_/g').compact.compressed.wasm
