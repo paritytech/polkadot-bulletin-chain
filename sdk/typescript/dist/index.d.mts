@@ -662,6 +662,13 @@ declare class AsyncBulletinClient {
      */
     withAccount(account: string): this;
     /**
+     * Sign, submit, and wait for a transaction to be finalized.
+     *
+     * Uses PAPI's signAndSubmit which returns a promise resolving to the
+     * finalized result directly.
+     */
+    private signAndSubmitFinalized;
+    /**
      * Store data on Bulletin Chain using builder pattern
      *
      * Returns a builder that allows fluent configuration of store options.
