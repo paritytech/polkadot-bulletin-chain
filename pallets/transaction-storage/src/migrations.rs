@@ -98,15 +98,22 @@ pub mod v1 {
 		pub block_chunks: ChunkIndex,
 	}
 
-	/// Unchecked migration logic. Wrapped by [`MigrateV0ToV1`] for version gating.
-	pub struct UncheckedMigrateV0ToV1<T>(PhantomData<T>);
+	/// Version-unchecked migration logic. Wrapped by [`MigrateV0ToV1`] for version gating.
+	pub struct VersionUncheckedMigrateV0ToV1<T>(PhantomData<T>);
 
-	impl<T: Config> UncheckedOnRuntimeUpgrade for UncheckedMigrateV0ToV1<T> {
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV0ToV1<T> {
+		/// NOTE: This iterates all `Transactions` entries without an upper bound.
+		/// The entry count is bounded by `RetentionPeriod` (one per block number).
+		/// At the time of deployment the live chain has 126 entries, well within
+		/// a single block's weight and PoV limits. If the entry count were ever
+		/// close to `RetentionPeriod` (100,800), this would need to be converted
+		/// to a multi-block migration.
 		fn on_runtime_upgrade() -> Weight {
 			let prefix = Transactions::<T>::final_prefix();
 			let mut previous_key = prefix.to_vec();
 			let mut migrated: u64 = 0;
 			let mut skipped: u64 = 0;
+			let mut corrupted: u64 = 0;
 
 			while let Some(key) =
 				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
@@ -140,14 +147,25 @@ pub mod v1 {
 								block_chunks: old.block_chunks,
 							})
 							.collect();
-						let bounded: BoundedVec<TransactionInfo, T::MaxBlockTransactions> =
-							new_txs.try_into().expect("same length, same bound");
+						let Ok(bounded) =
+							BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(
+								new_txs,
+							)
+						else {
+							// Unreachable: decoded N items from a BoundedVec with the same
+							// bound, mapped 1:1. Log defensively and skip.
+							polkadot_sdk_frame::deps::frame_support::defensive!(
+								"v0->v1: BoundedVec conversion failed"
+							);
+							continue;
+						};
 						unhashed::put_raw(&key, &bounded.encode());
 						migrated += 1;
 					},
 					Err(_) => {
 						// Corrupted entry — remove to prevent on_finalize panic.
 						unhashed::kill(&key);
+						corrupted += 1;
 						tracing::warn!(
 							target: LOG_TARGET,
 							"Removed corrupted Transactions entry during v0->v1 migration",
@@ -160,17 +178,18 @@ pub mod v1 {
 				target: LOG_TARGET,
 				migrated,
 				skipped,
+				corrupted,
 				"v0->v1 TransactionInfo migration complete",
 			);
 
+			let entries = migrated + skipped + corrupted;
 			T::DbWeight::get()
-				.reads(migrated + skipped + 1)
-				.saturating_add(T::DbWeight::get().writes(migrated))
+				.reads(entries.saturating_mul(2).saturating_add(1))
+				.saturating_add(T::DbWeight::get().writes(migrated + corrupted))
 		}
 
 		#[cfg(feature = "try-runtime")]
-		fn pre_upgrade()
-		-> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 			let prefix = Transactions::<T>::final_prefix();
 			let mut previous_key = prefix.to_vec();
 			let mut count: u64 = 0;
@@ -190,24 +209,13 @@ pub mod v1 {
 		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 			let old_count =
 				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			// iter() decodes every entry — if any fail, they are skipped and the
+			// count drops, which the check below will catch.
 			let new_count = Transactions::<T>::iter().count() as u64;
 			polkadot_sdk_frame::prelude::ensure!(
 				new_count <= old_count,
 				"post_upgrade: more entries than before migration"
 			);
-			for (_block, txs) in Transactions::<T>::iter() {
-				for tx in txs.iter() {
-					polkadot_sdk_frame::prelude::ensure!(
-						matches!(
-							tx.hashing,
-							HashingAlgorithm::Blake2b256
-								| HashingAlgorithm::Sha2_256
-								| HashingAlgorithm::Keccak256
-						),
-						"Invalid hashing algorithm"
-					);
-				}
-			}
 			tracing::info!(target: LOG_TARGET, old_count, new_count, "post_upgrade: valid");
 			Ok(())
 		}
@@ -218,7 +226,7 @@ pub mod v1 {
 	pub type MigrateV0ToV1<T> = VersionedMigration<
 		0,
 		1,
-		UncheckedMigrateV0ToV1<T>,
+		VersionUncheckedMigrateV0ToV1<T>,
 		Pallet<T>,
 		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
 	>;

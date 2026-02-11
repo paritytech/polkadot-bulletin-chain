@@ -29,21 +29,16 @@ use super::{
 use crate::migrations::v1::OldTransactionInfo;
 use codec::Encode;
 use polkadot_sdk_frame::{
-	deps::{
-		frame_support::{
-			storage::unhashed,
-			traits::{GetStorageVersion, OnRuntimeUpgrade},
-			BoundedVec,
-		},
-		sp_io, sp_runtime,
+	deps::frame_support::{
+		storage::unhashed,
+		traits::{GetStorageVersion, OnRuntimeUpgrade},
+		BoundedVec,
 	},
-	traits::StorageVersion,
 	prelude::{frame_system::RawOrigin, *},
 	testing_prelude::*,
+	traits::StorageVersion,
 };
-use sp_transaction_storage_proof::{
-	num_chunks, random_chunk, registration::build_proof, CHUNK_SIZE,
-};
+use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;
@@ -617,24 +612,19 @@ fn signed_renew_prefers_preimage_authorization() {
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`
-/// storage slot for `block_num`.
+/// storage slot for `block_num`. Uses synthetic field values — the migration re-encodes
+/// fields 1:1 without validating chunk roots or content hashes.
 fn insert_old_format_transactions(block_num: u64, count: u32) {
-	let mut old_txs: Vec<OldTransactionInfo> = Vec::new();
-	let mut cumulative_chunks = 0u32;
-	for i in 0..count {
-		let data = vec![(i & 0xFF) as u8; 2000];
-		let chunks = num_chunks(data.len() as u32);
-		cumulative_chunks += chunks;
-		let chunk_vecs: Vec<Vec<u8>> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
-		let root =
-			sp_io::trie::blake2_256_ordered_root(chunk_vecs, sp_runtime::StateVersion::V1);
-		old_txs.push(OldTransactionInfo {
-			chunk_root: root,
-			content_hash: sp_io::hashing::blake2_256(&data).into(),
-			size: data.len() as u32,
-			block_chunks: cumulative_chunks,
-		});
-	}
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+
+	let old_txs: Vec<OldTransactionInfo> = (0..count)
+		.map(|i| OldTransactionInfo {
+			chunk_root: BlakeTwo256::hash(&[i as u8]),
+			content_hash: BlakeTwo256::hash(&[i as u8 + 100]),
+			size: 2000,
+			block_chunks: (i + 1) * 8,
+		})
+		.collect();
 	let bounded: BoundedVec<OldTransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
 		old_txs.try_into().expect("within bounds");
 	let key = Transactions::hashed_key_for(block_num);
