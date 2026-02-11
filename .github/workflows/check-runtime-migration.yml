@@ -176,15 +176,13 @@ jobs:
           RUNTIME_BLOB_PATH=./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME
           export RUST_LOG=remote-ext=debug,runtime=trace
           
-          COMMAND="try-runtime \
+          echo "Running command: "
+          echo 'try-runtime --runtime $RUNTIME_BLOB_PATH on-runtime-upgrade --checks=$CHECKS $EXTRA_FLAGS snap --path snapshot.raw'
+          try-runtime \
             --runtime $RUNTIME_BLOB_PATH \
             on-runtime-upgrade --checks=$CHECKS \
             $EXTRA_FLAGS \
-            snap --path snapshot.raw"
-          
-          echo "Running command:"
-          echo "$COMMAND"
-          eval "$COMMAND"
+            snap --path snapshot.raw
 
   # This will only run if all the tests in its "needs" array passed.
   # Add this as your required job, becuase if the matrix changes size (new things get added)
