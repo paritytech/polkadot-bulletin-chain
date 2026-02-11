@@ -204,7 +204,7 @@ impl AsyncBulletinClient {
 	///     .send()
 	///     .await?;
 	/// ```
-	pub fn store(&self, data: Vec<u8>) -> StoreBuilder {
+	pub fn store(&self, data: Vec<u8>) -> StoreBuilder<'_> {
 		StoreBuilder::new(self, data)
 	}
 
