@@ -165,8 +165,6 @@ jobs:
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
-          EXTRA_FLAGS: ${{ env.EXTRA_FLAGS }}
-          CHECKS: ${{ env.CHECKS }}
         run: |
           try-runtime --version
 
