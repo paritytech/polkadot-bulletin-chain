@@ -168,9 +168,9 @@ jobs:
         run: |
           try-runtime --version
 
-          FEATURES="--features try-runtime"
+          FEATURES="try-runtime"
           echo "Setting features: ${FEATURES}"
-          cargo build --release -p "$PACKAGE_NAME" "$FEATURES" -q --locked
+          cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
 
           RUNTIME_BLOB_NAME=$(echo $PACKAGE_NAME | sed 's/-/_/g').compact.compressed.wasm
           RUNTIME_BLOB_PATH=./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME
