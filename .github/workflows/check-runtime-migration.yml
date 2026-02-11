@@ -69,12 +69,15 @@ jobs:
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
 
-      - name: Install jq
+      - name: Install jq (Linux)
+        if: runner.os == 'Linux'
         run: |
-          if ! command -v jq &> /dev/null; then
-            echo "Installing jq..."
-            sudo apt-get update && sudo apt-get install -y jq
-          fi
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install jq (MacOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install jq
 
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
