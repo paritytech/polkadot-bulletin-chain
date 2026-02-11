@@ -1,9 +1,10 @@
 import { ChopsticksProvider, setup } from "@acala-network/chopsticks-core";
 
-console.log("Setting up Chopsticks with Bulletin chain...");
+const endpoint = process.argv[2] || "wss://westend-bulletin-rpc.polkadot.io";
+console.log(`Setting up Chopsticks with Bulletin chain (endpoint: ${endpoint})...`);
 
 try {
-  const chain = await setup({ endpoint: "wss://rpc.interweb-it.com/bulletin" });
+  const chain = await setup({ endpoint });
   await chain.api.isReady;
   console.log("Chain setup complete.");
 
