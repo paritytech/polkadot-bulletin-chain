@@ -1,13 +1,13 @@
 # Bulletin Chain SDK
 
-Multi-language client SDKs for Polkadot Bulletin Chain with complete transaction submission support.
+Multi-language client SDKs for Polkadot Bulletin Chain.
 
 ## Available SDKs
 
 - **[Rust](rust/)** - no_std compatible, works in native apps and ink! smart contracts
 - **[TypeScript](typescript/)** - Browser and Node.js compatible
 
-Both SDKs provide complete transaction submission with automatic chunking, authorization management, and DAG-PB manifest generation.
+Both SDKs provide CID calculation, automatic chunking, authorization management, and DAG-PB manifest generation. Transaction submission is partially implemented (authorization and renew operations work; `store().send()` is not yet implemented).
 
 ## Quick Build & Test
 
@@ -68,8 +68,8 @@ The SDK book contains comprehensive guides including:
 
 Both SDKs provide:
 
-- ✅ **Complete transaction submission** (not just data preparation)
-- ✅ **All 8 pallet operations** (store, renew, authorize, refresh, cleanup)
+- ✅ **Authorization operations** (authorizeAccount, authorizePreimage, renew)
+- ⚠️ **Store transaction submission** (not yet implemented — use PAPI directly for now)
 - ✅ **Automatic chunking** with configurable chunk size (default 1 MiB)
 - ✅ **DAG-PB manifests** (IPFS-compatible)
 - ✅ **Authorization management** (account and preimage)
@@ -80,10 +80,7 @@ Both SDKs provide:
 
 **Rust**: Example code is available in the [SDK book documentation](../docs/sdk-book/). Rust examples require metadata files from a running node, so they're not included in the repository. See the SDK book for complete working examples and instructions.
 
-**TypeScript** (`sdk/typescript/examples/`):
-- `simple-store.ts` - Basic storage with PAPI
-- `large-file.ts` - Chunked upload with progress
-- `complete-workflow.ts` - All operations demonstration
+**TypeScript**: See [`examples/typescript/`](../examples/typescript/) for working integration examples that use the SDK's chunker, CID calculation, and DAG-PB manifest generation with PAPI for transaction submission.
 
 ## Quick Start
 
@@ -92,8 +89,8 @@ Both SDKs provide:
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-let client = AsyncBulletinClient::new(submitter);
-let result = client.store(data, StoreOptions::default()).await?;
+let client = AsyncBulletinClient::new(api);
+let result = client.store(data).send().await?;
 ```
 
 See [rust/README.md](rust/README.md) for details.
@@ -101,10 +98,10 @@ See [rust/README.md](rust/README.md) for details.
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@bulletin/sdk';
 
-const client = new AsyncBulletinClient(submitter);
-const result = await client.store(data);
+const client = new AsyncBulletinClient(api, signer);
+const result = await client.store(data).send();
 ```
 
 See [typescript/README.md](typescript/README.md) for details.

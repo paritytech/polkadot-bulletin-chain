@@ -2,27 +2,33 @@
 
 The Bulletin SDK automatically handles chunking for large files. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks.
 
+> **Implementation Status**: CID calculation, chunking, and DAG-PB manifest generation are fully functional.
+> Transaction submission for `store().send()` is not yet implemented (throws `NOT_IMPLEMENTED`).
+> Use `storeChunked()` for CID calculation and manifest generation, then submit transactions via PAPI directly.
+
 ## Automatic Chunking (Recommended)
 
 For most use cases, simply use `store()` - it automatically chunks large files:
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@bulletin/sdk';
 
-const submitter = new PAPITransactionSubmitter(api, signer);
-const client = new AsyncBulletinClient(submitter);
+const client = new AsyncBulletinClient(api, signer);
 
 // Load file of any size
 const data = new Uint8Array(50 * 1024 * 1024); // 50 MB
 
 // Automatically chunks if > 2 MiB
-const result = await client.store(data, undefined, (event) => {
-    if (event.type === 'chunk_completed') {
-        console.log(`Chunk ${event.index + 1}/${event.total} uploaded`);
-    } else if (event.type === 'completed') {
-        console.log('Done!');
-    }
-});
+const result = await client
+    .store(data)
+    .withCallback((event) => {
+        if (event.type === 'chunk_completed') {
+            console.log(`Chunk ${event.index + 1}/${event.total} uploaded`);
+        } else if (event.type === 'completed') {
+            console.log('Done!');
+        }
+    })
+    .send();
 
 console.log('Stored with CID:', result.cid.toString());
 if (result.chunks) {
@@ -32,10 +38,10 @@ if (result.chunks) {
 
 ### Configuring Automatic Chunking
 
-You can configure the threshold and chunk size:
+You can configure the threshold and chunk size via the client constructor:
 
 ```typescript
-const client = new AsyncBulletinClient(submitter, {
+const client = new AsyncBulletinClient(api, signer, {
     chunkingThreshold: 5 * 1024 * 1024,  // Chunk files > 5 MiB
     defaultChunkSize: 2 * 1024 * 1024,   // 2 MiB chunks
     maxParallel: 8,                       // Upload 8 chunks in parallel
@@ -51,8 +57,7 @@ For advanced use cases where you need explicit control over chunking parameters,
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
 
-const submitter = new PAPITransactionSubmitter(api, signer);
-const client = new AsyncBulletinClient(submitter);
+const client = new AsyncBulletinClient(api, signer);
 
 const largeFile = new Uint8Array(100 * 1024 * 1024); // 100 MB
 
@@ -117,15 +122,15 @@ The `storeChunked()` method:
 ### When to Use `storeChunked()` vs `store()`
 
 **Use `store()` (recommended):**
-- ✅ For most use cases - it automatically handles everything
-- ✅ When you don't need detailed chunk information
-- ✅ For both small and large files
+- For most use cases - it automatically handles everything
+- When you don't need detailed chunk information
+- For both small and large files
 
 **Use `storeChunked()` (advanced):**
-- ⚙️ When you need detailed control over chunking parameters
-- ⚙️ When you need the full `ChunkedStoreResult` with all chunk CIDs
-- ⚙️ When you want to force chunking on small files
-- ⚙️ For testing or debugging chunking behavior
+- When you need detailed control over chunking parameters
+- When you need the full `ChunkedStoreResult` with all chunk CIDs
+- When you want to force chunking on small files
+- For testing or debugging chunking behavior
 
 **Key Difference:**
 - `store()` returns `StoreResult` with optional chunk info
@@ -208,7 +213,10 @@ const progress = (event) => {
     }
 };
 
-const result = await client.store(largeData, undefined, progress);
+const result = await client
+    .store(largeData)
+    .withCallback(progress)
+    .send();
 ```
 
 ## Authorization Checking (Fail Fast)
@@ -219,13 +227,13 @@ By default, the SDK checks authorization **before** uploading chunked data to av
 
 ```typescript
 // 1. Create client with account
-const client = new AsyncBulletinClient(submitter)
+const client = new AsyncBulletinClient(api, signer)
     .withAccount(account);  // Enable automatic authorization checking
 
 // 2. Upload large file - authorization checked automatically
 const largeData = new Uint8Array(50 * 1024 * 1024);
-const result = await client.store(largeData);
-//   ⬆️ Internally:
+const result = await client.store(largeData).send();
+//   Internally:
 //   - Queries authorization (if account set)
 //   - Checks expiration (if expires_at present)
 //   - Validates sufficient bytes and transactions
@@ -236,18 +244,22 @@ const result = await client.store(largeData);
 ### Error Handling
 
 ```typescript
+import { BulletinError } from '@bulletin/sdk';
+
 try {
-    const result = await client.store(largeData);
+    const result = await client.store(largeData).send();
     console.log('Success!');
 } catch (error) {
-    if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-        console.error('Need more authorization for', largeData.length, 'bytes');
+    if (error instanceof BulletinError) {
+        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
+            console.error('Need more authorization for', largeData.length, 'bytes');
 
-        // Estimate what's needed
-        const estimate = client.estimateAuthorization(largeData.length);
-        console.error('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
-    } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-        console.error('Authorization expired - please refresh');
+            // Estimate what's needed
+            const estimate = client.estimateAuthorization(largeData.length);
+            console.error('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
+        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
+            console.error('Authorization expired - please refresh');
+        }
     }
 }
 ```
@@ -255,11 +267,10 @@ try {
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
+import { AsyncBulletinClient, BulletinError } from '@bulletin/sdk';
 
-const submitter = new PAPITransactionSubmitter(api, signer);
 const account = 'your-account-address';
-const client = new AsyncBulletinClient(submitter)
+const client = new AsyncBulletinClient(api, signer)
     .withAccount(account);
 
 // Large file
@@ -267,7 +278,7 @@ const largeFile = new Uint8Array(100 * 1024 * 1024); // 100 MB
 
 // Estimate authorization needed
 const estimate = client.estimateAuthorization(largeFile.length);
-console.log('📊 Authorization needed:');
+console.log('Authorization needed:');
 console.log('   Transactions:', estimate.transactions);
 console.log('   Bytes:', estimate.bytes);
 
@@ -276,26 +287,29 @@ console.log('   Bytes:', estimate.bytes);
 
 try {
     // Upload with progress tracking
-    const result = await client.store(largeFile, undefined, (event) => {
-        if (event.type === 'chunk_completed') {
-            console.log(`Chunk ${event.index + 1}/${event.total} ✓`);
-        }
-    });
+    const result = await client
+        .store(largeFile)
+        .withCallback((event) => {
+            if (event.type === 'chunk_completed') {
+                console.log(`Chunk ${event.index + 1}/${event.total} done`);
+            }
+        })
+        .send();
 
-    console.log('✅ Upload complete!');
+    console.log('Upload complete!');
     console.log('   CID:', result.cid.toString());
     if (result.chunks) {
         console.log('   Chunks:', result.chunks.numChunks);
     }
 } catch (error) {
-    if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-        console.error('❌ Insufficient authorization');
-        console.error('   Please authorize your account first');
-    } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-        console.error('❌ Authorization expired');
-        console.error('   Please refresh your authorization');
+    if (error instanceof BulletinError) {
+        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
+            console.error('Insufficient authorization');
+        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
+            console.error('Authorization expired');
+        }
     } else {
-        console.error('❌ Error:', error.message);
+        console.error('Error:', error);
     }
 }
 ```

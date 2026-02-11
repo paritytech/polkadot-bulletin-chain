@@ -2,6 +2,11 @@
 
 This guide shows how to store data using the `AsyncBulletinClient` with direct PAPI integration.
 
+> **Implementation Status**: CID calculation, chunking, and DAG-PB manifest generation are fully functional.
+> Transaction submission for `store().send()` is not yet implemented (throws `NOT_IMPLEMENTED`).
+> Authorization operations (`authorizeAccount`, `authorizePreimage`, `renew`) work.
+> See the [examples](../../../../examples/) directory for current working patterns using PAPI directly.
+
 ## Quick Start
 
 The `store()` method with builder pattern automatically handles both small and large files:
@@ -94,7 +99,7 @@ const result = await client.store(data).send();
 const result = await client
     .store(data)
     .withCodec(CidCodec.Raw)
-    .withHashAlgorithm('blake2b-256')
+    .withHashAlgorithm(HashAlgorithm.Blake2b256)
     .withFinalization(true)
     .send();
 
@@ -178,10 +183,10 @@ try {
     if (error instanceof BulletinError) {
         if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
             console.error('Need more authorization!');
-            console.error('Details:', error.details);
+            console.error('Details:', error.cause);
         } else if (error.code === 'AUTHORIZATION_EXPIRED') {
             console.error('Authorization expired!');
-            console.error('Details:', error.details);
+            console.error('Details:', error.cause);
         }
     } else {
         console.error('Error:', error);

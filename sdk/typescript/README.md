@@ -1,11 +1,11 @@
 # Bulletin SDK for TypeScript
 
-Off-chain client SDK for Polkadot Bulletin Chain with **complete transaction submission support**.
+Off-chain client SDK for Polkadot Bulletin Chain with PAPI integration.
 
 ## Quick Start
 
 ```typescript
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@bulletin/sdk';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -15,13 +15,17 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(/* chain descriptors */);
 
 // Create client
-const submitter = new PAPITransactionSubmitter(api, signer);
-const client = new AsyncBulletinClient(submitter);
+const client = new AsyncBulletinClient(api, signer);
 
-// Store data - complete workflow in one call
-const result = await client.store(data);
+// Store data using builder pattern
+const result = await client.store(data).send();
 console.log('Stored with CID:', result.cid.toString());
 ```
+
+> **Note**: Transaction submission via `store().send()` is not yet fully implemented.
+> Authorization (`authorizeAccount`, `authorizePreimage`) and `renew` operations work.
+> CID calculation, chunking, and DAG-PB manifest generation are fully functional.
+> See the [examples](../../examples/) directory for current working patterns using PAPI directly.
 
 ## Installation
 
@@ -47,22 +51,9 @@ npm run test:unit
 npm run test:integration
 ```
 
-## Examples
-
-See [`examples/`](examples/) for complete working examples:
-- `simple-store.ts` - Basic storage with PAPI
-- `large-file.ts` - Chunked upload with progress
-- `complete-workflow.ts` - All operations
-
-Run examples:
-```bash
-npm run build
-node examples/simple-store.js
-```
-
 ## Documentation
 
-📚 **Complete documentation**: [`docs/sdk-book`](../../docs/sdk-book/)
+Complete documentation: [`docs/sdk-book`](../../docs/sdk-book/)
 
 The SDK book contains:
 - Detailed API reference
@@ -73,14 +64,16 @@ The SDK book contains:
 
 ## Features
 
-- ✅ Complete transaction submission
-- ✅ All 8 pallet operations
-- ✅ Automatic chunking (default 1 MiB)
-- ✅ DAG-PB manifests (IPFS-compatible)
-- ✅ Authorization management
-- ✅ Progress tracking
-- ✅ TypeScript types
-- ✅ Browser & Node.js compatible
+- CID calculation (Raw, DAG-PB, DAG-CBOR codecs)
+- Automatic chunking (default 1 MiB, configurable)
+- DAG-PB manifest generation (IPFS-compatible)
+- Authorization management (`authorizeAccount`, `authorizePreimage`)
+- Data renewal (`renew`)
+- Progress tracking callbacks
+- Builder pattern API
+- Mock client for testing
+- TypeScript types throughout
+- Browser & Node.js compatible
 
 ## License
 
