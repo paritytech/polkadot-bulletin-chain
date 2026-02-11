@@ -541,6 +541,7 @@ var BulletinClient = class {
 };
 
 // src/async-client.ts
+import { Binary } from "polkadot-api";
 var StoreBuilder = class {
   constructor(client, data) {
     this.client = client;
@@ -593,7 +594,11 @@ var StoreBuilder = class {
    * ```
    */
   async sendUnsigned() {
-    return this.client.storeWithPreimageAuth(this.data, this.options, this.callback);
+    return this.client.storeWithPreimageAuth(
+      this.data,
+      this.options,
+      this.callback
+    );
   }
 };
 var AsyncBulletinClient = class {
@@ -629,6 +634,21 @@ var AsyncBulletinClient = class {
   withAccount(account) {
     this.account = account;
     return this;
+  }
+  /**
+   * Sign, submit, and wait for a transaction to be finalized.
+   *
+   * Uses PAPI's signAndSubmit which returns a promise resolving to the
+   * finalized result directly.
+   */
+  async signAndSubmitFinalized(tx) {
+    const result = await tx.signAndSubmit(this.signer);
+    return {
+      blockHash: result.block?.hash,
+      txHash: result.txHash,
+      blockNumber: result.block?.number,
+      events: result.events
+    };
   }
   /**
    * Store data on Bulletin Chain using builder pattern
@@ -697,19 +717,113 @@ var AsyncBulletinClient = class {
       opts.cidCodec ?? 85 /* Raw */,
       opts.hashingAlgorithm
     );
-    throw new BulletinError(
-      "Direct PAPI integration not yet implemented - see examples for current usage patterns",
-      "NOT_IMPLEMENTED"
-    );
+    try {
+      const tx = this.api.tx.TransactionStorage.store({
+        data: new Binary(data)
+      });
+      const result = await this.signAndSubmitFinalized(tx);
+      return {
+        cid,
+        size: data.length,
+        blockNumber: result.blockNumber,
+        extrinsicIndex: void 0,
+        chunks: void 0
+      };
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to store data: ${error}`,
+        "TRANSACTION_FAILED",
+        error
+      );
+    }
   }
   /**
    * Internal: Store data with chunking
    */
   async storeInternalChunked(data, config, options, progressCallback) {
-    throw new BulletinError(
-      "Chunked upload not yet implemented for direct PAPI integration",
-      "NOT_IMPLEMENTED"
-    );
+    const chunkerConfig = {
+      ...DEFAULT_CHUNKER_CONFIG,
+      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
+      maxParallel: config?.maxParallel ?? this.config.maxParallel,
+      createManifest: config?.createManifest ?? this.config.createManifest
+    };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const chunker = new FixedSizeChunker(chunkerConfig);
+    const chunks = chunker.chunk(data);
+    const chunkCids = [];
+    for (const chunk of chunks) {
+      if (progressCallback) {
+        progressCallback({
+          type: "chunk_started",
+          index: chunk.index,
+          total: chunks.length
+        });
+      }
+      try {
+        const cid = await calculateCid(
+          chunk.data,
+          opts.cidCodec ?? 85 /* Raw */,
+          opts.hashingAlgorithm
+        );
+        chunk.cid = cid;
+        const tx = this.api.tx.TransactionStorage.store({
+          data: new Binary(chunk.data)
+        });
+        await this.signAndSubmitFinalized(tx);
+        chunkCids.push(cid);
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_completed",
+            index: chunk.index,
+            total: chunks.length,
+            cid
+          });
+        }
+      } catch (error) {
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_failed",
+            index: chunk.index,
+            total: chunks.length,
+            error
+          });
+        }
+        throw error;
+      }
+    }
+    let manifestCid;
+    if (chunkerConfig.createManifest) {
+      if (progressCallback) {
+        progressCallback({ type: "manifest_started" });
+      }
+      const builder = new UnixFsDagBuilder();
+      const manifest = await builder.build(chunks, opts.hashingAlgorithm);
+      const manifestTx = this.api.tx.TransactionStorage.store({
+        data: new Binary(manifest.dagBytes)
+      });
+      await this.signAndSubmitFinalized(manifestTx);
+      manifestCid = manifest.rootCid;
+      if (progressCallback) {
+        progressCallback({
+          type: "manifest_created",
+          cid: manifest.rootCid
+        });
+      }
+    }
+    if (progressCallback) {
+      progressCallback({ type: "completed", manifestCid });
+    }
+    const primaryCid = manifestCid ?? chunkCids[0];
+    return {
+      cid: primaryCid,
+      size: data.length,
+      blockNumber: void 0,
+      extrinsicIndex: void 0,
+      chunks: {
+        chunkCids,
+        numChunks: chunks.length
+      }
+    };
   }
   /**
    * Store large data with automatic chunking and manifest creation
@@ -753,6 +867,10 @@ var AsyncBulletinClient = class {
           opts.hashingAlgorithm
         );
         chunk.cid = cid;
+        const tx = this.api.tx.TransactionStorage.store({
+          data: new Binary(chunk.data)
+        });
+        await this.signAndSubmitFinalized(tx);
         chunkCids.push(cid);
         if (progressCallback) {
           progressCallback({
@@ -781,6 +899,10 @@ var AsyncBulletinClient = class {
       }
       const builder = new UnixFsDagBuilder();
       const manifest = await builder.build(chunks, opts.hashingAlgorithm);
+      const manifestTx = this.api.tx.TransactionStorage.store({
+        data: new Binary(manifest.dagBytes)
+      });
+      await this.signAndSubmitFinalized(manifestTx);
       manifestCid = manifest.rootCid;
       if (progressCallback) {
         progressCallback({
@@ -809,17 +931,17 @@ var AsyncBulletinClient = class {
    */
   async authorizeAccount(who, transactions, bytes) {
     try {
-      const tx = this.api.tx.TransactionStorage.authorize_account({
+      const authCall = this.api.tx.TransactionStorage.authorize_account({
         who,
         transactions,
         bytes
-      });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
+      }).decodedCall;
+      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
+      const result = await this.signAndSubmitFinalized(sudoTx);
       return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber
       };
     } catch (error) {
       throw new BulletinError(
@@ -836,16 +958,16 @@ var AsyncBulletinClient = class {
    */
   async authorizePreimage(contentHash, maxSize) {
     try {
-      const tx = this.api.tx.TransactionStorage.authorize_preimage({
+      const authCall = this.api.tx.TransactionStorage.authorize_preimage({
         content_hash: contentHash,
         max_size: maxSize
-      });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
+      }).decodedCall;
+      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
+      const result = await this.signAndSubmitFinalized(sudoTx);
       return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber
       };
     } catch (error) {
       throw new BulletinError(
@@ -861,12 +983,11 @@ var AsyncBulletinClient = class {
   async renew(block, index) {
     try {
       const tx = this.api.tx.TransactionStorage.renew({ block, index });
-      const result = await tx.signAndSubmit(this.signer);
-      const finalized = await result.waitFor("finalized");
+      const result = await this.signAndSubmitFinalized(tx);
       return {
-        blockHash: finalized.blockHash,
-        txHash: finalized.txHash,
-        blockNumber: finalized.blockNumber
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber
       };
     } catch (error) {
       throw new BulletinError(
