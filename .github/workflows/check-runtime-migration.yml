@@ -170,9 +170,8 @@ jobs:
 
           FEATURES="--features try-runtime"
           echo "Setting features: ${FEATURES}"
-          cargo build --release -p ${{ matrix.runtime.package }} "$FEATURES" -q --locked
+          cargo build --release -p "$PACKAGE_NAME" "$FEATURES" -q --locked
 
-          PACKAGE_NAME=${{ matrix.runtime.package }}
           RUNTIME_BLOB_NAME=$(echo $PACKAGE_NAME | sed 's/-/_/g').compact.compressed.wasm
           RUNTIME_BLOB_PATH=./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME
           export RUST_LOG=remote-ext=debug,runtime=trace
