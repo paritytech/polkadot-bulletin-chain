@@ -176,6 +176,10 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
+      - name: Test chopsticks compatibility (Westend parachain)
+        working-directory: examples
+        run: just run-test-chopsticks "ws://localhost:10000"
+
       # SDK Client Tests
       - name: Test Rust SDK (Westend parachain)
         continue-on-error: true
@@ -221,6 +225,10 @@ jobs:
       - name: Test authorize-preimage-and-store (Polkadot solochain)
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+
+      - name: Test chopsticks compatibility (Polkadot solochain)
+        working-directory: examples
+        run: just run-test-chopsticks "ws://localhost:10000"
 
       # SDK Client Tests
       - name: Test Rust SDK (Polkadot solochain)
