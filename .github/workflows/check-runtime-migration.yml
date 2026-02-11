@@ -22,7 +22,7 @@ permissions: {}
 
 jobs:
   runtime-matrix:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
@@ -69,10 +69,6 @@ jobs:
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
 
-      - name: Install jq
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq
-
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
         run: |
@@ -114,7 +110,7 @@ jobs:
 
   check-migrations:
     needs: [runtime-matrix, prepare-snapshots]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -197,7 +193,7 @@ jobs:
   # it will still require all the steps to succeed.
   # If you add more jobs, remember to add them to the "needs" array.
   confirmMigrationsPassed:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     name: All migrations passed
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     needs: [check-migrations]
