@@ -202,7 +202,7 @@ impl MockBulletinClient {
 	}
 
 	/// Store data using builder pattern.
-	pub fn store(&self, data: Vec<u8>) -> MockStoreBuilder {
+	pub fn store(&self, data: Vec<u8>) -> MockStoreBuilder<'_> {
 		MockStoreBuilder::new(self, data)
 	}
 

@@ -18,7 +18,7 @@ import { AsyncBulletinClient, PAPITransactionSubmitter } from '../../sdk/typescr
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
-    HTTP_IPFS_API,
+    DEFAULT_IPFS_GATEWAY_URL,
     fileToDisk,
     filesAreEqual,
     generateTextImage,
@@ -29,6 +29,7 @@ import { authorizeAccount, fetchCid, TX_MODE_FINALIZED_BLOCK } from '../api.js';
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 // Connect to local IPFS gateway
 const ipfs = create({ url: 'http://127.0.0.1:5001' });
