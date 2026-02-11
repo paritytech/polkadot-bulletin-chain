@@ -2098,7 +2098,6 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "hex",
- "log",
  "pallet-authorship",
  "pallet-babe",
  "pallet-bridge-grandpa",
@@ -2149,6 +2148,7 @@ dependencies = [
  "staging-xcm-executor",
  "static_assertions",
  "substrate-wasm-builder",
+ "tracing",
 ]
 
 [[package]]
@@ -8703,10 +8703,10 @@ dependencies = [
 name = "pallet-relayer-set"
 version = "1.0.0"
 dependencies = [
- "log",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
+ "tracing",
 ]
 
 [[package]]
@@ -9145,7 +9145,6 @@ dependencies = [
 name = "pallet-validator-set"
 version = "1.0.0"
 dependencies = [
- "log",
  "pallet-session",
  "pallets-common",
  "parity-scale-codec",
@@ -9153,6 +9152,7 @@ dependencies = [
  "scale-info",
  "serde",
  "sp-staking",
+ "tracing",
 ]
 
 [[package]]
@@ -9814,7 +9814,6 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "hex",
- "log",
  "pallet-authorship",
  "pallet-babe",
  "pallet-bridge-grandpa",
@@ -9862,6 +9861,7 @@ dependencies = [
  "staging-xcm-executor",
  "static_assertions",
  "substrate-wasm-builder",
+ "tracing",
 ]
 
 [[package]]

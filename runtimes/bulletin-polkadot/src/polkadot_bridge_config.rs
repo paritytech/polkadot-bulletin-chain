@@ -262,7 +262,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 		let payload = match message.data.payload {
 			Ok(payload) => payload,
 			Err(e) => {
-				log::error!(
+				tracing::error!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
 					"dispatch - payload error: {e:?} for lane_id: {:?} and message_nonce: {:?}",
 					message.key.lane_id,
@@ -276,7 +276,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 		};
 		let dispatch_level_result = match BlobDispatcher::dispatch_blob(payload) {
 			Ok(_) => {
-				log::debug!(
+				tracing::debug!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
 					"dispatch - `DispatchBlob::dispatch_blob` was ok for lane_id: {:?} and message_nonce: {:?}",
 					message.key.lane_id,
@@ -285,7 +285,7 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 				XcmBlobMessageDispatchResult::Dispatched
 			},
 			Err(e) => {
-				log::error!(
+				tracing::error!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
 					"dispatch - `DispatchBlob::dispatch_blob` failed with error: {e:?} for lane_id: {:?} and message_nonce: {:?}",
 					message.key.lane_id,
@@ -401,7 +401,7 @@ where
 				XCM_LANE, &blob,
 			)
 			.map_err(|e| {
-				log::error!(
+				tracing::error!(
 					target: LOG_TARGET_BRIDGE_DISPATCH,
 					"haul_blob result - error: {e:?} on lane: {XCM_LANE:?}",
 				);
@@ -410,7 +410,7 @@ where
 		let artifacts = pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::send_message(
 			send_message_args,
 		);
-		log::info!(
+		tracing::info!(
 			target: LOG_TARGET_BRIDGE_DISPATCH,
 			"haul_blob result - ok: {:?} on lane: {:?}. Enqueued messages: {}",
 			artifacts.nonce,

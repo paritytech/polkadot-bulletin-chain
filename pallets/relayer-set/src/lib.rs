@@ -159,7 +159,7 @@ impl<T: Config> Pallet<T> {
 
 		// Decrement who's provider reference count
 		if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
-			log::warn!(
+			tracing::warn!(
 				target: LOG_TARGET,
 				"Failed to decrement provider reference count for relayer {who:?}, \
 				leaking reference: {err:?}"
@@ -188,7 +188,7 @@ impl<T: Config> Pallet<T> {
 			Some(relayer) =>
 				relayer.min_bridge_tx_block = frame_system::Pallet::<T>::block_number()
 					.saturating_add(T::BridgeTxFailCooldownBlocks::get()),
-			None => log::warn!(
+			None => tracing::warn!(
 				target: LOG_TARGET,
 				"Could not find signer {who:?} of failed bridge transaction in relayer set"
 			),

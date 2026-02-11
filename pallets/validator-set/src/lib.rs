@@ -241,13 +241,13 @@ impl<T: Config> Pallet<T> {
 		if let Err(err) =
 			pallet_session::Pallet::<T>::purge_keys(RawOrigin::Signed(who.clone()).into())
 		{
-			log::trace!(
+			tracing::trace!(
 				target: LOG_TARGET,
 				"Failed to purge session keys for validator {who:?}: {err:?}"
 			);
 		}
 		if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
-			log::warn!(
+			tracing::warn!(
 				target: LOG_TARGET,
 				"Failed to decrement provider reference count for validator {who:?}, \
 				leaking reference: {err:?}"

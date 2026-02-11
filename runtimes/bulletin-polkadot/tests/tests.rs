@@ -310,7 +310,7 @@ fn construct_and_apply_extrinsic_with_codec(
 	let dispatch_info = call.get_dispatch_info();
 	let xt = construct_extrinsic_with_codec(account, call, cid_config)?;
 	let xt_len = xt.encode().len();
-	log::info!(
+	tracing::info!(
 		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
 		dispatch_info.class,
 		dispatch_info.pays_fee,
@@ -356,7 +356,7 @@ fn transaction_storage_runtime_sizes() {
 
 		// store data
 		for (index, size) in sizes.into_iter().enumerate() {
-			log::info!("Storing data with size: {size} and index: {index}");
+			tracing::info!("Storing data with size: {size} and index: {index}");
 			advance_block();
 			let res = construct_and_apply_extrinsic(
 				account.pair(),
