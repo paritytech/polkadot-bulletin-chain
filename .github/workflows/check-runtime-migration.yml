@@ -128,8 +128,8 @@ jobs:
           git fetch upstream --tags
 
       - name: Build EXTRA_FLAGS
-         env:
-           BLOCKTIME: ${{ matrix.runtime.blocktime }}
+        env:
+          BLOCKTIME: ${{ matrix.runtime.blocktime }}
         run: |
           EXTRA_FLAGS=" --blocktime $BLOCKTIME "
           EXTRA_FLAGS+=" --disable-spec-version-check"
@@ -149,7 +149,7 @@ jobs:
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
-          toolchain: "${{env.RUST_STABLE_VERSION}}"
+          toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
       - name: Install try-runtime-cli
         run: |
