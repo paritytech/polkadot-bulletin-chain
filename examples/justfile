@@ -482,6 +482,14 @@ run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" see
     set -e
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
 
+# Run Chopsticks compatibility check (services must already be running or use a live endpoint)
+# Parameters:
+#   endpoint - WebSocket URL of the Bulletin chain node (default: wss://westend-bulletin-rpc.polkadot.io)
+run-test-chopsticks endpoint="wss://westend-bulletin-rpc.polkadot.io": npm-install
+    #!/usr/bin/env bash
+    set -e
+    node check_chopsticks.js "{{ endpoint }}"
+
 # Run Rust example (services must already be running via start-services)
 # Parameters:
 #   example - Example name (e.g., "authorize-and-store")
