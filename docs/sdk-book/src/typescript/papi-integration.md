@@ -155,8 +155,8 @@ The SDK handles transaction submission internally. However, if you need to submi
 // Prepare data with core SDK (BulletinClient)
 import { BulletinClient } from '@bulletin/sdk';
 
-const prepClient = new BulletinClient();
-const operation = prepClient.prepare_store(data, {});
+const prepClient = new BulletinClient({ endpoint: 'ws://localhost:9944' });
+const operation = await prepClient.prepareStore(data);
 
 // Submit via PAPI
 const tx = api.tx.TransactionStorage.store({
@@ -183,7 +183,7 @@ try {
     if (error instanceof BulletinError) {
         console.error('Bulletin error:', error.code);
         console.error('Message:', error.message);
-        console.error('Details:', error.details);
+        console.error('Details:', error.cause);
     } else {
         console.error('Unexpected error:', error);
     }
