@@ -127,9 +127,13 @@ async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
 
     // Step 1: Mandatory dry-run validation
     console.log('\nStep 1: Dry-run validation...');
-    const fees = await tx.getEstimatedFees(signerAddress);
-    console.log(`  Estimated fees: ${fees}`);
-    console.log('  Dry-run passed!');
+    try {
+        const fees = await tx.getEstimatedFees(signerAddress);
+        console.log(`  Estimated fees: ${fees}`);
+        console.log('  Dry-run passed!');
+    } catch (error) {
+        throw new Error(`Dry-run failed, upgrade NOT submitted: ${error.message}`);
+    }
 
     // Step 2: Submit
     console.log('\nStep 2: Submitting sudo.sudo(system.setCode)...');
@@ -158,9 +162,13 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
 
     // Step 1: Mandatory dry-run validation
     console.log(`\nStep 1: Dry-run validation for authorize_upgrade (hash: ${hashHex})...`);
-    const fees = await authorizeTx.getEstimatedFees(signerAddress);
-    console.log(`  Estimated fees: ${fees}`);
-    console.log('  Dry-run passed!');
+    try {
+        const fees = await authorizeTx.getEstimatedFees(signerAddress);
+        console.log(`  Estimated fees: ${fees}`);
+        console.log('  Dry-run passed!');
+    } catch (error) {
+        throw new Error(`Dry-run failed, upgrade NOT submitted: ${error.message}`);
+    }
 
     // Step 2: Authorize (needs sudo or governance origin)
     console.log('\nStep 2: Submitting authorize_upgrade...');
