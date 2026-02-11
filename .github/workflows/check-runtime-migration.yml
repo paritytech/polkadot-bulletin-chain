@@ -126,8 +126,10 @@ jobs:
           git fetch upstream --tags
 
       - name: Build EXTRA_FLAGS
+         env:
+           BLOCKTIME: ${{ matrix.runtime.blocktime }}
         run: |
-          EXTRA_FLAGS=" --blocktime ${{ matrix.runtime.blocktime }} "
+          EXTRA_FLAGS=" --blocktime $BLOCKTIME "
           EXTRA_FLAGS+=" --disable-spec-version-check"
           CHECKS="all"
 
