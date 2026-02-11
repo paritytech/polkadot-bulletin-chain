@@ -127,8 +127,6 @@ jobs:
 
       - name: Build EXTRA_FLAGS
         run: |
-          sudo apt install python3
-
           EXTRA_FLAGS=" --blocktime ${{ matrix.runtime.blocktime }} "
           EXTRA_FLAGS+=" --disable-spec-version-check"
           CHECKS="all"
