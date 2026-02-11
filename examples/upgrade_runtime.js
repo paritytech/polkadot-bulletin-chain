@@ -11,7 +11,7 @@
  *   --rpc <url>        Custom RPC endpoint (overrides network default)
  *   --method <type>    Upgrade method: setCode, authorize (default: based on network)
  *   --verify-only      Only verify current runtime version, don't upgrade
- *   --dry-run          Show what would be done without submitting
+ *   (dry-run validation runs automatically before every upgrade)
  */
 
 import { cryptoWaitReady, blake2AsU8a } from '@polkadot/util-crypto';
@@ -54,7 +54,6 @@ function parseArgs() {
         rpc: null,
         method: null,
         verifyOnly: false,
-        dryRun: false,
     };
 
     let i = 0;
@@ -64,7 +63,6 @@ function parseArgs() {
         else if (arg === '--rpc' && args[i + 1])    { opts.rpc = args[++i]; }
         else if (arg === '--method' && args[i + 1]) { opts.method = args[++i]; }
         else if (arg === '--verify-only')            { opts.verifyOnly = true; }
-        else if (arg === '--dry-run')                { opts.dryRun = true; }
         else if (arg.startsWith('--'))               { console.error(`Unknown option: ${arg}`); process.exit(1); }
         else if (!opts.seed)                         { opts.seed = arg; }
         else if (!opts.wasmPath)                     { opts.wasmPath = arg; }
@@ -118,8 +116,7 @@ function printChainInfo({ runtimeVersion, lastUpgrade }) {
 // Binary.fromBytes wraps raw bytes; polkadot-api handles SCALE encoding
 // (including compact length prefix) internally when serializing the transaction.
 
-async function upgradeWithSetCode(client, signer, wasmCode) {
-    console.log('\nUsing sudo.sudo(system.setCode)...');
+async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
     const unsafeApi = client.getUnsafeApi();
 
     const setCodeCall = unsafeApi.tx.System.set_code({
@@ -127,17 +124,22 @@ async function upgradeWithSetCode(client, signer, wasmCode) {
     }).decodedCall;
 
     const tx = unsafeApi.tx.Sudo.sudo({ call: setCodeCall });
+
+    // Step 1: Mandatory dry-run validation
+    console.log('\nStep 1: Dry-run validation...');
+    const fees = await tx.getEstimatedFees(signerAddress);
+    console.log(`  Estimated fees: ${fees}`);
+    console.log('  Dry-run passed!');
+
+    // Step 2: Submit
+    console.log('\nStep 2: Submitting sudo.sudo(system.setCode)...');
     const result = await tx.signAndSubmit(signer);
     console.log(`Success! Block: ${result.block.hash}`);
 }
 
-async function upgradeWithAuthorize(client, signer, wasmCode, codeHash) {
-    console.log('\nUsing authorize_upgrade + apply_authorized_upgrade...');
+async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAddress) {
     const unsafeApi = client.getUnsafeApi();
     const hashHex = `0x${Buffer.from(codeHash).toString('hex')}`;
-
-    // Step 1: Authorize (needs sudo or governance origin)
-    console.log(`\nStep 1: Authorizing upgrade (hash: ${hashHex})...`);
 
     const authorizeCall = unsafeApi.tx.System.authorize_upgrade({
         code_hash: Binary.fromBytes(codeHash),
@@ -154,33 +156,26 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash) {
         console.log('  via system.authorize_upgrade (requires governance origin)');
     }
 
+    // Step 1: Mandatory dry-run validation
+    console.log(`\nStep 1: Dry-run validation for authorize_upgrade (hash: ${hashHex})...`);
+    const fees = await authorizeTx.getEstimatedFees(signerAddress);
+    console.log(`  Estimated fees: ${fees}`);
+    console.log('  Dry-run passed!');
+
+    // Step 2: Authorize (needs sudo or governance origin)
+    console.log('\nStep 2: Submitting authorize_upgrade...');
     const result1 = await authorizeTx.signAndSubmit(signer);
     console.log(`  Authorized! Block: ${result1.block.hash}`);
 
-    // Step 2: Apply as unsigned extrinsic (no signer/fees needed for the large WASM payload).
+    // Step 3: Apply as unsigned extrinsic (no signer/fees needed for the large WASM payload).
     // apply_authorized_upgrade supports ValidateUnsigned in the runtime.
-    console.log('\nStep 2: Applying authorized upgrade (unsigned)...');
+    console.log('\nStep 3: Applying authorized upgrade (unsigned)...');
     const applyTx = unsafeApi.tx.System.apply_authorized_upgrade({
         code: Binary.fromBytes(wasmCode),
     });
     const bareExtrinsic = await applyTx.getBareTx();
     const result2 = await client.submit(bareExtrinsic);
     console.log(`  Applied! Block: ${result2.block.hash}`);
-}
-
-// --- Dry run ---
-
-function dryRunSetCode(wasmCode) {
-    console.log('\n=== DRY RUN ===');
-    console.log('Would submit: sudo.sudo(system.setCode)');
-    console.log(`  WASM size: ${wasmCode.length} bytes`);
-}
-
-function dryRunAuthorize(wasmCode, codeHash) {
-    console.log('\n=== DRY RUN ===');
-    console.log(`Would submit: authorize_upgrade (hash: 0x${Buffer.from(codeHash).toString('hex')})`);
-    console.log(`Would submit: apply_authorized_upgrade (unsigned, no fees)`);
-    console.log(`  WASM size: ${wasmCode.length} bytes`);
 }
 
 // --- Verify ---
@@ -239,13 +234,6 @@ async function main() {
     console.log(`Hash:     0x${Buffer.from(codeHash).toString('hex')}`);
     console.log(`Network:  ${opts.network} (${method})`);
 
-    // -- Dry run --
-    if (opts.dryRun) {
-        if (method === 'setCode') dryRunSetCode(wasmCode);
-        else                      dryRunAuthorize(wasmCode, codeHash);
-        process.exit(0);
-    }
-
     // -- Connect & upgrade --
     console.log(`\nConnecting to ${rpc}...`);
     const client = createClient(withPolkadotSdkCompat(getWsProvider(rpc)));
@@ -255,9 +243,9 @@ async function main() {
         console.log(`Current runtime: ${current.spec_name} v${current.spec_version}`);
 
         if (method === 'setCode') {
-            await upgradeWithSetCode(client, signer, wasmCode);
+            await upgradeWithSetCode(client, signer, wasmCode, address);
         } else {
-            await upgradeWithAuthorize(client, signer, wasmCode, codeHash);
+            await upgradeWithAuthorize(client, signer, wasmCode, codeHash, address);
         }
 
         await verifyUpgrade(client, current.spec_version + 1);

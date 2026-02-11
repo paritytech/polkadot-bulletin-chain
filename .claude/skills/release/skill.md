@@ -40,8 +40,7 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
    git push origin --tags
    ```
 
-5. **Download WASM**:
-   - others: wait for the [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml), then `gh release download <TAG> -p "*.wasm" -D .`
+5. **Download WASM**: wait for the [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml), then `gh release download <TAG> -p "*.wasm" -D .`
 
 6. **Upgrade**: Use the upgrade script in `examples/`:
    ```bash
@@ -60,10 +59,9 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 node upgrade_runtime.js <seed> <wasm_path> [options]
 
 Options:
-  --network <name>   testnet, westend, paseo, pop, polkadot (default: westend)
+  --network <name>   westend, paseo, pop, polkadot (default: westend)
   --rpc <url>        Custom RPC endpoint
   --verify-only      Only check current version
-  --dry-run          Show what would happen
 ```
 
 ## Versioning Scheme

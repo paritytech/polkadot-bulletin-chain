@@ -48,18 +48,15 @@ git tag v<VERSION>
 git push origin --tags
 ```
 
-### Step 5: Build / Wait for CI
+### Step 5: Download WASM from CI
 
-**For Testnet (manual build):**
+Monitor [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml). Once the tag build completes, download the artifact:
+
 ```shell
-cargo build --profile production -p polkadot-bulletin-chain-runtime --features on-chain-release-build
-# Output: target/production/wbuild/polkadot-bulletin-chain-runtime/polkadot_bulletin_chain_runtime.compact.compressed.wasm
+gh release download <TAG> -p "*.wasm" -D .
 ```
 
-**For all other networks:**
-Monitor [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml).
-
-Produces:
+The release includes:
 - `<WASM_ARTIFACT>`
 - Blake2-256 hash in release notes
 
@@ -161,7 +158,7 @@ Two separate version tracks for git tags:
 
 | Track | Networks | Format | Examples |
 |-------|----------|--------|----------|
-| **Testnet** | testnet, westend, paseo | `v0.0.X` | v0.0.4, v0.0.5, v0.0.6 |
+| **Testnet** | westend, paseo | `v0.0.X` | v0.0.4, v0.0.5, v0.0.6 |
 | **Production** | polkadot, pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
 
 **Rules:**
