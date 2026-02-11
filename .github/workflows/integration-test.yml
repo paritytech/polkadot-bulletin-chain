@@ -17,11 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: 22
-  POLKADOT_SDK_VERSION: polkadot-stable2512
-  POLKADOT_SDK_VERSION_WITH_BULLETIN: unstable-bulletin-support-v1
   POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
-  ZOMBIENET_VERSION: v1.3.138
   ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
 
 jobs:
@@ -97,6 +93,9 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
 
       - name: Rust cache (Bulletin)
         uses: Swatinem/rust-cache@v2
