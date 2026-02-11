@@ -14,7 +14,8 @@ import assert from 'assert';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { bulletin } from '../.papi/descriptors/dist/index.mjs';
-import { AsyncBulletinClient, PAPITransactionSubmitter } from '../../sdk/typescript/dist/index.js';
+import pkg from '../../sdk/typescript/dist/index.js';
+const { AsyncBulletinClient, PAPITransactionSubmitter } = pkg;
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
