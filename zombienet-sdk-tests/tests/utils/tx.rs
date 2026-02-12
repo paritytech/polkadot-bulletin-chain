@@ -3,13 +3,15 @@
 
 //! Subxt transaction helpers: nonce management, storage operations, retention period.
 
-use super::config::*;
-use super::crypto::*;
+use super::{config::*, crypto::*};
 use anyhow::{anyhow, Result};
 use std::time::Duration;
-use subxt::config::substrate::{SubstrateConfig, SubstrateExtrinsicParamsBuilder};
-use subxt::ext::scale_value::value;
-use subxt::{dynamic::tx, dynamic::Value, OnlineClient};
+use subxt::{
+	config::substrate::{SubstrateConfig, SubstrateExtrinsicParamsBuilder},
+	dynamic::{tx, Value},
+	ext::scale_value::value,
+	OnlineClient,
+};
 use subxt_signer::sr25519::dev;
 
 pub async fn wait_for_in_best_block(
@@ -85,10 +87,7 @@ pub async fn set_retention_period(
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client
-			.tx()
-			.sign_and_submit_then_watch(&sudo_call, &signer, params)
-			.await?;
+		let progress = client.tx().sign_and_submit_then_watch(&sudo_call, &signer, params).await?;
 		wait_for_in_best_block(progress).await?;
 		Ok::<_, anyhow::Error>(())
 	})
@@ -123,17 +122,11 @@ pub async fn set_retention_period_finalized(
 	let sudo_call = tx("Sudo", "sudo", vec![set_storage_call.into_value()]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	tokio::time::timeout(
-		Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS),
-		async {
-			let progress = client
-				.tx()
-				.sign_and_submit_then_watch(&sudo_call, &signer, params)
-				.await?;
-			wait_for_finalized(progress).await?;
-			Ok::<_, anyhow::Error>(())
-		},
-	)
+	tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&sudo_call, &signer, params).await?;
+		wait_for_finalized(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
 	.await
 	.map_err(|_| anyhow!("set_retention_period_finalized transaction timed out"))??;
 
@@ -168,10 +161,8 @@ pub async fn authorize_and_store_data(
 	nonce += 1;
 
 	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client
-			.tx()
-			.sign_and_submit_then_watch(&authorize_call, &signer, params)
-			.await?;
+		let progress =
+			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
 		wait_for_in_best_block(progress).await?;
 		Ok::<_, anyhow::Error>(())
 	})
@@ -188,10 +179,8 @@ pub async fn authorize_and_store_data(
 
 	let (block_hash, _events) =
 		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-			let progress = client
-				.tx()
-				.sign_and_submit_then_watch(&store_call, &signer, params)
-				.await?;
+			let progress =
+				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
 			wait_for_in_best_block(progress).await
 		})
 		.await
@@ -226,24 +215,16 @@ pub async fn authorize_and_store_data_finalized(
 		}],
 	);
 
-	log::info!(
-		"Submitting authorization transaction (finalized, nonce={})...",
-		nonce
-	);
+	log::info!("Submitting authorization transaction (finalized, nonce={})...", nonce);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 	nonce += 1;
 
-	tokio::time::timeout(
-		Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS),
-		async {
-			let progress = client
-				.tx()
-				.sign_and_submit_then_watch(&authorize_call, &signer, params)
-				.await?;
-			wait_for_finalized(progress).await?;
-			Ok::<_, anyhow::Error>(())
-		},
-	)
+	tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
+		let progress =
+			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
+		wait_for_finalized(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
 	.await
 	.map_err(|_| anyhow!("authorization transaction timed out"))??;
 
@@ -251,25 +232,18 @@ pub async fn authorize_and_store_data_finalized(
 
 	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
 
-	log::info!(
-		"Submitting store transaction (finalized, nonce={})...",
-		nonce
-	);
+	log::info!("Submitting store transaction (finalized, nonce={})...", nonce);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 	nonce += 1;
 
-	let (block_hash, _events) = tokio::time::timeout(
-		Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS),
-		async {
-			let progress = client
-				.tx()
-				.sign_and_submit_then_watch(&store_call, &signer, params)
-				.await?;
+	let (block_hash, _events) =
+		tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
+			let progress =
+				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
 			wait_for_finalized(progress).await
-		},
-	)
-	.await
-	.map_err(|_| anyhow!("store transaction timed out"))??;
+		})
+		.await
+		.map_err(|_| anyhow!("store transaction timed out"))??;
 
 	let block = client.blocks().at(block_hash).await?;
 	let block_number = block.number() as u64;

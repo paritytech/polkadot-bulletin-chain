@@ -3,8 +3,7 @@
 
 //! RocksDB LDB tool integration: column dump, entry parsing, and verification.
 
-use super::config::*;
-use super::network::env_or_default;
+use super::{config::*, network::env_or_default};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -108,12 +107,7 @@ pub fn ldb_dump_column(db_path: &Path, column: &str) -> Result<LdbColumnDump> {
 	let ldb_path = get_ldb_path();
 	let db_path_str = db_path.to_string_lossy();
 
-	log::debug!(
-		"Running: {} --db={} --column_family={} dump --hex",
-		ldb_path,
-		db_path_str,
-		column
-	);
+	log::debug!("Running: {} --db={} --column_family={} dump --hex", ldb_path, db_path_str, column);
 
 	let output = Command::new(&ldb_path)
 		.args([
@@ -156,14 +150,8 @@ fn parse_ldb_dump_output(output: &str) -> Result<LdbColumnDump> {
 		if line.contains(" ==> ") {
 			let parts: Vec<&str> = line.split(" ==> ").collect();
 			if parts.len() == 2 {
-				let key = parts[0]
-					.strip_prefix("0x")
-					.unwrap_or(parts[0])
-					.to_uppercase();
-				let value = parts[1]
-					.strip_prefix("0x")
-					.unwrap_or(parts[1])
-					.to_uppercase();
+				let key = parts[0].strip_prefix("0x").unwrap_or(parts[0]).to_uppercase();
+				let value = parts[1].strip_prefix("0x").unwrap_or(parts[1]).to_uppercase();
 				entries.push(LdbEntry { key, value });
 			}
 		}

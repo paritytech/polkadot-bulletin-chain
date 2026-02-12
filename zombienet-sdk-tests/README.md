@@ -66,15 +66,17 @@ export ROCKSDB_LDB_PATH=/path/to/ldb
 
 ## Running tests
 
+Tests are gated behind the `zombie-sync-tests` feature to prevent accidental execution during `cargo test --workspace`.
+
 ```bash
 # All solochain tests
-cargo test -p bulletin-chain-zombienet-sdk-tests solochain_sync_storage -- --nocapture
+cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests solochain_sync_storage -- --nocapture
 
 # All parachain tests
-cargo test -p bulletin-chain-zombienet-sdk-tests parachain_sync_storage -- --nocapture
+cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests parachain_sync_storage -- --nocapture
 
 # Single test
-cargo test -p bulletin-chain-zombienet-sdk-tests fast_sync_test -- --nocapture
+cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests fast_sync_test -- --nocapture
 ```
 
 Run tests one at a time or with `--test-threads=1`. Each test spawns a full network and they are resource-intensive.
@@ -128,7 +130,8 @@ PARACHAIN_CHAIN_SPEC_PATH=./my-spec.json \
 RELAY_CHAIN=rococo-local \
 PARACHAIN_ID=2000 \
 PARACHAIN_CHAIN_ID=bulletin-rococo \
-  cargo test -p bulletin-chain-zombienet-sdk-tests parachain_fast_sync_test -- --nocapture
+  cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+  parachain_fast_sync_test -- --nocapture
 ```
 
 ## Key behaviors tested

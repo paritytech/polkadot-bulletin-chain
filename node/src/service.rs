@@ -3,7 +3,9 @@
 use crate::{fake_runtime_api::RuntimeApi, node_primitives::Block};
 use futures::FutureExt;
 use sc_client_api::{Backend, BlockBackend};
-use sc_consensus_grandpa::{warp_proof::NetworkProvider as GrandpaWarpSyncProvider, SharedVoterState};
+use sc_consensus_grandpa::{
+	warp_proof::NetworkProvider as GrandpaWarpSyncProvider, SharedVoterState,
+};
 use sc_service::{error::Error as ServiceError, Configuration, TaskManager, WarpSyncConfig};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;

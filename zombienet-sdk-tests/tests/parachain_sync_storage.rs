@@ -40,9 +40,11 @@
 //!    - Adds a regular sync node with --sync=full
 //!    - Verifies sync FAILS (peers respond with empty blocks - historical blocks pruned)
 //!
-//! 7. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb tool
+//! 7. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb
+//!    tool
 //!    - Verifies col11 state before/after store operations
-//!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after duplicate)
+//!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after
+//!      duplicate)
 //!    - Verifies data expiration after retention period (col11 becomes empty)
 //!
 //! ## Key Behavior Notes
@@ -50,10 +52,10 @@
 //! - **Full sync downloads indexed transactions**: Full sync (`--sync=full`) downloads all blocks
 //!   including indexed body, so synced nodes CAN serve historical transaction data via bitswap.
 //!
-//! - **Warp sync does NOT index transactions**: After warp proof + state sync, the gap fill
-//!   phase downloads full block bodies (`HEADER|BODY|JUSTIFICATION`) but does not execute them.
-//!   Bodies are stored in the BODY column, not TRANSACTIONS. Indexed data is not available,
-//!   so warp-synced nodes return DONT_HAVE via bitswap (same as fast sync).
+//! - **Warp sync does NOT index transactions**: After warp proof + state sync, the gap fill phase
+//!   downloads full block bodies (`HEADER|BODY|JUSTIFICATION`) but does not execute them. Bodies
+//!   are stored in the BODY column, not TRANSACTIONS. Indexed data is not available, so warp-synced
+//!   nodes return DONT_HAVE via bitswap (same as fast sync).
 //!
 //! - **Fast sync does NOT download indexed transactions**: State sync skips block bodies entirely,
 //!   so fast-synced nodes cannot serve historical transaction data via bitswap.
@@ -62,14 +64,16 @@
 //!   cannot complete because historical blocks are unavailable for gap filling.
 //!
 //! - **Pruning affects data availability**: With block pruning, early blocks and their indexed
-//!   transaction data are deleted. If data blocks are pruned before gap fill can download them,
-//!   the data becomes unrecoverable.
+//!   transaction data are deleted. If data blocks are pruned before gap fill can download them, the
+//!   data becomes unrecoverable.
 //!
 //! ## Environment Variables
 //!
 //! - `POLKADOT_RELAY_BINARY_PATH`: Path to the relay chain binary (default: "polkadot")
-//! - `POLKADOT_PARACHAIN_BINARY_PATH`: Path to the parachain collator binary (default: "polkadot-omni-node")
-//! - `PARACHAIN_CHAIN_SPEC_PATH`: Path to the parachain chain spec (default: "./zombienet/bulletin-westend-spec.json")
+//! - `POLKADOT_PARACHAIN_BINARY_PATH`: Path to the parachain collator binary (default:
+//!   "polkadot-omni-node")
+//! - `PARACHAIN_CHAIN_SPEC_PATH`: Path to the parachain chain spec (default:
+//!   "./zombienet/bulletin-westend-spec.json")
 //! - `RELAY_CHAIN`: Relay chain spec name (default: "westend-local")
 //! - `PARACHAIN_ID`: Parachain ID (default: 2487)
 //! - `PARACHAIN_CHAIN_ID`: Chain ID for parachain DB path (default: "bulletin-westend")
@@ -80,25 +84,30 @@
 //! POLKADOT_RELAY_BINARY_PATH=~/local_bulletin_testing/bin/polkadot \
 //! POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node \
 //! PARACHAIN_CHAIN_SPEC_PATH=./zombienet/bulletin-westend-spec.json \
-//!   cargo test -p bulletin-chain-zombienet-sdk-tests parachain_fast_sync_test
+//!   cargo test -p bulletin-chain-zombienet-sdk-tests \
+//!   --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+//!   parachain_fast_sync_test
 //! ```
 
-use crate::test_log;
-use crate::utils::{
-	authorize_and_store_data, authorize_and_store_data_finalized,
-	build_parachain_network_config_single_collator,
-	build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-	expect_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path,
-	get_parachain_binary_path, initialize_network, log_line_at_least_once, set_retention_period,
-	set_retention_period_finalized, verify_col11, verify_ldb_tool, verify_node_bitswap,
-	verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
-	wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
-	wait_for_relay_chain_to_sync, wait_for_session_change_on_node, BLOCK_PRODUCTION_TIMEOUT_SECS,
-	NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS,
-	TEST_DATA_SIZE, get_para_id, get_parachain_chain_id,
+use crate::{
+	test_log,
+	utils::{
+		authorize_and_store_data, authorize_and_store_data_finalized,
+		build_parachain_network_config_single_collator,
+		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
+		expect_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path, get_para_id,
+		get_parachain_binary_path, get_parachain_chain_id, initialize_network,
+		log_line_at_least_once, set_retention_period, set_retention_period_finalized, verify_col11,
+		verify_ldb_tool, verify_node_bitswap, verify_parachain_binaries,
+		verify_state_sync_completed, verify_warp_sync_completed, wait_for_block_height,
+		wait_for_finalized_height, wait_for_fullnode, wait_for_relay_chain_to_sync,
+		wait_for_session_change_on_node, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+	},
 };
 use anyhow::{anyhow, Context, Result};
 use env_logger::Env;
+use futures::try_join;
 use subxt::{config::substrate::SubstrateConfig, OnlineClient};
 use zombienet_orchestrator::AddCollatorOptions;
 
@@ -150,7 +159,9 @@ async fn parachain_fast_sync_test() -> Result<()> {
 
 	// Wait for first session change - this is when validators get assigned to the parachain
 	// and collators can start producing backed blocks
-	log::info!("Waiting for relay chain session change (required for parachain block production)...");
+	log::info!(
+		"Waiting for relay chain session change (required for parachain block production)..."
+	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -177,8 +188,10 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	// State sync triggers when: finalized_number + 8 >= network_median
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add a sync node with fast sync
 	log::info!("Adding sync-node with --sync=fast");
@@ -196,17 +209,12 @@ async fn parachain_fast_sync_test() -> Result<()> {
 		..Default::default()
 	};
 
-	network
-		.add_collator("sync-node", sync_node_opts, get_para_id())
-		.await?;
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
 	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
 
 	// Wait for the sync node to sync
 	wait_for_fullnode(sync_node).await?;
-	log::info!(
-		"Verifying sync-node's sync progress (target: block {})",
-		target_block
-	);
+	log::info!("Verifying sync-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
 	// Verify state sync was used
@@ -279,8 +287,10 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add sync node with fast sync and pruning
 	log::info!("Adding sync-node with --sync=fast and --blocks-pruning");
@@ -299,9 +309,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 		..Default::default()
 	};
 
-	network
-		.add_collator("sync-node", sync_node_opts, get_para_id())
-		.await?;
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
 	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
 
 	// Wait for the sync node to start up, discover peers, and attempt block requests.
@@ -325,14 +333,16 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	match zero_blocks_response {
 		Ok(result) if result.success() => {
 			log::info!("✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks");
-		}
+		},
 		_ => {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
-		}
+		},
 	}
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (with pruning) PASSED ===");
-	log::info!("Note: This test verifies that sync cannot complete when historical blocks are pruned");
+	log::info!(
+		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
+	);
 	network.destroy().await?;
 	Ok(())
 }
@@ -383,8 +393,10 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add a sync node with warp sync
 	log::info!("Adding sync-node with --sync=warp");
@@ -402,9 +414,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 		..Default::default()
 	};
 
-	network
-		.add_collator("sync-node", sync_node_opts, get_para_id())
-		.await?;
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
 	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
 
 	// Wait for the node to be up first
@@ -419,10 +429,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node's embedded relay chain did not sync")?;
-	log::info!(
-		"Verifying sync-node's progress (target: block {})",
-		target_block
-	);
+	log::info!("Verifying sync-node's progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node failed to sync via warp sync")?;
@@ -433,7 +440,9 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
 	expect_bitswap_dont_have(sync_node, &test_data, 30, "Sync-node").await?;
-	log::info!("Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data");
+	log::info!(
+		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
+	);
 
 	test_log!(TEST, "=== Parachain Warp Sync Test PASSED ===");
 	network.destroy().await?;
@@ -497,8 +506,10 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add sync node with warp sync
 	log::info!("Adding sync-node with --sync=warp");
@@ -516,9 +527,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		..Default::default()
 	};
 
-	network
-		.add_collator("sync-node", sync_node_opts, get_para_id())
-		.await?;
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
 	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
 
 	// Wait for the node to be up first
@@ -535,10 +544,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		.context("Sync node's embedded relay chain did not sync")?;
 
 	// Wait for warp sync to complete
-	log::info!(
-		"Verifying sync-node's progress (target: block {})",
-		target_block
-	);
+	log::info!("Verifying sync-node's progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node failed to sync via warp sync")?;
@@ -549,7 +555,9 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
 	expect_bitswap_dont_have(sync_node, &test_data, 30, "Sync-node").await?;
-	log::info!("Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data");
+	log::info!(
+		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
+	);
 
 	test_log!(TEST, "=== Parachain Warp Sync Test (with block pruning) PASSED ===");
 	network.destroy().await?;
@@ -576,7 +584,9 @@ async fn parachain_full_sync_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change (required for parachain block production)...");
+	log::info!(
+		"Waiting for relay chain session change (required for parachain block production)..."
+	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -602,8 +612,10 @@ async fn parachain_full_sync_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add a sync node with full sync
 	log::info!("Adding sync-node with --sync=full");
@@ -621,17 +633,12 @@ async fn parachain_full_sync_test() -> Result<()> {
 		..Default::default()
 	};
 
-	network
-		.add_collator("sync-node", sync_node_opts, get_para_id())
-		.await?;
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
 	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
 
 	// Wait for the sync node to sync
 	wait_for_fullnode(sync_node).await?;
-	log::info!(
-		"Verifying sync-node's sync progress (target: block {})",
-		target_block
-	);
+	log::info!("Verifying sync-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
 	// Verify bitswap returns data from sync-node
@@ -697,8 +704,10 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add sync node with full sync and pruning
 	log::info!("Adding sync-node with --sync=full and --blocks-pruning");
@@ -717,9 +726,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 		..Default::default()
 	};
 
-	network
-		.add_collator("sync-node", sync_node_opts, get_para_id())
-		.await?;
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
 	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
 
 	// Wait for the sync node to start up, discover peers, and attempt block requests.
@@ -742,14 +749,16 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	match zero_blocks_response {
 		Ok(result) if result.success() => {
 			log::info!("✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks");
-		}
+		},
 		_ => {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
-		}
+		},
 	}
 
 	test_log!(TEST, "=== Parachain Full Sync Test (with pruning) PASSED ===");
-	log::info!("Note: This test verifies that sync cannot complete when historical blocks are pruned");
+	log::info!(
+		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
+	);
 	network.destroy().await?;
 	Ok(())
 }
@@ -790,7 +799,9 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change (required for parachain block production)...");
+	log::info!(
+		"Waiting for relay chain session change (required for parachain block production)..."
+	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -827,10 +838,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	test_log!(TEST, "=== Step 1: Verify col11 is empty BEFORE store ===");
 	let dump = verify_col11(&collator_db_path, "col11 BEFORE store")?;
 	if !dump.is_empty() {
-		anyhow::bail!(
-			"Expected col11 to be empty before store, but found {} keys",
-			dump.key_count
-		);
+		anyhow::bail!("Expected col11 to be empty before store, but found {} keys", dump.key_count);
 	}
 	log::info!("✓ col11 is empty as expected before store");
 
@@ -843,7 +851,8 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// === Step 2: First store - verify refcount = 1 and content hash matches ===
 	test_log!(TEST, "=== Step 2: First store - expecting refcount = 1 ===");
-	let (first_store_block, next_nonce) = authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
+	let (first_store_block, next_nonce) =
+		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
 	nonce = next_nonce;
 	log::info!("First store completed at block {}", first_store_block);
 
@@ -863,11 +872,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// Verify the content hash matches our calculated hash
 	if !stored_hash.eq_ignore_ascii_case(&expected_hash) {
-		anyhow::bail!(
-			"Content hash mismatch! Expected: {}, Got: {}",
-			expected_hash,
-			stored_hash
-		);
+		anyhow::bail!("Content hash mismatch! Expected: {}, Got: {}", expected_hash, stored_hash);
 	}
 	log::info!("✓ Content hash matches: {}", stored_hash);
 
@@ -875,16 +880,14 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		.get_refcount(stored_hash)
 		.ok_or_else(|| anyhow!("Could not find refcount for content hash {}", stored_hash))?;
 	if refcount != 1 {
-		anyhow::bail!(
-			"Expected refcount=1 after first store, found refcount={}",
-			refcount
-		);
+		anyhow::bail!("Expected refcount=1 after first store, found refcount={}", refcount);
 	}
 	log::info!("✓ Reference count is 1 as expected after first store");
 
 	// === Step 3: Second store (same data) - verify refcount = 2, still 2 keys ===
 	test_log!(TEST, "=== Step 3: Second store - expecting refcount = 2, still 2 keys ===");
-	let (second_store_block, _) = authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
+	let (second_store_block, _) =
+		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
 	log::info!("Second store completed at block {}", second_store_block);
 
 	let dump = verify_col11(&collator_db_path, "col11 AFTER second store")?;
@@ -905,18 +908,12 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		.get_refcount(content_hash)
 		.ok_or_else(|| anyhow!("Could not find refcount for content hash {}", content_hash))?;
 	if refcount != 2 {
-		anyhow::bail!(
-			"Expected refcount=2 after second store, found refcount={}",
-			refcount
-		);
+		anyhow::bail!("Expected refcount=2 after second store, found refcount={}", refcount);
 	}
 	log::info!("✓ Reference count is 2 as expected after second store");
 
 	// === Step 4: Wait for retention period and verify col11 is empty ===
-	log::info!(
-		"=== Step 4: Wait for data expiration ({} blocks) ===",
-		LDB_TEST_RETENTION_PERIOD
-	);
+	log::info!("=== Step 4: Wait for data expiration ({} blocks) ===", LDB_TEST_RETENTION_PERIOD);
 
 	// Calculate when both stores should have expired
 	let expiration_block = second_store_block + LDB_TEST_RETENTION_PERIOD as u64 + 2; // +2 for safety margin
@@ -929,8 +926,8 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	);
 
 	// Must wait for FINALIZED height since block pruning (which triggers col11 cleanup)
-	// only happens for finalized blocks: prune_block() is called when finalized_number - blocks_pruning
-	// reaches the block containing the data.
+	// only happens for finalized blocks: prune_block() is called when finalized_number -
+	// blocks_pruning reaches the block containing the data.
 	wait_for_finalized_height(collator1, expiration_block, BLOCK_PRODUCTION_TIMEOUT_SECS * 2)
 		.await
 		.context("Collator did not reach finalized expiration block height")?;

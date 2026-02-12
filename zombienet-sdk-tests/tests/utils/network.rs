@@ -89,10 +89,7 @@ pub fn verify_ldb_tool() -> Result<String> {
 	std::process::Command::new(&ldb_path)
 		.arg("--help")
 		.output()
-		.context(format!(
-			"Failed to execute '{}' (set via {})",
-			ldb_path, LDB_PATH_ENV
-		))?;
+		.context(format!("Failed to execute '{}' (set via {})", ldb_path, LDB_PATH_ENV))?;
 	Ok(ldb_path)
 }
 
@@ -123,7 +120,8 @@ pub fn verify_parachain_binaries() -> Result<()> {
 pub fn verify_solo_binary() -> Result<()> {
 	let binary = get_binary_path();
 	log::info!("Solo chain binary: {}", binary);
-	verify_binary(&binary).context(format!("Solo chain binary '{}' ({})", binary, BINARY_PATH_ENV))?;
+	verify_binary(&binary)
+		.context(format!("Solo chain binary '{}' ({})", binary, BINARY_PATH_ENV))?;
 	Ok(())
 }
 
@@ -150,11 +148,7 @@ pub fn build_single_node_network_config(node_args: Vec<String>) -> Result<Networ
 		})
 		.build()
 		.map_err(|errs| {
-			let message = errs
-				.into_iter()
-				.map(|e| e.to_string())
-				.collect::<Vec<_>>()
-				.join(", ");
+			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
 			anyhow!("config errs: {message}")
 		})
 }
@@ -186,11 +180,7 @@ pub fn build_three_node_network_config(node_args: Vec<String>) -> Result<Network
 		})
 		.build()
 		.map_err(|errs| {
-			let message = errs
-				.into_iter()
-				.map(|e| e.to_string())
-				.collect::<Vec<_>>()
-				.join(", ");
+			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
 			anyhow!("config errs: {message}")
 		})
 }
@@ -222,12 +212,8 @@ pub fn build_parachain_network_config_single_collator(
 			relaychain
 				.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary.as_str())
-				.with_node(|node| {
-					node.with_name("alice").validator(true).with_args(relay_args)
-				})
-				.with_node(|node| {
-					node.with_name("bob").validator(true).with_args(relay_args2)
-				})
+				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
+				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
 		})
 		.with_parachain(|parachain| {
 			parachain
@@ -247,11 +233,7 @@ pub fn build_parachain_network_config_single_collator(
 		})
 		.build()
 		.map_err(|errs| {
-			let message = errs
-				.into_iter()
-				.map(|e| e.to_string())
-				.collect::<Vec<_>>()
-				.join(", ");
+			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
 			anyhow!("config errs: {message}")
 		})
 }
@@ -284,17 +266,9 @@ pub fn build_parachain_network_config_three_relay_validators(
 			relaychain
 				.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary.as_str())
-				.with_node(|node| {
-					node.with_name("alice").validator(true).with_args(relay_args)
-				})
-				.with_node(|node| {
-					node.with_name("bob").validator(true).with_args(relay_args2)
-				})
-				.with_node(|node| {
-					node.with_name("charlie")
-						.validator(true)
-						.with_args(relay_args3)
-				})
+				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
+				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
+				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
 			parachain
@@ -314,11 +288,7 @@ pub fn build_parachain_network_config_three_relay_validators(
 		})
 		.build()
 		.map_err(|errs| {
-			let message = errs
-				.into_iter()
-				.map(|e| e.to_string())
-				.collect::<Vec<_>>()
-				.join(", ");
+			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
 			anyhow!("config errs: {message}")
 		})
 }

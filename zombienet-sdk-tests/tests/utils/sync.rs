@@ -140,10 +140,7 @@ pub async fn wait_for_finalized_height(
 		timeout_secs,
 	)
 	.await
-	.context(format!(
-		"Node did not finalize block height {}",
-		min_height
-	))
+	.context(format!("Node did not finalize block height {}", min_height))
 }
 
 pub async fn wait_for_node_idle(
@@ -191,14 +188,11 @@ const WAIT_MAX_BLOCKS_FOR_SESSION: u32 = 50;
 async fn is_session_change_block(
 	block: &subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>,
 ) -> Result<bool> {
-	let events = block
-		.events()
-		.await
-		.context("Failed to fetch block events")?;
+	let events = block.events().await.context("Failed to fetch block events")?;
 	Ok(events.iter().any(|event| {
-		event.as_ref().is_ok_and(|e| {
-			e.pallet_name() == "Session" && e.variant_name() == "NewSession"
-		})
+		event
+			.as_ref()
+			.is_ok_and(|e| e.pallet_name() == "Session" && e.variant_name() == "NewSession")
 	}))
 }
 
@@ -217,10 +211,7 @@ pub async fn wait_for_nth_session_change(
 	mut sessions_to_wait: u32,
 	timeout_secs: u64,
 ) -> Result<()> {
-	log::info!(
-		"Waiting for {} session change(s) on relay chain...",
-		sessions_to_wait
-	);
+	log::info!("Waiting for {} session change(s) on relay chain...", sessions_to_wait);
 
 	let wait_future = async {
 		let mut blocks_sub = relay_client
@@ -265,21 +256,14 @@ pub async fn wait_for_nth_session_change(
 
 	tokio::time::timeout(Duration::from_secs(timeout_secs), wait_future)
 		.await
-		.map_err(|_| {
-			anyhow!(
-				"Timeout waiting for session change after {}s",
-				timeout_secs
-			)
-		})?
+		.map_err(|_| anyhow!("Timeout waiting for session change after {}s", timeout_secs))?
 }
 
 pub async fn wait_for_session_change_on_node(
 	relay_node: &zombienet_sdk::NetworkNode,
 	timeout_secs: u64,
 ) -> Result<()> {
-	let relay_client: OnlineClient<SubstrateConfig> = relay_node
-		.wait_client()
-		.await
-		.context("Failed to get relay chain client")?;
+	let relay_client: OnlineClient<SubstrateConfig> =
+		relay_node.wait_client().await.context("Failed to get relay chain client")?;
 	wait_for_first_session_change(&relay_client, timeout_secs).await
 }

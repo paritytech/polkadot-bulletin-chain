@@ -26,11 +26,7 @@ mod bitswap_schema {
 const BITSWAP_PROTOCOL: &str = "/ipfs/bitswap/1.2.0";
 
 enum BitswapClientCommand {
-	Fetch {
-		peer: PeerId,
-		cid_bytes: Vec<u8>,
-		response_tx: oneshot::Sender<Result<Vec<u8>>>,
-	},
+	Fetch { peer: PeerId, cid_bytes: Vec<u8>, response_tx: oneshot::Sender<Result<Vec<u8>>> },
 }
 
 struct PendingFetchRequest {
@@ -288,9 +284,7 @@ pub async fn fetch_via_bitswap(
 		hex::encode(data_hash)
 	);
 
-	let multiaddr: Multiaddr = node_multiaddr
-		.parse()
-		.context("Failed to parse multiaddr")?;
+	let multiaddr: Multiaddr = node_multiaddr.parse().context("Failed to parse multiaddr")?;
 
 	let peer_id_multihash = multiaddr
 		.iter()
@@ -331,12 +325,10 @@ pub async fn fetch_via_bitswap(
 		.await
 		.map_err(|e| anyhow!("Failed to dial: {:?}", e))?;
 
-	let connected = tokio::time::timeout(
-		Duration::from_secs(30),
-		wait_for_connection(&mut litep2p, peer_id),
-	)
-	.await
-	.map_err(|_| anyhow!("Timeout waiting for connection"))?;
+	let connected =
+		tokio::time::timeout(Duration::from_secs(30), wait_for_connection(&mut litep2p, peer_id))
+			.await
+			.map_err(|_| anyhow!("Timeout waiting for connection"))?;
 
 	if !connected {
 		anyhow::bail!("Failed to establish connection");
@@ -389,18 +381,16 @@ pub async fn fetch_via_bitswap(
 async fn wait_for_connection(litep2p: &mut Litep2p, target_peer: PeerId) -> bool {
 	loop {
 		match litep2p.next_event().await {
-			Some(Litep2pEvent::ConnectionEstablished { peer, .. }) => {
+			Some(Litep2pEvent::ConnectionEstablished { peer, .. }) =>
 				if peer == target_peer {
 					log::debug!("Connection established with target peer");
 					return true;
-				}
-			},
-			Some(Litep2pEvent::ConnectionClosed { peer, .. }) => {
+				},
+			Some(Litep2pEvent::ConnectionClosed { peer, .. }) =>
 				if peer == target_peer {
 					log::error!("Connection closed before established");
 					return false;
-				}
-			},
+				},
 			Some(Litep2pEvent::DialFailure { address, .. }) => {
 				log::error!("Dial failure for {:?}", address);
 				return false;
@@ -418,11 +408,7 @@ pub async fn verify_bitswap_fetch(
 ) -> Result<bool> {
 	let hash = blake2_256(expected_data);
 	let (hash_hex, cid) = content_hash_and_cid(expected_data);
-	log::info!(
-		"Verifying bitswap fetch for content hash: {}, CID: {}",
-		hash_hex,
-		cid
-	);
+	log::info!("Verifying bitswap fetch for content hash: {}, CID: {}", hash_hex, cid);
 
 	let fetched = fetch_via_bitswap(node_multiaddr, &hash, timeout_secs).await?;
 	verify_data_matches(&fetched, expected_data)
@@ -464,8 +450,7 @@ pub async fn expect_bitswap_dont_have(
 		},
 		Err(e) => {
 			let error_msg = e.to_string();
-			if error_msg.contains("Peer does not have the block")
-				|| error_msg.contains("DONT_HAVE")
+			if error_msg.contains("Peer does not have the block") || error_msg.contains("DONT_HAVE")
 			{
 				log::info!(
 					"✓ Bitswap correctly returned DONT_HAVE from {} (expected for synced nodes)",

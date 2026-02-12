@@ -40,7 +40,8 @@
 //!
 //! 7. `ldb_storage_verification_test` - Database-level verification using rocksdb_ldb tool
 //!    - Verifies col11 state before/after store operations
-//!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after duplicate)
+//!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after
+//!      duplicate)
 //!    - Verifies data expiration after retention period (col11 becomes empty)
 //!
 //! ## Key Behavior Notes
@@ -48,16 +49,16 @@
 //! - **Full sync downloads indexed transactions**: Full sync (`--sync=full`) downloads all blocks
 //!   including indexed body, so synced nodes CAN serve historical transaction data via bitswap.
 //!
-//! - **Warp sync does NOT index transactions**: After warp proof + state sync, the gap fill
-//!   phase downloads full block bodies (`HEADER|BODY|JUSTIFICATION`) but does not execute them.
-//!   Bodies are stored in the BODY column, not TRANSACTIONS. Indexed data is not available,
-//!   so warp-synced nodes return DONT_HAVE via bitswap (same as fast sync).
+//! - **Warp sync does NOT index transactions**: After warp proof + state sync, the gap fill phase
+//!   downloads full block bodies (`HEADER|BODY|JUSTIFICATION`) but does not execute them. Bodies
+//!   are stored in the BODY column, not TRANSACTIONS. Indexed data is not available, so warp-synced
+//!   nodes return DONT_HAVE via bitswap (same as fast sync).
 //!
 //! - **Fast sync does NOT download indexed transactions**: State sync skips block bodies entirely,
 //!   so fast-synced nodes cannot serve historical transaction data via bitswap.
 //!
-//! - **Pruning prevents sync**: When all peers have pruning enabled, fast/full sync
-//!   cannot complete because historical blocks are unavailable for gap filling.
+//! - **Pruning prevents sync**: When all peers have pruning enabled, fast/full sync cannot complete
+//!   because historical blocks are unavailable for gap filling.
 //!
 //! ## Environment Variables
 //!
@@ -68,22 +69,28 @@
 //!
 //! ```bash
 //! POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
-//!   cargo test -p bulletin-chain-zombienet-sdk-tests solochain_sync_storage -- --nocapture
+//!   cargo test -p bulletin-chain-zombienet-sdk-tests \
+//!   --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+//!   solochain_sync_storage -- --nocapture
 //! ```
 
-use crate::test_log;
-use crate::utils::{
-	authorize_and_store_data, build_single_node_network_config, build_three_node_network_config,
-	content_hash_and_cid, expect_bitswap_dont_have, generate_test_data, get_alice_nonce,
-	get_db_path, initialize_network, log_line_at_least_once, set_retention_period,
-	verify_col11, verify_ldb_tool, verify_node_bitswap, verify_solo_binary,
-	verify_state_sync_completed, verify_warp_sync_completed, wait_for_block_height,
-	wait_for_finalized_height, wait_for_fullnode, wait_for_validator, BEST_BLOCK_METRIC,
-	BLOCK_PRODUCTION_TIMEOUT_SECS, CHAIN_ID, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-	SOLO_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+use crate::{
+	test_log,
+	utils::{
+		authorize_and_store_data, build_single_node_network_config,
+		build_three_node_network_config, content_hash_and_cid, expect_bitswap_dont_have,
+		generate_test_data, get_alice_nonce, get_db_path, initialize_network,
+		log_line_at_least_once, set_retention_period, verify_col11, verify_ldb_tool,
+		verify_node_bitswap, verify_solo_binary, verify_state_sync_completed,
+		verify_warp_sync_completed, wait_for_block_height, wait_for_finalized_height,
+		wait_for_fullnode, wait_for_validator, BEST_BLOCK_METRIC, BLOCK_PRODUCTION_TIMEOUT_SECS,
+		CHAIN_ID, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, SOLO_TEST_DATA_PATTERN,
+		SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+	},
 };
 use anyhow::{anyhow, Context, Result};
 use env_logger::Env;
+use futures::try_join;
 use subxt::{config::substrate::SubstrateConfig, OnlineClient};
 use zombienet_sdk::AddNodeOptions;
 
@@ -107,7 +114,10 @@ async fn ldb_storage_verification_test() -> Result<()> {
 	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
 
 	test_log!(TEST, "=== LDB Storage Verification Test ===");
-	test_log!(TEST, "This test verifies transaction storage database behavior using rocksdb_ldb tool");
+	test_log!(
+		TEST,
+		"This test verifies transaction storage database behavior using rocksdb_ldb tool"
+	);
 	test_log!(
 		TEST,
 		"Using --blocks-pruning={} and retention-period={}",
@@ -155,10 +165,7 @@ async fn ldb_storage_verification_test() -> Result<()> {
 	test_log!(TEST, "=== Step 1: Verify col11 is empty BEFORE store ===");
 	let dump = verify_col11(&alice_db_path, "col11 BEFORE store")?;
 	if !dump.is_empty() {
-		anyhow::bail!(
-			"Expected col11 to be empty before store, but found {} keys",
-			dump.key_count
-		);
+		anyhow::bail!("Expected col11 to be empty before store, but found {} keys", dump.key_count);
 	}
 	log::info!("✓ col11 is empty as expected before store");
 
@@ -171,7 +178,8 @@ async fn ldb_storage_verification_test() -> Result<()> {
 
 	// === Step 2: First store - verify refcount = 1 and content hash matches ===
 	test_log!(TEST, "=== Step 2: First store - expecting refcount = 1 ===");
-	let (first_store_block, next_nonce) = authorize_and_store_data(alice, &test_data, nonce).await?;
+	let (first_store_block, next_nonce) =
+		authorize_and_store_data(alice, &test_data, nonce).await?;
 	nonce = next_nonce;
 	log::info!("First store completed at block {}", first_store_block);
 
@@ -184,21 +192,19 @@ async fn ldb_storage_verification_test() -> Result<()> {
 	}
 
 	let data_entries = dump.data_entries();
-	let data_entry = data_entries.first()
+	let data_entry = data_entries
+		.first()
 		.ok_or_else(|| anyhow!("No data entries found in col11 after first store"))?;
 	let stored_hash = data_entry.content_hash();
 
 	// Verify the content hash matches our calculated hash
 	if !stored_hash.eq_ignore_ascii_case(&expected_hash) {
-		anyhow::bail!(
-			"Content hash mismatch! Expected: {}, Got: {}",
-			expected_hash,
-			stored_hash
-		);
+		anyhow::bail!("Content hash mismatch! Expected: {}, Got: {}", expected_hash, stored_hash);
 	}
 	log::info!("✓ Content hash matches: {}", stored_hash);
 
-	let refcount = dump.get_refcount(stored_hash)
+	let refcount = dump
+		.get_refcount(stored_hash)
 		.ok_or_else(|| anyhow!("Could not find refcount for content hash {}", stored_hash))?;
 	if refcount != 1 {
 		anyhow::bail!("Expected refcount=1 after first store, found refcount={}", refcount);
@@ -220,10 +226,12 @@ async fn ldb_storage_verification_test() -> Result<()> {
 	log::info!("✓ Still only 2 keys in col11 - no duplicate data rows");
 
 	let data_entries = dump.data_entries();
-	let data_entry = data_entries.first()
+	let data_entry = data_entries
+		.first()
 		.ok_or_else(|| anyhow!("No data entries found in col11 after second store"))?;
 	let content_hash = data_entry.content_hash();
-	let refcount = dump.get_refcount(content_hash)
+	let refcount = dump
+		.get_refcount(content_hash)
 		.ok_or_else(|| anyhow!("Could not find refcount for content hash {}", content_hash))?;
 	if refcount != 2 {
 		anyhow::bail!("Expected refcount=2 after second store, found refcount={}", refcount);
@@ -231,7 +239,11 @@ async fn ldb_storage_verification_test() -> Result<()> {
 	log::info!("✓ Reference count is 2 as expected after second store");
 
 	// === Step 4: Wait for retention period and verify col11 is empty ===
-	test_log!(TEST, "=== Step 4: Wait for data expiration ({} blocks) ===", LDB_TEST_RETENTION_PERIOD);
+	test_log!(
+		TEST,
+		"=== Step 4: Wait for data expiration ({} blocks) ===",
+		LDB_TEST_RETENTION_PERIOD
+	);
 
 	// Calculate when both stores should have expired
 	// First store expires at: first_store_block + retention_period
@@ -258,7 +270,10 @@ async fn ldb_storage_verification_test() -> Result<()> {
 	test_log!(TEST, "=== Verify col11 is empty AFTER retention period ===");
 	let dump = verify_col11(&alice_db_path, "col11 AFTER retention period")?;
 	if !dump.is_empty() {
-		log::error!("Expected col11 to be empty after retention period, but found {} keys:", dump.key_count);
+		log::error!(
+			"Expected col11 to be empty after retention period, but found {} keys:",
+			dump.key_count
+		);
 		for entry in &dump.entries {
 			if entry.is_refcount() {
 				log::error!(
@@ -293,10 +308,8 @@ async fn fast_sync_test() -> Result<()> {
 	// Early validation of required binaries
 	verify_solo_binary()?;
 
-	let config = build_single_node_network_config(vec![
-		"--ipfs-server".into(),
-		NODE_LOG_CONFIG.into(),
-	])?;
+	let config =
+		build_single_node_network_config(vec!["--ipfs-server".into(), NODE_LOG_CONFIG.into()])?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -321,17 +334,15 @@ async fn fast_sync_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add Bob with fast sync
 	log::info!("Adding Bob with --sync=fast");
 	let bob_opts = AddNodeOptions {
-		args: vec![
-			"--sync=fast".into(),
-			"--ipfs-server".into(),
-			NODE_LOG_CONFIG.into(),
-		],
+		args: vec!["--sync=fast".into(), "--ipfs-server".into(), NODE_LOG_CONFIG.into()],
 		is_validator: false,
 		..Default::default()
 	};
@@ -363,11 +374,7 @@ async fn fast_sync_with_pruning_test() -> Result<()> {
 	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
 
 	test_log!(TEST, "=== Fast Sync Test (with pruning) ===");
-	log::info!(
-		"Using --blocks-pruning={}, retention-period={}",
-		PRUNING_BLOCKS,
-		RETENTION_PERIOD
-	);
+	log::info!("Using --blocks-pruning={}, retention-period={}", PRUNING_BLOCKS, RETENTION_PERIOD);
 
 	// Early validation of required binaries
 	verify_solo_binary()?;
@@ -407,8 +414,10 @@ async fn fast_sync_with_pruning_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add Bob with fast sync and pruning
 	log::info!("Adding Bob with --sync=fast and --blocks-pruning");
@@ -433,20 +442,26 @@ async fn fast_sync_with_pruning_test() -> Result<()> {
 
 	// Wait for the telltale sign: peers responding with 0 blocks (they don't have them)
 	let zero_blocks_response = bob
-		.wait_log_line_count_with_timeout("with 0 blocks", false, log_line_at_least_once(SYNC_TIMEOUT_SECS))
+		.wait_log_line_count_with_timeout(
+			"with 0 blocks",
+			false,
+			log_line_at_least_once(SYNC_TIMEOUT_SECS),
+		)
 		.await;
 
 	match zero_blocks_response {
 		Ok(result) if result.success() => {
 			log::info!("✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks");
-		}
+		},
 		_ => {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
-		}
+		},
 	}
 
 	test_log!(TEST, "=== Fast Sync Test (with pruning) PASSED ===");
-	log::info!("Note: This test verifies that sync cannot complete when historical blocks are pruned");
+	log::info!(
+		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
+	);
 	network.destroy().await?;
 	Ok(())
 }
@@ -465,10 +480,7 @@ async fn warp_sync_test() -> Result<()> {
 	verify_solo_binary()?;
 
 	// Build network with three validators for GRANDPA finality and warp sync peer requirement
-	let node_args = vec![
-		"--ipfs-server".to_string(),
-		NODE_LOG_CONFIG.to_string(),
-	];
+	let node_args = vec!["--ipfs-server".to_string(), NODE_LOG_CONFIG.to_string()];
 	let config = build_three_node_network_config(node_args)?;
 
 	let mut network = initialize_network(config).await?;
@@ -478,14 +490,15 @@ async fn warp_sync_test() -> Result<()> {
 	let bob = network.get_node("bob").context("Failed to get bob node")?;
 	let dave = network.get_node("dave").context("Failed to get dave node")?;
 
-	// Wait for all validators to be ready
-	wait_for_validator(alice).await?;
-	wait_for_validator(bob).await?;
-	wait_for_validator(dave).await?;
+	// Wait for all validators to be ready (in parallel)
+	try_join!(wait_for_validator(alice), wait_for_validator(bob), wait_for_validator(dave),)?;
 	log::info!("All validators (Alice, Bob, Dave) are ready");
 
 	// Wait for GRANDPA finality - critical for warp sync
-	log::info!("Waiting for GRANDPA finality (min {} finalized blocks)", WARP_SYNC_MIN_FINALIZED_BLOCKS);
+	log::info!(
+		"Waiting for GRANDPA finality (min {} finalized blocks)",
+		WARP_SYNC_MIN_FINALIZED_BLOCKS
+	);
 	wait_for_finalized_height(alice, WARP_SYNC_MIN_FINALIZED_BLOCKS, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await
 		.context("GRANDPA finality not achieved - warp sync requires finalized blocks")?;
@@ -509,17 +522,15 @@ async fn warp_sync_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add Charlie with warp sync
 	log::info!("Adding Charlie with --sync=warp");
 	let charlie_opts = AddNodeOptions {
-		args: vec![
-			"--sync=warp".into(),
-			"--ipfs-server".into(),
-			NODE_LOG_CONFIG.into(),
-		],
+		args: vec!["--sync=warp".into(), "--ipfs-server".into(), NODE_LOG_CONFIG.into()],
 		is_validator: false,
 		..Default::default()
 	};
@@ -540,7 +551,9 @@ async fn warp_sync_test() -> Result<()> {
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
 	expect_bitswap_dont_have(charlie, &test_data, 30, "Charlie").await?;
-	log::info!("Note: Charlie doesn't have indexed transactions - warp sync gap fill doesn't index data");
+	log::info!(
+		"Note: Charlie doesn't have indexed transactions - warp sync gap fill doesn't index data"
+	);
 
 	test_log!(TEST, "=== Warp Sync Test PASSED ===");
 	network.destroy().await?;
@@ -566,11 +579,7 @@ async fn warp_sync_with_pruning_test() -> Result<()> {
 
 	// Build network with three validators, all with block pruning enabled
 	let pruning_arg = format!("--blocks-pruning={}", WARP_PRUNING_BLOCKS);
-	let node_args = vec![
-		"--ipfs-server".to_string(),
-		pruning_arg,
-		NODE_LOG_CONFIG.to_string(),
-	];
+	let node_args = vec!["--ipfs-server".to_string(), pruning_arg, NODE_LOG_CONFIG.to_string()];
 	let config = build_three_node_network_config(node_args)?;
 
 	let mut network = initialize_network(config).await?;
@@ -580,14 +589,15 @@ async fn warp_sync_with_pruning_test() -> Result<()> {
 	let bob = network.get_node("bob").context("Failed to get bob node")?;
 	let dave = network.get_node("dave").context("Failed to get dave node")?;
 
-	// Wait for all validators to be ready
-	wait_for_validator(alice).await?;
-	wait_for_validator(bob).await?;
-	wait_for_validator(dave).await?;
+	// Wait for all validators to be ready (in parallel)
+	try_join!(wait_for_validator(alice), wait_for_validator(bob), wait_for_validator(dave),)?;
 	log::info!("All validators (Alice, Bob, Dave) are ready with pruning enabled");
 
 	// Wait for GRANDPA finality - critical for warp sync
-	log::info!("Waiting for GRANDPA finality (min {} finalized blocks)", WARP_SYNC_MIN_FINALIZED_BLOCKS);
+	log::info!(
+		"Waiting for GRANDPA finality (min {} finalized blocks)",
+		WARP_SYNC_MIN_FINALIZED_BLOCKS
+	);
 	wait_for_finalized_height(alice, WARP_SYNC_MIN_FINALIZED_BLOCKS, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await
 		.context("GRANDPA finality not achieved")?;
@@ -616,17 +626,15 @@ async fn warp_sync_with_pruning_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add Charlie with warp sync
 	log::info!("Adding Charlie with --sync=warp");
 	let charlie_opts = AddNodeOptions {
-		args: vec![
-			"--sync=warp".into(),
-			"--ipfs-server".into(),
-			NODE_LOG_CONFIG.into(),
-		],
+		args: vec!["--sync=warp".into(), "--ipfs-server".into(), NODE_LOG_CONFIG.into()],
 		is_validator: false,
 		..Default::default()
 	};
@@ -647,7 +655,9 @@ async fn warp_sync_with_pruning_test() -> Result<()> {
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
 	expect_bitswap_dont_have(charlie, &test_data, 30, "Charlie").await?;
-	log::info!("Note: Charlie doesn't have indexed transactions - warp sync gap fill doesn't index data");
+	log::info!(
+		"Note: Charlie doesn't have indexed transactions - warp sync gap fill doesn't index data"
+	);
 
 	test_log!(TEST, "=== Warp Sync Test (with block pruning) PASSED ===");
 	network.destroy().await?;
@@ -664,10 +674,8 @@ async fn full_sync_test() -> Result<()> {
 	// Early validation of required binaries
 	verify_solo_binary()?;
 
-	let config = build_single_node_network_config(vec![
-		"--ipfs-server".into(),
-		NODE_LOG_CONFIG.into(),
-	])?;
+	let config =
+		build_single_node_network_config(vec!["--ipfs-server".into(), NODE_LOG_CONFIG.into()])?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -692,17 +700,15 @@ async fn full_sync_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add Bob with full sync
 	log::info!("Adding Bob with --sync=full");
 	let bob_opts = AddNodeOptions {
-		args: vec![
-			"--sync=full".into(),
-			"--ipfs-server".into(),
-			NODE_LOG_CONFIG.into(),
-		],
+		args: vec!["--sync=full".into(), "--ipfs-server".into(), NODE_LOG_CONFIG.into()],
 		is_validator: false,
 		..Default::default()
 	};
@@ -731,11 +737,7 @@ async fn full_sync_with_pruning_test() -> Result<()> {
 	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
 
 	test_log!(TEST, "=== Full Sync Test (with pruning) ===");
-	log::info!(
-		"Using --blocks-pruning={}, retention-period={}",
-		PRUNING_BLOCKS,
-		RETENTION_PERIOD
-	);
+	log::info!("Using --blocks-pruning={}, retention-period={}", PRUNING_BLOCKS, RETENTION_PERIOD);
 
 	// Early validation of required binaries
 	verify_solo_binary()?;
@@ -775,8 +777,10 @@ async fn full_sync_with_pruning_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
-	wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	try_join!(
+		wait_for_block_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(alice, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
 
 	// Add Bob with full sync and pruning
 	log::info!("Adding Bob with --sync=full and --blocks-pruning");
@@ -801,20 +805,26 @@ async fn full_sync_with_pruning_test() -> Result<()> {
 
 	// Wait for the telltale sign: peers responding with 0 blocks (they don't have them)
 	let zero_blocks_response = bob
-		.wait_log_line_count_with_timeout("with 0 blocks", false, log_line_at_least_once(SYNC_TIMEOUT_SECS))
+		.wait_log_line_count_with_timeout(
+			"with 0 blocks",
+			false,
+			log_line_at_least_once(SYNC_TIMEOUT_SECS),
+		)
 		.await;
 
 	match zero_blocks_response {
 		Ok(result) if result.success() => {
 			log::info!("✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks");
-		}
+		},
 		_ => {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
-		}
+		},
 	}
 
 	test_log!(TEST, "=== Full Sync Test (with pruning) PASSED ===");
-	log::info!("Note: This test verifies that sync cannot complete when historical blocks are pruned");
+	log::info!(
+		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
+	);
 	network.destroy().await?;
 	Ok(())
 }
