@@ -73,16 +73,19 @@ jobs:
         if: steps.cache-restore.outputs.cache-matched-key == ''
         env:
           RUNTIME_NAME: ${{ matrix.runtime.name }}
-          URIS_JSON: ${{ toJSON(matrix.runtime.uris) }}
+          RUNTIME_URIS_JSON: ${{ toJSON(matrix.runtime.uris) }}
         run: |
           echo "Generating snapshot for $RUNTIME_NAME..."
 
-          URI_ARGS=$(echo "$URIS_JSON" | jq -r '.[] | "--uri " + .' | tr '\n' ' ')
-          echo "Using URIs: $URI_ARGS"
+          URI_ARGS=()
+          while IFS= read -r uri; do
+            URI_ARGS+=(--uri "$uri")
+          done < <(echo "$RUNTIME_URIS_JSON" | jq -r '.[]')
+          echo "Using URIs: ${URI_ARGS[*]}"
 
           for i in {1..10}; do
             echo "Snapshot creation attempt $i/10"
-            if try-runtime create-snapshot $URI_ARGS -- snapshot.raw; then
+            if try-runtime create-snapshot "${URI_ARGS[@]}" -- snapshot.raw; then
               if [ -f "snapshot.raw" ] && [ -s "snapshot.raw" ]; then
                 echo "Snapshot created successfully"
                 break
@@ -142,7 +145,7 @@ jobs:
           echo "EXTRA_FLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
           echo "CHECKS=$CHECKS" >> $GITHUB_ENV
 
-      - name: Set rust version via common env file
+      - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Install stable toolchain
