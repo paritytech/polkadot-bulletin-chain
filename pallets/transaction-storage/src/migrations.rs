@@ -183,6 +183,8 @@ pub mod v1 {
 			);
 
 			let entries = migrated + skipped + corrupted;
+			// 2 reads per entry (next_key + get_raw), 1 for the final next_key returning None.
+			// 1 write per migrated (put_raw) or corrupted (kill) entry; skipped = 0 writes.
 			T::DbWeight::get()
 				.reads(entries.saturating_mul(2).saturating_add(1))
 				.saturating_add(T::DbWeight::get().writes(migrated + corrupted))
