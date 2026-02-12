@@ -262,7 +262,10 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
@@ -302,17 +305,18 @@ pub mod pallet {
 				}
 			};
 
-			// During try-runtime testing, no inherents (including storage proofs) are
-			// submitted, so we log instead of panicking.
-			#[cfg(feature = "try-runtime")]
 			if !proof_ok {
-				tracing::warn!(
-					target: LOG_TARGET,
-					"Storage proof was not checked in this block (expected during try-runtime)"
-				);
+				// try-runtime simulates empty blocks without inherents after migration,
+				// so this check legitimately fails. Warn instead of panicking.
+				if cfg!(feature = "try-runtime") {
+					tracing::warn!(
+						target: LOG_TARGET,
+						"Storage proof was not checked — expected in try-runtime block simulation",
+					);
+				} else {
+					panic!("Storage proof must be checked once in the block");
+				}
 			}
-			#[cfg(not(feature = "try-runtime"))]
-			assert!(proof_ok, "Storage proof must be checked once in the block");
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
