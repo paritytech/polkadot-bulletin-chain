@@ -72,19 +72,33 @@ jobs:
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
 
+  runtime-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
+    name: Extract tasks from matrix
+    steps:
+      - uses: actions/checkout@v6
+      - id: runtime
+        run: |
+          TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
+          SKIPPED=$(jq '[.[] | select(.integration_tests != true)]' scripts/runtimes-matrix.json)
+          echo "--- Running integration tests for ---"
+          echo "$TASKS"
+          echo "--- Skipping integration tests for ---"
+          echo "$SKIPPED"
+          TASKS=$(echo "$TASKS" | jq -c .)
+          echo "runtime=$TASKS" >> $GITHUB_OUTPUT
+
   integration-tests:
-    needs: [setup]
+    needs: [setup, runtime-matrix]
     name: Integration Tests (${{ matrix.runtime.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 200
     strategy:
       fail-fast: false
       matrix:
-        runtime:
-          - name: "Westend parachain"
-            package: "bulletin-westend-runtime"
-          - name: "Polkadot solochain"
-            package: "bulletin-polkadot-runtime"
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
 
     steps:
       - name: Checkout sources
