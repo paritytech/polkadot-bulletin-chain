@@ -135,10 +135,6 @@ jobs:
           # Bench test is skipped intentionally (running too long and anyway, we are doing fresh weights)
           cargo test -p pallet-transaction-storage --features=runtime-benchmarks -- --skip bench_check_proof
 
-      - name: Run (Rococo) runtime tests
-        run: |
-          cargo test -p polkadot-bulletin-chain-runtime
-
       - name: Run (Polkadot) runtime tests
         run: |
           cargo test -p bulletin-polkadot-runtime
