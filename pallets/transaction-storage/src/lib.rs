@@ -27,21 +27,25 @@
 extern crate alloc;
 
 mod benchmarking;
+pub mod extension;
 pub mod weights;
 
+pub mod cids;
 pub mod migrations;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 mod tests;
 
+use alloc::vec::Vec;
+use cids::{calculate_cid, Cid, CidConfig, ContentHash};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
-	deps::{sp_core::sp_std::prelude::*, *},
+	deps::*,
 	prelude::*,
 	traits::{
-		fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
+		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
 		parameter_types,
 	},
 };
@@ -56,6 +60,7 @@ type BalanceOf<T> =
 pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
+use crate::cids::{CidCodec, HashingAlgorithm};
 pub use pallet::*;
 pub use weights::WeightInfo;
 
@@ -93,9 +98,6 @@ pub struct AuthorizationExtent {
 	pub bytes: u64,
 }
 
-/// Hash of a stored blob of data.
-type ContentHash = [u8; 32];
-
 /// The scope of an authorization.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 enum AuthorizationScope<AccountId> {
@@ -123,8 +125,14 @@ type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 pub struct TransactionInfo {
 	/// Chunk trie root.
 	chunk_root: <BlakeTwo256 as Hash>::Output,
+
 	/// Plain hash of indexed data.
-	content_hash: <BlakeTwo256 as Hash>::Output,
+	pub content_hash: ContentHash,
+	/// Used hashing algorithm for `content_hash`.
+	hashing: HashingAlgorithm,
+	/// Requested codec for CIDs.
+	cid_codec: CidCodec,
+
 	/// Size of indexed data in bytes.
 	size: u32,
 	/// Total number of chunks added in the block with this transaction. This
@@ -250,6 +258,8 @@ pub mod pallet {
 		AuthorizationNotFound,
 		/// Authorization has not expired.
 		AuthorizationNotExpired,
+		/// Content hash was not calculated.
+		InvalidContentHash,
 	}
 
 	#[pallet::pallet]
@@ -343,7 +353,7 @@ pub mod pallet {
 		/// O(n*log(n)) of data size, as all data is pushed to an in-memory trie.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { /*TODO: add here correct validation */ true })]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
@@ -356,10 +366,11 @@ pub mod pallet {
 			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
 			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
 
-			let content_hash = sp_io::hashing::blake2_256(&data);
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, content_hash);
+			let cid = calculate_cid(&data, CidConfigForStore::<T>::take())
+				.map_err(|_| Error::<T>::InvalidContentHash)?;
+			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -372,12 +383,18 @@ pub mod pallet {
 					.try_push(TransactionInfo {
 						chunk_root: root,
 						size: data.len() as u32,
-						content_hash: content_hash.into(),
+						content_hash: cid.content_hash,
+						hashing: cid.hashing,
+						cid_codec: cid.codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
-			Self::deposit_event(Event::Stored { index, content_hash });
+			Self::deposit_event(Event::Stored {
+				index,
+				content_hash: cid.content_hash,
+				cid: cid.to_bytes(),
+			});
 			Ok(())
 		}
 
@@ -409,7 +426,7 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = info.content_hash.into();
+			let content_hash = info.content_hash;
 			sp_io::transaction_index::renew(extrinsic_index, content_hash);
 
 			let mut index = 0;
@@ -425,6 +442,8 @@ pub mod pallet {
 						chunk_root: info.chunk_root,
 						size: info.size,
 						content_hash: info.content_hash,
+						hashing: info.hashing,
+						cid_codec: info.cid_codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -610,7 +629,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32, content_hash: ContentHash },
+		Stored { index: u32, content_hash: ContentHash, cid: Option<Cid> },
 		/// Renewed data under specified index.
 		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.
@@ -670,6 +689,12 @@ pub mod pallet {
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+	/// Ephemeral value killed on the block finalization. So it never ends up in the storage trie.
+	/// (Used by [`extension::ProvideCidConfig`])
+	#[pallet::storage]
+	#[pallet::whitelist_storage]
+	pub type CidConfigForStore<T: Config> = StorageValue<_, CidConfig, OptionQuery>;
 
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
@@ -884,6 +909,16 @@ pub mod pallet {
 			Self::check_signed(who, call, CheckContext::PreDispatch).map(|_| ())
 		}
 
+		/// Get ByteFee storage information from the outside of this pallet.
+		pub fn byte_fee() -> Option<BalanceOf<T>> {
+			ByteFee::<T>::get()
+		}
+
+		/// Get EntryFee storage information from the outside of this pallet.
+		pub fn entry_fee() -> Option<BalanceOf<T>> {
+			EntryFee::<T>::get()
+		}
+
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
@@ -1027,7 +1062,7 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
 						info.size as usize,
-						|| info.content_hash.into(),
+						|| info.content_hash,
 						context,
 					)
 				},
@@ -1064,11 +1099,14 @@ pub mod pallet {
 			call: &Call<T>,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
-			let size = match call {
-				Call::<T>::store { data } => data.len(),
+			let (size, content_hash) = match call {
+				Call::<T>::store { data } => {
+					let content_hash = sp_io::hashing::blake2_256(data);
+					(data.len(), content_hash)
+				},
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					info.size as usize
+					(info.size as usize, info.content_hash)
 				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};
@@ -1081,11 +1119,22 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
+			// Prefer preimage authorization if available.
+			// This allows anyone to store/renew pre-authorized content without consuming their
+			// own account authorization.
+			let consume = context.consume_authorization();
 			Self::check_authorization(
-				AuthorizationScope::Account(who.clone()),
+				AuthorizationScope::Preimage(content_hash),
 				size as u32,
-				context.consume_authorization(),
-			)?;
+				consume,
+			)
+			.or_else(|_| {
+				Self::check_authorization(
+					AuthorizationScope::Account(who.clone()),
+					size as u32,
+					consume,
+				)
+			})?;
 
 			Ok(context.want_valid_transaction().then(|| ValidTransaction {
 				priority: T::StoreRenewPriority::get(),
@@ -1094,6 +1143,8 @@ pub mod pallet {
 			}))
 		}
 
+		/// Verifies that the provided proof corresponds to a randomly selected chunk from a list of
+		/// transactions.
 		pub(crate) fn verify_chunk_proof(
 			proof: TransactionStorageProof,
 			random_hash: &[u8],

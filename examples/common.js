@@ -1,20 +1,15 @@
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
+import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'
 import { createCanvas } from "canvas";
 import fs from "fs";
 import assert from "assert";
 
 // ---- CONFIG ----
-export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
+export const DEFAULT_IPFS_API_URL = 'http://127.0.0.1:5011';     // IPFS HTTP API (for ipfs-http-client)
+export const DEFAULT_IPFS_GATEWAY_URL = 'http://127.0.0.1:8283'; // IPFS HTTP Gateway (for /ipfs/CID requests)
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
-
-// TODO: replace with PAPI
-export async function waitForNewBlock() {
-  // TODO: wait for a new block.
-  console.log('🛰 Waiting for new block...')
-  return new Promise(resolve => setTimeout(resolve, 8000))
-}
 
 /**
  * Creates a PAPI-compatible signer from a Keyring account
@@ -53,7 +48,7 @@ export function newSigner(seed) {
  *
  * @param {string} file
  * @param {string} text
- * @param {"small" | "big"} size
+ * @param {"small" | "big32" | "big64" | "big96"} size
  */
 export function generateTextImage(file, text, size = "small") {
     console.log(`Generating ${size} image with text: ${text} to the file: ${file}...`);
@@ -66,13 +61,31 @@ export function generateTextImage(file, text, size = "small") {
             noise: 1,
         },
         // ~33 MiB
-        big: {
+        big32: {
             width: 6500,
             height: 5500,
             quality: 0.95,
             shapes: 1000,
             noise: 50,
             targetBytes: 32 * 1024 * 1024,
+        },
+        // ~64 MiB
+        big64: {
+            width: 7500,
+            height: 5500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 65 * 1024 * 1024,
+        },
+        // ~96 MiB
+        big96: {
+            width: 9000,
+            height: 6500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 98 * 1024 * 1024,
         },
     };
 
@@ -114,7 +127,7 @@ export function generateTextImage(file, text, size = "small") {
 
     // 🔧 Big images: tune quality to hit target size
     let imageBytes;
-    if (size === "big" && cfg.targetBytes) {
+    if ((size === "big32" || size === "big64" || size === "big96") && cfg.targetBytes) {
         let quality = cfg.quality;
 
         do {
@@ -226,6 +239,33 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
     return false;
 }
 
+export function getContentHash(bytes, mhCode = 0xb220) {
+  switch (mhCode) {
+    case 0xb220: // blake2b-256
+      return blake2AsU8a(bytes);
+    case 0x12:   // sha2-256
+      return sha256AsU8a(bytes);
+    case 0x1b:   // keccak-256
+      return keccak256AsU8a(bytes);
+    default:
+      throw new Error("Unhandled multihash code: " + mhCode);
+  }
+}
+
+// Convert multihash code to HashingAlgorithm enum for the runtime
+export function toHashingEnum(mhCode) {
+  switch (mhCode) {
+    case 0xb220: return { type: "Blake2b256" };
+    case 0x12:   return { type: "Sha2_256" };
+    case 0x1b:   return { type: "Keccak256" };
+    default:     throw new Error(`Unhandled multihash code: ${mhCode}`);
+  }
+}
+
+export function toHex(bytes) {
+  return '0x' + Buffer.from(bytes).toString('hex');
+}
+
 // // Try uncoment and: node common.js generateTextImage "B4" big
 //
 // const [, , command, ...args] = process.argv;
@@ -241,7 +281,7 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
 //         console.error("Unknown command:", command);
 //         console.error("Usage:");
 //         console.error(
-//             '  node common.js generateTextImage "TEXT" [small|big]'
+//             '  node common.js generateTextImage "TEXT" [small|big32|big64|big96]'
 //         );
 //         process.exit(1);
 // }

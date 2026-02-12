@@ -4,23 +4,48 @@ import fs from 'fs'
 import os from "os";
 import path from "path";
 import assert from "assert";
-import {authorizeAccount, store, } from "./api.js";
-import {cidFromBytes} from "./cid_dag_metadata.js";
+import {authorizeAccount, store, fetchCid, TX_MODE_FINALIZED_BLOCK, TX_MODE_IN_BLOCK} from "./api.js";
+import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
     CHUNK_SIZE,
     newSigner,
     fileToDisk,
     filesAreEqual,
-    generateTextImage
+    generateTextImage,
+    DEFAULT_IPFS_API_URL,
+    DEFAULT_IPFS_GATEWAY_URL,
 } from "./common.js";
+import {
+    logHeader,
+    logConnection,
+    logStep,
+    logSuccess,
+    logError,
+    logTestResult,
+} from "./logger.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// ---- CONFIG ----
-const NODE_WS = 'ws://localhost:10000';
-// ----
+// Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
+// Note: --signer-disc=XX flag is also supported for parallel runs
+// Note: --skip-authorize flag skips account authorization (for live networks)
+// Note: --skip-ipfs-verify flag skips IPFS download verification
+const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
+// Derive API URL from gateway URL (port 8283 -> 5011)
+const IPFS_API_URL = IPFS_GATEWAY_URL.replace(':8283', ':5011');
+// Image size preset: small, big32, big64, big96
+const IMAGE_SIZE = args[3] || 'big64';
+const NUM_SIGNERS = 16;
+
+// Optional flags
+const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
+const SKIP_AUTHORIZE = process.argv.includes("--skip-authorize");
+const SKIP_IPFS_VERIFY = process.argv.includes("--skip-ipfs-verify");
 
 // -------------------- queue --------------------
 const queue = [];
@@ -32,7 +57,16 @@ const resultQueue = [];
 function pushToResultQueue(data) {
     resultQueue.push(data);
 }
-function waitForQueueLength(targetLength, timeoutMs = 60000) {
+
+// -------------------- statistics --------------------
+const stats = {
+    startTime: null,
+    endTime: null,
+    blockNumbers: [],  // Track all block numbers where txs were included
+    blockHashes: {},   // Map block number -> block hash for timestamp lookups
+};
+
+function waitForQueueLength(targetLength, timeoutMs = 300000) {
     return new Promise((resolve, reject) => {
         const start = Date.now();
 
@@ -44,7 +78,7 @@ function waitForQueueLength(targetLength, timeoutMs = 60000) {
                 clearInterval(interval);
                 reject(new Error(`Timeout waiting for ${targetLength} entries in queue`));
             }
-        }, 50); // check every 50ms
+        }, 500); // check every 500ms
     });
 }
 
@@ -74,14 +108,113 @@ async function processJob(typedApi, workerId, signer, chunk) {
         `Worker ${workerId} submitting tx for chunk ${chunk.cid} of size ${chunk.len} bytes`
     );
 
-    let cid = await store(typedApi, signer.signer, chunk.bytes);
-    pushToResultQueue(cid);
-    console.log(`Worker ${workerId} tx included in the block with CID: ${cid}`);
+    let { cid, blockHash, blockNumber } = await store(typedApi, signer.signer, chunk.bytes);
+    pushToResultQueue({ cid, blockNumber });
+    if (blockNumber !== undefined) {
+        stats.blockNumbers.push(blockNumber);
+        if (blockHash && !stats.blockHashes[blockNumber]) {
+            stats.blockHashes[blockNumber] = blockHash;
+        }
+    }
+    console.log(`Worker ${workerId} tx included in block #${blockNumber} with CID: ${cid}`);
 }
 
 // -------------------- helpers --------------------
 function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
+}
+
+function formatBytes(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MiB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KiB';
+    return bytes + ' B';
+}
+
+function formatDuration(ms) {
+    if (ms >= 60000) return (ms / 60000).toFixed(2) + ' min';
+    if (ms >= 1000) return (ms / 1000).toFixed(2) + ' s';
+    return ms + ' ms';
+}
+
+async function printStatistics(dataSize, typedApi) {
+    const numTxs = stats.blockNumbers.length;
+    const elapsed = stats.endTime - stats.startTime;
+
+    // Calculate startBlock and endBlock from actual transaction blocks
+    const startBlock = Math.min(...stats.blockNumbers);
+    const endBlock = Math.max(...stats.blockNumbers);
+    const blocksElapsed = endBlock - startBlock;
+
+    // Count transactions per block
+    const txsPerBlock = {};
+    for (const blockNum of stats.blockNumbers) {
+        txsPerBlock[blockNum] = (txsPerBlock[blockNum] || 0) + 1;
+    }
+    const numBlocksWithTxs = Object.keys(txsPerBlock).length;
+    const totalBlocksInRange = blocksElapsed + 1;
+    const avgTxsPerBlock = totalBlocksInRange > 0 ? (numTxs / totalBlocksInRange).toFixed(2) : 'N/A';
+
+    // Fetch block timestamps for all blocks in range
+    // Query at the last known block to ensure all previous blocks are visible
+    const lastKnownBlockHash = stats.blockHashes[endBlock];
+    const blockTimestamps = {};
+    for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
+        try {
+            // Get block hash - either from stored or query at last known block
+            let blockHash = stats.blockHashes[blockNum];
+            if (!blockHash) {
+                blockHash = await typedApi.query.System.BlockHash.getValue(blockNum, { at: lastKnownBlockHash });
+            }
+            // Convert Binary/Uint8Array to hex string for PAPI's at parameter
+            const blockHashHex = typeof blockHash === 'string'
+                ? blockHash
+                : (blockHash?.asHex?.() || blockHash?.toHex?.() || '0x' + Buffer.from(blockHash).toString('hex'));
+            // Skip blocks with zero hash (pruned)
+            if (blockHashHex.match(/^(0x)?0+$/)) {
+                continue;
+            }
+            const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHashHex });
+            blockTimestamps[blockNum] = timestamp;
+        } catch (e) {
+            console.error(`Failed to fetch timestamp for block #${blockNum}:`, e.message);
+        }
+    }
+
+    console.log('\n');
+    // Calculate average block time from timestamps
+    const startTimestamp = blockTimestamps[startBlock];
+    const endTimestamp = blockTimestamps[endBlock];
+    const avgBlockTime = (startTimestamp && endTimestamp && blocksElapsed > 0)
+        ? (Number(endTimestamp) - Number(startTimestamp)) / blocksElapsed
+        : null;
+
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('📊 STORAGE STATISTICS');
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log(`│ File size           │ ${formatBytes(dataSize).padEnd(25)} │`);
+    console.log(`│ Chunk/TX size       │ ${formatBytes(CHUNK_SIZE).padEnd(25)} │`);
+    console.log(`│ Number of chunks    │ ${numTxs.toString().padEnd(25)} │`);
+    console.log(`│ Avg txs per block   │ ${`${avgTxsPerBlock} (${numTxs} txs in #${startBlock} → #${endBlock})`.padEnd(25)} │`);
+    console.log(`│ Avg block time      │ ${(avgBlockTime ? formatDuration(avgBlockTime) : 'N/A').padEnd(25)} │`);
+    console.log(`│ Time elapsed        │ ${formatDuration(elapsed).padEnd(25)} │`);
+    console.log(`│ Blocks elapsed      │ ${`${blocksElapsed} (#${startBlock} → #${endBlock})`.padEnd(25)} │`);
+    console.log(`│ Throughput/sec      │ ${(formatBytes(dataSize / (elapsed / 1000)) + '/s').padEnd(25)} │`);
+    console.log(`│ Throughput/block    │ ${(formatBytes(dataSize / totalBlocksInRange) + '/block').padEnd(25)} │`);
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('📦 TRANSACTIONS PER BLOCK');
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('│ Block       │ Time                │ TXs │ Size         │ Bar                  │');
+    console.log('├─────────────┼─────────────────────┼─────┼──────────────┼──────────────────────┤');
+    for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
+        const count = txsPerBlock[blockNum] || 0;
+        const size = count > 0 ? formatBytes(count * CHUNK_SIZE) : '-';
+        const bar = count > 0 ? '█'.repeat(Math.min(count, 20)) : '';
+        const timestamp = blockTimestamps[blockNum];
+        const timeStr = timestamp ? new Date(Number(timestamp)).toISOString().replace('T', ' ').slice(0, 19) : '-';
+        console.log(`│ #${blockNum.toString().padEnd(10)} │ ${timeStr.padEnd(19)} │ ${count.toString().padStart(3)} │ ${size.padEnd(12)} │ ${bar.padEnd(20)} │`);
+    }
+    console.log('════════════════════════════════════════════════════════════════════════════════');
+    console.log('\n');
 }
 
 /**
@@ -101,6 +234,9 @@ export async function storeChunkedFile(api, filePath) {
     }
     console.log(`✂️ Split into ${chunks.length} chunks`)
 
+    // Start timing for statistics
+    stats.startTime = Date.now();
+
     // ---- 2️⃣ Store chunks in Bulletin ----
     for (let i = 0; i < chunks.length; i++) {
         pushToQueue(chunks[i]);
@@ -108,44 +244,34 @@ export async function storeChunkedFile(api, filePath) {
     return { chunks, dataSize: fileData.length };
 }
 
-// Connect to a local IPFS gateway (e.g. Kubo)
-const ipfs = create({
-    url: 'http://127.0.0.1:5001', // Local IPFS API
-});
-
-async function readFromIpfs(cid) {
-    // Fetch the block (downloads via Bitswap if not local)
-    console.log('Trying to get cid: ', cid);
-    const chunks = [];
-    for await (const chunk of ipfs.cat(cid)) {
-        chunks.push(chunk);
-    }
-    const fullData = Buffer.concat(chunks);
-    console.log('Received block: ', fullData);
-    return fullData
+// Connect to IPFS API (for ipfs-http-client operations like block.get)
+let ipfs = null;
+if (!SKIP_IPFS_VERIFY) {
+    ipfs = create({
+        url: IPFS_API_URL,
+    });
 }
-
-// Optional signer discriminator, when we want to run the script in parallel and don't take care of nonces.
-// E.g.: node store_big_data.js --signer-disc=BB
-const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
 
 async function main() {
     await cryptoWaitReady()
+
+    logHeader('STORE BIG DATA TEST');
+    logConnection(NODE_WS, SEED, IPFS_GATEWAY_URL);
 
     let client, resultCode;
     try {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletinimggen-"));
         const filePath = path.join(tmpDir, "image.jpeg");
         const downloadedFilePath = path.join(tmpDir, "downloaded.jpeg");
-        generateTextImage(filePath, "Hello, Bulletin - " + new Date().toString(), "big");
+        const downloadedFileByDagPath = path.join(tmpDir, "downloadedByDag.jpeg");
+        generateTextImage(filePath, `Hello, Bulletin ${IMAGE_SIZE} - ` + new Date().toString(), IMAGE_SIZE);
 
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, _ } = setupKeyringAndSigners('//Alice', '//Alice');
 
         // Let's do parallelism with multiple accounts
-        const signers = Array.from({ length: 8 }, (_, i) => {
+        const signers = Array.from({ length: NUM_SIGNERS }, (_, i) => {
             if (!signerDiscriminator) {
                 return newSigner(`//Signer${i + 1}`)
             } else {
@@ -154,14 +280,18 @@ async function main() {
             }
         });
 
-        // Authorize accounts.
-        await authorizeAccount(
-            bulletinAPI,
-            sudoSigner,
-            signers.map(a => a.address),
-            100,
-            BigInt(100 * 1024 * 1024), // 100 MiB
-        );
+        // Authorize accounts (skip for live networks with pre-authorized accounts)
+        if (!SKIP_AUTHORIZE) {
+            const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
+            await authorizeAccount(
+                bulletinAPI,
+                sudoSigner,
+                signers.map(a => a.address),
+                100,
+                BigInt(100 * 1024 * 1024), // 100 MiB
+                TX_MODE_FINALIZED_BLOCK,
+            );
+        }
 
         // Start 8 workers
         signers.forEach((signer, i) => {
@@ -175,34 +305,68 @@ async function main() {
         // wait for all chunks are stored
         try {
             console.log(`Waiting for all chunks ${chunks.length} to be stored!`);
-            await waitForQueueLength(chunks.length, 180_000);
+            await waitForQueueLength(chunks.length);
+            stats.endTime = Date.now();
             console.log(`All chunks ${chunks.length} are stored!`);
         } catch (err) {
+            stats.endTime = Date.now();
             console.error(err.message);
             throw new Error('❌ Storing chunks failed! Error:' + err.message);
         }
 
-        // Check all chunks are there.
-        let downloadedChunks = [];
-        for (const chunk of chunks) {
-            // Download the chunk from IPFS.
-            let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
-            downloadedChunks.push(block);
-        }
-        let fullBuffer = Buffer.concat(downloadedChunks);
-        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(downloadedFilePath, fullBuffer);
-        filesAreEqual(filePath, downloadedFilePath);
-        assert.strictEqual(
-            dataSize,
-            fullBuffer.length,
-            '❌ Failed to download all the data!'
+        console.log(`Storing DAG...`);
+        let { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220);
+        // Store with dag-pb codec (0x70) to match rootCid from buildUnixFSDagPB
+        let { cid } = await store(
+            bulletinAPI,
+            signers[0].signer,
+            dagBytes,
+            0x70,   // dag-pb codec
+            0xb220, // blake2b-256
+            TX_MODE_IN_BLOCK
         );
+        console.log(`Downloading...${cid} / ${rootCid}`);
+        assert.deepStrictEqual(cid, rootCid, '❌ CID mismatch between stored and computed DAG root');
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        // Print storage statistics
+        await printStatistics(dataSize, bulletinAPI);
+
+        // IPFS verification (skip with --skip-ipfs-verify)
+        if (!SKIP_IPFS_VERIFY) {
+            let downloadedContent = await fetchCid(IPFS_GATEWAY_URL, rootCid);
+            console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
+            await fileToDisk(downloadedFileByDagPath, downloadedContent);
+            filesAreEqual(filePath, downloadedFileByDagPath);
+            assert.strictEqual(
+                dataSize,
+                downloadedContent.length,
+                '❌ Failed to download all the data!'
+            );
+
+            // Check all chunks are there.
+            console.log(`Downloading by chunks...`);
+            let downloadedChunks = [];
+            for (const chunk of chunks) {
+                // Download the chunk from IPFS.
+                let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
+                downloadedChunks.push(block);
+            }
+            let fullBuffer = Buffer.concat(downloadedChunks);
+            console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+            await fileToDisk(downloadedFilePath, fullBuffer);
+            filesAreEqual(filePath, downloadedFilePath);
+            assert.strictEqual(
+                dataSize,
+                fullBuffer.length,
+                '❌ Failed to download all the data!'
+            );
+        }
+
+        logTestResult(true, SKIP_IPFS_VERIFY ? 'Store Big Data Test (Storage Only)' : 'Store Big Data Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();

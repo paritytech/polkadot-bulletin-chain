@@ -2,17 +2,24 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store} from './api.js';
-import { setupKeyringAndSigners } from './common.js';
+import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-const NODE_WS = 'ws://localhost:10000';
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 async function main() {
     await cryptoWaitReady();
-    
+
+    logHeader('AUTHORIZE AND STORE TEST (WebSocket)');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
+
     let client, resultCode;
     try {
         // Init WS PAPI client and typed api.
@@ -20,7 +27,7 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Papisigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
@@ -31,17 +38,18 @@ async function main() {
             bulletinAPI,
             sudoSigner,
             whoAddress,
-            1,
-            BigInt(dataToStore.length)
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK,
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, whoSigner, dataToStore);
-        console.log("✅ Data stored successfully with CID:", cid);
+        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
+        logSuccess(`Data stored successfully with CID: ${cid}`);
 
         // Read back from IPFS
         let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
-        console.log("✅ Downloaded content:", downloadedContent.toString());
+        logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,
             expectedCid,
@@ -52,12 +60,13 @@ async function main() {
             downloadedContent.toString(),
             '❌ dataToStore does not match downloadedContent!'
         );
-        console.log(`✅ Verified content!`);
+        logSuccess('Verified content!');
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Authorize and Store Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();
@@ -66,4 +75,3 @@ async function main() {
 }
 
 await main();
-

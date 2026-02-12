@@ -96,17 +96,17 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     ROOT_DIR="{{ justfile_directory() }}/.."
     # Build the node binary (which will build the runtime as a dependency)
     cargo build --release -p polkadot-bulletin-chain
+    POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
         runtime   : {{ runtime }}
         test_dir  : {{ test_dir }}
         zombienet : $ZOMBIENET_BIN
-        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
-        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+        POLKADOT_BULLETIN_BINARY_PATH : $POLKADOT_BULLETIN_BINARY_PATH
     EOF
     cd "$ROOT_DIR"
-    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain" \
+    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$POLKADOT_BULLETIN_BINARY_PATH" \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
     cd -
 
@@ -216,24 +216,53 @@ ipfs-start test_dir: _check-docker
     #!/usr/bin/env bash
     set -e
     echo "🐳 Starting IPFS Docker container..."
-    
+
+    # Use non-standard ports to avoid conflicts with other IPFS instances
+    IPFS_SWARM_PORT=4011
+    IPFS_API_PORT=5011
+    IPFS_GATEWAY_PORT=8283
+
     # Pull latest kubo image if not present
     docker pull ipfs/kubo:latest
-    
+
+    # Remove old volume to start fresh (no cached peers)
+    docker volume rm ipfs-data 2>/dev/null || true
+
     # Determine network mode based on OS
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use port mapping
-        NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
+        # macOS - use bridge with port mapping
+        NETWORK_ARGS="-p ${IPFS_SWARM_PORT}:${IPFS_SWARM_PORT} -p ${IPFS_GATEWAY_PORT}:${IPFS_GATEWAY_PORT} -p ${IPFS_API_PORT}:${IPFS_API_PORT}"
     else
-        # Linux (including CI) - use host networking for direct access
-        NETWORK_ARGS="--network host -p 4001:4001 -p 8080:8080 -p 5001:5001"
+        # Linux (including CI) - use host networking so container can reach localhost services
+        NETWORK_ARGS="--network host"
     fi
-    
-    # Start Docker container
+
+    # Start container - daemon will init and start
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
-    echo "   Container: ipfs-node"
-    echo "   Waiting for container to start..."
+    echo "   Container: ipfs-node (network: $NETWORK_ARGS)"
+    echo "   Waiting for IPFS to initialize..."
     sleep 5
+
+    # Configure IPFS for isolated mode while daemon is running (config changes take effect on restart)
+    echo "   Configuring isolated mode..."
+    docker exec ipfs-node ipfs bootstrap rm --all
+    docker exec ipfs-node ipfs config --json Routing.Type '"none"'
+    docker exec ipfs-node ipfs config --json Discovery.MDNS.Enabled false
+    docker exec ipfs-node ipfs config --json Swarm.RelayClient.Enabled false
+    docker exec ipfs-node ipfs config --json Swarm.RelayService.Enabled false
+
+    # Configure custom ports to avoid conflicts with other IPFS instances
+    echo "   Configuring custom ports (swarm: ${IPFS_SWARM_PORT}, api: ${IPFS_API_PORT}, gateway: ${IPFS_GATEWAY_PORT})..."
+    docker exec ipfs-node ipfs config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
+    docker exec ipfs-node ipfs config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
+    docker exec ipfs-node ipfs config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
+
+    # Restart container to apply config changes
+    echo "   Restarting daemon with isolated config..."
+    docker restart ipfs-node
+    sleep 5
+
+    docker exec ipfs-node ipfs --version
 
     # Bitswap logging
     docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
@@ -247,32 +276,31 @@ ipfs-start test_dir: _check-docker
 ipfs-connect runtime:
     #!/usr/bin/env bash
     set -e
-    
+
     echo "🔗 Connecting IPFS nodes (Docker, runtime: {{ runtime }})..."
-    
+
     # Detect the correct host and protocol for Docker
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use dns4/host.docker.internal
+        # macOS - use dns4/host.docker.internal (bridge network)
         PROTOCOL="dns4"
         DOCKER_HOST="host.docker.internal"
     else
-        # Linux (with host networking) - use ip4/127.0.0.1
+        # Linux - use ip4/127.0.0.1 (host network mode)
         PROTOCOL="ip4"
         DOCKER_HOST="127.0.0.1"
     fi
-    
+
     echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
 
-    # TODO: improve this for multiple runtimes
-    # Different peer IDs for different runtimes
+    # Different peer IDs and ports for different runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        # Westend parachain peer IDs
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
+        # Westend parachain peer IDs (WebSocket ports: 10002, 12348)
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        # Polkadot solo chain peer IDs
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+        # Polkadot solo chain peer IDs (WebSocket ports: 10002, 12348)
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
     else
         echo "🐳 Unhandled runtime: {{ runtime }} specified!"
         exit 1
@@ -285,6 +313,7 @@ ipfs-shutdown test_dir:
     echo "🛑 Shutting down IPFS Docker container..."
     docker stop ipfs-node 2>/dev/null || echo "   ⚠ Container not running or already stopped"
     docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
+    docker volume rm ipfs-data 2>/dev/null || echo "   ⚠ Volume not found or already removed"
     
     # Clean up container file if it exists
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
@@ -300,9 +329,9 @@ ipfs-reconnect-start test_dir runtime:
     cd "$ROOT_DIR"
     # TODO: improve this for multiple runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        ./scripts/ipfs-reconnect-westend.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+        ./scripts/ipfs-reconnect-westend.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        ./scripts/ipfs-reconnect-solo.sh docker > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+        ./scripts/ipfs-reconnect-solo.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     else
         echo "🐳 Unhandled runtime: {{ runtime }} specified!"
         exit 1
@@ -316,17 +345,20 @@ ipfs-reconnect-start test_dir runtime:
     sleep 2
 
 # Generate PAPI descriptors
-papi-generate:
+# Generate PAPI descriptors from a running node
+# Parameters:
+#   ws_url - WebSocket URL of the node (default: ws://localhost:10000)
+papi-generate ws_url="ws://localhost:10000": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🔧 Generating PAPI descriptors..."
-    npm run papi:generate
+    echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
+    npx papi add -w "{{ ws_url }}" bulletin
 
 # Setup all services using Docker for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-setup-services test_dir runtime:
+setup-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -365,10 +397,107 @@ teardown-services test_dir:
     just ipfs-shutdown "{{ test_dir }}"
     echo "✅ Docker services stopped"
 
+# Start all services for a runtime (use with run-test-* recipes)
+# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
+start-services test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    mkdir -p "{{ test_dir }}"
+    just setup-services "{{ test_dir }}" "{{ runtime }}"
+
+# Stop all services
+# Usage: just stop-services /tmp/my-test-dir
+stop-services test_dir:
+    #!/usr/bin/env bash
+    echo "📁 Stopping services - test directory: {{ test_dir }}"
+    just teardown-services "{{ test_dir }}"
+    echo "✅ Services stopped"
+
+# Run authorize-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   runtime - Runtime name for smoldot chainspec path resolution
+#   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
+#   ws_url - WebSocket URL (default: ws://localhost:10000, only used in ws mode)
+#   seed - Account seed phrase or dev seed (default: //Alice, only used in ws mode)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+
+    if [ "{{ mode }}" = "smoldot" ]; then
+        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
+    elif [ "{{ mode }}" = "ws" ]; then
+        SCRIPT_NAME="authorize_and_store_papi.js"
+    else
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
+    fi
+
+    # Run the script with parameters
+    if [ "{{ mode }}" = "smoldot" ]; then
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
+        else
+            CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "{{ http_ipfs_api }}"
+        fi
+    else
+        node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    fi
+
+# Run store-chunked-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run store-big-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   image_size - Image size preset: small, big32, big64, big96 (default: big64)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
+run-test-store-big-data test_dir image_size="big64" ws_url="ws://localhost:10000" seed="//Alice" ipfs_gateway_url="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+
+# Run authorize-preimage-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run Chopsticks compatibility check (services must already be running or use a live endpoint)
+# Parameters:
+#   endpoint - WebSocket URL of the Bulletin chain node (default: wss://westend-bulletin-rpc.polkadot.io)
+run-test-chopsticks endpoint="wss://westend-bulletin-rpc.polkadot.io": npm-install
+    #!/usr/bin/env bash
+    set -e
+    node check_chopsticks.js "{{ endpoint }}"
+
+# ============================================================================
+# Standalone recipes (with full setup/teardown) - kept for local dev convenience
+# ============================================================================
+
 # Run authorize and store example with Docker IPFS
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime", "polkadot-bulletin-chain-runtime")
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
 run-authorize-and-store runtime mode="ws": npm-install
     #!/usr/bin/env bash
     set -e
@@ -388,20 +517,20 @@ run-authorize-and-store runtime mode="ws": npm-install
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
-    # Run the script with chainspec_path parameter only for smoldot mode
+    # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
         # Set chainspec path based on runtime
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
             # Parachain: relay chain (required) + parachain spec (optional)
             RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1006.json"
-            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
         else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
-            node $SCRIPT_NAME "$CHAINSPEC_PATH"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "http://127.0.0.1:8283"
         fi
     else
-        node $SCRIPT_NAME
+        node $SCRIPT_NAME "ws://localhost:10000" "//Alice" "http://127.0.0.1:8283"
     fi
     EXAMPLE_EXIT=$?
     
@@ -419,7 +548,10 @@ run-authorize-and-store runtime mode="ws": npm-install
 # Run store chunked data example with Docker IPFS
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-store-chunked-data runtime: npm-install
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -429,7 +561,7 @@ run-store-chunked-data runtime: npm-install
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
-    node store_chunked_data.js
+    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     EXAMPLE_EXIT=$?
 
     echo ""
@@ -444,7 +576,12 @@ run-store-chunked-data runtime: npm-install
     exit $EXAMPLE_EXIT
 
 # Run store big data example.
-run-store-big-data runtime: npm-install
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5011)
+run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:5011": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -454,7 +591,7 @@ run-store-big-data runtime: npm-install
     just setup-services "$TEST_DIR" "{{ runtime }}"
 
     set +e
-    node store_big_data.js
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     EXAMPLE_EXIT=$?
 
     echo ""
@@ -467,3 +604,69 @@ run-store-big-data runtime: npm-install
 
     just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
+
+# Run authorize preimage and store with PAPI example.
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283": npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting authorize preimage and store with PAPI workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
+# ============================================================================
+# Live network tests (external endpoints - Westend, Paseo, etc.)
+# ============================================================================
+#
+# Run store-big-data test against live Bulletin chain deployments.
+# These require pre-authorized accounts.
+#
+# Usage:
+#   just run-live-tests-westend <seed>
+#   just run-live-tests-westend <seed> http://127.0.0.1:8283 small
+
+# Live network endpoints
+WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
+PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
+
+# Run store-big-data test against a live endpoint
+# Parameters:
+#   ws_url - WebSocket URL of the Bulletin chain node
+#   seed - Account seed phrase (must be pre-authorized on the network)
+#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
+#   image_size - Image size preset: small, big32, big64, big96 (default: small)
+_run-live-tests ws_url seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small": npm-install
+    #!/usr/bin/env bash
+    set -e
+    echo "🌐 Running live tests against: {{ ws_url }}"
+    just papi-generate "{{ ws_url }}"
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" --skip-authorize --skip-ipfs-verify
+
+# Run live tests against Westend Bulletin
+run-live-tests-westend seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+
+# Run live tests against Paseo Bulletin
+run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"

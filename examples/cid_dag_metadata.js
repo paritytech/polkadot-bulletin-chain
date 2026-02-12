@@ -1,5 +1,5 @@
-import { blake2AsU8a } from '@polkadot/util-crypto';
 import * as multihash from 'multiformats/hashes/digest';
+import { getContentHash } from './common.js';
 import { CID } from 'multiformats/cid';
 import * as dagPB from '@ipld/dag-pb';
 import { UnixFS } from 'ipfs-unixfs';
@@ -14,8 +14,8 @@ export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
         throw new Error('❌ buildUnixFSDag: chunks[] is empty')
     }
 
-    // UnixFS blockSizes = sizes of child blocks
-    const blockSizes = chunks.map(c => c.len)
+    // UnixFS blockSizes = sizes of child blocks (must be BigInt for ipfs-unixfs v11+)
+    const blockSizes = chunks.map(c => BigInt(c.len))
 
     console.log(`🧩 Building UnixFS DAG from chunks:
   • totalChunks: ${chunks.length}
@@ -27,12 +27,12 @@ export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
         blockSizes
     })
 
-    // DAG-PB node: our file with chunk links
+    // DAG-PB node: our file with chunk links (Tsize must be regular number for dag-pb)
     const dagNode = dagPB.prepare({
         Data: fileData.marshal(),
         Links: chunks.map(c => ({
             Name: '',
-            Tsize: c.len,
+            Tsize: Number(c.len),
             Hash: c.cid
         }))
     })
@@ -60,16 +60,8 @@ export async function buildUnixFSDagPB(chunks, mhCode = 0x12) {
  */
 export async function cidFromBytes(bytes, cidCodec = 0x55, mhCode = 0xb220) {
     console.log(`[CID]: Using cidCodec: ${cidCodec} and mhCode: ${mhCode}`);
-    let mh;
-    switch (mhCode) {
-        case 0xb220: // blake2b-256
-            mh = multihash.create(mhCode, blake2AsU8a(bytes));
-            break;
-
-        default:
-            throw new Error("Unhandled multihash code: " + mhCode)
-    }
-    return CID.createV1(cidCodec, mh)
+    const mh = multihash.create(mhCode, getContentHash(bytes, mhCode));
+    return CID.createV1(cidCodec, mh);
 }
 
 export function convertCid(cid, cidCodec) {
