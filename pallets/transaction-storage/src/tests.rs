@@ -760,3 +760,21 @@ fn migration_v1_idempotent() {
 		assert_eq!(after_first, after_second);
 	});
 }
+
+#[test]
+fn migration_v1_empty_storage() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<TransactionStorage>();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
+
+		// No Transactions entries exist
+		assert_eq!(Transactions::iter().count(), 0);
+
+		// Run migration
+		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+
+		// Version updated, no entries created
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+		assert_eq!(Transactions::iter().count(), 0);
+	});
+}
