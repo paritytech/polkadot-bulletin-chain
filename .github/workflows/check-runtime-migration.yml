@@ -73,13 +73,14 @@ jobs:
         if: steps.cache-restore.outputs.cache-matched-key == ''
         env:
           RUNTIME_NAME: ${{ matrix.runtime.name }}
+          RUNTIME_URIS_JSON: ${{ toJSON(matrix.runtime.uris) }}
         run: |
           echo "Generating snapshot for $RUNTIME_NAME..."
 
           URI_ARGS=()
           while IFS= read -r uri; do
             URI_ARGS+=(--uri "$uri")
-          done < <(echo '${{ toJSON(matrix.runtime.uris) }}' | jq -r '.[]')
+          done < <(echo "$RUNTIME_URIS_JSON" | jq -r '.[]')
           echo "Using URIs: ${URI_ARGS[*]}"
 
           for i in {1..10}; do
