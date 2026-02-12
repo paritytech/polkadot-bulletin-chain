@@ -76,12 +76,15 @@ jobs:
         run: |
           echo "Generating snapshot for $RUNTIME_NAME..."
 
-          URI_ARGS=$(echo '${{ toJSON(matrix.runtime.uris) }}' | jq -r '.[] | "--uri " + .' | tr '\n' ' ')
-          echo "Using URIs: $URI_ARGS"
+          URI_ARGS=()
+          while IFS= read -r uri; do
+            URI_ARGS+=(--uri "$uri")
+          done < <(echo '${{ toJSON(matrix.runtime.uris) }}' | jq -r '.[]')
+          echo "Using URIs: ${URI_ARGS[*]}"
 
           for i in {1..10}; do
             echo "Snapshot creation attempt $i/10"
-            if try-runtime create-snapshot "$URI_ARGS" -- snapshot.raw; then
+            if try-runtime create-snapshot "${URI_ARGS[@]}" -- snapshot.raw; then
               if [ -f "snapshot.raw" ] && [ -s "snapshot.raw" ]; then
                 echo "Snapshot created successfully"
                 break
