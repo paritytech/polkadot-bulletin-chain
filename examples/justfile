@@ -240,34 +240,60 @@ ipfs-start test_dir: _check-docker
     # Start container - daemon will init and start
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
     echo "   Container: ipfs-node (network: $NETWORK_ARGS)"
-    echo "   Waiting for IPFS to initialize..."
-    sleep 5
 
-    # Configure IPFS for isolated mode while daemon is running (config changes take effect on restart)
+    # Wait for the IPFS daemon API (default port 5001) to be ready
+    DEFAULT_API="--api /ip4/127.0.0.1/tcp/5001"
+    echo "   Waiting for IPFS daemon API to be ready..."
+    for i in $(seq 1 30); do
+        if docker exec ipfs-node ipfs $DEFAULT_API id >/dev/null 2>&1; then
+            echo "   IPFS API is ready"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "   ❌ IPFS API failed to start within 30 seconds"
+            exit 1
+        fi
+        sleep 1
+    done
+
+    # Configure IPFS for isolated mode via the running daemon's API (avoids repo.lock contention)
     echo "   Configuring isolated mode..."
-    docker exec ipfs-node ipfs bootstrap rm --all
-    docker exec ipfs-node ipfs config --json Routing.Type '"none"'
-    docker exec ipfs-node ipfs config --json Discovery.MDNS.Enabled false
-    docker exec ipfs-node ipfs config --json Swarm.RelayClient.Enabled false
-    docker exec ipfs-node ipfs config --json Swarm.RelayService.Enabled false
+    docker exec ipfs-node ipfs $DEFAULT_API bootstrap rm --all
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Routing.Type '"none"'
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Discovery.MDNS.Enabled false
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Swarm.RelayClient.Enabled false
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Swarm.RelayService.Enabled false
 
     # Configure custom ports to avoid conflicts with other IPFS instances
     echo "   Configuring custom ports (swarm: ${IPFS_SWARM_PORT}, api: ${IPFS_API_PORT}, gateway: ${IPFS_GATEWAY_PORT})..."
-    docker exec ipfs-node ipfs config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
-    docker exec ipfs-node ipfs config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
-    docker exec ipfs-node ipfs config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
+    docker exec ipfs-node ipfs $DEFAULT_API config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
+    docker exec ipfs-node ipfs $DEFAULT_API config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
-    # Restart container to apply config changes
+    # Restart container to apply config changes (API now on custom port)
     echo "   Restarting daemon with isolated config..."
     docker restart ipfs-node
-    sleep 5
+
+    CUSTOM_API="--api /ip4/127.0.0.1/tcp/${IPFS_API_PORT}"
+    echo "   Waiting for IPFS daemon API to be ready on port ${IPFS_API_PORT}..."
+    for i in $(seq 1 30); do
+        if docker exec ipfs-node ipfs $CUSTOM_API id >/dev/null 2>&1; then
+            echo "   IPFS API is ready"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "   ❌ IPFS API failed to start within 30 seconds after restart"
+            exit 1
+        fi
+        sleep 1
+    done
 
     docker exec ipfs-node ipfs --version
 
     # Bitswap logging
     docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
-    docker exec ipfs-node ipfs log level bitswap debug
-    docker exec ipfs-node ipfs log level bitswap/client debug
+    docker exec ipfs-node ipfs $CUSTOM_API log level bitswap debug
+    docker exec ipfs-node ipfs $CUSTOM_API log level bitswap/client debug
 
     # Store container name in PID directory for cleanup
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
