@@ -78,9 +78,17 @@ jobs:
 
   integration-tests:
     needs: [setup]
-    name: Integration Tests
+    name: Integration Tests (${{ matrix.runtime.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: "Westend parachain"
+            package: "bulletin-westend-runtime"
+          - name: "Polkadot solochain"
+            package: "bulletin-polkadot-runtime"
 
     steps:
       - name: Checkout sources
@@ -138,80 +146,38 @@ jobs:
           echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
           echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
-      # ========================================================================
-      # Westend parachain tests
-      # ========================================================================
-      - name: Start services (Westend parachain)
+      - name: Start services
         working-directory: examples
         run: |
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "bulletin-westend-runtime"
+          just start-services "$TEST_DIR" "${{ matrix.runtime.package }}"
 
-      - name: Test authorize-and-store ws (Westend parachain)
+      - name: Test authorize-and-store ws
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
+        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "${{ matrix.runtime.package }}" "ws"
 
-      - name: Test authorize-and-store smoldot (Westend parachain)
+      - name: Test authorize-and-store smoldot
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"
+        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "${{ matrix.runtime.package }}" "smoldot"
 
-      - name: Test store-chunked-data (Westend parachain)
-        working-directory: examples
-        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
-
-      - name: Test store-big-data (Westend parachain)
-        working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
-
-      - name: Test authorize-preimage-and-store (Westend parachain)
-        working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
-
-      - name: Test chopsticks compatibility (Westend parachain)
-        working-directory: examples
-        run: just run-test-chopsticks "ws://localhost:10000"
-
-      - name: Stop services (Westend parachain)
-        if: always()
-        working-directory: examples
-        run: just stop-services "${{ env.TEST_DIR }}"
-
-      # ========================================================================
-      # Polkadot solochain tests
-      # ========================================================================
-      - name: Start services (Polkadot solochain)
-        working-directory: examples
-        run: |
-          TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "bulletin-polkadot-runtime"
-
-      - name: Test authorize-and-store ws (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "ws"
-
-      - name: Test authorize-and-store smoldot (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "smoldot"
-
-      - name: Test store-chunked-data (Polkadot solochain)
+      - name: Test store-chunked-data
         working-directory: examples
         run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
 
-      - name: Test store-big-data (Polkadot solochain)
+      - name: Test store-big-data
         working-directory: examples
         run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
 
-      - name: Test authorize-preimage-and-store (Polkadot solochain)
+      - name: Test authorize-preimage-and-store
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
 
-      - name: Test chopsticks compatibility (Polkadot solochain)
+      - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://localhost:10000"
 
-      - name: Stop services (Polkadot solochain)
+      - name: Stop services
         if: always()
         working-directory: examples
         run: just stop-services "${{ env.TEST_DIR }}"
@@ -221,6 +187,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: failed-zombienet-logs
+          name: failed-zombienet-logs-${{ matrix.runtime.name }}
           path: |
             ${{ env.TEST_DIR }}/*.log
