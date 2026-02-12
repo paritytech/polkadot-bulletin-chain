@@ -144,7 +144,7 @@ jobs:
           echo "EXTRA_FLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
           echo "CHECKS=$CHECKS" >> $GITHUB_ENV
 
-      - name: Set rust version via common env file
+      - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Install stable toolchain
