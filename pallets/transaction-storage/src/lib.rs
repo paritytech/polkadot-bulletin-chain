@@ -306,7 +306,7 @@ pub mod pallet {
 			// submitted, so we log instead of panicking.
 			#[cfg(feature = "try-runtime")]
 			if !proof_ok {
-				tracing::error!(
+				tracing::warn!(
 					target: LOG_TARGET,
 					"Storage proof was not checked in this block (expected during try-runtime)"
 				);
