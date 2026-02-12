@@ -289,21 +289,30 @@ pub mod pallet {
 		}
 
 		fn on_finalize(n: BlockNumberFor<T>) {
-			assert!(
-				<ProofChecked<T>>::take() || {
-					// Proof is not required for early or empty blocks.
-					let number = <frame_system::Pallet<T>>::block_number();
-					let period = Self::retention_period();
-					let target_number = number.saturating_sub(period);
+			let proof_ok = <ProofChecked<T>>::take() || {
+				// Proof is not required for early or empty blocks.
+				let number = <frame_system::Pallet<T>>::block_number();
+				let period = Self::retention_period();
+				let target_number = number.saturating_sub(period);
 
-					target_number.is_zero() || {
-						// An empty block means no transactions were stored, relying on the fact
-						// below that we store transactions only if they contain chunks.
-						!Transactions::<T>::contains_key(target_number)
-					}
-				},
-				"Storage proof must be checked once in the block"
-			);
+				target_number.is_zero() || {
+					// An empty block means no transactions were stored, relying on the fact
+					// below that we store transactions only if they contain chunks.
+					!Transactions::<T>::contains_key(target_number)
+				}
+			};
+
+			// During try-runtime testing, no inherents (including storage proofs) are
+			// submitted, so we log instead of panicking.
+			#[cfg(feature = "try-runtime")]
+			if !proof_ok {
+				tracing::error!(
+					target: LOG_TARGET,
+					"Storage proof was not checked in this block (expected during try-runtime)"
+				);
+			}
+			#[cfg(not(feature = "try-runtime"))]
+			assert!(proof_ok, "Storage proof must be checked once in the block");
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
