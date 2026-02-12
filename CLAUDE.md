@@ -39,7 +39,6 @@ cargo test -p pallet-validator-set
 cargo test -p pallet-relayer-set
 
 # Run runtime tests
-cargo test -p polkadot-bulletin-chain-runtime
 cargo test -p bulletin-polkadot-runtime
 cargo test -p bulletin-westend-runtime
 
@@ -72,7 +71,6 @@ zepter run --config .config/zepter.yaml
 ```
 polkadot-bulletin-chain/
 ├── node/                     # Off-chain solochain node implementation (CLI, service, RPC)
-├── runtime/                  # Rococo testnet runtime (WASM)
 ├── runtimes/
 │   ├── bulletin-polkadot/    # Production Polkadot runtime
 │   └── bulletin-westend/     # Westend testnet runtime
@@ -90,8 +88,7 @@ polkadot-bulletin-chain/
 
 **Node (`node/`)**: Off-chain validator/full-node binary with BaBE + GRANDPA consensus and integrated IPFS (Bitswap/Kademlia).
 
-**Runtimes**: Three WASM runtimes targeting different networks:
-- `runtime/` - Rococo testnet (bridges via BridgeHub)
+**Runtimes**: Two WASM runtimes targeting different networks:
 - `runtimes/bulletin-polkadot/` - Production Polkadot (bridges to People Chain)
 - `runtimes/bulletin-westend/` - Westend testnet
 

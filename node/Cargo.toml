@@ -74,9 +74,6 @@ frame-benchmarking-cli = { workspace = true }
 frame-benchmarking = { optional = true, workspace = true, default-features = true }
 
 # Local Dependencies
-# Rococo testnet
-polkadot-bulletin-chain-runtime = { workspace = true }
-# Polkadot production
 bulletin-polkadot-runtime = { workspace = true }
 
 # TODO: remove when bulletin-polkadot is upgraded live with TX storage runtime API
@@ -94,7 +91,6 @@ runtime-benchmarks = [
 	"frame-support/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
-	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
 	"polkadot-primitives/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
@@ -107,6 +103,5 @@ try-runtime = [
 	"frame-try-runtime/try-runtime",
 	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
-	"polkadot-bulletin-chain-runtime/try-runtime",
 	"sp-runtime/try-runtime",
 ]

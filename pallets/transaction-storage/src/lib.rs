@@ -262,7 +262,10 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
@@ -289,21 +292,31 @@ pub mod pallet {
 		}
 
 		fn on_finalize(n: BlockNumberFor<T>) {
-			assert!(
-				<ProofChecked<T>>::take() || {
-					// Proof is not required for early or empty blocks.
-					let number = <frame_system::Pallet<T>>::block_number();
-					let period = Self::retention_period();
-					let target_number = number.saturating_sub(period);
+			let proof_ok = <ProofChecked<T>>::take() || {
+				// Proof is not required for early or empty blocks.
+				let number = <frame_system::Pallet<T>>::block_number();
+				let period = Self::retention_period();
+				let target_number = number.saturating_sub(period);
 
-					target_number.is_zero() || {
-						// An empty block means no transactions were stored, relying on the fact
-						// below that we store transactions only if they contain chunks.
-						!Transactions::<T>::contains_key(target_number)
-					}
-				},
-				"Storage proof must be checked once in the block"
-			);
+				target_number.is_zero() || {
+					// An empty block means no transactions were stored, relying on the fact
+					// below that we store transactions only if they contain chunks.
+					!Transactions::<T>::contains_key(target_number)
+				}
+			};
+
+			if !proof_ok {
+				// try-runtime simulates empty blocks without inherents after migration,
+				// so this check legitimately fails. Warn instead of panicking.
+				if cfg!(feature = "try-runtime") {
+					tracing::warn!(
+						target: LOG_TARGET,
+						"Storage proof was not checked — expected in try-runtime block simulation",
+					);
+				} else {
+					panic!("Storage proof must be checked once in the block");
+				}
+			}
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
