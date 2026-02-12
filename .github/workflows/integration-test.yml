@@ -203,3 +203,16 @@ jobs:
           name: failed-zombienet-logs-${{ matrix.runtime.name }}
           path: |
             ${{ env.TEST_DIR }}/*.log
+
+  integration-tests-complete:
+    name: Integration Tests
+    needs: [integration-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check integration test results
+        run: |
+          if [ "${{ needs.integration-tests.result }}" != "success" ]; then
+            echo "Integration tests failed or were cancelled"
+            exit 1
+          fi
