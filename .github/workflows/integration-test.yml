@@ -25,11 +25,17 @@ jobs:
     name: Setup
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
       - name: Free Disk Space (Ubuntu)
         if: ${{ runner.environment == 'github-hosted' }}
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
         with:
           tool-cache: false
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
 
       # Cache the Polkadot SDK binaries
       - name: Cache Polkadot SDK binaries
