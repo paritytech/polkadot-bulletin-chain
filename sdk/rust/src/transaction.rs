@@ -11,11 +11,8 @@ use crate::{
 	cid::ContentHash,
 	types::{Error, Result},
 };
-use subxt::{
-	OnlineClient, PolkadotConfig,
-	tx::{PairSigner, TxPayload},
-};
-use sp_core::sr25519::Pair;
+use subxt::{OnlineClient, PolkadotConfig};
+use subxt_signer::sr25519::Keypair;
 use sp_runtime::AccountId32;
 
 // Subxt metadata for TransactionStorage pallet
@@ -56,7 +53,7 @@ impl TransactionClient {
 	pub async fn store(
 		&self,
 		data: Vec<u8>,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<StoreReceipt> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -90,7 +87,7 @@ impl TransactionClient {
 		who: AccountId32,
 		transactions: u32,
 		bytes: u64,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<AuthorizationReceipt> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -121,7 +118,7 @@ impl TransactionClient {
 		&self,
 		content_hash: ContentHash,
 		max_size: u64,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<PreimageAuthorizationReceipt> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -149,7 +146,7 @@ impl TransactionClient {
 		&self,
 		block: u32,
 		index: u32,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<RenewReceipt> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -178,7 +175,7 @@ impl TransactionClient {
 	pub async fn refresh_account_authorization(
 		&self,
 		who: AccountId32,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<()> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -202,7 +199,7 @@ impl TransactionClient {
 	pub async fn refresh_preimage_authorization(
 		&self,
 		content_hash: ContentHash,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<()> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -224,7 +221,7 @@ impl TransactionClient {
 	pub async fn remove_expired_account_authorization(
 		&self,
 		who: AccountId32,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<()> {
 		let tx = bulletin::tx()
 			.transaction_storage()
@@ -246,7 +243,7 @@ impl TransactionClient {
 	pub async fn remove_expired_preimage_authorization(
 		&self,
 		content_hash: ContentHash,
-		signer: &PairSigner<PolkadotConfig, Pair>,
+		signer: &Keypair,
 	) -> Result<()> {
 		let tx = bulletin::tx()
 			.transaction_storage()
