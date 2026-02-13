@@ -1,7 +1,7 @@
 [workspace.package]
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2021"
-repository = "https://github.com/zdave-parity/polkadot-bulletin-chain.git"
+repository = "https://github.com/paritytech/polkadot-bulletin-chain.git"
 
 [workspace.dependencies]
 array-bytes = { version = "6.1" }
@@ -41,7 +41,6 @@ pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
 pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 pallets-common = { path = "pallets/common", default-features = false }
-polkadot-bulletin-chain-runtime = { path = "runtime" }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "81a3af9830ea8b6ff64b066b73b04bb3b675add5", default-features = false }
@@ -177,7 +176,6 @@ members = [
 	"pallets/relayer-set",
 	"pallets/transaction-storage",
 	"pallets/validator-set",
-	"runtime",
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",

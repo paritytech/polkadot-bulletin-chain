@@ -43,17 +43,13 @@ impl SubstrateCli for Cli {
 
 	fn load_spec(&self, id: &str) -> Result<Box<dyn sc_service::ChainSpec>, String> {
 		Ok(match id {
-			// TODO: put behind feature and remove dependencies
-			"dev" | "rococo-dev" => Box::new(chain_spec::rococo_development_config()?),
-			"local" | "rococo-local" => Box::new(chain_spec::rococo_local_testnet_config()?),
-			"polkadot-dev" | "bulletin-polkadot-dev" => Box::new(chain_spec::bulletin_polkadot_development_config()?),
-			"polkadot-local" | "bulletin-polkadot-local" => Box::new(chain_spec::bulletin_polkadot_local_testnet_config()?),
+			"dev" | "polkadot-dev" | "bulletin-polkadot-dev" => Box::new(chain_spec::bulletin_polkadot_development_config()?),
+			"local" | "polkadot-local" | "bulletin-polkadot-local" => Box::new(chain_spec::bulletin_polkadot_local_testnet_config()?),
 			"bulletin-polkadot" => Box::new(chain_spec::bulletin_polkadot_config()?),
 			"" => return Err(
 				"No chain_id or path specified! Either provide a path to the chain spec or specify chain_id: \
 				Polkadot Live (bulletin-polkadot) \
-				or Polkadot Dev/Local (bulletin-polkadot-dev, bulletin-polkadot-local) \
-				or Rococo (dev, local, rococo-dev, rococo-local)"
+				or Polkadot Dev/Local (dev, local, bulletin-polkadot-dev, bulletin-polkadot-local)"
 					.into(),
 			),
 			path =>
