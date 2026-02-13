@@ -13,8 +13,8 @@ use subxt::{
 	config::{
 		substrate::SubstrateConfig,
 		transaction_extensions::{
-			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis,
-			CheckMetadataHash, CheckMortality, CheckNonce, CheckSpecVersion, CheckTxVersion,
+			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis, CheckMetadataHash,
+			CheckMortality, CheckNonce, CheckSpecVersion, CheckTxVersion,
 		},
 		Config, ExtrinsicParams, ExtrinsicParamsEncoder, ExtrinsicParamsError,
 	},
