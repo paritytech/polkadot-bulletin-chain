@@ -11,14 +11,13 @@ use codec::Encode;
 use subxt::{
 	client::ClientState,
 	config::{
-		signed_extensions::{
-			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis, CheckMetadataHash,
-			CheckMortality, CheckNonce, CheckSpecVersion, CheckTxVersion,
-		},
 		substrate::SubstrateConfig,
-		Config, ExtrinsicParams, ExtrinsicParamsEncoder,
+		transaction_extensions::{
+			AnyOf, ChargeAssetTxPayment, ChargeTransactionPayment, CheckGenesis,
+			CheckMetadataHash, CheckMortality, CheckNonce, CheckSpecVersion, CheckTxVersion,
+		},
+		Config, ExtrinsicParams, ExtrinsicParamsEncoder, ExtrinsicParamsError,
 	},
-	error::ExtrinsicParamsError,
 };
 
 /// Custom signed extension for Bulletin Chain's ProvideCidConfig.
@@ -47,14 +46,14 @@ impl<T: Config> ExtrinsicParams<T> for ProvideCidConfig {
 }
 
 impl ExtrinsicParamsEncoder for ProvideCidConfig {
-	fn encode_extra_to(&self, v: &mut Vec<u8>) {
+	fn encode_value_to(&self, v: &mut Vec<u8>) {
 		// Encode Option<CidConfig>::None = 0x00
 		// This means "use the pallet's default CID configuration"
 		None::<()>.encode_to(v);
 	}
 }
 
-impl<T: Config> subxt::config::SignedExtension<T> for ProvideCidConfig {
+impl<T: Config> subxt::config::TransactionExtension<T> for ProvideCidConfig {
 	type Decoded = ();
 
 	fn matches(identifier: &str, _type_id: u32, _types: &scale_info::PortableRegistry) -> bool {
@@ -106,7 +105,6 @@ pub type BulletinExtrinsicParams<T> = AnyOf<
 pub enum BulletinConfig {}
 
 impl Config for BulletinConfig {
-	type Hash = <SubstrateConfig as Config>::Hash;
 	type AccountId = <SubstrateConfig as Config>::AccountId;
 	type Address = <SubstrateConfig as Config>::Address;
 	type Signature = <SubstrateConfig as Config>::Signature;
@@ -119,13 +117,13 @@ impl Config for BulletinConfig {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use subxt::config::SignedExtension;
+	use subxt::config::TransactionExtension;
 
 	#[test]
 	fn test_provide_cid_config_encodes_none() {
 		let extension = ProvideCidConfig;
 		let mut buf = Vec::new();
-		extension.encode_extra_to(&mut buf);
+		extension.encode_value_to(&mut buf);
 
 		// Should encode as Option::None (0x00)
 		assert_eq!(buf, vec![0x00]);
@@ -139,14 +137,14 @@ mod tests {
 		let registry = PortableRegistry::from(Registry::new());
 
 		// ProvideCidConfig matches the identifier "ProvideCidConfig"
-		assert!(<ProvideCidConfig as SignedExtension<BulletinConfig>>::matches(
+		assert!(<ProvideCidConfig as TransactionExtension<BulletinConfig>>::matches(
 			"ProvideCidConfig",
 			0,
 			&registry
 		));
 
 		// ProvideCidConfig does not match other identifiers
-		assert!(!<ProvideCidConfig as SignedExtension<BulletinConfig>>::matches(
+		assert!(!<ProvideCidConfig as TransactionExtension<BulletinConfig>>::matches(
 			"SomeOtherExtension",
 			0,
 			&registry

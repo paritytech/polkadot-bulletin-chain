@@ -13,9 +13,8 @@ path = "src/main.rs"
 bulletin-sdk-rust = { path = "../../../sdk/rust" }
 
 # Subxt for blockchain interaction
-# Using 0.37 with V14 metadata format (stable, well-tested)
-subxt = { version = "0.37", features = ["substrate-compat"] }
-subxt-signer = { version = "0.37", features = ["sr25519", "subxt"] }
+subxt = { version = "0.44" }
+subxt-signer = { version = "0.44", features = ["sr25519"] }
 
 # CLI and utilities
 clap = { version = "4.2", features = ["derive"] }
