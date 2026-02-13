@@ -54,12 +54,12 @@ jobs:
           mkdir -p $POLKADOT_SDK_BIN_DIR
           cd $POLKADOT_SDK_BIN_DIR
           echo "Downloading Polkadot SDK binaries..."
-          curl -L -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
-          curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
-          curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
-          curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
+          curl -fL -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
+          curl -fL -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
+          curl -fL -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
+          curl -fL -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
           # TODO: replace POLKADOT_SDK_VERSION_WITH_BULLETIN with POLKADOT_SDK_VERSION when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-          curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
+          curl -fL -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
           echo "${POLKADOT_SHA256}  polkadot" | sha256sum -c -
           echo "${POLKADOT_PREPARE_WORKER_SHA256}  polkadot-prepare-worker" | sha256sum -c -
           echo "${POLKADOT_EXECUTE_WORKER_SHA256}  polkadot-execute-worker" | sha256sum -c -
@@ -78,11 +78,13 @@ jobs:
       # NOTE: zombienet releases do not publish checksums
       - name: Download Zombienet binaries
         if: steps.zombienet-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p $ZOMBIENET_BIN_DIR
           cd $ZOMBIENET_BIN_DIR
-          curl -L \
-            -H "Authorization: token ${{ github.token }}" \
+          curl -fL \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
             -o zombienet-linux-x64 \
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
@@ -141,6 +143,17 @@ jobs:
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      - name: Verify cached binaries are available
+        run: |
+          if [ ! -d "${POLKADOT_SDK_BIN_DIR}" ] || [ -z "$(ls -A "${POLKADOT_SDK_BIN_DIR}")" ]; then
+            echo "::error::Polkadot SDK binaries not found in cache. The setup job may have failed."
+            exit 1
+          fi
+          if [ ! -d "${ZOMBIENET_BIN_DIR}" ] || [ -z "$(ls -A "${ZOMBIENET_BIN_DIR}")" ]; then
+            echo "::error::Zombienet binary not found in cache. The setup job may have failed."
+            exit 1
+          fi
+
       - name: Add binaries to PATH
         run: |
           chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
