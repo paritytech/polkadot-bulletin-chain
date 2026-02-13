@@ -4,6 +4,7 @@
     "package": "bulletin-polkadot-runtime",
     "path": "runtimes/bulletin-polkadot",
     "blocktime": 6000,
+    "integration_tests": true,
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
@@ -20,6 +21,7 @@
       "wss://westend-bulletin-rpc.polkadot.io"
     ],
     "blocktime": 6000,
+    "integration_tests": true,
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
