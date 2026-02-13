@@ -275,6 +275,16 @@ pub mod pallet {
 			let mut weight = Weight::zero();
 			let db_weight = T::DbWeight::get();
 
+			// Run v0→v1 migration if it hasn't been applied yet.
+			// This handles the case where `codeSubstitutes` loaded the fix runtime
+			// without triggering `on_runtime_upgrade` (spec_version unchanged).
+			// Safe alongside the regular `MigrateV0ToV1` wired in Executive: both
+			// check `on_chain_storage_version() < 1`, so whichever runs first bumps
+			// the version and the other becomes a no-op.
+			// TODO: Remove once all chains have been migrated past v1 — after that
+			// this is just a redundant storage read per block.
+			weight.saturating_accrue(Self::maybe_migrate_v0_to_v1());
+
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
 			weight.saturating_accrue(db_weight.reads(1));
@@ -945,6 +955,38 @@ pub mod pallet {
 		fn ensure_data_size_ok(size: usize) -> Result<(), Error<T>> {
 			ensure!(Self::data_size_ok(size), Error::<T>::BadDataSize);
 			Ok(())
+		}
+
+		/// Run the v0→v1 `TransactionInfo` migration if the on-chain storage version
+		/// is still 0. This covers the `codeSubstitutes` recovery path where the fix
+		/// runtime is loaded without triggering `on_runtime_upgrade`.
+		///
+		/// Returns the weight consumed. On subsequent blocks (version already 1)
+		/// this is a single storage read.
+		fn maybe_migrate_v0_to_v1() -> Weight {
+			use frame_support::traits::UncheckedOnRuntimeUpgrade;
+
+			let on_chain = Self::on_chain_storage_version();
+			if on_chain >= 1 {
+				return T::DbWeight::get().reads(1);
+			}
+
+			tracing::info!(
+				target: LOG_TARGET,
+				?on_chain,
+				"Running v0→v1 TransactionInfo migration from on_initialize",
+			);
+
+			let migration_weight =
+				migrations::v1::VersionUncheckedMigrateV0ToV1::<T>::on_runtime_upgrade();
+
+			StorageVersion::new(1).put::<Pallet<T>>();
+
+			// 1 read (version check) + migration weight + 1 write (version bump)
+			T::DbWeight::get()
+				.reads(1)
+				.saturating_add(migration_weight)
+				.saturating_add(T::DbWeight::get().writes(1))
 		}
 
 		/// Returns the [`TransactionInfo`] for the specified store/renew transaction.
