@@ -143,7 +143,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	println!("Connecting to: {ws_url}");
 
-	let client = OnlineClient::<BulletinConfig>::from_url(ws_url).await?;
+	let client = OnlineClient::<BulletinConfig>::from_url(ws_url.clone()).await?;
+	let sudo_client = OnlineClient::<PolkadotConfig>::from_url(ws_url).await?;
 
 	let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 	let data = format!("Hello, Bulletin with subxt preimage - {now}");
@@ -159,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let sudo_call = subxt::dynamic::tx("Sudo", "sudo", vec![authorize_preimage.into_value()]);
 
 	let sudo_signer = dev::alice();
-	client
+	sudo_client
 		.tx()
 		.sign_and_submit_then_watch_default(&sudo_call, &sudo_signer)
 		.await?
