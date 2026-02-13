@@ -386,15 +386,12 @@ impl pallet_sudo::Config for Runtime {
 	Debug,
 	codec::MaxEncodedLen,
 	scale_info::TypeInfo,
+	Default,
 )]
 pub enum ProxyType {
 	/// Fully permissioned proxy. Can execute any call on behalf of _proxied_.
+	#[default]
 	Any,
-}
-impl Default for ProxyType {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 impl InstanceFilter<RuntimeCall> for ProxyType {
 	fn filter(&self, _c: &RuntimeCall) -> bool {
