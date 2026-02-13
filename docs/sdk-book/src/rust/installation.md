@@ -25,6 +25,6 @@ Add `subxt` to your dependencies:
 ```toml
 [dependencies]
 bulletin-sdk-rust = "0.1"
-subxt = "0.37"
+subxt = "0.44"
 tokio = { version = "1", features = ["full"] }
 ```

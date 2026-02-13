@@ -15,9 +15,8 @@ if ! command -v subxt &> /dev/null; then
     exit 1
 fi
 
-# Fetch metadata (request V14 format for subxt 0.37 compatibility)
-# Modern Polkadot SDK nodes support serving multiple metadata versions
-subxt metadata --url "$WS_URL" --version 14 -f bytes > bulletin_metadata.scale
+# Fetch metadata (V15 format, supported by subxt 0.44+)
+subxt metadata --url "$WS_URL" -f bytes > bulletin_metadata.scale
 
 echo "✅ Metadata saved to bulletin_metadata.scale"
 echo "File size: $(wc -c < bulletin_metadata.scale) bytes"
