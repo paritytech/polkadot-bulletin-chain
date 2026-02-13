@@ -142,7 +142,7 @@ pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 }
 
 /// Submit a parachain runtime upgrade via sudo on the parachain.
-/// Uses ParachainSystem::authorize_upgrade + enact_authorized_upgrade.
+/// Uses System::authorize_upgrade_without_checks + System::apply_authorized_upgrade.
 pub async fn do_parachain_runtime_upgrade(
 	node: &zombienet_sdk::NetworkNode,
 	wasm_path: &str,
