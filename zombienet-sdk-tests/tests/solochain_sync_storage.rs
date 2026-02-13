@@ -435,6 +435,11 @@ async fn fast_sync_with_pruning_test() -> Result<()> {
 	network.add_node("bob", bob_opts).await?;
 	let bob = network.get_node("bob").context("Failed to get bob node")?;
 
+	// Wait for Bob's node to be up before checking logs (the log file is created
+	// asynchronously and wait_log_line_count_with_timeout errors immediately if
+	// the file doesn't exist yet).
+	wait_for_fullnode(bob).await?;
+
 	// With pruning enabled on all nodes, historical blocks are unavailable.
 	// Bob cannot sync because blocks 1-N are pruned on peers.
 	// We expect to see "BlockResponse ... with 0 blocks" - peers don't have the blocks.
@@ -797,6 +802,11 @@ async fn full_sync_with_pruning_test() -> Result<()> {
 
 	network.add_node("bob", bob_opts).await?;
 	let bob = network.get_node("bob").context("Failed to get bob node")?;
+
+	// Wait for Bob's node to be up before checking logs (the log file is created
+	// asynchronously and wait_log_line_count_with_timeout errors immediately if
+	// the file doesn't exist yet).
+	wait_for_fullnode(bob).await?;
 
 	// With pruning enabled on all nodes, historical blocks are unavailable.
 	// Bob cannot sync because blocks 1-N are pruned on peers.
