@@ -1419,6 +1419,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "authorize-preimage-subxt"
+version = "0.1.0"
+dependencies = [
+ "parity-scale-codec",
+ "scale-info",
+ "scale-value",
+ "sp-core",
+ "subxt",
+ "subxt-core",
+ "subxt-signer",
+ "tokio",
+]
+
+[[package]]
 name = "auto_impl"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14850,6 +14864,7 @@ dependencies = [
  "frame-metadata",
  "futures",
  "hex",
+ "jsonrpsee",
  "parity-scale-codec",
  "primitive-types 0.13.1",
  "scale-bits",
@@ -14870,6 +14885,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "wasm-bindgen-futures",
  "web-time",
 ]
 
@@ -14988,6 +15004,7 @@ dependencies = [
  "subxt-core",
  "subxt-lightclient",
  "thiserror 2.0.18",
+ "tokio-util",
  "tracing",
  "url",
 ]

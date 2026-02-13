@@ -49,12 +49,29 @@ type Transactions = super::Transactions<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
+/// Helper: authorize preimage and store data via the `Authorized` origin.
+fn authorize_and_store(data: Vec<u8>) {
+	let hash = blake2_256(&data);
+	assert_ok!(TransactionStorage::authorize_preimage(
+		RuntimeOrigin::root(),
+		hash,
+		data.len() as u64,
+	));
+	assert_ok!(TransactionStorage::store(RawOrigin::Authorized.into(), data));
+}
+
+/// Helper: authorize preimage and renew via the `Authorized` origin.
+fn authorize_and_renew(block: u64, index: u32, content_hash: [u8; 32], size: u64) {
+	assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), content_hash, size,));
+	assert_ok!(TransactionStorage::renew(RawOrigin::Authorized.into(), block, index));
+}
+
 #[test]
 fn discards_data() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		authorize_and_store(vec![0u8; 2000]);
+		authorize_and_store(vec![0u8; 2000]);
 		let proof_provider = || {
 			let block_num = System::block_number();
 			if block_num == 11 {
@@ -152,10 +169,7 @@ fn uses_preimage_authorization() {
 fn checks_proof() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(
-			RuntimeOrigin::none(),
-			vec![0u8; MAX_DATA_SIZE as usize]
-		));
+		authorize_and_store(vec![0u8; MAX_DATA_SIZE as usize]);
 		run_to_block(10, || None);
 		let parent_hash = System::parent_hash();
 		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
@@ -239,14 +253,10 @@ fn verify_chunk_proof_works() {
 fn renews_data() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		authorize_and_store(vec![0u8; 2000]);
 		let info = BlockTransactions::get().last().unwrap().clone();
 		run_to_block(6, || None);
-		assert_ok!(TransactionStorage::renew(
-			RuntimeOrigin::none(),
-			1, // block
-			0, // transaction
-		));
+		authorize_and_renew(1, 0, info.content_hash, info.size as u64);
 		let proof_provider = || {
 			let block_num = System::block_number();
 			if block_num == 11 || block_num == 16 {
@@ -404,7 +414,7 @@ fn stores_various_sizes_with_account_authorization() {
 		for size in sizes {
 			let call = Call::store { data: vec![0u8; size] };
 			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
-			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
+			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::signed(who)));
 		}
 
 		// After consuming the authorized sizes, authorization should be removed and providers
@@ -426,7 +436,7 @@ fn stores_various_sizes_with_account_authorization() {
 		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &too_big_call), BAD_DATA_SIZE);
 		// dispatch should also reject with pallet Error::BadDataSize
 		assert_noop!(
-			Into::<RuntimeCall>::into(too_big_call).dispatch(RuntimeOrigin::none()),
+			Into::<RuntimeCall>::into(too_big_call).dispatch(RuntimeOrigin::signed(who)),
 			Error::BadDataSize,
 		);
 		run_to_block(2, || None);
@@ -544,8 +554,8 @@ fn signed_renew_uses_account_authorization() {
 			2000
 		));
 		let store_call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		assert_ok!(store_call.authorize(TransactionSource::External).unwrap());
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RawOrigin::Authorized.into()));
 
 		run_to_block(3, || None);
 
@@ -582,7 +592,7 @@ fn signed_renew_prefers_preimage_authorization() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
 		let store_call = Call::store { data };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::signed(who)));
 
 		// Account authorization consumed after store
 		assert_eq!(
@@ -700,7 +710,7 @@ fn migration_v1_new_entries_only() {
 		run_to_block(1, || None);
 
 		// Store via normal (new-format) code path
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		authorize_and_store(vec![0u8; 2000]);
 		run_to_block(2, || None);
 
 		let original = Transactions::get(1).expect("should decode");
@@ -726,7 +736,7 @@ fn migration_v1_mixed_entries() {
 
 		// New-format entry at block 10
 		run_to_block(10, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![42u8; 500]));
+		authorize_and_store(vec![42u8; 500]);
 		run_to_block(11, || None);
 		let new_entry_before = Transactions::get(10).expect("new format decodes");
 

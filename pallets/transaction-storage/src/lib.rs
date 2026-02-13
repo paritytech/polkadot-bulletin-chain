@@ -344,7 +344,21 @@ pub mod pallet {
 		/// O(n*log(n)) of data size, as all data is pushed to an in-memory trie.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { /*TODO: add here correct validation */ true })]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool {
+			// Check preimage authorization
+			let hash = sp_io::hashing::blake2_256(data);
+			let preimage_extent = Pallet::<T>::preimage_authorization_extent(hash);
+			if preimage_extent.transactions > 0 && preimage_extent.bytes >= data.len() as u64 {
+				return true;
+			}
+			// Check account authorization for signed origins
+			if let Ok(who) = frame_system::ensure_signed(origin.clone()) {
+				let account_extent = Pallet::<T>::account_authorization_extent(who);
+				return account_extent.transactions > 0 &&
+					account_extent.bytes >= data.len() as u64;
+			}
+			false
+		})]
 		#[pallet::authorize(|_source, data| {
 			Pallet::<T>::to_validity_with_refund(Pallet::<T>::check_unsigned_store(
 				data.as_slice(),
@@ -359,7 +373,7 @@ pub mod pallet {
 						.map_err(Self::dispatch_error_from_validity)?;
 				},
 				Ok(frame_system::RawOrigin::Signed(_)) => {},
-				_ => return Err(DispatchError::BadOrigin.into()),
+				_ => return Err(DispatchError::BadOrigin),
 			}
 
 			// In the case of a regular unsigned transaction, this should have been checked by
@@ -1147,7 +1161,14 @@ pub mod pallet {
 				AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				consume,
-			)?;
+			)
+			.or_else(|_| {
+				Self::check_authorization(
+					AuthorizationScope::Account(who.clone()),
+					size as u32,
+					consume,
+				)
+			})?;
 
 			Ok(ValidTransaction {
 				priority: T::StoreRenewPriority::get(),
