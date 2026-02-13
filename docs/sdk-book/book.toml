@@ -1,0 +1,8 @@
+[book]
+authors = ["Polkadot Bulletin Team"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Polkadot Bulletin SDK Documentation"
+
+[output.html]
