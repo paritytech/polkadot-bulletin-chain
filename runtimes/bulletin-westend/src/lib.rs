@@ -78,7 +78,11 @@ use sp_runtime::{
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
-use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
+use testnet_parachains_constants::westend::{currency::*, fee::WeightToFee, time::*};
+// Import consensus constants but override the ones we need for elastic scaling (3 cores, 2s blocks).
+use testnet_parachains_constants::westend::consensus::{
+	MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS,
+};
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
@@ -90,6 +94,11 @@ use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
 	fees::Error as XcmPaymentApiError,
 };
+
+// Override consensus constants for elastic scaling (3 cores, 2s blocks).
+const SLOT_DURATION: u64 = 2000;
+const BLOCK_PROCESSING_VELOCITY: u32 = 3;
+const UNINCLUDED_SEGMENT_CAPACITY: u32 = 6;
 
 /// The address format for describing accounts.
 pub type Address = MultiAddress<AccountId, ()>;
