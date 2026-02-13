@@ -95,7 +95,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - id: runtime
         run: |
           TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
@@ -189,11 +189,13 @@ jobs:
 
       - name: Start services
         working-directory: examples
+        env:
+          RUNTIME_PACKAGE: ${{ matrix.runtime.package }}
         run: |
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          echo "RUNTIME_PACKAGE=${{ matrix.runtime.package }}" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "${{ matrix.runtime.package }}"
+          echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
+          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE"
 
       - name: Test authorize-and-store ws
         working-directory: examples
@@ -240,8 +242,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check integration test results
+        env:
+          TEST_RESULT: ${{ needs.integration-tests.result }}
         run: |
-          if [ "${{ needs.integration-tests.result }}" != "success" ]; then
+          if [ "$TEST_RESULT" != "success" ]; then
             echo "Integration tests failed or were cancelled"
             exit 1
           fi
