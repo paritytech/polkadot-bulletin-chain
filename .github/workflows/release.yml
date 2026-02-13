@@ -5,12 +5,13 @@ on:
     tags:
       - v*
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   build-runtimes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -25,11 +26,11 @@ jobs:
             path: runtimes/bulletin-polkadot
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Build ${{ matrix.name }} runtime
         id: srtool_build
-        uses: chevdor/srtool-actions@v0.9.2
+        uses: chevdor/srtool-actions@48e9baed50ca414936dfac59d34d8b9bbe581abd # v0.9.2
         env:
           BUILD_OPTS: "--features on-chain-release-build"
         with:
@@ -39,11 +40,13 @@ jobs:
           profile: production
 
       - name: Store srtool digest
+        env:
+          SRTOOL_JSON: ${{ steps.srtool_build.outputs.json }}
         run: |
-          echo '${{ steps.srtool_build.outputs.json }}' | jq > ${{ matrix.name }}_srtool_output.json
+          echo "$SRTOOL_JSON" | jq > ${{ matrix.name }}_srtool_output.json
 
       - name: Upload ${{ matrix.name }} wasm
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ matrix.name }}-runtime
           path: |
@@ -51,6 +54,8 @@ jobs:
             ${{ matrix.name }}_srtool_output.json
 
   build-node:
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -63,10 +68,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: wasm32-unknown-unknown
           components: rust-src
@@ -91,20 +96,22 @@ jobs:
         run: cargo build --profile production -p polkadot-bulletin-chain
 
       - name: Upload polkadot-bulletin-chain binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ matrix.artifact_name }}
           path: target/production/polkadot-bulletin-chain
 
   publish-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: [build-runtimes, build-node]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: artifacts
 
@@ -147,7 +154,7 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2
         with:
           files: |
             release-assets/*.wasm

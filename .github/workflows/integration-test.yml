@@ -16,6 +16,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
   ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
@@ -26,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Free Disk Space (Ubuntu)
         if: ${{ runner.environment == 'github-hosted' }}
@@ -39,7 +42,7 @@ jobs:
 
       # Cache the Polkadot SDK binaries
       - name: Cache Polkadot SDK binaries
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
@@ -57,16 +60,22 @@ jobs:
           curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
           # TODO: replace POLKADOT_SDK_VERSION_WITH_BULLETIN with POLKADOT_SDK_VERSION when released: https://github.com/paritytech/polkadot-sdk/pull/10662
           curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
+          echo "${POLKADOT_SHA256}  polkadot" | sha256sum -c -
+          echo "${POLKADOT_PREPARE_WORKER_SHA256}  polkadot-prepare-worker" | sha256sum -c -
+          echo "${POLKADOT_EXECUTE_WORKER_SHA256}  polkadot-execute-worker" | sha256sum -c -
+          echo "${CHAIN_SPEC_BUILDER_SHA256}  chain-spec-builder" | sha256sum -c -
+          echo "${POLKADOT_OMNI_NODE_SHA256}  polkadot-omni-node" | sha256sum -c -
           chmod +x *
 
       # Cache the Zombienet binaries
       - name: Cache Zombienet
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: zombienet-cache
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
       # Download and extract binaries if cache missed
+      # NOTE: zombienet releases do not publish checksums
       - name: Download Zombienet binaries
         if: steps.zombienet-cache.outputs.cache-hit != 'true'
         run: |
@@ -86,10 +95,10 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: wasm32-unknown-unknown
           components: rust-src
@@ -104,14 +113,14 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Rust cache (Bulletin)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
         with:
           workspaces: .
           shared-key: "bulletin-cache-bulletin-integration-tests"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -121,13 +130,13 @@ jobs:
         run: cargo install just --locked || true
 
       - name: Cache Polkadot SDK binaries
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
           key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_VERSION_WITH_BULLETIN }}-binaries
       - name: Cache Zombienet
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: zombienet-cache
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
@@ -224,7 +233,7 @@ jobs:
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: failed-zombienet-logs
           path: |

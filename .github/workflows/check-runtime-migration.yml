@@ -27,7 +27,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - id: runtime
         run: |
           # Filter out runtimes that don't have URIs
@@ -50,12 +50,12 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Check if snapshot exists in cache
         id: cache-restore
         if: github.event_name != 'schedule'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           lookup-only: true
           path: snapshot.raw
@@ -64,8 +64,11 @@ jobs:
 
       - name: Install try-runtime-cli
         if: steps.cache-restore.outputs.cache-matched-key == ''
+        env:
+          TRY_RUNTIME_SHA256: d6fcd586fba4c7245668f4ae2a06ffc94e6da4135fae22cfe24453dd11aee3c3
         run: |
           curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.1/try-runtime-x86_64-unknown-linux-musl -o try-runtime
+          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
 
@@ -108,7 +111,7 @@ jobs:
 
       - name: Save snapshot to cache
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
@@ -124,7 +127,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: "Fetch upstream tags"
         run: |
@@ -149,20 +152,23 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
       - name: Install try-runtime-cli
+        env:
+          TRY_RUNTIME_SHA256: d6fcd586fba4c7245668f4ae2a06ffc94e6da4135fae22cfe24453dd11aee3c3
         run: |
           curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.1/try-runtime-x86_64-unknown-linux-musl -o try-runtime
+          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
 
       - name: Restore snapshot from cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-
@@ -181,7 +187,7 @@ jobs:
           RUNTIME_BLOB_NAME=$(echo $PACKAGE_NAME | sed 's/-/_/g').compact.compressed.wasm
           RUNTIME_BLOB_PATH=./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME
           export RUST_LOG=remote-ext=debug,runtime=trace
-          
+
           (set -x; try-runtime \
             --runtime $RUNTIME_BLOB_PATH \
             on-runtime-upgrade --checks=$CHECKS \
