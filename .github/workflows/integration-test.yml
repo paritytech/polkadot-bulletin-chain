@@ -170,27 +170,28 @@ jobs:
         run: |
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          echo "RUNTIME_PACKAGE=${{ matrix.runtime.package }}" >> "$GITHUB_ENV"
           just start-services "$TEST_DIR" "${{ matrix.runtime.package }}"
 
       - name: Test authorize-and-store ws
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "${{ matrix.runtime.package }}" "ws"
+        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
 
       - name: Test authorize-and-store smoldot
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "${{ matrix.runtime.package }}" "smoldot"
+        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
 
       - name: Test store-chunked-data
         working-directory: examples
-        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
+        run: just run-test-store-chunked-data "$TEST_DIR"
 
       - name: Test store-big-data
         working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
+        run: just run-test-store-big-data "$TEST_DIR" "big32"
 
       - name: Test authorize-preimage-and-store
         working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+        run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
       - name: Test chopsticks compatibility
         working-directory: examples
@@ -199,7 +200,7 @@ jobs:
       - name: Stop services
         if: always()
         working-directory: examples
-        run: just stop-services "${{ env.TEST_DIR }}"
+        run: just stop-services "$TEST_DIR"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
