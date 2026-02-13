@@ -165,17 +165,6 @@ jobs:
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
-      - name: Verify cached binaries are available
-        run: |
-          if [ ! -d "${POLKADOT_SDK_BIN_DIR}" ] || [ -z "$(ls -A "${POLKADOT_SDK_BIN_DIR}")" ]; then
-            echo "::error::Polkadot SDK binaries not found in cache. The setup job may have failed."
-            exit 1
-          fi
-          if [ ! -d "${ZOMBIENET_BIN_DIR}" ] || [ -z "$(ls -A "${ZOMBIENET_BIN_DIR}")" ]; then
-            echo "::error::Zombienet binary not found in cache. The setup job may have failed."
-            exit 1
-          fi
-
       - name: Add binaries to PATH
         run: |
           chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
