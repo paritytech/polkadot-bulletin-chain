@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
 	// Step 1: Authorize the account to store data (requires sudo)
 	info!("\nStep 1: Authorizing account...");
 
-	// In subxt 0.37, to wrap a call in sudo, we need to construct the RuntimeCall manually.
+	// To wrap a call in sudo, we need to construct the RuntimeCall manually.
 	// The runtime type depends on which node we're connected to (polkadot vs westend).
 	// Use feature flags to select the correct runtime at compile time.
 	use bulletin::runtime_types;
