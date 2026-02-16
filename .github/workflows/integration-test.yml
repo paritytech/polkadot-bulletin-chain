@@ -179,8 +179,8 @@ jobs:
 
       - name: Test authorize-preimage-and-store ws (Westend parachain)
         working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
-
+        run: just run-test-authorize-preimage-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
+        
       - name: Test authorize-and-store smoldot
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
@@ -188,6 +188,10 @@ jobs:
       - name: Test store-chunked-data
         working-directory: examples
         run: just run-test-store-chunked-data "$TEST_DIR"
+
+      - name: Test native-ipfs-dag-pb-chunked-data
+        working-directory: examples
+        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
 
       - name: Test store-big-data
         working-directory: examples
