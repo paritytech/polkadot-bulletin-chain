@@ -78,11 +78,33 @@ jobs:
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
 
+  runtime-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.runtime.outputs.runtime }}
+    name: Extract tasks from matrix
+    steps:
+      - uses: actions/checkout@v6
+      - id: runtime
+        run: |
+          TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
+          SKIPPED=$(jq '[.[] | select(.integration_tests != true)]' scripts/runtimes-matrix.json)
+          echo "--- Running integration tests for ---"
+          echo "$TASKS"
+          echo "--- Skipping integration tests for ---"
+          echo "$SKIPPED"
+          TASKS=$(echo "$TASKS" | jq -c .)
+          echo "runtime=$TASKS" >> $GITHUB_OUTPUT
+
   integration-tests:
-    needs: [setup]
-    name: Integration Tests
+    needs: [setup, runtime-matrix]
+    name: Integration Tests (${{ matrix.runtime.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
 
     steps:
       - name: Checkout sources
@@ -143,89 +165,65 @@ jobs:
           echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
           echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
-      # ========================================================================
-      # Westend parachain tests
-      # ========================================================================
-      - name: Start services (Westend parachain)
+      - name: Start services
         working-directory: examples
         run: |
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "bulletin-westend-runtime"
+          echo "RUNTIME_PACKAGE=${{ matrix.runtime.package }}" >> "$GITHUB_ENV"
+          just start-services "$TEST_DIR" "${{ matrix.runtime.package }}"
 
-      - name: Test authorize-and-store ws (Westend parachain)
+      - name: Test authorize-and-store ws
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "ws"
+        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
 
-      - name: Test authorize-and-store smoldot (Westend parachain)
+      - name: Test authorize-and-store smoldot
         working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-westend-runtime" "smoldot"
+        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
 
-      - name: Test store-chunked-data (Westend parachain)
+      - name: Test store-chunked-data
         working-directory: examples
-        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
+        run: just run-test-store-chunked-data "$TEST_DIR"
 
-      - name: Test store-big-data (Westend parachain)
+      - name: Test native-ipfs-dag-pb-chunked-data
         working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
+        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
 
-      - name: Test authorize-preimage-and-store (Westend parachain)
+      - name: Test store-big-data
         working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
+        run: just run-test-store-big-data "$TEST_DIR" "big32"
 
-      - name: Test chopsticks compatibility (Westend parachain)
+      - name: Test authorize-preimage-and-store
         working-directory: examples
-        run: just run-test-chopsticks "ws://localhost:10000"
+        run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
-      - name: Stop services (Westend parachain)
-        if: always()
-        working-directory: examples
-        run: just stop-services "${{ env.TEST_DIR }}"
-
-      # ========================================================================
-      # Polkadot solochain tests
-      # ========================================================================
-      - name: Start services (Polkadot solochain)
-        working-directory: examples
-        run: |
-          TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
-          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "bulletin-polkadot-runtime"
-
-      - name: Test authorize-and-store ws (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "ws"
-
-      - name: Test authorize-and-store smoldot (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-and-store "${{ env.TEST_DIR }}" "bulletin-polkadot-runtime" "smoldot"
-
-      - name: Test store-chunked-data (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-store-chunked-data "${{ env.TEST_DIR }}"
-
-      - name: Test store-big-data (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-store-big-data "${{ env.TEST_DIR }}" "big32"
-
-      - name: Test authorize-preimage-and-store (Polkadot solochain)
-        working-directory: examples
-        run: just run-test-authorize-preimage-and-store "${{ env.TEST_DIR }}"
-
-      - name: Test chopsticks compatibility (Polkadot solochain)
+      - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://localhost:10000"
 
-      - name: Stop services (Polkadot solochain)
+      - name: Stop services
         if: always()
         working-directory: examples
-        run: just stop-services "${{ env.TEST_DIR }}"
+        run: just stop-services "$TEST_DIR"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: failed-zombienet-logs
+          name: failed-zombienet-logs-${{ matrix.runtime.name }}
           path: |
             ${{ env.TEST_DIR }}/*.log
+
+  integration-tests-complete:
+    name: Integration Tests
+    needs: [integration-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check integration test results
+        run: |
+          if [ "${{ needs.integration-tests.result }}" != "success" ]; then
+            echo "Integration tests failed or were cancelled"
+            exit 1
+          fi
