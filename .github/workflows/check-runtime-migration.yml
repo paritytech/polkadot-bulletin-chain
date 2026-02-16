@@ -189,13 +189,13 @@ jobs:
           echo "Setting features: ${FEATURES}"
           cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
 
-          RUNTIME_BLOB_NAME=$(echo $PACKAGE_NAME | sed 's/-/_/g').compact.compressed.wasm
-          RUNTIME_BLOB_PATH=./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME
+          RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
+          RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
           export RUST_LOG=remote-ext=debug,runtime=trace
 
           (set -x; try-runtime \
-            --runtime $RUNTIME_BLOB_PATH \
-            on-runtime-upgrade --checks=$CHECKS \
+            --runtime "$RUNTIME_BLOB_PATH" \
+            on-runtime-upgrade --checks="$CHECKS" \
             $EXTRA_FLAGS \
             snap --path snapshot.raw)
 
