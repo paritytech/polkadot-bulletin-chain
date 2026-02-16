@@ -232,4 +232,35 @@ pub mod v1 {
 		Pallet<T>,
 		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
 	>;
+
+	/// Run the v0→v1 `TransactionInfo` migration if the on-chain storage version
+	/// is still 0. This covers the `codeSubstitutes` recovery path where the fix
+	/// runtime is loaded without triggering `on_runtime_upgrade`.
+	///
+	/// Returns the weight consumed. On subsequent blocks (version already 1)
+	/// this is a single storage read.
+	pub fn maybe_migrate_v0_to_v1<T: Config>() -> Weight {
+		use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
+
+		let on_chain = Pallet::<T>::on_chain_storage_version();
+		if on_chain >= 1 {
+			return T::DbWeight::get().reads(1);
+		}
+
+		tracing::info!(
+			target: LOG_TARGET,
+			?on_chain,
+			"Running v0→v1 TransactionInfo migration from on_initialize",
+		);
+
+		let migration_weight = VersionUncheckedMigrateV0ToV1::<T>::on_runtime_upgrade();
+
+		StorageVersion::new(1).put::<Pallet<T>>();
+
+		// 1 read (version check) + migration weight + 1 write (version bump)
+		T::DbWeight::get()
+			.reads(1)
+			.saturating_add(migration_weight)
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 }
