@@ -170,6 +170,7 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [workspace]
 resolver = "2"
 members = [
+	"integration-tests/authorize-preimage-subxt",
 	"node",
 	"pallets/common",
 	"pallets/relayer-set",

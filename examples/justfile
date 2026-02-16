@@ -402,14 +402,17 @@ setup-services test_dir runtime: npm-install
     just papi-generate
 
     # Start IPFS
-    echo "🔧 Tearing down Docker services if they are running..."
-    just ipfs-shutdown "{{ test_dir }}"
-    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
-    just ipfs-start "{{ test_dir }}"
-    just ipfs-connect "{{ runtime }}"
-    just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
-
-    echo "✅ Services setup complete (Docker mode)"
+    if [ -n "$SKIP_IPFS" ]; then
+        echo "⏭️  Skipping IPFS setup (SKIP_IPFS set)"
+    else
+        echo "🔧 Tearing down Docker services if they are running..."
+        just ipfs-shutdown "{{ test_dir }}"
+        echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
+        just ipfs-start "{{ test_dir }}"
+        just ipfs-connect "{{ runtime }}"
+        just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+        echo "✅ Services setup complete (Docker mode)"
+    fi
 
 # Stop all Docker services
 teardown-services test_dir:
@@ -511,13 +514,19 @@ run-test-store-big-data test_dir image_size="big64" ws_url="ws://localhost:10000
 # Run authorize-preimage-and-store test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
+#   runtime - Runtime name for compatibility with CI invocation
+#   mode - Connection mode: "ws" (default) or "smoldot" (not supported by subxt)
 #   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
-#   seed - Account seed phrase or dev seed (default: //Alice)
-#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+run-test-authorize-preimage-and-store test_dir runtime="" mode="ws" ws_url="ws://localhost:10000":
     #!/usr/bin/env bash
     set -e
-    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+    if [ "{{ mode }}" != "ws" ]; then
+        echo "❌ Error: authorize-preimage-and-store requires ws mode for subxt"
+        exit 1
+    fi
+
+    (cd .. && cargo run -p authorize-preimage-subxt -- "{{ ws_url }}")
 
 # Run Chopsticks compatibility check (services must already be running or use a live endpoint)
 # Parameters:

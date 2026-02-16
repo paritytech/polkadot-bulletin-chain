@@ -122,14 +122,33 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 mod benchmarks {
 	use super::*;
 
+	fn authorize_for_store<T: Config>(
+		who: &T::AccountId,
+		transactions: u32,
+		bytes: u64,
+	) -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		TransactionStorage::<T>::authorize_account(
+			origin as T::RuntimeOrigin,
+			who.clone(),
+			transactions,
+			bytes,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		Ok(())
+	}
+
 	#[benchmark]
 	fn store(l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; l as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		let cid = calculate_cid(&data, None).unwrap().to_bytes();
+		let caller: T::AccountId = whitelisted_caller();
+		authorize_for_store::<T>(&caller, 1, l as u64)?;
 
 		#[extrinsic_call]
-		_(RawOrigin::None, data);
+		_(RawOrigin::Signed(caller), data);
 
 		assert!(!BlockTransactions::<T>::get().is_empty());
 		assert_last_event::<T>(Event::Stored { index: 0, content_hash, cid }.into());
@@ -140,11 +159,13 @@ mod benchmarks {
 	fn renew() -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
-		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
+		let caller: T::AccountId = whitelisted_caller();
+		authorize_for_store::<T>(&caller, 2, T::MaxTransactionSize::get() as u64)?;
+		TransactionStorage::<T>::store(RawOrigin::Signed(caller.clone()).into(), data)?;
 		run_to_block::<T>(1u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::None, BlockNumberFor::<T>::zero(), 0);
+		_(RawOrigin::Signed(caller), BlockNumberFor::<T>::zero(), 0);
 
 		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
 		Ok(())
@@ -153,9 +174,13 @@ mod benchmarks {
 	#[benchmark]
 	fn check_proof() -> Result<(), BenchmarkError> {
 		run_to_block::<T>(1u32.into());
+		let caller: T::AccountId = whitelisted_caller();
+		let tx_count = T::MaxBlockTransactions::get();
+		let max_size = T::MaxTransactionSize::get() as u64;
+		authorize_for_store::<T>(&caller, tx_count, max_size.saturating_mul(tx_count as u64))?;
 		for _ in 0..T::MaxBlockTransactions::get() {
 			TransactionStorage::<T>::store(
-				RawOrigin::None.into(),
+				RawOrigin::Signed(caller.clone()).into(),
 				vec![0u8; T::MaxTransactionSize::get() as usize],
 			)?;
 		}

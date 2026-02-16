@@ -177,6 +177,10 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
 
+      - name: Test authorize-preimage-and-store ws (Westend parachain)
+        working-directory: examples
+        run: just run-test-authorize-preimage-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
+        
       - name: Test authorize-and-store smoldot
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
