@@ -27,13 +27,14 @@
 //!
 //! # Runtime WASM blobs required
 //!
-//! Three pre-built runtime WASMs must be available (set via env vars or use defaults):
+//! Four pre-built runtime WASMs must be available (set via env vars or use defaults):
 //!
-//! | WASM | spec_version | TransactionInfo | Migration |
-//! |------|-------------|-----------------|-----------|
-//! | old_runtime | 1_000_000 | v0 (old struct) | None |
-//! | broken_runtime | 1_000_001 | v1 (new struct) | **None** |
-//! | fix_runtime | 1_000_002 | v1 (new struct) | v0→v1 |
+//! | WASM | TransactionInfo | Migration | Description |
+//! |------|-----------------|-----------|-------------|
+//! | old_runtime | v0 | None | Chain starts with this |
+//! | broken_runtime | v1 | **None** | Causes stall |
+//! | fix_runtime | v1 | v0→v1 in `on_initialize` | Recovers chain via `codeSubstitutes` |
+//! | next_runtime | v1 | None (un-wired) | Normal upgrade after recovery |
 //!
 //! # Test flow
 //!
@@ -46,6 +47,8 @@
 //! 7. Recovery: force_set_current_code on relay + code_substitutes + collator restart
 //! 8. Verify chain resumes block production
 //! 9. Store new data to verify chain is fully functional
+//! 10. Normal on-chain upgrade to next runtime (bumped spec_version, migration un-wired)
+//! 11. Store data to verify normal upgrades work post-recovery
 
 use crate::{test_log, utils::*};
 use std::time::Duration;
@@ -68,6 +71,7 @@ async fn parachain_migration_recovery_test() -> Result<(), anyhow::Error> {
 	let _old_wasm = get_wasm_path(OLD_RUNTIME_WASM_ENV, DEFAULT_OLD_RUNTIME_WASM);
 	let broken_wasm = get_wasm_path(BROKEN_RUNTIME_WASM_ENV, DEFAULT_BROKEN_RUNTIME_WASM);
 	let fix_wasm = get_wasm_path(FIX_RUNTIME_WASM_ENV, DEFAULT_FIX_RUNTIME_WASM);
+	let next_wasm = get_wasm_path(NEXT_RUNTIME_WASM_ENV, DEFAULT_NEXT_RUNTIME_WASM);
 
 	// --- Build and start network ---
 	test_log!(TEST, "Building parachain network configuration...");
@@ -223,12 +227,47 @@ async fn parachain_migration_recovery_test() -> Result<(), anyhow::Error> {
 
 	// --- Verify: store new data after recovery ---
 	test_log!(TEST, "Verifying chain by storing new data...");
-	let nonce = get_alice_nonce(collator).await?;
-	let (store_block_3, _) = authorize_and_store_data(collator, &data, nonce).await?;
+	let mut nonce = get_alice_nonce(collator).await?;
+	let (store_block_3, new_nonce) = authorize_and_store_data(collator, &data, nonce).await?;
+	nonce = new_nonce;
 	test_log!(
 		TEST,
 		"Data stored at block {} after recovery — chain is fully functional",
 		store_block_3
+	);
+
+	// --- Post-recovery: normal on-chain runtime upgrade ---
+	// Upgrade to next runtime (bumped spec_version, migration un-wired from Executive).
+	// This is a standard upgrade via authorize_upgrade + apply_authorized_upgrade
+	// on the parachain itself — proves the chain can do normal upgrades after recovery.
+	test_log!(TEST, "=== Upgrading to NEXT runtime (normal on-chain upgrade) ===");
+	do_parachain_runtime_upgrade(collator, &next_wasm, &mut nonce).await?;
+	test_log!(TEST, "Next runtime upgrade complete");
+
+	// After the parachain applies the upgrade, the relay chain must process the new
+	// validation code via its upgrade pipeline (validation_upgrade_delay). During this
+	// window the collator can't produce backed blocks (local code != relay code).
+	// Wait for the relay to catch up, then verify parachain blocks resume.
+	test_log!(TEST, "Waiting for relay chain to process the upgrade pipeline...");
+	tokio::time::sleep(Duration::from_secs(60)).await;
+
+	test_log!(TEST, "Waiting for parachain blocks after relay processes upgrade...");
+	let post_upgrade_height = collator
+		.reports(BEST_BLOCK_METRIC)
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to read best block metric: {}", e))?
+		as u64;
+	wait_for_block_height(collator, post_upgrade_height + 3, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	test_log!(TEST, "Blocks produced after next runtime upgrade");
+
+	test_log!(TEST, "Storing data with next runtime...");
+	let nonce = get_alice_nonce(collator).await?;
+	let (store_block_4, _) = authorize_and_store_data(collator, &data, nonce).await?;
+	test_log!(
+		TEST,
+		"Data stored at block {} with next runtime — normal upgrades work post-recovery",
+		store_block_4
 	);
 
 	// --- Cleanup ---

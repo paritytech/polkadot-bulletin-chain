@@ -32,6 +32,9 @@ pub const DEFAULT_BROKEN_RUNTIME_WASM: &str =
 pub const FIX_RUNTIME_WASM_ENV: &str = "FIX_RUNTIME_WASM_PATH";
 pub const DEFAULT_FIX_RUNTIME_WASM: &str =
 	"./zombienet-sdk-tests/runtimes/fix_runtime.compact.compressed.wasm";
+pub const NEXT_RUNTIME_WASM_ENV: &str = "NEXT_RUNTIME_WASM_PATH";
+pub const DEFAULT_NEXT_RUNTIME_WASM: &str =
+	"./zombienet-sdk-tests/runtimes/next_runtime.compact.compressed.wasm";
 
 // Timeouts (seconds)
 pub const NETWORK_READY_TIMEOUT_SECS: u64 = 180;

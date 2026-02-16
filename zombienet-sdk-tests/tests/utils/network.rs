@@ -123,6 +123,7 @@ pub fn verify_wasm_files() -> Result<()> {
 		(OLD_RUNTIME_WASM_ENV, DEFAULT_OLD_RUNTIME_WASM, "Old runtime"),
 		(BROKEN_RUNTIME_WASM_ENV, DEFAULT_BROKEN_RUNTIME_WASM, "Broken runtime"),
 		(FIX_RUNTIME_WASM_ENV, DEFAULT_FIX_RUNTIME_WASM, "Fix runtime"),
+		(NEXT_RUNTIME_WASM_ENV, DEFAULT_NEXT_RUNTIME_WASM, "Next runtime"),
 	] {
 		let path = get_wasm_path(env_var, default);
 		log::info!("{} WASM: {}", label, path);

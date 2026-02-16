@@ -8,7 +8,7 @@ Integration tests that simulate real parachain incidents using [zombienet-sdk](h
 
 Recreates the bulletin-westend incident where a runtime upgrade without the `TransactionInfo` v0→v1 migration caused `check_proof` to fail on old entries, stalling block production. Then recovers the chain using `force_set_current_code` on the relay chain + `codeSubstitutes` in the collator's chain spec + collator restart.
 
-**Flow:** start chain → store data (v0) → upgrade to broken runtime (no migration) → wait for stall → recover via relay + code substitutes → verify chain resumes.
+**Flow:** start chain → store data (v0) → upgrade to broken runtime (no migration) → wait for stall → recover via relay + code substitutes → verify chain resumes → normal on-chain upgrade to next runtime → verify normal upgrades work.
 
 ## Prerequisites
 
@@ -34,15 +34,16 @@ This builds the runtime WASM and runs `chain-spec-builder` to produce `./zombien
 
 ### Runtime WASMs
 
-Three pre-built `bulletin-westend-runtime` WASM blobs in `zombienet-sdk-tests/runtimes/`:
+Four pre-built `bulletin-westend-runtime` WASM blobs in `zombienet-sdk-tests/runtimes/`:
 
 | File | TransactionInfo | Migration | Description |
 |------|-----------------|-----------|-------------|
 | `old_runtime.compact.compressed.wasm` | v0 | None | Chain starts with this runtime |
 | `broken_runtime.compact.compressed.wasm` | v1 | **None** | Causes stall (can't decode v0 entries) |
 | `fix_runtime.compact.compressed.wasm` | v1 | v0→v1 in `on_initialize` | Recovers chain via `codeSubstitutes` |
+| `next_runtime.compact.compressed.wasm` | v1 | None (un-wired) | Normal upgrade after recovery |
 
-The broken and fix runtimes can share the same `spec_version` — recovery uses `codeSubstitutes` (client-side code replacement), not `on_runtime_upgrade`.
+The broken and fix runtimes can share the same `spec_version` — recovery uses `codeSubstitutes` (client-side code replacement), not `on_runtime_upgrade`. The next runtime must have a bumped `spec_version` for a standard on-chain upgrade.
 
 These are gitignored — build them from the appropriate commits.
 
@@ -66,6 +67,7 @@ All environment variables are optional if binaries are on `$PATH` and files are 
 | `OLD_RUNTIME_WASM_PATH` | `./zombienet-sdk-tests/runtimes/old_runtime.compact.compressed.wasm` | Old runtime |
 | `BROKEN_RUNTIME_WASM_PATH` | `./zombienet-sdk-tests/runtimes/broken_runtime.compact.compressed.wasm` | Broken runtime |
 | `FIX_RUNTIME_WASM_PATH` | `./zombienet-sdk-tests/runtimes/fix_runtime.compact.compressed.wasm` | Fix runtime |
+| `NEXT_RUNTIME_WASM_PATH` | `./zombienet-sdk-tests/runtimes/next_runtime.compact.compressed.wasm` | Next runtime (post-recovery upgrade) |
 | `RELAY_CHAIN` | `westend-local` | Relay chain name |
 | `PARACHAIN_ID` | `2487` | Parachain ID |
 | `PARACHAIN_CHAIN_ID` | `bulletin-westend` | Parachain chain ID |
