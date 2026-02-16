@@ -160,11 +160,7 @@ mod benchmarks {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		let caller: T::AccountId = whitelisted_caller();
-		authorize_for_store::<T>(
-			&caller,
-			2,
-			T::MaxTransactionSize::get() as u64,
-		)?;
+		authorize_for_store::<T>(&caller, 2, T::MaxTransactionSize::get() as u64)?;
 		TransactionStorage::<T>::store(RawOrigin::Signed(caller.clone()).into(), data)?;
 		run_to_block::<T>(1u32.into());
 
