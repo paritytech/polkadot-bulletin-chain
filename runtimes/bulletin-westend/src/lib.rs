@@ -144,7 +144,6 @@ pub mod migrations {
 			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-		pallet_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -185,7 +184,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_003,
+	spec_version: 1_000_004,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
