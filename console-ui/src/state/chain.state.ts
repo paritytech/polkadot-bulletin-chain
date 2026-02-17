@@ -71,7 +71,7 @@ export interface ChainState {
   ss58Format?: number;
 }
 
-const initialNetwork = NETWORKS.local;
+const initialNetwork = NETWORKS.paseo;
 
 const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
@@ -188,7 +188,6 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     const message = err instanceof Error ? err.message : "Unknown error";
     errorSubject.next(message);
     statusSubject.next("error");
-    throw err;
   }
 }
 

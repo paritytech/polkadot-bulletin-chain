@@ -109,7 +109,7 @@ export function Header() {
   // Auto-connect on mount
   useEffect(() => {
     if (status === "disconnected") {
-      connectToNetwork("local");
+      connectToNetwork("paseo");
     }
   }, []);
 
