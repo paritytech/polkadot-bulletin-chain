@@ -1258,7 +1258,7 @@ impl<T: Config> Pallet<T> {
 				cumulative_chunks = cumulative_chunks.saturating_add(expected_chunks);
 				ensure!(
 					tx.block_chunks == cumulative_chunks,
-					"block_chunks is not cumulative at transaction index"
+					"tx.block_chunks is not cumulative"
 				);
 			}
 
