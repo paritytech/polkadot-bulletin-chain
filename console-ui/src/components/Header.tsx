@@ -62,7 +62,7 @@ function NetworkSwitcher() {
 
   return (
     <Select value={network.id} onValueChange={handleNetworkChange}>
-      <SelectTrigger className="w-[260px]" disabled={status === "connecting"}>
+      <SelectTrigger className="w-[260px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

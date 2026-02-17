@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useChainState } from "@/state/chain.state";
+import { useChainState, StorageType } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { formatAddress, formatBlockNumber } from "@/utils/format";
 
@@ -147,7 +147,42 @@ function AccountCard() {
   );
 }
 
-function WelcomeCard() {
+function WelcomeCard({ storageType }: { storageType: StorageType }) {
+  if (storageType === "web3storage") {
+    return (
+      <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
+        <CardHeader>
+          <CardTitle className="text-2xl">Welcome to Web3 Storage Console</CardTitle>
+          <CardDescription className="text-base">
+            Decentralized storage powered by Web3 infrastructure
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid sm:grid-cols-3 gap-4 text-sm">
+            <div className="space-y-1">
+              <p className="font-medium">Web3 Native</p>
+              <p className="text-muted-foreground">
+                Built for the decentralized web
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="font-medium">Content Addressed</p>
+              <p className="text-muted-foreground">
+                Data identified and verified by content hashes
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="font-medium">Permissionless</p>
+              <p className="text-muted-foreground">
+                Open access to store and retrieve data
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
       <CardHeader>
@@ -183,22 +218,33 @@ function WelcomeCard() {
 }
 
 export function Dashboard() {
+  const { storageType } = useChainState();
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">
-          Overview of your Bulletin Chain activity
+          {storageType === "web3storage"
+            ? "Overview of your Web3 Storage activity"
+            : "Overview of your Bulletin Chain activity"}
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <WelcomeCard />
-        <AccountCard />
-        <ChainInfoCard />
-        <AuthorizationCard />
-        <QuickActions />
-      </div>
+      {storageType === "web3storage" ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          <WelcomeCard storageType={storageType} />
+          <ChainInfoCard />
+        </div>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <WelcomeCard storageType={storageType} />
+          <AccountCard />
+          <ChainInfoCard />
+          <AuthorizationCard />
+          <QuickActions />
+        </div>
+      )}
     </div>
   );
 }

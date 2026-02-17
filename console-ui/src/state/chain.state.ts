@@ -74,6 +74,12 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
         endpoints: ["ws://localhost:2222"],
         lightClient: false,
       },
+      westend: {
+        id: "westend",
+        name: "Web3 Westend (not released yet)",
+        endpoints: [],
+        lightClient: false,
+      },
     },
   },
 };
