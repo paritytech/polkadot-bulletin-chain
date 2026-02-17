@@ -8,7 +8,8 @@ import { bulletin_westend, bulletin_paseo, bulletin_dotspark } from "@polkadot-a
 
 export type NetworkId = "local" | "westend" | "polkadot" | "paseo" | "dotspark";
 
-const DESCRIPTORS: Partial<Record<NetworkId, typeof bulletin_westend>> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const DESCRIPTORS: Partial<Record<NetworkId, any>> = {
   local: bulletin_westend,
   westend: bulletin_westend,
   paseo: bulletin_paseo,
@@ -61,6 +62,7 @@ export interface ChainState {
   status: "disconnected" | "connecting" | "connected" | "error";
   error?: string;
   client?: PolkadotClient;
+  // Using bulletin_westend as the base type; all bulletin chains share the same core pallets
   api?: TypedApi<typeof bulletin_westend>;
   blockNumber?: number;
   chainName?: string;
@@ -138,7 +140,7 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     clientSubject.next(client);
 
     const descriptor = DESCRIPTORS[networkId] ?? bulletin_westend;
-    const api = client.getTypedApi(descriptor);
+    const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
     apiSubject.next(api);
 
     // Get chain info from runtime constants (async)
