@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 export default defineConfig({
+  base: process.env.GITHUB_PAGES ? "/polkadot-bulletin-chain/" : "/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
