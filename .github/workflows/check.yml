@@ -21,7 +21,6 @@ concurrency:
 # Repo env variable doesn't work for PRs from forks
 env:
   CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
-  POLKADOT_SDK_VERSION: "polkadot-stable2512-1"
   FRAME_OMNI_BENCHER_BIN_DIR: ${{ github.workspace }}/.frame-omni-bencher-bin
 
 jobs:
@@ -136,10 +135,6 @@ jobs:
           # Bench test is skipped intentionally (running too long and anyway, we are doing fresh weights)
           cargo test -p pallet-transaction-storage --features=runtime-benchmarks -- --skip bench_check_proof
 
-      - name: Run (Rococo) runtime tests
-        run: |
-          cargo test -p polkadot-bulletin-chain-runtime
-
       - name: Run (Polkadot) runtime tests
         run: |
           cargo test -p bulletin-polkadot-runtime
@@ -169,7 +164,10 @@ jobs:
         with:
           shared-key: "bulletin-cache-benchmarks"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
       - name: Create directory for binary and add to PATH
         run: |
           mkdir -p $FRAME_OMNI_BENCHER_BIN_DIR

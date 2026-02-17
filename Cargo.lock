@@ -1942,19 +1942,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bp-rococo"
-version = "0.6.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5#81a3af9830ea8b6ff64b066b73b04bb3b675add5"
-dependencies = [
- "bp-header-chain",
- "bp-polkadot-core",
- "bp-runtime",
- "frame-support",
- "sp-api",
- "sp-std",
-]
-
-[[package]]
 name = "bp-runtime"
 version = "0.7.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=81a3af9830ea8b6ff64b066b73b04bb3b675add5#81a3af9830ea8b6ff64b066b73b04bb3b675add5"
@@ -9746,7 +9733,6 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-transaction-storage",
- "polkadot-bulletin-chain-runtime",
  "polkadot-primitives",
  "sc-basic-authorship",
  "sc-chain-spec",
@@ -9789,79 +9775,6 @@ dependencies = [
  "substrate-build-script-utils",
  "substrate-frame-rpc-system",
  "tracing",
-]
-
-[[package]]
-name = "polkadot-bulletin-chain-runtime"
-version = "0.1.0-dev"
-dependencies = [
- "bp-bridge-hub-cumulus",
- "bp-bridge-hub-rococo",
- "bp-header-chain",
- "bp-messages",
- "bp-parachains",
- "bp-polkadot-bulletin",
- "bp-polkadot-core",
- "bp-rococo",
- "bp-runtime",
- "bp-test-utils",
- "bridge-runtime-common",
- "frame-benchmarking",
- "frame-executive",
- "frame-support",
- "frame-system",
- "frame-system-benchmarking",
- "frame-system-rpc-runtime-api",
- "frame-try-runtime",
- "hex",
- "log",
- "pallet-authorship",
- "pallet-babe",
- "pallet-bridge-grandpa",
- "pallet-bridge-messages",
- "pallet-bridge-parachains",
- "pallet-bridge-relayers",
- "pallet-grandpa",
- "pallet-offences",
- "pallet-relayer-set",
- "pallet-session",
- "pallet-staking",
- "pallet-sudo",
- "pallet-timestamp",
- "pallet-transaction-payment",
- "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
- "pallet-validator-set",
- "pallet-xcm",
- "pallet-xcm-bridge-hub",
- "pallets-common",
- "parachains-common",
- "parity-scale-codec",
- "scale-info",
- "serde_json",
- "sp-api",
- "sp-block-builder",
- "sp-consensus-babe",
- "sp-consensus-grandpa",
- "sp-core",
- "sp-genesis-builder",
- "sp-inherents",
- "sp-io",
- "sp-keyring",
- "sp-offchain",
- "sp-runtime",
- "sp-session",
- "sp-staking",
- "sp-storage",
- "sp-transaction-pool",
- "sp-transaction-storage-proof",
- "sp-trie",
- "sp-version",
- "staging-xcm",
- "staging-xcm-builder",
- "staging-xcm-executor",
- "static_assertions",
- "substrate-wasm-builder",
 ]
 
 [[package]]

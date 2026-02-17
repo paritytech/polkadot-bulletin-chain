@@ -262,7 +262,10 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
@@ -271,6 +274,16 @@ pub mod pallet {
 			// TODO: https://github.com/paritytech/polkadot-sdk/issues/10203 - Replace this with benchmarked weights.
 			let mut weight = Weight::zero();
 			let db_weight = T::DbWeight::get();
+
+			// Run v0→v1 migration if it hasn't been applied yet.
+			// This handles the case where `codeSubstitutes` loaded the fix runtime
+			// without triggering `on_runtime_upgrade` (spec_version unchanged).
+			// Safe alongside the regular `MigrateV0ToV1` wired in Executive: both
+			// check `on_chain_storage_version() < 1`, so whichever runs first bumps
+			// the version and the other becomes a no-op.
+			// TODO: Remove once all chains have been migrated past v1 — after that
+			// this is just a redundant storage read per block.
+			weight.saturating_accrue(migrations::v1::maybe_migrate_v0_to_v1::<T>());
 
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
@@ -289,21 +302,30 @@ pub mod pallet {
 		}
 
 		fn on_finalize(n: BlockNumberFor<T>) {
-			assert!(
-				<ProofChecked<T>>::take() || {
-					// Proof is not required for early or empty blocks.
-					let number = <frame_system::Pallet<T>>::block_number();
-					let period = Self::retention_period();
-					let target_number = number.saturating_sub(period);
+			let proof_ok = <ProofChecked<T>>::take() || {
+				// Proof is not required for early or empty blocks.
+				let number = <frame_system::Pallet<T>>::block_number();
+				let period = Self::retention_period();
+				let target_number = number.saturating_sub(period);
 
-					target_number.is_zero() || {
-						// An empty block means no transactions were stored, relying on the fact
-						// below that we store transactions only if they contain chunks.
-						!Transactions::<T>::contains_key(target_number)
-					}
-				},
-				"Storage proof must be checked once in the block"
-			);
+				target_number.is_zero() || {
+					// An empty block means no transactions were stored, relying on the fact
+					// below that we store transactions only if they contain chunks.
+					!Transactions::<T>::contains_key(target_number)
+				}
+			};
+
+			// During try-runtime testing, no inherents (including storage proofs) are
+			// submitted, so we log instead of panicking.
+			#[cfg(feature = "try-runtime")]
+			if !proof_ok {
+				tracing::warn!(
+					target: LOG_TARGET,
+					"Storage proof was not checked in this block (expected during try-runtime)"
+				);
+			}
+			#[cfg(not(feature = "try-runtime"))]
+			assert!(proof_ok, "Storage proof must be checked once in the block");
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
