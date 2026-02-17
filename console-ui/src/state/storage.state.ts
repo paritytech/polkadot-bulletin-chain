@@ -3,7 +3,7 @@ import { bind } from "@react-rxjs/core";
 import { api$ } from "./chain.state";
 import { selectedAccount$ } from "./wallet.state";
 import { SS58String, TypedApi, Enum } from "polkadot-api";
-import { bulletin } from "@polkadot-api/descriptors";
+import { bulletin_westend } from "@polkadot-api/descriptors";
 
 export interface Authorization {
   transactions: bigint;
@@ -29,7 +29,7 @@ const authorizationLoadingSubject = new BehaviorSubject<boolean>(false);
 const authorizationErrorSubject = new BehaviorSubject<string | undefined>(undefined);
 
 export async function fetchAccountAuthorization(
-  api: TypedApi<typeof bulletin>,
+  api: TypedApi<typeof bulletin_westend>,
   address: SS58String
 ): Promise<Authorization | null> {
   authorizationLoadingSubject.next(true);
@@ -68,7 +68,7 @@ const preimageAuthsSubject = new BehaviorSubject<PreimageAuthorization[]>([]);
 const preimageAuthsLoadingSubject = new BehaviorSubject<boolean>(false);
 
 export async function fetchPreimageAuthorizations(
-  api: TypedApi<typeof bulletin>
+  api: TypedApi<typeof bulletin_westend>
 ): Promise<PreimageAuthorization[]> {
   preimageAuthsLoadingSubject.next(true);
 
@@ -76,8 +76,8 @@ export async function fetchPreimageAuthorizations(
     const entries = await api.query.TransactionStorage.Authorizations.getEntries();
 
     const preimageAuths: PreimageAuthorization[] = entries
-      .filter(({ keyArgs }) => keyArgs[0].type === "Preimage")
-      .map(({ keyArgs, value }) => {
+      .filter(({ keyArgs }: any) => keyArgs[0].type === "Preimage")
+      .map(({ keyArgs, value }: any) => {
         // Extract content hash from the preimage key
         const preimageValue = keyArgs[0].value;
         let contentHash: Uint8Array;
@@ -108,7 +108,7 @@ export async function fetchPreimageAuthorizations(
 
 // Transaction info by block/index
 export async function fetchTransactionInfo(
-  api: TypedApi<typeof bulletin>,
+  api: TypedApi<typeof bulletin_westend>,
   blockNumber: number,
   index: number
 ): Promise<TransactionInfo | null> {

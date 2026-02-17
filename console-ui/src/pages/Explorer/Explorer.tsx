@@ -89,7 +89,7 @@ export function Explorer() {
       // Query storage events for this block
       const txInfos = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
 
-      const extrinsics: ExtrinsicInfo[] = (txInfos || []).map((_, index: number) => ({
+      const extrinsics: ExtrinsicInfo[] = (txInfos || []).map((_: any, index: number) => ({
         index,
         section: "TransactionStorage",
         method: "store",

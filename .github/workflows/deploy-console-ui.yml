@@ -33,6 +33,10 @@ jobs:
         working-directory: console-ui
         run: npm ci
 
+      - name: Generate papi descriptors
+        working-directory: console-ui
+        run: npx papi generate
+
       - name: Build
         working-directory: console-ui
         env:

@@ -14,8 +14,7 @@
 # Node.js
 **/node_modules/
 
-# Polkadot API generated files
-.papi/
+# Polkadot API generated files (descriptors dir is gitignored inside .papi)
 
 # Local test files
 kubo/

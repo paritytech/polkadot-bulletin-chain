@@ -4,9 +4,16 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, bulletin_dotspark } from "@polkadot-api/descriptors";
 
 export type NetworkId = "local" | "westend" | "polkadot" | "paseo" | "dotspark";
+
+const DESCRIPTORS: Partial<Record<NetworkId, typeof bulletin_westend>> = {
+  local: bulletin_westend,
+  westend: bulletin_westend,
+  paseo: bulletin_paseo,
+  dotspark: bulletin_dotspark,
+};
 
 export interface Network {
   id: NetworkId;
@@ -54,7 +61,7 @@ export interface ChainState {
   status: "disconnected" | "connecting" | "connected" | "error";
   error?: string;
   client?: PolkadotClient;
-  api?: TypedApi<typeof bulletin>;
+  api?: TypedApi<typeof bulletin_westend>;
   blockNumber?: number;
   chainName?: string;
   tokenSymbol?: string;
@@ -68,7 +75,7 @@ const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
 const errorSubject = new BehaviorSubject<string | undefined>(undefined);
 const clientSubject = new BehaviorSubject<PolkadotClient | undefined>(undefined);
-const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin> | undefined>(undefined);
+const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_westend> | undefined>(undefined);
 const blockNumberSubject = new BehaviorSubject<number | undefined>(undefined);
 const chainInfoSubject = new BehaviorSubject<{
   chainName?: string;
@@ -130,7 +137,8 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     const client = createClient(provider);
     clientSubject.next(client);
 
-    const api = client.getTypedApi(bulletin);
+    const descriptor = DESCRIPTORS[networkId] ?? bulletin_westend;
+    const api = client.getTypedApi(descriptor);
     apiSubject.next(api);
 
     // Get chain info from runtime constants (async)

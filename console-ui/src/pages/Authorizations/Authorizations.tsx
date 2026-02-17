@@ -261,7 +261,7 @@ function AccountAuthorizationsTab() {
         let resolved = false;
 
         const subscription = sudoTx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev) => {
+          next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
               resolved = true;
@@ -269,7 +269,7 @@ function AccountAuthorizationsTab() {
               resolve();
             }
           },
-          error: (err) => {
+          error: (err: any) => {
             if (!resolved) {
               resolved = true;
               reject(err);
@@ -554,7 +554,7 @@ function PreimageAuthorizationsTab() {
         let resolved = false;
 
         const subscription = sudoTx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev) => {
+          next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
               resolved = true;
@@ -562,7 +562,7 @@ function PreimageAuthorizationsTab() {
               resolve();
             }
           },
-          error: (err) => {
+          error: (err: any) => {
             if (!resolved) {
               resolved = true;
               reject(err);

@@ -20,7 +20,7 @@ import { useApi, useClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { formatBytes } from "@/utils/format";
-import { cidFromBytes, toHashingEnum } from "@/lib/cid";
+import { cidFromBytes } from "@/lib/cid";
 import { Binary } from "polkadot-api";
 
 type HashAlgorithm = "blake2b256" | "sha256" | "keccak256";
@@ -131,7 +131,7 @@ export function Upload() {
         let resolved = false;
 
         const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner, txOpts).subscribe({
-          next: (ev) => {
+          next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
               resolved = true;
@@ -142,7 +142,7 @@ export function Upload() {
               });
             }
           },
-          error: (err) => {
+          error: (err: any) => {
             if (!resolved) {
               resolved = true;
               reject(err);
