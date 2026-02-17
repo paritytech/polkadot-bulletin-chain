@@ -13,6 +13,7 @@
 
 # Node.js
 **/node_modules/
+tsconfig.tsbuildinfo
 
 # Polkadot API generated files (descriptors dir is gitignored inside .papi)
 
