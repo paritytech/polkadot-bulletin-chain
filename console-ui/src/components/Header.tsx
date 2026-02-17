@@ -54,7 +54,7 @@ function ConnectionStatus() {
 }
 
 function NetworkSwitcher() {
-  const { network, networks, status } = useChainState();
+  const { network, networks } = useChainState();
 
   const handleNetworkChange = (value: string) => {
     connectToNetwork(value as NetworkId);
