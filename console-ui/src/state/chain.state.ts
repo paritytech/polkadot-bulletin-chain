@@ -6,7 +6,7 @@ import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { bulletin } from "@polkadot-api/descriptors";
 
-export type NetworkId = "local" | "westend" | "polkadot";
+export type NetworkId = "local" | "westend" | "polkadot" | "paseo" | "dotspark";
 
 export interface Network {
   id: NetworkId;
@@ -29,10 +29,22 @@ export const NETWORKS: Record<NetworkId, Network> = {
     endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
     lightClient: false,
   },
+  paseo: {
+    id: "paseo",
+    name: "Bulletin Paseo",
+    endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
+    lightClient: false,
+  },
+  dotspark: {
+    id: "dotspark",
+    name: "Bulletin (Prototypes dotspark)",
+    endpoints: ["wss://bulletin.dotspark.app"],
+    lightClient: false,
+  },
   polkadot: {
     id: "polkadot",
-    name: "Bulletin Polkadot",
-    endpoints: ["wss://bulletin-rpc.polkadot.io"],
+    name: "Bulletin Polkadot (not released yet)",
+    endpoints: [],
     lightClient: false,
   },
 };
@@ -87,6 +99,9 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
   const network = NETWORKS[networkId];
   if (!network) {
     throw new Error(`Unknown network: ${networkId}`);
+  }
+  if (network.endpoints.length === 0) {
+    throw new Error(`Network ${network.name} has no endpoints available`);
   }
 
   // Disconnect existing client

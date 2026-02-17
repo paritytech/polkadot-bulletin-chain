@@ -68,7 +68,7 @@ function NetworkSwitcher() {
       </SelectTrigger>
       <SelectContent>
         {Object.values(NETWORKS).map((net) => (
-          <SelectItem key={net.id} value={net.id}>
+          <SelectItem key={net.id} value={net.id} disabled={net.endpoints.length === 0}>
             {net.name}
           </SelectItem>
         ))}
