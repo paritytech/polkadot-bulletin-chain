@@ -42,9 +42,6 @@ function ConnectionStatus() {
   return (
     <div className="flex items-center gap-2 text-sm">
       <div className={cn("w-2 h-2 rounded-full", statusColors[status])} />
-      <span className="hidden sm:inline text-muted-foreground">
-        {network.name}
-      </span>
       {status === "connected" && blockNumber !== undefined && (
         <Badge variant="secondary" className="font-mono text-xs">
           {formatBlockNumber(blockNumber)}
@@ -63,7 +60,7 @@ function NetworkSwitcher() {
 
   return (
     <Select value={network.id} onValueChange={handleNetworkChange}>
-      <SelectTrigger className="w-[140px]" disabled={status === "connecting"}>
+      <SelectTrigger className="w-[260px]" disabled={status === "connecting"}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
