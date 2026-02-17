@@ -45,6 +45,7 @@ type Error = super::Error<Test>;
 
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
+type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -776,5 +777,162 @@ fn migration_v1_empty_storage() {
 		// Version updated, no entries created
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 		assert_eq!(Transactions::iter().count(), 0);
+	});
+}
+
+#[test]
+fn try_state_passes_on_empty_storage() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_passes_after_store_and_finalize() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![1u8; 500]));
+		run_to_block(2, || None);
+		// After finalization, ephemeral storage is cleared and transactions are persisted
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_passes_through_retention_lifecycle() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+		// Run past retention period; block 1 transactions get cleaned up at block 12
+		run_to_block(12, proof_provider);
+		assert!(Transactions::get(1).is_none());
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_passes_with_active_authorizations() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 10000));
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+
+		// Partially consume authorization
+		let call = Call::store { data: vec![0; 1000] };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_detects_bad_block_chunks() {
+	new_test_ext().execute_with(|| {
+		run_to_block(2, || None);
+
+		// Insert a corrupted TransactionInfo with wrong block_chunks using raw storage.
+		// TransactionInfo SCALE layout: chunk_root([u8;32]), content_hash([u8;32]),
+		// hashing(u8 enum), cid_codec(u64), size(u32), block_chunks(u32)
+		let corrupted_tx = (
+			[0u8; 32], // chunk_root
+			[0u8; 32], // content_hash
+			0u8,       // hashing (Blake2b256)
+			0x55u64,   // cid_codec (raw)
+			2000u32,   // size (valid)
+			999u32,    // block_chunks (CORRUPTED - should be num_chunks(2000))
+		);
+		let key = Transactions::hashed_key_for(1u64);
+		unhashed::put_raw(&key, &vec![corrupted_tx].encode());
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"block_chunks is not cumulative at transaction index"
+		);
+	});
+}
+
+#[test]
+fn try_state_detects_zero_size_transaction() {
+	new_test_ext().execute_with(|| {
+		run_to_block(2, || None);
+
+		// Insert a corrupted TransactionInfo with zero size using raw storage.
+		let corrupted_tx = (
+			[0u8; 32], // chunk_root
+			[0u8; 32], // content_hash
+			0u8,       // hashing (Blake2b256)
+			0x55u64,   // cid_codec (raw)
+			0u32,      // size (CORRUPTED - zero)
+			0u32,      // block_chunks
+		);
+		let key = Transactions::hashed_key_for(1u64);
+		unhashed::put_raw(&key, &vec![corrupted_tx].encode());
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"Transaction size out of valid range"
+		);
+	});
+}
+
+#[test]
+fn try_state_detects_zero_authorization_transactions() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Insert a corrupted authorization with zero transactions using raw storage.
+		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
+		// AuthorizationExtent SCALE layout: transactions(u32), bytes(u64)
+		let corrupted_auth = (0u32, 100u64, 100u64); // transactions=0, bytes=100, expiration=100
+		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
+		unhashed::put_raw(&key, &corrupted_auth.encode());
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"Stored authorization has zero transactions remaining"
+		);
+	});
+}
+
+#[test]
+fn try_state_detects_zero_authorization_bytes() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Insert a corrupted authorization with zero bytes using raw storage.
+		let corrupted_auth = (5u32, 0u64, 100u64); // transactions=5, bytes=0, expiration=100
+		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
+		unhashed::put_raw(&key, &corrupted_auth.encode());
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"Stored authorization has zero bytes remaining"
+		);
+	});
+}
+
+#[test]
+fn try_state_detects_zero_retention_period() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Set RetentionPeriod to zero
+		RetentionPeriod::put(0u64);
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"RetentionPeriod must not be zero"
+		);
 	});
 }
