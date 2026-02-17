@@ -275,6 +275,16 @@ pub mod pallet {
 			let mut weight = Weight::zero();
 			let db_weight = T::DbWeight::get();
 
+			// Run v0→v1 migration if it hasn't been applied yet.
+			// This handles the case where `codeSubstitutes` loaded the fix runtime
+			// without triggering `on_runtime_upgrade` (spec_version unchanged).
+			// Safe alongside the regular `MigrateV0ToV1` wired in Executive: both
+			// check `on_chain_storage_version() < 1`, so whichever runs first bumps
+			// the version and the other becomes a no-op.
+			// TODO: Remove once all chains have been migrated past v1 — after that
+			// this is just a redundant storage read per block.
+			weight.saturating_accrue(migrations::v1::maybe_migrate_v0_to_v1::<T>());
+
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
 			weight.saturating_accrue(db_weight.reads(1));
@@ -305,18 +315,17 @@ pub mod pallet {
 				}
 			};
 
+			// During try-runtime testing, no inherents (including storage proofs) are
+			// submitted, so we log instead of panicking.
+			#[cfg(feature = "try-runtime")]
 			if !proof_ok {
-				// try-runtime simulates empty blocks without inherents after migration,
-				// so this check legitimately fails. Warn instead of panicking.
-				if cfg!(feature = "try-runtime") {
-					tracing::warn!(
-						target: LOG_TARGET,
-						"Storage proof was not checked — expected in try-runtime block simulation",
-					);
-				} else {
-					panic!("Storage proof must be checked once in the block");
-				}
+				tracing::warn!(
+					target: LOG_TARGET,
+					"Storage proof was not checked in this block (expected during try-runtime)"
+				);
 			}
+			#[cfg(not(feature = "try-runtime"))]
+			assert!(proof_ok, "Storage proof must be checked once in the block");
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();

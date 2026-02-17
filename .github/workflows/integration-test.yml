@@ -193,6 +193,10 @@ jobs:
         working-directory: examples
         run: just run-test-store-chunked-data "$TEST_DIR"
 
+      - name: Test native-ipfs-dag-pb-chunked-data
+        working-directory: examples
+        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
+
       - name: Test store-big-data
         working-directory: examples
         run: just run-test-store-big-data "$TEST_DIR" "big32"
