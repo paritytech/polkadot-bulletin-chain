@@ -12,8 +12,10 @@ import { Badge } from "@/components/ui/Badge";
 import {
   useChainState,
   connectToNetwork,
-  NETWORKS,
+  switchStorageType,
+  STORAGE_CONFIGS,
   type NetworkId,
+  type StorageType,
 } from "@/state/chain.state";
 import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
 import { formatAddress, formatBlockNumber } from "@/utils/format";
@@ -30,7 +32,7 @@ const navItems = [
 ];
 
 function ConnectionStatus() {
-  const { status, blockNumber, network } = useChainState();
+  const { status, blockNumber } = useChainState();
 
   const statusColors = {
     disconnected: "bg-gray-500",
@@ -52,7 +54,7 @@ function ConnectionStatus() {
 }
 
 function NetworkSwitcher() {
-  const { network, status } = useChainState();
+  const { network, networks, status } = useChainState();
 
   const handleNetworkChange = (value: string) => {
     connectToNetwork(value as NetworkId);
@@ -64,7 +66,7 @@ function NetworkSwitcher() {
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {Object.values(NETWORKS).map((net) => (
+        {Object.values(networks).map((net) => (
           <SelectItem key={net.id} value={net.id} disabled={net.endpoints.length === 0}>
             {net.name}
           </SelectItem>
@@ -101,7 +103,7 @@ function AccountDisplay() {
 export function Header() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { status } = useChainState();
+  const { status, storageType } = useChainState();
 
   // Auto-connect on mount
   useEffect(() => {
@@ -114,13 +116,27 @@ export function Header() {
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto max-w-7xl px-4">
         <div className="flex h-14 items-center justify-between">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-white font-bold text-lg">B</span>
-            </div>
-            <span className="font-semibold hidden sm:inline">Bulletin Console</span>
-          </Link>
+          {/* Logo & Storage Type */}
+          <div className="flex items-center gap-3">
+            <Link to="/" className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+                <span className="text-white font-bold text-lg">S</span>
+              </div>
+              <span className="font-semibold hidden sm:inline">Storage Console</span>
+            </Link>
+            <Select value={storageType} onValueChange={(v) => switchStorageType(v as StorageType)}>
+              <SelectTrigger className="w-[140px] hidden sm:flex">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.values(STORAGE_CONFIGS).map((config) => (
+                  <SelectItem key={config.id} value={config.id}>
+                    {config.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">

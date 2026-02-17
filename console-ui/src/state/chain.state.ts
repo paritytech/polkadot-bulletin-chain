@@ -6,15 +6,9 @@ import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { bulletin_westend, bulletin_paseo, bulletin_dotspark } from "@polkadot-api/descriptors";
 
-export type NetworkId = "local" | "westend" | "polkadot" | "paseo" | "dotspark";
+export type StorageType = "bulletin" | "web3storage";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const DESCRIPTORS: Partial<Record<NetworkId, any>> = {
-  local: bulletin_westend,
-  westend: bulletin_westend,
-  paseo: bulletin_paseo,
-  dotspark: bulletin_dotspark,
-};
+export type NetworkId = string;
 
 export interface Network {
   id: NetworkId;
@@ -24,41 +18,78 @@ export interface Network {
   chainSpec?: string;
 }
 
-export const NETWORKS: Record<NetworkId, Network> = {
-  local: {
-    id: "local",
-    name: "Local Dev",
-    endpoints: ["ws://localhost:10000"],
-    lightClient: false,
+export interface StorageConfig {
+  id: StorageType;
+  name: string;
+  networks: Record<string, Network>;
+  defaultNetwork: string;
+}
+
+export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
+  bulletin: {
+    id: "bulletin",
+    name: "Bulletin",
+    defaultNetwork: "paseo",
+    networks: {
+      local: {
+        id: "local",
+        name: "Local Dev",
+        endpoints: ["ws://localhost:10000"],
+        lightClient: false,
+      },
+      westend: {
+        id: "westend",
+        name: "Bulletin Westend",
+        endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
+        lightClient: false,
+      },
+      paseo: {
+        id: "paseo",
+        name: "Bulletin Paseo",
+        endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
+        lightClient: false,
+      },
+      dotspark: {
+        id: "dotspark",
+        name: "Bulletin (Prototypes dotspark)",
+        endpoints: ["wss://bulletin.dotspark.app"],
+        lightClient: false,
+      },
+      polkadot: {
+        id: "polkadot",
+        name: "Bulletin Polkadot (not released yet)",
+        endpoints: [],
+        lightClient: false,
+      },
+    },
   },
-  westend: {
-    id: "westend",
-    name: "Bulletin Westend",
-    endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
-    lightClient: false,
-  },
-  paseo: {
-    id: "paseo",
-    name: "Bulletin Paseo",
-    endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
-    lightClient: false,
-  },
-  dotspark: {
-    id: "dotspark",
-    name: "Bulletin (Prototypes dotspark)",
-    endpoints: ["wss://bulletin.dotspark.app"],
-    lightClient: false,
-  },
-  polkadot: {
-    id: "polkadot",
-    name: "Bulletin Polkadot (not released yet)",
-    endpoints: [],
-    lightClient: false,
+  web3storage: {
+    id: "web3storage",
+    name: "Web3 Storage",
+    defaultNetwork: "local",
+    networks: {
+      local: {
+        id: "local",
+        name: "Local Dev",
+        endpoints: ["ws://localhost:2222"],
+        lightClient: false,
+      },
+    },
   },
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const DESCRIPTORS: Record<string, any> = {
+  local: bulletin_westend,
+  westend: bulletin_westend,
+  paseo: bulletin_paseo,
+  dotspark: bulletin_dotspark,
+};
+
 export interface ChainState {
+  storageType: StorageType;
   network: Network;
+  networks: Record<string, Network>;
   status: "disconnected" | "connecting" | "connected" | "error";
   error?: string;
   client?: PolkadotClient;
@@ -71,8 +102,12 @@ export interface ChainState {
   ss58Format?: number;
 }
 
-const initialNetwork = NETWORKS.paseo;
+const initialStorageType: StorageType = "bulletin";
+const initialConfig = STORAGE_CONFIGS[initialStorageType];
+const initialNetwork = initialConfig.networks[initialConfig.defaultNetwork]!;
 
+const storageTypeSubject = new BehaviorSubject<StorageType>(initialStorageType);
+const networksSubject = new BehaviorSubject<Record<string, Network>>(initialConfig.networks);
 const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
 const errorSubject = new BehaviorSubject<string | undefined>(undefined);
@@ -104,8 +139,16 @@ async function createSmoldotProvider(network: Network) {
   return getSmProvider(chain);
 }
 
+export function switchStorageType(type: StorageType): void {
+  const config = STORAGE_CONFIGS[type];
+  storageTypeSubject.next(type);
+  networksSubject.next(config.networks);
+  connectToNetwork(config.defaultNetwork);
+}
+
 export async function connectToNetwork(networkId: NetworkId): Promise<void> {
-  const network = NETWORKS[networkId];
+  const networks = networksSubject.getValue();
+  const network = networks[networkId];
   if (!network) {
     throw new Error(`Unknown network: ${networkId}`);
   }
@@ -206,6 +249,8 @@ export function disconnect(): void {
 
 // Combined chain state observable
 const chainState$ = combineLatest([
+  storageTypeSubject,
+  networksSubject,
   networkSubject,
   statusSubject,
   errorSubject,
@@ -214,7 +259,9 @@ const chainState$ = combineLatest([
   blockNumberSubject,
   chainInfoSubject,
 ]).pipe(
-  map(([network, status, error, client, api, blockNumber, chainInfo]) => ({
+  map(([storageType, networks, network, status, error, client, api, blockNumber, chainInfo]) => ({
+    storageType,
+    networks,
     network,
     status,
     error,
@@ -228,6 +275,8 @@ const chainState$ = combineLatest([
 
 // React hooks
 export const [useChainState] = bind(chainState$, {
+  storageType: initialStorageType,
+  networks: initialConfig.networks,
   network: initialNetwork,
   status: "disconnected" as const,
   error: undefined,
