@@ -23,7 +23,7 @@
     "web3_storage": {
       "wsUrl": "ws://localhost:2222",
       "metadata": ".papi/metadata/web3_storage.scale",
-      "genesis": "0x49e1084e4f146f28c05c60295168e00da124cc84d6ea972a41f860adf3116974",
+      "genesis": "0x4545454545454545454545454545454545454545454545454545454545454545",
       "codeHash": "0x289091ecfc0d1c0b66b62e22d54788fbcd0314f037c3ed7aebae4c330d21e879"
     }
   }

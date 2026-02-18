@@ -1,5 +1,5 @@
 import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/web";
+import { getWsProvider } from "@polkadot-api/ws-provider";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
@@ -98,6 +98,47 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
   },
 };
 
+// No-op WebSocket that never connects. Used to silence the PAPI provider's
+// internal reconnection loop after we switch away from a network.
+// Without this, getSyncProvider keeps retrying with real WebSocket connections
+// because client.destroy() doesn't fully stop pending reconnection attempts.
+class NullWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  readyState = 3;
+  constructor(_url: string | URL, _protocols?: string | string[]) {}
+  addEventListener() {}
+  removeEventListener() {}
+  close() {}
+  send() {}
+  dispatchEvent() { return false; }
+}
+
+// Track the current provider's kill switch so we can silence its reconnection loop
+let killCurrentProvider: (() => void) | null = null;
+
+function createKillableWsProvider(endpoint: string) {
+  let killed = false;
+
+  // Proxy intercepts `new WebsocketClass(...)` and returns a NullWebSocket
+  // once killed, preventing any real network connections from retry loops
+  const wsClass = new Proxy(WebSocket, {
+    construct(target, args: [string, string?]) {
+      if (killed) return new NullWebSocket(args[0], args[1]) as unknown as WebSocket;
+      return new target(args[0], args[1]);
+    },
+  });
+
+  const provider = getWsProvider(endpoint, {
+    websocketClass: wsClass as typeof WebSocket,
+  });
+
+  const kill = () => { killed = true; };
+  return { provider, kill };
+}
+
 export interface ChainState {
   storageType: StorageType;
   network: Network;
@@ -170,7 +211,11 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     throw new Error(`Network ${network.name} has no endpoints available`);
   }
 
-  // Disconnect existing client
+  // Kill previous provider's reconnection loop and destroy client
+  if (killCurrentProvider) {
+    killCurrentProvider();
+    killCurrentProvider = null;
+  }
   const existingClient = clientSubject.getValue();
   if (existingClient) {
     existingClient.destroy();
@@ -190,7 +235,9 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     if (network.lightClient && network.chainSpec) {
       provider = await createSmoldotProvider(network);
     } else {
-      provider = getWsProvider(network.endpoints[0]!);
+      const killable = createKillableWsProvider(network.endpoints[0]!);
+      provider = killable.provider;
+      killCurrentProvider = killable.kill;
     }
 
     const client = createClient(provider);
@@ -250,6 +297,10 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
 }
 
 export function disconnect(): void {
+  if (killCurrentProvider) {
+    killCurrentProvider();
+    killCurrentProvider = null;
+  }
   const client = clientSubject.getValue();
   if (client) {
     client.destroy();

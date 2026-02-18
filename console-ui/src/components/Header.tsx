@@ -24,10 +24,10 @@ import { useState, useEffect } from "react";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: Database, web3storage: true },
+  { path: "/authorizations", label: "Faucet", icon: Shield, web3storage: false },
   { path: "/explorer", label: "Explorer", icon: Search, web3storage: true },
   { path: "/upload", label: "Upload", icon: Upload, web3storage: false },
   { path: "/download", label: "Download", icon: Download, web3storage: false },
-  { path: "/authorizations", label: "Faucet", icon: Shield, web3storage: false },
   { separator: true },
 ] as const;
 

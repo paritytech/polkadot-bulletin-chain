@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { RefreshCw, User, UserPlus, FileText, AlertCircle, Search, Plus, Shield, Droplet } from "lucide-react";
+import { RefreshCw, User, FileText, AlertCircle, Search, Plus, Shield, Droplet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -804,7 +804,7 @@ function FaucetAuthorizePreimagePanel() {
           Authorize Preimage
         </CardTitle>
         <CardDescription>
-          Authorize a content hash for storage. Compute blake2 hash from text or file, or enter it directly. Signed automatically with //Alice.
+          Authorize a content hash for storage. Compute blake2 hash from text or file, or enter it directly.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -940,15 +940,11 @@ function StorageFaucetTab() {
     bytes: bigint;
     expiresAt?: number;
   } | null>(null);
-  const [bobAddress, setBobAddress] = useState<string>("");
   const [aliceBalance, setAliceBalance] = useState<bigint | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-  const [isBobAuthorizing, setIsBobAuthorizing] = useState(false);
-  const [bobError, setBobError] = useState<string | null>(null);
-  const [bobSuccess, setBobSuccess] = useState<string | null>(null);
 
   // Initialize Alice and Bob accounts
   useEffect(() => {
@@ -959,8 +955,6 @@ function StorageFaucetTab() {
         await cryptoWaitReady();
         const keyring = new Keyring({ type: "sr25519" });
         const alice = keyring.addFromUri("//Alice");
-        const bob = keyring.addFromUri("//Bob");
-        setBobAddress(bob.address);
 
         const accountInfo = await api.query.System.Account.getValue(alice.address as SS58String);
         setAliceBalance(accountInfo?.data?.free ?? null);
@@ -1114,80 +1108,6 @@ function StorageFaucetTab() {
     }
   };
 
-  const handleAuthorizeBob = async () => {
-    if (!api || !bobAddress) return;
-
-    setIsBobAuthorizing(true);
-    setBobError(null);
-    setBobSuccess(null);
-
-    try {
-      await cryptoWaitReady();
-      const keyring = new Keyring({ type: "sr25519" });
-      const alice = keyring.addFromUri("//Alice");
-      const aliceSigner = getPolkadotSigner(
-        alice.publicKey,
-        "Sr25519",
-        (data: Uint8Array) => alice.sign(data)
-      );
-
-      const tx = api.tx.TransactionStorage.authorize_account({
-        who: bobAddress as SS58String,
-        transactions: 100,
-        bytes: 10n * 1024n * 1024n,
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
-
-      setBobSuccess(`Successfully authorized Bob (${formatAddress(bobAddress, 8)}): 100 transactions, 10 MB`);
-    } catch (err) {
-      console.error("Bob authorization failed:", err);
-
-      let errorMessage = "Authorization failed";
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === "object" && err !== null) {
-        const errObj = err as any;
-        if (errObj.type === "Invalid" && errObj.value?.type === "Payment") {
-          errorMessage = "Payment error: Alice account has insufficient balance.";
-        } else {
-          errorMessage = JSON.stringify(err);
-        }
-      }
-
-      setBobError(errorMessage);
-    } finally {
-      setIsBobAuthorizing(false);
-    }
-  };
-
   const hasBalanceIssue = aliceBalance !== null && aliceBalance === 0n;
   const canSubmit =
     forWho.length > 0 &&
@@ -1232,60 +1152,12 @@ function StorageFaucetTab() {
         </CardContent>
       </Card>
 
-      {/* Quick Authorize Bob */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UserPlus className="h-5 w-5" />
-            Authorize Bob
-          </CardTitle>
-          <CardDescription>
-            One-click authorization for the Bob dev account (//Bob). Grants 100 transactions and 10 MB. Signed automatically with //Alice.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {bobSuccess && (
-            <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400">
-              {bobSuccess}
-            </div>
-          )}
-          {bobError && (
-            <div className="p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
-              {bobError}
-            </div>
-          )}
-          {bobAddress && (
-            <div className="text-sm">
-              <span className="text-muted-foreground">Bob address: </span>
-              <span className="font-mono">{bobAddress}</span>
-            </div>
-          )}
-          <Button
-            onClick={handleAuthorizeBob}
-            disabled={!api || !bobAddress || isBobAuthorizing || hasBalanceIssue}
-            className="w-full"
-          >
-            {isBobAuthorizing ? (
-              <>
-                <Spinner size="sm" className="mr-2" />
-                Authorizing Bob...
-              </>
-            ) : (
-              <>
-                <UserPlus className="h-4 w-4 mr-2" />
-                Authorize Bob (100 txs, 10 MB)
-              </>
-            )}
-          </Button>
-        </CardContent>
-      </Card>
-
       {/* Authorization Form */}
       <Card>
         <CardHeader>
           <CardTitle>Authorize Account</CardTitle>
           <CardDescription>
-            Grant storage authorization to any account. Signed automatically with //Alice.
+            Grant storage authorization to any account.
           </CardDescription>
         </CardHeader>
         <CardContent>
