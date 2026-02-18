@@ -886,3 +886,15 @@ fn try_state_detects_zero_retention_period() {
 		);
 	});
 }
+
+#[test]
+fn try_state_passes_with_preimage_authorization() {
+    new_test_ext().execute_with(|| {
+        run_to_block(1, || None);
+        let hash = sp_io::hashing::blake2_256(&[1u8; 32]);
+        assert_ok!(TransactionStorage::authorize_preimage(
+            RuntimeOrigin::root(), hash, 5000
+        ));
+        assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+    });
+}

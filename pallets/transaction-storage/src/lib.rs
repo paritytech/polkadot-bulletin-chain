@@ -1235,12 +1235,9 @@ impl<T: Config> Pallet<T> {
 	/// - The `block_chunks` field is cumulative: each entry equals the previous
 	///   cumulative total plus `num_chunks(size)`.
 	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
-
 		for (_block, transactions) in Transactions::<T>::iter() {
-
 			let mut cumulative_chunks: ChunkIndex = 0;
 			for tx in transactions.iter() {
-
 				let expected_chunks = num_chunks(tx.size);
 				cumulative_chunks = cumulative_chunks.saturating_add(expected_chunks);
 				ensure!(
