@@ -9,7 +9,7 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { formatBytes, formatNumber } from "@/utils/format";
 import { SS58String } from "polkadot-api";
 
-export function AuthorizationCard() {
+export function AuthorizationCard({ className }: { className?: string }) {
   const authorization = useAuthorization();
   const isLoading = useAuthorizationLoading();
   const error = useAuthorizationError();
@@ -24,11 +24,11 @@ export function AuthorizationCard() {
 
   if (!selectedAccount) {
     return (
-      <Card>
+      <Card className={className}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
-            Authorization Status
+            Account's Storage
           </CardTitle>
           <CardDescription>Connect a wallet to view authorization</CardDescription>
         </CardHeader>
@@ -42,13 +42,13 @@ export function AuthorizationCard() {
   }
 
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5" />
-              Authorization Status
+              Account's Storage
             </CardTitle>
             <CardDescription>Your storage quota and permissions</CardDescription>
           </div>
