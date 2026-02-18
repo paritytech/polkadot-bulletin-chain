@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
-import { useApi, useBlockNumber } from "@/state/chain.state";
+import { useApi, useBlockNumber, useChainState } from "@/state/chain.state";
 import { formatBlockNumber } from "@/utils/format";
 
 interface BlockInfo {
@@ -26,6 +26,7 @@ interface ExtrinsicInfo {
 export function Explorer() {
   const api = useApi();
   const currentBlockNumber = useBlockNumber();
+  const { storageType } = useChainState();
 
   const [selectedBlockNumber, setSelectedBlockNumber] = useState<number | null>(null);
   const [blockSearchInput, setBlockSearchInput] = useState("");
@@ -105,6 +106,15 @@ export function Explorer() {
     }
   }, [api]);
 
+  // Reset state when the network changes
+  useEffect(() => {
+    setRecentBlocks([]);
+    setSelectedBlock(null);
+    setSelectedBlockNumber(null);
+    setBlockExtrinsics([]);
+    setBlockSearchInput("");
+  }, [storageType]);
+
   // Initial load
   useEffect(() => {
     if (currentBlockNumber !== undefined && recentBlocks.length === 0) {
@@ -134,9 +144,13 @@ export function Explorer() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Block Explorer</h1>
+        <h1 className="text-3xl font-bold tracking-tight">
+          {storageType === "web3storage" ? "Web3 Storage Explorer" : "Block Explorer"}
+        </h1>
         <p className="text-muted-foreground">
-          Browse blocks and storage transactions on the Bulletin Chain
+          {storageType === "web3storage"
+            ? "Browse blocks and storage transactions on Web3 Storage"
+            : "Browse blocks and storage transactions on the Bulletin Chain"}
         </p>
       </div>
 
