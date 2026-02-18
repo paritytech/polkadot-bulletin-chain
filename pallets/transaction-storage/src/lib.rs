@@ -1240,10 +1240,6 @@ impl<T: Config> Pallet<T> {
 	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
 
 		for (_block, transactions) in Transactions::<T>::iter() {
-			ensure!(
-				transactions.len() <= max_txs,
-				"Transaction count exceeds MaxBlockTransactions"
-			);
 
 			let mut cumulative_chunks: ChunkIndex = 0;
 			for tx in transactions.iter() {
