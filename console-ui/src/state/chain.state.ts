@@ -103,6 +103,7 @@ export interface ChainState {
   api?: TypedApi<typeof bulletin_westend>;
   blockNumber?: number;
   chainName?: string;
+  specVersion?: number;
   tokenSymbol?: string;
   tokenDecimals?: number;
   ss58Format?: number;
@@ -122,6 +123,7 @@ const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_westend> | undef
 const blockNumberSubject = new BehaviorSubject<number | undefined>(undefined);
 const chainInfoSubject = new BehaviorSubject<{
   chainName?: string;
+  specVersion?: number;
   tokenSymbol?: string;
   tokenDecimals?: number;
   ss58Format?: number;
@@ -199,6 +201,7 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
 
       chainInfoSubject.next({
         chainName: version.spec_name,
+        specVersion: version.spec_version,
         tokenSymbol: "DOT",
         tokenDecimals: 10,
         ss58Format,
@@ -290,6 +293,7 @@ export const [useChainState] = bind(chainState$, {
   api: undefined,
   blockNumber: undefined,
   chainName: undefined,
+  specVersion: undefined,
   tokenSymbol: undefined,
   tokenDecimals: undefined,
   ss58Format: undefined,
