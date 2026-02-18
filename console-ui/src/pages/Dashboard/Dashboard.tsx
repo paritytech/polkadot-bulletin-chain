@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Upload, Download, Search, Shield, Database, Activity, BarChart3 } from "lucide-react";
+import { Upload, Download, Search, Shield, Database, Activity, BarChart3, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -184,6 +184,34 @@ function WelcomeCard({ storageType }: { storageType: StorageType }) {
               <p className="text-muted-foreground">
                 Open access to store and retrieve data
               </p>
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-primary/10 space-y-2 text-sm">
+            <div>
+              <p className="font-medium mb-1">Design by <a href="https://github.com/eskimor" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">eskimor</a></p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <a href="https://github.com/paritytech/polkadot-sdk/pull/10731" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  Design PR
+                </a>
+                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  Scalable Web3 Storage
+                </a>
+                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage-implementation.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  Implementation Details
+                </a>
+              </div>
+            </div>
+            <div>
+              <p className="font-medium mb-1">Proof of Concept</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <a href="https://github.com/paritytech/web3-storage?tab=readme-ov-file#quick-start" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  web3-storage (see README for local setup)
+                </a>
+              </div>
             </div>
           </div>
         </CardContent>
