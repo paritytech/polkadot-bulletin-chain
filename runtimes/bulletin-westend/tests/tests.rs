@@ -330,27 +330,25 @@ fn store_with_cid_config_works() {
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
 		));
 
-		// 2. Store data WITH a cid_config as the default codec for raw data via `store_with_cid_config`.
+		// 2. Store data WITH a cid_config as the default codec for raw data via
+		//    `store_with_cid_config`.
 		// (Should produce the same content_hash as above).
 		assert_ok_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
-			RuntimeCall::TransactionStorage(
-				TxStorageCall::<Runtime>::store_with_cid_config {
-					cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
-					data: data.clone(),
-				},
-			),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+				cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+				data: data.clone(),
+			}),
 		));
 
-		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec) via `store_with_cid_config`.
+		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec) via
+		//    `store_with_cid_config`.
 		assert_ok_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
-			RuntimeCall::TransactionStorage(
-				TxStorageCall::<Runtime>::store_with_cid_config {
-					cid: CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 },
-					data: data.clone(),
-				},
-			),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+				cid: CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 },
+				data: data.clone(),
+			}),
 		));
 
 		// Check the content_hashes and CIDs.

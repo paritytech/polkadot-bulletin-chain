@@ -144,6 +144,7 @@ pub mod migrations {
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		pallet_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
+		pallet_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.

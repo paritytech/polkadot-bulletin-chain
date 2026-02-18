@@ -20,7 +20,7 @@ use sc_client_db::{Backend, BlocksPruning};
 use sp_core::H256;
 use sp_runtime::{
 	testing::{Block as RawBlock, Header, MockCallU64, TestXt},
-	Storage, StateVersion,
+	StateVersion, Storage,
 };
 use sp_state_machine::IndexOperation;
 
@@ -31,7 +31,13 @@ use sp_state_machine::IndexOperation;
 
 /// Mirrors the runtime-level call dispatch encoding (pallet index 40).
 #[derive(
-	Clone, Debug, PartialEq, Eq, Encode, codec::Decode, codec::DecodeWithMemTracking,
+	Clone,
+	Debug,
+	PartialEq,
+	Eq,
+	Encode,
+	codec::Decode,
+	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
 enum RuntimeCall {
@@ -41,7 +47,13 @@ enum RuntimeCall {
 
 /// Mirrors `pallet_transaction_storage::Call` variant encoding.
 #[derive(
-	Clone, Debug, PartialEq, Eq, Encode, codec::Decode, codec::DecodeWithMemTracking,
+	Clone,
+	Debug,
+	PartialEq,
+	Eq,
+	Encode,
+	codec::Decode,
+	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
 enum TransactionStorageCall {
@@ -155,11 +167,7 @@ fn indexed_transaction_stored_and_retrievable() {
 			hash: blake2_hash.to_vec(),
 			size: data.len() as u32,
 		},
-		IndexOperation::Insert {
-			extrinsic: 1,
-			hash: sha2_hash.to_vec(),
-			size: data.len() as u32,
-		},
+		IndexOperation::Insert { extrinsic: 1, hash: sha2_hash.to_vec(), size: data.len() as u32 },
 	];
 
 	insert_block(&backend, 0, Default::default(), vec![xt0, xt1], Some(index));
@@ -237,10 +245,7 @@ fn renewed_transaction_survives_pruning() {
 			});
 		} else if i < 5 {
 			// Keep renewing through block 4.
-			index.push(IndexOperation::Renew {
-				extrinsic: 0,
-				hash: content_hash.to_vec(),
-			});
+			index.push(IndexOperation::Renew { extrinsic: 0, hash: content_hash.to_vec() });
 		}
 		// Blocks 5+ stop renewing.
 

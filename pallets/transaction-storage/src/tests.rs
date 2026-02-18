@@ -18,7 +18,7 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
-	cids::HashingAlgorithm,
+	cids::{CidConfig, HashingAlgorithm},
 	mock::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
@@ -26,7 +26,7 @@ use super::{
 	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
 	BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use crate::migrations::v1::OldTransactionInfo;
+use crate::migrations::v1::{OldTransactionInfo, V1TransactionInfo};
 use codec::Encode;
 use polkadot_sdk_frame::{
 	deps::frame_support::{
@@ -611,50 +611,51 @@ fn signed_renew_prefers_preimage_authorization() {
 
 #[test]
 fn store_with_cid_config_uses_custom_hashing() {
-	use crate::cids::{CidConfig, HashingAlgorithm};
-
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let data = vec![42u8; 2000];
 
-		// Store with default config (no CidConfig = Blake2b256 + raw codec)
+		// Store with default config (no CidConfig = None = platform defaults)
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
 		let default_info = BlockTransactions::get().last().unwrap().clone();
-		assert_eq!(default_info.hashing, HashingAlgorithm::Blake2b256);
-		assert_eq!(default_info.cid_codec, 0x55);
+		assert_eq!(default_info.cid_config, None);
 
 		// Store with explicit SHA2-256 config
 		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
 		assert_ok!(TransactionStorage::store_with_cid_config(
 			RuntimeOrigin::none(),
-			sha2_config,
+			sha2_config.clone(),
 			data.clone(),
 		));
 		let sha2_info = BlockTransactions::get().last().unwrap().clone();
-		assert_eq!(sha2_info.hashing, HashingAlgorithm::Sha2_256);
-		assert_eq!(sha2_info.cid_codec, 0x55);
+		assert_eq!(sha2_info.cid_config, Some(sha2_config));
 		// Content hashes differ because different hashing algorithms are used
 		assert_ne!(default_info.content_hash, sha2_info.content_hash);
 
-		// Store with explicit Blake2b256 config (same as default)
+		// Store with explicit Blake2b256 config (same as default but explicitly set)
 		let blake2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
 		assert_ok!(TransactionStorage::store_with_cid_config(
 			RuntimeOrigin::none(),
-			blake2_config,
+			blake2_config.clone(),
 			data.clone(),
 		));
 		let blake2_info = BlockTransactions::get().last().unwrap().clone();
-		assert_eq!(blake2_info.hashing, HashingAlgorithm::Blake2b256);
-		assert_eq!(blake2_info.cid_codec, 0x55);
+		assert_eq!(blake2_info.cid_config, Some(blake2_config));
 		assert_eq!(default_info.content_hash, blake2_info.content_hash);
 
 		// Finalize block 1 and verify Transactions storage
 		run_to_block(2, || None);
 		let txs = Transactions::get(1).expect("transactions should be stored for block 1");
 		assert_eq!(txs.len(), 3);
-		assert_eq!(txs[0].hashing, HashingAlgorithm::Blake2b256);
-		assert_eq!(txs[1].hashing, HashingAlgorithm::Sha2_256);
-		assert_eq!(txs[2].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(txs[0].cid_config, None);
+		assert_eq!(
+			txs[1].cid_config,
+			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 })
+		);
+		assert_eq!(
+			txs[2].cid_config,
+			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 })
+		);
 	});
 }
 
@@ -702,15 +703,25 @@ fn migration_v1_old_entries_only() {
 		assert!(Transactions::contains_key(2));
 		assert!(Transactions::contains_key(3));
 
-		// Run migration
+		// Run v0→v1 migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 
-		// All entries now decode
-		let txs1 = Transactions::get(1).expect("should decode");
+		// Entries are now in v1 format (not yet v2), so Transactions::get() can't
+		// decode them — but raw bytes exist.
+		assert!(Transactions::get(1).is_none());
+		assert!(Transactions::contains_key(1));
+		assert!(Transactions::contains_key(2));
+		assert!(Transactions::contains_key(3));
+
+		// Run v1→v2 migration to make entries decodable
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		let txs1 = Transactions::get(1).expect("should decode after v2 migration");
 		assert_eq!(txs1.len(), 2);
 		for tx in txs1.iter() {
-			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
-			assert_eq!(tx.cid_codec, 0x55);
+			// v0→v1 produced Blake2b256+0x55 (defaults), v1→v2 converts to None
+			assert_eq!(tx.cid_config, None);
 			assert_eq!(tx.size, 2000);
 		}
 
@@ -720,7 +731,7 @@ fn migration_v1_old_entries_only() {
 		let txs3 = Transactions::get(3).expect("should decode");
 		assert_eq!(txs3.len(), 3);
 
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
 	});
 }
 
@@ -764,14 +775,12 @@ fn migration_v1_mixed_entries() {
 		// Run migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
-		// Old entry transformed
-		let migrated = Transactions::get(5).expect("should now decode");
-		assert_eq!(migrated.len(), 2);
-		assert_eq!(migrated[0].hashing, HashingAlgorithm::Blake2b256);
-		assert_eq!(migrated[0].cid_codec, 0x55);
-		assert_eq!(migrated[0].size, 2000);
+		// Old entry transformed to v1 format (V1TransactionInfo) — not decodable
+		// as v2 TransactionInfo, but raw bytes are present.
+		assert!(Transactions::get(5).is_none());
+		assert!(Transactions::contains_key(5));
 
-		// New entry preserved exactly
+		// New entry preserved exactly (v2 format was skipped by migration)
 		let new_entry_after = Transactions::get(10).expect("still decodes");
 		assert_eq!(new_entry_before, new_entry_after);
 	});
@@ -782,7 +791,7 @@ fn migration_v1_version_updated() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(1));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(2));
 
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
@@ -796,17 +805,19 @@ fn migration_v1_idempotent() {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		insert_old_format_transactions(1, 1);
 
-		// First run: migrates
+		// First run: migrates old entries to v1 format
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let after_first = Transactions::get(1).expect("decodes");
+		// v1 format is not decodable as v2 TransactionInfo, but raw bytes exist
+		let key = Transactions::hashed_key_for(1u64);
+		let raw_after_first = unhashed::get_raw(&key).expect("raw bytes exist");
 
 		// Second run: noop (version already 1)
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let after_second = Transactions::get(1).expect("still decodes");
+		let raw_after_second = unhashed::get_raw(&key).expect("raw bytes still exist");
 
-		assert_eq!(after_first, after_second);
+		assert_eq!(raw_after_first, raw_after_second);
 	});
 }
 
@@ -824,6 +835,181 @@ fn migration_v1_empty_storage() {
 
 		// Version updated, no entries created
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
+		assert_eq!(Transactions::iter().count(), 0);
+	});
+}
+
+// ---- V2 Migration tests ----
+
+/// Write v1-format `V1TransactionInfo` entries as raw bytes into the `Transactions`
+/// storage slot for `block_num`.
+fn insert_v1_format_transactions(block_num: u64, entries: Vec<(HashingAlgorithm, u64)>) {
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+
+	let v1_txs: Vec<V1TransactionInfo> = entries
+		.into_iter()
+		.enumerate()
+		.map(|(i, (hashing, codec))| V1TransactionInfo {
+			chunk_root: BlakeTwo256::hash(&[i as u8]),
+			content_hash: BlakeTwo256::hash(&[i as u8 + 100]).into(),
+			hashing,
+			cid_codec: codec,
+			size: 2000,
+			block_chunks: (i as u32 + 1) * 8,
+		})
+		.collect();
+	let bounded: BoundedVec<V1TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+		v1_txs.try_into().expect("within bounds");
+	let key = Transactions::hashed_key_for(block_num);
+	unhashed::put_raw(&key, &bounded.encode());
+}
+
+#[test]
+fn migration_v2_default_entries_become_none() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+
+		// Insert v1 entries with default values (Blake2b256 + 0x55)
+		insert_v1_format_transactions(
+			1,
+			vec![(HashingAlgorithm::Blake2b256, 0x55), (HashingAlgorithm::Blake2b256, 0x55)],
+		);
+
+		// Can't decode with current (v2) type
+		assert!(Transactions::get(1).is_none());
+		assert!(Transactions::contains_key(1));
+
+		// Run migration
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		// All entries now decode with None (defaults)
+		let txs = Transactions::get(1).expect("should decode");
+		assert_eq!(txs.len(), 2);
+		for tx in txs.iter() {
+			assert_eq!(tx.cid_config, None);
+			assert_eq!(tx.size, 2000);
+		}
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+	});
+}
+
+#[test]
+fn migration_v2_explicit_entries_become_some() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+
+		// Insert v1 entries with non-default values
+		insert_v1_format_transactions(
+			1,
+			vec![
+				(HashingAlgorithm::Sha2_256, 0x55),
+				(HashingAlgorithm::Blake2b256, 0x70),
+				(HashingAlgorithm::Keccak256, 0x70),
+			],
+		);
+
+		// Run migration
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		let txs = Transactions::get(1).expect("should decode");
+		assert_eq!(txs.len(), 3);
+		assert_eq!(
+			txs[0].cid_config,
+			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 })
+		);
+		assert_eq!(
+			txs[1].cid_config,
+			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Blake2b256 })
+		);
+		assert_eq!(
+			txs[2].cid_config,
+			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Keccak256 })
+		);
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+	});
+}
+
+#[test]
+fn migration_v2_mixed_default_and_explicit() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+
+		insert_v1_format_transactions(
+			1,
+			vec![
+				(HashingAlgorithm::Blake2b256, 0x55), // default → None
+				(HashingAlgorithm::Sha2_256, 0x70),   // explicit → Some
+			],
+		);
+
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		let txs = Transactions::get(1).expect("should decode");
+		assert_eq!(txs.len(), 2);
+		assert_eq!(txs[0].cid_config, None);
+		assert_eq!(
+			txs[1].cid_config,
+			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 })
+		);
+	});
+}
+
+#[test]
+fn migration_v2_skips_already_migrated() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+
+		// Store via normal code path (already v2 format)
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		run_to_block(2, || None);
+
+		let original = Transactions::get(1).expect("should decode");
+		assert_eq!(original.len(), 1);
+
+		// Manually set version back to 1 to allow migration to run
+		StorageVersion::new(1).put::<TransactionStorage>();
+
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		// Entry unchanged
+		let after = Transactions::get(1).expect("should decode");
+		assert_eq!(original, after);
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+	});
+}
+
+#[test]
+fn migration_v2_idempotent() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+		insert_v1_format_transactions(1, vec![(HashingAlgorithm::Blake2b256, 0x55)]);
+
+		// First run: migrates
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		let after_first = Transactions::get(1).expect("decodes");
+
+		// Second run: noop (version already 2)
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		let after_second = Transactions::get(1).expect("still decodes");
+
+		assert_eq!(after_first, after_second);
+	});
+}
+
+#[test]
+fn migration_v2_empty_storage() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+		assert_eq!(Transactions::iter().count(), 0);
+
+		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
 		assert_eq!(Transactions::iter().count(), 0);
 	});
 }

@@ -73,7 +73,7 @@ impl<T: Config, NewValue: Get<BlockNumberFor<T>>> OnRuntimeUpgrade
 pub mod v1 {
 	use super::*;
 	use crate::{
-		cids::HashingAlgorithm,
+		cids::{CidCodec, ContentHash, HashingAlgorithm},
 		pallet::{Pallet, Transactions},
 		TransactionInfo,
 	};
@@ -94,6 +94,17 @@ pub mod v1 {
 	pub(crate) struct OldTransactionInfo {
 		pub chunk_root: <BlakeTwo256 as Hash>::Output,
 		pub content_hash: <BlakeTwo256 as Hash>::Output,
+		pub size: u32,
+		pub block_chunks: ChunkIndex,
+	}
+
+	/// `TransactionInfo` layout at v1 (mandatory `hashing` and `cid_codec`).
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V1TransactionInfo {
+		pub chunk_root: <BlakeTwo256 as Hash>::Output,
+		pub content_hash: ContentHash,
+		pub hashing: HashingAlgorithm,
+		pub cid_codec: CidCodec,
 		pub size: u32,
 		pub block_chunks: ChunkIndex,
 	}
@@ -121,11 +132,14 @@ pub mod v1 {
 				previous_key = key.clone();
 				let Some(raw) = unhashed::get_raw(&key) else { continue };
 
-				// Try decode as new type first — if it works, the entry is already
-				// post-upgrade. Old format (72 bytes/entry) always fails here because
-				// the decoder runs out of bytes (new format needs 81 bytes/entry).
-				if BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
-					.is_ok()
+				// Try decode as v1 or v2 type first — if either works, the entry
+				// is already post-upgrade. Old format (72 bytes/entry) always fails
+				// here because the decoder runs out of bytes.
+				if BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+					.is_ok() || BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(
+					&mut &raw[..],
+				)
+				.is_ok()
 				{
 					skipped += 1;
 					continue;
@@ -136,9 +150,9 @@ pub mod v1 {
 					&mut &raw[..],
 				) {
 					Ok(old_txs) => {
-						let new_txs: Vec<TransactionInfo> = old_txs
+						let new_txs: Vec<V1TransactionInfo> = old_txs
 							.into_iter()
-							.map(|old| TransactionInfo {
+							.map(|old| V1TransactionInfo {
 								chunk_root: old.chunk_root,
 								content_hash: old.content_hash.into(),
 								hashing: HashingAlgorithm::Blake2b256,
@@ -148,7 +162,7 @@ pub mod v1 {
 							})
 							.collect();
 						let Ok(bounded) =
-							BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(
+							BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::try_from(
 								new_txs,
 							)
 						else {
@@ -237,7 +251,7 @@ pub mod v1 {
 	/// is still 0. This covers the `codeSubstitutes` recovery path where the fix
 	/// runtime is loaded without triggering `on_runtime_upgrade`.
 	///
-	/// Returns the weight consumed. On subsequent blocks (version already 1)
+	/// Returns the weight consumed. On subsequent blocks (version already ≥ 1)
 	/// this is a single storage read.
 	pub fn maybe_migrate_v0_to_v1<T: Config>() -> Weight {
 		use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
@@ -263,4 +277,160 @@ pub mod v1 {
 			.saturating_add(migration_weight)
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
+}
+
+/// Migration v1→v2: Makes `hashing` and `cid_codec` fields `Option` in `TransactionInfo`.
+///
+/// V1 stored mandatory `HashingAlgorithm` and `CidCodec` values. V2 uses `Option`:
+/// - Default values (Blake2b256 + 0x55) → `None, None` (saves space)
+/// - Explicit values → `Some(hashing), Some(cid_codec)`
+pub mod v2 {
+	use super::*;
+	use crate::{
+		cids::{CidConfig, HashingAlgorithm},
+		pallet::{Pallet, Transactions},
+		TransactionInfo,
+	};
+	use polkadot_sdk_frame::deps::{
+		frame_support::{
+			migrations::VersionedMigration,
+			storage::{unhashed, StoragePrefixedMap},
+			traits::UncheckedOnRuntimeUpgrade,
+			BoundedVec,
+		},
+		sp_io,
+	};
+
+	use super::v1::V1TransactionInfo;
+
+	/// Version-unchecked migration logic. Wrapped by [`MigrateV1ToV2`] for version gating.
+	pub struct VersionUncheckedMigrateV1ToV2<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let prefix = Transactions::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut migrated: u64 = 0;
+			let mut skipped: u64 = 0;
+			let mut corrupted: u64 = 0;
+
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key.clone();
+				let Some(raw) = unhashed::get_raw(&key) else { continue };
+
+				// Try decode as v2 (current format with Option fields) — skip if it works.
+				if BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+					.is_ok()
+				{
+					skipped += 1;
+					continue;
+				}
+
+				// Try decode as v1 format and convert.
+				match BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::decode(
+					&mut &raw[..],
+				) {
+					Ok(v1_txs) => {
+						let new_txs: Vec<TransactionInfo> = v1_txs
+							.into_iter()
+							.map(|old| {
+								// Default values → None; explicit values → Some
+								let is_default =
+									matches!(old.hashing, HashingAlgorithm::Blake2b256) &&
+										old.cid_codec == 0x55;
+								TransactionInfo {
+									chunk_root: old.chunk_root,
+									content_hash: old.content_hash,
+									cid_config: if is_default {
+										None
+									} else {
+										Some(CidConfig {
+											codec: old.cid_codec,
+											hashing: old.hashing,
+										})
+									},
+									size: old.size,
+									block_chunks: old.block_chunks,
+								}
+							})
+							.collect();
+						let Ok(bounded) =
+							BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(
+								new_txs,
+							)
+						else {
+							polkadot_sdk_frame::deps::frame_support::defensive!(
+								"v1->v2: BoundedVec conversion failed"
+							);
+							continue;
+						};
+						unhashed::put_raw(&key, &bounded.encode());
+						migrated += 1;
+					},
+					Err(_) => {
+						unhashed::kill(&key);
+						corrupted += 1;
+						tracing::warn!(
+							target: LOG_TARGET,
+							"Removed corrupted Transactions entry during v1->v2 migration",
+						);
+					},
+				}
+			}
+
+			tracing::info!(
+				target: LOG_TARGET,
+				migrated,
+				skipped,
+				corrupted,
+				"v1->v2 TransactionInfo migration complete",
+			);
+
+			let entries = migrated + skipped + corrupted;
+			T::DbWeight::get()
+				.reads(entries.saturating_mul(2).saturating_add(1))
+				.saturating_add(T::DbWeight::get().writes(migrated + corrupted))
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let prefix = Transactions::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
+				count += 1;
+			}
+			tracing::info!(target: LOG_TARGET, count, "v1->v2 pre_upgrade: Transactions entries");
+			Ok(count.encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let old_count =
+				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			let new_count = Transactions::<T>::iter().count() as u64;
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count <= old_count,
+				"post_upgrade: more entries than before migration"
+			);
+			tracing::info!(target: LOG_TARGET, old_count, new_count, "v1->v2 post_upgrade: valid");
+			Ok(())
+		}
+	}
+
+	/// Versioned migration v1→v2: makes `hashing` and `cid_codec` fields `Option`.
+	pub type MigrateV1ToV2<T> = VersionedMigration<
+		1,
+		2,
+		VersionUncheckedMigrateV1ToV2<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
 }

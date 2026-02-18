@@ -59,7 +59,6 @@ type BalanceOf<T> =
 pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
-use crate::cids::{CidCodec, HashingAlgorithm};
 pub use pallet::*;
 pub use weights::WeightInfo;
 
@@ -127,10 +126,9 @@ pub struct TransactionInfo {
 
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
-	/// Used hashing algorithm for `content_hash`.
-	hashing: HashingAlgorithm,
-	/// Requested codec for CIDs.
-	cid_codec: CidCodec,
+	/// CID configuration (hashing algorithm + codec).
+	/// `None` means platform defaults (Blake2b-256 + raw codec 0x55).
+	cid_config: Option<CidConfig>,
 
 	/// Size of indexed data in bytes.
 	size: u32,
@@ -261,7 +259,7 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -440,8 +438,7 @@ pub mod pallet {
 						chunk_root: info.chunk_root,
 						size: info.size,
 						content_hash: info.content_hash,
-						hashing: info.hashing,
-						cid_codec: info.cid_codec,
+						cid_config: info.cid_config,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -771,8 +768,9 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let cid = calculate_cid(&data, cid_config)
-				.map_err(|_| Error::<T>::InvalidContentHash)?;
+			let stored_config = cid_config.clone();
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
 			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
 
 			let mut index = 0;
@@ -787,8 +785,7 @@ pub mod pallet {
 						chunk_root: root,
 						size: data.len() as u32,
 						content_hash: cid.content_hash,
-						hashing: cid.hashing,
-						cid_codec: cid.codec,
+						cid_config: stored_config,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
