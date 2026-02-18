@@ -609,6 +609,55 @@ fn signed_renew_prefers_preimage_authorization() {
 	});
 }
 
+#[test]
+fn store_with_cid_config_uses_custom_hashing() {
+	use crate::cids::{CidConfig, HashingAlgorithm};
+
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![42u8; 2000];
+
+		// Store with default config (no CidConfig = Blake2b256 + raw codec)
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		let default_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(default_info.hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(default_info.cid_codec, 0x55);
+
+		// Store with explicit SHA2-256 config
+		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		assert_ok!(TransactionStorage::store_with_cid_config(
+			RuntimeOrigin::none(),
+			sha2_config,
+			data.clone(),
+		));
+		let sha2_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(sha2_info.hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(sha2_info.cid_codec, 0x55);
+		// Content hashes differ because different hashing algorithms are used
+		assert_ne!(default_info.content_hash, sha2_info.content_hash);
+
+		// Store with explicit Blake2b256 config (same as default)
+		let blake2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
+		assert_ok!(TransactionStorage::store_with_cid_config(
+			RuntimeOrigin::none(),
+			blake2_config,
+			data.clone(),
+		));
+		let blake2_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(blake2_info.hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(blake2_info.cid_codec, 0x55);
+		assert_eq!(default_info.content_hash, blake2_info.content_hash);
+
+		// Finalize block 1 and verify Transactions storage
+		run_to_block(2, || None);
+		let txs = Transactions::get(1).expect("transactions should be stored for block 1");
+		assert_eq!(txs.len(), 3);
+		assert_eq!(txs[0].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(txs[1].hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(txs[2].hashing, HashingAlgorithm::Blake2b256);
+	});
+}
+
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`

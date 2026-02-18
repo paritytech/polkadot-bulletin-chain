@@ -23,8 +23,7 @@ use pallet_bridge_messages::{
 use pallet_bridge_parachains::ParachainHeaders;
 use pallet_transaction_storage::{
 	cids::{calculate_cid, CidConfig, HashingAlgorithm},
-	AuthorizationExtent, Call as TxStorageCall, CidConfigForStore, Config as TxStorageConfig,
-	BAD_DATA_SIZE,
+	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
 };
 use runtime::{
 	bridge_config::bp_people_polkadot, BuildStorage, Executive, Hash, Header, Runtime, RuntimeCall,
@@ -265,10 +264,9 @@ fn emulate_sent_messages() {
 	);
 }
 
-fn construct_extrinsic_with_codec(
+fn construct_extrinsic(
 	sender: sp_core::sr25519::Pair,
 	call: RuntimeCall,
-	cid_config: Option<CidConfig>,
 ) -> Result<UncheckedExtrinsic, TransactionValidityError> {
 	let account_id = sp_runtime::AccountId32::from(sender.public());
 	frame_system::BlockHash::<Runtime>::insert(0, Hash::default());
@@ -284,7 +282,6 @@ fn construct_extrinsic_with_codec(
 		frame_system::CheckWeight::<Runtime>::new(),
 		runtime::ValidateSigned,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
-		pallet_transaction_storage::extension::ProvideCidConfig::<Runtime>::new(cid_config),
 	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
 	let signature = payload.using_encoded(|e| sender.sign(e));
@@ -300,15 +297,8 @@ fn construct_and_apply_extrinsic(
 	account: sp_core::sr25519::Pair,
 	call: RuntimeCall,
 ) -> ApplyExtrinsicResult {
-	construct_and_apply_extrinsic_with_codec(account, call, None)
-}
-fn construct_and_apply_extrinsic_with_codec(
-	account: sp_core::sr25519::Pair,
-	call: RuntimeCall,
-	cid_config: Option<CidConfig>,
-) -> ApplyExtrinsicResult {
 	let dispatch_info = call.get_dispatch_info();
-	let xt = construct_extrinsic_with_codec(account, call, cid_config)?;
+	let xt = construct_extrinsic(account, call)?;
 	let xt_len = xt.encode().len();
 	log::info!(
 		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
@@ -399,7 +389,7 @@ fn transaction_storage_runtime_sizes() {
 }
 
 #[test]
-fn provide_cid_codec_extension_works() {
+fn store_with_cid_config_works() {
 	run_test(|| {
 		// prepare data
 		let account = Sr25519Keyring::Alice;
@@ -420,30 +410,34 @@ fn provide_cid_codec_extension_works() {
 			AuthorizationExtent { transactions: 3, bytes: 3 * total_bytes },
 		);
 
-		// 1. Store data WITHOUT a custom cid_config.
-		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+		// 1. Store data WITHOUT a custom cid_config (plain `store`).
+		assert_ok_ok(construct_and_apply_extrinsic(
 			account.pair(),
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
-			None,
 		));
-		assert!(!CidConfigForStore::<Runtime>::exists());
 
-		// 2. Store data WITH a cid_config as the default codec for raw data.
-		// (Should produce the same result as above).
-		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+		// 2. Store data WITH a cid_config as the default codec for raw data via `store_with_cid_config`.
+		// (Should produce the same content_hash as above).
+		assert_ok_ok(construct_and_apply_extrinsic(
 			account.pair(),
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
-			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 }),
+			RuntimeCall::TransactionStorage(
+				TxStorageCall::<Runtime>::store_with_cid_config {
+					cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+					data: data.clone(),
+				},
+			),
 		));
-		assert!(!CidConfigForStore::<Runtime>::exists());
 
-		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec).
-		assert_ok_ok(construct_and_apply_extrinsic_with_codec(
+		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec) via `store_with_cid_config`.
+		assert_ok_ok(construct_and_apply_extrinsic(
 			account.pair(),
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
-			Some(CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 }),
+			RuntimeCall::TransactionStorage(
+				TxStorageCall::<Runtime>::store_with_cid_config {
+					cid: CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 },
+					data: data.clone(),
+				},
+			),
 		));
-		assert!(!CidConfigForStore::<Runtime>::exists());
 
 		// Check the content_hashes and CIDs.
 		runtime::TransactionStorage::on_finalize(block_number);
