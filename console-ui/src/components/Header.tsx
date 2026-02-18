@@ -23,11 +23,11 @@ import { cn } from "@/utils/cn";
 import { useState, useEffect } from "react";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: Database },
-  { path: "/upload", label: "Upload", icon: Upload },
-  { path: "/download", label: "Download", icon: Download },
-  { path: "/explorer", label: "Explorer", icon: Search },
-  { path: "/authorizations", label: "Faucet", icon: Shield },
+  { path: "/", label: "Dashboard", icon: Database, web3storage: true },
+  { path: "/explorer", label: "Explorer", icon: Search, web3storage: true },
+  { path: "/upload", label: "Upload", icon: Upload, web3storage: false },
+  { path: "/download", label: "Download", icon: Download, web3storage: false },
+  { path: "/authorizations", label: "Faucet", icon: Shield, web3storage: false },
   { separator: true },
 ] as const;
 
@@ -140,10 +140,26 @@ export function Header() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map((item, i) =>
-              "separator" in item ? (
-                <div key={i} className="w-px h-5 bg-border mx-1" />
-              ) : (
+            {navItems.map((item, i) => {
+              if ("separator" in item) {
+                return <div key={i} className="w-px h-5 bg-border mx-1" />;
+              }
+              const disabled = storageType === "web3storage" && !item.web3storage;
+              if (disabled) {
+                return (
+                  <Button
+                    key={item.path}
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className="opacity-30"
+                  >
+                    <item.icon className="h-4 w-4 mr-1" />
+                    {item.label}
+                  </Button>
+                );
+              }
+              return (
                 <Link key={item.path} to={item.path}>
                   <Button
                     variant={location.pathname === item.path ? "secondary" : "ghost"}
@@ -153,8 +169,8 @@ export function Header() {
                     {item.label}
                   </Button>
                 </Link>
-              )
-            )}
+              );
+            })}
           </nav>
 
           {/* Right side */}
@@ -181,10 +197,25 @@ export function Header() {
         {mobileMenuOpen && (
           <nav className="md:hidden py-4 border-t">
             <div className="flex flex-col gap-1">
-              {navItems.map((item, i) =>
-                "separator" in item ? (
-                  <div key={i} className="h-px bg-border my-1" />
-                ) : (
+              {navItems.map((item, i) => {
+                if ("separator" in item) {
+                  return <div key={i} className="h-px bg-border my-1" />;
+                }
+                const disabled = storageType === "web3storage" && !item.web3storage;
+                if (disabled) {
+                  return (
+                    <Button
+                      key={item.path}
+                      variant="ghost"
+                      className="w-full justify-start opacity-30"
+                      disabled
+                    >
+                      <item.icon className="h-4 w-4 mr-2" />
+                      {item.label}
+                    </Button>
+                  );
+                }
+                return (
                   <Link
                     key={item.path}
                     to={item.path}
@@ -198,8 +229,8 @@ export function Header() {
                       {item.label}
                     </Button>
                   </Link>
-                )
-              )}
+                );
+              })}
               <div className="pt-2 mt-2 border-t">
                 <NetworkSwitcher />
               </div>
