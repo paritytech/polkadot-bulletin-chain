@@ -16,6 +16,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
   ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
@@ -26,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Free Disk Space (Ubuntu)
         if: ${{ runner.environment == 'github-hosted' }}
@@ -39,7 +42,7 @@ jobs:
 
       # Cache the Polkadot SDK binaries
       - name: Cache Polkadot SDK binaries
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
@@ -51,29 +54,37 @@ jobs:
           mkdir -p $POLKADOT_SDK_BIN_DIR
           cd $POLKADOT_SDK_BIN_DIR
           echo "Downloading Polkadot SDK binaries..."
-          curl -L -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
-          curl -L -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
-          curl -L -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
-          curl -L -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
+          curl -fL -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
+          curl -fL -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
+          curl -fL -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
+          curl -fL -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
           # TODO: replace POLKADOT_SDK_VERSION_WITH_BULLETIN with POLKADOT_SDK_VERSION when released: https://github.com/paritytech/polkadot-sdk/pull/10662
-          curl -L -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
+          curl -fL -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
+          echo "${POLKADOT_SHA256}  polkadot" | sha256sum -c -
+          echo "${POLKADOT_PREPARE_WORKER_SHA256}  polkadot-prepare-worker" | sha256sum -c -
+          echo "${POLKADOT_EXECUTE_WORKER_SHA256}  polkadot-execute-worker" | sha256sum -c -
+          echo "${CHAIN_SPEC_BUILDER_SHA256}  chain-spec-builder" | sha256sum -c -
+          echo "${POLKADOT_OMNI_NODE_SHA256}  polkadot-omni-node" | sha256sum -c -
           chmod +x *
 
       # Cache the Zombienet binaries
       - name: Cache Zombienet
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: zombienet-cache
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
       # Download and extract binaries if cache missed
+      # NOTE: zombienet releases do not publish checksums
       - name: Download Zombienet binaries
         if: steps.zombienet-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p $ZOMBIENET_BIN_DIR
           cd $ZOMBIENET_BIN_DIR
-          curl -L \
-            -H "Authorization: token ${{ github.token }}" \
+          curl -fL \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
             -o zombienet-linux-x64 \
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
@@ -84,7 +95,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - id: runtime
         run: |
           TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
@@ -108,10 +119,10 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: wasm32-unknown-unknown
           components: rust-src
@@ -126,14 +137,14 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Rust cache (Bulletin)
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-bulletin-integration-tests"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -143,13 +154,13 @@ jobs:
         run: cargo install just --locked || true
 
       - name: Cache Polkadot SDK binaries
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: polkadot-sdk-cache
         with:
           path: ${{ env.POLKADOT_SDK_BIN_DIR }}
           key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_VERSION_WITH_BULLETIN }}-binaries
       - name: Cache Zombienet
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: zombienet-cache
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
@@ -167,11 +178,13 @@ jobs:
 
       - name: Start services
         working-directory: examples
+        env:
+          RUNTIME_PACKAGE: ${{ matrix.runtime.package }}
         run: |
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
-          echo "RUNTIME_PACKAGE=${{ matrix.runtime.package }}" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "${{ matrix.runtime.package }}"
+          echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
+          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE"
 
       - name: Test authorize-and-store ws
         working-directory: examples
@@ -209,7 +222,7 @@ jobs:
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: failed-zombienet-logs-${{ matrix.runtime.name }}
           path: |
@@ -222,8 +235,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check integration test results
+        env:
+          TEST_RESULT: ${{ needs.integration-tests.result }}
         run: |
-          if [ "${{ needs.integration-tests.result }}" != "success" ]; then
+          if [ "$TEST_RESULT" != "success" ]; then
             echo "Integration tests failed or were cancelled"
             exit 1
           fi
