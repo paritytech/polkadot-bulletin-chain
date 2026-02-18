@@ -1127,7 +1127,7 @@ export function Authorizations() {
           </TabsTrigger>
           <TabsTrigger value="accounts">
             <User className="h-4 w-4 mr-2" />
-            Account
+            Accounts
           </TabsTrigger>
           <TabsTrigger value="preimages">
             <FileText className="h-4 w-4 mr-2" />
