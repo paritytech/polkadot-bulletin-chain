@@ -27,7 +27,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - id: runtime
         run: |
           # Filter out runtimes that don't have URIs
@@ -50,22 +50,28 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Check if snapshot exists in cache
         id: cache-restore
         if: github.event_name != 'schedule'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           lookup-only: true
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}
+          restore-keys: |
+            try-runtime-snapshot-${{ matrix.runtime.name }}-
           fail-on-cache-miss: false
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
 
       - name: Install try-runtime-cli
         if: steps.cache-restore.outputs.cache-matched-key == ''
         run: |
-          curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.1/try-runtime-x86_64-unknown-linux-musl -o try-runtime
+          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
+          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
 
@@ -108,7 +114,7 @@ jobs:
 
       - name: Save snapshot to cache
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
@@ -117,6 +123,7 @@ jobs:
   check-migrations:
     needs: [runtime-matrix, prepare-snapshots]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -124,11 +131,14 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: "Fetch upstream tags"
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
-          git remote add upstream https://github.com/${{ github.event.pull_request.base.repo.full_name }}.git
+          git remote add upstream "https://github.com/${BASE_REPO}.git"
           git fetch upstream --tags
 
       - name: Build EXTRA_FLAGS
@@ -149,7 +159,7 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
@@ -157,12 +167,13 @@ jobs:
 
       - name: Install try-runtime-cli
         run: |
-          curl -sL https://github.com/paritytech/try-runtime-cli/releases/download/v0.10.1/try-runtime-x86_64-unknown-linux-musl -o try-runtime
+          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
+          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
           chmod +x try-runtime
           sudo mv try-runtime /usr/local/bin/
 
       - name: Restore snapshot from cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-
