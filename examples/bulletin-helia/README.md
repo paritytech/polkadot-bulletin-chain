@@ -6,7 +6,7 @@ Available as both a **CLI application** and a **web application**.
 
 ## Prerequisites
 
-1. **Run local bulletin chain** with IPFS server enabled via instruction [here](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples#run-bulletin-solochain-with---ipfs-server) and **Note** the P2P address of the node eg. `/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm` (the addresss is dispalyed within zombienet logs)
+1. **Run local bulletin chain** with IPFS server enabled via instruction [here](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples#run-bulletin-solochain-with---ipfs-server) and **Note** the P2P address of the node eg. `/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm` (the address is displayed within zombienet logs)
 
 2. **Upload some data and note CID** - you can use the script available in this repo [here](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples#using-modern-papi-polkadot-api)
 

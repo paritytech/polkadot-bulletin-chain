@@ -94,12 +94,16 @@ fetchBtn.addEventListener('click', async () => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     setStatus(`Error: ${errorMessage}`, 'error');
-    contentDiv.innerHTML = `
-      <div class="error-display">
-        <h3>Error</h3>
-        <p>${errorMessage}</p>
-      </div>
-    `;
+    contentDiv.innerHTML = '';
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-display';
+    const errorTitle = document.createElement('h3');
+    errorTitle.textContent = 'Error';
+    const errorText = document.createElement('p');
+    errorText.textContent = errorMessage;
+    errorDiv.appendChild(errorTitle);
+    errorDiv.appendChild(errorText);
+    contentDiv.appendChild(errorDiv);
   } finally {
     fetchBtn.disabled = false;
   }
@@ -155,10 +159,14 @@ function displayContent(result: { data: any; isJSON: boolean; rawHex?: string })
     // Info section
     const info = document.createElement('div');
     info.className = 'hex-info';
-    info.innerHTML = `
-      <strong>Raw Bytes (Hex String)</strong><br>
-      Size: ${result.rawHex ? result.rawHex.length / 2 : 0} bytes
-    `;
+    const label = document.createElement('strong');
+    label.textContent = 'Raw Bytes (Hex String)';
+    const sizeText = document.createTextNode(
+      `\nSize: ${result.rawHex ? result.rawHex.length / 2 : 0} bytes`
+    );
+    info.appendChild(label);
+    info.appendChild(document.createElement('br'));
+    info.appendChild(sizeText);
 
     // Hex content
     const pre = document.createElement('pre');
@@ -204,4 +212,4 @@ cidInput.addEventListener('keypress', e => {
 // Initial log
 logger.info('Application initialized - P2P Mode');
 logger.info('Ready to fetch data from IPFS via P2P');
-logger.debug('Security: Only localhost (127.0.0.1, ::1) connections are allowed');
+logger.debug('Security: Only connections to specified whitelisted peers are allowed');

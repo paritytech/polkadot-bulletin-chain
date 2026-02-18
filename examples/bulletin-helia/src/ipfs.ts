@@ -33,7 +33,7 @@ export class IPFSClient {
 
   private async initializeHeliaP2P(): Promise<void> {
     this.config.logger.debug('Creating full Helia P2P node with libp2p...');
-    this.config.logger.info('This will start a full IPFS node in your browser');
+    this.config.logger.info('This will start a full IPFS node with libp2p networking');
 
     // Extract peer IDs from provided multiaddrs
     const allowedPeerIds = new Set<string>();
@@ -149,13 +149,7 @@ export class IPFSClient {
     }
 
     try {
-      let result: { data: any; isJSON: boolean; rawHex?: string };
-
-      if (this.helia) {
-        result = await this.fetchViaHelia(cid);
-      } else {
-        throw new Error('IPFS client not initialized');
-      }
+      const result = await this.fetchViaHelia(cid);
 
       if (result.isJSON) {
         this.config.logger.success('Data fetched and parsed as JSON successfully');
