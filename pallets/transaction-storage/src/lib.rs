@@ -1243,10 +1243,6 @@ impl<T: Config> Pallet<T> {
 
 			let mut cumulative_chunks: ChunkIndex = 0;
 			for tx in transactions.iter() {
-				ensure!(
-					tx.size > 0 && tx.size <= max_size,
-					"Transaction size out of valid range"
-				);
 
 				let expected_chunks = num_chunks(tx.size);
 				cumulative_chunks = cumulative_chunks.saturating_add(expected_chunks);
