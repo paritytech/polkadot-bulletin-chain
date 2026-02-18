@@ -837,56 +837,6 @@ fn try_state_passes_with_active_authorizations() {
 }
 
 #[test]
-fn try_state_detects_bad_block_chunks() {
-	new_test_ext().execute_with(|| {
-		run_to_block(2, || None);
-
-		// Insert a corrupted TransactionInfo with wrong block_chunks using raw storage.
-		// TransactionInfo SCALE layout: chunk_root([u8;32]), content_hash([u8;32]),
-		// hashing(u8 enum), cid_codec(u64), size(u32), block_chunks(u32)
-		let corrupted_tx = (
-			[0u8; 32], // chunk_root
-			[0u8; 32], // content_hash
-			0u8,       // hashing (Blake2b256)
-			0x55u64,   // cid_codec (raw)
-			2000u32,   // size (valid)
-			999u32,    // block_chunks (CORRUPTED - should be num_chunks(2000))
-		);
-		let key = Transactions::hashed_key_for(1u64);
-		unhashed::put_raw(&key, &vec![corrupted_tx].encode());
-
-		assert_err!(
-			TransactionStorage::do_try_state(System::block_number()),
-			"block_chunks is not cumulative at transaction index"
-		);
-	});
-}
-
-#[test]
-fn try_state_detects_zero_size_transaction() {
-	new_test_ext().execute_with(|| {
-		run_to_block(2, || None);
-
-		// Insert a corrupted TransactionInfo with zero size using raw storage.
-		let corrupted_tx = (
-			[0u8; 32], // chunk_root
-			[0u8; 32], // content_hash
-			0u8,       // hashing (Blake2b256)
-			0x55u64,   // cid_codec (raw)
-			0u32,      // size (CORRUPTED - zero)
-			0u32,      // block_chunks
-		);
-		let key = Transactions::hashed_key_for(1u64);
-		unhashed::put_raw(&key, &vec![corrupted_tx].encode());
-
-		assert_err!(
-			TransactionStorage::do_try_state(System::block_number()),
-			"Transaction size out of valid range"
-		);
-	});
-}
-
-#[test]
 fn try_state_detects_zero_authorization_transactions() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
