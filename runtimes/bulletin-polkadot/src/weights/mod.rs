@@ -17,6 +17,7 @@ pub mod pallet_relayer_set;
 pub mod pallet_sudo;
 pub mod pallet_timestamp;
 pub mod pallet_transaction_storage;
+pub mod pallet_utility;
 pub mod pallet_validator_set;
 
 impl GrandpaWeightInfoExt for pallet_bridge_grandpa::WeightInfo<crate::Runtime> {

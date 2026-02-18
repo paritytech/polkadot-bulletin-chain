@@ -20,6 +20,7 @@
 #![cfg(feature = "runtime-benchmarks")]
 
 use super::{Pallet as TransactionStorage, *};
+use alloc::vec;
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
 	deps::frame_system::{EventRecord, Pallet as System, RawOrigin},
@@ -125,12 +126,13 @@ mod benchmarks {
 	fn store(l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; l as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
+		let cid = calculate_cid(&data, None).unwrap().to_bytes();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
 
 		assert!(!BlockTransactions::<T>::get().is_empty());
-		assert_last_event::<T>(Event::Stored { index: 0, content_hash }.into());
+		assert_last_event::<T>(Event::Stored { index: 0, content_hash, cid }.into());
 		Ok(())
 	}
 
@@ -157,7 +159,7 @@ mod benchmarks {
 				vec![0u8; T::MaxTransactionSize::get() as usize],
 			)?;
 		}
-		run_to_block::<T>(T::StoragePeriod::get() + BlockNumberFor::<T>::one());
+		run_to_block::<T>(crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one());
 		let encoded_proof = proof();
 		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();
 

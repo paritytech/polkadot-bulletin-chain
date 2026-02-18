@@ -102,7 +102,7 @@ sp_api::impl_runtime_apis! {
 	}
 
 	impl sp_session::SessionKeys<Block> for Runtime {
-		fn generate_session_keys(_: Option<Vec<u8>>) -> Vec<u8> {
+		fn generate_session_keys(_owner: Vec<u8>, _seed: Option<Vec<u8>>) -> sp_session::OpaqueGeneratedSessionKeys {
 			unimplemented!()
 		}
 
@@ -206,6 +206,12 @@ sp_api::impl_runtime_apis! {
 			unimplemented!()
 		}
 		fn query_length_to_fee(_: u32) -> Balance {
+			unimplemented!()
+		}
+	}
+
+	impl sp_transaction_storage_proof::runtime_api::TransactionStorageApi<Block> for Runtime {
+		fn retention_period() -> sp_runtime::traits::NumberFor<Block> {
 			unimplemented!()
 		}
 	}

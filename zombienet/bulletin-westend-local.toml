@@ -15,17 +15,23 @@ chain = "westend-local"
 [[relaychain.nodes]]
 name = "alice"
 validator = true
+p2p_port = 30333
 rpc_port = 9942
 balance = 2000000000000
+# WebSocket P2P on p2p_port + 1 for smoldot light client support
+args = ["--listen-addr", "/ip4/0.0.0.0/tcp/30334/ws"]
 
 [[relaychain.nodes]]
 name = "bob"
 validator = true
+p2p_port = 30433
 rpc_port = 9943
 balance = 2000000000000
+# WebSocket P2P on p2p_port + 1 for smoldot light client support
+args = ["--listen-addr", "/ip4/0.0.0.0/tcp/30434/ws"]
 
 [[parachains]]
-id = 1006
+id = 2487
 chain_spec_path = "./zombienet/bulletin-westend-spec.json"
 cumulus_based = true
 
@@ -37,7 +43,12 @@ p2p_port = 10001
 rpc_port = 10000
 args = [
 	"--ipfs-server",
-	"-lparachain=debug,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace",
+	# Increase tx pool from 20->64 MiB
+	# "--pool-kbytes 65536",
+	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
+	# WebSocket P2P on p2p_port + 1 for smoldot light client support
+	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
+	"--listen-addr=/ip4/0.0.0.0/tcp/10002/ws",
 ]
 
 [[parachains.collators]]
@@ -48,5 +59,10 @@ p2p_port = 12347
 rpc_port = 12346
 args = [
 	"--ipfs-server",
-	"-lparachain=debug,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace",
+	# Increase tx pool from 20->64 MiB
+	# "--pool-kbytes 65536",
+	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
+	# WebSocket P2P on p2p_port + 1 for smoldot light client support
+	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
+	"--listen-addr=/ip4/0.0.0.0/tcp/12348/ws",
 ]

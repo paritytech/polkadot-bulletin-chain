@@ -1,6 +1,6 @@
 [package]
 name = "polkadot-bulletin-chain"
-version = "1.0.0"
+version = "1.1.0"
 description = "Polkadot Bulletin Chain node"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true
@@ -74,10 +74,10 @@ frame-benchmarking-cli = { workspace = true }
 frame-benchmarking = { optional = true, workspace = true, default-features = true }
 
 # Local Dependencies
-# Rococo testnet
-polkadot-bulletin-chain-runtime = { workspace = true }
-# Polkadot production
 bulletin-polkadot-runtime = { workspace = true }
+
+# TODO: remove when bulletin-polkadot is upgraded live with TX storage runtime API
+pallet-transaction-storage = { workspace = true }
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
@@ -90,7 +90,7 @@ runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
-	"polkadot-bulletin-chain-runtime/runtime-benchmarks",
+	"pallet-transaction-storage/runtime-benchmarks",
 	"polkadot-primitives/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
@@ -102,6 +102,6 @@ try-runtime = [
 	"frame-support/try-runtime",
 	"frame-try-runtime/try-runtime",
 	"pallet-transaction-payment/try-runtime",
-	"polkadot-bulletin-chain-runtime/try-runtime",
+	"pallet-transaction-storage/try-runtime",
 	"sp-runtime/try-runtime",
 ]

@@ -16,19 +16,28 @@
 
 //! Storage-specific configurations.
 
-use super::{Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, Equals},
+	traits::{EitherOfDiverse, Equals, SortedMembers},
 };
+use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
 use pallets_common::NoCurrency;
+use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
 
+/// Provides test accounts for use with `EnsureSignedBy`.
+pub struct TestAccounts;
+impl SortedMembers<AccountId> for TestAccounts {
+	fn sorted_members() -> Vec<AccountId> {
+		alloc::vec![Sr25519Keyring::Alice.to_account_id()]
+	}
+}
+
 parameter_types! {
-	// This currently _must_ be set to DEFAULT_STORAGE_PERIOD
-	pub const StoragePeriod: crate::BlockNumber = sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD;
 	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
@@ -51,13 +60,16 @@ impl pallet_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
-	type StoragePeriod = StoragePeriod;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
-		// Root can do whatever.
-		crate::EnsureRoot<Self::AccountId>,
-		// People chain can also handle authorizations.
-		EnsureXcm<Equals<PeopleLocation>>,
+		EitherOfDiverse<
+			// Root can do whatever.
+			crate::EnsureRoot<Self::AccountId>,
+			// People chain can also handle authorizations.
+			EnsureXcm<Equals<PeopleLocation>>,
+		>,
+		// Test accounts can also authorize for testing purposes.
+		EnsureSignedBy<TestAccounts, Self::AccountId>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;

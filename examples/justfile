@@ -2,15 +2,32 @@
 # 
 # See README.md for usage instructions.
 
-# PID file locations
-PID_DIR := "/tmp/bulletin-pids"
-
 # Default recipe - run the complete PAPI workflow test
-default: run-authorize-and-store
+default: (run-authorize-and-store "bulletin-westend-runtime" "ws")
 
-# Build the bulletin chain node in release mode
-build:
-    cargo build --release -p polkadot-bulletin-chain
+# Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
+# This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
+setup-parachain-prerequisites:
+    #!/usr/bin/env bash
+    set -e
+    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
+        echo "⏭️  Skipping parachain prerequisites (SKIP_PARACHAIN_SETUP set)"
+    else
+        ROOT_DIR="{{ justfile_directory() }}/.."
+        cd "$ROOT_DIR"
+        ./scripts/setup_parachain_prerequisites.sh
+        cd -
+    fi
+
+compute-test-dir:
+    #!/usr/bin/env bash
+    if [ -n "$TEST_DIR" ]; then
+        echo "$TEST_DIR";
+    else
+        TEST_DIR="$(mktemp -d /tmp/bulletin-tests-run-XXXXX)/test";
+        mkdir -p "$TEST_DIR";
+        echo "$TEST_DIR";
+    fi
 
 # Install JavaScript dependencies
 npm-install:
@@ -28,15 +45,39 @@ _ipfs-cmd:
         exit 1
     fi
 
-# Start start solo chain with zombienet in background
-bulletin-solo-zombienet-start:
+kill-pids test_dir:
     #!/usr/bin/env bash
     set -e
-    
-    mkdir -p {{ PID_DIR }}
-    
-    echo "⚡ Starting Bulletin chain with zombienet..."
-    
+
+    # Kill any existing background processes using stored PIDs
+    echo "🔍 Checking for existing background processes - PIDs stored in {{ test_dir }}..."
+    for pidfile in {{ test_dir }}/*.pid; do
+        if [ -f "$pidfile" ]; then
+            PID=$(cat "$pidfile")
+            SERVICE=$(basename "$pidfile" .pid)
+            if kill -0 $PID 2>/dev/null; then
+                echo "   Found existing $SERVICE process (PID: $PID), pidfile: $pidfile"
+                # Kill the process and its children
+                pkill -TERM -P $PID 2>/dev/null || true
+                sleep 2
+                pkill -9 -P $PID 2>/dev/null || true
+                sleep 2
+                kill -9 $PID 2>/dev/null || true
+                echo "   ✓ Cleaned up $SERVICE process"
+            else
+                echo "   Stale $SERVICE PID file: $pidfile found (process not running)"
+            fi
+            rm "$pidfile"
+        fi
+    done
+
+# Start solo chain or parachain with zombienet in background
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
+    #!/usr/bin/env bash
+    set -e
+
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
         ZOMBIENET_BIN="$ZOMBIENET_BINARY"
@@ -44,26 +85,115 @@ bulletin-solo-zombienet-start:
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
     
-    if [ -z "$ZOMBIENET_BIN" ] || [ ! -f "$ZOMBIENET_BIN" ]; then
+    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
         exit 1
     fi
-    
-    echo "   Using zombienet: $ZOMBIENET_BIN"
-    
-    # Get absolute paths for bulletin binary and config
-    BULLETIN_BINARY=$(cd .. && pwd)/target/release/polkadot-bulletin-chain
-    ZOMBIENET_CONFIG=$(cd .. && pwd)/zombienet/bulletin-polkadot-local.toml
-    
-    POLKADOT_BULLETIN_BINARY_PATH=$BULLETIN_BINARY $ZOMBIENET_BIN -p native spawn $ZOMBIENET_CONFIG > /tmp/zombienet.log 2>&1 &
+
+    echo "   Setting up Polkadot runtime..."
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    # Build the node binary (which will build the runtime as a dependency)
+    cargo build --release -p polkadot-bulletin-chain
+    POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain"
+
+    cat <<EOF
+    ⚡ Starting Bulletin chain with zombienet
+        runtime   : {{ runtime }}
+        test_dir  : {{ test_dir }}
+        zombienet : $ZOMBIENET_BIN
+        POLKADOT_BULLETIN_BINARY_PATH : $POLKADOT_BULLETIN_BINARY_PATH
+    EOF
+    cd "$ROOT_DIR"
+    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$POLKADOT_BULLETIN_BINARY_PATH" \
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
+    cd -
+
     ZOMBIENET_PID=$!
-    echo $ZOMBIENET_PID > {{ PID_DIR }}/zombienet.pid
+    echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
-    echo "   Log: /tmp/zombienet.log"
-    echo "   Waiting for chain to start (15 seconds)..."
-    sleep 15
+    echo "   Log: {{ test_dir }}/zombienet.log"
+    # TODO: replace with better check for produced/finalized block 1 with timeout 60s
+    echo "   Waiting for chain to start (60 seconds)..."
+    sleep 60
+
+# Start westend parachain with zombienet in background
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-parachain-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
+    #!/usr/bin/env bash
+    set -e
+
+    # Find zombienet binary (use env var if set, otherwise search)
+    if [ -n "$ZOMBIENET_BINARY" ]; then
+        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+    else
+        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
+    fi
+
+    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
+        echo "❌ Error: Zombienet binary not found"
+        echo "   Tried: $ZOMBIENET_BIN"
+        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
+        exit 1
+    fi
+
+    # Run prerequisites setup first
+    just setup-parachain-prerequisites
+
+    # Set paths to binaries
+    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
+        # Expect in the PATH
+        POLKADOT_BINARY_PATH=polkadot
+        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
+    else
+        POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
+        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+    fi
+
+    # Verify binaries exist after setup
+    if ! command -v "$POLKADOT_BINARY_PATH"; then
+        echo "❌ Error: Prerequisites setup completed but binaries still not found"
+        echo "   Expected POLKADOT_BINARY_PATH: $POLKADOT_BINARY_PATH"
+        exit 1
+    fi
+    if ! command -v "$POLKADOT_PARACHAIN_BINARY_PATH"; then
+        echo "❌ Error: Prerequisites setup completed but binaries still not found"
+        echo "   Expected POLKADOT_PARACHAIN_BINARY_PATH: $POLKADOT_PARACHAIN_BINARY_PATH"
+        exit 1
+    fi
+
+    # Create chain spec
+    echo "   Creating Westend chain spec..."
+    # Ensure binaries are in PATH and run from root directory
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    cd "$ROOT_DIR"
+    PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh
+    cd -
+
+    # Run zombienet from root directory so relative paths in config work correctly
+    cat <<EOF
+    ⚡ Starting Bulletin chain with zombienet
+        runtime   : {{ runtime }}
+        test_dir  : {{ test_dir }}
+        zombienet : $ZOMBIENET_BIN
+        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
+        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+    EOF
+    cd "$ROOT_DIR"
+    (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+        POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
+    cd -
+
+    ZOMBIENET_PID=$!
+    echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
+    echo "   Zombienet PID: $ZOMBIENET_PID"
+    echo "   Log: {{ test_dir }}/zombienet.log"
+    # TODO: replace with better check for produced/finalized block 1 with timeout 180s
+    echo "   Waiting for chain to start (180 seconds)..."
+    sleep 180
 
 # Check if Docker is available and running
 _check-docker:
@@ -82,194 +212,393 @@ _check-docker:
     fi
 
 # Start IPFS Docker container
-ipfs-start: _check-docker
+ipfs-start test_dir: _check-docker
     #!/usr/bin/env bash
     set -e
-    mkdir -p {{ PID_DIR }}
-    
     echo "🐳 Starting IPFS Docker container..."
-    
+
+    # Use non-standard ports to avoid conflicts with other IPFS instances
+    IPFS_SWARM_PORT=4011
+    IPFS_API_PORT=5011
+    IPFS_GATEWAY_PORT=8283
+
     # Pull latest kubo image if not present
     docker pull ipfs/kubo:latest
-    
+
+    # Remove old volume to start fresh (no cached peers)
+    docker volume rm ipfs-data 2>/dev/null || true
+
     # Determine network mode based on OS
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use port mapping
-        NETWORK_ARGS="-p 4001:4001 -p 8080:8080 -p 5001:5001"
+        # macOS - use bridge with port mapping
+        NETWORK_ARGS="-p ${IPFS_SWARM_PORT}:${IPFS_SWARM_PORT} -p ${IPFS_GATEWAY_PORT}:${IPFS_GATEWAY_PORT} -p ${IPFS_API_PORT}:${IPFS_API_PORT}"
     else
-        # Linux (including CI) - use host networking for direct access
-        NETWORK_ARGS="--network host -p 4001:4001 -p 8080:8080 -p 5001:5001"
+        # Linux (including CI) - use host networking so container can reach localhost services
+        NETWORK_ARGS="--network host"
     fi
-    
-    # Start Docker container
+
+    # Start container - daemon will init and start
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
-    echo "   Container: ipfs-node"
-    echo "   Waiting for container to start..."
-    sleep 5
-    
+    echo "   Container: ipfs-node (network: $NETWORK_ARGS)"
+
+    # Wait for the IPFS daemon API (default port 5001) to be ready
+    DEFAULT_API="--api /ip4/127.0.0.1/tcp/5001"
+    echo "   Waiting for IPFS daemon API to be ready..."
+    for i in $(seq 1 30); do
+        if docker exec ipfs-node ipfs $DEFAULT_API id >/dev/null 2>&1; then
+            echo "   IPFS API is ready"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "   ❌ IPFS API failed to start within 30 seconds"
+            exit 1
+        fi
+        sleep 1
+    done
+
+    # Configure IPFS for isolated mode via the running daemon's API (avoids repo.lock contention)
+    echo "   Configuring isolated mode..."
+    docker exec ipfs-node ipfs $DEFAULT_API bootstrap rm --all
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Routing.Type '"none"'
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Discovery.MDNS.Enabled false
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Swarm.RelayClient.Enabled false
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Swarm.RelayService.Enabled false
+
+    # Configure custom ports to avoid conflicts with other IPFS instances
+    echo "   Configuring custom ports (swarm: ${IPFS_SWARM_PORT}, api: ${IPFS_API_PORT}, gateway: ${IPFS_GATEWAY_PORT})..."
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
+    docker exec ipfs-node ipfs $DEFAULT_API config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
+    docker exec ipfs-node ipfs $DEFAULT_API config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
+
+    # Restart container to apply config changes (API now on custom port)
+    echo "   Restarting daemon with isolated config..."
+    docker restart ipfs-node
+
+    CUSTOM_API="--api /ip4/127.0.0.1/tcp/${IPFS_API_PORT}"
+    echo "   Waiting for IPFS daemon API to be ready on port ${IPFS_API_PORT}..."
+    for i in $(seq 1 30); do
+        if docker exec ipfs-node ipfs $CUSTOM_API id >/dev/null 2>&1; then
+            echo "   IPFS API is ready"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "   ❌ IPFS API failed to start within 30 seconds after restart"
+            exit 1
+        fi
+        sleep 1
+    done
+
+    docker exec ipfs-node ipfs --version
+
+    # Bitswap logging
+    docker logs -f ipfs-node > {{ test_dir }}/ipfs-node.log 2>&1 &
+    docker exec ipfs-node ipfs $CUSTOM_API log level bitswap debug
+    docker exec ipfs-node ipfs $CUSTOM_API log level bitswap/client debug
+
     # Store container name in PID directory for cleanup
-    echo "ipfs-node" > {{ PID_DIR }}/ipfs-docker.container
+    echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
 # Connect to IPFS nodes using Docker
-ipfs-connect:
+ipfs-connect runtime:
     #!/usr/bin/env bash
     set -e
-    
-    echo "🔗 Connecting IPFS nodes (Docker)..."
-    
+
+    echo "🔗 Connecting IPFS nodes (Docker, runtime: {{ runtime }})..."
+
     # Detect the correct host and protocol for Docker
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use dns4/host.docker.internal
+        # macOS - use dns4/host.docker.internal (bridge network)
         PROTOCOL="dns4"
         DOCKER_HOST="host.docker.internal"
     else
-        # Linux (with host networking) - use ip4/127.0.0.1
+        # Linux - use ip4/127.0.0.1 (host network mode)
         PROTOCOL="ip4"
         DOCKER_HOST="127.0.0.1"
     fi
-    
+
     echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
-    docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-    docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+
+    # Different peer IDs and ports for different runtimes
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        # Westend parachain peer IDs (WebSocket ports: 10002, 12348)
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        # Polkadot solo chain peer IDs (WebSocket ports: 10002, 12348)
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
+        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    else
+        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        exit 1
+    fi
 
 # Shutdown IPFS Docker container
-ipfs-shutdown:
+ipfs-shutdown test_dir:
     #!/usr/bin/env bash
     
     echo "🛑 Shutting down IPFS Docker container..."
     docker stop ipfs-node 2>/dev/null || echo "   ⚠ Container not running or already stopped"
     docker rm ipfs-node 2>/dev/null || echo "   ⚠ Container not found or already removed"
+    docker volume rm ipfs-data 2>/dev/null || echo "   ⚠ Volume not found or already removed"
     
     # Clean up container file if it exists
-    [ -f "{{ PID_DIR }}/ipfs-docker.container" ] && rm "{{ PID_DIR }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
+    [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
 
 # Start IPFS reconnect script in background (Docker mode)
-ipfs-reconnect-start:
+ipfs-reconnect-start test_dir runtime:
     #!/usr/bin/env bash
     set -e
+    echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
     
-    mkdir -p {{ PID_DIR }}
+    # Use different reconnect script for westend
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    cd "$ROOT_DIR"
+    # TODO: improve this for multiple runtimes
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        ./scripts/ipfs-reconnect-westend.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        ./scripts/ipfs-reconnect-solo.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+    else
+        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        exit 1
+    fi
+    cd -
     
-    echo "🔄 Starting IPFS reconnect script (Docker mode)..."
-    ./scripts/ipfs-reconnect-solo.sh docker > /tmp/ipfs-reconnect-docker.log 2>&1 &
     RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ PID_DIR }}/ipfs-reconnect-docker.pid
+    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
     echo "   Reconnect PID: $RECONNECT_PID"
-    echo "   Log: /tmp/ipfs-reconnect-docker.log"
+    echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
     sleep 2
 
 # Generate PAPI descriptors
-papi-generate:
+# Generate PAPI descriptors from a running node
+# Parameters:
+#   ws_url - WebSocket URL of the node (default: ws://localhost:10000)
+papi-generate ws_url="ws://localhost:10000": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🔧 Generating PAPI descriptors..."
-    npm run papi:generate
+    echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
+    npx papi add -w "{{ ws_url }}" bulletin
 
 # Setup all services using Docker for IPFS
-setup-services:
+# Parameters:
+#   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+setup-services test_dir runtime: npm-install
     #!/usr/bin/env bash
     set -e
-    
-    echo "🔧 Tearing down Docker services if they are running..."
-    just ipfs-shutdown
-    
-    echo "🐳 Setting up services with Docker IPFS..."
-    
-    # Start services with Docker
-    just ipfs-start
-    just bulletin-solo-zombienet-start
-    
-    # Wait a bit longer and verify zombienet is running
-    echo "🔍 Verifying zombienet is ready..."
-    sleep 10
-    echo "   Zombienet process check:"
-    ps aux | grep zombienet | grep -v grep || echo "   ⚠ No zombienet process found"
-    echo "   Checking zombienet log:"
-    tail -20 /tmp/zombienet.log || echo "   ⚠ Could not read zombienet log"
-    
-    just ipfs-connect
-    just ipfs-reconnect-start
+
+    # TODO: improve this for multiple runtimes
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        just bulletin-solo-zombienet-start "{{ test_dir }}" "{{ runtime }}"
+    else
+        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        exit 1
+    fi
+
+    # Generate PAPI descriptors from running node.
     just papi-generate
-    
+
+    # Start IPFS
+    echo "🔧 Tearing down Docker services if they are running..."
+    just ipfs-shutdown "{{ test_dir }}"
+    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
+    just ipfs-start "{{ test_dir }}"
+    just ipfs-connect "{{ runtime }}"
+    just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+
     echo "✅ Services setup complete (Docker mode)"
 
 # Stop all Docker services
-teardown-services:
+teardown-services test_dir:
     #!/usr/bin/env bash
-    
-    echo "🧹 Stopping all Docker services..."
-    
-    # Stop reconnect script
-    if [ -d {{ PID_DIR }} ]; then
-        for pidfile in {{ PID_DIR }}/*.pid; do
-            if [ -f "$pidfile" ]; then
-                PID=$(cat "$pidfile")
-                SERVICE=$(basename "$pidfile" .pid)
-                if kill $PID 2>/dev/null; then
-                    echo "   ✓ Stopped $SERVICE (PID: $PID)"
-                else
-                    echo "   ⚠ $SERVICE (PID: $PID) not running or already stopped"
-                fi
-                rm "$pidfile"
-            fi
-        done
-    fi
-    
+
+    # Stop all background processes
+    just kill-pids "{{ test_dir }}"
+
     # Stop Docker container
-    just ipfs-shutdown
-    
-    # Clean up PID directory
-    if [ -d {{ PID_DIR }} ]; then
-        rmdir {{ PID_DIR }} 2>/dev/null || true
-    fi
-    
+    echo "🧹 Stopping all Docker services..."
+    just ipfs-shutdown "{{ test_dir }}"
     echo "✅ Docker services stopped"
 
-# Run authorize and store example with Docker IPFS
+# Start all services for a runtime (use with run-test-* recipes)
+# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
+start-services test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    mkdir -p "{{ test_dir }}"
+    just setup-services "{{ test_dir }}" "{{ runtime }}"
+
+# Stop all services
+# Usage: just stop-services /tmp/my-test-dir
+stop-services test_dir:
+    #!/usr/bin/env bash
+    echo "📁 Stopping services - test directory: {{ test_dir }}"
+    just teardown-services "{{ test_dir }}"
+    echo "✅ Services stopped"
+
+# Run authorize-and-store test only (services must already be running via start-services)
 # Parameters:
+#   test_dir - Test directory where services are running
+#   runtime - Runtime name for smoldot chainspec path resolution
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-run-authorize-and-store mode="ws": build npm-install
+#   ws_url - WebSocket URL (default: ws://localhost:10000, only used in ws mode)
+#   seed - Account seed phrase or dev seed (default: //Alice, only used in ws mode)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot)..."
         SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
     elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws)..."
         SCRIPT_NAME="authorize_and_store_papi.js"
     else
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
         exit 1
     fi
-    echo ""
-    
-    just setup-services
-    node $SCRIPT_NAME
-    EXAMPLE_EXIT=$?
-    
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    if [ $EXAMPLE_EXIT -eq 0 ]; then
-        echo "✅ Example completed successfully!"
-    else
-        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
-    fi
-    
-    just teardown-services    
-    exit $EXAMPLE_EXIT
 
-# Run store chunked data example with Docker IPFS
-run-store-chunked-data: build npm-install
+    # Run the script with parameters
+    if [ "{{ mode }}" = "smoldot" ]; then
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
+        else
+            CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "{{ http_ipfs_api }}"
+        fi
+    else
+        node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    fi
+
+# Run store-chunked-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run native-ipfs-dag-pb-chunked-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-native-ipfs-dag-pb-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node native_ipfs_dag_pb_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run store-big-data test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   image_size - Image size preset: small, big32, big64, big96 (default: big64)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
+run-test-store-big-data test_dir image_size="big64" ws_url="ws://localhost:10000" seed="//Alice" ipfs_gateway_url="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+
+# Run authorize-preimage-and-store test only (services must already be running via start-services)
+# Parameters:
+#   test_dir - Test directory where services are running
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+    #!/usr/bin/env bash
+    set -e
+    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run Chopsticks compatibility check (services must already be running or use a live endpoint)
+# Parameters:
+#   endpoint - WebSocket URL of the Bulletin chain node (default: wss://westend-bulletin-rpc.polkadot.io)
+run-test-chopsticks endpoint="wss://westend-bulletin-rpc.polkadot.io": npm-install
+    #!/usr/bin/env bash
+    set -e
+    node check_chopsticks.js "{{ endpoint }}"
+
+# ============================================================================
+# Standalone recipes (with full setup/teardown) - kept for local dev convenience
+# ============================================================================
+
+# Run authorize and store example with Docker IPFS
+# Parameters:
+#   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+run-authorize-and-store runtime mode="ws": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting store chunked data + DAG-PB workflow test ..."
-    echo ""
+    if [ "{{ mode }}" = "smoldot" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }})..."
+        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
+    elif [ "{{ mode }}" = "ws" ]; then
+        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }})..."
+        SCRIPT_NAME="authorize_and_store_papi.js"
+    else
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
+    fi
 
-    just setup-services
-    node store_chunked_data.js
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    # Run the script with parameters
+    if [ "{{ mode }}" = "smoldot" ]; then
+        # Set chainspec path based on runtime
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            # Parachain: relay chain (required) + parachain spec (optional)
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
+        else # bulletin-polkadot-runtime (solochain)
+            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
+            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "http://127.0.0.1:8283"
+        fi
+    else
+        node $SCRIPT_NAME "ws://localhost:10000" "//Alice" "http://127.0.0.1:8283"
+    fi
+    EXAMPLE_EXIT=$?
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+    
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
+# Run store chunked data example with Docker IPFS
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283": npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting store chunked data + DAG-PB workflow test (runtime: {{ runtime }})..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     EXAMPLE_EXIT=$?
 
     echo ""
@@ -280,5 +609,101 @@ run-store-chunked-data: build npm-install
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
 
-    just teardown-services
+    just teardown-services "$TEST_DIR"
     exit $EXAMPLE_EXIT
+
+# Run store big data example.
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5011)
+run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:5011": npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting store big data workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
+# Run authorize preimage and store with PAPI example.
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   seed - Account seed phrase or dev seed (default: //Alice)
+#   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
+run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283": npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting authorize preimage and store with PAPI workflow test ..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    EXAMPLE_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $EXAMPLE_EXIT -eq 0 ]; then
+        echo "✅ Example completed successfully!"
+    else
+        echo "❌ Example failed with exit code $EXAMPLE_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $EXAMPLE_EXIT
+
+# ============================================================================
+# Live network tests (external endpoints - Westend, Paseo, etc.)
+# ============================================================================
+#
+# Run store-big-data test against live Bulletin chain deployments.
+# These require pre-authorized accounts.
+#
+# Usage:
+#   just run-live-tests-westend <seed>
+#   just run-live-tests-westend <seed> http://127.0.0.1:8283 small
+
+# Live network endpoints
+WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
+PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
+
+# Run store-big-data test against a live endpoint
+# Parameters:
+#   ws_url - WebSocket URL of the Bulletin chain node
+#   seed - Account seed phrase (must be pre-authorized on the network)
+#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
+#   image_size - Image size preset: small, big32, big64, big96 (default: small)
+_run-live-tests ws_url seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small": npm-install
+    #!/usr/bin/env bash
+    set -e
+    echo "🌐 Running live tests against: {{ ws_url }}"
+    just papi-generate "{{ ws_url }}"
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" --skip-authorize --skip-ipfs-verify
+
+# Run live tests against Westend Bulletin
+run-live-tests-westend seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+
+# Run live tests against Paseo Bulletin
+run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
