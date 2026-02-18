@@ -328,19 +328,44 @@ function UsageCard() {
             </div>
             <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations</p>
-              <div className="space-y-1 pl-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Users</span>
-                  <span className="text-sm">
-                    {formatNumber(stats.userAuths.count)} txns &middot; {formatBytes(stats.userAuths.bytes)}
-                  </span>
+              <p className="text-sm font-medium mb-2">Authorizations for Users</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Transactions
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {formatNumber(stats.userAuths.count)}
+                  </p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Preimages</span>
-                  <span className="text-sm">
-                    {formatNumber(stats.preimageAuths.count)} txns &middot; {formatBytes(stats.preimageAuths.bytes)}
-                  </span>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Bytes
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {formatBytes(stats.userAuths.bytes)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-medium mb-2">Authorizations for Preimages</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Transactions
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {formatNumber(stats.preimageAuths.count)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Bytes
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {formatBytes(stats.preimageAuths.bytes)}
+                  </p>
                 </div>
               </div>
             </div>
