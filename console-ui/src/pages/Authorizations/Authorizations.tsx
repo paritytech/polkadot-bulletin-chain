@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { RefreshCw, User, FileText, AlertCircle, Search, Plus, Shield, Droplet } from "lucide-react";
+import { RefreshCw, User, UserPlus, FileText, AlertCircle, Search, Plus, Shield, Droplet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
@@ -17,7 +18,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/Dialog";
 import { useApi } from "@/state/chain.state";
-import { useSudoKey } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import {
   useAuthorization,
@@ -27,6 +27,8 @@ import {
   fetchAccountAuthorization,
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
+import { FileUpload } from "@/components/FileUpload";
+import { getContentHash } from "@/lib/cid";
 import { formatBytes, formatNumber, formatAddress, bytesToHex } from "@/utils/format";
 import { SS58String, Enum, Binary } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
@@ -228,7 +230,6 @@ function AuthorizePreimageForm({ onSubmit, isSubmitting }: AuthorizePreimageForm
 function AccountAuthorizationsTab() {
   const api = useApi();
   const selectedAccount = useSelectedAccount();
-  const sudoKey = useSudoKey();
   const authorization = useAuthorization();
   const isLoading = useAuthorizationLoading();
 
@@ -243,8 +244,6 @@ function AccountAuthorizationsTab() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
-  const isSudo = selectedAccount && sudoKey && selectedAccount.address === sudoKey;
-
   const handleAuthorizeAccount = async (address: string, transactions: bigint, bytes: bigint) => {
     if (!api || !selectedAccount) return;
 
@@ -253,18 +252,16 @@ function AccountAuthorizationsTab() {
     setSubmitSuccess(null);
 
     try {
-      const authCall = api.tx.TransactionStorage.authorize_account({
+      const tx = api.tx.TransactionStorage.authorize_account({
         who: address as SS58String,
         transactions: Number(transactions),
         bytes,
       });
 
-      const sudoTx = api.tx.Sudo.sudo({ call: authCall.decodedCall });
-
       await new Promise<void>((resolve, reject) => {
         let resolved = false;
 
-        const subscription = sudoTx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
+        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
           next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
@@ -350,45 +347,6 @@ function AccountAuthorizationsTab() {
         <div className="p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
           {submitError}
         </div>
-      )}
-
-      {/* Sudo Authorization Card */}
-      {isSudo && (
-        <Card className="border-amber-500/50 bg-amber-500/5">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-amber-500" />
-                  Sudo Access
-                </CardTitle>
-                <CardDescription>
-                  You have sudo privileges. You can authorize accounts to use storage.
-                </CardDescription>
-              </div>
-              <Dialog open={isAuthorizeDialogOpen} onOpenChange={setIsAuthorizeDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Authorize Account
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Authorize Account</DialogTitle>
-                    <DialogDescription>
-                      Grant storage authorization to an account. This requires sudo privileges.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <AuthorizeAccountForm
-                    onSubmit={handleAuthorizeAccount}
-                    isSubmitting={isSubmitting}
-                  />
-                </DialogContent>
-              </Dialog>
-            </div>
-          </CardHeader>
-        </Card>
       )}
 
       {/* Current Account Authorization */}
@@ -539,7 +497,6 @@ function AccountAuthorizationsTab() {
 function PreimageAuthorizationsTab() {
   const api = useApi();
   const selectedAccount = useSelectedAccount();
-  const sudoKey = useSudoKey();
   const preimageAuths = usePreimageAuthorizations();
   const isLoading = usePreimageAuthsLoading();
 
@@ -547,8 +504,6 @@ function PreimageAuthorizationsTab() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-
-  const isSudo = selectedAccount && sudoKey && selectedAccount.address === sudoKey;
 
   const handleAuthorizePreimage = async (contentHash: string, maxSize: bigint) => {
     if (!api || !selectedAccount) return;
@@ -558,20 +513,17 @@ function PreimageAuthorizationsTab() {
     setSubmitSuccess(null);
 
     try {
-      // Normalize the content hash (ensure it has 0x prefix)
       const normalizedHash = contentHash.startsWith("0x") ? contentHash : `0x${contentHash}`;
 
-      const authCall = api.tx.TransactionStorage.authorize_preimage({
+      const tx = api.tx.TransactionStorage.authorize_preimage({
         content_hash: Binary.fromHex(normalizedHash),
         max_size: maxSize,
       });
 
-      const sudoTx = api.tx.Sudo.sudo({ call: authCall.decodedCall });
-
       await new Promise<void>((resolve, reject) => {
         let resolved = false;
 
-        const subscription = sudoTx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
+        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
           next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
@@ -636,45 +588,6 @@ function PreimageAuthorizationsTab() {
         </div>
       )}
 
-      {/* Sudo Authorization Card */}
-      {isSudo && (
-        <Card className="border-amber-500/50 bg-amber-500/5">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-amber-500" />
-                  Sudo Access
-                </CardTitle>
-                <CardDescription>
-                  You have sudo privileges. You can authorize preimages for unsigned uploads.
-                </CardDescription>
-              </div>
-              <Dialog open={isAuthorizeDialogOpen} onOpenChange={setIsAuthorizeDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Authorize Preimage
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Authorize Preimage</DialogTitle>
-                    <DialogDescription>
-                      Authorize a content hash for unsigned uploads. This requires sudo privileges.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <AuthorizePreimageForm
-                    onSubmit={handleAuthorizePreimage}
-                    isSubmitting={isSubmitting}
-                  />
-                </DialogContent>
-              </Dialog>
-            </div>
-          </CardHeader>
-        </Card>
-      )}
-
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -735,9 +648,287 @@ function PreimageAuthorizationsTab() {
   );
 }
 
+function FaucetAuthorizePreimagePanel() {
+  const api = useApi();
+
+  const [preimageHash, setPreimageHash] = useState("");
+  const [inputMode, setInputMode] = useState<"text" | "file">("text");
+  const [textData, setTextData] = useState("");
+  const [fileData, setFileData] = useState<Uint8Array | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [maxSize, setMaxSize] = useState("");
+  const [sizeUnit, setSizeUnit] = useState<"B" | "KB" | "MB">("KB");
+  const [isComputing, setIsComputing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+
+  const getSizeValue = (): bigint => {
+    const value = parseInt(maxSize, 10);
+    if (isNaN(value)) return 0n;
+    switch (sizeUnit) {
+      case "KB":
+        return BigInt(value) * 1024n;
+      case "MB":
+        return BigInt(value) * 1024n * 1024n;
+      default:
+        return BigInt(value);
+    }
+  };
+
+  // Compute blake2 hash when text changes
+  useEffect(() => {
+    if (inputMode !== "text" || !textData.trim()) return;
+
+    const computeHash = async () => {
+      setIsComputing(true);
+      try {
+        const data = new TextEncoder().encode(textData);
+        const hash = await getContentHash(data);
+        setPreimageHash(bytesToHex(hash));
+        setMaxSize(data.length.toString());
+        setSizeUnit("B");
+      } catch (err) {
+        console.error("Failed to compute hash:", err);
+      } finally {
+        setIsComputing(false);
+      }
+    };
+
+    computeHash();
+  }, [textData, inputMode]);
+
+  // Compute blake2 hash when file changes
+  useEffect(() => {
+    if (inputMode !== "file" || !fileData) return;
+
+    const computeHash = async () => {
+      setIsComputing(true);
+      try {
+        const hash = await getContentHash(fileData);
+        setPreimageHash(bytesToHex(hash));
+        setMaxSize(fileData.length.toString());
+        setSizeUnit("B");
+      } catch (err) {
+        console.error("Failed to compute hash:", err);
+      } finally {
+        setIsComputing(false);
+      }
+    };
+
+    computeHash();
+  }, [fileData, inputMode]);
+
+  const handleFileSelect = useCallback((file: File | null, data: Uint8Array | null) => {
+    setFileData(data);
+    setFileName(file?.name ?? null);
+    if (!data) {
+      setPreimageHash("");
+      setMaxSize("");
+    }
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!api || !preimageHash) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    try {
+      await cryptoWaitReady();
+      const keyring = new Keyring({ type: "sr25519" });
+      const alice = keyring.addFromUri("//Alice");
+      const aliceSigner = getPolkadotSigner(
+        alice.publicKey,
+        "Sr25519",
+        (data: Uint8Array) => alice.sign(data)
+      );
+
+      const normalizedHash = preimageHash.startsWith("0x") ? preimageHash : `0x${preimageHash}`;
+      const sizeValue = getSizeValue();
+
+      const tx = api.tx.TransactionStorage.authorize_preimage({
+        content_hash: Binary.fromHex(normalizedHash),
+        max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        let resolved = false;
+
+        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
+          next: (ev: any) => {
+            console.log("TX event:", ev.type);
+            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+              resolve();
+            }
+          },
+          error: (err: any) => {
+            if (!resolved) {
+              resolved = true;
+              reject(err);
+            }
+          },
+        });
+
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            subscription.unsubscribe();
+            reject(new Error("Transaction timed out"));
+          }
+        }, 120000);
+      });
+
+      setSubmitSuccess("Successfully authorized preimage");
+      fetchPreimageAuthorizations(api);
+    } catch (err) {
+      console.error("Preimage authorization failed:", err);
+      setSubmitError(err instanceof Error ? err.message : "Authorization failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const isValidHash = preimageHash.length === 0 || /^(0x)?[0-9a-fA-F]{64}$/.test(preimageHash);
+  const canSubmit = /^(0x)?[0-9a-fA-F]{64}$/.test(preimageHash) && !isSubmitting;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileText className="h-5 w-5" />
+          Authorize Preimage
+        </CardTitle>
+        <CardDescription>
+          Authorize a content hash for storage. Compute blake2 hash from text or file, or enter it directly. Signed automatically with //Alice.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {submitSuccess && (
+          <div className="mb-4 p-4 rounded-md bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400">
+            {submitSuccess}
+          </div>
+        )}
+        {submitError && (
+          <div className="mb-4 p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
+            {submitError}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Blake2 Hash (required)</label>
+            <div className="relative">
+              <Input
+                placeholder="0x... (32 bytes hex)"
+                value={preimageHash}
+                onChange={(e) => setPreimageHash(e.target.value)}
+                className="font-mono"
+                disabled={isSubmitting}
+              />
+              {isComputing && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <Spinner size="sm" />
+                </div>
+              )}
+            </div>
+            {!isValidHash && preimageHash.length > 0 && (
+              <p className="text-xs text-destructive">Must be a 32-byte hex string (64 hex chars)</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-muted-foreground">
+              Compute hash from data (optional)
+            </label>
+            <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as "text" | "file")}>
+              <TabsList>
+                <TabsTrigger value="text">Text</TabsTrigger>
+                <TabsTrigger value="file">File</TabsTrigger>
+              </TabsList>
+              <TabsContent value="text" className="space-y-2">
+                <Textarea
+                  placeholder="Enter text to compute blake2 hash..."
+                  value={textData}
+                  onChange={(e) => {
+                    setTextData(e.target.value);
+                    setSubmitSuccess(null);
+                    setSubmitError(null);
+                  }}
+                  className="min-h-[120px] font-mono"
+                  disabled={isSubmitting}
+                />
+              </TabsContent>
+              <TabsContent value="file">
+                <FileUpload
+                  onFileSelect={handleFileSelect}
+                  maxSize={10 * 1024 * 1024}
+                  disabled={isSubmitting}
+                />
+                {fileName && (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Selected: {fileName}
+                  </p>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Max Size</label>
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                placeholder="Maximum size"
+                value={maxSize}
+                onChange={(e) => setMaxSize(e.target.value)}
+                min="1"
+                className="flex-1"
+                disabled={isSubmitting}
+              />
+              <select
+                value={sizeUnit}
+                onChange={(e) => setSizeUnit(e.target.value as "B" | "KB" | "MB")}
+                className="px-3 py-2 border rounded-md bg-background text-sm"
+                disabled={isSubmitting}
+              >
+                <option value="B">Bytes</option>
+                <option value="KB">KB</option>
+                <option value="MB">MB</option>
+              </select>
+            </div>
+            {maxSize && (
+              <p className="text-xs text-muted-foreground">
+                = {formatBytes(getSizeValue())}
+              </p>
+            )}
+          </div>
+
+          <Button type="submit" disabled={!canSubmit} className="w-full">
+            {isSubmitting ? (
+              <>
+                <Spinner size="sm" className="mr-2" />
+                Authorizing Preimage...
+              </>
+            ) : (
+              <>
+                <FileText className="h-4 w-4 mr-2" />
+                Authorize Preimage
+              </>
+            )}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StorageFaucetTab() {
   const api = useApi();
-  const sudoKey = useSudoKey();
 
   const [forWho, setForWho] = useState("");
   const [transactions, setTransactions] = useState("100");
@@ -749,33 +940,36 @@ function StorageFaucetTab() {
     bytes: bigint;
     expiresAt?: number;
   } | null>(null);
-  const [aliceAddress, setAliceAddress] = useState<string>("");
+  const [bobAddress, setBobAddress] = useState<string>("");
   const [aliceBalance, setAliceBalance] = useState<bigint | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [isBobAuthorizing, setIsBobAuthorizing] = useState(false);
+  const [bobError, setBobError] = useState<string | null>(null);
+  const [bobSuccess, setBobSuccess] = useState<string | null>(null);
 
-  // Initialize Alice account and check balance
+  // Initialize Alice and Bob accounts
   useEffect(() => {
-    const initAlice = async () => {
+    const initAccounts = async () => {
       if (!api) return;
 
       try {
         await cryptoWaitReady();
         const keyring = new Keyring({ type: "sr25519" });
         const alice = keyring.addFromUri("//Alice");
-        setAliceAddress(alice.address);
+        const bob = keyring.addFromUri("//Bob");
+        setBobAddress(bob.address);
 
-        // Check Alice's balance
         const accountInfo = await api.query.System.Account.getValue(alice.address as SS58String);
         setAliceBalance(accountInfo?.data?.free ?? null);
       } catch (err) {
-        console.error("Failed to initialize Alice account:", err);
+        console.error("Failed to initialize dev accounts:", err);
       }
     };
 
-    initAlice();
+    initAccounts();
   }, [api]);
 
   const getBytesValue = (): bigint => {
@@ -798,7 +992,6 @@ function StorageFaucetTab() {
       return;
     }
 
-    // Validate SS58 address format
     if (forWho.length < 40) {
       return;
     }
@@ -839,14 +1032,9 @@ function StorageFaucetTab() {
     setSubmitSuccess(null);
 
     try {
-      // Ensure crypto is ready
       await cryptoWaitReady();
-
-      // Create Alice dev account signer using Polkadot.js keyring
       const keyring = new Keyring({ type: "sr25519" });
       const alice = keyring.addFromUri("//Alice");
-
-      // Create polkadot-api compatible signer
       const aliceSigner = getPolkadotSigner(
         alice.publicKey,
         "Sr25519",
@@ -856,18 +1044,16 @@ function StorageFaucetTab() {
       const txCount = BigInt(parseInt(transactions, 10) || 0);
       const bytesValue = getBytesValue();
 
-      const authCall = api.tx.TransactionStorage.authorize_account({
+      const tx = api.tx.TransactionStorage.authorize_account({
         who: forWho as SS58String,
         transactions: Number(txCount),
         bytes: bytesValue,
       });
 
-      const sudoTx = api.tx.Sudo.sudo({ call: authCall.decodedCall });
-
       await new Promise<void>((resolve, reject) => {
         let resolved = false;
 
-        const subscription = sudoTx.signSubmitAndWatch(aliceSigner).subscribe({
+        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
           next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
@@ -895,7 +1081,6 @@ function StorageFaucetTab() {
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
-      // Refresh authorization display
       const auth = await api.query.TransactionStorage.Authorizations.getValue(
         Enum("Account", forWho)
       );
@@ -929,14 +1114,86 @@ function StorageFaucetTab() {
     }
   };
 
+  const handleAuthorizeBob = async () => {
+    if (!api || !bobAddress) return;
+
+    setIsBobAuthorizing(true);
+    setBobError(null);
+    setBobSuccess(null);
+
+    try {
+      await cryptoWaitReady();
+      const keyring = new Keyring({ type: "sr25519" });
+      const alice = keyring.addFromUri("//Alice");
+      const aliceSigner = getPolkadotSigner(
+        alice.publicKey,
+        "Sr25519",
+        (data: Uint8Array) => alice.sign(data)
+      );
+
+      const tx = api.tx.TransactionStorage.authorize_account({
+        who: bobAddress as SS58String,
+        transactions: 100,
+        bytes: 10n * 1024n * 1024n,
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        let resolved = false;
+
+        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
+          next: (ev: any) => {
+            console.log("TX event:", ev.type);
+            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+              resolve();
+            }
+          },
+          error: (err: any) => {
+            if (!resolved) {
+              resolved = true;
+              reject(err);
+            }
+          },
+        });
+
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            subscription.unsubscribe();
+            reject(new Error("Transaction timed out"));
+          }
+        }, 120000);
+      });
+
+      setBobSuccess(`Successfully authorized Bob (${formatAddress(bobAddress, 8)}): 100 transactions, 10 MB`);
+    } catch (err) {
+      console.error("Bob authorization failed:", err);
+
+      let errorMessage = "Authorization failed";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === "object" && err !== null) {
+        const errObj = err as any;
+        if (errObj.type === "Invalid" && errObj.value?.type === "Payment") {
+          errorMessage = "Payment error: Alice account has insufficient balance.";
+        } else {
+          errorMessage = JSON.stringify(err);
+        }
+      }
+
+      setBobError(errorMessage);
+    } finally {
+      setIsBobAuthorizing(false);
+    }
+  };
+
   const hasBalanceIssue = aliceBalance !== null && aliceBalance === 0n;
-  const hasSudoIssue = aliceAddress && sudoKey && aliceAddress !== sudoKey;
   const canSubmit =
     forWho.length > 0 &&
     (parseInt(transactions, 10) > 0 || getBytesValue() > 0n) &&
     !isSubmitting &&
-    !hasBalanceIssue &&
-    !hasSudoIssue;
+    !hasBalanceIssue;
 
   return (
     <div className="space-y-6">
@@ -971,13 +1228,55 @@ function StorageFaucetTab() {
                 Warning: Alice account has zero balance. Transactions will fail. Please fund Alice or use a local dev chain.
               </div>
             )}
-            {aliceAddress && sudoKey && aliceAddress !== sudoKey && (
-              <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
-                <AlertCircle className="h-4 w-4 inline mr-2" />
-                Warning: Alice is not the sudo key on this network. Sudo calls will fail.
-              </div>
-            )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Quick Authorize Bob */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5" />
+            Authorize Bob
+          </CardTitle>
+          <CardDescription>
+            One-click authorization for the Bob dev account (//Bob). Grants 100 transactions and 10 MB. Signed automatically with //Alice.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {bobSuccess && (
+            <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400">
+              {bobSuccess}
+            </div>
+          )}
+          {bobError && (
+            <div className="p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
+              {bobError}
+            </div>
+          )}
+          {bobAddress && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Bob address: </span>
+              <span className="font-mono">{bobAddress}</span>
+            </div>
+          )}
+          <Button
+            onClick={handleAuthorizeBob}
+            disabled={!api || !bobAddress || isBobAuthorizing || hasBalanceIssue}
+            className="w-full"
+          >
+            {isBobAuthorizing ? (
+              <>
+                <Spinner size="sm" className="mr-2" />
+                Authorizing Bob...
+              </>
+            ) : (
+              <>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Authorize Bob (100 txs, 10 MB)
+              </>
+            )}
+          </Button>
         </CardContent>
       </Card>
 
@@ -1095,11 +1394,6 @@ function StorageFaucetTab() {
                   <AlertCircle className="h-4 w-4 mr-2" />
                   Alice Has No Balance
                 </>
-              ) : hasSudoIssue ? (
-                <>
-                  <AlertCircle className="h-4 w-4 mr-2" />
-                  Alice Is Not Sudo
-                </>
               ) : (
                 <>
                   <Droplet className="h-4 w-4 mr-2" />
@@ -1110,6 +1404,9 @@ function StorageFaucetTab() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Authorize Preimage */}
+      <FaucetAuthorizePreimagePanel />
     </div>
   );
 }
