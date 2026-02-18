@@ -308,23 +308,36 @@ function UsageCard() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div>
-              <p className="text-sm font-medium mb-2">Transactions</p>
-              <p className="text-sm pl-2 text-right">
-                {formatNumber(stats.transactions.count)} txns &middot; {formatBytes(stats.transactions.bytes)}
-              </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                  Transactions
+                </p>
+                <p className="text-2xl font-semibold">
+                  {formatNumber(stats.transactions.count)}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                  Bytes
+                </p>
+                <p className="text-2xl font-semibold">
+                  {formatBytes(stats.transactions.bytes)}
+                </p>
+              </div>
             </div>
+            <hr />
             <div>
               <p className="text-sm font-medium mb-2">Authorizations</p>
               <div className="space-y-1 pl-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">User</span>
+                  <span className="text-xs text-muted-foreground">Users</span>
                   <span className="text-sm">
                     {formatNumber(stats.userAuths.count)} txns &middot; {formatBytes(stats.userAuths.bytes)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Preimage</span>
+                  <span className="text-xs text-muted-foreground">Preimages</span>
                   <span className="text-sm">
                     {formatNumber(stats.preimageAuths.count)} txns &middot; {formatBytes(stats.preimageAuths.bytes)}
                   </span>

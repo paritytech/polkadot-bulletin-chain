@@ -50,7 +50,7 @@ export function AuthorizationCard({ className }: { className?: string }) {
               <Shield className="h-5 w-5" />
               Account's Storage
             </CardTitle>
-            <CardDescription>Your storage quota and permissions</CardDescription>
+            <CardDescription>Your storage usage and quota</CardDescription>
           </div>
           <Button
             variant="ghost"
@@ -80,7 +80,7 @@ export function AuthorizationCard({ className }: { className?: string }) {
                   Transactions
                 </p>
                 <p className="text-2xl font-semibold">
-                  {formatNumber(authorization.transactions)}
+                  {formatNumber(0)}
                 </p>
               </div>
               <div className="space-y-1">
@@ -88,16 +88,36 @@ export function AuthorizationCard({ className }: { className?: string }) {
                   Bytes
                 </p>
                 <p className="text-2xl font-semibold">
-                  {formatBytes(authorization.bytes)}
+                  {formatBytes(0)}
                 </p>
               </div>
             </div>
-            {authorization.expiresAt && (
-              <div className="pt-2 border-t">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Expires at block</span>
-                  <Badge variant="secondary">#{authorization.expiresAt}</Badge>
+            <hr />
+            <div>
+              <p className="text-sm font-medium mb-2">Authorization for</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Transactions
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {formatNumber(authorization.transactions)}
+                  </p>
                 </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Bytes
+                  </p>
+                  <p className="text-2xl font-semibold">
+                    {formatBytes(authorization.bytes)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            {authorization.expiresAt && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Expires at block</span>
+                <Badge variant="secondary">#{authorization.expiresAt}</Badge>
               </div>
             )}
           </div>
