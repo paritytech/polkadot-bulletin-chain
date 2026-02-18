@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Database, Upload, Download, Search, Shield, Wallet, Menu } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
@@ -102,6 +102,7 @@ function AccountDisplay() {
 
 export function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { status, storageType } = useChainState();
 
@@ -111,6 +112,16 @@ export function Header() {
       connectToNetwork("paseo");
     }
   }, []);
+
+  // Redirect to Dashboard if current route is disabled for the active storage type
+  useEffect(() => {
+    const currentItem = navItems.find(
+      (item) => !("separator" in item) && item.path === location.pathname
+    );
+    if (currentItem && !("separator" in currentItem) && storageType === "web3storage" && !currentItem.web3storage) {
+      navigate("/");
+    }
+  }, [storageType, location.pathname, navigate]);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -136,6 +147,7 @@ export function Header() {
                 ))}
               </SelectContent>
             </Select>
+            <div className="w-px h-5 bg-border hidden sm:block" />
           </div>
 
           {/* Desktop Navigation */}
@@ -162,7 +174,7 @@ export function Header() {
               return (
                 <Link key={item.path} to={item.path}>
                   <Button
-                    variant={location.pathname === item.path ? "secondary" : "ghost"}
+                    variant={location.pathname === item.path ? "default" : "ghost"}
                     size="sm"
                   >
                     <item.icon className="h-4 w-4 mr-1" />
@@ -222,7 +234,7 @@ export function Header() {
                     onClick={() => setMobileMenuOpen(false)}
                   >
                     <Button
-                      variant={location.pathname === item.path ? "secondary" : "ghost"}
+                      variant={location.pathname === item.path ? "default" : "ghost"}
                       className="w-full justify-start"
                     >
                       <item.icon className="h-4 w-4 mr-2" />
