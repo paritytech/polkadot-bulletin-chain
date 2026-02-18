@@ -21,3 +21,4 @@ package-lock.json
 # Local test files
 kubo/
 zombienet-*
+!zombienet-sdk-tests/

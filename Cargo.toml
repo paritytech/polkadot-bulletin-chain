@@ -178,6 +178,7 @@ members = [
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
+	"zombienet-sdk-tests",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.
