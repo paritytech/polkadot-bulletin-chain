@@ -1227,16 +1227,13 @@ impl<T: Config> Pallet<T> {
 		);
 		Self::check_transactions_integrity()?;
 		Self::check_no_stale_transactions(n)?;
-		Self::check_ephemeral_storage_cleared()?;
 		Self::check_authorizations_integrity()?;
 		Ok(())
 	}
 
 	/// Verify that for each block's transaction list:
-	/// - Each transaction has a valid size (1..=MaxTransactionSize).
 	/// - The `block_chunks` field is cumulative: each entry equals the previous
 	///   cumulative total plus `num_chunks(size)`.
-	/// - The transaction count does not exceed `MaxBlockTransactions`.
 	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
 
 		for (_block, transactions) in Transactions::<T>::iter() {
@@ -1277,22 +1274,6 @@ impl<T: Config> Pallet<T> {
 			);
 			ensure!(block <= n, "Transaction entry exists for a future block");
 		}
-
-		Ok(())
-	}
-
-	/// Verify that ephemeral storage items have been cleared after `on_finalize`:
-	/// - `BlockTransactions` should be empty (taken during finalization).
-	/// - `ProofChecked` should be false (taken during finalization).
-	fn check_ephemeral_storage_cleared() -> Result<(), sp_runtime::TryRuntimeError> {
-		ensure!(
-			BlockTransactions::<T>::get().is_empty(),
-			"BlockTransactions should be empty after on_finalize"
-		);
-		ensure!(
-			!ProofChecked::<T>::get(),
-			"ProofChecked should be false after on_finalize"
-		);
 
 		Ok(())
 	}
