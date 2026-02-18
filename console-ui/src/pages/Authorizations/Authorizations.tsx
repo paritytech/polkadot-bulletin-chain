@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { RefreshCw, User, FileText, AlertCircle, Search, Plus, Shield, Droplet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -945,7 +946,7 @@ function StorageFaucetTab() {
             Storage Faucet
           </CardTitle>
           <CardDescription>
-            Authorize storage allowances for accounts using the Alice dev account. This is for testing purposes only.
+            Authorize storage allowances for accounts using the Alice dev account. This is for testing purposes only. You can authorize an unlimited amount, so please be reasonable.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1106,17 +1107,24 @@ function StorageFaucetTab() {
 }
 
 export function Authorizations() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "faucet";
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Authorizations</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Faucet & Authorizations</h1>
         <p className="text-muted-foreground">
-          View and manage storage authorizations
+          Storage faucet and authorization management
         </p>
       </div>
 
-      <Tabs defaultValue="accounts">
+      <Tabs value={activeTab} onValueChange={(v) => setSearchParams({ tab: v })}>
         <TabsList>
+          <TabsTrigger value="faucet">
+            <Droplet className="h-4 w-4 mr-2" />
+            Storage Faucet
+          </TabsTrigger>
           <TabsTrigger value="accounts">
             <User className="h-4 w-4 mr-2" />
             Account
@@ -1125,19 +1133,15 @@ export function Authorizations() {
             <FileText className="h-4 w-4 mr-2" />
             Preimages
           </TabsTrigger>
-          <TabsTrigger value="faucet">
-            <Droplet className="h-4 w-4 mr-2" />
-            Storage Faucet
-          </TabsTrigger>
         </TabsList>
+        <TabsContent value="faucet" className="mt-4">
+          <StorageFaucetTab />
+        </TabsContent>
         <TabsContent value="accounts" className="mt-4">
           <AccountAuthorizationsTab />
         </TabsContent>
         <TabsContent value="preimages" className="mt-4">
           <PreimageAuthorizationsTab />
-        </TabsContent>
-        <TabsContent value="faucet" className="mt-4">
-          <StorageFaucetTab />
         </TabsContent>
       </Tabs>
     </div>

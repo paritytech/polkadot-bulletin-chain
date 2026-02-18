@@ -27,7 +27,7 @@ const navItems = [
   { path: "/upload", label: "Upload", icon: Upload },
   { path: "/download", label: "Download", icon: Download },
   { path: "/explorer", label: "Explorer", icon: Search },
-  { path: "/authorizations", label: "Auth", icon: Shield },
+  { path: "/authorizations", label: "Faucet", icon: Shield },
   { path: "/accounts", label: "Accounts", icon: Wallet },
 ];
 

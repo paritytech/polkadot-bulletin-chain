@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Upload, Download, Search, Shield, Database, Activity, BarChart3 } from "lucide-react";
+import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -44,6 +44,12 @@ function QuickActions() {
             <Button variant="outline" className="w-full justify-start">
               <Shield className="h-4 w-4 mr-2" />
               View Authorizations
+            </Button>
+          </Link>
+          <Link to="/authorizations?tab=faucet">
+            <Button variant="outline" className="w-full justify-start">
+              <Droplets className="h-4 w-4 mr-2" />
+              Storage Faucet
             </Button>
           </Link>
         </div>
