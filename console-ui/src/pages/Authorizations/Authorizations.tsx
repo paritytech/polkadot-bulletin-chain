@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { RefreshCw, User, FileText, AlertCircle, Search, Plus, Shield, Droplet } from "lucide-react";
+import { RefreshCw, User, FileText, AlertCircle, Search, Droplet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -8,15 +8,6 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/Dialog";
 import { useApi } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import {
@@ -35,198 +26,6 @@ import { cryptoWaitReady } from "@polkadot/util-crypto";
 import { Keyring } from "@polkadot/keyring";
 import { getPolkadotSigner } from "polkadot-api/signer";
 
-interface AuthorizeAccountFormProps {
-  onSubmit: (address: string, transactions: bigint, bytes: bigint) => Promise<void>;
-  isSubmitting: boolean;
-}
-
-function AuthorizeAccountForm({ onSubmit, isSubmitting }: AuthorizeAccountFormProps) {
-  const [address, setAddress] = useState("");
-  const [transactions, setTransactions] = useState("");
-  const [bytes, setBytes] = useState("");
-  const [bytesUnit, setBytesUnit] = useState<"B" | "KB" | "MB">("KB");
-
-  const getBytesValue = (): bigint => {
-    const value = parseInt(bytes, 10);
-    if (isNaN(value)) return 0n;
-    switch (bytesUnit) {
-      case "KB":
-        return BigInt(value) * 1024n;
-      case "MB":
-        return BigInt(value) * 1024n * 1024n;
-      default:
-        return BigInt(value);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const txCount = BigInt(parseInt(transactions, 10) || 0);
-    const bytesValue = getBytesValue();
-    await onSubmit(address, txCount, bytesValue);
-  };
-
-  const canSubmit = address.length > 0 && (parseInt(transactions, 10) > 0 || getBytesValue() > 0n);
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Account Address</label>
-        <Input
-          placeholder="Enter SS58 address..."
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          className="font-mono"
-          disabled={isSubmitting}
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Transactions</label>
-        <Input
-          type="number"
-          placeholder="Number of transactions"
-          value={transactions}
-          onChange={(e) => setTransactions(e.target.value)}
-          min="0"
-          disabled={isSubmitting}
-        />
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Bytes</label>
-        <div className="flex gap-2">
-          <Input
-            type="number"
-            placeholder="Amount"
-            value={bytes}
-            onChange={(e) => setBytes(e.target.value)}
-            min="0"
-            className="flex-1"
-            disabled={isSubmitting}
-          />
-          <select
-            value={bytesUnit}
-            onChange={(e) => setBytesUnit(e.target.value as "B" | "KB" | "MB")}
-            className="px-3 py-2 border rounded-md bg-background text-sm"
-            disabled={isSubmitting}
-          >
-            <option value="B">Bytes</option>
-            <option value="KB">KB</option>
-            <option value="MB">MB</option>
-          </select>
-        </div>
-        {bytes && (
-          <p className="text-xs text-muted-foreground">
-            = {formatBytes(getBytesValue())}
-          </p>
-        )}
-      </div>
-      <DialogFooter>
-        <Button type="submit" disabled={!canSubmit || isSubmitting}>
-          {isSubmitting ? (
-            <>
-              <Spinner size="sm" className="mr-2" />
-              Submitting...
-            </>
-          ) : (
-            "Authorize Account"
-          )}
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
-interface AuthorizePreimageFormProps {
-  onSubmit: (contentHash: string, maxSize: bigint) => Promise<void>;
-  isSubmitting: boolean;
-}
-
-function AuthorizePreimageForm({ onSubmit, isSubmitting }: AuthorizePreimageFormProps) {
-  const [contentHash, setContentHash] = useState("");
-  const [maxSize, setMaxSize] = useState("");
-  const [sizeUnit, setSizeUnit] = useState<"B" | "KB" | "MB">("KB");
-
-  const getSizeValue = (): bigint => {
-    const value = parseInt(maxSize, 10);
-    if (isNaN(value)) return 0n;
-    switch (sizeUnit) {
-      case "KB":
-        return BigInt(value) * 1024n;
-      case "MB":
-        return BigInt(value) * 1024n * 1024n;
-      default:
-        return BigInt(value);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await onSubmit(contentHash, getSizeValue());
-  };
-
-  const isValidHex = contentHash.length === 0 || /^(0x)?[0-9a-fA-F]{64}$/.test(contentHash);
-  const canSubmit = /^(0x)?[0-9a-fA-F]{64}$/.test(contentHash) && getSizeValue() > 0n;
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Content Hash</label>
-        <Input
-          placeholder="0x... (32 bytes hex)"
-          value={contentHash}
-          onChange={(e) => setContentHash(e.target.value)}
-          className="font-mono"
-          disabled={isSubmitting}
-        />
-        {!isValidHex && contentHash.length > 0 && (
-          <p className="text-xs text-destructive">Must be a 32-byte hex string</p>
-        )}
-      </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Max Size</label>
-        <div className="flex gap-2">
-          <Input
-            type="number"
-            placeholder="Maximum size"
-            value={maxSize}
-            onChange={(e) => setMaxSize(e.target.value)}
-            min="1"
-            className="flex-1"
-            disabled={isSubmitting}
-          />
-          <select
-            value={sizeUnit}
-            onChange={(e) => setSizeUnit(e.target.value as "B" | "KB" | "MB")}
-            className="px-3 py-2 border rounded-md bg-background text-sm"
-            disabled={isSubmitting}
-          >
-            <option value="B">Bytes</option>
-            <option value="KB">KB</option>
-            <option value="MB">MB</option>
-          </select>
-        </div>
-        {maxSize && (
-          <p className="text-xs text-muted-foreground">
-            = {formatBytes(getSizeValue())}
-          </p>
-        )}
-      </div>
-      <DialogFooter>
-        <Button type="submit" disabled={!canSubmit || isSubmitting}>
-          {isSubmitting ? (
-            <>
-              <Spinner size="sm" className="mr-2" />
-              Submitting...
-            </>
-          ) : (
-            "Authorize Preimage"
-          )}
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
 function AccountAuthorizationsTab() {
   const api = useApi();
   const selectedAccount = useSelectedAccount();
@@ -239,68 +38,6 @@ function AccountAuthorizationsTab() {
     authorization: { transactions: bigint; bytes: bigint; expiresAt?: number } | null;
   } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [isAuthorizeDialogOpen, setIsAuthorizeDialogOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-
-  const handleAuthorizeAccount = async (address: string, transactions: bigint, bytes: bigint) => {
-    if (!api || !selectedAccount) return;
-
-    setIsSubmitting(true);
-    setSubmitError(null);
-    setSubmitSuccess(null);
-
-    try {
-      const tx = api.tx.TransactionStorage.authorize_account({
-        who: address as SS58String,
-        transactions: Number(transactions),
-        bytes,
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
-
-      setSubmitSuccess(`Successfully authorized account ${formatAddress(address, 8)}`);
-      setIsAuthorizeDialogOpen(false);
-
-      // Refresh the authorization if it was for the current account
-      if (address === selectedAccount.address) {
-        fetchAccountAuthorization(api, selectedAccount.address as SS58String);
-      }
-    } catch (err) {
-      console.error("Authorization failed:", err);
-      setSubmitError(err instanceof Error ? err.message : "Authorization failed");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleSearch = async () => {
     if (!api || !searchAddress) return;
@@ -337,18 +74,6 @@ function AccountAuthorizationsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Success/Error Messages */}
-      {submitSuccess && (
-        <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400">
-          {submitSuccess}
-        </div>
-      )}
-      {submitError && (
-        <div className="p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
-          {submitError}
-        </div>
-      )}
-
       {/* Current Account Authorization */}
       <Card>
         <CardHeader>
@@ -496,71 +221,8 @@ function AccountAuthorizationsTab() {
 
 function PreimageAuthorizationsTab() {
   const api = useApi();
-  const selectedAccount = useSelectedAccount();
   const preimageAuths = usePreimageAuthorizations();
   const isLoading = usePreimageAuthsLoading();
-
-  const [isAuthorizeDialogOpen, setIsAuthorizeDialogOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-
-  const handleAuthorizePreimage = async (contentHash: string, maxSize: bigint) => {
-    if (!api || !selectedAccount) return;
-
-    setIsSubmitting(true);
-    setSubmitError(null);
-    setSubmitSuccess(null);
-
-    try {
-      const normalizedHash = contentHash.startsWith("0x") ? contentHash : `0x${contentHash}`;
-
-      const tx = api.tx.TransactionStorage.authorize_preimage({
-        content_hash: Binary.fromHex(normalizedHash),
-        max_size: maxSize,
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
-
-      setSubmitSuccess(`Successfully authorized preimage`);
-      setIsAuthorizeDialogOpen(false);
-
-      // Refresh the preimage authorizations list
-      fetchPreimageAuthorizations(api);
-    } catch (err) {
-      console.error("Preimage authorization failed:", err);
-      setSubmitError(err instanceof Error ? err.message : "Authorization failed");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleRefresh = () => {
     if (api) {
@@ -576,18 +238,6 @@ function PreimageAuthorizationsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Success/Error Messages */}
-      {submitSuccess && (
-        <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400">
-          {submitSuccess}
-        </div>
-      )}
-      {submitError && (
-        <div className="p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
-          {submitError}
-        </div>
-      )}
-
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
