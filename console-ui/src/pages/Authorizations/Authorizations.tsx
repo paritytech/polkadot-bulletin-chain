@@ -1145,7 +1145,7 @@ function StorageFaucetTab() {
             {aliceBalance !== null && aliceBalance === 0n && (
               <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
                 <AlertCircle className="h-4 w-4 inline mr-2" />
-                Warning: Alice account has zero balance. Transactions will fail. Please fund Alice or use a local dev chain.
+                Warning: Alice account has zero balance. Transactions will fail.
               </div>
             )}
           </div>
