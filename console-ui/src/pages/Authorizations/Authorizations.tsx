@@ -27,7 +27,7 @@ import {
   fetchAccountAuthorization,
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
-import { formatBytes, formatAddress, bytesToHex } from "@/utils/format";
+import { formatBytes, formatNumber, formatAddress, bytesToHex } from "@/utils/format";
 import { SS58String, Enum, Binary } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
 import { Keyring } from "@polkadot/keyring";
@@ -433,7 +433,7 @@ function AccountAuthorizationsTab() {
                   Transactions Remaining
                 </p>
                 <p className="text-2xl font-semibold">
-                  {authorization.transactions.toLocaleString()}
+                  {formatNumber(Number(authorization.transactions))}
                 </p>
               </div>
               <div className="space-y-1">
@@ -450,7 +450,7 @@ function AccountAuthorizationsTab() {
                     Expires at Block
                   </p>
                   <p className="text-2xl font-semibold">
-                    #{authorization.expiresAt.toLocaleString()}
+                    #{formatNumber(authorization.expiresAt)}
                   </p>
                 </div>
               )}
@@ -497,18 +497,32 @@ function AccountAuthorizationsTab() {
                 {searchResult.address}
               </p>
               {searchResult.authorization ? (
-                <div className="grid sm:grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Transactions:</span>{" "}
-                    <span className="font-medium">
-                      {searchResult.authorization.transactions.toLocaleString()}
-                    </span>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Transactions
+                    </p>
+                    <p className="text-2xl font-semibold">
+                      {formatNumber(Number(searchResult.authorization.transactions))}
+                    </p>
                   </div>
-                  <div>
-                    <span className="text-muted-foreground">Bytes:</span>{" "}
-                    <span className="font-medium">
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Bytes
+                    </p>
+                    <p className="text-2xl font-semibold">
                       {formatBytes(searchResult.authorization.bytes)}
-                    </span>
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Expires at Block
+                    </p>
+                    <p className="text-2xl font-semibold">
+                      {searchResult.authorization.expiresAt
+                        ? `#${formatNumber(searchResult.authorization.expiresAt)}`
+                        : "Never"}
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -755,7 +769,7 @@ function StorageFaucetTab() {
 
         // Check Alice's balance
         const accountInfo = await api.query.System.Account.getValue(alice.address as SS58String);
-        setAliceBalance(accountInfo.data.free);
+        setAliceBalance(accountInfo?.data?.free ?? null);
       } catch (err) {
         console.error("Failed to initialize Alice account:", err);
       }
@@ -951,12 +965,6 @@ function StorageFaucetTab() {
         </CardHeader>
         <CardContent>
           <div className="space-y-2 text-sm">
-            {aliceAddress && (
-              <div className="flex items-center justify-between p-3 rounded-md bg-secondary/50">
-                <span className="text-muted-foreground">Alice Address:</span>
-                <span className="font-mono">{formatAddress(aliceAddress, 8)}</span>
-              </div>
-            )}
             {aliceBalance !== null && aliceBalance === 0n && (
               <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
                 <AlertCircle className="h-4 w-4 inline mr-2" />
@@ -1009,7 +1017,7 @@ function StorageFaucetTab() {
                       <div>
                         <span className="text-muted-foreground">Transactions:</span>{" "}
                         <span className="font-medium">
-                          {authorization.transactions.toLocaleString()}
+                          {formatNumber(Number(authorization.transactions))}
                         </span>
                       </div>
                       <div>
@@ -1022,7 +1030,7 @@ function StorageFaucetTab() {
                         <div className="sm:col-span-2">
                           <span className="text-muted-foreground">Expires at block:</span>{" "}
                           <span className="font-medium">
-                            #{authorization.expiresAt.toLocaleString()}
+                            #{formatNumber(authorization.expiresAt)}
                           </span>
                         </div>
                       )}

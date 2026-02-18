@@ -28,8 +28,8 @@ const navItems = [
   { path: "/download", label: "Download", icon: Download },
   { path: "/explorer", label: "Explorer", icon: Search },
   { path: "/authorizations", label: "Faucet", icon: Shield },
-  { path: "/accounts", label: "Accounts", icon: Wallet },
-];
+  { separator: true },
+] as const;
 
 function ConnectionStatus() {
   const { status, blockNumber } = useChainState();
@@ -140,17 +140,21 @@ export function Header() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map(({ path, label, icon: Icon }) => (
-              <Link key={path} to={path}>
-                <Button
-                  variant={location.pathname === path ? "secondary" : "ghost"}
-                  size="sm"
-                >
-                  <Icon className="h-4 w-4 mr-1" />
-                  {label}
-                </Button>
-              </Link>
-            ))}
+            {navItems.map((item, i) =>
+              "separator" in item ? (
+                <div key={i} className="w-px h-5 bg-border mx-1" />
+              ) : (
+                <Link key={item.path} to={item.path}>
+                  <Button
+                    variant={location.pathname === item.path ? "secondary" : "ghost"}
+                    size="sm"
+                  >
+                    <item.icon className="h-4 w-4 mr-1" />
+                    {item.label}
+                  </Button>
+                </Link>
+              )
+            )}
           </nav>
 
           {/* Right side */}
@@ -177,21 +181,25 @@ export function Header() {
         {mobileMenuOpen && (
           <nav className="md:hidden py-4 border-t">
             <div className="flex flex-col gap-1">
-              {navItems.map(({ path, label, icon: Icon }) => (
-                <Link
-                  key={path}
-                  to={path}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Button
-                    variant={location.pathname === path ? "secondary" : "ghost"}
-                    className="w-full justify-start"
+              {navItems.map((item, i) =>
+                "separator" in item ? (
+                  <div key={i} className="h-px bg-border my-1" />
+                ) : (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMobileMenuOpen(false)}
                   >
-                    <Icon className="h-4 w-4 mr-2" />
-                    {label}
-                  </Button>
-                </Link>
-              ))}
+                    <Button
+                      variant={location.pathname === item.path ? "secondary" : "ghost"}
+                      className="w-full justify-start"
+                    >
+                      <item.icon className="h-4 w-4 mr-2" />
+                      {item.label}
+                    </Button>
+                  </Link>
+                )
+              )}
               <div className="pt-2 mt-2 border-t">
                 <NetworkSwitcher />
               </div>
