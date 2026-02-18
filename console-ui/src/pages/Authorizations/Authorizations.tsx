@@ -956,12 +956,6 @@ function StorageFaucetTab() {
                 <span className="font-mono">{formatAddress(aliceAddress, 8)}</span>
               </div>
             )}
-            {aliceBalance !== null && (
-              <div className="flex items-center justify-between p-3 rounded-md bg-secondary/50">
-                <span className="text-muted-foreground">Alice Balance:</span>
-                <span className="font-mono">{formatBytes(aliceBalance)}</span>
-              </div>
-            )}
             {aliceBalance !== null && aliceBalance === 0n && (
               <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
                 <AlertCircle className="h-4 w-4 inline mr-2" />
