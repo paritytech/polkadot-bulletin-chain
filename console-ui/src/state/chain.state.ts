@@ -4,7 +4,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_dotspark } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, bulletin_dotspark, web3_storage } from "@polkadot-api/descriptors";
 
 export type StorageType = "bulletin" | "web3storage";
 
@@ -85,11 +85,17 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const DESCRIPTORS: Record<string, any> = {
-  local: bulletin_westend,
-  westend: bulletin_westend,
-  paseo: bulletin_paseo,
-  dotspark: bulletin_dotspark,
+const DESCRIPTORS: Record<string, Record<string, any>> = {
+  bulletin: {
+    local: bulletin_westend,
+    westend: bulletin_westend,
+    paseo: bulletin_paseo,
+    dotspark: bulletin_dotspark,
+  },
+  web3storage: {
+    local: web3_storage,
+    westend: web3_storage,
+  },
 };
 
 export interface ChainState {
@@ -190,7 +196,7 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     const client = createClient(provider);
     clientSubject.next(client);
 
-    const descriptor = DESCRIPTORS[networkId] ?? bulletin_westend;
+    const descriptor = DESCRIPTORS[storageTypeSubject.getValue()]?.[networkId] ?? bulletin_westend;
     const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
     apiSubject.next(api);
 

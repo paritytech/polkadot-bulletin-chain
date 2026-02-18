@@ -23,12 +23,12 @@ import { cn } from "@/utils/cn";
 import { useState, useEffect } from "react";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: Database },
-  { path: "/upload", label: "Upload", icon: Upload },
-  { path: "/download", label: "Download", icon: Download },
-  { path: "/explorer", label: "Explorer", icon: Search },
-  { path: "/authorizations", label: "Auth", icon: Shield },
-  { path: "/accounts", label: "Accounts", icon: Wallet },
+  { path: "/", label: "Dashboard", icon: Database, web3storage: true },
+  { path: "/explorer", label: "Explorer", icon: Search, web3storage: true },
+  { path: "/upload", label: "Upload", icon: Upload, web3storage: false },
+  { path: "/download", label: "Download", icon: Download, web3storage: false },
+  { path: "/authorizations", label: "Auth", icon: Shield, web3storage: false },
+  { path: "/accounts", label: "Accounts", icon: Wallet, web3storage: false },
 ];
 
 function ConnectionStatus() {
@@ -140,17 +140,34 @@ export function Header() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map(({ path, label, icon: Icon }) => (
-              <Link key={path} to={path}>
-                <Button
-                  variant={location.pathname === path ? "secondary" : "ghost"}
-                  size="sm"
-                >
-                  <Icon className="h-4 w-4 mr-1" />
-                  {label}
-                </Button>
-              </Link>
-            ))}
+            {navItems.map(({ path, label, icon: Icon, web3storage }) => {
+              const disabled = storageType === "web3storage" && !web3storage;
+              if (disabled) {
+                return (
+                  <Button
+                    key={path}
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className="opacity-30"
+                  >
+                    <Icon className="h-4 w-4 mr-1" />
+                    {label}
+                  </Button>
+                );
+              }
+              return (
+                <Link key={path} to={path}>
+                  <Button
+                    variant={location.pathname === path ? "secondary" : "ghost"}
+                    size="sm"
+                  >
+                    <Icon className="h-4 w-4 mr-1" />
+                    {label}
+                  </Button>
+                </Link>
+              );
+            })}
           </nav>
 
           {/* Right side */}
@@ -177,21 +194,37 @@ export function Header() {
         {mobileMenuOpen && (
           <nav className="md:hidden py-4 border-t">
             <div className="flex flex-col gap-1">
-              {navItems.map(({ path, label, icon: Icon }) => (
-                <Link
-                  key={path}
-                  to={path}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Button
-                    variant={location.pathname === path ? "secondary" : "ghost"}
-                    className="w-full justify-start"
+              {navItems.map(({ path, label, icon: Icon, web3storage }) => {
+                const disabled = storageType === "web3storage" && !web3storage;
+                if (disabled) {
+                  return (
+                    <Button
+                      key={path}
+                      variant="ghost"
+                      className="w-full justify-start opacity-30"
+                      disabled
+                    >
+                      <Icon className="h-4 w-4 mr-2" />
+                      {label}
+                    </Button>
+                  );
+                }
+                return (
+                  <Link
+                    key={path}
+                    to={path}
+                    onClick={() => setMobileMenuOpen(false)}
                   >
-                    <Icon className="h-4 w-4 mr-2" />
-                    {label}
-                  </Button>
-                </Link>
-              ))}
+                    <Button
+                      variant={location.pathname === path ? "secondary" : "ghost"}
+                      className="w-full justify-start"
+                    >
+                      <Icon className="h-4 w-4 mr-2" />
+                      {label}
+                    </Button>
+                  </Link>
+                );
+              })}
               <div className="pt-2 mt-2 border-t">
                 <NetworkSwitcher />
               </div>

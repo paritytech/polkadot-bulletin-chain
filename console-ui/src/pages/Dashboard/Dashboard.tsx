@@ -404,6 +404,92 @@ function UsageCard() {
   );
 }
 
+function Web3StorageTotalsCard() {
+  const api = useApi();
+  const [providerCount, setProviderCount] = useState<number | null>(null);
+  const [bucketCount, setBucketCount] = useState<number | null>(null);
+  const [challengeCount, setChallengeCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!api) return;
+
+    let cancelled = false;
+    setLoading(true);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const typedApi = api as any;
+
+    Promise.all([
+      typedApi.query.StorageProvider.Providers.getEntries(),
+      typedApi.query.StorageProvider.Buckets.getEntries(),
+      typedApi.query.StorageProvider.Challenges.getEntries(),
+    ])
+      .then(([providers, buckets, challenges]: [unknown[], unknown[], unknown[]]) => {
+        if (cancelled) return;
+        setProviderCount(providers.length);
+        setBucketCount(buckets.length);
+        setChallengeCount(challenges.length);
+      })
+      .catch((err: unknown) => {
+        console.error("Failed to fetch storage totals:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <BarChart3 className="h-5 w-5" />
+          Storage Totals
+        </CardTitle>
+        <CardDescription>On-chain storage provider statistics</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading || providerCount === null ? (
+          <div className="flex items-center justify-center py-4">
+            <Spinner size="sm" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Providers
+              </p>
+              <p className="text-2xl font-semibold">
+                {formatNumber(providerCount)}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Buckets
+              </p>
+              <p className="text-2xl font-semibold">
+                {formatNumber(bucketCount ?? 0)}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Challenges
+              </p>
+              <p className="text-2xl font-semibold">
+                {formatNumber(challengeCount ?? 0)}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Dashboard() {
   const { storageType } = useChainState();
 
@@ -422,6 +508,7 @@ export function Dashboard() {
         <div className="grid gap-6 md:grid-cols-2">
           <WelcomeCard storageType={storageType} />
           <ChainInfoCard />
+          <Web3StorageTotalsCard />
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
