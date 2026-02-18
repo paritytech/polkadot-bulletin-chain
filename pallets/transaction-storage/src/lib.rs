@@ -1221,10 +1221,7 @@ pub mod pallet {
 #[cfg(any(test, feature = "try-runtime"))]
 impl<T: Config> Pallet<T> {
 	pub(crate) fn do_try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
-		ensure!(
-			!Self::retention_period().is_zero(),
-			"RetentionPeriod must not be zero"
-		);
+		ensure!(!Self::retention_period().is_zero(), "RetentionPeriod must not be zero");
 		Self::check_transactions_integrity()?;
 		Self::check_no_stale_transactions(n)?;
 		Self::check_authorizations_integrity()?;
@@ -1232,18 +1229,15 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// Verify that for each block's transaction list:
-	/// - The `block_chunks` field is cumulative: each entry equals the previous
-	///   cumulative total plus `num_chunks(size)`.
+	/// - The `block_chunks` field is cumulative: each entry equals the previous cumulative total
+	///   plus `num_chunks(size)`.
 	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
 		for (_block, transactions) in Transactions::<T>::iter() {
 			let mut cumulative_chunks: ChunkIndex = 0;
 			for tx in transactions.iter() {
 				let expected_chunks = num_chunks(tx.size);
 				cumulative_chunks = cumulative_chunks.saturating_add(expected_chunks);
-				ensure!(
-					tx.block_chunks == cumulative_chunks,
-					"tx.block_chunks is not cumulative"
-				);
+				ensure!(tx.block_chunks == cumulative_chunks, "tx.block_chunks is not cumulative");
 			}
 
 			// The last entry's block_chunks should equal total_chunks for the block.
@@ -1260,15 +1254,14 @@ impl<T: Config> Pallet<T> {
 	/// Verify that no `Transactions` entries exist for blocks older than
 	/// `current_block - retention_period`. These should have been cleaned up
 	/// by `on_initialize`.
-	fn check_no_stale_transactions(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+	fn check_no_stale_transactions(
+		n: BlockNumberFor<T>,
+	) -> Result<(), sp_runtime::TryRuntimeError> {
 		let period = Self::retention_period();
 		let oldest_valid = n.saturating_sub(period);
 
 		for (block, _) in Transactions::<T>::iter() {
-			ensure!(
-				block >= oldest_valid,
-				"Stale transaction entry found beyond retention period"
-			);
+			ensure!(block >= oldest_valid, "Stale transaction entry found beyond retention period");
 			ensure!(block <= n, "Transaction entry exists for a future block");
 		}
 
