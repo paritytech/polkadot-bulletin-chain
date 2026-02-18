@@ -1238,8 +1238,6 @@ impl<T: Config> Pallet<T> {
 	///   cumulative total plus `num_chunks(size)`.
 	/// - The transaction count does not exceed `MaxBlockTransactions`.
 	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
-		let max_size = T::MaxTransactionSize::get();
-		let max_txs = T::MaxBlockTransactions::get() as usize;
 
 		for (_block, transactions) in Transactions::<T>::iter() {
 			ensure!(
