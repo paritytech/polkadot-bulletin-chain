@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Database, Upload, Download, Search, Shield, Wallet, Menu } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
@@ -23,13 +23,13 @@ import { cn } from "@/utils/cn";
 import { useState, useEffect } from "react";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: Database },
-  { path: "/upload", label: "Upload", icon: Upload },
-  { path: "/download", label: "Download", icon: Download },
-  { path: "/explorer", label: "Explorer", icon: Search },
-  { path: "/authorizations", label: "Auth", icon: Shield },
-  { path: "/accounts", label: "Accounts", icon: Wallet },
-];
+  { path: "/", label: "Dashboard", icon: Database, web3storage: true },
+  { path: "/authorizations", label: "Faucet", icon: Shield, web3storage: false },
+  { path: "/explorer", label: "Explorer", icon: Search, web3storage: true },
+  { path: "/upload", label: "Upload", icon: Upload, web3storage: false },
+  { path: "/download", label: "Download", icon: Download, web3storage: false },
+  { separator: true },
+] as const;
 
 function ConnectionStatus() {
   const { status, blockNumber } = useChainState();
@@ -102,6 +102,7 @@ function AccountDisplay() {
 
 export function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { status, storageType } = useChainState();
 
@@ -111,6 +112,16 @@ export function Header() {
       connectToNetwork("paseo");
     }
   }, []);
+
+  // Redirect to Dashboard if current route is disabled for the active storage type
+  useEffect(() => {
+    const currentItem = navItems.find(
+      (item) => !("separator" in item) && item.path === location.pathname
+    );
+    if (currentItem && !("separator" in currentItem) && storageType === "web3storage" && !currentItem.web3storage) {
+      navigate("/");
+    }
+  }, [storageType, location.pathname, navigate]);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -136,21 +147,42 @@ export function Header() {
                 ))}
               </SelectContent>
             </Select>
+            <div className="w-px h-5 bg-border hidden sm:block" />
           </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map(({ path, label, icon: Icon }) => (
-              <Link key={path} to={path}>
-                <Button
-                  variant={location.pathname === path ? "secondary" : "ghost"}
-                  size="sm"
-                >
-                  <Icon className="h-4 w-4 mr-1" />
-                  {label}
-                </Button>
-              </Link>
-            ))}
+            {navItems.map((item, i) => {
+              if ("separator" in item) {
+                return <div key={i} className="w-px h-5 bg-border mx-1" />;
+              }
+              const disabled = storageType === "web3storage" && !item.web3storage;
+              if (disabled) {
+                return (
+                  <Button
+                    key={item.path}
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className="opacity-30"
+                  >
+                    <item.icon className="h-4 w-4 mr-1" />
+                    {item.label}
+                  </Button>
+                );
+              }
+              return (
+                <Link key={item.path} to={item.path}>
+                  <Button
+                    variant={location.pathname === item.path ? "default" : "ghost"}
+                    size="sm"
+                  >
+                    <item.icon className="h-4 w-4 mr-1" />
+                    {item.label}
+                  </Button>
+                </Link>
+              );
+            })}
           </nav>
 
           {/* Right side */}
@@ -177,21 +209,40 @@ export function Header() {
         {mobileMenuOpen && (
           <nav className="md:hidden py-4 border-t">
             <div className="flex flex-col gap-1">
-              {navItems.map(({ path, label, icon: Icon }) => (
-                <Link
-                  key={path}
-                  to={path}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  <Button
-                    variant={location.pathname === path ? "secondary" : "ghost"}
-                    className="w-full justify-start"
+              {navItems.map((item, i) => {
+                if ("separator" in item) {
+                  return <div key={i} className="h-px bg-border my-1" />;
+                }
+                const disabled = storageType === "web3storage" && !item.web3storage;
+                if (disabled) {
+                  return (
+                    <Button
+                      key={item.path}
+                      variant="ghost"
+                      className="w-full justify-start opacity-30"
+                      disabled
+                    >
+                      <item.icon className="h-4 w-4 mr-2" />
+                      {item.label}
+                    </Button>
+                  );
+                }
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMobileMenuOpen(false)}
                   >
-                    <Icon className="h-4 w-4 mr-2" />
-                    {label}
-                  </Button>
-                </Link>
-              ))}
+                    <Button
+                      variant={location.pathname === item.path ? "default" : "ghost"}
+                      className="w-full justify-start"
+                    >
+                      <item.icon className="h-4 w-4 mr-2" />
+                      {item.label}
+                    </Button>
+                  </Link>
+                );
+              })}
               <div className="pt-2 mt-2 border-t">
                 <NetworkSwitcher />
               </div>

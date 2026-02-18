@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Upload, Download, Search, Shield, Database, Activity, BarChart3 } from "lucide-react";
+import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -44,6 +44,12 @@ function QuickActions() {
             <Button variant="outline" className="w-full justify-start">
               <Shield className="h-4 w-4 mr-2" />
               View Authorizations
+            </Button>
+          </Link>
+          <Link to="/authorizations?tab=faucet">
+            <Button variant="outline" className="w-full justify-start">
+              <Droplets className="h-4 w-4 mr-2" />
+              Storage Faucet
             </Button>
           </Link>
         </div>
@@ -184,6 +190,34 @@ function WelcomeCard({ storageType }: { storageType: StorageType }) {
               <p className="text-muted-foreground">
                 Open access to store and retrieve data
               </p>
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-primary/10 space-y-2 text-sm">
+            <div>
+              <p className="font-medium mb-1">Design by <a href="https://github.com/eskimor" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">eskimor</a></p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <a href="https://github.com/paritytech/polkadot-sdk/pull/10731" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  Design PR
+                </a>
+                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  Scalable Web3 Storage
+                </a>
+                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage-implementation.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  Implementation Details
+                </a>
+              </div>
+            </div>
+            <div>
+              <p className="font-medium mb-1">Proof of Concept</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <a href="https://github.com/paritytech/web3-storage?tab=readme-ov-file#quick-start" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" />
+                  web3-storage (see README for local setup)
+                </a>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -376,6 +410,92 @@ function UsageCard() {
   );
 }
 
+function Web3StorageTotalsCard() {
+  const api = useApi();
+  const [providerCount, setProviderCount] = useState<number | null>(null);
+  const [bucketCount, setBucketCount] = useState<number | null>(null);
+  const [challengeCount, setChallengeCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!api) return;
+
+    let cancelled = false;
+    setLoading(true);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const typedApi = api as any;
+
+    Promise.all([
+      typedApi.query.StorageProvider.Providers.getEntries(),
+      typedApi.query.StorageProvider.Buckets.getEntries(),
+      typedApi.query.StorageProvider.Challenges.getEntries(),
+    ])
+      .then(([providers, buckets, challenges]: [unknown[], unknown[], unknown[]]) => {
+        if (cancelled) return;
+        setProviderCount(providers.length);
+        setBucketCount(buckets.length);
+        setChallengeCount(challenges.length);
+      })
+      .catch((err: unknown) => {
+        console.error("Failed to fetch storage totals:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <BarChart3 className="h-5 w-5" />
+          Storage Totals
+        </CardTitle>
+        <CardDescription>On-chain storage provider statistics</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading || providerCount === null ? (
+          <div className="flex items-center justify-center py-4">
+            <Spinner size="sm" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Providers
+              </p>
+              <p className="text-2xl font-semibold">
+                {formatNumber(providerCount)}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Buckets
+              </p>
+              <p className="text-2xl font-semibold">
+                {formatNumber(bucketCount ?? 0)}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Challenges
+              </p>
+              <p className="text-2xl font-semibold">
+                {formatNumber(challengeCount ?? 0)}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Dashboard() {
   const { storageType } = useChainState();
 
@@ -394,6 +514,7 @@ export function Dashboard() {
         <div className="grid gap-6 md:grid-cols-2">
           <WelcomeCard storageType={storageType} />
           <ChainInfoCard />
+          <Web3StorageTotalsCard />
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
