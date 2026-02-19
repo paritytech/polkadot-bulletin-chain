@@ -16,38 +16,16 @@
 //!
 //! ## Usage
 //!
-//! ### Quick Start with AsyncBulletinClient (Recommended)
+//! ### Prepare and Submit via Subxt (Recommended)
 //!
-//! The easiest way to store data is using [`AsyncBulletinClient`], which handles
-//! connection, chunking, and transaction submission automatically:
+//! The SDK prepares storage operations; you submit them via subxt with your
+//! runtime metadata. This gives you full control over transaction parameters.
 //!
-//! ```ignore
-//! use bulletin_sdk_rust::prelude::*;
+//! > **Note**: `AsyncBulletinClient` exists but is experimental and returns
+//! > placeholder errors. Use `BulletinClient` for preparation and submit
+//! > transactions directly via subxt.
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<()> {
-//!     // Connect to a Bulletin Chain node
-//!     let client = AsyncBulletinClient::new("ws://localhost:9944").await?;
-//!
-//!     // Create a signer from a seed phrase or dev account
-//!     let signer = Keypair::from_uri("//Alice")?;
-//!
-//!     // Store data - handles chunking and submission automatically
-//!     let data = b"Hello, Bulletin!".to_vec();
-//!     let result = client.store(data, &signer).await?;
-//!
-//!     println!("Stored with CID: {}", result.cid);
-//!     Ok(())
-//! }
-//! ```
-//!
-//! ### Low-Level API: Prepare and Submit Separately
-//!
-//! For more control, you can prepare operations and submit them manually.
-//! This is useful for batching, custom transaction parameters, or integration
-//! with existing subxt setups.
-//!
-//! #### Step 1: Prepare the Operation
+//! ### Step 1: Prepare the Operation
 //!
 //! ```ignore
 //! use bulletin_sdk_rust::{BulletinClient, types::StoreOptions};
@@ -61,7 +39,7 @@
 //! println!("Will store {} bytes", operation.size());
 //! ```
 //!
-//! #### Step 2: Submit via Subxt
+//! ### Step 2: Submit via Subxt
 //!
 //! ```ignore
 //! use subxt::{OnlineClient, PolkadotConfig};
@@ -117,15 +95,16 @@
 //! // Then submit the manifest if present
 //! ```
 //!
-//! Or use `AsyncBulletinClient` which handles chunking automatically:
+//! ### Testing with MockBulletinClient
+//!
+//! For testing without a running node:
 //!
 //! ```ignore
-//! let result = client
-//!     .store_builder(large_data)
-//!     .with_chunk_size(1024 * 1024)
-//!     .with_progress(|event| println!("{:?}", event))
-//!     .send(&signer)
-//!     .await?;
+//! use bulletin_sdk_rust::prelude::*;
+//!
+//! let client = MockBulletinClient::new();
+//! let result = client.store(data).send().await?;
+//! println!("Mock CID: {:?}", result.cid);
 //! ```
 //!
 //! ## Feature Flags
