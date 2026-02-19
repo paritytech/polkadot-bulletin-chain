@@ -247,24 +247,24 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
     apiSubject.next(api);
 
-    // Get chain info from runtime constants (async)
+    // Get chain info from runtime constants and RPC
     try {
-      const version = await api.constants.System.Version();
-      const ss58Format = await api.constants.System.SS58Prefix();
+      const [version, ss58Format, properties] = await Promise.all([
+        api.constants.System.Version(),
+        api.constants.System.SS58Prefix(),
+        client._request<{ tokenSymbol?: string; tokenDecimals?: number }>("system_properties", []),
+      ]);
 
       chainInfoSubject.next({
         chainName: version.spec_name,
         specVersion: version.spec_version,
-        tokenSymbol: "DOT",
-        tokenDecimals: 10,
+        tokenSymbol: properties.tokenSymbol ?? "Unit",
+        tokenDecimals: properties.tokenDecimals ?? 12,
         ss58Format,
       });
     } catch {
       // Constants may not be available immediately
-      chainInfoSubject.next({
-        tokenSymbol: "DOT",
-        tokenDecimals: 10,
-      });
+      chainInfoSubject.next({});
     }
 
     // Get sudo key

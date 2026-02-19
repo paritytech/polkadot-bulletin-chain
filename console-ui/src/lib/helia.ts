@@ -109,20 +109,24 @@ export class HeliaClient {
     return { peerId, connections: this.connectedPeers };
   }
 
-  async fetchData(cidString: string): Promise<FetchResult> {
+  async fetchData(cidOrString: string | CID): Promise<FetchResult> {
     if (!this.helia) {
       throw new Error("Helia not initialized");
     }
 
-    this.log("info", `Fetching CID: ${cidString}`);
-
     let cid: CID;
-    try {
-      cid = CID.parse(cidString);
-      this.log("debug", `CID parsed: version=${cid.version}, codec=0x${cid.code.toString(16)}`);
-    } catch (error) {
-      throw new Error(`Invalid CID: ${error instanceof Error ? error.message : String(error)}`);
+    if (typeof cidOrString === "string") {
+      try {
+        cid = CID.parse(cidOrString);
+      } catch (error) {
+        throw new Error(`Invalid CID: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } else {
+      cid = cidOrString;
     }
+
+    this.log("info", `Fetching CID: ${cid.toString()}`);
+    this.log("debug", `CID parsed: version=${cid.version}, codec=0x${cid.code.toString(16)}`);
 
     this.log("debug", "Requesting block from blockstore...");
     const blockData = await this.helia.blockstore.get(cid);

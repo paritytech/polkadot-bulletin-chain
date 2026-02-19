@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Subscribe } from "@react-rxjs/core";
 import { Header } from "@/components/Header";
@@ -7,8 +8,12 @@ import { Download } from "@/pages/Download/Download";
 import { Explorer } from "@/pages/Explorer/Explorer";
 import { Authorizations } from "@/pages/Authorizations/Authorizations";
 import { Accounts } from "@/pages/Accounts/Accounts";
+import { restoreWalletConnection } from "@/state/wallet.state";
 
 export default function App() {
+  useEffect(() => {
+    restoreWalletConnection();
+  }, []);
   return (
     <Subscribe>
       <div className="min-h-screen flex flex-col">

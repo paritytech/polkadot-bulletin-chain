@@ -24,6 +24,9 @@ export function refreshExtensions(): string[] {
   return extensions;
 }
 
+const STORAGE_KEY_EXTENSION = "bulletin-wallet-extension";
+const STORAGE_KEY_ACCOUNT = "bulletin-wallet-account";
+
 export async function connectExtension(extensionName: string): Promise<void> {
   statusSubject.next("connecting");
   errorSubject.next(undefined);
@@ -35,9 +38,11 @@ export async function connectExtension(extensionName: string): Promise<void> {
     const accounts = extension.getAccounts();
     accountsSubject.next(accounts);
 
-    // Auto-select first account if available
-    if (accounts.length > 0 && !selectedAccountSubject.getValue()) {
-      selectedAccountSubject.next(accounts[0]);
+    // Restore previously selected account, or auto-select first
+    const savedAddress = localStorage.getItem(STORAGE_KEY_ACCOUNT);
+    const savedAccount = savedAddress ? accounts.find(a => a.address === savedAddress) : undefined;
+    if (!selectedAccountSubject.getValue()) {
+      selectedAccountSubject.next(savedAccount ?? accounts[0]);
     }
 
     // Subscribe to account changes
@@ -50,6 +55,7 @@ export async function connectExtension(extensionName: string): Promise<void> {
       }
     });
 
+    localStorage.setItem(STORAGE_KEY_EXTENSION, extensionName);
     statusSubject.next("connected");
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to connect wallet";
@@ -64,6 +70,7 @@ export function selectAccount(address: string): void {
   const account = accounts.find(a => a.address === address);
   if (account) {
     selectedAccountSubject.next(account);
+    localStorage.setItem(STORAGE_KEY_ACCOUNT, address);
   }
 }
 
@@ -77,6 +84,8 @@ export function disconnectWallet(): void {
   selectedAccountSubject.next(undefined);
   statusSubject.next("disconnected");
   errorSubject.next(undefined);
+  localStorage.removeItem(STORAGE_KEY_EXTENSION);
+  localStorage.removeItem(STORAGE_KEY_ACCOUNT);
 }
 
 // Combined wallet state observable
@@ -113,6 +122,26 @@ export const [useWalletStatus] = bind(statusSubject, "disconnected");
 export const [useAccounts] = bind(accountsSubject, []);
 export const [useSelectedAccount] = bind(selectedAccountSubject, undefined);
 export const [useAvailableExtensions] = bind(extensionsSubject, []);
+
+// Auto-reconnect on page load
+export async function restoreWalletConnection(): Promise<void> {
+  const savedExtension = localStorage.getItem(STORAGE_KEY_EXTENSION);
+  if (!savedExtension) return;
+
+  // Wait briefly for extensions to inject into the page
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const available = getInjectedExtensions();
+  if (available.includes(savedExtension)) {
+    try {
+      await connectExtension(savedExtension);
+    } catch {
+      // Extension no longer available, clear saved state
+      localStorage.removeItem(STORAGE_KEY_EXTENSION);
+      localStorage.removeItem(STORAGE_KEY_ACCOUNT);
+    }
+  }
+}
 
 // Direct access
 export const selectedAccount$ = selectedAccountSubject.asObservable();
