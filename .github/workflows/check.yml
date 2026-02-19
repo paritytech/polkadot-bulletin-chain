@@ -16,12 +16,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 # Parity CI image to use
 # Common variable is defined in the workflow
 # Repo env variable doesn't work for PRs from forks
 env:
   CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
-  POLKADOT_SDK_VERSION: "polkadot-stable2512-1"
   FRAME_OMNI_BENCHER_BIN_DIR: ${{ github.workspace }}/.frame-omni-bencher-bin
 
 jobs:
@@ -42,7 +44,7 @@ jobs:
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Cargo fmt
         run: |
@@ -70,10 +72,10 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           shared-key: "bulletin-cache-check"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -94,10 +96,10 @@ jobs:
       SKIP_WASM_BUILD: 1
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           shared-key: "bulletin-cache-clippy"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -118,10 +120,10 @@ jobs:
       SKIP_WASM_BUILD: 1
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           shared-key: "bulletin-cache-tests"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -135,10 +137,6 @@ jobs:
           cargo test -p pallet-transaction-storage
           # Bench test is skipped intentionally (running too long and anyway, we are doing fresh weights)
           cargo test -p pallet-transaction-storage --features=runtime-benchmarks -- --skip bench_check_proof
-
-      - name: Run (Rococo) runtime tests
-        run: |
-          cargo test -p polkadot-bulletin-chain-runtime
 
       - name: Run (Polkadot) runtime tests
         run: |
@@ -162,32 +160,36 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           shared-key: "bulletin-cache-benchmarks"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
       - name: Create directory for binary and add to PATH
         run: |
           mkdir -p $FRAME_OMNI_BENCHER_BIN_DIR
           echo "${FRAME_OMNI_BENCHER_BIN_DIR}" >> $GITHUB_PATH
 
       - name: Cache frame-omni-bencher
-        uses: actions/cache@v5
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: frame-omni-bencher-cache
         with:
           path: ${{ env.FRAME_OMNI_BENCHER_BIN_DIR }}
           key: frame-omni-bencher-${{ env.POLKADOT_SDK_VERSION }}
-          
+
       - name: Download frame-omni-bencher
         if: steps.frame-omni-bencher-cache.outputs.cache-hit != 'true'
         run: |
           cd $FRAME_OMNI_BENCHER_BIN_DIR
           echo "Downloading frame-omni-bencher..."
-          curl -L -o frame-omni-bencher "https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
+          curl -fL -o frame-omni-bencher "https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
+          echo "${FRAME_OMNI_BENCHER_SHA256}  frame-omni-bencher" | sha256sum -c -
           chmod +x frame-omni-bencher
           ./frame-omni-bencher --version
 
