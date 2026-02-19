@@ -736,7 +736,7 @@ pub type Executive = frame_executive::Executive<
 pub mod migrations {
 	/// Unreleased migrations. Add new ones here:
 	pub type Unreleased =
-		(pallet_transaction_storage::migrations::v2::MigrateV1ToV2<crate::Runtime>,);
+		(pallet_transaction_storage::migrations::v1::MigrateV0ToV1<crate::Runtime>, pallet_transaction_storage::migrations::v2::MigrateV1ToV2<crate::Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
