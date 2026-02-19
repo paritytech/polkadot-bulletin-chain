@@ -99,18 +99,44 @@ impl Chunker for FixedSizeChunker {
 }
 
 /// Reassemble chunks back into the original data.
+///
+/// # Validation
+///
+/// This function validates that:
+/// - Chunks are not empty
+/// - All chunks have consistent `total_chunks` values (belong to same file)
+/// - The number of chunks matches the expected `total_chunks`
+/// - Chunk indices are sequential starting from 0
 pub fn reassemble_chunks(chunks: &[Chunk]) -> Result<Vec<u8>> {
 	if chunks.is_empty() {
 		return Err(Error::EmptyData);
 	}
 
-	// Validate chunk indices are sequential
+	let expected_total = chunks[0].total_chunks;
+	let actual_count = chunks.len() as u32;
+
+	// Validate chunk count matches expected total
+	if expected_total != actual_count {
+		return Err(Error::ChunkingFailed(alloc::format!(
+			"Chunk count mismatch: expected {expected_total} chunks, got {actual_count}",
+		)));
+	}
+
+	// Validate all chunks belong to the same file and have sequential indices
 	for (i, chunk) in chunks.iter().enumerate() {
-		if chunk.index != i as u32 {
+		// Verify all chunks agree on total_chunks (same file)
+		if chunk.total_chunks != expected_total {
+			let actual = chunk.total_chunks;
 			return Err(Error::ChunkingFailed(alloc::format!(
-				"Chunk index mismatch: expected {}, got {}",
-				i,
-				chunk.index
+				"Chunk {i} has inconsistent total_chunks: expected {expected_total}, got {actual}",
+			)));
+		}
+
+		// Verify sequential indices
+		if chunk.index != i as u32 {
+			let actual = chunk.index;
+			return Err(Error::ChunkingFailed(alloc::format!(
+				"Chunk index mismatch: expected {i}, got {actual}",
 			)));
 		}
 	}
@@ -205,5 +231,43 @@ mod tests {
 		assert_eq!(chunker.num_chunks(1024 * 1024), 1);
 		assert_eq!(chunker.num_chunks(1024 * 1024 + 1), 2);
 		assert_eq!(chunker.num_chunks(1024 * 1024 * 2), 2);
+	}
+
+	#[test]
+	fn test_reassemble_chunk_count_mismatch() {
+		use crate::types::Chunk;
+
+		// Create chunks where total_chunks doesn't match actual count
+		let chunks = vec![
+			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 3 },
+			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 },
+			// Missing third chunk - only 2 chunks but total_chunks says 3
+		];
+
+		let result = reassemble_chunks(&chunks);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("Chunk count mismatch"));
+	}
+
+	#[test]
+	fn test_reassemble_inconsistent_total_chunks() {
+		use crate::types::Chunk;
+
+		// Create chunks from different files (inconsistent total_chunks)
+		let chunks = vec![
+			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 2 },
+			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 }, // Wrong total
+		];
+
+		let result = reassemble_chunks(&chunks);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("inconsistent total_chunks"));
+	}
+
+	#[test]
+	fn test_reassemble_empty_chunks() {
+		let chunks: Vec<Chunk> = vec![];
+		let result = reassemble_chunks(&chunks);
+		assert!(result.is_err());
 	}
 }
