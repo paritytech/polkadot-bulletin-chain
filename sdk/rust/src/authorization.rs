@@ -99,15 +99,16 @@ impl AuthorizationManager {
 		num_chunks: usize,
 		include_manifest: bool,
 	) -> (u32, u64) {
-		// Each chunk requires one transaction
-		let mut transactions = num_chunks as u32;
+		// Each chunk requires one transaction (saturate to u32::MAX if overflow)
+		let mut transactions = u32::try_from(num_chunks).unwrap_or(u32::MAX);
 		let mut total_bytes = total_size;
 
 		// If creating a manifest, add one more transaction
 		if include_manifest {
-			transactions += 1;
+			transactions = transactions.saturating_add(1);
 			// Manifest is typically small, estimate ~1KB per 100 chunks
-			total_bytes += (num_chunks as u64 * 10) + 1000;
+			let manifest_estimate = (num_chunks as u64).saturating_mul(10).saturating_add(1000);
+			total_bytes = total_bytes.saturating_add(manifest_estimate);
 		}
 
 		(transactions, total_bytes)
