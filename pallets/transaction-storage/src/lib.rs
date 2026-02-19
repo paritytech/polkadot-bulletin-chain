@@ -783,7 +783,7 @@ pub mod pallet {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 			let cid_config = CidConfig { codec: cid_codec, hashing };
-			let cid = calculate_cid(&data, Some(cid_config))
+			let cid = calculate_cid(&data, cid_config)
 				.map_err(|_| Error::<T>::InvalidContentHash)?;
 			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
 

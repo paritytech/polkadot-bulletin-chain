@@ -152,23 +152,12 @@ impl CidData {
 	}
 }
 
-/// Compute a CIDv1 for the given data with optional configuration.
-///
-/// If no configuration is provided, defaults are:
-/// - Codec: raw (0x55)
-/// - Hashing: Blake2b-256
+/// Compute a CIDv1 for the given data with the specified configuration.
 ///
 /// # Errors
 /// Returns `Err(CidError)` if multihash wrapping fails.
-pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, CidError> {
-	// Determine hashing algorithm and codec
-	let (hashing, codec) = config.map_or_else(
-		|| {
-			// Defaults: raw codec and Blake2b-256 hash
-			(HashingAlgorithm::Blake2b256, RAW_CODEC)
-		},
-		|c| (c.hashing, c.codec),
-	);
+pub fn calculate_cid(data: &[u8], config: CidConfig) -> Result<CidData, CidError> {
+	let (hashing, codec) = (config.hashing, config.codec);
 
 	// Hash the data
 	let content_hash = hashing.hash(data);
@@ -205,10 +194,14 @@ mod tests {
 		assert_eq!(expected_cid.hash().digest(), expected_content_hash);
 
 		// Calculate CIDv1 with default raw codec and blake2b-256.
-		let cid_raw = calculate_cid(data.as_ref(), None).expect("valid_cid");
+		let cid_raw = calculate_cid(
+			data.as_ref(),
+			CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+		)
+		.expect("valid_cid");
 		let cid_blake2b_256_raw = calculate_cid(
 			data.as_ref(),
-			Some(CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 }),
+			CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
 		)
 		.expect("valid_cid");
 		assert_eq!(cid_raw.to_bytes().expect("valid cid"), expected_cid.to_bytes());
@@ -261,7 +254,7 @@ mod tests {
 			// Test `calculate_cid`
 			let calculated = calculate_cid(
 				data.as_ref(),
-				Some(CidConfig { codec, hashing: from_multihash_code(mh_code) }),
+				CidConfig { codec, hashing: from_multihash_code(mh_code) },
 			)
 			.expect("calculate_cid succeeded");
 
