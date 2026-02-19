@@ -139,14 +139,31 @@ pub mod helpers {
 
 	/// Estimate weight/fees for a storage operation.
 	///
-	/// This is a rough estimate. Actual fees depend on runtime configuration.
+	/// # Warning: Rough Estimate Only
+	///
+	/// This function provides a **rough order-of-magnitude estimate** using hardcoded
+	/// placeholder values. **Do not rely on this for accurate fee prediction.**
+	///
+	/// The actual fees depend on:
+	/// - Runtime weight configuration (`WeightToFee`)
+	/// - Current chain congestion and fee multiplier
+	/// - Transaction length fees
+	/// - Any runtime-specific fee adjustments
+	///
+	/// For accurate fee estimation, use subxt's `payment_queryInfo` RPC or
+	/// the `TransactionPaymentApi::query_info` runtime API against a live node.
+	///
+	/// # Returns
+	///
+	/// A placeholder estimate in plancks (smallest unit). This value is intentionally
+	/// conservative and may significantly differ from actual fees.
 	pub fn estimate_fees(data_size: usize) -> u64 {
-		// Base fee + per-byte fee
-		// These are rough estimates and should be configured
-		const BASE_FEE: u64 = 1_000_000;
-		const PER_BYTE_FEE: u64 = 100;
+		// WARNING: These are placeholder values for rough estimation only.
+		// Actual fees are determined by runtime configuration.
+		const BASE_FEE: u64 = 1_000_000; // Placeholder base fee
+		const PER_BYTE_FEE: u64 = 100; // Placeholder per-byte fee
 
-		BASE_FEE + (data_size as u64 * PER_BYTE_FEE)
+		BASE_FEE.saturating_add((data_size as u64).saturating_mul(PER_BYTE_FEE))
 	}
 }
 
