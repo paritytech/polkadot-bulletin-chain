@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/utils/cn";
 import { CID } from "multiformats/cid";
@@ -31,6 +31,15 @@ export function CidInput({
     } catch {
       return { isValid: false, error: "Invalid CID format" };
     }
+  }, []);
+
+  // Validate on mount when value is pre-populated (e.g. from URL query param)
+  useEffect(() => {
+    if (value.trim()) {
+      const result = validateCid(value);
+      onChange(value, result.isValid, result.cid);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
