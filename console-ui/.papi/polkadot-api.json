@@ -6,13 +6,13 @@
       "wsUrl": "wss://westend-bulletin-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_westend.scale",
       "genesis": "0xee1f44f62e68312c4852f37585941e9b64b5ceae539e4aa112ce9d3cf7bbe9fd",
-      "codeHash": "0xa5411eee1eccdffb4f8c29d74cd4a69134a5c8f7452236c4a2d6ffa003bba040"
+      "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
     },
     "bulletin_paseo": {
       "wsUrl": "wss://paseo-bulletin-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_paseo.scale",
       "genesis": "0x744960c32e3a3df5440e1ecd4d34096f1ce2230d7016a5ada8a765d5a622b4ea",
-      "codeHash": "0xa5411eee1eccdffb4f8c29d74cd4a69134a5c8f7452236c4a2d6ffa003bba040"
+      "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
     },
     "bulletin_dotspark": {
       "wsUrl": "wss://bulletin.dotspark.app",

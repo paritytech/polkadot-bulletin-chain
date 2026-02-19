@@ -2,6 +2,15 @@ import { createHelia, type Helia } from "helia";
 import { CID } from "multiformats/cid";
 import { multiaddr } from "@multiformats/multiaddr";
 import { blake2b256 } from "@multiformats/blake2/blake2b";
+import { sha256 } from "multiformats/hashes/sha2";
+import { from as hasherFrom } from "multiformats/hashes/hasher";
+import { keccak_256 } from "@noble/hashes/sha3";
+
+const keccak256Hasher = hasherFrom({
+  name: "keccak-256",
+  code: 0x1b,
+  encode: (input: Uint8Array) => keccak_256(input),
+});
 
 export interface HeliaClientConfig {
   peerMultiaddrs: string[];
@@ -55,7 +64,7 @@ export class HeliaClient {
 
     // Create Helia node with blake2b256 hasher for Polkadot/Substrate CID compatibility
     this.helia = await createHelia({
-      hashers: [blake2b256],
+      hashers: [blake2b256, sha256, keccak256Hasher],
       libp2p: {
         connectionGater: {
           denyDialMultiaddr: async (maAddr) => {

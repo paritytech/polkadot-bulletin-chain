@@ -20,7 +20,7 @@ import { useApi, useClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { formatBytes } from "@/utils/format";
-import { cidFromBytes } from "@/lib/cid";
+import { cidFromBytes, toHashingEnum } from "@/lib/cid";
 import { Binary } from "polkadot-api";
 
 type HashAlgorithm = "blake2b256" | "sha256" | "keccak256";
@@ -108,29 +108,26 @@ export function Upload() {
       // Calculate expected CID
       const expectedCid = await cidFromBytes(data, codecConfig.codec, hashConfig.mhCode);
 
-      // Build transaction options with custom extension if non-default config
-      const txOpts: Record<string, unknown> = {};
-      // if (hashAlgorithm !== "blake2b256" || cidCodec !== "raw") {
-      //   txOpts.customSignedExtensions = {
-      //     ProvideCidConfig: {
-      //       value: {
-      //         codec: BigInt(codecConfig.codec),
-      //         hashing: toHashingEnum(hashConfig.mhCode),
-      //       },
-      //     },
-      //   };
-      // }
+      // Use store_with_cid_config for non-default CID settings, plain store otherwise
+      const isCustomCid = hashAlgorithm !== "blake2b256" || cidCodec !== "raw";
 
-      // Create and submit transaction
-      const tx = api.tx.TransactionStorage.store({
-        data: Binary.fromBytes(data),
-      });
+      const tx = isCustomCid
+        ? api.tx.TransactionStorage.store_with_cid_config({
+            cid: {
+              codec: BigInt(codecConfig.codec),
+              hashing: toHashingEnum(hashConfig.mhCode),
+            },
+            data: Binary.fromBytes(data),
+          })
+        : api.tx.TransactionStorage.store({
+            data: Binary.fromBytes(data),
+          });
 
       // Sign and submit
       const result = await new Promise<{ blockHash?: string; blockNumber?: number }>((resolve, reject) => {
         let resolved = false;
 
-        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner, txOpts).subscribe({
+        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
           next: (ev: any) => {
             console.log("TX event:", ev.type);
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
