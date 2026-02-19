@@ -165,17 +165,17 @@ export function Download() {
   };
 
   const handleFetch = async () => {
-    if (!isCidValid || !cidInput || !heliaClientRef.current) return;
+    if (!isCidValid || !parsedCid || !heliaClientRef.current) return;
 
     setIsFetching(true);
     setFetchError(null);
     setFetchResult(null);
 
     try {
-      const result = await heliaClientRef.current.fetchData(cidInput);
+      const result = await heliaClientRef.current.fetchData(parsedCid);
 
       setFetchResult({
-        cid: cidInput,
+        cid: parsedCid.toString(),
         data: result.data,
         size: result.data.length,
         isJSON: result.isJSON,
@@ -298,7 +298,7 @@ export function Download() {
                 P2P Connection
               </CardTitle>
               <CardDescription>
-                Connect to bulletin-chain validator nodes via WebSocket
+                Connect to bulletin-chain validator nodes via WebSocket using <strong>Helia</strong> (IPFS in the browser)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -505,6 +505,19 @@ export function Download() {
             <CardContent>
               {parsedCid ? (
                 <div className="space-y-3 text-sm">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">CID</span>
+                      <button
+                        onClick={() => copyToClipboard(parsedCid.toString())}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                        title="Copy CID"
+                      >
+                        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                    <p className="font-mono text-xs mt-1 break-all">{parsedCid.toString()}</p>
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Version</span>
                     <Badge variant="secondary">CIDv{parsedCid.version}</Badge>

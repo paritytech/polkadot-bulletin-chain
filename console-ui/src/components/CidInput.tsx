@@ -14,19 +14,38 @@ interface CidInputProps {
 export function CidInput({
   value,
   onChange,
-  placeholder = "Enter CID (e.g., bafk...)",
+  placeholder = "Enter CID (bafk... or 0x...)",
   className,
   disabled,
 }: CidInputProps) {
   const [error, setError] = useState<string | null>(null);
 
   const validateCid = useCallback((input: string): { isValid: boolean; cid?: CID; error?: string } => {
-    if (!input.trim()) {
+    const trimmed = input.trim();
+    if (!trimmed) {
       return { isValid: false };
     }
 
+    // Accept 0x-prefixed hex (raw CID bytes)
+    if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+      try {
+        const hex = trimmed.slice(2);
+        if (hex.length === 0 || hex.length % 2 !== 0) {
+          return { isValid: false, error: "Invalid hex length" };
+        }
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < hex.length; i += 2) {
+          bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+        }
+        const cid = CID.decode(bytes);
+        return { isValid: true, cid };
+      } catch {
+        return { isValid: false, error: "Invalid CID hex" };
+      }
+    }
+
     try {
-      const cid = CID.parse(input.trim());
+      const cid = CID.parse(trimmed);
       return { isValid: true, cid };
     } catch {
       return { isValid: false, error: "Invalid CID format" };
