@@ -682,11 +682,7 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_noop!(TransactionStorage::pre_dispatch(&store_call), InvalidTransaction::Payment);
 
 		// Authorize preimage with SHA2 hash (matching the CID config's algorithm).
-		assert_ok!(TransactionStorage::authorize_preimage(
-			RuntimeOrigin::root(),
-			sha2_hash,
-			2000
-		));
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
 
 		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
 		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
@@ -718,11 +714,7 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_noop!(TransactionStorage::pre_dispatch(&renew_call), InvalidTransaction::Payment);
 
 		// Authorize preimage with SHA2 hash (renew uses stored content_hash).
-		assert_ok!(TransactionStorage::authorize_preimage(
-			RuntimeOrigin::root(),
-			sha2_hash,
-			2000
-		));
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
 		assert_ok!(TransactionStorage::pre_dispatch(&renew_call));
 
 		// Preimage authorization for sha2 hash should be consumed.
@@ -1019,4 +1011,3 @@ fn try_state_passes_with_preimage_authorization() {
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
 	});
 }
-

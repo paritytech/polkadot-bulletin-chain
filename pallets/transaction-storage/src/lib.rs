@@ -524,10 +524,9 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store)
-		///   this is the BLAKE2b-256 hash; for
-		///   [`store_with_cid_config`](Self::store_with_cid_config) this is the hash produced
-		///   by the CID config's hashing algorithm.
+		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store) this
+		///   is the BLAKE2b-256 hash; for [`store_with_cid_config`](Self::store_with_cid_config)
+		///   this is the hash produced by the CID config's hashing algorithm.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -783,8 +782,8 @@ pub mod pallet {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 			let cid_config = CidConfig { codec: cid_codec, hashing };
-			let cid = calculate_cid(&data, cid_config)
-				.map_err(|_| Error::<T>::InvalidContentHash)?;
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
 			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
 
 			let mut index = 0;
@@ -1103,18 +1102,13 @@ pub mod pallet {
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			match call {
-				Call::<T>::store { data } =>
-					Self::check_store_renew_unsigned(
-						data.len(),
-						|| sp_io::hashing::blake2_256(data),
-						context,
-					),
+				Call::<T>::store { data } => Self::check_store_renew_unsigned(
+					data.len(),
+					|| sp_io::hashing::blake2_256(data),
+					context,
+				),
 				Call::<T>::store_with_cid_config { cid, data } =>
-					Self::check_store_renew_unsigned(
-						data.len(),
-						|| cid.hashing.hash(data),
-						context,
-					),
+					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
