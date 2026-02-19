@@ -37,7 +37,7 @@ mod mock;
 mod tests;
 
 use alloc::vec::Vec;
-use cids::{calculate_cid, Cid, CidCodec, CidConfig, ContentHash, HashingAlgorithm};
+use cids::{calculate_cid, Cid, CidCodec, CidConfig, ContentHash, HashingAlgorithm, RAW_CODEC};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
@@ -380,7 +380,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			Self::do_store(data, HashingAlgorithm::Blake2b256, 0x55)
+			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
 		}
 
 		/// Index and store data off chain with an explicit CID configuration.

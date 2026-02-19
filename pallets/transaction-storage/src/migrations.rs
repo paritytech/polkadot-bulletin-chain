@@ -69,11 +69,11 @@ impl<T: Config, NewValue: Get<BlockNumberFor<T>>> OnRuntimeUpgrade
 /// entries. Uses raw storage iteration with try-new-then-old decoding to avoid
 /// corrupting post-upgrade entries.
 ///
-/// Old entries get defaults: `hashing = Blake2b256`, `cid_codec = 0x55` (raw).
+/// Old entries get defaults: `hashing = Blake2b256`, `cid_codec = RAW_CODEC`.
 pub mod v1 {
 	use super::*;
 	use crate::{
-		cids::{CidCodec, ContentHash, HashingAlgorithm},
+		cids::{CidCodec, ContentHash, HashingAlgorithm, RAW_CODEC},
 		pallet::{Pallet, Transactions},
 		TransactionInfo,
 	};
@@ -153,7 +153,7 @@ pub mod v1 {
 								chunk_root: old.chunk_root,
 								content_hash: old.content_hash.into(),
 								hashing: HashingAlgorithm::Blake2b256,
-								cid_codec: 0x55, // raw codec — the only codec pre-CID
+								cid_codec: RAW_CODEC,
 								size: old.size,
 								block_chunks: old.block_chunks,
 							})

@@ -35,6 +35,9 @@ pub type Cid = Vec<u8>;
 /// Type alias representing a CID codec (e.g., raw = 0x55, dag-pb = 0x70).
 pub type CidCodec = u64;
 
+/// CID codec for raw binary content.
+pub const RAW_CODEC: CidCodec = 0x55;
+
 /// Supported hashing algorithms for computing CIDs.
 #[derive(
 	Clone,
@@ -161,8 +164,8 @@ pub fn calculate_cid(data: &[u8], config: Option<CidConfig>) -> Result<CidData, 
 	// Determine hashing algorithm and codec
 	let (hashing, codec) = config.map_or_else(
 		|| {
-			// Defaults: raw codec (0x55) and Blake2b-256 hash
-			(HashingAlgorithm::Blake2b256, 0x55)
+			// Defaults: raw codec and Blake2b-256 hash
+			(HashingAlgorithm::Blake2b256, RAW_CODEC)
 		},
 		|c| (c.hashing, c.codec),
 	);
