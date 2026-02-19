@@ -132,14 +132,11 @@ pub mod v1 {
 				previous_key = key.clone();
 				let Some(raw) = unhashed::get_raw(&key) else { continue };
 
-				// Try decode as v1 or v2 type first — if either works, the entry
-				// is already post-upgrade. Old format (72 bytes/entry) always fails
+				// Try decode as current type first — if it works, the entry is
+				// already post-upgrade. Old format (72 bytes/entry) always fails
 				// here because the decoder runs out of bytes.
-				if BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
-					.is_ok() || BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(
-					&mut &raw[..],
-				)
-				.is_ok()
+				if BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+					.is_ok()
 				{
 					skipped += 1;
 					continue;
@@ -277,105 +274,4 @@ pub mod v1 {
 			.saturating_add(migration_weight)
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-}
-
-/// Migration v1→v2: Makes `hashing` and `cid_codec` fields `Option` in `TransactionInfo`.
-///
-/// V1 stored mandatory `HashingAlgorithm` and `CidCodec` values. V2 uses `Option`:
-/// - Default values (Blake2b256 + 0x55) → `None, None` (saves space)
-/// - Explicit values → `Some(hashing), Some(cid_codec)`
-pub mod v2 {
-	use super::*;
-	use crate::{
-		cids::{CidConfig, HashingAlgorithm},
-		pallet::{Pallet, Transactions},
-		TransactionInfo,
-	};
-	use polkadot_sdk_frame::deps::frame_support::{
-		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade, BoundedVec,
-	};
-
-	use super::v1::V1TransactionInfo;
-
-	/// Version-unchecked migration logic. Wrapped by [`MigrateV1ToV2`] for version gating.
-	pub struct VersionUncheckedMigrateV1ToV2<T>(PhantomData<T>);
-
-	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
-		fn on_runtime_upgrade() -> Weight {
-			let mut migrated: u64 = 0;
-
-			Transactions::<T>::translate::<
-				BoundedVec<V1TransactionInfo, T::MaxBlockTransactions>,
-				_,
-			>(|_block, v1_txs| {
-				let new_txs: Vec<TransactionInfo> = v1_txs
-					.into_iter()
-					.map(|old| {
-						// Default values → None; explicit values → Some
-						let is_default =
-							matches!(old.hashing, HashingAlgorithm::Blake2b256) &&
-								old.cid_codec == 0x55;
-						TransactionInfo {
-							chunk_root: old.chunk_root,
-							content_hash: old.content_hash,
-							cid_config: if is_default {
-								None
-							} else {
-								Some(CidConfig {
-									codec: old.cid_codec,
-									hashing: old.hashing,
-								})
-							},
-							size: old.size,
-							block_chunks: old.block_chunks,
-						}
-					})
-					.collect();
-				migrated += 1;
-				BoundedVec::try_from(new_txs).ok()
-			});
-
-			tracing::info!(
-				target: LOG_TARGET,
-				migrated,
-				"v1->v2 TransactionInfo migration complete",
-			);
-
-			// 1 read + 1 write per entry, plus 1 read for the iteration terminal.
-			T::DbWeight::get()
-				.reads(migrated.saturating_add(1))
-				.saturating_add(T::DbWeight::get().writes(migrated))
-		}
-
-		#[cfg(feature = "try-runtime")]
-		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
-			let count = Transactions::<T>::iter_keys().count() as u64;
-			tracing::info!(target: LOG_TARGET, count, "v1->v2 pre_upgrade: Transactions entries");
-			Ok(count.encode())
-		}
-
-		#[cfg(feature = "try-runtime")]
-		fn post_upgrade(
-			state: Vec<u8>,
-		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
-			let old_count =
-				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
-			let new_count = Transactions::<T>::iter().count() as u64;
-			polkadot_sdk_frame::prelude::ensure!(
-				new_count <= old_count,
-				"post_upgrade: more entries than before migration"
-			);
-			tracing::info!(target: LOG_TARGET, old_count, new_count, "v1->v2 post_upgrade: valid");
-			Ok(())
-		}
-	}
-
-	/// Versioned migration v1→v2: makes `hashing` and `cid_codec` fields `Option`.
-	pub type MigrateV1ToV2<T> = VersionedMigration<
-		1,
-		2,
-		VersionUncheckedMigrateV1ToV2<T>,
-		Pallet<T>,
-		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
-	>;
 }

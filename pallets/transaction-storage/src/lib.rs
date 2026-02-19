@@ -37,7 +37,7 @@ mod mock;
 mod tests;
 
 use alloc::vec::Vec;
-use cids::{calculate_cid, Cid, CidConfig, ContentHash};
+use cids::{calculate_cid, Cid, CidCodec, CidConfig, ContentHash, HashingAlgorithm};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
@@ -126,9 +126,10 @@ pub struct TransactionInfo {
 
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
-	/// CID configuration (hashing algorithm + codec).
-	/// `None` means platform defaults (Blake2b-256 + raw codec 0x55).
-	cid_config: Option<CidConfig>,
+	/// Used hashing algorithm for `content_hash`.
+	pub hashing: HashingAlgorithm,
+	/// Codec for CID.
+	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
 	size: u32,
@@ -259,7 +260,7 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -379,7 +380,7 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			Self::do_store(data, None)
+			Self::do_store(data, HashingAlgorithm::Blake2b256, 0x55)
 		}
 
 		/// Index and store data off chain with an explicit CID configuration.
@@ -396,7 +397,7 @@ pub mod pallet {
 			cid: CidConfig,
 			data: Vec<u8>,
 		) -> DispatchResult {
-			Self::do_store(data, Some(cid))
+			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
 		/// Renew previously stored data. Parameters are the block number that contains previous
@@ -443,7 +444,8 @@ pub mod pallet {
 						chunk_root: info.chunk_root,
 						size: info.size,
 						content_hash: info.content_hash,
-						cid_config: info.cid_config,
+						hashing: info.hashing,
+						cid_codec: info.cid_codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -762,7 +764,11 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
-		fn do_store(data: Vec<u8>, cid_config: Option<CidConfig>) -> DispatchResult {
+		fn do_store(
+			data: Vec<u8>,
+			hashing: HashingAlgorithm,
+			cid_codec: CidCodec,
+		) -> DispatchResult {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
@@ -776,9 +782,9 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let stored_config = cid_config.clone();
-			let cid =
-				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
+			let cid_config = CidConfig { codec: cid_codec, hashing };
+			let cid = calculate_cid(&data, Some(cid_config))
+				.map_err(|_| Error::<T>::InvalidContentHash)?;
 			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
 
 			let mut index = 0;
@@ -793,7 +799,8 @@ pub mod pallet {
 						chunk_root: root,
 						size: data.len() as u32,
 						content_hash: cid.content_hash,
-						cid_config: stored_config,
+						hashing,
+						cid_codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
