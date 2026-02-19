@@ -69,11 +69,11 @@ impl<T: Config, NewValue: Get<BlockNumberFor<T>>> OnRuntimeUpgrade
 /// entries. Uses raw storage iteration with try-new-then-old decoding to avoid
 /// corrupting post-upgrade entries.
 ///
-/// Old entries get defaults: `hashing = Blake2b256`, `cid_codec = 0x55` (raw).
+/// Old entries get defaults: `hashing = Blake2b256`, `cid_codec = RAW_CODEC`.
 pub mod v1 {
 	use super::*;
 	use crate::{
-		cids::HashingAlgorithm,
+		cids::{CidCodec, ContentHash, HashingAlgorithm, RAW_CODEC},
 		pallet::{Pallet, Transactions},
 		TransactionInfo,
 	};
@@ -94,6 +94,17 @@ pub mod v1 {
 	pub(crate) struct OldTransactionInfo {
 		pub chunk_root: <BlakeTwo256 as Hash>::Output,
 		pub content_hash: <BlakeTwo256 as Hash>::Output,
+		pub size: u32,
+		pub block_chunks: ChunkIndex,
+	}
+
+	/// `TransactionInfo` layout at v1 (mandatory `hashing` and `cid_codec`).
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V1TransactionInfo {
+		pub chunk_root: <BlakeTwo256 as Hash>::Output,
+		pub content_hash: ContentHash,
+		pub hashing: HashingAlgorithm,
+		pub cid_codec: CidCodec,
 		pub size: u32,
 		pub block_chunks: ChunkIndex,
 	}
@@ -121,9 +132,9 @@ pub mod v1 {
 				previous_key = key.clone();
 				let Some(raw) = unhashed::get_raw(&key) else { continue };
 
-				// Try decode as new type first — if it works, the entry is already
-				// post-upgrade. Old format (72 bytes/entry) always fails here because
-				// the decoder runs out of bytes (new format needs 81 bytes/entry).
+				// Try decode as current type first — if it works, the entry is
+				// already post-upgrade. Old format (72 bytes/entry) always fails
+				// here because the decoder runs out of bytes.
 				if BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
 					.is_ok()
 				{
@@ -136,19 +147,19 @@ pub mod v1 {
 					&mut &raw[..],
 				) {
 					Ok(old_txs) => {
-						let new_txs: Vec<TransactionInfo> = old_txs
+						let new_txs: Vec<V1TransactionInfo> = old_txs
 							.into_iter()
-							.map(|old| TransactionInfo {
+							.map(|old| V1TransactionInfo {
 								chunk_root: old.chunk_root,
 								content_hash: old.content_hash.into(),
 								hashing: HashingAlgorithm::Blake2b256,
-								cid_codec: 0x55, // raw codec — the only codec pre-CID
+								cid_codec: RAW_CODEC,
 								size: old.size,
 								block_chunks: old.block_chunks,
 							})
 							.collect();
 						let Ok(bounded) =
-							BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(
+							BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::try_from(
 								new_txs,
 							)
 						else {
@@ -237,7 +248,7 @@ pub mod v1 {
 	/// is still 0. This covers the `codeSubstitutes` recovery path where the fix
 	/// runtime is loaded without triggering `on_runtime_upgrade`.
 	///
-	/// Returns the weight consumed. On subsequent blocks (version already 1)
+	/// Returns the weight consumed. On subsequent blocks (version already ≥ 1)
 	/// this is a single storage read.
 	pub fn maybe_migrate_v0_to_v1<T: Config>() -> Weight {
 		use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
