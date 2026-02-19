@@ -27,7 +27,6 @@
 extern crate alloc;
 
 mod benchmarking;
-pub mod extension;
 pub mod weights;
 
 pub mod cids;
@@ -38,7 +37,7 @@ mod mock;
 mod tests;
 
 use alloc::vec::Vec;
-use cids::{calculate_cid, Cid, CidConfig, ContentHash};
+use cids::{calculate_cid, Cid, CidCodec, CidConfig, ContentHash, HashingAlgorithm, RAW_CODEC};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
@@ -60,7 +59,6 @@ type BalanceOf<T> =
 pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
-use crate::cids::{CidCodec, HashingAlgorithm};
 pub use pallet::*;
 pub use weights::WeightInfo;
 
@@ -129,9 +127,9 @@ pub struct TransactionInfo {
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
 	/// Used hashing algorithm for `content_hash`.
-	hashing: HashingAlgorithm,
-	/// Requested codec for CIDs.
-	cid_codec: CidCodec,
+	pub hashing: HashingAlgorithm,
+	/// Codec for CID.
+	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
 	size: u32,
@@ -262,7 +260,10 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
@@ -271,6 +272,16 @@ pub mod pallet {
 			// TODO: https://github.com/paritytech/polkadot-sdk/issues/10203 - Replace this with benchmarked weights.
 			let mut weight = Weight::zero();
 			let db_weight = T::DbWeight::get();
+
+			// Run v0→v1 migration if it hasn't been applied yet.
+			// This handles the case where `codeSubstitutes` loaded the fix runtime
+			// without triggering `on_runtime_upgrade` (spec_version unchanged).
+			// Safe alongside the regular `MigrateV0ToV1` wired in Executive: both
+			// check `on_chain_storage_version() < 1`, so whichever runs first bumps
+			// the version and the other becomes a no-op.
+			// TODO: Remove once all chains have been migrated past v1 — after that
+			// this is just a redundant storage read per block.
+			weight.saturating_accrue(migrations::v1::maybe_migrate_v0_to_v1::<T>());
 
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
@@ -306,7 +317,7 @@ pub mod pallet {
 			// submitted, so we log instead of panicking.
 			#[cfg(feature = "try-runtime")]
 			if !proof_ok {
-				tracing::error!(
+				tracing::warn!(
 					target: LOG_TARGET,
 					"Storage proof was not checked in this block (expected during try-runtime)"
 				);
@@ -320,6 +331,11 @@ pub mod pallet {
 			if total_chunks != 0 {
 				<Transactions<T>>::insert(n, transactions);
 			}
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+			Self::do_try_state(n)
 		}
 
 		fn integrity_test() {
@@ -364,47 +380,24 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			// In the case of a regular unsigned transaction, this should have been checked by
-			// pre_dispatch. In the case of a regular signed transaction, this should have been
-			// checked by pre_dispatch_signed.
-			Self::ensure_data_size_ok(data.len())?;
+			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
+		}
 
-			// Chunk data and compute storage root
-			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
-			let chunk_count = chunks.len() as u32;
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
-			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
-
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let cid = calculate_cid(&data, CidConfigForStore::<T>::take())
-				.map_err(|_| Error::<T>::InvalidContentHash)?;
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
-
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
-					return Err(Error::<T>::TooManyTransactions);
-				}
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: root,
-						size: data.len() as u32,
-						content_hash: cid.content_hash,
-						hashing: cid.hashing,
-						cid_codec: cid.codec,
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-			Self::deposit_event(Event::Stored {
-				index,
-				content_hash: cid.content_hash,
-				cid: cid.to_bytes(),
-			});
-			Ok(())
+		/// Index and store data off chain with an explicit CID configuration.
+		///
+		/// Behaves identically to [`store`](Self::store), but the CID configuration
+		/// (codec and hashing algorithm) is passed directly as a parameter.
+		///
+		/// Emits [`Stored`](Event::Stored) when successful.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
+		pub fn store_with_cid_config(
+			_origin: OriginFor<T>,
+			cid: CidConfig,
+			data: Vec<u8>,
+		) -> DispatchResult {
+			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
 		/// Renew previously stored data. Parameters are the block number that contains previous
@@ -522,7 +515,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Authorize anyone to store a preimage of the given BLAKE2b hash. The authorization will
+		/// Authorize anyone to store a preimage of the given content hash. The authorization will
 		/// expire after a configured number of blocks.
 		///
 		/// If authorization already exists for a preimage of the given hash to be stored, the
@@ -531,7 +524,9 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store) this
+		///   is the BLAKE2b-256 hash; for [`store_with_cid_config`](Self::store_with_cid_config)
+		///   this is the hash produced by the CID config's hashing algorithm.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -699,12 +694,6 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
 
-	/// Ephemeral value killed on the block finalization. So it never ends up in the storage trie.
-	/// (Used by [`extension::ProvideCidConfig`])
-	#[pallet::storage]
-	#[pallet::whitelist_storage]
-	pub type CidConfigForStore<T: Config> = StorageValue<_, CidConfig, OptionQuery>;
-
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
 		pub byte_fee: BalanceOf<T>,
@@ -772,6 +761,57 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// Common implementation for [`store`](Self::store) and
+		/// [`store_with_cid_config`](Self::store_with_cid_config).
+		fn do_store(
+			data: Vec<u8>,
+			hashing: HashingAlgorithm,
+			cid_codec: CidCodec,
+		) -> DispatchResult {
+			// In the case of a regular unsigned transaction, this should have been checked by
+			// pre_dispatch. In the case of a regular signed transaction, this should have been
+			// checked by pre_dispatch_signed.
+			Self::ensure_data_size_ok(data.len())?;
+
+			// Chunk data and compute storage root
+			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+			let chunk_count = chunks.len() as u32;
+			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
+			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
+
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			let cid_config = CidConfig { codec: cid_codec, hashing };
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
+			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
+
+			let mut index = 0;
+			<BlockTransactions<T>>::mutate(|transactions| {
+				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
+					return Err(Error::<T>::TooManyTransactions);
+				}
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
+				index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root: root,
+						size: data.len() as u32,
+						content_hash: cid.content_hash,
+						hashing,
+						cid_codec,
+						block_chunks: total_chunks,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)
+			})?;
+			Self::deposit_event(Event::Stored {
+				index,
+				content_hash: cid.content_hash,
+				cid: cid.to_bytes(),
+			});
+			Ok(())
+		}
+
 		/// Returns `true` if the system is beyond the given expiration point.
 		fn expired(expiration: BlockNumberFor<T>) -> bool {
 			let now = frame_system::Pallet::<T>::block_number();
@@ -1067,6 +1107,8 @@ pub mod pallet {
 					|| sp_io::hashing::blake2_256(data),
 					context,
 				),
+				Call::<T>::store_with_cid_config { cid, data } =>
+					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
@@ -1113,9 +1155,27 @@ pub mod pallet {
 					let content_hash = sp_io::hashing::blake2_256(data);
 					(data.len(), content_hash)
 				},
+				Call::<T>::store_with_cid_config { cid, data } => {
+					let content_hash = cid.hashing.hash(data);
+					(data.len(), content_hash)
+				},
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash)
+				},
+				Call::<T>::authorize_account { .. } |
+				Call::<T>::authorize_preimage { .. } |
+				Call::<T>::refresh_account_authorization { .. } |
+				Call::<T>::refresh_preimage_authorization { .. } => {
+					// Verify that the signer satisfies the Authorizer origin.
+					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
+					T::Authorizer::ensure_origin(origin)
+						.map_err(|_| InvalidTransaction::BadSigner)?;
+					return Ok(context.want_valid_transaction().then(|| ValidTransaction {
+						priority: T::StoreRenewPriority::get(),
+						longevity: T::StoreRenewLongevity::get(),
+						..Default::default()
+					}));
 				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};
@@ -1206,5 +1266,74 @@ pub mod pallet {
 
 			Ok(())
 		}
+	}
+}
+
+#[cfg(any(test, feature = "try-runtime"))]
+impl<T: Config> Pallet<T> {
+	pub(crate) fn do_try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+		ensure!(!Self::retention_period().is_zero(), "RetentionPeriod must not be zero");
+		Self::check_transactions_integrity()?;
+		Self::check_no_stale_transactions(n)?;
+		Self::check_authorizations_integrity()?;
+		Ok(())
+	}
+
+	/// Verify that for each block's transaction list:
+	/// - The `block_chunks` field is cumulative: each entry equals the previous cumulative total
+	///   plus `num_chunks(size)`.
+	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
+		for (_block, transactions) in Transactions::<T>::iter() {
+			let mut cumulative_chunks: ChunkIndex = 0;
+			for tx in transactions.iter() {
+				let expected_chunks = num_chunks(tx.size);
+				cumulative_chunks = cumulative_chunks.saturating_add(expected_chunks);
+				ensure!(tx.block_chunks == cumulative_chunks, "tx.block_chunks is not cumulative");
+			}
+
+			// The last entry's block_chunks should equal total_chunks for the block.
+			let total = TransactionInfo::total_chunks(&transactions);
+			ensure!(
+				total == cumulative_chunks,
+				"total_chunks mismatch with cumulative block_chunks"
+			);
+		}
+
+		Ok(())
+	}
+
+	/// Verify that no `Transactions` entries exist for blocks older than
+	/// `current_block - retention_period`. These should have been cleaned up
+	/// by `on_initialize`.
+	fn check_no_stale_transactions(
+		n: BlockNumberFor<T>,
+	) -> Result<(), sp_runtime::TryRuntimeError> {
+		let period = Self::retention_period();
+		let oldest_valid = n.saturating_sub(period);
+
+		for (block, _) in Transactions::<T>::iter() {
+			ensure!(block >= oldest_valid, "Stale transaction entry found beyond retention period");
+			ensure!(block <= n, "Transaction entry exists for a future block");
+		}
+
+		Ok(())
+	}
+
+	/// Verify that all stored authorizations have non-zero extent.
+	/// Depleted authorizations (transactions == 0 or bytes == 0) are removed
+	/// upon consumption, so any stored authorization should have both fields > 0.
+	fn check_authorizations_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
+		for (_, authorization) in Authorizations::<T>::iter() {
+			ensure!(
+				authorization.extent.transactions > 0,
+				"Stored authorization has zero transactions remaining"
+			);
+			ensure!(
+				authorization.extent.bytes > 0,
+				"Stored authorization has zero bytes remaining"
+			);
+		}
+
+		Ok(())
 	}
 }

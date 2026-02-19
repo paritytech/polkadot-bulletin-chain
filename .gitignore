@@ -21,3 +21,6 @@ package-lock.json
 # Local test files
 kubo/
 zombienet-*
+console-ui/dist/
+console-ui/.vite/
+console-ui/tsconfig.tsbuildinfo
