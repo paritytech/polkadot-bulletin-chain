@@ -8,7 +8,7 @@ export const DEFAULT_IPFS_GATEWAY = "http://127.0.0.1:8283";
  */
 export const IPFS_GATEWAYS: Record<string, string> = {
   local: "http://127.0.0.1:8283",
-  // Add more gateways as they become available
+  dotspark: "https://ipfs.dotspark.app",
 };
 
 /**
