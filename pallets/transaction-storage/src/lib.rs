@@ -1093,12 +1093,16 @@ pub mod pallet {
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			match call {
-				Call::<T>::store { data } | Call::<T>::store_with_cid_config { data, .. } =>
-					Self::check_store_renew_unsigned(
-						data.len(),
-						|| sp_io::hashing::blake2_256(data),
-						context,
-					),
+                Call::<T>::store { data } => Self::check_store_renew_unsigned(
+                    data.len(),
+                    || sp_io::hashing::blake2_256(data),
+                    context,
+                ),
+                Call::<T>::store_with_cid_config { cid, data } => Self::check_store_renew_unsigned(
+                    data.len(),
+                    || cid.hashing.hash(data),
+                    context,
+                )
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
@@ -1141,7 +1145,14 @@ pub mod pallet {
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			let (size, content_hash) = match call {
-				Call::<T>::store { data } | Call::<T>::store_with_cid_config { data, .. } => {
+                Call::<T>::store { data } => {
+                    let content_hash = sp_io::hashing::blake2_256(data);
+                    (data.len(), content_hash)
+                },
+                Call::<T>::store_with_cid_config { cid, data } => {
+                    let content_hash = cid.hashing.hash(data);
+                    (data.len(), content_hash)
+                },
 					let content_hash = sp_io::hashing::blake2_256(data);
 					(data.len(), content_hash)
 				},
