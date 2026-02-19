@@ -134,21 +134,25 @@ impl UnixFsDagBuilder {
 	///   optional bytes Data = 1;
 	/// }
 	/// ```
+	///
+	/// Note: The canonical encoding order is Links first, then Data. This ordering
+	/// is required for IPFS compatibility due to a historical bug in the original
+	/// protobuf encoder. See: <https://ipld.io/specs/codecs/dag-pb/spec/>
 	fn encode_dag_node(links: &[Vec<u8>], data: &[u8]) -> Vec<u8> {
 		let mut buf = Vec::new();
 
-		// Field 1: Data (bytes) - comes first in encoding
-		if !data.is_empty() {
-			buf.push((1 << 3) | 2); // wire_type 2 = length-delimited
-			encode_varint(data.len() as u64, &mut buf);
-			buf.extend_from_slice(data);
-		}
-
-		// Field 2: Links (repeated)
+		// Field 2: Links (repeated) - MUST come first for canonical DAG-PB encoding
 		for link in links {
 			buf.push((2 << 3) | 2); // wire_type 2 = length-delimited
 			encode_varint(link.len() as u64, &mut buf);
 			buf.extend_from_slice(link);
+		}
+
+		// Field 1: Data (bytes) - comes second despite lower field number
+		if !data.is_empty() {
+			buf.push((1 << 3) | 2); // wire_type 2 = length-delimited
+			encode_varint(data.len() as u64, &mut buf);
+			buf.extend_from_slice(data);
 		}
 
 		buf
