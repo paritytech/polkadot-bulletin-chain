@@ -19,8 +19,9 @@
 use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
-	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeGenesisConfig,
-	RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension, UncheckedExtrinsic,
+	AllPalletsWithoutSystem, Balances, Block, Runtime, RuntimeCall, RuntimeEvent,
+	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
+	UncheckedExtrinsic,
 };
 use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
 use pallet_transaction_storage::{
@@ -544,6 +545,68 @@ fn governance_authorize_upgrade_works() {
 		Runtime,
 		RuntimeOrigin,
 	>(GovernanceOrigin::Location(GovernanceLocation::get())));
+}
+
+#[test]
+fn alice_can_sign_authorize_account_extrinsic() {
+	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
+	// from Alice must pass ValidateSigned (not be rejected as InvalidTransaction::Call)
+	// and succeed at dispatch.
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let alice = Sr25519Keyring::Alice;
+			let target = Sr25519Keyring::Eve;
+
+			// Give Alice balance to cover tx fees (authorize_account is not feeless).
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
+
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.to_account_id(),
+					transactions: 5,
+					bytes: 1024,
+				});
+
+			let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+
+			// Verify the authorization was actually applied.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(target.to_account_id()),
+				AuthorizationExtent { transactions: 5, bytes: 1024 },
+			);
+		});
+}
+
+#[test]
+fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
+	// Eve is NOT a TestAccount/Authorizer. Her signed `authorize_account` extrinsic should
+	// be rejected at validation with BadSigner (checked in pallet's check_signed).
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let eve = Sr25519Keyring::Eve;
+			let target = Sr25519Keyring::Ferdie;
+
+			// Give Eve balance so the fee check (before ValidateSigned) passes.
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&eve.to_account_id(), 1_000_000_000_000).unwrap();
+
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.to_account_id(),
+					transactions: 5,
+					bytes: 1024,
+				});
+
+			assert_eq!(
+				construct_and_apply_extrinsic(Some(eve.pair()), call),
+				Err(transaction_validity::TransactionValidityError::Invalid(
+					InvalidTransaction::BadSigner
+				)),
+			);
+		});
 }
 
 #[test]

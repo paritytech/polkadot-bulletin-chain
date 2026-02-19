@@ -37,6 +37,7 @@ sp-core = { workspace = true }
 sp-genesis-builder = { workspace = true }
 sp-inherents = { workspace = true }
 sp-io = { workspace = true }
+sp-keyring = { workspace = true }
 sp-offchain = { workspace = true }
 sp-runtime = { workspace = true }
 sp-session = { workspace = true }
@@ -96,7 +97,6 @@ bridge-runtime-common = { workspace = true, features = ["integrity-test"] }
 pallet-bridge-messages = { workspace = true, features = ["test-helpers"] }
 hex = { workspace = true }
 sp-io = { workspace = true }
-sp-keyring = { workspace = true }
 sp-trie = { workspace = true }
 static_assertions = { workspace = true }
 sp-tracing = { workspace = true }

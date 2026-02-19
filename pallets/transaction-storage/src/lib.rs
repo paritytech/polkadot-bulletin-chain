@@ -1135,6 +1135,20 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash)
 				},
+				Call::<T>::authorize_account { .. } |
+				Call::<T>::authorize_preimage { .. } |
+				Call::<T>::refresh_account_authorization { .. } |
+				Call::<T>::refresh_preimage_authorization { .. } => {
+					// Verify that the signer satisfies the Authorizer origin.
+					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
+					T::Authorizer::ensure_origin(origin)
+						.map_err(|_| InvalidTransaction::BadSigner)?;
+					return Ok(context.want_valid_transaction().then(|| ValidTransaction {
+						priority: T::StoreRenewPriority::get(),
+						longevity: T::StoreRenewLongevity::get(),
+						..Default::default()
+					}));
+				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};
 
