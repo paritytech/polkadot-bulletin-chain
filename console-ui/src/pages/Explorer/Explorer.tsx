@@ -48,16 +48,16 @@ export function Explorer() {
       const startBlock = currentBlockNumber;
       const count = Math.min(10, startBlock);
 
-      // For each block, we query the block hash and header
+      // For each block, query the transaction count
       for (let i = 0; i < count; i++) {
         const blockNumber = startBlock - i;
         try {
-          // Query system events or use block number as identifier
+          const txInfos = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
           blocks.push({
             number: blockNumber,
-            hash: `Block #${blockNumber}`, // Placeholder - would need RPC for actual hash
+            hash: `Block #${blockNumber}`,
             parentHash: `Block #${blockNumber - 1}`,
-            extrinsicsCount: 0, // Would need block data
+            extrinsicsCount: txInfos?.length ?? 0,
           });
         } catch {
           // Skip blocks we can't fetch
