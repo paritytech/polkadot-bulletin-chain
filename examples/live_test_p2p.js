@@ -47,7 +47,7 @@ async function main() {
 
         // Verify via P2P
         console.log(`\nVerifying CID via P2P...`);
-        const downloaded = await fetchCidViaP2P(PEER_MULTIADDRS, cid, { timeoutMs: 120000 });
+        const downloaded = await fetchCidViaP2P(PEER_MULTIADDRS, cid);
         logSuccess(`Downloaded ${downloaded.length} bytes via P2P`);
 
         assert.deepStrictEqual(

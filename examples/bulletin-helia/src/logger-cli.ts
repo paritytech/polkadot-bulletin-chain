@@ -1,4 +1,4 @@
-import { BaseLogger, type LogLevel, type LogEntry } from './logger-base';
+import { BaseLogger, type LogLevel, type LogEntry } from './logger-base.js';
 
 export class CLILogger extends BaseLogger {
   log(level: LogLevel, message: string, data?: any): void {

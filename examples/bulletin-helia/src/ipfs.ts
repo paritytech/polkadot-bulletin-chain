@@ -2,7 +2,7 @@ import { createHelia, type Helia } from 'helia';
 import { CID } from 'multiformats/cid';
 import { multiaddr } from '@multiformats/multiaddr';
 import { blake2b256 } from '@multiformats/blake2/blake2b';
-import { BaseLogger } from './logger-base';
+import { BaseLogger } from './logger-base.js';
 
 export interface IPFSConfig {
   logger: BaseLogger;
@@ -125,28 +125,16 @@ export class IPFSClient {
     });
   }
 
+  /**
+   * Fetch raw bytes for a CID. Returns a Uint8Array with no encoding overhead.
+   */
+  async fetchRawBytes(cidString: string): Promise<Uint8Array> {
+    const cid = this.parseCid(cidString);
+    return this.fetchBlock(cid);
+  }
+
   async fetchData(cidString: string): Promise<{ data: any; isJSON: boolean; rawHex?: string }> {
-    this.config.logger.info(`Starting fetch for CID: ${cidString}`);
-    this.config.logger.network('Parsing CID...');
-
-    let cid: CID;
-    try {
-      cid = CID.parse(cidString);
-
-      // Determine codec name
-      const codecName = this.getCodecName(cid.code);
-
-      this.config.logger.debug('CID parsed successfully', {
-        version: cid.version,
-        codec: `${codecName} (0x${cid.code.toString(16)})`,
-        multihash: cid.multihash.toString(),
-      });
-
-      this.config.logger.info(`Detected codec: ${codecName}`);
-    } catch (error) {
-      this.config.logger.error('Invalid CID format', error);
-      throw new Error(`Invalid CID: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const cid = this.parseCid(cidString);
 
     try {
       const result = await this.fetchViaHelia(cid);
@@ -172,6 +160,27 @@ export class IPFSClient {
     }
   }
 
+  private parseCid(cidString: string): CID {
+    this.config.logger.info(`Starting fetch for CID: ${cidString}`);
+
+    try {
+      const cid = CID.parse(cidString);
+      const codecName = this.getCodecName(cid.code);
+
+      this.config.logger.debug('CID parsed successfully', {
+        version: cid.version,
+        codec: `${codecName} (0x${cid.code.toString(16)})`,
+        multihash: cid.multihash.toString(),
+      });
+
+      this.config.logger.info(`Detected codec: ${codecName}`);
+      return cid;
+    } catch (error) {
+      this.config.logger.error('Invalid CID format', error);
+      throw new Error(`Invalid CID: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private bytesToHex(bytes: Uint8Array): string {
     return Array.from(bytes)
       .map(b => b.toString(16).padStart(2, '0'))
@@ -187,132 +196,86 @@ export class IPFSClient {
     }
   }
 
-  private async fetchViaHelia(cid: CID): Promise<{ data: any; isJSON: boolean; rawHex?: string }> {
+  /**
+   * Fetch a raw block from the blockstore and return it as Uint8Array.
+   */
+  private async fetchBlock(cid: CID): Promise<Uint8Array> {
     if (!this.helia) {
       throw new Error('Helia not initialized');
     }
 
     this.config.logger.network('Fetching via Helia...');
-    this.config.logger.debug('Requesting data from IPFS network...');
 
-    const codecName = this.getCodecName(cid.code);
-    this.config.logger.info(`Codec detected: ${codecName} - Fetching raw bytes from blockstore`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blockData: any = await this.helia.blockstore.get(cid);
 
-    try {
-      // Just get raw bytes directly from blockstore, regardless of codec
-      this.config.logger.debug('Requesting block from blockstore...');
-      const blockData = await this.helia.blockstore.get(cid);
+    let block: Uint8Array;
 
-      // Log raw data
-      this.config.logger.debug('📦 raw data received from ipfs', {
-        type: typeof blockData,
-        constructor: blockData?.constructor?.name,
-        isUint8Array: blockData instanceof Uint8Array,
-        length: blockData?.length,
-        isBuffer: typeof Buffer !== 'undefined' && Buffer.isBuffer?.(blockData),
-        toString: blockData?.toString?.(),
-        isAsyncIterable: Symbol.asyncIterator in Object(blockData),
+    if (blockData instanceof Uint8Array) {
+      block = blockData;
+    } else if (typeof Buffer !== 'undefined' && Buffer.isBuffer(blockData)) {
+      block = new Uint8Array(blockData);
+    } else if (typeof blockData === 'object' && Symbol.asyncIterator in Object(blockData)) {
+      this.config.logger.debug('Blockdata is async iterable, consuming chunks...');
+      const chunks: Uint8Array[] = [];
+
+      const timeoutMs = 30000;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error(`Timeout after ${timeoutMs / 1000}s waiting for data`)),
+          timeoutMs
+        );
       });
 
-      // Convert to Uint8Array if needed
-      let block: Uint8Array;
+      const iterator = (blockData as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+      let done = false;
 
-      if (blockData instanceof Uint8Array) {
-        block = blockData;
-      } else if (typeof Buffer !== 'undefined' && Buffer.isBuffer(blockData)) {
-        block = new Uint8Array(blockData);
-      } else if (typeof blockData === 'object' && Symbol.asyncIterator in Object(blockData)) {
-        this.config.logger.debug('Blockdata is async iterable, consuming chunks...');
-        const chunks: Uint8Array[] = [];
-
-        const timeoutMs = 30000; // 30 seconds
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(
-              new Error(
-                `Timeout after ${timeoutMs / 1000}s waiting for data. The CID may not be available on the connected peers.`
-              )
-            );
-          }, timeoutMs);
-        });
-
-        try {
-          const iterator = (blockData as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
-          let done = false;
-
-          while (!done) {
-            const nextPromise = iterator.next();
-            const result = await Promise.race([nextPromise, timeoutPromise]);
-
-            if (result.done) {
-              done = true;
-            } else {
-              chunks.push(result.value);
-              this.config.logger.debug(`Received chunk: ${result.value.length} bytes`);
-            }
-          }
-        } catch (error) {
-          this.config.logger.error('Error consuming async iterable', error);
-          throw error;
+      while (!done) {
+        const result = await Promise.race([iterator.next(), timeoutPromise]);
+        if (result.done) {
+          done = true;
+        } else {
+          chunks.push(result.value);
         }
-
-        if (chunks.length === 0) {
-          this.config.logger.error('No chunks received from async iterable');
-          throw new Error('Block not found - the peer may not have this CID');
-        }
-
-        // Combine chunks
-        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        block = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of chunks) {
-          block.set(chunk, offset);
-          offset += chunk.length;
-        }
-
-        this.config.logger.debug(`Combined ${chunks.length} chunks into ${block.length} bytes`);
-      } else if (typeof blockData === 'object' && blockData.length !== undefined) {
-        // Array-like object
-        block = new Uint8Array(blockData);
-      } else {
-        this.config.logger.error('Unknown block data type', {
-          type: typeof blockData,
-          constructor: blockData?.constructor?.name,
-        });
-        throw new Error(`Unexpected block data type: ${typeof blockData}`);
       }
 
-      if (block.length === 0) {
-        this.config.logger.error('Block has zero length after conversion');
-        throw new Error('Block is empty - the peer may not have this CID');
+      if (chunks.length === 0) {
+        throw new Error('Block not found - the peer may not have this CID');
       }
 
-      const rawHex = this.bytesToHex(block);
-
-      this.config.logger.debug('📦 raw data as hexstring (first 100 chars)', {
-        hex: rawHex.substring(0, 100) + (rawHex.length > 100 ? '...' : ''),
-        totalBytes: block.length,
-      });
-
-      this.config.logger.network('Raw block data received from Helia', {
-        bytes: block.length,
-      });
-
-      // Try to decode as text and parse as JSON
-      const decoder = new TextDecoder();
-      const text = decoder.decode(block);
-      const jsonResult = this.tryParseJSON(text);
-
-      if (jsonResult.success) {
-        this.config.logger.debug('Raw block contains valid JSON');
-        return { data: jsonResult.data, isJSON: true, rawHex };
-      } else {
-        this.config.logger.debug('Raw block is not JSON, displaying as hex');
-        return { data: text, isJSON: false, rawHex };
+      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      block = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        block.set(chunk, offset);
+        offset += chunk.length;
       }
-    } catch (error) {
-      this.config.logger.error('Failed to fetch raw block', error);
-      throw error;
+    } else if (typeof blockData === 'object' && blockData.length !== undefined) {
+      block = new Uint8Array(blockData);
+    } else {
+      throw new Error(`Unexpected block data type: ${typeof blockData}`);
+    }
+
+    if (block.length === 0) {
+      throw new Error('Block is empty - the peer may not have this CID');
+    }
+
+    this.config.logger.success(`Fetched ${block.length} bytes`);
+    return block;
+  }
+
+  private async fetchViaHelia(cid: CID): Promise<{ data: any; isJSON: boolean; rawHex?: string }> {
+    const block = await this.fetchBlock(cid);
+    const rawHex = this.bytesToHex(block);
+
+    const decoder = new TextDecoder();
+    const text = decoder.decode(block);
+    const jsonResult = this.tryParseJSON(text);
+
+    if (jsonResult.success) {
+      return { data: jsonResult.data, isJSON: true, rawHex };
+    } else {
+      return { data: text, isJSON: false, rawHex };
     }
   }
 

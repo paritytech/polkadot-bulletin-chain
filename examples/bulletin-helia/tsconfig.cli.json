@@ -2,6 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist-cli",
+    "noEmit": false,
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": false,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2022",
@@ -11,7 +14,6 @@
   },
   "include": [
     "src/cli.ts",
-    "src/verify.ts",
     "src/ipfs.ts",
     "src/logger-base.ts",
     "src/logger-cli.ts"
