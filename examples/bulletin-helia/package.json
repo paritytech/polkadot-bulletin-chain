@@ -3,10 +3,25 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    "./ipfs": {
+      "types": "./dist-cli/ipfs.d.ts",
+      "default": "./dist-cli/ipfs.js"
+    },
+    "./logger-base": {
+      "types": "./dist-cli/logger-base.d.ts",
+      "default": "./dist-cli/logger-base.js"
+    },
+    "./logger-cli": {
+      "types": "./dist-cli/logger-cli.d.ts",
+      "default": "./dist-cli/logger-cli.js"
+    }
+  },
   "bin": {
     "bulletin-helia": "./dist-cli/cli.js"
   },
   "scripts": {
+    "prepare": "tsc --project tsconfig.cli.json",
     "dev": "vite",
     "dev:cli": "tsx src/cli.ts",
     "build": "npm run build:web && npm run build:cli",

@@ -2,6 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist-cli",
+    "noEmit": false,
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": false,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2022",

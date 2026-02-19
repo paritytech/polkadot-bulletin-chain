@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { IPFSClient } from './ipfs';
-import { CLILogger } from './logger-cli';
+import { IPFSClient } from './ipfs.js';
+import { CLILogger } from './logger-cli.js';
 
 async function main() {
   const args = process.argv.slice(2);
