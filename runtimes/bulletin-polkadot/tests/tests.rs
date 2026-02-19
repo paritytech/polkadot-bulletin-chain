@@ -978,3 +978,52 @@ fn sudo_kill_works() {
 		);
 	});
 }
+
+#[test]
+fn alice_can_sign_authorize_account_extrinsic() {
+	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
+	// from Alice must pass ValidateSigned and succeed at dispatch.
+	run_test(|| {
+		let alice = sudo_relayer_signer(); // Alice
+		let target = non_relay_signer();
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		assert_ok_ok(construct_and_apply_extrinsic(alice.pair(), call));
+
+		// Verify the authorization was actually applied.
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(target.to_account_id()),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+		);
+	});
+}
+
+#[test]
+fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
+	// A non-TestAccount signer's `authorize_account` extrinsic should be rejected at
+	// validation with BadSigner (checked in pallet's check_signed).
+	run_test(|| {
+		let signer = non_relay_signer(); // Charlie, not a TestAccount
+		let target = relayer_signer();
+
+		// Ensure Charlie's account exists so CheckNonce doesn't reject first.
+		frame_system::Pallet::<Runtime>::inc_providers(&signer.to_account_id());
+
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
+		);
+	});
+}
