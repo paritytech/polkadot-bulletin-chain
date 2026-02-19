@@ -1077,31 +1077,6 @@ fn migration_v2_mixed_default_and_explicit() {
 }
 
 #[test]
-fn migration_v2_skips_already_migrated() {
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(1).put::<TransactionStorage>();
-
-		// Store via normal code path (already v2 format)
-		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
-		run_to_block(2, || None);
-
-		let original = Transactions::get(1).expect("should decode");
-		assert_eq!(original.len(), 1);
-
-		// Manually set version back to 1 to allow migration to run
-		StorageVersion::new(1).put::<TransactionStorage>();
-
-		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
-
-		// Entry unchanged
-		let after = Transactions::get(1).expect("should decode");
-		assert_eq!(original, after);
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
-	});
-}
-
-#[test]
 fn migration_v2_idempotent() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(1).put::<TransactionStorage>();
