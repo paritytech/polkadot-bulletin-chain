@@ -137,7 +137,15 @@ export class BulletinClient {
             error: error as Error,
           });
         }
-        throw error;
+        // Wrap raw errors in BulletinError for consistent error handling
+        if (error instanceof BulletinError) {
+          throw error;
+        }
+        throw new BulletinError(
+          `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
+          "CHUNK_FAILED",
+          error,
+        );
       }
     }
 

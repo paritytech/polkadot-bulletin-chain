@@ -270,7 +270,15 @@ export async function retry<T>(
     }
   }
 
-  throw lastError || new Error("Retry failed");
+  // Wrap raw errors in BulletinError for consistent error handling
+  if (lastError instanceof BulletinError) {
+    throw lastError;
+  }
+  throw new BulletinError(
+    lastError?.message || "Retry failed after maximum attempts",
+    "RETRY_EXHAUSTED",
+    lastError,
+  );
 }
 
 /**
