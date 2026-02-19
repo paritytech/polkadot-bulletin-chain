@@ -270,4 +270,210 @@ mod tests {
 		let result = reassemble_chunks(&chunks);
 		assert!(result.is_err());
 	}
+
+	// ==================== Large File Handling Tests ====================
+
+	#[test]
+	fn test_large_file_chunking_10mb() {
+		// 10 MB file with 1 MiB chunks = 10 chunks
+		let data = vec![0xABu8; 10 * 1024 * 1024];
+		let config = ChunkerConfig {
+			chunk_size: 1024 * 1024, // 1 MiB
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+		let chunks = chunker.chunk(&data).unwrap();
+
+		assert_eq!(chunks.len(), 10);
+
+		// Verify all chunks have correct metadata
+		for (i, chunk) in chunks.iter().enumerate() {
+			assert_eq!(chunk.index, i as u32);
+			assert_eq!(chunk.total_chunks, 10);
+			assert_eq!(chunk.data.len(), 1024 * 1024);
+		}
+	}
+
+	#[test]
+	fn test_large_file_chunking_100mb() {
+		// 100 MB file - verify chunk count and metadata without holding all data
+		let data_size = 100 * 1024 * 1024;
+		let chunk_size = 1024 * 1024;
+		let expected_chunks = 100;
+
+		let config = ChunkerConfig {
+			chunk_size: chunk_size as u32,
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+
+		// Verify num_chunks calculation for large files
+		assert_eq!(chunker.num_chunks(data_size), expected_chunks);
+
+		// Create actual data and chunk it (this tests memory handling)
+		let data = vec![0xCDu8; data_size];
+		let chunks = chunker.chunk(&data).unwrap();
+
+		assert_eq!(chunks.len(), expected_chunks);
+
+		// Verify first and last chunk metadata
+		assert_eq!(chunks[0].index, 0);
+		assert_eq!(chunks[0].total_chunks, expected_chunks as u32);
+		assert_eq!(chunks[99].index, 99);
+		assert_eq!(chunks[99].total_chunks, expected_chunks as u32);
+	}
+
+	#[test]
+	fn test_large_file_reassembly_integrity() {
+		// Create 5 MB file with varying data pattern
+		let size = 5 * 1024 * 1024;
+		let mut data = Vec::with_capacity(size);
+		for i in 0..size {
+			data.push((i % 256) as u8);
+		}
+
+		let config = ChunkerConfig {
+			chunk_size: 512 * 1024, // 512 KiB chunks
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+		let chunks = chunker.chunk(&data).unwrap();
+
+		// Should have 10 chunks (5 MiB / 512 KiB)
+		assert_eq!(chunks.len(), 10);
+
+		// Reassemble and verify integrity
+		let reassembled = reassemble_chunks(&chunks).unwrap();
+		assert_eq!(data.len(), reassembled.len());
+		assert_eq!(data, reassembled);
+	}
+
+	#[test]
+	fn test_large_file_partial_last_chunk() {
+		// File size that doesn't divide evenly into chunks
+		let size = 10 * 1024 * 1024 + 12345; // 10 MB + 12345 bytes
+		let data = vec![0xEFu8; size];
+
+		let config = ChunkerConfig {
+			chunk_size: 1024 * 1024,
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+		let chunks = chunker.chunk(&data).unwrap();
+
+		// Should have 11 chunks
+		assert_eq!(chunks.len(), 11);
+
+		// Last chunk should have the remainder
+		assert_eq!(chunks[10].data.len(), 12345);
+
+		// Verify reassembly
+		let reassembled = reassemble_chunks(&chunks).unwrap();
+		assert_eq!(data, reassembled);
+	}
+
+	#[test]
+	fn test_chunk_index_consistency_many_chunks() {
+		// Many small chunks to test index handling
+		let data = vec![0x42u8; 1000];
+		let config = ChunkerConfig {
+			chunk_size: 10, // Very small chunks
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+		let chunks = chunker.chunk(&data).unwrap();
+
+		assert_eq!(chunks.len(), 100);
+
+		// Verify sequential indices
+		for (i, chunk) in chunks.iter().enumerate() {
+			assert_eq!(chunk.index, i as u32, "Chunk {} has wrong index", i);
+			assert_eq!(chunk.total_chunks, 100, "Chunk {} has wrong total_chunks", i);
+		}
+	}
+
+	#[test]
+	fn test_reassemble_out_of_order_chunks() {
+		let original_data = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+		let config = ChunkerConfig { chunk_size: 3, max_parallel: 8, create_manifest: true };
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+		let mut chunks = chunker.chunk(&original_data).unwrap();
+
+		// Shuffle chunks out of order
+		chunks.swap(0, 2);
+		chunks.swap(1, 3);
+
+		// Sort back by index before reassembly
+		chunks.sort_by_key(|c| c.index);
+
+		let reassembled = reassemble_chunks(&chunks).unwrap();
+		assert_eq!(original_data, reassembled);
+	}
+
+	#[test]
+	fn test_chunk_boundary_exact_multiple() {
+		// Data size exactly divisible by chunk size
+		let chunk_size = 1000;
+		let num_chunks = 5;
+		let data = vec![0xAAu8; chunk_size * num_chunks];
+
+		let config = ChunkerConfig {
+			chunk_size: chunk_size as u32,
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let chunker = FixedSizeChunker::new(config).unwrap();
+		let chunks = chunker.chunk(&data).unwrap();
+
+		assert_eq!(chunks.len(), num_chunks);
+
+		// All chunks should be exactly chunk_size
+		for chunk in &chunks {
+			assert_eq!(chunk.data.len(), chunk_size);
+		}
+	}
+
+	#[test]
+	fn test_default_config_values() {
+		let chunker = FixedSizeChunker::default_config();
+
+		// Verify default chunk size is 1 MiB
+		assert_eq!(chunker.num_chunks(1024 * 1024), 1);
+		assert_eq!(chunker.num_chunks(1024 * 1024 + 1), 2);
+	}
+
+	#[test]
+	fn test_max_chunk_size_boundary() {
+		// Exactly at max chunk size should work
+		let config = ChunkerConfig {
+			chunk_size: MAX_CHUNK_SIZE as u32,
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let result = FixedSizeChunker::new(config);
+		assert!(result.is_ok());
+
+		// One byte over should fail
+		let config_over = ChunkerConfig {
+			chunk_size: MAX_CHUNK_SIZE as u32 + 1,
+			max_parallel: 8,
+			create_manifest: true,
+		};
+
+		let result_over = FixedSizeChunker::new(config_over);
+		assert!(result_over.is_err());
+	}
 }

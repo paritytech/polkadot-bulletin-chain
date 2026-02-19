@@ -245,4 +245,154 @@ mod tests {
 		let manager = AuthorizationManager::new().with_auto_refresh(true);
 		assert!(manager.auto_refresh);
 	}
+
+	// ==================== Authorization Expiry Edge Cases ====================
+
+	#[test]
+	fn test_authorization_with_expiry_set() {
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 10,
+			max_size: 10_000_000,
+			expires_at: Some(1000),
+		};
+
+		// Authorization struct correctly stores expiry
+		assert_eq!(auth.expires_at, Some(1000));
+	}
+
+	#[test]
+	fn test_authorization_without_expiry() {
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 10,
+			max_size: 10_000_000,
+			expires_at: None,
+		};
+
+		// No expiry means authorization doesn't expire
+		assert_eq!(auth.expires_at, None);
+	}
+
+	#[test]
+	fn test_authorization_at_exact_boundary() {
+		let manager = AuthorizationManager::new();
+
+		// Exactly at the limit - should succeed
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 5,
+			max_size: 5_000_000,
+			expires_at: None,
+		};
+
+		let result = manager.check_authorization(&auth, 5_000_000, 5);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn test_authorization_one_over_transaction_limit() {
+		let manager = AuthorizationManager::new();
+
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 5,
+			max_size: 10_000_000,
+			expires_at: None,
+		};
+
+		// Requesting 6 transactions when only 5 authorized
+		let result = manager.check_authorization(&auth, 1_000_000, 6);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_authorization_one_byte_over_size_limit() {
+		let manager = AuthorizationManager::new();
+
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 10,
+			max_size: 5_000_000,
+			expires_at: None,
+		};
+
+		// Requesting 1 byte more than authorized
+		let result = manager.check_authorization(&auth, 5_000_001, 1);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_authorization_zero_transactions_required() {
+		let manager = AuthorizationManager::new();
+
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 0,
+			max_size: 0,
+			expires_at: None,
+		};
+
+		// Zero required should succeed even with zero available
+		let result = manager.check_authorization(&auth, 0, 0);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn test_authorization_max_values() {
+		let manager = AuthorizationManager::new();
+
+		let auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: u32::MAX,
+			max_size: u64::MAX,
+			expires_at: Some(u32::MAX),
+		};
+
+		// Should handle max values without overflow
+		let result = manager.check_authorization(&auth, u64::MAX, u32::MAX);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn test_calculate_requirements_overflow_protection() {
+		let manager = AuthorizationManager::new();
+
+		// Very large number of chunks that would overflow u32
+		let (txs, bytes) = manager.calculate_requirements(u64::MAX, usize::MAX, true);
+
+		// Should saturate instead of overflow
+		assert_eq!(txs, u32::MAX);
+		assert!(bytes > 0); // Should have saturated but not wrapped to zero
+	}
+
+	#[test]
+	fn test_estimate_authorization_zero_size() {
+		let manager = AuthorizationManager::new();
+
+		// Zero size should still require 1 transaction
+		let (txs, _bytes) = manager.estimate_authorization(0, false);
+		assert_eq!(txs, 1);
+	}
+
+	#[test]
+	fn test_preimage_vs_account_scope() {
+		let account_auth = Authorization {
+			scope: AuthorizationScope::Account,
+			transactions: 10,
+			max_size: 10_000_000,
+			expires_at: None,
+		};
+
+		let preimage_auth = Authorization {
+			scope: AuthorizationScope::Preimage,
+			transactions: 1,
+			max_size: 1_000_000,
+			expires_at: None,
+		};
+
+		// Verify different scopes are correctly stored
+		assert!(matches!(account_auth.scope, AuthorizationScope::Account));
+		assert!(matches!(preimage_auth.scope, AuthorizationScope::Preimage));
+	}
 }
