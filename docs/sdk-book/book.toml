@@ -6,3 +6,4 @@ src = "src"
 title = "Polkadot Bulletin SDK Documentation"
 
 [output.html]
+site-url = "/polkadot-bulletin-chain/"
