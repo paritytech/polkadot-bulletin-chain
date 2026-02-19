@@ -82,6 +82,7 @@ export function Download() {
   const activeTab = searchParams.get("tab") || "p2p";
 
   const heliaClientRef = useRef<HeliaClient | null>(null);
+  const prevNetworkId = useRef(network.id);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -90,8 +91,14 @@ export function Download() {
     };
   }, []);
 
-  // Reset everything when network changes
+  // Reset everything when network actually changes (skip on mount so we
+  // preserve the CID from URL query params; works with StrictMode)
   useEffect(() => {
+    if (prevNetworkId.current === network.id) {
+      return;
+    }
+    prevNetworkId.current = network.id;
+
     heliaClientRef.current?.stop();
     heliaClientRef.current = null;
 
