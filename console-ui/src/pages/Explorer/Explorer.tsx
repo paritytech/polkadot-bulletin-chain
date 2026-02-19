@@ -5,26 +5,119 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
-import { useApi, useBlockNumber, useChainState } from "@/state/chain.state";
+import { useApi, useClient, useBlockNumber, useChainState } from "@/state/chain.state";
 import { formatBlockNumber } from "@/utils/format";
+import { Binary, type HexString } from "polkadot-api";
 
 interface BlockInfo {
   number: number;
   hash: string;
-  parentHash: string;
   extrinsicsCount: number;
 }
 
 interface ExtrinsicInfo {
   index: number;
-  section: string;
-  method: string;
-  isSigned: boolean;
-  signer?: string;
+  pallet: string;
+  call: string;
+}
+
+// Return the byte length of a SCALE compact-encoded integer at the given offset.
+function compactLen(bytes: Uint8Array, offset: number): number {
+  const mode = bytes[offset]! & 0x03;
+  if (mode === 0) return 1;
+  if (mode === 1) return 2;
+  if (mode === 2) return 4;
+  // big-integer mode
+  const len = (bytes[offset]! >> 2) + 4;
+  return 1 + len;
+}
+
+// Decode the value of a SCALE compact-encoded integer at the given offset.
+function compactValue(bytes: Uint8Array, offset: number): number {
+  const mode = bytes[offset]! & 0x03;
+  if (mode === 0) return bytes[offset]! >> 2;
+  if (mode === 1) return ((bytes[offset + 1]! << 8) | bytes[offset]!) >> 2;
+  if (mode === 2) {
+    const val = (bytes[offset + 3]! << 24) | (bytes[offset + 2]! << 16)
+      | (bytes[offset + 1]! << 8) | bytes[offset]!;
+    return val >>> 2;
+  }
+  // big-integer: not expected for extension lengths
+  return 0;
+}
+
+// Extract call data from a SCALE-encoded extrinsic.
+// For unsigned/bare: unambiguous — call data follows the version byte directly.
+// For signed: returns null (extensions are runtime-specific, caller uses fallback).
+function extractCallData(hexExt: HexString): Uint8Array | null {
+  try {
+    const bytes = Binary.fromHex(hexExt).asBytes();
+    if (bytes.length < 3) return null;
+
+    let offset = compactLen(bytes, 0);
+    const preamble = bytes[offset]!;
+    offset += 1;
+
+    const version = preamble & 0x1f;
+
+    if (version === 5) {
+      const preambleType = (preamble >> 5) & 0x03;
+      if (preambleType === 0) return bytes.slice(offset); // Bare
+      if (preambleType === 2) {
+        // General (0x45): compact(ext_len) ++ extension_bytes ++ call_data
+        const extLenSize = compactLen(bytes, offset);
+        const extLen = compactValue(bytes, offset);
+        offset += extLenSize + extLen;
+        return bytes.slice(offset);
+      }
+      return null; // Signed v5
+    }
+
+    if (version === 4) {
+      if ((preamble & 0x80) === 0) return bytes.slice(offset); // Unsigned
+      return null; // Signed — handled by caller via fallback
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// For signed extrinsics: skip address + signature, then try offsets from the
+// most likely position outward until txFromCallData succeeds.
+function getSignedExtOffsetRange(hexExt: HexString): { bytes: Uint8Array; minOffset: number } | null {
+  try {
+    const bytes = Binary.fromHex(hexExt).asBytes();
+    if (bytes.length < 3) return null;
+
+    let offset = compactLen(bytes, 0);
+    const preamble = bytes[offset]!;
+    offset += 1;
+
+    const version = preamble & 0x1f;
+    const isSigned = version === 4 ? (preamble & 0x80) !== 0 : ((preamble >> 5) & 0x03) !== 0;
+    if (!isSigned) return null;
+
+    // Skip address
+    const addrType = bytes[offset]!;
+    offset += 1;
+    if (addrType === 0) offset += 32;
+    else return null;
+
+    // Skip signature
+    const sigType = bytes[offset]!;
+    offset += 1 + (sigType === 2 ? 65 : 64);
+
+    return { bytes, minOffset: offset };
+  } catch {
+    return null;
+  }
 }
 
 export function Explorer() {
   const api = useApi();
+  const client = useClient();
   const currentBlockNumber = useBlockNumber();
   const { storageType } = useChainState();
 
@@ -38,31 +131,31 @@ export function Explorer() {
   const [blockExtrinsics, setBlockExtrinsics] = useState<ExtrinsicInfo[]>([]);
   const [isLoadingBlock, setIsLoadingBlock] = useState(false);
 
-  // Load recent blocks using API queries
+  // Load recent blocks using the client's block data
   const loadRecentBlocks = useCallback(async () => {
-    if (!api || currentBlockNumber === undefined) return;
+    if (!client || currentBlockNumber === undefined) return;
 
     setIsLoadingBlocks(true);
     try {
-      const blocks: BlockInfo[] = [];
-      const startBlock = currentBlockNumber;
-      const count = Math.min(10, startBlock);
-
-      // For each block, query the transaction count
-      for (let i = 0; i < count; i++) {
-        const blockNumber = startBlock - i;
-        try {
-          const txInfos = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
-          blocks.push({
-            number: blockNumber,
-            hash: `Block #${blockNumber}`,
-            parentHash: `Block #${blockNumber - 1}`,
-            extrinsicsCount: txInfos?.length ?? 0,
-          });
-        } catch {
-          // Skip blocks we can't fetch
-        }
-      }
+      const bestBlocks = await client.getBestBlocks();
+      const blocks: BlockInfo[] = await Promise.all(
+        bestBlocks.map(async (b) => {
+          try {
+            const body = await client.getBlockBody(b.hash);
+            return {
+              number: b.number,
+              hash: b.hash,
+                extrinsicsCount: body.length,
+            };
+          } catch {
+            return {
+              number: b.number,
+              hash: b.hash,
+                extrinsicsCount: 0,
+            };
+          }
+        })
+      );
 
       setRecentBlocks(blocks);
     } catch (err) {
@@ -70,57 +163,122 @@ export function Explorer() {
     } finally {
       setIsLoadingBlocks(false);
     }
-  }, [api, currentBlockNumber]);
+  }, [client, currentBlockNumber]);
 
-  // Load block details
-  const loadBlockDetails = useCallback(async (blockNumber: number) => {
-    if (!api) return;
+  // Load block details. If knownHash is provided (e.g. from bestBlocks), use it
+  // directly instead of querying System.BlockHash.
+  const loadBlockDetails = useCallback(async (blockNumber: number, knownHash?: string) => {
+    if (!client) return;
 
     setIsLoadingBlock(true);
     setSelectedBlockNumber(blockNumber);
+    setBlockExtrinsics([]);
 
     try {
+      // Use known hash or look it up from the recent blocks list
+      let hashHex = knownHash
+        ?? recentBlocks.find((b) => b.number === blockNumber)?.hash
+        ?? "";
+
+      // Fall back to System.BlockHash storage query
+      if (!hashHex && api) {
+        const blockHash = await api.query.System.BlockHash.getValue(blockNumber);
+        if (blockHash) {
+          const hex = blockHash.asHex();
+          // Ignore zero hash (block not in storage)
+          if (hex !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+            hashHex = hex;
+          }
+        }
+      }
+
+      // Try to get block body - may fail for blocks not pinned by chainHead
+      let body: string[] = [];
+      try {
+        if (hashHex) {
+          body = await client.getBlockBody(hashHex);
+        }
+      } catch {
+        // Block body not available (e.g. unpinned finalized block)
+      }
+
       setSelectedBlock({
         number: blockNumber,
-        hash: `Block #${blockNumber}`,
-        parentHash: `Block #${blockNumber - 1}`,
-        extrinsicsCount: 0,
+        hash: hashHex || "",
+        extrinsicsCount: body.length,
       });
 
-      // Query storage events for this block
-      const txInfos = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
+      // Decode each extrinsic to extract pallet + call name
+      const extrinsics: ExtrinsicInfo[] = await Promise.all(
+        body.map(async (hex, index) => {
+          if (!api) return { index, pallet: "", call: "" };
+          try {
+            // Try direct extraction (works for unsigned/bare/general)
+            const callData = extractCallData(hex as HexString);
+            if (callData) {
+              const tx = await api.txFromCallData(Binary.fromBytes(callData));
+              const pallet = tx.decodedCall.type;
+              const call = (tx.decodedCall.value as { type: string }).type;
+              return { index, pallet, call };
+            }
 
-      const extrinsics: ExtrinsicInfo[] = (txInfos || []).map((_: any, index: number) => ({
-        index,
-        section: "TransactionStorage",
-        method: "store",
-        isSigned: true,
-      }));
-
+            // Signed extrinsic: try offsets after the signature, starting from
+            // the end (shortest call data first to avoid false positives)
+            const range = getSignedExtOffsetRange(hex as HexString);
+            if (range) {
+              for (let i = range.bytes.length - 2; i >= range.minOffset; i--) {
+                try {
+                  const slice = range.bytes.slice(i);
+                  const tx = await api.txFromCallData(Binary.fromBytes(slice));
+                  const pallet = tx.decodedCall.type;
+                  const call = (tx.decodedCall.value as { type: string }).type;
+                  return { index, pallet, call };
+                } catch {
+                  // Try next offset
+                }
+              }
+            }
+          } catch (e) {
+            console.error(`[ext ${index}] decoding failed:`, e);
+          }
+          return { index, pallet: "", call: "" };
+        })
+      );
       setBlockExtrinsics(extrinsics);
     } catch (err) {
       console.error("Failed to load block details:", err);
-      setBlockExtrinsics([]);
+      setSelectedBlock({
+        number: blockNumber,
+        hash: "",
+        extrinsicsCount: 0,
+      });
     } finally {
       setIsLoadingBlock(false);
     }
-  }, [api]);
+  }, [api, client, recentBlocks]);
 
-  // Reset state when the network changes
+  // Reset and reload when the network/client changes
   useEffect(() => {
     setRecentBlocks([]);
     setSelectedBlock(null);
     setSelectedBlockNumber(null);
     setBlockExtrinsics([]);
     setBlockSearchInput("");
-  }, [storageType]);
+  }, [api]);
 
-  // Initial load
+  // Refresh recent blocks whenever the block number changes
   useEffect(() => {
-    if (currentBlockNumber !== undefined && recentBlocks.length === 0) {
+    if (currentBlockNumber !== undefined) {
       loadRecentBlocks();
     }
-  }, [currentBlockNumber, loadRecentBlocks, recentBlocks.length]);
+  }, [currentBlockNumber, loadRecentBlocks]);
+
+  // Auto-select the first block when blocks are loaded but none is selected
+  useEffect(() => {
+    if (recentBlocks.length > 0 && selectedBlockNumber === null) {
+      loadBlockDetails(recentBlocks[0]!.number, recentBlocks[0]!.hash);
+    }
+  }, [recentBlocks, selectedBlockNumber, loadBlockDetails]);
 
   const handleBlockSearch = () => {
     const blockNum = parseInt(blockSearchInput);
@@ -188,7 +346,7 @@ export function Explorer() {
                   {recentBlocks.map((block) => (
                     <button
                       key={block.number}
-                      onClick={() => loadBlockDetails(block.number)}
+                      onClick={() => loadBlockDetails(block.number, block.hash)}
                       className={`w-full text-left p-3 rounded-md transition-colors ${
                         selectedBlockNumber === block.number
                           ? "bg-primary/10 border border-primary/20"
@@ -279,38 +437,28 @@ export function Explorer() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                        Parent
-                      </p>
-                      <p className="font-mono text-sm truncate">
-                        {selectedBlock.parentHash}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                        Storage Transactions
-                      </p>
-                      <p className="font-mono text-sm">
-                        {blockExtrinsics.length}
-                      </p>
-                    </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Transactions
+                    </p>
+                    <p className="font-mono text-sm">
+                      {blockExtrinsics.length}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg">Storage Transactions</CardTitle>
+                  <CardTitle className="text-lg">Extrinsics</CardTitle>
                   <CardDescription>
-                    {blockExtrinsics.length} storage transaction(s) in this block
+                    {blockExtrinsics.length} extrinsic(s) in this block
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {blockExtrinsics.length === 0 ? (
                     <p className="text-center text-muted-foreground py-4">
-                      No storage transactions in this block
+                      No extrinsics in this block
                     </p>
                   ) : (
                     <div className="space-y-2">
@@ -319,22 +467,14 @@ export function Explorer() {
                           key={ext.index}
                           className="p-3 rounded-md bg-secondary/50 border"
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">#{ext.index}</Badge>
-                              <span className="font-mono text-sm">
-                                {ext.section}.{ext.method}
-                              </span>
-                            </div>
-                            {ext.isSigned && (
-                              <Badge variant="secondary">Signed</Badge>
-                            )}
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">#{ext.index}</Badge>
+                            <span className="font-mono text-sm">
+                              {ext.pallet && ext.call
+                                ? `${ext.pallet}.${ext.call}`
+                                : "Extrinsic"}
+                            </span>
                           </div>
-                          {ext.signer && (
-                            <p className="text-xs text-muted-foreground font-mono mt-1">
-                              Signer: {ext.signer}
-                            </p>
-                          )}
                         </div>
                       ))}
                     </div>
