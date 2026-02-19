@@ -8,6 +8,13 @@
 
 extern crate alloc;
 
+/// Maximum number of chunks supported in a single DAG manifest.
+///
+/// This limit prevents excessive memory allocation when building manifests.
+/// With 1 MiB chunks, this allows files up to ~1 TB. For larger files,
+/// consider using a hierarchical DAG structure or streaming approach.
+pub const MAX_MANIFEST_CHUNKS: usize = 1_000_000;
+
 use crate::{
 	cid::{calculate_cid, CidConfig, CidData},
 	types::{Chunk, CidCodec, Error, HashAlgorithm, Result},
@@ -154,6 +161,16 @@ impl DagBuilder for UnixFsDagBuilder {
 			return Err(Error::EmptyData);
 		}
 
+		// Prevent excessive memory allocation for very large files
+		if chunks.len() > MAX_MANIFEST_CHUNKS {
+			return Err(Error::DagEncodingFailed(alloc::format!(
+				"Too many chunks ({}) for single manifest. Maximum is {}. \
+				 Consider using hierarchical DAG structure for files this large.",
+				chunks.len(),
+				MAX_MANIFEST_CHUNKS
+			)));
+		}
+
 		// Calculate CIDs for all chunks (using raw codec)
 		let mut chunk_cids = Vec::with_capacity(chunks.len());
 		let mut block_sizes = Vec::with_capacity(chunks.len());
@@ -284,5 +301,12 @@ mod tests {
 		let builder = UnixFsDagBuilder::new();
 		let result = builder.build(&chunks, HashAlgorithm::Blake2b256);
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_max_manifest_chunks_constant() {
+		// Verify the constant is set to a reasonable value
+		// With 1 MiB chunks, 1M chunks = ~1 TB max file size
+		assert_eq!(MAX_MANIFEST_CHUNKS, 1_000_000);
 	}
 }
