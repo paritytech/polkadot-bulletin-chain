@@ -266,4 +266,20 @@ pub enum ProgressEvent {
 }
 
 /// Progress callback type.
-pub type ProgressCallback = fn(ProgressEvent);
+///
+/// Uses `Arc<dyn Fn>` to allow closures with captured state while remaining
+/// cloneable and thread-safe. This enables patterns like:
+///
+/// ```ignore
+/// use std::sync::Arc;
+/// use bulletin_sdk_rust::ProgressCallback;
+///
+/// let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
+/// let counter_clone = counter.clone();
+///
+/// let callback: ProgressCallback = Arc::new(move |event| {
+///     counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+///     println!("Progress: {:?}", event);
+/// });
+/// ```
+pub type ProgressCallback = alloc::sync::Arc<dyn Fn(ProgressEvent) + Send + Sync>;
