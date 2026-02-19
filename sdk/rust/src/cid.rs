@@ -230,7 +230,8 @@ mod tests {
 	#[test]
 	#[cfg(feature = "std")]
 	fn test_cid_from_string_with_whitespace() {
-		let result = cid_from_string("  bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi  ");
+		let result =
+			cid_from_string("  bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi  ");
 		// Should fail because whitespace is not valid in CIDs
 		assert!(result.is_err());
 	}
@@ -245,18 +246,9 @@ mod tests {
 
 	#[test]
 	fn test_multihash_code_to_algorithm_known() {
-		assert_eq!(
-			multihash_code_to_algorithm(0xb220),
-			Some(HashingAlgorithm::Blake2b256)
-		);
-		assert_eq!(
-			multihash_code_to_algorithm(0x12),
-			Some(HashingAlgorithm::Sha2_256)
-		);
-		assert_eq!(
-			multihash_code_to_algorithm(0x1b),
-			Some(HashingAlgorithm::Keccak256)
-		);
+		assert_eq!(multihash_code_to_algorithm(0xb220), Some(HashingAlgorithm::Blake2b256));
+		assert_eq!(multihash_code_to_algorithm(0x12), Some(HashingAlgorithm::Sha2_256));
+		assert_eq!(multihash_code_to_algorithm(0x1b), Some(HashingAlgorithm::Keccak256));
 	}
 
 	#[test]

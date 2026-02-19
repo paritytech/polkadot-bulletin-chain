@@ -303,11 +303,8 @@ mod tests {
 		let chunk_size = 1024 * 1024;
 		let expected_chunks = 100;
 
-		let config = ChunkerConfig {
-			chunk_size: chunk_size as u32,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config =
+			ChunkerConfig { chunk_size: chunk_size as u32, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 
@@ -360,11 +357,8 @@ mod tests {
 		let size = 10 * 1024 * 1024 + 12345; // 10 MB + 12345 bytes
 		let data = vec![0xEFu8; size];
 
-		let config = ChunkerConfig {
-			chunk_size: 1024 * 1024,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config =
+			ChunkerConfig { chunk_size: 1024 * 1024, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();
@@ -397,8 +391,8 @@ mod tests {
 
 		// Verify sequential indices
 		for (i, chunk) in chunks.iter().enumerate() {
-			assert_eq!(chunk.index, i as u32, "Chunk {} has wrong index", i);
-			assert_eq!(chunk.total_chunks, 100, "Chunk {} has wrong total_chunks", i);
+			assert_eq!(chunk.index, i as u32, "Chunk {i} has wrong index");
+			assert_eq!(chunk.total_chunks, 100, "Chunk {i} has wrong total_chunks");
 		}
 	}
 
@@ -428,11 +422,8 @@ mod tests {
 		let num_chunks = 5;
 		let data = vec![0xAAu8; chunk_size * num_chunks];
 
-		let config = ChunkerConfig {
-			chunk_size: chunk_size as u32,
-			max_parallel: 8,
-			create_manifest: true,
-		};
+		let config =
+			ChunkerConfig { chunk_size: chunk_size as u32, max_parallel: 8, create_manifest: true };
 
 		let chunker = FixedSizeChunker::new(config).unwrap();
 		let chunks = chunker.chunk(&data).unwrap();
