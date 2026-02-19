@@ -660,6 +660,78 @@ fn store_with_cid_config_uses_custom_hashing() {
 	});
 }
 
+#[test]
+fn preimage_authorize_store_with_cid_config_and_renew() {
+	new_test_ext().execute_with(|| {
+		let data = vec![42u8; 2000];
+		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		let sha2_hash = polkadot_sdk_frame::hashing::sha2_256(&data);
+
+		// check_unsigned / check_store_renew_unsigned use the CID config's hashing
+		// algorithm for preimage authorization lookup.
+		// Authorizing with blake2 hash should NOT work for store_with_cid_config(sha2).
+		let blake2_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			blake2_hash,
+			2000
+		));
+		let store_call =
+			Call::store_with_cid_config { cid: sha2_config.clone(), data: data.clone() };
+		run_to_block(1, || None);
+		assert_noop!(TransactionStorage::pre_dispatch(&store_call), InvalidTransaction::Payment);
+
+		// Authorize preimage with SHA2 hash (matching the CID config's algorithm).
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			sha2_hash,
+			2000
+		));
+
+		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
+		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		// Preimage authorization for sha2 hash should be consumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+		// Blake2 authorization should remain unconsumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(blake2_hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+
+		// Finalize block so Transactions storage is populated.
+		run_to_block(3, || None);
+
+		// Verify stored entry uses SHA2-256 and content_hash matches.
+		let txs = Transactions::get(1).expect("transactions stored at block 1");
+		assert_eq!(txs.len(), 1);
+		assert_eq!(txs[0].cid_config, Some(sha2_config));
+		assert_eq!(txs[0].content_hash, sha2_hash);
+
+		// Renew without authorization fails.
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_noop!(TransactionStorage::pre_dispatch(&renew_call), InvalidTransaction::Payment);
+
+		// Authorize preimage with SHA2 hash (renew uses stored content_hash).
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			sha2_hash,
+			2000
+		));
+		assert_ok!(TransactionStorage::pre_dispatch(&renew_call));
+
+		// Preimage authorization for sha2 hash should be consumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+	});
+}
+
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`
