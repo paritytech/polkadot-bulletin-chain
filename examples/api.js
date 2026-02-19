@@ -117,25 +117,23 @@ export async function authorizePreimage(
 export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null) {
     console.log('⬆️ Storing data with length=', data.length);
 
-    // Add custom `TransactionExtension` for codec, if specified.
-    const txOpts = {};
     let expectedCid;
-    // if (cidCodec != null && mhCode != null) {
-    //     txOpts.customSignedExtensions = {
-    //         ProvideCidConfig: {
-    //             value: {
-    //                 codec: BigInt(cidCodec),
-    //                 hashing: toHashingEnum(mhCode),
-    //             }
-    //         }
-    //     };
-    //     expectedCid = await cidFromBytes(data, cidCodec, mhCode);
-    // } else {
+    let tx;
+    if (cidCodec != null && mhCode != null) {
+        expectedCid = await cidFromBytes(data, cidCodec, mhCode);
+        tx = typedApi.tx.TransactionStorage.store_with_cid_config({
+            cid: {
+                codec: BigInt(cidCodec),
+                hashing: toHashingEnum(mhCode),
+            },
+            data: toBinary(data),
+        });
+    } else {
         expectedCid = await cidFromBytes(data);
-    // }
+        tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
+    }
 
-    const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
-    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
+    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
     return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 

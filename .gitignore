@@ -20,5 +20,6 @@ tsconfig.tsbuildinfo
 # Local test files
 kubo/
 zombienet-*
-
-**/dist/**
+console-ui/dist/
+console-ui/.vite/
+console-ui/tsconfig.tsbuildinfo
