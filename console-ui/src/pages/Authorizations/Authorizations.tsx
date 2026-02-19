@@ -579,6 +579,7 @@ function FaucetAuthorizePreimagePanel() {
 
 function StorageFaucetTab() {
   const api = useApi();
+  const selectedAccount = useSelectedAccount();
 
   const [forWho, setForWho] = useState("");
   const [transactions, setTransactions] = useState("100");
@@ -615,6 +616,13 @@ function StorageFaucetTab() {
 
     initAccounts();
   }, [api]);
+
+  // Prefill with connected account address
+  useEffect(() => {
+    if (selectedAccount?.address && !forWho) {
+      setForWho(selectedAccount.address);
+    }
+  }, [selectedAccount?.address]);
 
   const getBytesValue = (): bigint => {
     const value = parseInt(bytes, 10);
