@@ -5,6 +5,19 @@
 //!
 //! This module provides a complete client that handles both data preparation
 //! and transaction submission to the Bulletin Chain using subxt.
+//!
+//! # ⚠️ Experimental
+//!
+//! **This module is experimental and not yet fully implemented.**
+//!
+//! The `store()` and related methods currently return placeholder errors.
+//! Transaction submission requires runtime metadata codegen which is not yet
+//! integrated into this SDK.
+//!
+//! For production use, prepare operations with [`crate::BulletinClient`] and
+//! submit transactions directly via subxt with your own metadata setup.
+//!
+//! See the `examples/` directory for working integration patterns.
 
 #[cfg(feature = "std")]
 use {
@@ -125,6 +138,14 @@ impl<'a> StoreBuilder<'a> {
 /// Users must provide a configured `OnlineClient` with the appropriate
 /// runtime metadata and configuration for their Bulletin Chain node.
 ///
+/// # ⚠️ Experimental - Not Yet Fully Implemented
+///
+/// **The `store()` method currently returns a placeholder error.**
+/// Transaction submission requires runtime metadata codegen which is pending.
+///
+/// For now, use [`crate::BulletinClient`] to prepare operations and submit
+/// transactions directly via subxt. See examples for working patterns.
+///
 /// # Example
 ///
 /// ```ignore
@@ -137,7 +158,7 @@ impl<'a> StoreBuilder<'a> {
 /// // Create SDK client
 /// let client = AsyncBulletinClient::new(api);
 ///
-/// // Store data
+/// // Store data (NOTE: not yet implemented, will return error)
 /// let result = client.store(data).send().await?;
 /// ```
 #[cfg(feature = "std")]
@@ -190,6 +211,11 @@ impl AsyncBulletinClient {
 	/// Store data on Bulletin Chain using builder pattern.
 	///
 	/// Returns a builder that allows fluent configuration of store options.
+	///
+	/// # ⚠️ Not Yet Implemented
+	///
+	/// This method currently returns a placeholder error. Transaction submission
+	/// requires runtime metadata codegen which is pending integration.
 	///
 	/// # Example
 	///
