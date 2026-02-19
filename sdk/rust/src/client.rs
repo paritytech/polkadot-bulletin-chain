@@ -73,6 +73,7 @@ impl BulletinClient {
 	///
 	/// This creates a storage operation that can be submitted to the blockchain.
 	/// For actual submission, use `subxt` to call `TransactionStorage.store`.
+	#[must_use = "storage operation must be submitted to the blockchain"]
 	pub fn prepare_store(&self, data: Vec<u8>, options: StoreOptions) -> Result<StorageOperation> {
 		let op = StorageOperation::new(data, options)?;
 		op.validate()?;
@@ -83,6 +84,7 @@ impl BulletinClient {
 	///
 	/// This chunks the data, calculates CIDs, and optionally creates a DAG-PB manifest.
 	/// Returns the batch operation and optionally the manifest data.
+	#[must_use = "batch operation must be submitted to the blockchain"]
 	pub fn prepare_store_chunked(
 		&self,
 		data: &[u8],

@@ -29,6 +29,7 @@ impl StorageOperation {
 	/// Create a new storage operation.
 	///
 	/// Returns an error if the hash algorithm is not supported.
+	#[must_use = "storage operation must be submitted to the blockchain"]
 	pub fn new(data: Vec<u8>, options: StoreOptions) -> Result<Self> {
 		let cid_config = CidConfig {
 			codec: options.cid_codec.code(),
@@ -39,6 +40,7 @@ impl StorageOperation {
 	}
 
 	/// Calculate the CID for this operation.
+	#[must_use = "CID result should be used or stored"]
 	pub fn calculate_cid(&self) -> Result<CidData> {
 		crate::cid::calculate_cid(&self.data, Some(self.cid_config.clone()))
 			.map_err(|_| Error::StorageFailed("Failed to calculate CID".into()))
@@ -76,6 +78,7 @@ pub struct BatchStorageOperation {
 
 impl BatchStorageOperation {
 	/// Create a new batch operation.
+	#[must_use = "batch operation must be submitted to the blockchain"]
 	pub fn new(chunks: &[Chunk], options: StoreOptions) -> Result<Self> {
 		let mut operations = Vec::with_capacity(chunks.len());
 
@@ -104,6 +107,7 @@ impl BatchStorageOperation {
 	}
 
 	/// Calculate CIDs for all operations.
+	#[must_use = "CID results should be used or stored"]
 	pub fn calculate_cids(&self) -> Result<Vec<CidData>> {
 		self.operations.iter().map(|op| op.calculate_cid()).collect()
 	}
@@ -127,6 +131,7 @@ pub mod helpers {
 	/// Prepare batch transaction call data for multiple `store` calls.
 	///
 	/// Note: This uses `Utility.batch_all` to submit multiple transactions atomically.
+	#[must_use = "call data must be submitted to the blockchain"]
 	pub fn prepare_batch_store_calls(operations: &BatchStorageOperation) -> Result<Vec<Vec<u8>>> {
 		let mut calls = Vec::with_capacity(operations.len());
 
