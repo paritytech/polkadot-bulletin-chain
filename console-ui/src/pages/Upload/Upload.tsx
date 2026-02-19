@@ -390,7 +390,7 @@ export function Upload() {
                 <div className="text-center text-muted-foreground">
                   <p className="mb-4">Connect a wallet to upload data</p>
                   <Button variant="outline" asChild>
-                    <a href="/accounts">Connect Wallet</a>
+                    <a href={`${import.meta.env.BASE_URL}accounts`}>Connect Wallet</a>
                   </Button>
                 </div>
               </CardContent>
