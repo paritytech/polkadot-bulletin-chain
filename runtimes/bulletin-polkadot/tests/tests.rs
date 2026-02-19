@@ -445,7 +445,12 @@ fn store_with_cid_config_works() {
 			.enumerate()
 			.collect::<HashMap<_, _>>();
 		assert_eq!(stored_txs.len(), 3);
-		assert_eq!(stored_txs[&0].content_hash, calculate_cid(&data, None).unwrap().content_hash);
+		assert_eq!(
+			stored_txs[&0].content_hash,
+			calculate_cid(&data, CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 })
+				.unwrap()
+				.content_hash
+		);
 		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
 		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
 	});
