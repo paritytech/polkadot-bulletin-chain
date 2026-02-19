@@ -513,7 +513,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Authorize anyone to store a preimage of the given BLAKE2b hash. The authorization will
+		/// Authorize anyone to store a preimage of the given content hash. The authorization will
 		/// expire after a configured number of blocks.
 		///
 		/// If authorization already exists for a preimage of the given hash to be stored, the
@@ -522,7 +522,10 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store)
+		///   this is the BLAKE2b-256 hash; for
+		///   [`store_with_cid_config`](Self::store_with_cid_config) this is the hash produced
+		///   by the CID config's hashing algorithm.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
