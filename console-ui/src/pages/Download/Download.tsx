@@ -19,8 +19,23 @@ import { CidInput } from "@/components/CidInput";
 import { formatBytes, bytesToHex } from "@/utils/format";
 import { CID } from "multiformats/cid";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
+import { useNetwork } from "@/state/chain.state";
 
-const DEFAULT_PEER_MULTIADDR = "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2";
+const P2P_MULTIADDRS: Record<string, string> = {
+  local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
+  westend: [
+    "/dns4/westend-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSxYQRoTT9rZNZRrjCfG2fPpBwPumkQsxLroTKjX6Mvkw",
+    "/dns4/westend-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSD5tovFkmja9aFYA6QM8eU3mFhZKdAuCsa5MgSsNDmxc",
+    "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
+    "/dns4/westend-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWN8hBVUWXNiur1w6EiEPkTJibbzpagZmm4cphMxWLv9yc",
+  ].join("\n"),
+  paseo: [
+    "/dns4/paseo-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWRuKisocQ2Z5hBZagV5YGxJMYuW13xT42sUiUCWf5bRtu",
+    "/dns4/paseo-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSgdX2egCUiXtDUNV6hGh6JrtTb9vQ6iRfFMdnTemQDDp",
+    "/dns4/paseo-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWG7dt8yAMBaNrWh5juvHMGvJtPKTCaS87kkadWZKpV7ox",
+    "/dns4/paseo-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWSS9QNRiLGBoZrDrtXvPyBV7QrV7F3A1V8f6xAXECSnj5",
+  ].join("\n"),
+};
 
 interface FetchResult {
   cid: string;
@@ -32,14 +47,19 @@ interface FetchResult {
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
+function getDefaultMultiaddrs(networkId: string): string {
+  return P2P_MULTIADDRS[networkId] ?? P2P_MULTIADDRS["local"]!;
+}
+
 export function Download() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const network = useNetwork();
 
   const [cidInput, setCidInput] = useState(searchParams.get("cid") || "");
   const [isCidValid, setIsCidValid] = useState(false);
   const [parsedCid, setParsedCid] = useState<CID | undefined>();
 
-  const [peerMultiaddrs, setPeerMultiaddrs] = useState(DEFAULT_PEER_MULTIADDR);
+  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network.id));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectedPeers, setConnectedPeers] = useState<ConnectionInfo[]>([]);
@@ -60,6 +80,13 @@ export function Download() {
       heliaClientRef.current?.stop();
     };
   }, []);
+
+  // Update default multiaddrs when network changes (only when not connected)
+  useEffect(() => {
+    if (connectionStatus === "disconnected" || connectionStatus === "error") {
+      setPeerMultiaddrs(getDefaultMultiaddrs(network.id));
+    }
+  }, [network.id, connectionStatus]);
 
   // Update URL when CID changes
   useEffect(() => {
