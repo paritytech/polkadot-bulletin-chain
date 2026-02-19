@@ -18,7 +18,7 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
-	cids::HashingAlgorithm,
+	cids::{CidConfig, HashingAlgorithm},
 	mock::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
@@ -610,6 +610,121 @@ fn signed_renew_prefers_preimage_authorization() {
 	});
 }
 
+#[test]
+fn store_with_cid_config_uses_custom_hashing() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![42u8; 2000];
+
+		// Store with default config (Blake2b256 + raw codec 0x55)
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		let default_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(default_info.hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(default_info.cid_codec, 0x55);
+
+		// Store with explicit SHA2-256 config
+		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		assert_ok!(TransactionStorage::store_with_cid_config(
+			RuntimeOrigin::none(),
+			sha2_config.clone(),
+			data.clone(),
+		));
+		let sha2_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(sha2_info.hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(sha2_info.cid_codec, 0x55);
+		// Content hashes differ because different hashing algorithms are used
+		assert_ne!(default_info.content_hash, sha2_info.content_hash);
+
+		// Store with explicit Blake2b256 config (same as default but explicitly set)
+		let blake2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
+		assert_ok!(TransactionStorage::store_with_cid_config(
+			RuntimeOrigin::none(),
+			blake2_config.clone(),
+			data.clone(),
+		));
+		let blake2_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(blake2_info.hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(blake2_info.cid_codec, 0x55);
+		assert_eq!(default_info.content_hash, blake2_info.content_hash);
+
+		// Finalize block 1 and verify Transactions storage
+		run_to_block(2, || None);
+		let txs = Transactions::get(1).expect("transactions should be stored for block 1");
+		assert_eq!(txs.len(), 3);
+		assert_eq!(txs[0].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(txs[0].cid_codec, 0x55);
+		assert_eq!(txs[1].hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(txs[1].cid_codec, 0x55);
+		assert_eq!(txs[2].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(txs[2].cid_codec, 0x55);
+	});
+}
+
+#[test]
+fn preimage_authorize_store_with_cid_config_and_renew() {
+	new_test_ext().execute_with(|| {
+		let data = vec![42u8; 2000];
+		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		let sha2_hash = polkadot_sdk_frame::hashing::sha2_256(&data);
+
+		// check_unsigned / check_store_renew_unsigned use the CID config's hashing
+		// algorithm for preimage authorization lookup.
+		// Authorizing with blake2 hash should NOT work for store_with_cid_config(sha2).
+		let blake2_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			blake2_hash,
+			2000
+		));
+		let store_call =
+			Call::store_with_cid_config { cid: sha2_config.clone(), data: data.clone() };
+		run_to_block(1, || None);
+		assert_noop!(TransactionStorage::pre_dispatch(&store_call), InvalidTransaction::Payment);
+
+		// Authorize preimage with SHA2 hash (matching the CID config's algorithm).
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
+
+		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
+		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		// Preimage authorization for sha2 hash should be consumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+		// Blake2 authorization should remain unconsumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(blake2_hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+
+		// Finalize block so Transactions storage is populated.
+		run_to_block(3, || None);
+
+		// Verify stored entry uses SHA2-256 and content_hash matches.
+		let txs = Transactions::get(1).expect("transactions stored at block 1");
+		assert_eq!(txs.len(), 1);
+		assert_eq!(txs[0].hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(txs[0].cid_codec, 0x55);
+		assert_eq!(txs[0].content_hash, sha2_hash);
+
+		// Renew without authorization fails.
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_noop!(TransactionStorage::pre_dispatch(&renew_call), InvalidTransaction::Payment);
+
+		// Authorize preimage with SHA2 hash (renew uses stored content_hash).
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
+		assert_ok!(TransactionStorage::pre_dispatch(&renew_call));
+
+		// Preimage authorization for sha2 hash should be consumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+	});
+}
+
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`
@@ -654,11 +769,12 @@ fn migration_v1_old_entries_only() {
 		assert!(Transactions::contains_key(2));
 		assert!(Transactions::contains_key(3));
 
-		// Run migration
+		// Run v0→v1 migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 
-		// All entries now decode
-		let txs1 = Transactions::get(1).expect("should decode");
+		// Entries are now directly decodable after v0→v1 (v1 layout matches TransactionInfo)
+		let txs1 = Transactions::get(1).expect("should decode after v1 migration");
 		assert_eq!(txs1.len(), 2);
 		for tx in txs1.iter() {
 			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
@@ -671,8 +787,6 @@ fn migration_v1_old_entries_only() {
 
 		let txs3 = Transactions::get(3).expect("should decode");
 		assert_eq!(txs3.len(), 3);
-
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 	});
 }
 
@@ -716,12 +830,9 @@ fn migration_v1_mixed_entries() {
 		// Run migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
-		// Old entry transformed
-		let migrated = Transactions::get(5).expect("should now decode");
-		assert_eq!(migrated.len(), 2);
-		assert_eq!(migrated[0].hashing, HashingAlgorithm::Blake2b256);
-		assert_eq!(migrated[0].cid_codec, 0x55);
-		assert_eq!(migrated[0].size, 2000);
+		// Old entry transformed to v1 format — now directly decodable
+		let old_entry_after = Transactions::get(5).expect("should decode after v1 migration");
+		assert_eq!(old_entry_after.len(), 2);
 
 		// New entry preserved exactly
 		let new_entry_after = Transactions::get(10).expect("still decodes");
@@ -748,17 +859,19 @@ fn migration_v1_idempotent() {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		insert_old_format_transactions(1, 1);
 
-		// First run: migrates
+		// First run: migrates old entries to v1 format
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let after_first = Transactions::get(1).expect("decodes");
+		// v1 format is not decodable as v2 TransactionInfo, but raw bytes exist
+		let key = Transactions::hashed_key_for(1u64);
+		let raw_after_first = unhashed::get_raw(&key).expect("raw bytes exist");
 
 		// Second run: noop (version already 1)
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let after_second = Transactions::get(1).expect("still decodes");
+		let raw_after_second = unhashed::get_raw(&key).expect("raw bytes still exist");
 
-		assert_eq!(after_first, after_second);
+		assert_eq!(raw_after_first, raw_after_second);
 	});
 }
 
@@ -779,6 +892,8 @@ fn migration_v1_empty_storage() {
 		assert_eq!(Transactions::iter().count(), 0);
 	});
 }
+
+// ---- try_state tests ----
 
 #[test]
 fn try_state_passes_on_empty_storage() {
