@@ -79,13 +79,6 @@ bulletin-polkadot-runtime = { workspace = true }
 # TODO: remove when bulletin-polkadot is upgraded live with TX storage runtime API
 pallet-transaction-storage = { workspace = true }
 
-[dev-dependencies]
-codec = { workspace = true }
-scale-info = { workspace = true }
-sc-client-db = { workspace = true, features = ["test-helpers"] }
-sp-crypto-hashing = { workspace = true }
-sp-state-machine = { workspace = true }
-
 [build-dependencies]
 substrate-build-script-utils = { workspace = true }
 
@@ -99,7 +92,6 @@ runtime-benchmarks = [
 	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
 	"polkadot-primitives/runtime-benchmarks",
-	"sc-client-db/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 ]
