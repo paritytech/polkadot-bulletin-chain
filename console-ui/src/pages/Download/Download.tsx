@@ -207,12 +207,7 @@ export function Download() {
       let isJSON = false;
       let parsedJSON: unknown;
 
-      if (heliaClientRef.current) {
-        const result = await heliaClientRef.current.fetchData(parsedCid);
-        data = result.data;
-        isJSON = result.isJSON;
-        parsedJSON = result.parsedJSON;
-      } else if (hasGateway) {
+      if (activeTab === "gateway" && hasGateway) {
         const result = await fetchFromIpfs(parsedCid.toString(), gatewayUrl.trim());
         data = result.data;
         const contentType = result.contentType ?? "";
@@ -224,6 +219,11 @@ export function Download() {
             // not valid JSON despite content-type
           }
         }
+      } else if (heliaClientRef.current) {
+        const result = await heliaClientRef.current.fetchData(parsedCid);
+        data = result.data;
+        isJSON = result.isJSON;
+        parsedJSON = result.parsedJSON;
       } else {
         return;
       }
@@ -331,7 +331,7 @@ export function Download() {
 
   const isConnected = connectionStatus === "connected";
   const hasGateway = gatewayUrl.trim().length > 0;
-  const canFetch = isConnected || hasGateway;
+  const canFetch = activeTab === "gateway" ? hasGateway : isConnected;
 
   return (
     <div className="space-y-6">
@@ -566,11 +566,11 @@ export function Download() {
                 Fetch by CID
               </CardTitle>
               <CardDescription>
-                {isConnected
-                  ? "Enter a CID to retrieve data via P2P"
-                  : hasGateway
+                {canFetch
+                  ? activeTab === "gateway"
                     ? "Enter a CID to retrieve data via IPFS Gateway"
-                    : "Enter a CID to retrieve data"}
+                    : "Enter a CID to retrieve data via P2P"
+                  : "Enter a CID to retrieve data"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -601,7 +601,7 @@ export function Download() {
                 {isFetching ? (
                   <>
                     <Spinner size="sm" className="mr-2" />
-                    {isConnected ? "Fetching via P2P..." : "Fetching via Gateway..."}
+                    {activeTab === "gateway" ? "Fetching via Gateway..." : "Fetching via P2P..."}
                   </>
                 ) : (
                   <>
