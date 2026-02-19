@@ -313,12 +313,11 @@ export class AsyncBulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
-    // Calculate CID
-    const cid = await calculateCid(
-      data,
-      opts.cidCodec ?? CidCodec.Raw,
-      opts.hashingAlgorithm!,
-    );
+    // Calculate CID using defaults if not specified
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm);
 
     try {
       const tx = this.api.tx.TransactionStorage.store({
@@ -489,6 +488,10 @@ export class AsyncBulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
+    // Extract options with defaults
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+
     // Chunk the data
     const chunker = new FixedSizeChunker(chunkerConfig);
     const chunks = chunker.chunk(dataBytes);
@@ -507,11 +510,7 @@ export class AsyncBulletinClient {
 
       try {
         // Calculate CID for this chunk
-        const cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? CidCodec.Raw,
-          opts.hashingAlgorithm!,
-        );
+        const cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm);
 
         chunk.cid = cid;
 
@@ -551,7 +550,7 @@ export class AsyncBulletinClient {
       }
 
       const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, opts.hashingAlgorithm!);
+      const manifest = await builder.build(chunks, hashAlgorithm);
 
       const manifestTx = this.api.tx.TransactionStorage.store({
         data: new Binary(manifest.dagBytes),
@@ -717,12 +716,11 @@ export class AsyncBulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
-    // Calculate CID
-    const cid = await calculateCid(
-      dataBytes,
-      opts.cidCodec ?? CidCodec.Raw,
-      opts.hashingAlgorithm!,
-    );
+    // Calculate CID using defaults if not specified
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+
+    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm);
 
     try {
       // Submit as unsigned transaction

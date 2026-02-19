@@ -227,12 +227,11 @@ export class MockBulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
-    // Calculate CID (this is real, not mocked)
-    const cid = await calculateCid(
-      dataBytes,
-      opts.cidCodec ?? CidCodec.Raw,
-      opts.hashingAlgorithm!,
-    );
+    // Calculate CID using defaults if not specified (this is real, not mocked)
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+
+    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm);
 
     // Record the operation
     this.operations.push({

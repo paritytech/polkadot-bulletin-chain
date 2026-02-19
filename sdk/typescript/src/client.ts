@@ -62,12 +62,11 @@ export class BulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
-    // Calculate CID
-    const cid = await calculateCid(
-      data,
-      opts.cidCodec ?? CidCodec.Raw,
-      opts.hashingAlgorithm!,
-    );
+    // Calculate CID using defaults if not specified
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm);
 
     return { data, cid };
   }
@@ -100,6 +99,10 @@ export class BulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
 
+    // Extract options with defaults
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+
     // Chunk the data
     const chunker = new FixedSizeChunker(chunkerConfig);
     const chunks = chunker.chunk(data);
@@ -115,11 +118,7 @@ export class BulletinClient {
       }
 
       try {
-        chunk.cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? CidCodec.Raw,
-          opts.hashingAlgorithm!,
-        );
+        chunk.cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm);
 
         if (progressCallback) {
           progressCallback({
@@ -150,7 +149,7 @@ export class BulletinClient {
       }
 
       const builder = new UnixFsDagBuilder();
-      const dagManifest = await builder.build(chunks, opts.hashingAlgorithm!);
+      const dagManifest = await builder.build(chunks, hashAlgorithm);
 
       manifest = {
         data: dagManifest.dagBytes,
