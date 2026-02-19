@@ -107,14 +107,14 @@ export function getCidInfo(cid: CID): {
 /**
  * Convert multihash code to runtime HashingAlgorithm enum
  */
-export function toHashingEnum(mhCode: number): { type: string } {
+export function toHashingEnum(mhCode: number) {
   switch (mhCode) {
     case HASH_CODES.blake2b256:
-      return { type: "Blake2b256" };
+      return { type: "Blake2b256" as const, value: undefined };
     case HASH_CODES.sha256:
-      return { type: "Sha2_256" };
+      return { type: "Sha2_256" as const, value: undefined };
     case HASH_CODES.keccak256:
-      return { type: "Keccak256" };
+      return { type: "Keccak256" as const, value: undefined };
     default:
       throw new Error(`Unhandled multihash code: 0x${mhCode.toString(16)}`);
   }
