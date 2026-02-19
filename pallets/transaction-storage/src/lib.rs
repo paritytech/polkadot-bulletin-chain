@@ -27,7 +27,6 @@
 extern crate alloc;
 
 mod benchmarking;
-pub mod extension;
 pub mod weights;
 
 pub mod cids;
@@ -38,7 +37,7 @@ mod mock;
 mod tests;
 
 use alloc::vec::Vec;
-use cids::{calculate_cid, Cid, CidConfig, ContentHash};
+use cids::{calculate_cid, Cid, CidCodec, CidConfig, ContentHash, HashingAlgorithm, RAW_CODEC};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
@@ -60,7 +59,6 @@ type BalanceOf<T> =
 pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
 // Re-export pallet items so that they can be accessed from the crate namespace.
-use crate::cids::{CidCodec, HashingAlgorithm};
 pub use pallet::*;
 pub use weights::WeightInfo;
 
@@ -129,9 +127,9 @@ pub struct TransactionInfo {
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
 	/// Used hashing algorithm for `content_hash`.
-	hashing: HashingAlgorithm,
-	/// Requested codec for CIDs.
-	cid_codec: CidCodec,
+	pub hashing: HashingAlgorithm,
+	/// Codec for CID.
+	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
 	size: u32,
@@ -382,47 +380,24 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			// In the case of a regular unsigned transaction, this should have been checked by
-			// pre_dispatch. In the case of a regular signed transaction, this should have been
-			// checked by pre_dispatch_signed.
-			Self::ensure_data_size_ok(data.len())?;
+			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
+		}
 
-			// Chunk data and compute storage root
-			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
-			let chunk_count = chunks.len() as u32;
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
-			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
-
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let cid = calculate_cid(&data, CidConfigForStore::<T>::take())
-				.map_err(|_| Error::<T>::InvalidContentHash)?;
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
-
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
-					return Err(Error::<T>::TooManyTransactions);
-				}
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: root,
-						size: data.len() as u32,
-						content_hash: cid.content_hash,
-						hashing: cid.hashing,
-						cid_codec: cid.codec,
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-			Self::deposit_event(Event::Stored {
-				index,
-				content_hash: cid.content_hash,
-				cid: cid.to_bytes(),
-			});
-			Ok(())
+		/// Index and store data off chain with an explicit CID configuration.
+		///
+		/// Behaves identically to [`store`](Self::store), but the CID configuration
+		/// (codec and hashing algorithm) is passed directly as a parameter.
+		///
+		/// Emits [`Stored`](Event::Stored) when successful.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
+		pub fn store_with_cid_config(
+			_origin: OriginFor<T>,
+			cid: CidConfig,
+			data: Vec<u8>,
+		) -> DispatchResult {
+			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
 		/// Renew previously stored data. Parameters are the block number that contains previous
@@ -540,7 +515,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Authorize anyone to store a preimage of the given BLAKE2b hash. The authorization will
+		/// Authorize anyone to store a preimage of the given content hash. The authorization will
 		/// expire after a configured number of blocks.
 		///
 		/// If authorization already exists for a preimage of the given hash to be stored, the
@@ -549,7 +524,9 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store) this
+		///   is the BLAKE2b-256 hash; for [`store_with_cid_config`](Self::store_with_cid_config)
+		///   this is the hash produced by the CID config's hashing algorithm.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -717,12 +694,6 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
 
-	/// Ephemeral value killed on the block finalization. So it never ends up in the storage trie.
-	/// (Used by [`extension::ProvideCidConfig`])
-	#[pallet::storage]
-	#[pallet::whitelist_storage]
-	pub type CidConfigForStore<T: Config> = StorageValue<_, CidConfig, OptionQuery>;
-
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
 		pub byte_fee: BalanceOf<T>,
@@ -790,6 +761,57 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// Common implementation for [`store`](Self::store) and
+		/// [`store_with_cid_config`](Self::store_with_cid_config).
+		fn do_store(
+			data: Vec<u8>,
+			hashing: HashingAlgorithm,
+			cid_codec: CidCodec,
+		) -> DispatchResult {
+			// In the case of a regular unsigned transaction, this should have been checked by
+			// pre_dispatch. In the case of a regular signed transaction, this should have been
+			// checked by pre_dispatch_signed.
+			Self::ensure_data_size_ok(data.len())?;
+
+			// Chunk data and compute storage root
+			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+			let chunk_count = chunks.len() as u32;
+			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
+			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
+
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			let cid_config = CidConfig { codec: cid_codec, hashing };
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
+			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
+
+			let mut index = 0;
+			<BlockTransactions<T>>::mutate(|transactions| {
+				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
+					return Err(Error::<T>::TooManyTransactions);
+				}
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
+				index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root: root,
+						size: data.len() as u32,
+						content_hash: cid.content_hash,
+						hashing,
+						cid_codec,
+						block_chunks: total_chunks,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)
+			})?;
+			Self::deposit_event(Event::Stored {
+				index,
+				content_hash: cid.content_hash,
+				cid: cid.to_bytes(),
+			});
+			Ok(())
+		}
+
 		/// Returns `true` if the system is beyond the given expiration point.
 		fn expired(expiration: BlockNumberFor<T>) -> bool {
 			let now = frame_system::Pallet::<T>::block_number();
@@ -1085,6 +1107,8 @@ pub mod pallet {
 					|| sp_io::hashing::blake2_256(data),
 					context,
 				),
+				Call::<T>::store_with_cid_config { cid, data } =>
+					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
@@ -1129,6 +1153,10 @@ pub mod pallet {
 			let (size, content_hash) = match call {
 				Call::<T>::store { data } => {
 					let content_hash = sp_io::hashing::blake2_256(data);
+					(data.len(), content_hash)
+				},
+				Call::<T>::store_with_cid_config { cid, data } => {
+					let content_hash = cid.hashing.hash(data);
 					(data.len(), content_hash)
 				},
 				Call::<T>::renew { block, index } => {

@@ -727,7 +727,6 @@ pub type TxExtension = (
 	frame_system::CheckWeight<Runtime>,
 	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
-	pallet_transaction_storage::extension::ProvideCidConfig<Runtime>,
 );
 
 /// Unchecked extrinsic type as expected by this runtime.
@@ -748,7 +747,8 @@ pub type Executive = frame_executive::Executive<
 #[allow(deprecated, missing_docs)]
 pub mod migrations {
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = ();
+	pub type Unreleased =
+		(pallet_transaction_storage::migrations::v1::MigrateV0ToV1<crate::Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
