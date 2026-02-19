@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "dev:cli": "tsx src/cli.ts",
+    "verify": "tsx src/verify.ts",
     "build": "npm run build:web && npm run build:cli",
     "build:web": "tsc && vite build",
     "build:cli": "tsc --project tsconfig.cli.json",

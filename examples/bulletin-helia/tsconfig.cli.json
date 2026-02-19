@@ -11,6 +11,7 @@
   },
   "include": [
     "src/cli.ts",
+    "src/verify.ts",
     "src/ipfs.ts",
     "src/logger-base.ts",
     "src/logger-cli.ts"

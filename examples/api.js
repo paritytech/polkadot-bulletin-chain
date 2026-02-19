@@ -228,6 +228,9 @@ export async function fetchCid(httpIpfsApi, cid) {
     return Buffer.from(await res.arrayBuffer())
 }
 
+// Re-export P2P fetch from bulletin-helia tool
+export { fetchCidViaP2P } from './bulletin-helia/p2p_fetch.js';
+
 /**
  * Read the file, chunk it, store in Bulletin and return CIDs.
  * @param {object} typedApi - PAPI typed API
