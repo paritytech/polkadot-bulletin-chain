@@ -40,7 +40,7 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
    git push origin --tags
    ```
 
-5. **Download WASM**: wait for the [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml), then `gh release download <TAG> -p "*.wasm" -D .`
+5. **Download WASM**: The [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml) builds the WASM artifact. **Note:** CI takes a long time (15-30+ minutes). Do NOT poll or check CI status repeatedly — tell the user you are waiting and ask them to notify you when the release is ready. Once notified, download with: `gh release download <TAG> -p "*.wasm" -D .`
 
 6. **Upgrade**: Use the upgrade script in `examples/`:
    ```bash

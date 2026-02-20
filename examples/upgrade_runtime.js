@@ -188,18 +188,25 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
 
 // --- Verify ---
 
-async function verifyUpgrade(client, expectedVersion) {
-    console.log('\nVerifying upgrade...');
-    await new Promise(resolve => setTimeout(resolve, 6000));
+async function verifyUpgrade(client, previousVersion, maxAttempts = 30, intervalMs = 12000) {
+    console.log(`\nVerifying upgrade (waiting for version to change from ${previousVersion})...`);
+    console.log(`Will poll every ${intervalMs / 1000}s for up to ${maxAttempts} attempts (~${(maxAttempts * intervalMs / 60000).toFixed(0)} minutes).`);
+    console.log('On parachains, runtime upgrades are enacted after a delay of several blocks.\n');
 
-    const { runtimeVersion } = await getChainInfo(client);
-    console.log(`Current spec_version: ${runtimeVersion.spec_version}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
 
-    if (runtimeVersion.spec_version >= expectedVersion) {
-        console.log(`Upgrade successful! Runtime is at version ${runtimeVersion.spec_version}`);
-    } else {
-        console.log(`Warning: Expected version ${expectedVersion}, got ${runtimeVersion.spec_version}`);
+        const { runtimeVersion } = await getChainInfo(client);
+        console.log(`  [${attempt}/${maxAttempts}] spec_version: ${runtimeVersion.spec_version}`);
+
+        if (runtimeVersion.spec_version > previousVersion) {
+            console.log(`\nUpgrade successful! Runtime upgraded from ${previousVersion} to ${runtimeVersion.spec_version}`);
+            return;
+        }
     }
+
+    console.log(`\nWarning: spec_version is still ${previousVersion} after ${maxAttempts} attempts.`);
+    console.log('The upgrade may still be pending enactment. Check manually with --verify-only.');
 }
 
 // --- Main ---
@@ -256,7 +263,7 @@ async function main() {
             await upgradeWithAuthorize(client, signer, wasmCode, codeHash, address);
         }
 
-        await verifyUpgrade(client, current.spec_version + 1);
+        await verifyUpgrade(client, current.spec_version);
     } catch (error) {
         console.error('\nError:', error.message);
         if (error.cause) console.error('Cause:', error.cause);
