@@ -43,13 +43,6 @@ The SDKs provide high-level abstractions for:
 - DAG-PB manifest generation
 - Authorization management
 
-### Direct RPC
-
-You can also interact directly via Polkadot-API (PAPI) or Subxt:
-- `transactionStorage.store(data)` - Store data
-- `transactionStorage.renew(block, index)` - Renew storage
-- Query chain state for authorization status
-
 ### IPFS
 
 Data retrieval happens through IPFS:
