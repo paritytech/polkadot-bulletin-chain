@@ -1,27 +1,76 @@
 # Core Concepts
 
-To effectively use the SDKs, it's helpful to understand a few underlying concepts of the Bulletin Chain.
+This section covers the fundamental concepts you need to understand when working with Bulletin Chain.
 
-## The "Authorize -> Store" Flow
+## Data Lifecycle
 
-To prevent spam and manage storage growth, Bulletin Chain requires a two-step process for storing data:
+```
+1. AUTHORIZE    2. STORE        3. RETRIEVE     4. RENEW (optional)
+   ↓               ↓               ↓               ↓
+Grant storage   Submit data    Fetch via      Extend before
+permission      to chain       IPFS           expiration
+```
 
-1.  **Authorize**: A Root user (sudo) reserves space for an account or preimage. This call must be made by Root and doesn't cost any fees. It grants permission to store a specified amount of data.
-2.  **Store**: The authorized user uploads the actual data. The storage transaction costs fees, but the authorization ensures the user has permission to use that chain space.
+### 1. Authorization
 
-The SDKs help you calculate the required authorization and track the status of your uploads.
+Before storing data, accounts must be **authorized**. This prevents spam and manages storage growth.
 
-## Data Limits
+- A Root/Sudo user grants permission to store a specified amount of data
+- Authorization can be for an account or a specific content hash (preimage)
+- Learn more: [Authorization](./authorization.md)
 
-- **Max Transaction Size**: ~8 MiB (typical Substrate limit).
-- **Recommended Chunk Size**: 1 MiB.
+### 2. Storage
 
-If your file is larger than the transaction limit, it *must* be split into chunks. The SDKs handle this automatically.
+Once authorized, users can submit data to the chain:
+
+- **Small data** (< 8 MiB): Stored directly in a single transaction
+- **Large data** (> 8 MiB): Split into chunks with a DAG-PB manifest
+- The chain returns a **CID** (Content Identifier) for retrieval
+- Learn more: [Storage Model](./storage.md)
+
+### 3. Retrieval
+
+Data is retrieved via **IPFS**, not directly from the chain:
+
+- Use any IPFS gateway: `https://ipfs.io/ipfs/{cid}`
+- Connect directly to Bulletin nodes via Bitswap protocol
+- Chunked data is automatically reassembled by IPFS
+- Learn more: [Data Retrieval](./retrieval.md)
+
+### 4. Renewal
+
+Data has a **retention period** after which it may be pruned:
+
+- Call `renew(block, index)` to extend the retention period
+- Track the block number and index from `Stored`/`Renewed` events
+- Learn more: [Data Renewal](./renewal.md)
 
 ## CIDs (Content Identifiers)
 
-Bulletin Chain uses CIDs to identify data. A CID is a self-describing label used in IPFS.
-- **Codec**: Describes the format (e.g., `0x55` for Raw, `0x70` for DAG-PB).
-- **Multihash**: Describes the hash algorithm (e.g., `blake2b-256`, `sha2-256`).
+Bulletin Chain uses **CIDs** to identify data. A CID is a self-describing label used in IPFS:
+
+| Component | Description | Example |
+|-----------|-------------|---------|
+| **Version** | CID version | `1` (CIDv1) |
+| **Codec** | Data format | `0x55` (Raw), `0x70` (DAG-PB) |
+| **Multihash** | Hash algorithm | `blake2b-256`, `sha2-256` |
 
 When you store data, the chain records the CID. This proves that *this specific data* existed at *this specific block number*.
+
+## Data Limits
+
+| Limit | Value | Notes |
+|-------|-------|-------|
+| Max Transaction Size | ~8 MiB | Substrate limit |
+| Recommended Chunk Size | 1 MiB | Optimal for most use cases |
+| Retention Period | Chain-specific | Check `transactionStorage.retentionPeriod()` |
+
+Files larger than the transaction limit must be chunked. The SDKs handle this automatically.
+
+## Sections
+
+- [Storage Model](./storage.md) - How data is stored on-chain
+- [Data Retrieval](./retrieval.md) - Fetching data via IPFS
+- [Data Renewal](./renewal.md) - Extending storage retention
+- [Authorization](./authorization.md) - Pre-approving storage
+- [Manifests & IPFS](./manifests.md) - DAG-PB format for chunked data

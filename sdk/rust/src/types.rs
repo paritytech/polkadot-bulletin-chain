@@ -80,6 +80,17 @@ pub enum Error {
 	/// Unsupported hash algorithm.
 	#[cfg_attr(feature = "std", error("Unsupported hash algorithm: {0}"))]
 	UnsupportedHashAlgorithm(String),
+
+	/// Renewal target not found.
+	#[cfg_attr(
+		feature = "std",
+		error("Renewal target not found: block {block}, index {index}")
+	)]
+	RenewalNotFound { block: u32, index: u32 },
+
+	/// Renewal failed.
+	#[cfg_attr(feature = "std", error("Renewal failed: {0}"))]
+	RenewalFailed(String),
 }
 
 /// Configuration for chunking large data.
@@ -169,6 +180,35 @@ pub struct ChunkedStoreResult {
 	pub total_size: u64,
 	/// Number of chunks.
 	pub num_chunks: u32,
+}
+
+/// Reference to a stored transaction for renewal.
+///
+/// This identifies a previous `store` or `renew` transaction that can be renewed.
+#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo)]
+pub struct StorageRef {
+	/// Block number where the data was stored or last renewed.
+	pub block: u32,
+	/// Transaction index within that block (from `Stored` or `Renewed` event).
+	pub index: u32,
+}
+
+impl StorageRef {
+	/// Create a new storage reference.
+	pub fn new(block: u32, index: u32) -> Self {
+		Self { block, index }
+	}
+}
+
+/// Result of a renewal operation.
+#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+pub struct RenewalResult {
+	/// The new storage reference (for the next renewal).
+	pub new_ref: StorageRef,
+	/// Content hash of the renewed data.
+	pub content_hash: Vec<u8>,
+	/// Size of the renewed data.
+	pub size: u64,
 }
 
 /// Options for storing data.

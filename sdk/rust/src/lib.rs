@@ -134,6 +134,7 @@ pub mod chunker;
 pub mod cid;
 pub mod client;
 pub mod dag;
+pub mod renewal;
 pub mod storage;
 pub mod types;
 pub mod utils;
@@ -152,9 +153,10 @@ pub mod subxt_config;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
+pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
 	AuthorizationScope, Chunk, ChunkedStoreResult, ChunkerConfig, CidCodec, Error, HashAlgorithm,
-	ProgressCallback, ProgressEvent, Result, StoreOptions, StoreResult,
+	ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions, StoreResult,
 };
 
 // Re-export CID types from pallet
@@ -178,6 +180,7 @@ pub mod prelude {
 		},
 		client::{BulletinClient, ClientConfig},
 		dag::{DagBuilder, DagManifest, UnixFsDagBuilder},
+		renewal::{RenewalOperation, RenewalTracker, TrackedEntry},
 		storage::{BatchStorageOperation, StorageOperation},
 		types::*,
 		utils,

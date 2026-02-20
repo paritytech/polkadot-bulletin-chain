@@ -2,7 +2,7 @@
 authors = ["Polkadot Bulletin Team"]
 language = "en"
 src = "src"
-title = "Polkadot Bulletin SDK Documentation"
+title = "Polkadot Bulletin Chain Documentation"
 
 [output.html]
 site-url = "/polkadot-bulletin-chain/sdk-docs/"

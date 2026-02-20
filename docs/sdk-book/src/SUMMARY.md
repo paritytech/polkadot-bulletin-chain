@@ -3,6 +3,8 @@
 - [Introduction](./README.md)
 - [Core Concepts](./concepts/README.md)
     - [Storage Model](./concepts/storage.md)
+    - [Data Retrieval](./concepts/retrieval.md)
+    - [Data Renewal](./concepts/renewal.md)
     - [Authorization](./concepts/authorization.md)
     - [Manifests & IPFS](./concepts/manifests.md)
 - [Rust SDK](./rust/README.md)

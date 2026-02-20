@@ -12,8 +12,9 @@ use crate::{
 	authorization::AuthorizationManager,
 	chunker::{Chunker, FixedSizeChunker},
 	dag::{DagBuilder, UnixFsDagBuilder},
+	renewal::RenewalOperation,
 	storage::{BatchStorageOperation, StorageOperation},
-	types::{ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result, StoreOptions},
+	types::{ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result, StorageRef, StoreOptions},
 };
 use alloc::vec::Vec;
 
@@ -142,6 +143,43 @@ impl BulletinClient {
 	/// Estimate authorization needed for storing data.
 	pub fn estimate_authorization(&self, data_size: u64) -> (u32, u64) {
 		self.auth_manager.estimate_authorization(data_size, self.config.create_manifest)
+	}
+
+	/// Prepare a renewal operation.
+	///
+	/// This creates a renewal operation that can be submitted to the blockchain
+	/// to extend the retention period of previously stored data.
+	///
+	/// # Arguments
+	/// * `storage_ref` - Reference to the original storage (block number and index)
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// use bulletin_sdk_rust::prelude::*;
+	///
+	/// let client = BulletinClient::new();
+	///
+	/// // After storing data, you received block=100, index=5 from the Stored event
+	/// let storage_ref = StorageRef::new(100, 5);
+	/// let renewal = client.prepare_renew(storage_ref)?;
+	///
+	/// // Submit via subxt:
+	/// // api.tx().transaction_storage().renew(renewal.block, renewal.index)
+	/// ```
+	#[must_use = "renewal operation must be submitted to the blockchain"]
+	pub fn prepare_renew(&self, storage_ref: StorageRef) -> Result<RenewalOperation> {
+		let op = RenewalOperation::new(storage_ref);
+		op.validate()?;
+		Ok(op)
+	}
+
+	/// Prepare a renewal from raw block number and index.
+	///
+	/// Convenience method when you have the values directly.
+	#[must_use = "renewal operation must be submitted to the blockchain"]
+	pub fn prepare_renew_raw(&self, block: u32, index: u32) -> Result<RenewalOperation> {
+		self.prepare_renew(StorageRef::new(block, index))
 	}
 }
 
@@ -272,5 +310,43 @@ mod tests {
 		// 10 MB = 10 chunks + 1 manifest
 		assert_eq!(txs, 11);
 		assert!(bytes > 10_000_000);
+	}
+
+	#[test]
+	fn test_prepare_renew() {
+		use crate::types::StorageRef;
+
+		let client = BulletinClient::new();
+		let storage_ref = StorageRef::new(100, 5);
+
+		let result = client.prepare_renew(storage_ref);
+		assert!(result.is_ok());
+
+		let op = result.unwrap();
+		assert_eq!(op.block, 100);
+		assert_eq!(op.index, 5);
+	}
+
+	#[test]
+	fn test_prepare_renew_raw() {
+		let client = BulletinClient::new();
+
+		let result = client.prepare_renew_raw(200, 10);
+		assert!(result.is_ok());
+
+		let op = result.unwrap();
+		assert_eq!(op.block, 200);
+		assert_eq!(op.index, 10);
+	}
+
+	#[test]
+	fn test_prepare_renew_invalid_block_zero() {
+		use crate::types::StorageRef;
+
+		let client = BulletinClient::new();
+		let storage_ref = StorageRef::new(0, 5);
+
+		let result = client.prepare_renew(storage_ref);
+		assert!(result.is_err());
 	}
 }
