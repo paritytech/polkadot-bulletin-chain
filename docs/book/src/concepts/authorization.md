@@ -10,7 +10,7 @@ Authorization is granted by **privileged accounts**:
 |---------|------------|----------------|
 | **Testnets** (Paseo, Westend) | Sudo account | Use the **Faucet** in the Console UI |
 | **Dotspark** | Sudo account | Use the Faucet or contact operators |
-| **Mainnet** (Polkadot) | Governance / Validators | Not yet launched |
+| **Mainnet** (Polkadot) | Governance (ideally) | Contact chain operators for now |
 
 ### Using the Faucet (Testnets)
 
