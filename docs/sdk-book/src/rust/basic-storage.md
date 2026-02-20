@@ -17,20 +17,6 @@ The builder pattern provides:
 - **Flexibility**: Only specify options you need
 - **Clarity**: Intent is clear from method names
 
-Compare:
-```rust
-// Old API (still available but deprecated)
-client.store_with_options(data, StoreOptions { ... }, Some(callback)).await?;
-
-// New builder API (recommended)
-client
-    .store(data)
-    .with_codec(CidCodec::DagPb)
-    .with_callback(callback)
-    .send()
-    .await?;
-```
-
 ### Basic Example
 
 ```rust
@@ -43,8 +29,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // 1. Connect to Bulletin Chain
+    // Available endpoints (see shared/networks.ts for full list):
+    //   - Local:    ws://localhost:10000
+    //   - Westend:  wss://westend-bulletin-rpc.polkadot.io
+    //   - Paseo:    wss://paseo-bulletin-rpc.polkadot.io
+    //   - Dotspark: wss://bulletin.dotspark.app
     let ws_url = std::env::var("BULLETIN_WS_URL")
-        .unwrap_or_else(|_| "ws://localhost:10000".to_string());
+        .unwrap_or_else(|_| "wss://paseo-bulletin-rpc.polkadot.io".to_string());
     let signer = /* your PairSigner */;
 
     let submitter = SubxtSubmitter::from_url(&ws_url, signer).await?;

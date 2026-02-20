@@ -5,18 +5,19 @@ import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { bulletin_westend, bulletin_paseo, bulletin_dotspark, web3_storage } from "@polkadot-api/descriptors";
+import {
+  BULLETIN_NETWORKS,
+  WEB3_STORAGE_NETWORKS,
+  DEFAULT_NETWORKS,
+  type Network,
+} from "../../../shared/networks";
 
 export type StorageType = "bulletin" | "web3storage";
 
 export type NetworkId = string;
 
-export interface Network {
-  id: NetworkId;
-  name: string;
-  endpoints: string[];
-  lightClient: boolean;
-  chainSpec?: string;
-}
+// Re-export Network type for convenience
+export type { Network };
 
 export interface StorageConfig {
   id: StorageType;
@@ -29,58 +30,14 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
   bulletin: {
     id: "bulletin",
     name: "Bulletin",
-    defaultNetwork: "paseo",
-    networks: {
-      local: {
-        id: "local",
-        name: "Local Dev",
-        endpoints: ["ws://localhost:10000"],
-        lightClient: false,
-      },
-      westend: {
-        id: "westend",
-        name: "Bulletin Westend",
-        endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
-        lightClient: false,
-      },
-      paseo: {
-        id: "paseo",
-        name: "Bulletin Paseo",
-        endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
-        lightClient: false,
-      },
-      dotspark: {
-        id: "dotspark",
-        name: "Bulletin (Prototypes dotspark)",
-        endpoints: ["wss://bulletin.dotspark.app"],
-        lightClient: false,
-      },
-      polkadot: {
-        id: "polkadot",
-        name: "Bulletin Polkadot (not released yet)",
-        endpoints: [],
-        lightClient: false,
-      },
-    },
+    defaultNetwork: DEFAULT_NETWORKS.bulletin,
+    networks: BULLETIN_NETWORKS,
   },
   web3storage: {
     id: "web3storage",
     name: "Web3 Storage",
-    defaultNetwork: "local",
-    networks: {
-      local: {
-        id: "local",
-        name: "Local Dev",
-        endpoints: ["ws://localhost:2222"],
-        lightClient: false,
-      },
-      westend: {
-        id: "westend",
-        name: "Web3 Westend (not released yet)",
-        endpoints: [],
-        lightClient: false,
-      },
-    },
+    defaultNetwork: DEFAULT_NETWORKS.web3storage,
+    networks: WEB3_STORAGE_NETWORKS,
   },
 };
 
