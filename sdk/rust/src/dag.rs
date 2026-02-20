@@ -186,7 +186,7 @@ impl DagBuilder for UnixFsDagBuilder {
 				hashing: crate::cid::hash_algorithm_to_pallet(hash_algo)?,
 			};
 
-			let cid_data = calculate_cid(&chunk.data, Some(cid_config))
+			let cid_data = calculate_cid(&chunk.data, cid_config)
 				.map_err(|_| Error::DagEncodingFailed("Failed to calculate chunk CID".into()))?;
 
 			let chunk_size = chunk.data.len() as u64;
@@ -218,7 +218,7 @@ impl DagBuilder for UnixFsDagBuilder {
 			hashing: crate::cid::hash_algorithm_to_pallet(hash_algo)?,
 		};
 
-		let root_cid = calculate_cid(&dag_bytes, Some(root_config))
+		let root_cid = calculate_cid(&dag_bytes, root_config)
 			.map_err(|_| Error::DagEncodingFailed("Failed to calculate root CID".into()))?;
 
 		Ok(DagManifest { root_cid, chunk_cids, total_size, dag_bytes })

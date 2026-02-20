@@ -49,13 +49,15 @@ pub fn calculate_cid_with_config(
 	hash_algo: HashAlgorithm,
 ) -> Result<CidData> {
 	let config = create_config(codec, hash_algo)?;
-	calculate_cid(data, Some(config))
+	calculate_cid(data, config)
 		.map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
 }
 
 /// Calculate CID with default configuration (raw codec, blake2b-256).
 pub fn calculate_cid_default(data: &[u8]) -> Result<CidData> {
-	calculate_cid(data, None).map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
+	let config = CidConfig { codec: CidCodec::Raw.code(), hashing: HashingAlgorithm::Blake2b256 };
+	calculate_cid(data, config)
+		.map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
 }
 
 /// Convert CidData to bytes (CIDv1 format).
