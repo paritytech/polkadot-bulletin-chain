@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a8a936f7.js";
+            window.path_to_searchindex_js = "searchindex-c08dc049.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5689f54b.js"></script>
@@ -229,13 +229,6 @@
 <li>DAG-PB manifest generation</li>
 <li>Authorization management</li>
 </ul>
-<h3 id="direct-rpc"><a class="header" href="#direct-rpc">Direct RPC</a></h3>
-<p>You can also interact directly via Polkadot-API (PAPI) or Subxt:</p>
-<ul>
-<li><code>transactionStorage.store(data)</code> - Store data</li>
-<li><code>transactionStorage.renew(block, index)</code> - Renew storage</li>
-<li>Query chain state for authorization status</li>
-</ul>
 <h3 id="ipfs"><a class="header" href="#ipfs">IPFS</a></h3>
 <p>Data retrieval happens through IPFS:</p>
 <ul>
@@ -402,51 +395,128 @@ Get permission    Submit data       Fetch via IPFS    Extend retention
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="authorization"><a class="header" href="#authorization">Authorization</a></h1>
-<p>Before storing data, you must authorize the storage. This mechanism prevents spam and ensures users pay for the storage they introduce.</p>
+<p>Before storing data, you must be <strong>authorized</strong>. This mechanism prevents spam and ensures fair usage of chain storage.</p>
+<h2 id="who-can-authorize"><a class="header" href="#who-can-authorize">Who Can Authorize?</a></h2>
+<p>Authorization is granted by <strong>privileged accounts</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Network</th><th>Authorizer</th><th>How to Request</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Testnets</strong> (Paseo, Westend)</td><td><a href="#finding-the-sudo-account">Sudo account</a></td><td>Use the <strong>Faucet</strong> in the Console UI</td></tr>
+<tr><td><strong>Dotspark</strong></td><td><a href="#finding-the-sudo-account">Sudo account</a></td><td>Use the Faucet or contact operators</td></tr>
+<tr><td><strong>Mainnet</strong> (Polkadot)</td><td>Governance (ideally)</td><td>Contact chain operators for now</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="finding-the-sudo-account"><a class="header" href="#finding-the-sudo-account">Finding the Sudo Account</a></h3>
+<p>The sudo account for each network can be queried on-chain:</p>
+<pre><code class="language-typescript">// Query the current sudo key
+const sudoKey = await api.query.Sudo.Key.getValue();
+console.log("Sudo account:", sudoKey);
+</code></pre>
+<p>Or check the <strong>Dashboard</strong> in the Console UI - the sudo account is displayed in the chain info section when connected.</p>
+<h3 id="using-the-faucet-testnets"><a class="header" href="#using-the-faucet-testnets">Using the Faucet (Testnets)</a></h3>
+<p>The easiest way to get authorization on testnets:</p>
+<ol>
+<li>Open the <strong>Console UI</strong> (you’re likely already here!)</li>
+<li>Connect your wallet (Polkadot.js, Talisman, etc.)</li>
+<li>Navigate to <strong>Faucet</strong> in the menu</li>
+<li>Request authorization for your account</li>
+<li>The faucet will grant you a default allocation (transactions + bytes)</li>
+</ol>
+<h3 id="for-application-developers"><a class="header" href="#for-application-developers">For Application Developers</a></h3>
+<p>If you’re building an application that needs authorization:</p>
+<ul>
+<li><strong>Testnets</strong>: Use the faucet or run your own node with sudo access</li>
+<li><strong>Production</strong>: Contact the chain operators or submit a governance proposal</li>
+</ul>
+<h3 id="running-your-own-node-local-development"><a class="header" href="#running-your-own-node-local-development">Running Your Own Node (Local Development)</a></h3>
+<p>For local development, you have sudo access:</p>
+<pre><code class="language-bash"># Start a local dev node
+./polkadot-bulletin-chain --dev
+
+# The //Alice account has sudo privileges
+# Use it to authorize other accounts
+</code></pre>
 <h2 id="types-of-authorization"><a class="header" href="#types-of-authorization">Types of Authorization</a></h2>
 <h3 id="1-account-authorization-authorize_account"><a class="header" href="#1-account-authorization-authorize_account">1. Account Authorization (<code>authorize_account</code>)</a></h3>
-<p>This authorizes a specific <strong>account</strong> (public key) to store a certain amount of data.</p>
+<p>Authorizes a specific <strong>account</strong> to store data up to a limit.</p>
 <ul>
-<li><strong>Flexible</strong>: The account can store <em>any</em> data up to the limit.</li>
-<li><strong>Usage</strong>: Good for active users or applications uploading dynamic content.</li>
-<li><strong>Parameters</strong>:
-<ul>
-<li><code>who</code>: The account to authorize.</li>
-<li><code>transactions</code>: Number of transactions allowed.</li>
-<li><code>bytes</code>: Total bytes allowed.</li>
+<li><strong>Flexible</strong>: The account can store <em>any</em> data</li>
+<li><strong>Best for</strong>: Active users, applications with dynamic content</li>
 </ul>
-</li>
+<p><strong>Parameters:</strong></p>
+<ul>
+<li><code>who</code>: The account to authorize</li>
+<li><code>transactions</code>: Number of storage transactions allowed</li>
+<li><code>bytes</code>: Total bytes allowed</li>
 </ul>
 <h3 id="2-preimage-authorization-authorize_preimage"><a class="header" href="#2-preimage-authorization-authorize_preimage">2. Preimage Authorization (<code>authorize_preimage</code>)</a></h3>
-<p>This authorizes a specific <strong>piece of data</strong> (identified by its hash) to be stored by <em>anyone</em>.</p>
+<p>Authorizes a specific <strong>piece of data</strong> (by hash) to be stored by anyone.</p>
 <ul>
-<li><strong>Restricted</strong>: Only data matching the authorized hash can be stored.</li>
-<li><strong>Usage</strong>: Good for “sponsored” uploads where you want to pay for a specific file to be hosted, regardless of who submits the transaction.</li>
-<li><strong>Parameters</strong>:
+<li><strong>Restricted</strong>: Only data matching the hash can be stored</li>
+<li><strong>Best for</strong>: Sponsored uploads, known content</li>
+</ul>
+<p><strong>Parameters:</strong></p>
 <ul>
-<li><code>content_hash</code>: Hash of the data.</li>
-<li><code>max_size</code>: Maximum size of the data.</li>
+<li><code>content_hash</code>: Hash of the data to authorize</li>
+<li><code>max_size</code>: Maximum size of the data</li>
 </ul>
-</li>
-</ul>
-<h2 id="sdk-helpers"><a class="header" href="#sdk-helpers">SDK Helpers</a></h2>
-<p>The SDK provides <code>estimate_authorization</code> / <code>estimateAuthorization</code> to help you calculate the required values for authorization: the number of transactions and total bytes needed.</p>
-<p><strong>Example Calculation:</strong>
-If you want to store a 100 MiB file with 1 MiB chunks:</p>
-<ul>
-<li><strong>Chunks</strong>: 100</li>
-<li><strong>Manifest</strong>: 1</li>
-<li><strong>Total Transactions</strong>: 101</li>
-<li><strong>Total Bytes</strong>: 100 MiB + size of manifest (~2KB)</li>
-</ul>
+<h2 id="checking-your-authorization"><a class="header" href="#checking-your-authorization">Checking Your Authorization</a></h2>
+<p>Query your current authorization status:</p>
+<pre><code class="language-typescript">// TypeScript (PAPI)
+const auth = await api.query.TransactionStorage.Authorizations.getValue(accountId);
+if (auth) {
+  console.log(`Transactions remaining: ${auth.transactions}`);
+  console.log(`Bytes remaining: ${auth.bytes}`);
+}
+</code></pre>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Rust (subxt)
+let auth = api
+    .storage()
+    .at_latest()
+    .await?
+    .fetch(&amp;bulletin::storage().transaction_storage().authorizations(account_id))
+    .await?;
+<span class="boring">}</span></code></pre>
+<h2 id="estimating-authorization-needs"><a class="header" href="#estimating-authorization-needs">Estimating Authorization Needs</a></h2>
+<p>Use the SDK to calculate how much authorization you need:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>// Rust
-let (txs, bytes) = client.estimate_authorization(100_000_000);
+let client = BulletinClient::new();
+let (txs, bytes) = client.estimate_authorization(file_size_in_bytes);
+println!("Need {} transactions and {} bytes", txs, bytes);
 <span class="boring">}</span></code></pre>
 <pre><code class="language-typescript">// TypeScript
-const { transactions, bytes } = client.estimateAuthorization(100000000);
+const client = new BulletinClient();
+const { transactions, bytes } = client.estimateAuthorization(fileSizeInBytes);
+console.log(`Need ${transactions} transactions and ${bytes} bytes`);
 </code></pre>
+<p><strong>Example Calculation</strong> (100 MiB file with 1 MiB chunks):</p>
+<ul>
+<li>Chunks: 100</li>
+<li>Manifest: 1</li>
+<li><strong>Total Transactions</strong>: 101</li>
+<li><strong>Total Bytes</strong>: ~100 MiB + manifest overhead</li>
+</ul>
+<h2 id="authorization-expiry"><a class="header" href="#authorization-expiry">Authorization Expiry</a></h2>
+<p>Authorization may have an optional expiry block:</p>
+<ul>
+<li>If set, authorization becomes invalid after that block</li>
+<li>Unused authorization is not refunded</li>
+<li>Plan your uploads accordingly</li>
+</ul>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
+<ul>
+<li><a href="#storage-models">Storage Model</a> - How to store data</li>
+<li><a href="#data-retrieval">Data Retrieval</a> - Fetching stored data</li>
+<li><a href="#data-renewal">Data Renewal</a> - Extending retention</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="storage-models"><a class="header" href="#storage-models">Storage Models</a></h1>
 <p>The SDK supports two primary modes of operation.</p>
@@ -666,7 +736,7 @@ if (computedCid.toString() === cidString) {
 </ul>
 </blockquote>
 <p>For now, use standard HTTP clients or IPFS libraries for retrieval as shown above.</p>
-<h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
+<h2 id="next-steps-1"><a class="header" href="#next-steps-1">Next Steps</a></h2>
 <ul>
 <li><a href="#storage-models">Storage Model</a> - Understanding how data is stored</li>
 <li><a href="#manifests--ipfs">Manifests &amp; IPFS</a> - DAG-PB format details</li>
@@ -760,7 +830,7 @@ Block 100000: renew(50000, 2) → Renewed { index: 0 }
 <li><strong>Rust SDK</strong>: <code>prepare_renew()</code>, <code>RenewalTracker</code> - See <a href="#renewal">Rust SDK: Renewal</a></li>
 <li><strong>TypeScript SDK</strong>: Coming soon - See <a href="typescript/README.html">TypeScript SDK</a></li>
 </ul>
-<h2 id="next-steps-1"><a class="header" href="#next-steps-1">Next Steps</a></h2>
+<h2 id="next-steps-2"><a class="header" href="#next-steps-2">Next Steps</a></h2>
 <ul>
 <li><a href="#renewal">Rust SDK: Renewal</a> - SDK-specific implementation</li>
 <li><a href="#storage-models">Storage Model</a> - How data is stored</li>
@@ -1286,7 +1356,7 @@ mod tests {
     }
 }
 <span class="boring">}</span></code></pre>
-<h2 id="next-steps-2"><a class="header" href="#next-steps-2">Next Steps</a></h2>
+<h2 id="next-steps-3"><a class="header" href="#next-steps-3">Next Steps</a></h2>
 <ul>
 <li><a href="#chunked-uploads">Chunked Uploads</a> - For files &gt; 8 MiB</li>
 <li><a href="#authorization-2">Authorization</a> - Managing storage authorization</li>
@@ -1880,7 +1950,7 @@ async fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
 <blockquote>
 <p><strong>Note</strong>: Authorization checking happens automatically inside <code>store().send()</code> when you configure <code>.with_account()</code>. You don’t need to manually check - the SDK does it for you!</p>
 </blockquote>
-<h2 id="next-steps-3"><a class="header" href="#next-steps-3">Next Steps</a></h2>
+<h2 id="next-steps-4"><a class="header" href="#next-steps-4">Next Steps</a></h2>
 <ul>
 <li><a href="#authorization-2">Authorization</a> - Manage storage authorization</li>
 <li><a href="rust/submitters.html">Transaction Submitters</a> - Custom submitter implementations</li>
@@ -2252,7 +2322,7 @@ impl StorageManager {
     }
 }
 <span class="boring">}</span></code></pre>
-<h2 id="next-steps-4"><a class="header" href="#next-steps-4">Next Steps</a></h2>
+<h2 id="next-steps-5"><a class="header" href="#next-steps-5">Next Steps</a></h2>
 <ul>
 <li><a href="#basic-storage">Basic Storage</a> - Storing data</li>
 <li><a href="#chunked-uploads">Chunked Uploads</a> - Large file handling</li>
