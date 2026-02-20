@@ -56,7 +56,7 @@ cd sdk
 
 ## Documentation
 
-📚 **Complete SDK documentation**: [`docs/sdk-book`](../docs/sdk-book/)
+📚 **Complete SDK documentation**: [`docs/book`](../docs/book/)
 
 The SDK book contains comprehensive guides including:
 - **Concepts**: Authorization, chunking, DAG-PB manifests
@@ -78,7 +78,7 @@ Both SDKs provide:
 
 ## Examples
 
-**Rust**: Example code is available in the [SDK book documentation](../docs/sdk-book/). Rust examples require metadata files from a running node, so they're not included in the repository. See the SDK book for complete working examples and instructions.
+**Rust**: Example code is available in the [SDK book documentation](../docs/book/). Rust examples require metadata files from a running node, so they're not included in the repository. See the SDK book for complete working examples and instructions.
 
 **TypeScript**: See [`examples/typescript/`](../examples/typescript/) for working integration examples that use the SDK's chunker, CID calculation, and DAG-PB manifest generation with PAPI for transaction submission.
 

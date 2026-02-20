@@ -92,6 +92,6 @@ try-runtime = [
 
 # Note: Examples and integration tests are not included in the repository because they
 # require metadata files from a running Bulletin Chain node and would cause CI failures.
-# Complete example code is available in the SDK book documentation (docs/sdk-book/).
+# Complete example code is available in the SDK book documentation (docs/book/).
 # For reference implementations, see the TypeScript SDK examples which don't require
 # compile-time metadata generation.

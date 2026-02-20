@@ -5,7 +5,7 @@ on:
     branches: [main, console-ui]
     paths:
       - "console-ui/**"
-      - "docs/sdk-book/**"
+      - "docs/book/**"
       - ".github/workflows/deploy-console-ui.yml"
   workflow_dispatch:
 
@@ -53,12 +53,12 @@ jobs:
           sudo mv mdbook /usr/local/bin/
 
       - name: Build SDK Documentation
-        run: mdbook build docs/sdk-book
+        run: mdbook build docs/book
 
       - name: Copy SDK docs to dist
         run: |
           mkdir -p console-ui/dist/sdk-docs
-          cp -r docs/sdk-book/book/* console-ui/dist/sdk-docs/
+          cp -r docs/book/book/* console-ui/dist/sdk-docs/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

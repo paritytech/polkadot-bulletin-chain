@@ -274,7 +274,7 @@ Both SDKs provide:
 
 ## 📖 Documentation
 
-**Complete SDK Book**: [`docs/sdk-book`](./docs/sdk-book/)
+**Complete SDK Book**: [`docs/book`](./docs/book/)
 
 The Bulletin SDK Book contains comprehensive guides including:
 - Concepts (authorization, chunking, DAG-PB manifests)
@@ -284,7 +284,7 @@ The Bulletin SDK Book contains comprehensive guides including:
 
 To view the documentation locally:
 ```bash
-cd docs/sdk-book
+cd docs/book
 mdbook serve --open
 ```
 

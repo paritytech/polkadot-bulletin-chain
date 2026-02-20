@@ -53,7 +53,7 @@ npm run test:integration
 
 ## Documentation
 
-Complete documentation: [`docs/sdk-book`](../../docs/sdk-book/)
+Complete documentation: [`docs/book`](../../docs/book/)
 
 The SDK book contains:
 - Detailed API reference

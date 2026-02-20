@@ -26,4 +26,4 @@ console-ui/tsconfig.tsbuildinfo
 
 # mdBook build output
 console-ui/public/sdk-docs/
-docs/sdk-book/book/
+docs/book/book/

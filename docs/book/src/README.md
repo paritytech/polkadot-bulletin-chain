@@ -118,7 +118,7 @@ This documentation is built using [mdBook](https://github.com/rust-lang/mdBook).
 cargo install mdbook
 
 # Serve locally with live reload
-cd docs/sdk-book
+cd docs/book
 mdbook serve --open
 
 # Build static HTML
