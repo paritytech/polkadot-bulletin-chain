@@ -8,9 +8,32 @@ use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
 use sp_api::{ApiExt, ProvideRuntimeApi};
+use sp_blockchain::HeaderBackend;
 use sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
+use sp_core::hashing::blake2_256;
+use sp_runtime::SaturatedConversion;
 use sp_transaction_storage_proof::runtime_api::TransactionStorageApi;
 use std::{sync::Arc, time::Duration};
+
+/// Mock personhood verifier that derives a deterministic alias from the proof bytes.
+/// Replace with a real ring-VRF verifier (e.g. `BandersnatchVerifier`) once
+/// ring roots are available from People Chain state.
+pub struct MockPersonhoodVerifier;
+
+impl hop_service::PersonhoodVerifier for MockPersonhoodVerifier {
+	fn verify(
+		&self,
+		proof: &[u8],
+		_context: &[u8],
+		_msg: &[u8],
+	) -> Result<hop_service::Alias, hop_service::HopError> {
+		if proof.is_empty() {
+			return Err(hop_service::HopError::InvalidPersonhoodProof);
+		}
+		// Derive a deterministic alias from the proof bytes.
+		Ok(blake2_256(proof))
+	}
+}
 
 pub(crate) type FullClient = sc_service::TFullClient<
 	Block,
@@ -245,6 +268,26 @@ pub fn new_full<
 
 	let shared_voter_state = SharedVoterState::empty();
 
+	// Create personhood verifier for HOP
+	let hop_verifier = Arc::new(MockPersonhoodVerifier);
+
+	// Spawn HOP cleanup task if pool is enabled
+	if let Some(ref pool) = hop_pool {
+		let cleanup_pool = pool.clone();
+		let cleanup_client = client.clone();
+		let check_interval = hop_params.hop_check_interval;
+		task_manager.spawn_handle().spawn("hop-cleanup", None, async move {
+			loop {
+				futures_timer::Delay::new(Duration::from_secs(check_interval)).await;
+				let block = cleanup_client.info().best_number.saturated_into::<u32>();
+				let freed = cleanup_pool.cleanup_expired(block);
+				if freed > 0 {
+					tracing::info!(target: "hop", freed, "Cleaned up expired entries");
+				}
+			}
+		});
+	}
+
 	let rpc_extensions_builder = {
 		let client = client.clone();
 		let pool = transaction_pool.clone();
@@ -252,6 +295,7 @@ pub fn new_full<
 		let select_chain = select_chain.clone();
 		let chain_spec = config.chain_spec.cloned_box();
 		let hop_pool_rpc = hop_pool.clone();
+		let hop_verifier_rpc = hop_verifier.clone();
 
 		let justification_stream = grandpa_link.justification_stream();
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
@@ -280,6 +324,7 @@ pub fn new_full<
 					finality_proof_provider: finality_proof_provider.clone(),
 				},
 				hop_pool: hop_pool_rpc.clone(),
+				hop_verifier: hop_verifier_rpc.clone(),
 			};
 			crate::rpc::create_full(deps).map_err(Into::into)
 		})

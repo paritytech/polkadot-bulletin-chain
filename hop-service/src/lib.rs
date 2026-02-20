@@ -76,7 +76,7 @@
 //!
 //! ## RPC Methods
 //!
-//! - `hop_submit(data: Bytes, recipients: Vec<Bytes>) -> SubmitResult` - Submit data with recipient keys, returns hash + pool status
+//! - `hop_submit(data: Bytes, recipients: Vec<Bytes>, proof: Bytes) -> SubmitResult` - Submit data with recipient keys and personhood proof
 //! - `hop_claim(hash: Bytes, signature: Bytes) -> Bytes` - Claim data with ed25519 signature
 //! - `hop_poolStatus() -> PoolStatus` - Get pool statistics
 //!
@@ -97,5 +97,5 @@ pub mod types;
 pub use cli::HopParams;
 pub use pool::HopDataPool;
 pub use primitives::{HopBlockNumber, HopHash};
-pub use rpc::{HopApiServer, HopRpcServer};
-pub use types::{HopError, HopPoolEntry, PoolStatus, SubmitResult};
+pub use rpc::{HopApiServer, HopRpcServer, PersonhoodVerifier};
+pub use types::{Alias, HopError, HopPoolEntry, PoolStatus, SubmitResult};

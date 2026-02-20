@@ -57,11 +57,13 @@ async fn hop_submit(
     rpc: &RpcClient,
     data: &[u8],
     recipients: Vec<Vec<u8>>,
+    proof: &[u8],
 ) -> Result<SubmitResult, Box<dyn std::error::Error>> {
     let hex_data = Bytes(data.to_vec());
     let hex_recipients: Vec<Bytes> = recipients.into_iter().map(Bytes).collect();
+    let hex_proof = Bytes(proof.to_vec());
     let result: SubmitResult = rpc
-        .request("hop_submit", rpc_params![hex_data, hex_recipients])
+        .request("hop_submit", rpc_params![hex_data, hex_recipients, hex_proof])
         .await?;
     Ok(result)
 }
@@ -178,10 +180,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 5: Alice uploads file to HOP
     println!("[5/12] Alice: uploading file to HOP...");
     let pool_before = hop_pool_status(&bulletin_rpc).await?;
+    // Mock proof: any non-empty bytes work with MockPersonhoodVerifier
+    let mock_proof = b"alice-personhood-proof";
     let submit_result = hop_submit(
         &bulletin_rpc,
         &file_data,
         vec![ephemeral_pubkey.to_vec()],
+        mock_proof,
     )
     .await?;
     let cid = submit_result.hash.0.clone();

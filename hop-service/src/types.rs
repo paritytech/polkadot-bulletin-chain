@@ -20,6 +20,13 @@ use crate::primitives::HopBlockNumber;
 use codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
+/// Stable pseudonymous alias derived from ring-VRF personhood proofs.
+/// Same person + same context = same alias, always.
+pub type Alias = [u8; 32];
+
+/// Context string for HOP pool personhood proofs (32 bytes, null-padded).
+pub const HOP_CONTEXT: [u8; 32] = *b"pop:polkadot.network/hop-pool\x00\x00\x00";
+
 /// Entry in the HOP data pool
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct HopPoolEntry {
@@ -36,6 +43,8 @@ pub struct HopPoolEntry {
 	pub recipients: Vec<[u8; 32]>,
 	/// Tracks which recipients have claimed (by index into `recipients`).
 	pub claimed: Vec<bool>,
+	/// Alias of the sender who submitted this entry (from personhood proof).
+	pub sender_alias: Alias,
 }
 
 impl HopPoolEntry {
@@ -45,12 +54,13 @@ impl HopPoolEntry {
 		added_at: HopBlockNumber,
 		retention_blocks: u32,
 		recipients: Vec<[u8; 32]>,
+		sender_alias: Alias,
 	) -> Self {
 		let size = data.len() as u64;
 		let expires_at = added_at.saturating_add(retention_blocks);
 		let claimed = vec![false; recipients.len()];
 
-		Self { data, added_at, expires_at, size, recipients, claimed }
+		Self { data, added_at, expires_at, size, recipients, claimed, sender_alias }
 	}
 }
 
@@ -108,6 +118,12 @@ pub enum HopError {
 
 	#[error("Invalid recipient public key: expected 32 bytes, got {0}")]
 	InvalidRecipientKey(usize),
+
+	#[error("User quota exceeded: using {used} of {limit} bytes")]
+	UserQuotaExceeded { used: u64, limit: u64 },
+
+	#[error("Invalid personhood proof")]
+	InvalidPersonhoodProof,
 }
 
 impl From<HopError> for jsonrpsee::types::ErrorObjectOwned {
@@ -123,6 +139,8 @@ impl From<HopError> for jsonrpsee::types::ErrorObjectOwned {
 			HopError::NotRecipient => 1010,
 			HopError::NoRecipients => 1011,
 			HopError::InvalidRecipientKey(_) => 1012,
+			HopError::UserQuotaExceeded { .. } => 1013,
+			HopError::InvalidPersonhoodProof => 1014,
 		};
 
 		jsonrpsee::types::ErrorObject::owned(code, err.to_string(), None::<()>)

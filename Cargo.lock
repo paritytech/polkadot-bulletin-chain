@@ -7936,6 +7936,7 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "futures",
+ "futures-timer",
  "hop-service",
  "jsonrpsee",
  "pallet-transaction-payment",

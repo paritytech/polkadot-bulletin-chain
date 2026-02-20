@@ -24,7 +24,7 @@ use sp_consensus::SelectChain;
 use sp_keystore::KeystorePtr;
 
 /// Full client dependencies.
-pub struct FullDeps<C, P, SC, B> {
+pub struct FullDeps<C, P, SC, B, V: hop_service::PersonhoodVerifier> {
 	/// The client instance to use.
 	pub client: Arc<C>,
 	/// Transaction pool instance.
@@ -39,6 +39,8 @@ pub struct FullDeps<C, P, SC, B> {
 	pub grandpa: GrandpaDeps<B>,
 	/// HOP data pool.
 	pub hop_pool: Option<Arc<hop_service::HopDataPool>>,
+	/// Personhood proof verifier for HOP.
+	pub hop_verifier: Arc<V>,
 }
 
 /// BABE RPC dependencies.
@@ -64,8 +66,8 @@ pub struct GrandpaDeps<B> {
 }
 
 /// Instantiate all full RPC extensions.
-pub fn create_full<C, P, SC, B>(
-	deps: FullDeps<C, P, SC, B>,
+pub fn create_full<C, P, SC, B, V>(
+	deps: FullDeps<C, P, SC, B, V>,
 ) -> Result<RpcModule<()>, Box<dyn std::error::Error + Send + Sync>>
 where
 	C: ProvideRuntimeApi<Block>,
@@ -77,12 +79,22 @@ where
 	P: TransactionPool + 'static,
 	SC: SelectChain<Block> + 'static,
 	B: sc_client_api::Backend<Block> + Send + Sync + 'static,
+	V: hop_service::PersonhoodVerifier,
 {
 	use sc_consensus_babe_rpc::{Babe, BabeApiServer};
 	use substrate_frame_rpc_system::{System, SystemApiServer};
 
 	let mut module = RpcModule::new(());
-	let FullDeps { client, pool, select_chain, chain_spec, babe, grandpa, hop_pool } = deps;
+	let FullDeps {
+		client,
+		pool,
+		select_chain,
+		chain_spec,
+		babe,
+		grandpa,
+		hop_pool,
+		hop_verifier,
+	} = deps;
 	let BabeDeps { babe_worker_handle, keystore } = babe;
 
 	module.merge(System::new(client.clone(), pool).into_rpc())?;
@@ -112,7 +124,9 @@ where
 	// HOP (Hand-Off Protocol) RPC
 	if let Some(hop_pool) = hop_pool {
 		use hop_service::{HopApiServer, HopRpcServer};
-		module.merge(HopRpcServer::new(hop_pool, client.clone()).into_rpc())?;
+		module.merge(
+			HopRpcServer::new(hop_pool, client.clone(), hop_verifier).into_rpc(),
+		)?;
 	}
 
 	Ok(module)
