@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
-import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -16,11 +17,12 @@ import {
 } from "@/components/ui/Select";
 import { FileUpload } from "@/components/FileUpload";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useApi, useClient } from "@/state/chain.state";
+import { useApi, useClient, useChainState } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
+import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { cidFromBytes, toHashingEnum } from "@/lib/cid";
+import { cidFromBytes, toHashingEnum, getContentHash } from "@/lib/cid";
 import { Binary } from "polkadot-api";
 
 type HashAlgorithm = "blake2b256" | "sha256" | "keccak256";
@@ -38,14 +40,18 @@ const CID_CODECS = [
 
 interface UploadResult {
   cid: string;
+  contentHash: string;
   blockHash?: string;
   blockNumber?: number;
+  index?: number;
   size: number;
 }
 
 export function Upload() {
   const api = useApi();
   const client = useClient();
+  const { network } = useChainState();
+  const navigate = useNavigate();
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
 
@@ -105,8 +111,10 @@ export function Upload() {
         throw new Error("Invalid configuration");
       }
 
-      // Calculate expected CID
+      // Calculate expected CID and content hash
       const expectedCid = await cidFromBytes(data, codecConfig.codec, hashConfig.mhCode);
+      const contentHash = await getContentHash(data, hashConfig.mhCode);
+      const contentHashHex = "0x" + Array.from(contentHash).map(b => b.toString(16).padStart(2, "0")).join("");
 
       // Use store_with_cid_config for non-default CID settings, plain store otherwise
       const isCustomCid = hashAlgorithm !== "blake2b256" || cidCodec !== "raw";
@@ -124,7 +132,7 @@ export function Upload() {
           });
 
       // Sign and submit
-      const result = await new Promise<{ blockHash?: string; blockNumber?: number }>((resolve, reject) => {
+      const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
         let resolved = false;
 
         const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
@@ -133,9 +141,22 @@ export function Upload() {
             if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
               resolved = true;
               subscription.unsubscribe();
+
+              // Try to find the Stored event to get the index
+              let index: number | undefined;
+              if (ev.events) {
+                const storedEvent = ev.events.find(
+                  (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
+                );
+                if (storedEvent?.value?.value?.index !== undefined) {
+                  index = storedEvent.value.value.index;
+                }
+              }
+
               resolve({
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
+                index,
               });
             }
           },
@@ -157,12 +178,30 @@ export function Upload() {
         }, 120000);
       });
 
-      setUploadResult({
+      const uploadResultData: UploadResult = {
         cid: expectedCid.toString(),
+        contentHash: contentHashHex,
         blockHash: result.blockHash,
         blockNumber: result.blockNumber,
+        index: result.index,
         size: data.length,
-      });
+      };
+
+      setUploadResult(uploadResultData);
+
+      // Save to history for easy renewal later
+      if (result.blockNumber !== undefined && result.index !== undefined) {
+        addStorageEntry({
+          blockNumber: result.blockNumber,
+          index: result.index,
+          cid: expectedCid.toString(),
+          contentHash: contentHashHex,
+          size: data.length,
+          account: selectedAccount.address,
+          networkId: network.id,
+          label: fileName || undefined,
+        });
+      }
     } catch (err) {
       console.error("Upload failed:", err);
       setUploadError(err instanceof Error ? err.message : "Upload failed");
@@ -330,8 +369,9 @@ export function Upload() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* CID */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">CID</label>
+                  <label className="text-sm font-medium">CID (Content Identifier)</label>
                   <div className="flex items-center gap-2">
                     <Input
                       value={uploadResult.cid}
@@ -352,28 +392,72 @@ export function Upload() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  {uploadResult.blockNumber && (
+                {/* Block & Index - Important for renewal */}
+                <div className="p-3 rounded-md bg-primary/10 border border-primary/20">
+                  <div className="flex items-start gap-2 mb-2">
+                    <Info className="h-4 w-4 mt-0.5 text-primary" />
+                    <span className="text-sm font-medium">Save for Renewal</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-muted-foreground">Block Number</span>
-                      <p className="font-mono">#{uploadResult.blockNumber}</p>
+                      <p className="font-mono font-medium">#{uploadResult.blockNumber}</p>
                     </div>
-                  )}
+                    <div>
+                      <span className="text-muted-foreground">Transaction Index</span>
+                      <p className="font-mono font-medium">{uploadResult.index ?? "N/A"}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    You'll need these values to renew your data before it expires.
+                    {uploadResult.blockNumber !== undefined && uploadResult.index !== undefined && (
+                      <span className="text-success"> (Auto-saved to browser history)</span>
+                    )}
+                  </p>
+                </div>
+
+                {/* Additional Details */}
+                <div className="grid sm:grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="text-muted-foreground">Size</span>
                     <p>{formatBytes(uploadResult.size)}</p>
                   </div>
+                  <div>
+                    <span className="text-muted-foreground">Content Hash</span>
+                    <p className="font-mono text-xs truncate" title={uploadResult.contentHash}>
+                      {uploadResult.contentHash}
+                    </p>
+                  </div>
                 </div>
 
-                <div className="flex gap-2 pt-2">
+                {/* Actions */}
+                <div className="flex flex-wrap gap-2 pt-2">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => window.open(`${import.meta.env.BASE_URL}download?cid=${uploadResult.cid}`, "_blank")}
+                    onClick={() => window.open(`https://ipfs.io/ipfs/${uploadResult.cid}`, "_blank")}
                   >
                     <ExternalLink className="h-4 w-4 mr-2" />
-                    View in Download
+                    View on IPFS
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(`/download?cid=${uploadResult.cid}`)}
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Download Page
+                  </Button>
+                  {uploadResult.blockNumber !== undefined && uploadResult.index !== undefined && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/renew?block=${uploadResult.blockNumber}&index=${uploadResult.index}`)}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Renew Later
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
