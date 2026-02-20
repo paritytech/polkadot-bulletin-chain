@@ -8,9 +8,21 @@ Authorization is granted by **privileged accounts**:
 
 | Network | Authorizer | How to Request |
 |---------|------------|----------------|
-| **Testnets** (Paseo, Westend) | Sudo account | Use the **Faucet** in the Console UI |
-| **Dotspark** | Sudo account | Use the Faucet or contact operators |
+| **Testnets** (Paseo, Westend) | [Sudo account](#finding-the-sudo-account) | Use the **Faucet** in the Console UI |
+| **Dotspark** | [Sudo account](#finding-the-sudo-account) | Use the Faucet or contact operators |
 | **Mainnet** (Polkadot) | Governance (ideally) | Contact chain operators for now |
+
+### Finding the Sudo Account
+
+The sudo account for each network can be queried on-chain:
+
+```typescript
+// Query the current sudo key
+const sudoKey = await api.query.Sudo.Key.getValue();
+console.log("Sudo account:", sudoKey);
+```
+
+Or check the **Dashboard** in the Console UI - the sudo account is displayed in the chain info section when connected.
 
 ### Using the Faucet (Testnets)
 
