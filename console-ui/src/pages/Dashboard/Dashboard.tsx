@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets, ExternalLink } from "lucide-react";
+import { Upload, Download, Search, Database, Activity, BarChart3, Droplets, ExternalLink, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -40,10 +40,10 @@ function QuickActions() {
               Explore Blocks
             </Button>
           </Link>
-          <Link to="/authorizations">
+          <Link to="/renew">
             <Button variant="outline" className="w-full justify-start">
-              <Shield className="h-4 w-4 mr-2" />
-              View Authorizations
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Renew Storage
             </Button>
           </Link>
           <Link to="/authorizations?tab=faucet">
