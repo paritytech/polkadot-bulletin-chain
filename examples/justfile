@@ -707,3 +707,33 @@ run-live-tests-westend seed ipfs_gateway_url="http://127.0.0.1:8283" image_size=
 # Run live tests against Paseo Bulletin
 run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
     just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+
+# ============================================================================
+# Health checks (PAPI-based, no credentials required)
+# ============================================================================
+#
+# Run health and pallet checks against live Bulletin chain deployments.
+# Uses WebSocket (WSS) via PAPI - no curl/HTTPS needed.
+#
+# Usage:
+#   just health-check                                  # Westend health only
+#   just health-check "wss://custom-rpc.example.com"   # Custom endpoint
+#   just health-check-westend --check                  # Westend health + pallet check
+
+# Run health check against a live endpoint
+# Parameters:
+#   ws_url - WebSocket URL of the Bulletin chain node
+#   check  - Pass "--check" to include pallet verification
+health-check ws_url="wss://westend-bulletin-rpc.polkadot.io" check="": npm-install
+    #!/usr/bin/env bash
+    set -e
+    just papi-generate "{{ ws_url }}"
+    node health_check.js "{{ ws_url }}" {{ check }}
+
+# Health check against Westend Bulletin
+health-check-westend check="":
+    just health-check "{{ WESTEND_RPC }}" "{{ check }}"
+
+# Health check against Paseo Bulletin
+health-check-paseo check="":
+    just health-check "{{ PASEO_RPC }}" "{{ check }}"
