@@ -5,27 +5,30 @@ This section covers the fundamental concepts you need to understand when working
 ## Data Lifecycle
 
 ```
-1. AUTHORIZE    2. STORE        3. RETRIEVE     4. RENEW (optional)
-   ↓               ↓               ↓               ↓
-Grant storage   Submit data    Fetch via      Extend before
-permission      to chain       IPFS           expiration
+1. AUTHORIZE       2. STORE           3. RETRIEVE        4. RENEW
+   ↓                  ↓                  ↓                  ↓
+Get permission    Submit data       Fetch via IPFS    Extend retention
+(faucet/sudo)     + receive CID     using CID         before expiration
 ```
 
-### 1. Authorization
+### 1. Authorization (Faucet)
 
-Before storing data, accounts must be **authorized**. This prevents spam and manages storage growth.
+Before storing data, accounts must be **authorized**. This prevents spam and manages storage costs.
 
-- A Root/Sudo user grants permission to store a specified amount of data
+- Use the **Faucet** (testnet) or request authorization from a Root/Sudo user
+- Authorization grants permission to store a specified amount of data (bytes + transactions)
 - Authorization can be for an account or a specific content hash (preimage)
 - Learn more: [Authorization](./authorization.md)
 
 ### 2. Storage
 
-Once authorized, users can submit data to the chain:
+Once authorized, submit data to the chain:
 
 - **Small data** (< 8 MiB): Stored directly in a single transaction
 - **Large data** (> 8 MiB): Split into chunks with a DAG-PB manifest
-- The chain returns a **CID** (Content Identifier) for retrieval
+- On success, you receive:
+  - **CID** (Content Identifier) for retrieval
+  - **Block number** and **index** (needed for renewal)
 - Learn more: [Storage Model](./storage.md)
 
 ### 3. Retrieval
@@ -41,8 +44,9 @@ Data is retrieved via **IPFS**, not directly from the chain:
 
 Data has a **retention period** after which it may be pruned:
 
-- Call `renew(block, index)` to extend the retention period
 - Track the block number and index from `Stored`/`Renewed` events
+- Call `renew(block, index)` before expiration to extend retention
+- Each renewal gives you a **new** block/index for the next renewal
 - Learn more: [Data Renewal](./renewal.md)
 
 ## CIDs (Content Identifiers)
@@ -69,8 +73,8 @@ Files larger than the transaction limit must be chunked. The SDKs handle this au
 
 ## Sections
 
+- [Authorization](./authorization.md) - Getting permission to store (faucet)
 - [Storage Model](./storage.md) - How data is stored on-chain
 - [Data Retrieval](./retrieval.md) - Fetching data via IPFS
 - [Data Renewal](./renewal.md) - Extending storage retention
-- [Authorization](./authorization.md) - Pre-approving storage
 - [Manifests & IPFS](./manifests.md) - DAG-PB format for chunked data

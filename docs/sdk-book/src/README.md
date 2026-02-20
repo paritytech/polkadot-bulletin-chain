@@ -19,12 +19,12 @@ Unlike typical file storage systems (like Filecoin or Arweave), Bulletin Chain f
 
 ## Key Concepts
 
-| Concept | Description |
-|---------|-------------|
-| **Store** | Submit data to the chain, receive a CID |
-| **Retrieve** | Fetch data via IPFS using the CID |
-| **Renew** | Extend storage before the retention period expires |
-| **Authorization** | Pre-approve accounts for storage transactions |
+| Step | Concept | Description |
+|------|---------|-------------|
+| 1 | **Authorize** | Get permission to store (faucet on testnet) |
+| 2 | **Store** | Submit data to the chain, receive a CID |
+| 3 | **Retrieve** | Fetch data via IPFS using the CID |
+| 4 | **Renew** | Extend storage before the retention period expires |
 
 ## Accessing Bulletin Chain
 
