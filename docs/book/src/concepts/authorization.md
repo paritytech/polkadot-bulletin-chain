@@ -16,7 +16,7 @@ Authorization is granted by **privileged accounts**:
 
 The easiest way to get authorization on testnets:
 
-1. Go to the **Console UI** at [paritytech.github.io/polkadot-bulletin-chain](https://paritytech.github.io/polkadot-bulletin-chain)
+1. Open the **Console UI** (you're likely already here!)
 2. Connect your wallet (Polkadot.js, Talisman, etc.)
 3. Navigate to **Faucet** in the menu
 4. Request authorization for your account
