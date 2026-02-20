@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info } from "lucide-react";
+import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -225,6 +225,141 @@ export function Upload() {
         </p>
       </div>
 
+      {/* Error Display - at top for visibility */}
+      {uploadError && (
+        <Card className="border-destructive relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={() => setUploadError(null)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+          <CardContent className="pt-6 pr-10">
+            <div className="flex items-start gap-3 text-destructive">
+              <AlertCircle className="h-5 w-5 mt-0.5" />
+              <div>
+                <p className="font-medium">Upload Failed</p>
+                <p className="text-sm mt-1">{uploadError}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Result Display - at top for visibility */}
+      {uploadResult && (
+        <Card className="border-success relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={() => setUploadResult(null)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+          <CardHeader className="pr-10">
+            <CardTitle className="text-success">Upload Successful</CardTitle>
+            <CardDescription>
+              Your data has been stored on the Bulletin Chain
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* CID */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">CID (Content Identifier)</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={uploadResult.cid}
+                  readOnly
+                  className="font-mono text-sm"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => copyToClipboard(uploadResult.cid)}
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Block & Index - Important for renewal */}
+            <div className="p-3 rounded-md bg-primary/10 border border-primary/20">
+              <div className="flex items-start gap-2 mb-2">
+                <Info className="h-4 w-4 mt-0.5 text-primary" />
+                <span className="text-sm font-medium">Save for Renewal</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Block Number</span>
+                  <p className="font-mono font-medium">#{uploadResult.blockNumber}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Transaction Index</span>
+                  <p className="font-mono font-medium">{uploadResult.index ?? "N/A"}</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                You'll need these values to renew your data before it expires.
+                {uploadResult.blockNumber !== undefined && uploadResult.index !== undefined && (
+                  <span className="text-success"> (Auto-saved to browser history)</span>
+                )}
+              </p>
+            </div>
+
+            {/* Additional Details */}
+            <div className="grid sm:grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Size</span>
+                <p>{formatBytes(uploadResult.size)}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Content Hash</span>
+                <p className="font-mono text-xs truncate" title={uploadResult.contentHash}>
+                  {uploadResult.contentHash}
+                </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`https://ipfs.io/ipfs/${uploadResult.cid}`, "_blank")}
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                View on IPFS
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/download?cid=${uploadResult.cid}`)}
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Download Page
+              </Button>
+              {uploadResult.blockNumber !== undefined && uploadResult.index !== undefined && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/renew?block=${uploadResult.blockNumber}&index=${uploadResult.index}`)}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Renew Later
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           {/* Input Card */}
@@ -343,125 +478,6 @@ export function Upload() {
               </>
             )}
           </Button>
-
-          {/* Error Display */}
-          {uploadError && (
-            <Card className="border-destructive">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-3 text-destructive">
-                  <AlertCircle className="h-5 w-5 mt-0.5" />
-                  <div>
-                    <p className="font-medium">Upload Failed</p>
-                    <p className="text-sm mt-1">{uploadError}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Result Display */}
-          {uploadResult && (
-            <Card className="border-success">
-              <CardHeader>
-                <CardTitle className="text-success">Upload Successful</CardTitle>
-                <CardDescription>
-                  Your data has been stored on the Bulletin Chain
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* CID */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">CID (Content Identifier)</label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={uploadResult.cid}
-                      readOnly
-                      className="font-mono text-sm"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => copyToClipboard(uploadResult.cid)}
-                    >
-                      {copied ? (
-                        <Check className="h-4 w-4" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Block & Index - Important for renewal */}
-                <div className="p-3 rounded-md bg-primary/10 border border-primary/20">
-                  <div className="flex items-start gap-2 mb-2">
-                    <Info className="h-4 w-4 mt-0.5 text-primary" />
-                    <span className="text-sm font-medium">Save for Renewal</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Block Number</span>
-                      <p className="font-mono font-medium">#{uploadResult.blockNumber}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Transaction Index</span>
-                      <p className="font-mono font-medium">{uploadResult.index ?? "N/A"}</p>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    You'll need these values to renew your data before it expires.
-                    {uploadResult.blockNumber !== undefined && uploadResult.index !== undefined && (
-                      <span className="text-success"> (Auto-saved to browser history)</span>
-                    )}
-                  </p>
-                </div>
-
-                {/* Additional Details */}
-                <div className="grid sm:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Size</span>
-                    <p>{formatBytes(uploadResult.size)}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Content Hash</span>
-                    <p className="font-mono text-xs truncate" title={uploadResult.contentHash}>
-                      {uploadResult.contentHash}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.open(`https://ipfs.io/ipfs/${uploadResult.cid}`, "_blank")}
-                  >
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    View on IPFS
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigate(`/download?cid=${uploadResult.cid}`)}
-                  >
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    Download Page
-                  </Button>
-                  {uploadResult.blockNumber !== undefined && uploadResult.index !== undefined && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(`/renew?block=${uploadResult.blockNumber}&index=${uploadResult.index}`)}
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Renew Later
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* Sidebar */}
