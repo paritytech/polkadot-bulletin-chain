@@ -21,7 +21,7 @@ import { CidInput } from "@/components/CidInput";
 import { formatBytes, bytesToHex } from "@/utils/format";
 import { CID } from "multiformats/cid";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
-import { IPFS_GATEWAYS, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
+import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
 import { useNetwork } from "@/state/chain.state";
 
 const P2P_MULTIADDRS: Record<string, string> = {
@@ -79,7 +79,7 @@ export function Download() {
     () => IPFS_GATEWAYS[network.id] ?? ""
   );
 
-  const activeTab = searchParams.get("tab") || "p2p";
+  const activeTab = searchParams.get("tab") || PREFERRED_DOWNLOAD_METHOD[network.id] || "p2p";
 
   const heliaClientRef = useRef<HeliaClient | null>(null);
   const prevNetworkId = useRef(network.id);
@@ -116,7 +116,15 @@ export function Download() {
     setFetchResult(null);
 
     setGatewayUrl(IPFS_GATEWAYS[network.id] ?? "");
-  }, [network.id]);
+
+    // Clear tab param so the new network's preferred method takes effect
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("tab");
+      next.delete("cid");
+      return next;
+    });
+  }, [network.id, setSearchParams]);
 
   // Update URL when CID changes
   useEffect(() => {
