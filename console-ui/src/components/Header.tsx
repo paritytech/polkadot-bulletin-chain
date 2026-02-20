@@ -96,11 +96,11 @@ function HelpMenu() {
 
   const helpLinks = [
     {
-      label: "SDK Documentation",
-      href: "/sdk-docs/index.html",
+      label: "User Manual",
+      href: "/docs/index.html",
       icon: BookOpen,
       external: true,
-      description: "Learn how to use the Bulletin SDK",
+      description: "Guides for storing and retrieving data",
     },
     {
       label: "GitHub Repository",
