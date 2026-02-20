@@ -34,9 +34,9 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 
 4. **Merge the PR** and **tag the release** on main — `v0.0.X` for testnets, `v1.x.y` for production (see Versioning below):
    ```bash
-   gh pr merge <PR_NUMBER> --merge
+   gh pr merge <PR_NUMBER> --squash
    git checkout main && git pull
-   git tag v<VERSION>
+   git tag -a v<VERSION> -m "Release v<VERSION>"
    git push origin --tags
    ```
 

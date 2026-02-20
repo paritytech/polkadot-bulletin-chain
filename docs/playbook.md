@@ -42,9 +42,9 @@ gh pr create --title "Bump <RUNTIME> spec_version to <VERSION>"
 Tag using the correct version track — `v0.0.X` for testnets, `v1.x.y` for production (see [Versioning Scheme](#versioning-scheme)).
 
 ```shell
-gh pr merge <PR_NUMBER> --merge
+gh pr merge <PR_NUMBER> --squash
 git checkout main && git pull
-git tag v<VERSION>
+git tag -a v<VERSION> -m "Release v<VERSION>"
 git push origin --tags
 ```
 
