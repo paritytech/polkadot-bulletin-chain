@@ -1,8 +1,10 @@
 [book]
 authors = ["Polkadot Bulletin Team"]
 language = "en"
-multilingual = false
 src = "src"
 title = "Polkadot Bulletin SDK Documentation"
 
 [output.html]
+site-url = "/polkadot-bulletin-chain/sdk-docs/"
+git-repository-url = "https://github.com/paritytech/polkadot-bulletin-chain"
+edit-url-template = "https://github.com/paritytech/polkadot-bulletin-chain/edit/main/docs/sdk-book/{path}"

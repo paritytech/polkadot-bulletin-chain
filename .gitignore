@@ -23,3 +23,7 @@ zombienet-*
 console-ui/dist/
 console-ui/.vite/
 console-ui/tsconfig.tsbuildinfo
+
+# mdBook build output
+console-ui/public/sdk-docs/
+docs/sdk-book/book/

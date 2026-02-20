@@ -2,9 +2,10 @@ name: Deploy Console UI to GitHub Pages
 
 on:
   push:
-    branches: [console-ui]
+    branches: [main, console-ui]
     paths:
       - "console-ui/**"
+      - "docs/sdk-book/**"
       - ".github/workflows/deploy-console-ui.yml"
   workflow_dispatch:
 
@@ -45,6 +46,19 @@ jobs:
 
       - name: Copy index.html to 404.html for SPA routing
         run: cp console-ui/dist/index.html console-ui/dist/404.html
+
+      - name: Install mdBook
+        run: |
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          sudo mv mdbook /usr/local/bin/
+
+      - name: Build SDK Documentation
+        run: mdbook build docs/sdk-book
+
+      - name: Copy SDK docs to dist
+        run: |
+          mkdir -p console-ui/dist/sdk-docs
+          cp -r docs/sdk-book/book/* console-ui/dist/sdk-docs/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
