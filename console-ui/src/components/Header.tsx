@@ -20,7 +20,7 @@ import {
 import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
 import { formatAddress, formatBlockNumber } from "@/utils/format";
 import { cn } from "@/utils/cn";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: Database, web3storage: true },
@@ -78,6 +78,21 @@ function NetworkSwitcher() {
 
 function HelpMenu() {
   const [open, setOpen] = useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
 
   const helpLinks = [
     {
@@ -97,7 +112,7 @@ function HelpMenu() {
   ];
 
   return (
-    <div className="relative">
+    <div className="relative" ref={menuRef}>
       <Button
         variant="ghost"
         size="icon"
@@ -108,12 +123,7 @@ function HelpMenu() {
       </Button>
 
       {open && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-2 shadow-lg z-50">
+        <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-2 shadow-lg z-50">
             <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
               Help & Resources
             </div>
@@ -139,7 +149,6 @@ function HelpMenu() {
               </a>
             ))}
           </div>
-        </>
       )}
     </div>
   );
