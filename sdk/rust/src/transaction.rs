@@ -9,11 +9,13 @@
 
 use crate::{
 	cid::ContentHash,
-	types::{Error, Result},
+	types::{Error, ProgressCallback, ProgressEvent, Result},
 };
 use subxt::{OnlineClient, PolkadotConfig};
+use subxt::blocks::BlockRef;
 use subxt_signer::sr25519::Keypair;
 use sp_runtime::AccountId32;
+use futures::StreamExt;
 
 // Subxt metadata for TransactionStorage pallet
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale", substitute_type_path = "sp_core::crypto::AccountId32")]
@@ -55,28 +57,153 @@ impl TransactionClient {
 		data: Vec<u8>,
 		signer: &Keypair,
 	) -> Result<StoreReceipt> {
+		self.store_with_progress(data, signer, None).await
+	}
+
+	/// Store data on-chain with progress callbacks.
+	///
+	/// Submits a `TransactionStorage.store` extrinsic and emits progress
+	/// events as the transaction moves through the network.
+	///
+	/// Progress events emitted:
+	/// - `TransactionStatusEvent::Validated` - Transaction validated in pool
+	/// - `TransactionStatusEvent::Broadcasted` - Transaction sent to peers
+	/// - `TransactionStatusEvent::InBestBlock` - Transaction in a best block
+	/// - `TransactionStatusEvent::Finalized` - Transaction finalized
+	pub async fn store_with_progress(
+		&self,
+		data: Vec<u8>,
+		signer: &Keypair,
+		progress_callback: Option<ProgressCallback>,
+	) -> Result<StoreReceipt> {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.store(data.clone());
 
-		let result = self
+		let mut progress = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Transaction submission failed: {:?}", e)))?
-			.wait_for_finalized_success()
-			.await
-			.map_err(|e| Error::StorageFailed(format!("Transaction failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Transaction submission failed: {:?}", e)))?;
 
-		let block_hash = result.block_hash();
-		let extrinsic_hash = result.extrinsic_hash();
+		let mut final_block_hash = None;
+		let mut final_extrinsic_hash = None;
+
+		// Stream transaction status events
+		while let Some(status) = progress.next().await {
+			match status {
+				Ok(status) => {
+					use subxt::tx::TxStatus;
+					match status {
+						TxStatus::Validated => {
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::tx_validated());
+							}
+						}
+						TxStatus::Broadcasted { num_peers } => {
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::tx_broadcasted(num_peers));
+							}
+						}
+						TxStatus::InBestBlock(in_block) => {
+							let block_hash = format!("{:?}", in_block.block_hash());
+							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
+
+							// Try to get block number
+							let block_number = self.get_block_number(in_block.block_hash()).await.ok();
+
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::tx_in_best_block(
+									block_hash.clone(),
+									block_number,
+									None, // extrinsic index not easily available here
+								));
+							}
+
+							final_block_hash = Some(block_hash);
+							final_extrinsic_hash = Some(extrinsic_hash);
+						}
+						TxStatus::InFinalizedBlock(in_block) => {
+							let block_hash = format!("{:?}", in_block.block_hash());
+							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
+
+							// Try to get block number
+							let block_number = self.get_block_number(in_block.block_hash()).await.ok();
+
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::tx_finalized(
+									block_hash.clone(),
+									block_number,
+									None,
+								));
+							}
+
+							final_block_hash = Some(block_hash);
+							final_extrinsic_hash = Some(extrinsic_hash);
+
+							// Check for success
+							in_block
+								.wait_for_success()
+								.await
+								.map_err(|e| Error::StorageFailed(format!("Transaction failed: {:?}", e)))?;
+
+							break;
+						}
+						TxStatus::NoLongerInBestBlock => {
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::NoLongerInBestBlock,
+								));
+							}
+						}
+						TxStatus::Invalid { message } => {
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::Invalid { error: message.clone() },
+								));
+							}
+							return Err(Error::StorageFailed(format!("Transaction invalid: {}", message)));
+						}
+						TxStatus::Dropped { message } => {
+							if let Some(ref callback) = progress_callback {
+								callback(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::Dropped { error: message.clone() },
+								));
+							}
+							return Err(Error::StorageFailed(format!("Transaction dropped: {}", message)));
+						}
+						TxStatus::Error { message } => {
+							return Err(Error::StorageFailed(format!("Transaction error: {}", message)));
+						}
+					}
+				}
+				Err(e) => {
+					return Err(Error::StorageFailed(format!("Status error: {:?}", e)));
+				}
+			}
+		}
 
 		Ok(StoreReceipt {
-			block_hash: format!("{:?}", block_hash),
-			extrinsic_hash: format!("{:?}", extrinsic_hash),
+			block_hash: final_block_hash.unwrap_or_default(),
+			extrinsic_hash: final_extrinsic_hash.unwrap_or_default(),
 			data_size: data.len() as u64,
 		})
+	}
+
+	/// Helper to get block number from block hash.
+	async fn get_block_number<H: Into<BlockRef<subxt::config::substrate::H256>>>(
+		&self,
+		block_hash: H,
+	) -> Result<u32> {
+		let block = self
+			.api
+			.blocks()
+			.at(block_hash)
+			.await
+			.map_err(|e| Error::NetworkError(format!("Failed to get block: {:?}", e)))?;
+
+		Ok(block.number())
 	}
 
 	/// Authorize an account to store data.

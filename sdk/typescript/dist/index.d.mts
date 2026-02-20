@@ -60,6 +60,10 @@ interface Chunk {
     totalChunks: number;
 }
 /**
+ * Transaction confirmation level
+ */
+type WaitFor = "best_block" | "finalized";
+/**
  * Options for storing data
  */
 interface StoreOptions {
@@ -67,8 +71,19 @@ interface StoreOptions {
     cidCodec?: CidCodec;
     /** Hashing algorithm to use (default: blake2b-256) */
     hashingAlgorithm?: HashAlgorithm;
-    /** Whether to wait for finalization (default: false) */
+    /**
+     * What to wait for before returning (default: "best_block")
+     * - "best_block": Return when tx is in a best block (faster, may reorg)
+     * - "finalized": Return when tx is finalized (safer, slower)
+     * @deprecated Use `waitFor` instead
+     */
     waitForFinalization?: boolean;
+    /**
+     * What to wait for before returning (default: "best_block")
+     * - "best_block": Return when tx is in a best block (faster, may reorg)
+     * - "finalized": Return when tx is finalized (safer, slower)
+     */
+    waitFor?: WaitFor;
 }
 /**
  * Default store options
@@ -143,9 +158,9 @@ interface Authorization {
     expiresAt?: number;
 }
 /**
- * Progress event types
+ * Progress event types for chunked uploads
  */
-type ProgressEvent = {
+type ChunkProgressEvent = {
     type: "chunk_started";
     index: number;
     total: number;
@@ -168,6 +183,29 @@ type ProgressEvent = {
     type: "completed";
     manifestCid?: CID;
 };
+/**
+ * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
+ */
+type TransactionStatusEvent = {
+    type: "signed";
+    txHash: string;
+} | {
+    type: "broadcasted";
+} | {
+    type: "best_block";
+    blockHash: string;
+    blockNumber: number;
+    txIndex?: number;
+} | {
+    type: "finalized";
+    blockHash: string;
+    blockNumber: number;
+    txIndex?: number;
+};
+/**
+ * Combined progress event types
+ */
+type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent;
 /**
  * Progress callback type
  */
@@ -669,6 +707,17 @@ declare class AsyncBulletinClient {
      */
     private signAndSubmitFinalized;
     /**
+     * Sign, submit, and watch a transaction with progress callbacks.
+     *
+     * Uses PAPI's signSubmitAndWatch which provides real-time status updates
+     * as the transaction progresses through the network.
+     *
+     * @param tx - The transaction to submit
+     * @param progressCallback - Optional callback to receive transaction status events
+     * @param waitFor - What to wait for: "best_block" (faster) or "finalized" (safer, default)
+     */
+    private signAndSubmitWithProgress;
+    /**
      * Store data on Bulletin Chain using builder pattern
      *
      * Returns a builder that allows fluent configuration of store options.
@@ -730,18 +779,31 @@ declare class AsyncBulletinClient {
      * Authorize an account to store data
      *
      * Requires sudo/authorizer privileges
+     *
+     * @param who - Account address to authorize
+     * @param transactions - Number of transactions to authorize
+     * @param bytes - Maximum bytes to authorize
+     * @param progressCallback - Optional callback to receive transaction status events
      */
-    authorizeAccount(who: string, transactions: number, bytes: bigint): Promise<TransactionReceipt>;
+    authorizeAccount(who: string, transactions: number, bytes: bigint, progressCallback?: ProgressCallback): Promise<TransactionReceipt>;
     /**
      * Authorize a preimage (by content hash) to be stored
      *
      * Requires sudo/authorizer privileges
+     *
+     * @param contentHash - Blake2b-256 hash of the content to authorize
+     * @param maxSize - Maximum size in bytes for the content
+     * @param progressCallback - Optional callback to receive transaction status events
      */
-    authorizePreimage(contentHash: Uint8Array, maxSize: bigint): Promise<TransactionReceipt>;
+    authorizePreimage(contentHash: Uint8Array, maxSize: bigint, progressCallback?: ProgressCallback): Promise<TransactionReceipt>;
     /**
      * Renew/extend retention period for stored data
+     *
+     * @param block - Block number where the original storage transaction was included
+     * @param index - Extrinsic index within the block
+     * @param progressCallback - Optional callback to receive transaction status events
      */
-    renew(block: number, index: number): Promise<TransactionReceipt>;
+    renew(block: number, index: number, progressCallback?: ProgressCallback): Promise<TransactionReceipt>;
     /**
      * Store preimage-authorized content as unsigned transaction
      *
@@ -914,4 +976,4 @@ declare class MockBulletinClient {
  */
 declare const VERSION = "0.1.0";
 
-export { AsyncBulletinClient, type AsyncClientConfig, type Authorization, AuthorizationScope, BulletinClient, BulletinError, type Chunk, type ChunkDetails, type ChunkedStoreResult, type ChunkerConfig, CidCodec, type ClientConfig, DEFAULT_CHUNKER_CONFIG, DEFAULT_STORE_OPTIONS, type DagManifest, FixedSizeChunker, HashAlgorithm, MAX_CHUNK_SIZE, MockBulletinClient, type MockClientConfig, type MockOperation, MockStoreBuilder, type ProgressCallback, type ProgressEvent, StoreBuilder, type StoreOptions, type StoreResult, type TransactionReceipt, UnixFsDagBuilder, VERSION, batch, bytesToHex, calculateCid, calculateThroughput, cidFromBytes, cidToBytes, convertCid, createProgressTracker, deepClone, estimateFees, formatBytes, formatThroughput, getContentHash, hexToBytes, isBrowser, isNode, isValidSS58, limitConcurrency, measureTime, optimalChunkSize, parseCid, reassembleChunks, retry, sleep, truncate, validateChunkSize };
+export { AsyncBulletinClient, type AsyncClientConfig, type Authorization, AuthorizationScope, BulletinClient, BulletinError, type Chunk, type ChunkDetails, type ChunkProgressEvent, type ChunkedStoreResult, type ChunkerConfig, CidCodec, type ClientConfig, DEFAULT_CHUNKER_CONFIG, DEFAULT_STORE_OPTIONS, type DagManifest, FixedSizeChunker, HashAlgorithm, MAX_CHUNK_SIZE, MockBulletinClient, type MockClientConfig, type MockOperation, MockStoreBuilder, type ProgressCallback, type ProgressEvent, StoreBuilder, type StoreOptions, type StoreResult, type TransactionReceipt, type TransactionStatusEvent, UnixFsDagBuilder, VERSION, type WaitFor, batch, bytesToHex, calculateCid, calculateThroughput, cidFromBytes, cidToBytes, convertCid, createProgressTracker, deepClone, estimateFees, formatBytes, formatThroughput, getContentHash, hexToBytes, isBrowser, isNode, isValidSS58, limitConcurrency, measureTime, optimalChunkSize, parseCid, reassembleChunks, retry, sleep, truncate, validateChunkSize };

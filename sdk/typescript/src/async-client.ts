@@ -24,6 +24,7 @@ import {
   HashAlgorithm,
   ChunkDetails,
   Authorization,
+  WaitFor,
 } from "./types.js";
 
 /**
@@ -236,6 +237,140 @@ export class AsyncBulletinClient {
   }
 
   /**
+   * Sign, submit, and watch a transaction with progress callbacks.
+   *
+   * Uses PAPI's signSubmitAndWatch which provides real-time status updates
+   * as the transaction progresses through the network.
+   *
+   * @param tx - The transaction to submit
+   * @param progressCallback - Optional callback to receive transaction status events
+   * @param waitFor - What to wait for: "best_block" (faster) or "finalized" (safer, default)
+   */
+  private async signAndSubmitWithProgress(
+    tx: any,
+    progressCallback?: ProgressCallback,
+    waitFor: "best_block" | "finalized" = "finalized",
+  ): Promise<{
+    blockHash: string;
+    txHash: string;
+    blockNumber?: number;
+    txIndex?: number;
+    events?: any[];
+  }> {
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      let txHash: string | undefined;
+
+      const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
+        next: (ev: any) => {
+          // Emit signed event when we first get a tx hash
+          if (ev.txHash && !txHash) {
+            txHash = ev.txHash as string;
+            if (progressCallback) {
+              progressCallback({ type: "signed", txHash: txHash });
+            }
+          }
+
+          // Handle broadcasted event
+          if (ev.type === "broadcasted" && progressCallback) {
+            progressCallback({ type: "broadcasted" });
+          }
+
+          // Handle best block state
+          if (ev.type === "txBestBlocksState" && ev.found) {
+            if (progressCallback) {
+              progressCallback({
+                type: "best_block",
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+                txIndex: ev.block.index,
+              });
+            }
+
+            // If waiting for best_block, resolve here
+            if (waitFor === "best_block" && !resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+
+              // Extract tx index from Stored event if available
+              let storedIndex: number | undefined;
+              if (ev.events) {
+                const storedEvent = ev.events.find(
+                  (e: any) =>
+                    e.type === "TransactionStorage" && e.value?.type === "Stored",
+                );
+                if (storedEvent?.value?.value?.index !== undefined) {
+                  storedIndex = storedEvent.value.value.index;
+                }
+              }
+
+              resolve({
+                blockHash: ev.block.hash,
+                txHash: txHash || "",
+                blockNumber: ev.block.number,
+                txIndex: storedIndex,
+                events: ev.events,
+              });
+            }
+          }
+
+          // Handle finalized state
+          if (ev.type === "finalized") {
+            if (progressCallback) {
+              progressCallback({
+                type: "finalized",
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+                txIndex: ev.block.index,
+              });
+            }
+
+            if (!resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+
+              // Extract tx index from Stored event if available
+              let storedIndex: number | undefined;
+              if (ev.events) {
+                const storedEvent = ev.events.find(
+                  (e: any) =>
+                    e.type === "TransactionStorage" && e.value?.type === "Stored",
+                );
+                if (storedEvent?.value?.value?.index !== undefined) {
+                  storedIndex = storedEvent.value.value.index;
+                }
+              }
+
+              resolve({
+                blockHash: ev.block.hash,
+                txHash: txHash || "",
+                blockNumber: ev.block.number,
+                txIndex: storedIndex,
+                events: ev.events,
+              });
+            }
+          }
+        },
+        error: (err: any) => {
+          if (!resolved) {
+            resolved = true;
+            reject(err);
+          }
+        },
+      });
+
+      // Timeout after 2 minutes
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          subscription.unsubscribe();
+          reject(new BulletinError("Transaction timed out", "TIMEOUT"));
+        }
+      }, 120000);
+    });
+  }
+
+  /**
    * Store data on Bulletin Chain using builder pattern
    *
    * Returns a builder that allows fluent configuration of store options.
@@ -296,7 +431,7 @@ export class AsyncBulletinClient {
       );
     } else {
       // Small data - single transaction
-      return this.storeInternalSingle(dataBytes, options);
+      return this.storeInternalSingle(dataBytes, options, progressCallback);
     }
   }
 
@@ -306,6 +441,7 @@ export class AsyncBulletinClient {
   private async storeInternalSingle(
     data: Uint8Array,
     options?: StoreOptions,
+    progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
@@ -317,19 +453,27 @@ export class AsyncBulletinClient {
     const cidCodec = opts.cidCodec ?? CidCodec.Raw;
     const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
 
+    // Determine wait strategy (support both old and new options)
+    const waitFor: WaitFor = opts.waitFor ??
+      (opts.waitForFinalization ? "finalized" : "best_block");
+
     const cid = await calculateCid(data, cidCodec, hashAlgorithm);
 
     try {
       const tx = this.api.tx.TransactionStorage.store({
         data: new Binary(data),
       });
-      const result = await this.signAndSubmitFinalized(tx);
+
+      // Use progress-aware submission if callback provided, otherwise use simple submission
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback, waitFor)
+        : await this.signAndSubmitFinalized(tx);
 
       return {
         cid,
         size: data.length,
         blockNumber: result.blockNumber,
-        extrinsicIndex: undefined,
+        extrinsicIndex: "txIndex" in result ? (result.txIndex as number | undefined) : undefined,
         chunks: undefined,
       };
     } catch (error) {
@@ -594,11 +738,17 @@ export class AsyncBulletinClient {
    * Authorize an account to store data
    *
    * Requires sudo/authorizer privileges
+   *
+   * @param who - Account address to authorize
+   * @param transactions - Number of transactions to authorize
+   * @param bytes - Maximum bytes to authorize
+   * @param progressCallback - Optional callback to receive transaction status events
    */
   async authorizeAccount(
     who: string,
     transactions: number,
     bytes: bigint,
+    progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
     try {
       const authCall = this.api.tx.TransactionStorage.authorize_account({
@@ -608,7 +758,11 @@ export class AsyncBulletinClient {
       }).decodedCall;
 
       const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
-      const result = await this.signAndSubmitFinalized(sudoTx);
+
+      // Use progress-aware submission if callback provided
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(sudoTx, progressCallback)
+        : await this.signAndSubmitFinalized(sudoTx);
 
       return {
         blockHash: result.blockHash,
@@ -628,10 +782,15 @@ export class AsyncBulletinClient {
    * Authorize a preimage (by content hash) to be stored
    *
    * Requires sudo/authorizer privileges
+   *
+   * @param contentHash - Blake2b-256 hash of the content to authorize
+   * @param maxSize - Maximum size in bytes for the content
+   * @param progressCallback - Optional callback to receive transaction status events
    */
   async authorizePreimage(
     contentHash: Uint8Array,
     maxSize: bigint,
+    progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
     try {
       const authCall = this.api.tx.TransactionStorage.authorize_preimage({
@@ -640,7 +799,11 @@ export class AsyncBulletinClient {
       }).decodedCall;
 
       const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
-      const result = await this.signAndSubmitFinalized(sudoTx);
+
+      // Use progress-aware submission if callback provided
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(sudoTx, progressCallback)
+        : await this.signAndSubmitFinalized(sudoTx);
 
       return {
         blockHash: result.blockHash,
@@ -658,11 +821,23 @@ export class AsyncBulletinClient {
 
   /**
    * Renew/extend retention period for stored data
+   *
+   * @param block - Block number where the original storage transaction was included
+   * @param index - Extrinsic index within the block
+   * @param progressCallback - Optional callback to receive transaction status events
    */
-  async renew(block: number, index: number): Promise<TransactionReceipt> {
+  async renew(
+    block: number,
+    index: number,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
     try {
       const tx = this.api.tx.TransactionStorage.renew({ block, index });
-      const result = await this.signAndSubmitFinalized(tx);
+
+      // Use progress-aware submission if callback provided
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx);
 
       return {
         blockHash: result.blockHash,

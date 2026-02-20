@@ -288,9 +288,9 @@ pub enum AuthorizationScope {
 	Preimage,
 }
 
-/// Progress event types.
+/// Progress event types for chunked uploads.
 #[derive(Debug, Clone)]
-pub enum ProgressEvent {
+pub enum ChunkProgressEvent {
 	/// A chunk upload has started.
 	ChunkStarted { index: u32, total: u32 },
 	/// A chunk upload has completed.
@@ -303,6 +303,111 @@ pub enum ProgressEvent {
 	ManifestCreated { cid: Vec<u8> },
 	/// All uploads completed successfully.
 	Completed { manifest_cid: Option<Vec<u8>> },
+}
+
+/// Transaction status event types (mirrors subxt's TxStatus).
+#[derive(Debug, Clone)]
+pub enum TransactionStatusEvent {
+	/// Transaction has been validated and added to the transaction pool.
+	Validated,
+	/// Transaction has been broadcast to peers.
+	Broadcasted { num_peers: usize },
+	/// Transaction is now in a best block.
+	InBestBlock {
+		block_hash: String,
+		block_number: Option<u32>,
+		extrinsic_index: Option<u32>,
+	},
+	/// Transaction has been finalized.
+	Finalized {
+		block_hash: String,
+		block_number: Option<u32>,
+		extrinsic_index: Option<u32>,
+	},
+	/// Transaction was in a block that got reorganized.
+	NoLongerInBestBlock,
+	/// Transaction is not valid anymore (e.g., nonce too low).
+	Invalid { error: String },
+	/// Transaction was dropped from the pool.
+	Dropped { error: String },
+}
+
+/// Combined progress event types.
+#[derive(Debug, Clone)]
+pub enum ProgressEvent {
+	/// Chunk upload progress event.
+	Chunk(ChunkProgressEvent),
+	/// Transaction status event.
+	Transaction(TransactionStatusEvent),
+}
+
+// Convenience constructors for backward compatibility
+impl ProgressEvent {
+	/// Create a ChunkStarted event.
+	pub fn chunk_started(index: u32, total: u32) -> Self {
+		ProgressEvent::Chunk(ChunkProgressEvent::ChunkStarted { index, total })
+	}
+
+	/// Create a ChunkCompleted event.
+	pub fn chunk_completed(index: u32, total: u32, cid: Vec<u8>) -> Self {
+		ProgressEvent::Chunk(ChunkProgressEvent::ChunkCompleted { index, total, cid })
+	}
+
+	/// Create a ChunkFailed event.
+	pub fn chunk_failed(index: u32, total: u32, error: String) -> Self {
+		ProgressEvent::Chunk(ChunkProgressEvent::ChunkFailed { index, total, error })
+	}
+
+	/// Create a ManifestStarted event.
+	pub fn manifest_started() -> Self {
+		ProgressEvent::Chunk(ChunkProgressEvent::ManifestStarted)
+	}
+
+	/// Create a ManifestCreated event.
+	pub fn manifest_created(cid: Vec<u8>) -> Self {
+		ProgressEvent::Chunk(ChunkProgressEvent::ManifestCreated { cid })
+	}
+
+	/// Create a Completed event.
+	pub fn completed(manifest_cid: Option<Vec<u8>>) -> Self {
+		ProgressEvent::Chunk(ChunkProgressEvent::Completed { manifest_cid })
+	}
+
+	/// Create a Validated transaction event.
+	pub fn tx_validated() -> Self {
+		ProgressEvent::Transaction(TransactionStatusEvent::Validated)
+	}
+
+	/// Create a Broadcasted transaction event.
+	pub fn tx_broadcasted(num_peers: usize) -> Self {
+		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted { num_peers })
+	}
+
+	/// Create an InBestBlock transaction event.
+	pub fn tx_in_best_block(
+		block_hash: String,
+		block_number: Option<u32>,
+		extrinsic_index: Option<u32>,
+	) -> Self {
+		ProgressEvent::Transaction(TransactionStatusEvent::InBestBlock {
+			block_hash,
+			block_number,
+			extrinsic_index,
+		})
+	}
+
+	/// Create a Finalized transaction event.
+	pub fn tx_finalized(
+		block_hash: String,
+		block_number: Option<u32>,
+		extrinsic_index: Option<u32>,
+	) -> Self {
+		ProgressEvent::Transaction(TransactionStatusEvent::Finalized {
+			block_hash,
+			block_number,
+			extrinsic_index,
+		})
+	}
 }
 
 /// Progress callback type.

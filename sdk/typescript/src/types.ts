@@ -70,6 +70,11 @@ export interface Chunk {
 }
 
 /**
+ * Transaction confirmation level
+ */
+export type WaitFor = "best_block" | "finalized";
+
+/**
  * Options for storing data
  */
 export interface StoreOptions {
@@ -77,8 +82,19 @@ export interface StoreOptions {
   cidCodec?: CidCodec;
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm;
-  /** Whether to wait for finalization (default: false) */
+  /**
+   * What to wait for before returning (default: "best_block")
+   * - "best_block": Return when tx is in a best block (faster, may reorg)
+   * - "finalized": Return when tx is finalized (safer, slower)
+   * @deprecated Use `waitFor` instead
+   */
   waitForFinalization?: boolean;
+  /**
+   * What to wait for before returning (default: "best_block")
+   * - "best_block": Return when tx is in a best block (faster, may reorg)
+   * - "finalized": Return when tx is finalized (safer, slower)
+   */
+  waitFor?: WaitFor;
 }
 
 /**
@@ -87,7 +103,7 @@ export interface StoreOptions {
 export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
-  waitForFinalization: false,
+  waitFor: "best_block",
 };
 
 /**
@@ -164,15 +180,29 @@ export interface Authorization {
 }
 
 /**
- * Progress event types
+ * Progress event types for chunked uploads
  */
-export type ProgressEvent =
+export type ChunkProgressEvent =
   | { type: "chunk_started"; index: number; total: number }
   | { type: "chunk_completed"; index: number; total: number; cid: CID }
   | { type: "chunk_failed"; index: number; total: number; error: Error }
   | { type: "manifest_started" }
   | { type: "manifest_created"; cid: CID }
   | { type: "completed"; manifestCid?: CID };
+
+/**
+ * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
+ */
+export type TransactionStatusEvent =
+  | { type: "signed"; txHash: string }
+  | { type: "broadcasted" }
+  | { type: "best_block"; blockHash: string; blockNumber: number; txIndex?: number }
+  | { type: "finalized"; blockHash: string; blockNumber: number; txIndex?: number };
+
+/**
+ * Combined progress event types
+ */
+export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent;
 
 /**
  * Progress callback type

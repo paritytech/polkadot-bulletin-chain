@@ -155,8 +155,9 @@ pub mod subxt_config;
 pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
-	AuthorizationScope, Chunk, ChunkedStoreResult, ChunkerConfig, CidCodec, Error, HashAlgorithm,
-	ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions, StoreResult,
+	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, CidCodec,
+	Error, HashAlgorithm, ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef,
+	StoreOptions, StoreResult, TransactionStatusEvent,
 };
 
 // Re-export CID types from pallet

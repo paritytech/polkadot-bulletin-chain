@@ -17,25 +17,21 @@ import {
 } from "@/components/ui/Select";
 import { FileUpload } from "@/components/FileUpload";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useApi, useClient, useChainState } from "@/state/chain.state";
+import { useApi, useChainState } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { cidFromBytes, toHashingEnum, getContentHash } from "@/lib/cid";
-import { Binary } from "polkadot-api";
+import { AsyncBulletinClient, getContentHash, bytesToHex, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
 
-type HashAlgorithm = "blake2b256" | "sha256" | "keccak256";
-
-const HASH_ALGORITHMS: { value: HashAlgorithm; label: string; mhCode: number }[] = [
-  { value: "blake2b256", label: "Blake2b-256 (default)", mhCode: 0xb220 },
-  { value: "sha256", label: "SHA2-256", mhCode: 0x12 },
-  { value: "keccak256", label: "Keccak-256", mhCode: 0x1b },
+const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
+  { value: HashAlgorithm.Blake2b256, label: "Blake2b-256 (default)" },
+  { value: HashAlgorithm.Sha2_256, label: "SHA2-256" },
 ];
 
-const CID_CODECS = [
-  { value: "raw", label: "Raw (0x55)", codec: 0x55 },
-  { value: "dag-pb", label: "DAG-PB (0x70)", codec: 0x70 },
+const CID_CODECS: { value: CidCodec; label: string }[] = [
+  { value: CidCodec.Raw, label: "Raw (0x55)" },
+  { value: CidCodec.DagPb, label: "DAG-PB (0x70)" },
 ];
 
 interface UploadResult {
@@ -49,19 +45,19 @@ interface UploadResult {
 
 export function Upload() {
   const api = useApi();
-  const client = useClient();
   const { network } = useChainState();
   const navigate = useNavigate();
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
+  const [txStatus, setTxStatus] = useState<string | null>(null);
 
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
   const [textData, setTextData] = useState("");
   const [fileData, setFileData] = useState<Uint8Array | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
-  const [hashAlgorithm, setHashAlgorithm] = useState<HashAlgorithm>("blake2b256");
-  const [cidCodec, setCidCodec] = useState("raw");
+  const [hashAlgorithm, setHashAlgorithm] = useState<HashAlgorithm>(HashAlgorithm.Blake2b256);
+  const [cidCodec, setCidCodec] = useState<CidCodec>(CidCodec.Raw);
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -80,7 +76,7 @@ export function Upload() {
 
   const canUpload =
     api &&
-    selectedAccount &&
+    selectedAccount?.polkadotSigner &&
     authorization &&
     dataSize > 0 &&
     authorization.bytes >= BigInt(dataSize) &&
@@ -94,7 +90,7 @@ export function Upload() {
   }, []);
 
   const handleUpload = async () => {
-    if (!api || !selectedAccount || !client) return;
+    if (!api || !selectedAccount?.polkadotSigner) return;
 
     const data = getData();
     if (!data) return;
@@ -102,101 +98,57 @@ export function Upload() {
     setIsUploading(true);
     setUploadError(null);
     setUploadResult(null);
+    setTxStatus(null);
 
     try {
-      const hashConfig = HASH_ALGORITHMS.find(h => h.value === hashAlgorithm);
-      const codecConfig = CID_CODECS.find(c => c.value === cidCodec);
+      // Calculate content hash for display
+      const contentHash = await getContentHash(data, hashAlgorithm);
+      const contentHashHex = bytesToHex(contentHash);
 
-      if (!hashConfig || !codecConfig) {
-        throw new Error("Invalid configuration");
-      }
+      // Create SDK client with user's signer
+      const bulletinClient = new AsyncBulletinClient(api, selectedAccount.polkadotSigner);
 
-      // Calculate expected CID and content hash
-      const expectedCid = await cidFromBytes(data, codecConfig.codec, hashConfig.mhCode);
-      const contentHash = await getContentHash(data, hashConfig.mhCode);
-      const contentHashHex = "0x" + Array.from(contentHash).map(b => b.toString(16).padStart(2, "0")).join("");
+      // Progress callback for transaction status updates
+      const handleProgress = (event: ProgressEvent) => {
+        console.log("SDK progress:", event);
+        if (event.type === "signed") {
+          setTxStatus("Transaction signed...");
+        } else if (event.type === "broadcasted") {
+          setTxStatus("Broadcasting to network...");
+        } else if (event.type === "best_block") {
+          setTxStatus(`Included in block #${event.blockNumber}...`);
+        } else if (event.type === "finalized") {
+          setTxStatus("Finalized!");
+        }
+      };
 
-      // Use store_with_cid_config for non-default CID settings, plain store otherwise
-      const isCustomCid = hashAlgorithm !== "blake2b256" || cidCodec !== "raw";
-
-      const tx = isCustomCid
-        ? api.tx.TransactionStorage.store_with_cid_config({
-            cid: {
-              codec: BigInt(codecConfig.codec),
-              hashing: toHashingEnum(hashConfig.mhCode),
-            },
-            data: Binary.fromBytes(data),
-          })
-        : api.tx.TransactionStorage.store({
-            data: Binary.fromBytes(data),
-          });
-
-      // Sign and submit
-      const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-
-              // Try to find the Stored event to get the index
-              let index: number | undefined;
-              if (ev.events) {
-                const storedEvent = ev.events.find(
-                  (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
-                );
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  index = storedEvent.value.value.index;
-                }
-              }
-
-              resolve({
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-                index,
-              });
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        // Timeout after 2 minutes
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Use SDK to store data with progress callback
+      const result = await bulletinClient
+        .store(data)
+        .withCodec(cidCodec)
+        .withHashAlgorithm(hashAlgorithm)
+        .withCallback(handleProgress)
+        .send();
 
       const uploadResultData: UploadResult = {
-        cid: expectedCid.toString(),
+        cid: result.cid.toString(),
         contentHash: contentHashHex,
-        blockHash: result.blockHash,
+        blockHash: undefined, // SDK doesn't expose this currently
         blockNumber: result.blockNumber,
-        index: result.index,
-        size: data.length,
+        index: result.extrinsicIndex,
+        size: result.size,
       };
 
       setUploadResult(uploadResultData);
 
       // Save to history for easy renewal later
-      if (result.blockNumber !== undefined && result.index !== undefined) {
+      if (result.blockNumber !== undefined && result.extrinsicIndex !== undefined) {
         addStorageEntry({
           blockNumber: result.blockNumber,
-          index: result.index,
-          cid: expectedCid.toString(),
+          index: result.extrinsicIndex,
+          cid: result.cid.toString(),
           contentHash: contentHashHex,
-          size: data.length,
+          size: result.size,
           account: selectedAccount.address,
           networkId: network.id,
           label: fileName || undefined,
@@ -207,6 +159,7 @@ export function Upload() {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);
+      setTxStatus(null);
     }
   };
 
@@ -427,13 +380,13 @@ export function Upload() {
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Hash Algorithm</label>
-                  <Select value={hashAlgorithm} onValueChange={(v) => setHashAlgorithm(v as HashAlgorithm)}>
+                  <Select value={String(hashAlgorithm)} onValueChange={(v) => setHashAlgorithm(Number(v) as HashAlgorithm)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {HASH_ALGORITHMS.map((alg) => (
-                        <SelectItem key={alg.value} value={alg.value}>
+                        <SelectItem key={alg.value} value={String(alg.value)}>
                           {alg.label}
                         </SelectItem>
                       ))}
@@ -442,13 +395,13 @@ export function Upload() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">CID Codec</label>
-                  <Select value={cidCodec} onValueChange={setCidCodec}>
+                  <Select value={String(cidCodec)} onValueChange={(v) => setCidCodec(Number(v) as CidCodec)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {CID_CODECS.map((codec) => (
-                        <SelectItem key={codec.value} value={codec.value}>
+                        <SelectItem key={codec.value} value={String(codec.value)}>
                           {codec.label}
                         </SelectItem>
                       ))}
@@ -469,7 +422,7 @@ export function Upload() {
             {isUploading ? (
               <>
                 <Spinner size="sm" className="mr-2" />
-                Uploading...
+                {txStatus || "Uploading..."}
               </>
             ) : (
               <>

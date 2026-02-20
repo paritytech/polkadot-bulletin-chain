@@ -20,7 +20,7 @@ var DEFAULT_CHUNKER_CONFIG = {
 var DEFAULT_STORE_OPTIONS = {
   cidCodec: 85 /* Raw */,
   hashingAlgorithm: 45600 /* Blake2b256 */,
-  waitForFinalization: false
+  waitFor: "best_block"
 };
 var AuthorizationScope = /* @__PURE__ */ ((AuthorizationScope2) => {
   AuthorizationScope2["Account"] = "Account";
@@ -247,7 +247,14 @@ async function retry(fn, options = {}) {
       }
     }
   }
-  throw lastError || new Error("Retry failed");
+  if (lastError instanceof BulletinError) {
+    throw lastError;
+  }
+  throw new BulletinError(
+    lastError?.message || "Retry failed after maximum attempts",
+    "RETRY_EXHAUSTED",
+    lastError
+  );
 }
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -437,11 +444,9 @@ var BulletinClient = class {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-    const cid = await calculateCid(
-      data,
-      opts.cidCodec ?? 85 /* Raw */,
-      opts.hashingAlgorithm
-    );
+    const cidCodec = opts.cidCodec ?? 85 /* Raw */;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm);
     return { data, cid };
   }
   /**
@@ -461,6 +466,8 @@ var BulletinClient = class {
       createManifest: config?.createManifest ?? this.config.createManifest
     };
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const cidCodec = opts.cidCodec ?? 85 /* Raw */;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
     const chunker = new FixedSizeChunker(chunkerConfig);
     const chunks = chunker.chunk(data);
     for (const chunk of chunks) {
@@ -472,11 +479,7 @@ var BulletinClient = class {
         });
       }
       try {
-        chunk.cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? 85 /* Raw */,
-          opts.hashingAlgorithm
-        );
+        chunk.cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm);
         if (progressCallback) {
           progressCallback({
             type: "chunk_completed",
@@ -494,7 +497,14 @@ var BulletinClient = class {
             error
           });
         }
-        throw error;
+        if (error instanceof BulletinError) {
+          throw error;
+        }
+        throw new BulletinError(
+          `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
+          "CHUNK_FAILED",
+          error
+        );
       }
     }
     let manifest;
@@ -503,7 +513,7 @@ var BulletinClient = class {
         progressCallback({ type: "manifest_started" });
       }
       const builder = new UnixFsDagBuilder();
-      const dagManifest = await builder.build(chunks, opts.hashingAlgorithm);
+      const dagManifest = await builder.build(chunks, hashAlgorithm);
       manifest = {
         data: dagManifest.dagBytes,
         cid: dagManifest.rootCid
@@ -651,6 +661,108 @@ var AsyncBulletinClient = class {
     };
   }
   /**
+   * Sign, submit, and watch a transaction with progress callbacks.
+   *
+   * Uses PAPI's signSubmitAndWatch which provides real-time status updates
+   * as the transaction progresses through the network.
+   *
+   * @param tx - The transaction to submit
+   * @param progressCallback - Optional callback to receive transaction status events
+   * @param waitFor - What to wait for: "best_block" (faster) or "finalized" (safer, default)
+   */
+  async signAndSubmitWithProgress(tx, progressCallback, waitFor = "finalized") {
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      let txHash;
+      const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
+        next: (ev) => {
+          if (ev.txHash && !txHash) {
+            txHash = ev.txHash;
+            if (progressCallback) {
+              progressCallback({ type: "signed", txHash });
+            }
+          }
+          if (ev.type === "broadcasted" && progressCallback) {
+            progressCallback({ type: "broadcasted" });
+          }
+          if (ev.type === "txBestBlocksState" && ev.found) {
+            if (progressCallback) {
+              progressCallback({
+                type: "best_block",
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+                txIndex: ev.block.index
+              });
+            }
+            if (waitFor === "best_block" && !resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+              let storedIndex;
+              if (ev.events) {
+                const storedEvent = ev.events.find(
+                  (e) => e.type === "TransactionStorage" && e.value?.type === "Stored"
+                );
+                if (storedEvent?.value?.value?.index !== void 0) {
+                  storedIndex = storedEvent.value.value.index;
+                }
+              }
+              resolve({
+                blockHash: ev.block.hash,
+                txHash: txHash || "",
+                blockNumber: ev.block.number,
+                txIndex: storedIndex,
+                events: ev.events
+              });
+            }
+          }
+          if (ev.type === "finalized") {
+            if (progressCallback) {
+              progressCallback({
+                type: "finalized",
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+                txIndex: ev.block.index
+              });
+            }
+            if (!resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+              let storedIndex;
+              if (ev.events) {
+                const storedEvent = ev.events.find(
+                  (e) => e.type === "TransactionStorage" && e.value?.type === "Stored"
+                );
+                if (storedEvent?.value?.value?.index !== void 0) {
+                  storedIndex = storedEvent.value.value.index;
+                }
+              }
+              resolve({
+                blockHash: ev.block.hash,
+                txHash: txHash || "",
+                blockNumber: ev.block.number,
+                txIndex: storedIndex,
+                events: ev.events
+              });
+            }
+          }
+        },
+        error: (err) => {
+          if (!resolved) {
+            resolved = true;
+            reject(err);
+          }
+        }
+      });
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          subscription.unsubscribe();
+          reject(new BulletinError("Transaction timed out", "TIMEOUT"));
+        }
+      }, 12e4);
+    });
+  }
+  /**
    * Store data on Bulletin Chain using builder pattern
    *
    * Returns a builder that allows fluent configuration of store options.
@@ -701,32 +813,31 @@ var AsyncBulletinClient = class {
         progressCallback
       );
     } else {
-      return this.storeInternalSingle(dataBytes, options);
+      return this.storeInternalSingle(dataBytes, options, progressCallback);
     }
   }
   /**
    * Internal: Store data in a single transaction (no chunking)
    */
-  async storeInternalSingle(data, options) {
+  async storeInternalSingle(data, options, progressCallback) {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
     }
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-    const cid = await calculateCid(
-      data,
-      opts.cidCodec ?? 85 /* Raw */,
-      opts.hashingAlgorithm
-    );
+    const cidCodec = opts.cidCodec ?? 85 /* Raw */;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const waitFor = opts.waitFor ?? (opts.waitForFinalization ? "finalized" : "best_block");
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm);
     try {
       const tx = this.api.tx.TransactionStorage.store({
         data: new Binary(data)
       });
-      const result = await this.signAndSubmitFinalized(tx);
+      const result = progressCallback ? await this.signAndSubmitWithProgress(tx, progressCallback, waitFor) : await this.signAndSubmitFinalized(tx);
       return {
         cid,
         size: data.length,
         blockNumber: result.blockNumber,
-        extrinsicIndex: void 0,
+        extrinsicIndex: "txIndex" in result ? result.txIndex : void 0,
         chunks: void 0
       };
     } catch (error) {
@@ -849,6 +960,8 @@ var AsyncBulletinClient = class {
       createManifest: config?.createManifest ?? this.config.createManifest
     };
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const cidCodec = opts.cidCodec ?? 85 /* Raw */;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
     const chunker = new FixedSizeChunker(chunkerConfig);
     const chunks = chunker.chunk(dataBytes);
     const chunkCids = [];
@@ -861,11 +974,7 @@ var AsyncBulletinClient = class {
         });
       }
       try {
-        const cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? 85 /* Raw */,
-          opts.hashingAlgorithm
-        );
+        const cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm);
         chunk.cid = cid;
         const tx = this.api.tx.TransactionStorage.store({
           data: new Binary(chunk.data)
@@ -889,7 +998,14 @@ var AsyncBulletinClient = class {
             error
           });
         }
-        throw error;
+        if (error instanceof BulletinError) {
+          throw error;
+        }
+        throw new BulletinError(
+          `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
+          "CHUNK_FAILED",
+          error
+        );
       }
     }
     let manifestCid;
@@ -898,7 +1014,7 @@ var AsyncBulletinClient = class {
         progressCallback({ type: "manifest_started" });
       }
       const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, opts.hashingAlgorithm);
+      const manifest = await builder.build(chunks, hashAlgorithm);
       const manifestTx = this.api.tx.TransactionStorage.store({
         data: new Binary(manifest.dagBytes)
       });
@@ -928,8 +1044,13 @@ var AsyncBulletinClient = class {
    * Authorize an account to store data
    *
    * Requires sudo/authorizer privileges
+   *
+   * @param who - Account address to authorize
+   * @param transactions - Number of transactions to authorize
+   * @param bytes - Maximum bytes to authorize
+   * @param progressCallback - Optional callback to receive transaction status events
    */
-  async authorizeAccount(who, transactions, bytes) {
+  async authorizeAccount(who, transactions, bytes, progressCallback) {
     try {
       const authCall = this.api.tx.TransactionStorage.authorize_account({
         who,
@@ -937,7 +1058,7 @@ var AsyncBulletinClient = class {
         bytes
       }).decodedCall;
       const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
-      const result = await this.signAndSubmitFinalized(sudoTx);
+      const result = progressCallback ? await this.signAndSubmitWithProgress(sudoTx, progressCallback) : await this.signAndSubmitFinalized(sudoTx);
       return {
         blockHash: result.blockHash,
         txHash: result.txHash,
@@ -955,15 +1076,19 @@ var AsyncBulletinClient = class {
    * Authorize a preimage (by content hash) to be stored
    *
    * Requires sudo/authorizer privileges
+   *
+   * @param contentHash - Blake2b-256 hash of the content to authorize
+   * @param maxSize - Maximum size in bytes for the content
+   * @param progressCallback - Optional callback to receive transaction status events
    */
-  async authorizePreimage(contentHash, maxSize) {
+  async authorizePreimage(contentHash, maxSize, progressCallback) {
     try {
       const authCall = this.api.tx.TransactionStorage.authorize_preimage({
         content_hash: contentHash,
         max_size: maxSize
       }).decodedCall;
       const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
-      const result = await this.signAndSubmitFinalized(sudoTx);
+      const result = progressCallback ? await this.signAndSubmitWithProgress(sudoTx, progressCallback) : await this.signAndSubmitFinalized(sudoTx);
       return {
         blockHash: result.blockHash,
         txHash: result.txHash,
@@ -979,11 +1104,15 @@ var AsyncBulletinClient = class {
   }
   /**
    * Renew/extend retention period for stored data
+   *
+   * @param block - Block number where the original storage transaction was included
+   * @param index - Extrinsic index within the block
+   * @param progressCallback - Optional callback to receive transaction status events
    */
-  async renew(block, index) {
+  async renew(block, index, progressCallback) {
     try {
       const tx = this.api.tx.TransactionStorage.renew({ block, index });
-      const result = await this.signAndSubmitFinalized(tx);
+      const result = progressCallback ? await this.signAndSubmitWithProgress(tx, progressCallback) : await this.signAndSubmitFinalized(tx);
       return {
         blockHash: result.blockHash,
         txHash: result.txHash,
@@ -1033,11 +1162,9 @@ var AsyncBulletinClient = class {
       );
     }
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-    const cid = await calculateCid(
-      dataBytes,
-      opts.cidCodec ?? 85 /* Raw */,
-      opts.hashingAlgorithm
-    );
+    const cidCodec = opts.cidCodec ?? 85 /* Raw */;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm);
     try {
       const tx = this.api.tx.TransactionStorage.store({ data: dataBytes });
       const result = await tx.submit();
@@ -1182,11 +1309,9 @@ var MockBulletinClient = class {
       );
     }
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
-    const cid = await calculateCid(
-      dataBytes,
-      opts.cidCodec ?? 85 /* Raw */,
-      opts.hashingAlgorithm
-    );
+    const cidCodec = opts.cidCodec ?? 85 /* Raw */;
+    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm);
     this.operations.push({
       type: "store",
       dataSize: dataBytes.length,

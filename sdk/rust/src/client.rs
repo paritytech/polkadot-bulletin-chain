@@ -110,7 +110,7 @@ impl BulletinClient {
 
 		// Notify progress
 		if let Some(ref callback) = progress_callback {
-			callback(ProgressEvent::ChunkStarted { index: 0, total: chunks.len() as u32 });
+			callback(ProgressEvent::chunk_started(0, chunks.len() as u32));
 		}
 
 		// Create batch operation
@@ -119,7 +119,7 @@ impl BulletinClient {
 		// Optionally create manifest
 		let manifest_data = if chunker_config.create_manifest {
 			if let Some(ref callback) = progress_callback {
-				callback(ProgressEvent::ManifestStarted);
+				callback(ProgressEvent::manifest_started());
 			}
 
 			let builder = UnixFsDagBuilder::new();
@@ -129,7 +129,7 @@ impl BulletinClient {
 				let cid_bytes = manifest.root_cid.to_bytes().ok_or_else(|| {
 					Error::DagEncodingFailed("Failed to convert manifest CID to bytes".into())
 				})?;
-				callback(ProgressEvent::ManifestCreated { cid: cid_bytes });
+				callback(ProgressEvent::manifest_created(cid_bytes));
 			}
 
 			Some(manifest.dag_bytes)

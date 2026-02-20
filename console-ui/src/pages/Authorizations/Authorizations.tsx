@@ -19,9 +19,9 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash } from "@/lib/cid";
-import { formatBytes, formatNumber, formatAddress, bytesToHex } from "@/utils/format";
-import { SS58String, Enum, Binary } from "polkadot-api";
+import { AsyncBulletinClient, getContentHash, bytesToHex, hexToBytes, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
+import { SS58String, Enum } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
 import { Keyring } from "@polkadot/keyring";
 import { getPolkadotSigner } from "polkadot-api/signer";
@@ -312,6 +312,7 @@ function FaucetAuthorizePreimagePanel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
 
   const getSizeValue = (): bigint => {
     const value = parseInt(maxSize, 10);
@@ -334,7 +335,7 @@ function FaucetAuthorizePreimagePanel() {
       setIsComputing(true);
       try {
         const data = new TextEncoder().encode(textData);
-        const hash = await getContentHash(data);
+        const hash = await getContentHash(data, HashAlgorithm.Blake2b256);
         setPreimageHash(bytesToHex(hash));
         setMaxSize(data.length.toString());
         setSizeUnit("B");
@@ -355,7 +356,7 @@ function FaucetAuthorizePreimagePanel() {
     const computeHash = async () => {
       setIsComputing(true);
       try {
-        const hash = await getContentHash(fileData);
+        const hash = await getContentHash(fileData, HashAlgorithm.Blake2b256);
         setPreimageHash(bytesToHex(hash));
         setMaxSize(fileData.length.toString());
         setSizeUnit("B");
@@ -385,6 +386,7 @@ function FaucetAuthorizePreimagePanel() {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setTxStatus(null);
 
     try {
       await cryptoWaitReady();
@@ -396,42 +398,33 @@ function FaucetAuthorizePreimagePanel() {
         (data: Uint8Array) => alice.sign(data)
       );
 
-      const normalizedHash = preimageHash.startsWith("0x") ? preimageHash : `0x${preimageHash}`;
+      const normalizedHash = preimageHash.startsWith("0x") ? preimageHash.slice(2) : preimageHash;
+      const contentHashBytes = hexToBytes(normalizedHash);
       const sizeValue = getSizeValue();
 
-      const tx = api.tx.TransactionStorage.authorize_preimage({
-        content_hash: Binary.fromHex(normalizedHash),
-        max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
-      });
+      // Create SDK client with Alice signer
+      const bulletinClient = new AsyncBulletinClient(api, aliceSigner);
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
+      // Progress callback for transaction status updates
+      const handleProgress = (event: ProgressEvent) => {
+        console.log("SDK progress:", event);
+        if (event.type === "signed") {
+          setTxStatus("Transaction signed...");
+        } else if (event.type === "broadcasted") {
+          setTxStatus("Broadcasting to network...");
+        } else if (event.type === "best_block") {
+          setTxStatus(`Included in block #${event.blockNumber}...`);
+        } else if (event.type === "finalized") {
+          setTxStatus("Finalized!");
+        }
+      };
 
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Use SDK to authorize preimage with progress callback
+      await bulletinClient.authorizePreimage(
+        contentHashBytes,
+        sizeValue > 0n ? sizeValue : 1024n * 1024n,
+        handleProgress
+      );
 
       setSubmitSuccess("Successfully authorized preimage");
       fetchPreimageAuthorizations(api);
@@ -440,6 +433,7 @@ function FaucetAuthorizePreimagePanel() {
       setSubmitError(err instanceof Error ? err.message : "Authorization failed");
     } finally {
       setIsSubmitting(false);
+      setTxStatus(null);
     }
   };
 
@@ -562,7 +556,7 @@ function FaucetAuthorizePreimagePanel() {
             {isSubmitting ? (
               <>
                 <Spinner size="sm" className="mr-2" />
-                Authorizing Preimage...
+                {txStatus || "Authorizing Preimage..."}
               </>
             ) : (
               <>
@@ -596,6 +590,7 @@ function FaucetAuthorizeAccountPanel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
 
   // Initialize Alice account
   useEffect(() => {
@@ -682,6 +677,7 @@ function FaucetAuthorizeAccountPanel() {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setTxStatus(null);
 
     try {
       await cryptoWaitReady();
@@ -693,43 +689,33 @@ function FaucetAuthorizeAccountPanel() {
         (data: Uint8Array) => alice.sign(data)
       );
 
-      const txCount = BigInt(parseInt(transactions, 10) || 0);
+      const txCount = parseInt(transactions, 10) || 0;
       const bytesValue = getBytesValue();
 
-      const tx = api.tx.TransactionStorage.authorize_account({
-        who: forWho as SS58String,
-        transactions: Number(txCount),
-        bytes: bytesValue,
-      });
+      // Create SDK client with Alice signer
+      const bulletinClient = new AsyncBulletinClient(api, aliceSigner);
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
+      // Progress callback for transaction status updates
+      const handleProgress = (event: ProgressEvent) => {
+        console.log("SDK progress:", event);
+        if (event.type === "signed") {
+          setTxStatus("Transaction signed...");
+        } else if (event.type === "broadcasted") {
+          setTxStatus("Broadcasting to network...");
+        } else if (event.type === "best_block") {
+          setTxStatus(`Included in block #${event.blockNumber}...`);
+        } else if (event.type === "finalized") {
+          setTxStatus("Finalized!");
+        }
+      };
 
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Use SDK to authorize account with progress callback
+      await bulletinClient.authorizeAccount(
+        forWho,
+        txCount,
+        bytesValue,
+        handleProgress
+      );
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
@@ -763,6 +749,7 @@ function FaucetAuthorizeAccountPanel() {
       setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
+      setTxStatus(null);
     }
   };
 
@@ -904,7 +891,7 @@ function FaucetAuthorizeAccountPanel() {
               {isSubmitting ? (
                 <>
                   <Spinner size="sm" className="mr-2" />
-                  Authorizing...
+                  {txStatus || "Authorizing..."}
                 </>
               ) : hasBalanceIssue ? (
                 <>
