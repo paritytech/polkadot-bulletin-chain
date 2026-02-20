@@ -139,7 +139,7 @@ Steps:
 5. If seed is missing, ask the user for it
 6. Report results: throughput, blocks used, success/failure
 
-If the test fails with authorization errors, inform the user their account needs to be authorized via sudo on that network.
+If the test fails with authorization errors, inform the user their account needs to be authorized. On test networks, Alice account should be able to authorize, and its also possible to use https://paritytech.github.io/polkadot-bulletin-chain/authorizations
 
 ### 4. `full <seed>` - All checks + storage test
 
