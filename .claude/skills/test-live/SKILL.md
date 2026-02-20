@@ -28,7 +28,7 @@ Resolve the network name to a WSS endpoint:
 | Network   | WSS Endpoint                              | Para ID |
 |-----------|-------------------------------------------|---------|
 | westend   | `wss://westend-bulletin-rpc.polkadot.io`  | 2487    |
-| paseo     | `wss://paseo-bulletin-rpc.polkadot.io`    | TBD     |
+| paseo     | `wss://paseo-bulletin-rpc.polkadot.io`    | 5118     |
 
 If the network argument doesn't match any known name, treat it as a custom WSS URL.
 Strip trailing slashes. If the user provides an `https://` URL, convert it to `wss://`.
