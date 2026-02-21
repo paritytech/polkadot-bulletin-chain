@@ -104,12 +104,12 @@ export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { status, storageType } = useChainState();
+  const { status, storageType, network } = useChainState();
 
-  // Auto-connect on mount
+  // Auto-connect on mount using the persisted network selection
   useEffect(() => {
     if (status === "disconnected") {
-      connectToNetwork("paseo");
+      connectToNetwork(network.id);
     }
   }, []);
 
