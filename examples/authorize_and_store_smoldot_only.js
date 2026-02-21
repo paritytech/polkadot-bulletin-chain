@@ -1,4 +1,7 @@
 import assert from "assert";
+// A fork of smoldot with Bitswap support is needed for this test.
+// Put it into ../../smoldot (relative to this file) and make sure too run `npm run build` in
+// ../../smoldot/wasm-node/javascript.
 import * as smoldot from 'smoldot';
 import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
@@ -94,12 +97,11 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
 
 async function fetchCidSmoldot(client, cid) {
     const cidString = cid.toString();
-    console.log(`⬇️ Fetching CID via smoldot bitswap_request RPC: ${cidString}`);
-    const result = await client._request("bitswap_request", [cidString]);
-    if (result === null) {
-        throw new Error(`bitswap_request returned null for CID: ${cidString}`);
-    }
-    return Buffer.from(result, 'hex');
+    console.log(`⬇️ Fetching CID via smoldot 'bitswap_block' RPC: ${cidString}`);
+    const result = await client._request("bitswap_block", [cidString]);
+
+    // Make sure to strip the leading "0x" prefix.
+    return Buffer.from(result.slice(2), 'hex');
 }
 
 async function main() {

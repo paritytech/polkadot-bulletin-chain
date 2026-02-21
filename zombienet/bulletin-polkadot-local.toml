@@ -17,7 +17,7 @@ args = [
 	# "--pool-kbytes 40960",
 	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
 	"--listen-addr=/ip4/0.0.0.0/tcp/10002/ws",
-	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
+	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=trace",
 ]
 
 [[relaychain.nodes]]
@@ -31,5 +31,5 @@ args = [
 	# "--pool-kbytes 40960",
 	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
 	"--listen-addr=/ip4/0.0.0.0/tcp/12348/ws",
-	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
+	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=trace",
 ]
