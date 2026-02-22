@@ -1,6 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X } from "lucide-react";
+import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X, FileText, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -19,7 +19,13 @@ import { FileUpload } from "@/components/FileUpload";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
 import { useApi, useClient, useChainState } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
-import { useAuthorization } from "@/state/storage.state";
+import {
+  useAuthorization,
+  usePreimageAuth,
+  usePreimageAuthLoading,
+  checkPreimageAuthorization,
+  clearPreimageAuth,
+} from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
 import { cidFromBytes, toHashingEnum, getContentHash } from "@/lib/cid";
@@ -45,6 +51,7 @@ interface UploadResult {
   blockNumber?: number;
   index?: number;
   size: number;
+  unsigned?: boolean;
 }
 
 export function Upload() {
@@ -54,6 +61,8 @@ export function Upload() {
   const navigate = useNavigate();
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
+  const preimageAuth = usePreimageAuth();
+  const preimageAuthLoading = usePreimageAuthLoading();
 
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
   const [textData, setTextData] = useState("");
@@ -68,6 +77,8 @@ export function Upload() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
   const getData = useCallback((): Uint8Array | null => {
     if (inputMode === "text") {
       if (!textData.trim()) return null;
@@ -78,13 +89,56 @@ export function Upload() {
 
   const dataSize = getData()?.length ?? 0;
 
-  const canUpload =
-    api &&
+  // Check preimage authorization when data or hash algorithm changes
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    const data = getData();
+    if (!data || !api) {
+      clearPreimageAuth();
+      return;
+    }
+
+    debounceTimer.current = setTimeout(async () => {
+      const hashConfig = HASH_ALGORITHMS.find(h => h.value === hashAlgorithm);
+      if (!hashConfig) return;
+
+      try {
+        const contentHash = await getContentHash(data, hashConfig.mhCode);
+        await checkPreimageAuthorization(api, contentHash);
+      } catch (err) {
+        console.error("Failed to check preimage authorization:", err);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [api, inputMode, textData, fileData, hashAlgorithm, getData]);
+
+  const hasAccountAuth =
     selectedAccount &&
     authorization &&
-    dataSize > 0 &&
     authorization.bytes >= BigInt(dataSize) &&
     authorization.transactions > 0n;
+
+  const hasPreimageAuth =
+    preimageAuth &&
+    preimageAuth.bytes >= BigInt(dataSize) &&
+    preimageAuth.transactions > 0n;
+
+  const canUpload =
+    api &&
+    client &&
+    dataSize > 0 &&
+    (hasAccountAuth || hasPreimageAuth);
+
+  // Preimage auth is preferred (same as pallet behavior)
+  const willUseUnsigned = !!hasPreimageAuth;
 
   const handleFileSelect = useCallback((file: File | null, data: Uint8Array | null) => {
     setFileData(data);
@@ -94,10 +148,14 @@ export function Upload() {
   }, []);
 
   const handleUpload = async () => {
-    if (!api || !selectedAccount || !client) return;
+    if (!api || !client) return;
 
     const data = getData();
     if (!data) return;
+
+    // Need either preimage auth or account auth with wallet
+    if (!hasPreimageAuth && !hasAccountAuth) return;
+    if (!hasPreimageAuth && !selectedAccount) return;
 
     setIsUploading(true);
     setUploadError(null);
@@ -131,48 +189,66 @@ export function Upload() {
             data: Binary.fromBytes(data),
           });
 
-      // Sign and submit
+      const useUnsigned = hasPreimageAuth;
+
       const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
         let resolved = false;
 
-        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
+        const handleEvent = (ev: any) => {
+          console.log("TX event:", ev.type);
+          if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+            resolved = true;
+            subscription.unsubscribe();
 
-              // Try to find the Stored event to get the index
-              let index: number | undefined;
-              if (ev.events) {
-                const storedEvent = ev.events.find(
-                  (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
-                );
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  index = storedEvent.value.value.index;
-                }
+            // Try to find the Stored event to get the index
+            let index: number | undefined;
+            if (ev.events) {
+              const storedEvent = ev.events.find(
+                (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
+              );
+              if (storedEvent?.value?.value?.index !== undefined) {
+                index = storedEvent.value.value.index;
               }
+            }
 
-              resolve({
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-                index,
-              });
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
+            resolve({
+              blockHash: ev.block.hash,
+              blockNumber: ev.block.number,
+              index,
+            });
+          }
+        };
+
+        const handleError = (err: any) => {
+          if (!resolved) {
+            resolved = true;
+            reject(err);
+          }
+        };
+
+        let subscription: { unsubscribe: () => void };
+
+        if (useUnsigned) {
+          // Unsigned submission via bareTx
+          tx.getBareTx().then((bareTx) => {
+            subscription = client.submitAndWatch(bareTx).subscribe({
+              next: handleEvent,
+              error: handleError,
+            });
+          }).catch(handleError);
+        } else {
+          // Signed submission
+          subscription = tx.signSubmitAndWatch(selectedAccount!.polkadotSigner).subscribe({
+            next: handleEvent,
+            error: handleError,
+          });
+        }
 
         // Timeout after 2 minutes
         setTimeout(() => {
           if (!resolved) {
             resolved = true;
-            subscription.unsubscribe();
+            subscription?.unsubscribe();
             reject(new Error("Transaction timed out"));
           }
         }, 120000);
@@ -185,12 +261,13 @@ export function Upload() {
         blockNumber: result.blockNumber,
         index: result.index,
         size: data.length,
+        unsigned: !!useUnsigned,
       };
 
       setUploadResult(uploadResultData);
 
-      // Save to history for easy renewal later
-      if (result.blockNumber !== undefined && result.index !== undefined) {
+      // Save to history for easy renewal later (only for signed transactions with account)
+      if (!useUnsigned && selectedAccount && result.blockNumber !== undefined && result.index !== undefined) {
         addStorageEntry({
           blockNumber: result.blockNumber,
           index: result.index,
@@ -469,12 +546,14 @@ export function Upload() {
             {isUploading ? (
               <>
                 <Spinner size="sm" className="mr-2" />
-                Uploading...
+                {willUseUnsigned ? "Uploading (unsigned)..." : "Uploading..."}
               </>
             ) : (
               <>
                 <UploadIcon className="h-5 w-5 mr-2" />
-                Upload to Bulletin Chain
+                {willUseUnsigned
+                  ? "Upload to Bulletin Chain (unsigned)"
+                  : "Upload to Bulletin Chain"}
               </>
             )}
           </Button>
@@ -482,22 +561,65 @@ export function Upload() {
 
         {/* Sidebar */}
         <div className="space-y-6">
+          {/* Preimage Authorization Card */}
+          {dataSize > 0 && (
+            <Card className={hasPreimageAuth ? "border-green-500/50" : undefined}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Preimage Authorization
+                </CardTitle>
+                <CardDescription>
+                  No wallet required for pre-authorized data
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {preimageAuthLoading ? (
+                  <div className="flex items-center justify-center h-16">
+                    <Spinner size="sm" />
+                  </div>
+                ) : hasPreimageAuth ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="default" className="bg-green-600">Authorized</Badge>
+                      <span className="text-sm text-muted-foreground">
+                        Up to {formatBytes(preimageAuth!.bytes)}
+                      </span>
+                    </div>
+                    {preimageAuth!.expiresAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Expires at block #{preimageAuth!.expiresAt}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      This data can be uploaded without a wallet connection
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground py-2">
+                    <p className="text-sm">No preimage authorization for this data</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <AuthorizationCard />
 
-          {!selectedAccount && (
+          {!selectedAccount && !hasPreimageAuth && (
             <Card>
               <CardContent className="pt-6">
                 <div className="text-center text-muted-foreground">
-                  <p className="mb-4">Connect a wallet to upload data</p>
+                  <p className="mb-4">Connect a wallet or use pre-authorized data to upload</p>
                   <Button variant="outline" asChild>
-                    <a href="/accounts">Connect Wallet</a>
+                    <a href={`${import.meta.env.BASE_URL}accounts`}>Connect Wallet</a>
                   </Button>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          {selectedAccount && !authorization && (
+          {selectedAccount && !authorization && !hasPreimageAuth && (
             <Card>
               <CardContent className="pt-6">
                 <div className="text-center text-muted-foreground">
@@ -506,6 +628,27 @@ export function Upload() {
                   <p className="text-sm mt-2">
                     Contact an admin to get storage authorization
                   </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Submission mode indicator */}
+          {canUpload && (
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 text-sm">
+                  {willUseUnsigned ? (
+                    <>
+                      <FileText className="h-4 w-4 text-green-600" />
+                      <span>Will submit as <strong>unsigned</strong> transaction (preimage authorized)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="h-4 w-4 text-blue-600" />
+                      <span>Will submit as <strong>signed</strong> transaction (account authorized)</span>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
