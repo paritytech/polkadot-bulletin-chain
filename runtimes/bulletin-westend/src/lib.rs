@@ -31,6 +31,7 @@ pub mod fast_runtime_binary {
 
 mod genesis_config_presets;
 pub mod storage;
+pub mod web3_storage;
 mod weights;
 pub mod xcm_config;
 
@@ -596,6 +597,7 @@ construct_runtime!(
 
 		// Storage
 		TransactionStorage: pallet_transaction_storage = 40,
+		StorageProvider: pallet_storage_provider = 50,
 
 		// Collator support. The order of these 5 are important and shall not change.
 		Authorship: pallet_authorship = 20,

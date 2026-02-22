@@ -37,9 +37,11 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
+pallet-storage-provider = { git = "https://github.com/paritytech/web3-storage.git", branch = "dev", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
 pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 pallets-common = { path = "pallets/common", default-features = false }
+storage-primitives = { git = "https://github.com/paritytech/web3-storage.git", branch = "dev", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "c7b9c08825acc61f1adde54535a41855c04962a2", default-features = false }
