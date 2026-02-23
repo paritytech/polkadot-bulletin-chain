@@ -11,6 +11,7 @@ import {
   WifiOff,
   Loader2,
   Globe,
+  History,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -18,11 +19,19 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { CidInput } from "@/components/CidInput";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
 import { formatBytes, bytesToHex } from "@/utils/format";
 import { CID } from "multiformats/cid";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
 import { useNetwork } from "@/state/chain.state";
+import { useStorageHistory } from "@/state/history.state";
 
 const P2P_MULTIADDRS: Record<string, string> = {
   local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
@@ -57,6 +66,10 @@ function getDefaultMultiaddrs(networkId: string): string {
 export function Download() {
   const [searchParams, setSearchParams] = useSearchParams();
   const network = useNetwork();
+  const storageHistory = useStorageHistory();
+
+  // Filter history for current network
+  const networkHistory = storageHistory.filter((entry) => entry.networkId === network.id);
 
   const [cidInput, setCidInput] = useState(searchParams.get("cid") || "");
   const [isCidValid, setIsCidValid] = useState(false);
@@ -147,6 +160,22 @@ export function Download() {
     setCidInput(value);
     setIsCidValid(isValid);
     setParsedCid(cid);
+    setFetchResult(null);
+    setFetchError(null);
+  };
+
+  const handleHistorySelect = (cid: string) => {
+    if (cid === "none") return;
+    setCidInput(cid);
+    // Try to parse it
+    try {
+      const parsed = CID.parse(cid);
+      setIsCidValid(true);
+      setParsedCid(parsed);
+    } catch {
+      setIsCidValid(false);
+      setParsedCid(undefined);
+    }
     setFetchResult(null);
     setFetchError(null);
   };
@@ -736,8 +765,52 @@ export function Download() {
           )}
         </div>
 
-        {/* Sidebar: CID Info */}
-        <div>
+        {/* Sidebar: History + CID Info */}
+        <div className="space-y-6">
+          {/* My Storage History */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <History className="h-5 w-5" />
+                My Storage
+              </CardTitle>
+              <CardDescription>Previously stored data on this network</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {networkHistory.length > 0 ? (
+                <div className="space-y-3">
+                  <Select onValueChange={handleHistorySelect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select from history..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {networkHistory.map((entry) => (
+                        <SelectItem key={`${entry.blockNumber}-${entry.index}`} value={entry.cid}>
+                          <div className="flex flex-col items-start">
+                            <span className="text-xs font-medium">
+                              {entry.label || `Block #${entry.blockNumber}`}
+                            </span>
+                            <span className="text-xs text-muted-foreground font-mono">
+                              {entry.cid.slice(0, 20)}...
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {networkHistory.length} item{networkHistory.length !== 1 ? "s" : ""} in history
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No storage history yet. Upload data to see it here.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* CID Info */}
           <Card>
             <CardHeader>
               <CardTitle>CID Info</CardTitle>
