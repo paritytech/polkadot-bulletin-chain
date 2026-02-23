@@ -5,8 +5,14 @@ name: Check Runtime Migrations
 
 on:
   push:
-    branches: ["release-*"]
+    branches: [main, "release-*"]
+    paths-ignore:
+      - "console-ui/**"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - "console-ui/**"
+      - "docs/**"
   workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'  # Daily at 5 AM UTC

@@ -2,7 +2,7 @@ name: Check Console UI
 
 on:
   pull_request:
-    branches: [console-ui, main]
+    branches: [main]
     paths:
       - "console-ui/**"
       - ".github/workflows/check-console-ui.yml"
