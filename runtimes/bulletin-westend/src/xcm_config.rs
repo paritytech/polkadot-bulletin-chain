@@ -226,6 +226,22 @@ pub type TrustedAliasers = (
 	AuthorizedAliasers<Runtime>,
 );
 
+/// Calls that are safe to dispatch from XCM. Blocks storage-mutating
+/// TransactionStorage calls — those require on-chain authorization that XCM cannot provide.
+pub struct XcmSafeCallFilter;
+impl Contains<RuntimeCall> for XcmSafeCallFilter {
+	fn contains(call: &RuntimeCall) -> bool {
+		!matches!(
+			call,
+			RuntimeCall::TransactionStorage(
+				pallet_transaction_storage::Call::store { .. } |
+					pallet_transaction_storage::Call::store_with_cid_config { .. } |
+					pallet_transaction_storage::Call::renew { .. }
+			)
+		)
+	}
+}
+
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
 	type RuntimeCall = RuntimeCall;
@@ -266,7 +282,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = XcmSafeCallFilter;
 	type Aliasers = TrustedAliasers;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();

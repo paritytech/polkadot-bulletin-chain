@@ -50,12 +50,30 @@ type Transactions = super::Transactions<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
+/// Authorize preimage for the given data so that an unsigned (`None`) dispatch can succeed.
+fn authorize_preimage_for(data: &[u8]) {
+	let hash = blake2_256(data);
+	TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, data.len() as u64)
+		.expect("authorize_preimage should succeed");
+}
+
+/// Authorize preimage for the given data using a specific hashing algorithm.
+fn authorize_preimage_for_cid(data: &[u8], hashing: HashingAlgorithm) {
+	let hash = hashing.hash(data);
+	TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, data.len() as u64)
+		.expect("authorize_preimage should succeed");
+}
+
 #[test]
 fn discards_data() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		let data = vec![0u8; 2000];
+		authorize_preimage_for(&data);
+		// Re-authorize so a second store of the same preimage succeeds.
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		authorize_preimage_for(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		let proof_provider = || {
 			let block_num = System::block_number();
 			if block_num == 11 {
@@ -85,19 +103,24 @@ fn uses_account_authorization() {
 			AuthorizationExtent { transactions: 2, bytes: 2001 }
 		);
 		let call = Call::store { data: vec![0u8; 2000] };
-		assert_noop!(
-			TransactionStorage::pre_dispatch_signed(&5, &call),
-			InvalidTransaction::Payment,
+		// Validation checks auth but does not consume.
+		assert_noop!(TransactionStorage::validate_signed(&5, &call), InvalidTransaction::Payment,);
+		assert_ok!(TransactionStorage::validate_signed(&caller, &call));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(caller),
+			AuthorizationExtent { transactions: 2, bytes: 2001 },
+			"validate_signed should not consume authorization"
 		);
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&caller, &call));
+		// Dispatch consumes authorization.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(caller).into(), vec![0u8; 2000]));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent { transactions: 1, bytes: 1 }
 		);
-		let call = Call::store { data: vec![0u8; 2] };
+		// Remaining authorization is insufficient for 2 more bytes.
 		assert_noop!(
-			TransactionStorage::pre_dispatch_signed(&caller, &call),
-			InvalidTransaction::Payment,
+			TransactionStorage::store(RawOrigin::Signed(caller).into(), vec![0u8; 2]),
+			Error::Unauthorized,
 		);
 	});
 }
@@ -115,18 +138,27 @@ fn uses_preimage_authorization() {
 		);
 		let call = Call::store { data: vec![1; 2000] };
 		assert_noop!(TransactionStorage::pre_dispatch(&call), InvalidTransaction::Payment);
-		let call = Call::store { data };
+		let call = Call::store { data: data.clone() };
+		// Validation checks but does not consume.
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 1, bytes: 2002 },
+			"validation should not consume authorization"
+		);
+		// Dispatch consumes authorization.
+		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 }
 		);
-		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
 		let call = Call::renew { block: 1, index: 0 };
 		assert_noop!(TransactionStorage::pre_dispatch(&call), InvalidTransaction::Payment);
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2000));
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		// Dispatch consumes the renew authorization.
+		assert_ok!(TransactionStorage::renew(RuntimeOrigin::none(), 1, 0));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 }
@@ -138,10 +170,9 @@ fn uses_preimage_authorization() {
 fn checks_proof() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(
-			RuntimeOrigin::none(),
-			vec![0u8; MAX_DATA_SIZE as usize]
-		));
+		let data = vec![0u8; MAX_DATA_SIZE as usize];
+		authorize_preimage_for(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(10, || None);
 		let parent_hash = System::parent_hash();
 		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
@@ -189,6 +220,13 @@ fn verify_chunk_proof_works() {
 		// Store a couple of transactions in one block.
 		run_to_block(1, || None);
 		let caller = 1;
+		let total_bytes: u64 = transactions.iter().map(|t| t.len() as u64).sum();
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			caller,
+			transactions.len() as u32,
+			total_bytes,
+		));
 		for transaction in transactions.clone() {
 			assert_ok!(TransactionStorage::store(RawOrigin::Signed(caller).into(), transaction));
 		}
@@ -225,9 +263,12 @@ fn verify_chunk_proof_works() {
 fn renews_data() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		let data = vec![0u8; 2000];
+		authorize_preimage_for(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
 		let info = BlockTransactions::get().last().unwrap().clone();
 		run_to_block(6, || None);
+		authorize_preimage_for(&data);
 		assert_ok!(TransactionStorage::renew(
 			RuntimeOrigin::none(),
 			1, // block
@@ -290,10 +331,10 @@ fn expired_authorization_clears() {
 		);
 		assert!(!System::providers(&who).is_zero());
 
-		// User uses some of the authorization, and the remaining amount gets updated appropriately
+		// User uses some of the authorization via dispatch.
 		run_to_block(2, || None);
 		let store_call = Call::store { data: vec![0; 1000] };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), vec![0; 1000]));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 1000 },
@@ -312,9 +353,9 @@ fn expired_authorization_clears() {
 		run_to_block(11, || None);
 		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(!System::providers(&who).is_zero());
-		// User cannot use authorization
+		// User cannot use expired authorization
 		assert_noop!(
-			TransactionStorage::pre_dispatch_signed(&who, &store_call),
+			TransactionStorage::validate_signed(&who, &store_call),
 			InvalidTransaction::Payment,
 		);
 		// Anyone can remove it
@@ -342,17 +383,15 @@ fn consumed_authorization_clears() {
 		);
 		assert!(!System::providers(&who).is_zero());
 
-		// User uses some of the authorization, and the remaining amount gets updated appropriately
-		let call = Call::store { data: vec![0; 1000] };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
-		// Debited half the authorization
+		// Dispatch consumes authorization.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), vec![0; 1000]));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 1000 },
 		);
 		assert!(!System::providers(&who).is_zero());
-		// Consume the remaining amount
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		// Consume the remaining amount via dispatch.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), vec![0; 1000]));
 		// Key should be cleared from Authorizations
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
@@ -385,9 +424,7 @@ fn stores_various_sizes_with_account_authorization() {
 		);
 
 		for size in sizes {
-			let call = Call::store { data: vec![0u8; size] };
-			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
-			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
+			assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), vec![0u8; size],));
 		}
 
 		// After consuming the authorized sizes, authorization should be removed and providers
@@ -405,11 +442,11 @@ fn stores_various_sizes_with_account_authorization() {
 			oversize as u64,
 		));
 		let too_big_call = Call::store { data: vec![0u8; oversize] };
-		// pre_dispatch should reject due to BAD_DATA_SIZE
-		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &too_big_call), BAD_DATA_SIZE);
+		// validate_signed should reject due to BAD_DATA_SIZE
+		assert_noop!(TransactionStorage::validate_signed(&who, &too_big_call), BAD_DATA_SIZE);
 		// dispatch should also reject with pallet Error::BadDataSize
 		assert_noop!(
-			Into::<RuntimeCall>::into(too_big_call).dispatch(RuntimeOrigin::none()),
+			TransactionStorage::store(RawOrigin::Signed(who).into(), vec![0u8; oversize]),
 			Error::BadDataSize,
 		);
 		run_to_block(2, || None);
@@ -442,12 +479,10 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			AuthorizationExtent { transactions: 1, bytes: 2000 }
 		);
 
-		// Store the pre-authorized content using a signed transaction
-		let call = Call::store { data: data.clone() };
-		assert_ok!(TransactionStorage::validate_signed(&who, &call));
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		// Store the pre-authorized content using a signed dispatch.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), data));
 
-		// Verify: preimage authorization was consumed, not account authorization
+		// Verify: preimage authorization was consumed, not account authorization.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
@@ -459,10 +494,8 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			"Account authorization should remain unchanged"
 		);
 
-		// User can still use their account authorization for different content
-		let other_data = vec![99u8; 1000];
-		let other_call = Call::store { data: other_data };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &other_call));
+		// User can still use their account authorization for different content.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), vec![99u8; 1000]));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 3000 },
@@ -493,17 +526,16 @@ fn signed_store_falls_back_to_account_authorization() {
 			1000
 		));
 
-		// Store content that doesn't have preimage authorization
-		let call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		// Store content that doesn't have preimage authorization.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), data));
 
-		// Verify: account authorization was consumed since no preimage auth for this content
+		// Verify: account authorization was consumed since no preimage auth for this content.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 2000 },
 			"Account authorization should be consumed when no matching preimage auth"
 		);
-		// Preimage authorization for different content should remain unchanged
+		// Preimage authorization for different content should remain unchanged.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(different_hash),
 			AuthorizationExtent { transactions: 1, bytes: 1000 },
@@ -520,31 +552,28 @@ fn signed_renew_uses_account_authorization() {
 		let data = vec![42u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Setup: authorize preimage and store the data
+		// Setup: authorize preimage and store the data.
 		assert_ok!(TransactionStorage::authorize_preimage(
 			RuntimeOrigin::root(),
 			content_hash,
 			2000
 		));
-		let store_call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 
 		run_to_block(3, || None);
 
-		// Setup: user has account authorization for renew
+		// Setup: user has account authorization for renew.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 2000 }
 		);
 
-		// Renew the stored data using signed transaction.
-		// Since preimage authorization was consumed during store, renew falls back to account.
-		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		// Renew via signed dispatch. Since preimage authorization was consumed
+		// during store, renew falls back to account authorization.
+		assert_ok!(TransactionStorage::renew(RawOrigin::Signed(who).into(), 1, 0));
 
-		// Verify: account authorization was consumed for renew
+		// Verify: account authorization was consumed for renew.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
@@ -561,13 +590,11 @@ fn signed_renew_prefers_preimage_authorization() {
 		let data = vec![42u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Setup: store data using account authorization
+		// Setup: store data using account authorization via dispatch.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
-		let store_call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), data));
 
-		// Account authorization consumed after store
+		// Account authorization consumed after store.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 0, bytes: 0 }
@@ -575,7 +602,7 @@ fn signed_renew_prefers_preimage_authorization() {
 
 		run_to_block(3, || None);
 
-		// Setup: authorize both preimage and account for renew
+		// Setup: authorize both preimage and account for renew.
 		assert_ok!(TransactionStorage::authorize_preimage(
 			RuntimeOrigin::root(),
 			content_hash,
@@ -592,11 +619,10 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent { transactions: 1, bytes: 2000 }
 		);
 
-		// Renew using signed transaction - should prefer preimage authorization
-		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		// Renew via signed dispatch — should prefer preimage authorization.
+		assert_ok!(TransactionStorage::renew(RawOrigin::Signed(who).into(), 1, 0));
 
-		// Verify: preimage authorization was consumed, account authorization unchanged
+		// Verify: preimage authorization was consumed, account authorization unchanged.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
@@ -617,6 +643,7 @@ fn store_with_cid_config_uses_custom_hashing() {
 		let data = vec![42u8; 2000];
 
 		// Store with default config (Blake2b256 + raw codec 0x55)
+		authorize_preimage_for(&data);
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
 		let default_info = BlockTransactions::get().last().unwrap().clone();
 		assert_eq!(default_info.hashing, HashingAlgorithm::Blake2b256);
@@ -624,6 +651,7 @@ fn store_with_cid_config_uses_custom_hashing() {
 
 		// Store with explicit SHA2-256 config
 		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		authorize_preimage_for_cid(&data, HashingAlgorithm::Sha2_256);
 		assert_ok!(TransactionStorage::store_with_cid_config(
 			RuntimeOrigin::none(),
 			sha2_config.clone(),
@@ -637,6 +665,7 @@ fn store_with_cid_config_uses_custom_hashing() {
 
 		// Store with explicit Blake2b256 config (same as default but explicitly set)
 		let blake2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
+		authorize_preimage_for(&data);
 		assert_ok!(TransactionStorage::store_with_cid_config(
 			RuntimeOrigin::none(),
 			blake2_config.clone(),
@@ -686,9 +715,16 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 
 		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
 		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		// Validation checks but does not consume.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+			"validation should not consume authorization"
+		);
+		// Dispatch consumes authorization.
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 
-		// Preimage authorization for sha2 hash should be consumed.
+		// Preimage authorization for sha2 hash should be consumed by dispatch.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(sha2_hash),
 			AuthorizationExtent { transactions: 0, bytes: 0 }
@@ -710,12 +746,12 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_eq!(txs[0].content_hash, sha2_hash);
 
 		// Renew without authorization fails.
-		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_noop!(TransactionStorage::pre_dispatch(&renew_call), InvalidTransaction::Payment);
+		assert_noop!(TransactionStorage::renew(RuntimeOrigin::none(), 1, 0), Error::Unauthorized,);
 
 		// Authorize preimage with SHA2 hash (renew uses stored content_hash).
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
-		assert_ok!(TransactionStorage::pre_dispatch(&renew_call));
+		// Dispatch consumes.
+		assert_ok!(TransactionStorage::renew(RuntimeOrigin::none(), 1, 0));
 
 		// Preimage authorization for sha2 hash should be consumed.
 		assert_eq!(
@@ -797,7 +833,9 @@ fn migration_v1_new_entries_only() {
 		run_to_block(1, || None);
 
 		// Store via normal (new-format) code path
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		let data = vec![0u8; 2000];
+		authorize_preimage_for(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
 		let original = Transactions::get(1).expect("should decode");
@@ -823,7 +861,9 @@ fn migration_v1_mixed_entries() {
 
 		// New-format entry at block 10
 		run_to_block(10, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![42u8; 500]));
+		let data = vec![42u8; 500];
+		authorize_preimage_for(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(11, || None);
 		let new_entry_before = Transactions::get(10).expect("new format decodes");
 
@@ -907,8 +947,12 @@ fn try_state_passes_on_empty_storage() {
 fn try_state_passes_after_store_and_finalize() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![1u8; 500]));
+		let d1 = vec![0u8; 2000];
+		let d2 = vec![1u8; 500];
+		authorize_preimage_for(&d1);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), d1));
+		authorize_preimage_for(&d2);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), d2));
 		run_to_block(2, || None);
 		// After finalization, ephemeral storage is cleared and transactions are persisted
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
@@ -919,7 +963,9 @@ fn try_state_passes_after_store_and_finalize() {
 fn try_state_passes_through_retention_lifecycle() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		let data = vec![0u8; 2000];
+		authorize_preimage_for(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		let proof_provider = || {
 			let block_num = System::block_number();
 			if block_num == 11 {
@@ -944,9 +990,8 @@ fn try_state_passes_with_active_authorizations() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 10000));
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
 
-		// Partially consume authorization
-		let call = Call::store { data: vec![0; 1000] };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		// Partially consume authorization via dispatch.
+		assert_ok!(TransactionStorage::store(RawOrigin::Signed(who).into(), vec![0; 1000]));
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
 	});
 }

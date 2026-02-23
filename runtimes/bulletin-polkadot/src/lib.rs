@@ -8,7 +8,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{
@@ -508,6 +508,73 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
+/// Maximum nesting depth for utility wrapper validation. Prevents stack overflow
+/// from adversarially deep nesting. Extrinsic size limits provide a natural bound,
+/// but this makes it explicit.
+const MAX_INNER_CALL_DEPTH: u32 = 8;
+
+/// Extract inner calls from a utility call variant.
+///
+/// Every variant that wraps a `RuntimeCall` must be listed here so that
+/// `validate_inner_calls` can inspect them. The wildcard arm returns an empty
+/// vec — if a new wrapping variant is added to pallet_utility, the pallet-side
+/// defense-in-depth (`consume_dispatch_authorization`) still catches bypasses
+/// at dispatch time.
+fn utility_inner_calls(call: &pallet_utility::Call<Runtime>) -> Vec<&RuntimeCall> {
+	match call {
+		pallet_utility::Call::batch { calls } |
+		pallet_utility::Call::batch_all { calls } |
+		pallet_utility::Call::force_batch { calls } => calls.iter().collect(),
+		pallet_utility::Call::as_derivative { call, .. } |
+		pallet_utility::Call::dispatch_as { call, .. } |
+		pallet_utility::Call::with_weight { call, .. } |
+		pallet_utility::Call::dispatch_as_fallible { call, .. } => vec![call.as_ref()],
+		pallet_utility::Call::if_else { main, fallback, .. } =>
+			vec![main.as_ref(), fallback.as_ref()],
+		_ => vec![],
+	}
+}
+
+/// Recursively validate inner calls of wrapper extrinsics. Each inner call must
+/// be in the ValidateSigned allowlist, and TransactionStorage calls are checked
+/// against their own signed validation.
+///
+/// NOTE: The allowlist here must be kept in sync with the `validate()` match arms
+/// in [`ValidateSigned`]. If a new pallet call is added there, add it here too.
+fn validate_inner_calls(
+	who: &AccountId,
+	call: &RuntimeCall,
+	depth: u32,
+) -> Result<(), TransactionValidityError> {
+	if depth >= MAX_INNER_CALL_DEPTH {
+		return Err(InvalidTransaction::ExhaustsResources.into());
+	}
+	match call {
+		RuntimeCall::TransactionStorage(inner_call) => {
+			TransactionStorage::validate_signed(who, inner_call).map(|_| ())
+		},
+		RuntimeCall::Utility(utility_call) => {
+			for inner in utility_inner_calls(utility_call) {
+				validate_inner_calls(who, inner, depth + 1)?;
+			}
+			Ok(())
+		},
+		// Allow calls that are in the ValidateSigned allowlist.
+		RuntimeCall::Session(..)
+		| RuntimeCall::BridgePolkadotGrandpa(..)
+		| RuntimeCall::BridgePolkadotParachains(..)
+		| RuntimeCall::BridgePolkadotMessages(..)
+		// Proxy and Sudo have their own authorization mechanisms (proxy delegation,
+		// sudo key check). Inner calls dispatched through them are protected by
+		// pallet-side defense-in-depth (consume_dispatch_authorization).
+		| RuntimeCall::Proxy(..)
+		| RuntimeCall::Sudo(..)
+		| RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => Ok(()),
+		// Reject anything else — mirrors the ValidateSigned catch-all.
+		_ => Err(InvalidTransaction::Call.into()),
+	}
+}
+
 /// `ValidateUnsigned` equivalent for signed transactions.
 ///
 /// This chain has no transaction fees, so we require checks equivalent to those performed by
@@ -611,11 +678,16 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 				longevity: BridgeTxLongevity::get(),
 				..Default::default()
 			}),
-			RuntimeCall::Utility(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
+			RuntimeCall::Utility(utility_call) => {
+				for inner in utility_inner_calls(utility_call) {
+					validate_inner_calls(who, inner, 0)?;
+				}
+				Ok(ValidTransaction {
+					priority: SudoPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				})
+			},
 			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
 				Ok(ValidTransaction {
 					priority: SudoPriority::get(),
@@ -642,7 +714,7 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		match call {
 			// Transaction storage validation
 			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+				TransactionStorage::validate_signed(who, inner_call).map(|_| None),
 
 			// Session key management
 			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
@@ -677,11 +749,15 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 					.map(|()| Some(who.clone())),
 
 			// Sudo calls
-			RuntimeCall::Proxy(_) => Ok(Some(who.clone())),
-			RuntimeCall::Sudo(_) => Ok(Some(who.clone())),
-			RuntimeCall::Utility(_) => Ok(Some(who.clone())),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(Some(who.clone())),
+			RuntimeCall::Proxy(_) => Ok(None),
+			RuntimeCall::Sudo(_) => Ok(None),
+			RuntimeCall::Utility(utility_call) => {
+				for inner in utility_inner_calls(utility_call) {
+					validate_inner_calls(who, inner, 0)?;
+				}
+				Ok(None)
+			},
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => Ok(None),
 
 			// All other calls are invalid
 			_ => Err(InvalidTransaction::Call.into()),

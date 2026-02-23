@@ -99,6 +99,22 @@ pub type Barrier = TrailingSetTopicAsId<
 	>,
 >;
 
+/// Calls that are safe to dispatch from XCM. Blocks storage-mutating
+/// TransactionStorage calls — those require on-chain authorization that XCM cannot provide.
+pub struct XcmSafeCallFilter;
+impl Contains<RuntimeCall> for XcmSafeCallFilter {
+	fn contains(call: &RuntimeCall) -> bool {
+		!matches!(
+			call,
+			RuntimeCall::TransactionStorage(
+				pallet_transaction_storage::Call::store { .. } |
+					pallet_transaction_storage::Call::store_with_cid_config { .. } |
+					pallet_transaction_storage::Call::renew { .. }
+			)
+		)
+	}
+}
+
 /// XCM executor configuration.
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
@@ -127,7 +143,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = XcmSafeCallFilter;
 	type Aliasers = Nothing;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
@@ -381,5 +397,63 @@ pub(crate) mod tests {
 			),
 			Ok(())
 		);
+	}
+
+	/// Build an XCM bridge message containing `Transact` with an arbitrary
+	/// runtime call dispatched from People Polkadot.
+	fn encoded_xcm_transact_from_people_polkadot(
+		origin_kind: OriginKind,
+		call: RuntimeCall,
+	) -> Vec<u8> {
+		let message = VersionedXcm::from(
+			Xcm::<()>::builder_unsafe()
+				.universal_origin(GlobalConsensus(BridgedNetwork::get()))
+				.descend_origin(Parachain(PEOPLE_POLKADOT_PARACHAIN_ID))
+				.unpaid_execution(Unlimited, None)
+				.transact(origin_kind, None, call.encode())
+				.build(),
+		);
+		let universal_dest: VersionedInteriorLocation = GlobalConsensus(ThisNetwork::get()).into();
+		BridgeMessage { universal_dest, message }.encode()
+	}
+
+	/// XCM Transact with `store` from People Polkadot (Superuser) must require
+	/// storage authorization even though it dispatches as Root.
+	#[test]
+	fn xcm_transact_store_requires_authorization() {
+		run_test(|| {
+			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+
+			let data = vec![42u8; 100];
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			// No authorization exists.
+			let content_hash = sp_io::hashing::blake2_256(&data);
+			assert_eq!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let result = Dispatcher::dispatch(DispatchMessage {
+				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+				data: DispatchMessageData {
+					payload: Ok(encoded_xcm_transact_from_people_polkadot(
+						OriginKind::Superuser,
+						store_call,
+					)),
+				},
+			});
+
+			// The store call must not succeed without authorization.
+			// SafeCallFilter = XcmSafeCallFilter blocks storage-mutating calls,
+			// and the pallet-side defense rejects Root origin at dispatch time.
+			assert_ne!(
+				result.dispatch_level_result,
+				XcmBlobMessageDispatchResult::Dispatched,
+				"XCM Transact store without authorization should not dispatch successfully",
+			);
+		});
 	}
 }
