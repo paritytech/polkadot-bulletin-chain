@@ -19,7 +19,7 @@ import {
 } from "@/state/chain.state";
 import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization, useAuthorizationLoading } from "@/state/storage.state";
-import { formatAddress, formatBlockNumber, formatBytes } from "@/utils/format";
+import { formatAddress, formatBlockNumber } from "@/utils/format";
 import { cn } from "@/utils/cn";
 import { useState, useEffect } from "react";
 
@@ -66,14 +66,9 @@ function AuthorizationStatus() {
     return null;
   }
 
-  // Not connected
+  // Not connected - don't show anything (Connect button already visible)
   if (!selectedAccount) {
-    return (
-      <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-md bg-muted/50 text-xs">
-        <Wallet className="h-3 w-3 text-muted-foreground" />
-        <span className="text-muted-foreground">Connect wallet</span>
-      </div>
-    );
+    return null;
   }
 
   // Loading
@@ -104,37 +99,16 @@ function AuthorizationStatus() {
   const isExpiringSoon = blocksUntilExpiry !== null && blocksUntilExpiry > 0 && blocksUntilExpiry < 1000;
   const isExpired = blocksUntilExpiry !== null && blocksUntilExpiry <= 0;
 
-  // Has authorization
+  // Has authorization - simple indicator
   return (
     <div className={cn(
-      "hidden lg:flex items-center gap-3 px-3 py-1 rounded-md text-xs",
-      isExpired ? "bg-destructive/10" : isExpiringSoon ? "bg-yellow-500/10" : "bg-green-500/10"
+      "hidden lg:flex items-center gap-2 px-3 py-1 rounded-md text-xs",
+      isExpired ? "bg-destructive/10 text-destructive" : isExpiringSoon ? "bg-yellow-500/10 text-yellow-600" : "bg-green-500/10 text-green-600"
     )}>
-      <div className="flex items-center gap-1.5">
-        <span className="text-muted-foreground">Txs:</span>
-        <span className="font-mono font-medium">{authorization.transactions.toString()}</span>
-      </div>
-      <div className="w-px h-3 bg-border" />
-      <div className="flex items-center gap-1.5">
-        <span className="text-muted-foreground">Data:</span>
-        <span className="font-mono font-medium">{formatBytes(Number(authorization.bytes))}</span>
-      </div>
-      {blocksUntilExpiry !== null && (
-        <>
-          <div className="w-px h-3 bg-border" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">Expires:</span>
-            <span className={cn(
-              "font-mono font-medium",
-              isExpired ? "text-destructive" : isExpiringSoon ? "text-yellow-600" : ""
-            )}>
-              {isExpired
-                ? "Expired"
-                : `${blocksUntilExpiry.toLocaleString()} blocks`}
-            </span>
-          </div>
-        </>
-      )}
+      <Shield className="h-3 w-3" />
+      <span className="font-medium">
+        {isExpired ? "Authorization Expired" : "Authorized"}
+      </span>
     </div>
   );
 }
