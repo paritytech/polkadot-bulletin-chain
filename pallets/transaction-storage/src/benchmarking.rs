@@ -133,6 +133,10 @@ mod benchmarks {
 		.unwrap()
 		.to_bytes();
 
+		let authorizer = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute authorizer origin"))?;
+		TransactionStorage::<T>::authorize_preimage(authorizer, content_hash, l as u64)?;
+
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
 
@@ -145,8 +149,17 @@ mod benchmarks {
 	fn renew() -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
+		let max_size = T::MaxTransactionSize::get() as u64;
+
+		// Authorize and store the initial data
+		let authorizer = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute authorizer origin"))?;
+		TransactionStorage::<T>::authorize_preimage(authorizer.clone(), content_hash, max_size)?;
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
+
+		// Authorize again for the renew (store consumed the previous authorization)
+		TransactionStorage::<T>::authorize_preimage(authorizer, content_hash, max_size)?;
 
 		#[extrinsic_call]
 		_(RawOrigin::None, BlockNumberFor::<T>::zero(), 0);
@@ -158,11 +171,18 @@ mod benchmarks {
 	#[benchmark]
 	fn check_proof() -> Result<(), BenchmarkError> {
 		run_to_block::<T>(1u32.into());
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+		let max_size = T::MaxTransactionSize::get() as u64;
+		let authorizer = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute authorizer origin"))?;
 		for _ in 0..T::MaxBlockTransactions::get() {
-			TransactionStorage::<T>::store(
-				RawOrigin::None.into(),
-				vec![0u8; T::MaxTransactionSize::get() as usize],
+			TransactionStorage::<T>::authorize_preimage(
+				authorizer.clone(),
+				content_hash,
+				max_size,
 			)?;
+			TransactionStorage::<T>::store(RawOrigin::None.into(), data.clone())?;
 		}
 		run_to_block::<T>(crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one());
 		let encoded_proof = proof();
