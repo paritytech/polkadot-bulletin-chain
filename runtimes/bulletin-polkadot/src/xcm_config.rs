@@ -223,13 +223,14 @@ pub(crate) mod tests {
 			bp_people_polkadot::PEOPLE_POLKADOT_PARACHAIN_ID, tests::run_test,
 			WithPeoplePolkadotMessagesInstance, XcmBlobMessageDispatchResult, XCM_LANE,
 		},
-		Runtime,
+		Runtime, RuntimeOrigin,
 	};
 	use bp_messages::{
 		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
 		MessageKey,
 	};
 	use codec::Encode;
+	use frame_support::assert_ok;
 	use pallet_bridge_messages::Config as MessagesConfig;
 	use sp_keyring::Sr25519Keyring as AccountKeyring;
 	use xcm::{prelude::VersionedXcm, VersionedInteriorLocation};
@@ -417,24 +418,32 @@ pub(crate) mod tests {
 		BridgeMessage { universal_dest, message }.encode()
 	}
 
-	/// XCM Transact with `store` from People Polkadot (Superuser) must require
-	/// storage authorization even though it dispatches as Root.
+	/// XCM Transact with `store` from People Polkadot (Superuser) must be blocked
+	/// unconditionally — even if authorization exists. Storage operations must go
+	/// through signed extrinsics, never through XCM.
 	#[test]
-	fn xcm_transact_store_requires_authorization() {
+	fn xcm_transact_store_is_blocked() {
 		run_test(|| {
 			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
 
 			let data = vec![42u8; 100];
-			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-				data: data.clone(),
-			});
-
-			// No authorization exists.
 			let content_hash = sp_io::hashing::blake2_256(&data);
-			assert_eq!(
+
+			// Authorize the preimage so we can verify the filter blocks it
+			// regardless of authorization state.
+			assert_ok!(crate::TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash,
+				data.len() as u64,
+			));
+			assert_ne!(
 				crate::TransactionStorage::preimage_authorization_extent(content_hash),
 				AuthorizationExtent { transactions: 0, bytes: 0 },
 			);
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
 
 			let result = Dispatcher::dispatch(DispatchMessage {
 				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
@@ -446,13 +455,19 @@ pub(crate) mod tests {
 				},
 			});
 
-			// The store call must not succeed without authorization.
-			// SafeCallFilter = XcmSafeCallFilter blocks storage-mutating calls,
-			// and the pallet-side defense rejects Root origin at dispatch time.
+			// XcmSafeCallFilter blocks store/store_with_cid_config/renew
+			// unconditionally — authorization does not matter for XCM.
 			assert_ne!(
 				result.dispatch_level_result,
 				XcmBlobMessageDispatchResult::Dispatched,
-				"XCM Transact store without authorization should not dispatch successfully",
+				"XCM Transact store must be blocked even with authorization",
+			);
+
+			// Authorization must not have been consumed.
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Authorization should remain unconsumed since XCM was blocked",
 			);
 		});
 	}

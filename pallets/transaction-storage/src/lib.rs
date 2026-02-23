@@ -87,28 +87,6 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 /// Authorization has not expired.
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
-/// Context of a `check_signed`/`check_unsigned` call.
-#[derive(Clone, Copy)]
-enum CheckContext {
-	/// `validate_signed` or `validate_unsigned`.
-	Validate,
-	/// `pre_dispatch_signed` or `pre_dispatch`.
-	PreDispatch,
-}
-
-impl CheckContext {
-	/// Should authorization be consumed in this context? If not, we merely check that
-	/// authorization exists.
-	fn consume_authorization(self) -> bool {
-		matches!(self, CheckContext::PreDispatch)
-	}
-
-	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
-	fn want_valid_transaction(self) -> bool {
-		matches!(self, CheckContext::Validate)
-	}
-}
-
 /// Number of transactions and bytes covered by an authorization.
 #[derive(PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct AuthorizationExtent {
@@ -169,6 +147,28 @@ impl TransactionInfo {
 	/// See the `block_chunks` field of [`TransactionInfo`] for details.
 	pub fn total_chunks(txs: &[TransactionInfo]) -> ChunkIndex {
 		txs.last().map_or(0, |t| t.block_chunks)
+	}
+}
+
+/// Context of a `check_signed`/`check_unsigned` call.
+#[derive(Clone, Copy)]
+enum CheckContext {
+	/// `validate_signed` or `validate_unsigned`.
+	Validate,
+	/// `pre_dispatch_signed` or `pre_dispatch`.
+	PreDispatch,
+}
+
+impl CheckContext {
+	/// Should authorization be consumed in this context? If not, we merely check that
+	/// authorization exists.
+	fn consume_authorization(self) -> bool {
+		matches!(self, CheckContext::PreDispatch)
+	}
+
+	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
+	fn want_valid_transaction(self) -> bool {
+		matches!(self, CheckContext::Validate)
 	}
 }
 
