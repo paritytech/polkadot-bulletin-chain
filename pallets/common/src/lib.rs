@@ -15,6 +15,9 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{vec, vec::Vec};
 use codec::{Decode, Encode};
 use polkadot_sdk_frame::{
 	deps::frame_support,
@@ -322,5 +325,46 @@ impl<AccountId, HoldReason> ReservableCurrency<AccountId> for NoCurrency<Account
 
 	fn reserved_balance(_who: &AccountId) -> Self::Balance {
 		Zero::zero()
+	}
+}
+
+/// Extract inner calls from a utility call variant.
+pub fn utility_inner_calls<T: pallet_utility::Config>(
+	call: &pallet_utility::Call<T>,
+) -> Vec<&<T as pallet_utility::Config>::RuntimeCall> {
+	match call {
+		pallet_utility::Call::batch { calls } |
+		pallet_utility::Call::batch_all { calls } |
+		pallet_utility::Call::force_batch { calls } => calls.iter().collect(),
+		pallet_utility::Call::as_derivative { call, .. } |
+		pallet_utility::Call::dispatch_as { call, .. } |
+		pallet_utility::Call::with_weight { call, .. } |
+		pallet_utility::Call::dispatch_as_fallible { call, .. } => vec![call.as_ref()],
+		pallet_utility::Call::if_else { main, fallback, .. } =>
+			vec![main.as_ref(), fallback.as_ref()],
+		_ => vec![],
+	}
+}
+
+/// Extract inner calls from a proxy call variant.
+pub fn proxy_inner_calls<T: pallet_proxy::Config>(
+	call: &pallet_proxy::Call<T>,
+) -> Vec<&<T as pallet_proxy::Config>::RuntimeCall> {
+	match call {
+		pallet_proxy::Call::proxy { call, .. } |
+		pallet_proxy::Call::proxy_announced { call, .. } => vec![call.as_ref()],
+		_ => vec![],
+	}
+}
+
+/// Extract inner calls from a sudo call variant.
+pub fn sudo_inner_calls<T: pallet_sudo::Config>(
+	call: &pallet_sudo::Call<T>,
+) -> Vec<&<T as pallet_sudo::Config>::RuntimeCall> {
+	match call {
+		pallet_sudo::Call::sudo { call } |
+		pallet_sudo::Call::sudo_as { call, .. } |
+		pallet_sudo::Call::sudo_unchecked_weight { call, .. } => vec![call.as_ref()],
+		_ => vec![],
 	}
 }

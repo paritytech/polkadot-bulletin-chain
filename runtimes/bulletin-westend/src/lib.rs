@@ -279,31 +279,15 @@ impl pallet_timestamp::Config for Runtime {
 /// from adversarially deep nesting.
 const MAX_INNER_CALL_DEPTH: u32 = 8;
 
-/// Extract inner calls from a utility call variant.
-///
-/// Every variant that wraps a `RuntimeCall` must be listed here so that
-/// `validate_inner_calls` can inspect them. The wildcard arm returns an empty
-/// vec — if a new wrapping variant is added to pallet_utility, the pallet-side
-/// defense-in-depth (`consume_dispatch_authorization`) still catches bypasses
-/// at dispatch time.
-fn utility_inner_calls(call: &pallet_utility::Call<Runtime>) -> Vec<&RuntimeCall> {
-	match call {
-		pallet_utility::Call::batch { calls } |
-		pallet_utility::Call::batch_all { calls } |
-		pallet_utility::Call::force_batch { calls } => calls.iter().collect(),
-		pallet_utility::Call::as_derivative { call, .. } |
-		pallet_utility::Call::dispatch_as { call, .. } |
-		pallet_utility::Call::with_weight { call, .. } |
-		pallet_utility::Call::dispatch_as_fallible { call, .. } => vec![call.as_ref()],
-		pallet_utility::Call::if_else { main, fallback, .. } =>
-			vec![main.as_ref(), fallback.as_ref()],
-		_ => vec![],
-	}
-}
+use pallets_common::{sudo_inner_calls, utility_inner_calls};
 
 /// Recursively validate inner calls of wrapper extrinsics. TransactionStorage calls
 /// are required to pass their own signed validation; utility wrappers are recursed into.
 /// All other recognized calls are allowed through; unknown calls are rejected.
+///
+/// When `consume` is true (called from `prepare()`), authorization is consumed
+/// for TransactionStorage calls. When false (called from `validate()`), it only
+/// checks that authorization exists.
 ///
 /// NOTE: The allowlist here must be kept in sync with the top-level `validate()` match
 /// arms in [`ValidateSigned`]. If a new pallet call is accepted there, add it here too.
@@ -311,29 +295,65 @@ fn validate_inner_calls(
 	who: &AccountId,
 	call: &RuntimeCall,
 	depth: u32,
+	consume: bool,
 ) -> Result<(), TransactionValidityError> {
 	if depth >= MAX_INNER_CALL_DEPTH {
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {
-		RuntimeCall::TransactionStorage(inner_call) => {
-			TransactionStorage::validate_signed(who, inner_call).map(|_| ())
-		},
+		RuntimeCall::TransactionStorage(inner_call) =>
+			if consume {
+				TransactionStorage::pre_dispatch_signed(who, inner_call)
+			} else {
+				TransactionStorage::validate_signed(who, inner_call).map(|_| ())
+			},
 		RuntimeCall::Utility(utility_call) => {
 			for inner in utility_inner_calls(utility_call) {
-				validate_inner_calls(who, inner, depth + 1)?;
+				validate_inner_calls(who, inner, depth + 1, consume)?;
+			}
+			Ok(())
+		},
+		// Sudo has its own authorization (sudo key check). We only inspect
+		// inner calls for TransactionStorage authorization.
+		RuntimeCall::Sudo(sudo_call) => {
+			for inner in sudo_inner_calls(sudo_call) {
+				validate_storage_calls(who, inner, depth + 1, consume)?;
 			}
 			Ok(())
 		},
 		// Allow calls that are accepted at the top level.
-		RuntimeCall::System(..)
-		| RuntimeCall::Balances(..)
-		| RuntimeCall::Session(..)
-		// Sudo has its own authorization (sudo key check). Inner calls dispatched
-		// through it are protected by pallet-side defense-in-depth.
-		| RuntimeCall::Sudo(..) => Ok(()),
+		RuntimeCall::System(..) | RuntimeCall::Balances(..) | RuntimeCall::Session(..) => Ok(()),
 		// Reject anything else.
 		_ => Err(InvalidTransaction::Call.into()),
+	}
+}
+
+/// Validate only TransactionStorage calls within sudo wrappers.
+/// Non-storage calls are allowed through since sudo provides its own authorization.
+fn validate_storage_calls(
+	who: &AccountId,
+	call: &RuntimeCall,
+	depth: u32,
+	consume: bool,
+) -> Result<(), TransactionValidityError> {
+	if depth >= MAX_INNER_CALL_DEPTH {
+		return Err(InvalidTransaction::ExhaustsResources.into());
+	}
+	match call {
+		RuntimeCall::TransactionStorage(inner_call) =>
+			if consume {
+				TransactionStorage::pre_dispatch_signed(who, inner_call)
+			} else {
+				TransactionStorage::validate_signed(who, inner_call).map(|_| ())
+			},
+		RuntimeCall::Utility(utility_call) => {
+			for inner in utility_inner_calls(utility_call) {
+				validate_storage_calls(who, inner, depth + 1, consume)?;
+			}
+			Ok(())
+		},
+		// Allow all non-storage calls through.
+		_ => Ok(()),
 	}
 }
 
@@ -386,9 +406,20 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 
 			RuntimeCall::Utility(utility_call) => {
 				for inner in utility_inner_calls(utility_call) {
-					validate_inner_calls(who, inner, 0)?;
+					validate_inner_calls(who, inner, 0, false)?;
 				}
 				Ok(ValidTransaction::default())
+			},
+
+			RuntimeCall::Sudo(sudo_call) => {
+				for inner in sudo_inner_calls(sudo_call) {
+					validate_storage_calls(who, inner, 0, false)?;
+				}
+				Ok(ValidTransaction {
+					priority: storage::SudoPriority::get(),
+					longevity: storage::SudoLongevity::get(),
+					..Default::default()
+				})
 			},
 
 			_ => Ok(ValidTransaction::default()),
@@ -405,17 +436,21 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
-		// Enforce pre-dispatch for transaction storage calls and utility wrappers.
+		// Enforce pre-dispatch for transaction storage calls, consuming authorization.
 		if let Some(who) = origin.as_system_origin_signer() {
 			match call {
 				RuntimeCall::TransactionStorage(inner_call) => {
-					TransactionStorage::validate_signed(who, inner_call).map(|_| ())?;
+					TransactionStorage::pre_dispatch_signed(who, inner_call)?;
 				},
 				RuntimeCall::Utility(utility_call) => {
 					for inner in utility_inner_calls(utility_call) {
-						validate_inner_calls(who, inner, 0)?;
+						validate_inner_calls(who, inner, 0, true)?;
 					}
 				},
+				RuntimeCall::Sudo(sudo_call) =>
+					for inner in sudo_inner_calls(sudo_call) {
+						validate_storage_calls(who, inner, 0, true)?;
+					},
 				_ => {},
 			}
 		}

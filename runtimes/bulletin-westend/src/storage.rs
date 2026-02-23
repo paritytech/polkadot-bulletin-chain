@@ -41,6 +41,7 @@ parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
+	pub const SudoLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
 	pub const SetPurgeKeysLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;

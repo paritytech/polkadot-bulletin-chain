@@ -1114,8 +1114,9 @@ fn wrapped_store_requires_authorization() {
 			"store",
 		);
 
-		// sudo_as: attacker is NOT the sudo key → fails with RequireSudo at dispatch.
-		assert_ok_err(
+		// sudo_as: attacker is NOT the sudo key, but sudo_as inner store call
+		// is checked for TransactionStorage auth at validation time.
+		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
 				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
@@ -1123,26 +1124,20 @@ fn wrapped_store_requires_authorization() {
 					call: Box::new(store_call.clone()),
 				}),
 			),
-			pallet_sudo::Error::<Runtime>::RequireSudo.into(),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
 
-		// proxy: inner store blocked by pallet-side authorization check (Unauthorized).
-		// proxy::proxy swallows inner errors and always returns Ok(()).
-		assert_ok_ok(construct_and_apply_extrinsic(
-			attacker.pair(),
-			RuntimeCall::Proxy(pallet_proxy::Call::proxy {
-				real: sp_runtime::MultiAddress::Id(real.to_account_id()),
-				force_proxy_type: None,
-				call: Box::new(store_call),
-			}),
-		));
-
-		// Verify: no transactions were actually stored during this block.
-		let block = System::block_number();
-		advance_block();
-		assert!(
-			runtime::TransactionStorage::transaction_roots(block).is_none(),
-			"store: no data should have been stored via any wrapping mechanism",
+		// proxy: inner store is checked for TransactionStorage auth at validation time.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+					real: sp_runtime::MultiAddress::Id(real.to_account_id()),
+					force_proxy_type: None,
+					call: Box::new(store_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
 	});
 }
@@ -1170,8 +1165,9 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 			"store_with_cid_config",
 		);
 
-		// sudo_as: attacker is NOT the sudo key → RequireSudo.
-		assert_ok_err(
+		// sudo_as: inner store_with_cid_config is checked for TransactionStorage auth at
+		// validation.
+		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
 				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
@@ -1179,25 +1175,20 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 					call: Box::new(store_call.clone()),
 				}),
 			),
-			pallet_sudo::Error::<Runtime>::RequireSudo.into(),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
 
-		// proxy: inner store blocked by pallet-side auth check.
-		assert_ok_ok(construct_and_apply_extrinsic(
-			attacker.pair(),
-			RuntimeCall::Proxy(pallet_proxy::Call::proxy {
-				real: sp_runtime::MultiAddress::Id(real.to_account_id()),
-				force_proxy_type: None,
-				call: Box::new(store_call),
-			}),
-		));
-
-		// Verify: no transactions were stored.
-		let block = System::block_number();
-		advance_block();
-		assert!(
-			runtime::TransactionStorage::transaction_roots(block).is_none(),
-			"store_with_cid_config: no data should have been stored",
+		// proxy: inner store_with_cid_config is checked for TransactionStorage auth at validation.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+					real: sp_runtime::MultiAddress::Id(real.to_account_id()),
+					force_proxy_type: None,
+					call: Box::new(store_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
 	});
 }
@@ -1225,22 +1216,17 @@ fn wrapped_store_requires_authorization_even_for_relayer() {
 			"relayer store without auth",
 		);
 
-		// sudo_as: relayer IS the sudo key, so sudo_as dispatches the inner call.
-		// Inner store fails with Unauthorized (no storage auth). sudo_as swallows the error.
-		assert_ok_ok(construct_and_apply_extrinsic(
-			relayer.pair(),
-			RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
-				who: sp_runtime::MultiAddress::Id(relayer.to_account_id()),
-				call: Box::new(store_call),
-			}),
-		));
-
-		// Verify: no transactions were stored despite sudo_as passing.
-		let block = System::block_number();
-		advance_block();
-		assert!(
-			runtime::TransactionStorage::transaction_roots(block).is_none(),
-			"relayer store without auth: no data should have been stored via sudo_as",
+		// sudo_as: relayer IS the sudo key, but inner store is checked for
+		// TransactionStorage auth at validation time.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				relayer.pair(),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(relayer.to_account_id()),
+					call: Box::new(store_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
 	});
 }
@@ -1302,8 +1288,8 @@ fn wrapped_renew_requires_authorization() {
 			"renew",
 		);
 
-		// sudo_as: attacker is NOT the sudo key → RequireSudo.
-		assert_ok_err(
+		// sudo_as: inner renew is checked for TransactionStorage auth at validation.
+		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
 				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
@@ -1311,37 +1297,21 @@ fn wrapped_renew_requires_authorization() {
 					call: Box::new(renew_call.clone()),
 				}),
 			),
-			pallet_sudo::Error::<Runtime>::RequireSudo.into(),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
 
-		// proxy: inner renew blocked by pallet-side auth check (authorized has no remaining auth).
-		// proxy::proxy swallows inner errors and returns Ok(()).
-		assert_ok_ok(construct_and_apply_extrinsic(
-			attacker.pair(),
-			RuntimeCall::Proxy(pallet_proxy::Call::proxy {
-				real: sp_runtime::MultiAddress::Id(authorized.to_account_id()),
-				force_proxy_type: None,
-				call: Box::new(renew_call),
-			}),
-		));
-
-		// Verify: authorized account's auth was not magically restored (still consumed).
+		// proxy: inner renew is checked for TransactionStorage auth at validation.
 		assert_eq!(
-			runtime::TransactionStorage::account_authorization_extent(authorized.to_account_id()),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
-			"renew: no unauthorized renewal should have occurred",
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+					real: sp_runtime::MultiAddress::Id(authorized.to_account_id()),
+					force_proxy_type: None,
+					call: Box::new(renew_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 		);
-
-		// Verify: no Renewed event was emitted by any wrapping mechanism.
-		let has_renewed = System::events().iter().any(|record| {
-			matches!(
-				record.event,
-				runtime::RuntimeEvent::TransactionStorage(
-					pallet_transaction_storage::Event::Renewed { .. }
-				)
-			)
-		});
-		assert!(!has_renewed, "renew: no Renewed event should have been emitted");
 	});
 }
 
