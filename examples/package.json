@@ -20,7 +20,8 @@
     "ipfs-unixfs": "^11.2.0",
     "multiformats": "^13.4.1",
     "polkadot-api": "^1.22.0",
-    "smoldot": "file:../../smoldot/wasm-node/javascript",
+    "smoldot": "^2.0.40",
+    "smoldot-bitswap": "file:../../smoldot/wasm-node/javascript",
     "ws": "^8.18.0"
   },
   "devDependencies": {

@@ -1,21 +1,22 @@
 import assert from "assert";
-// A fork of smoldot with Bitswap support is needed for this test.
+// A fork of smoldot with Bitswap support is required for this test.
 // Put it into ../../smoldot (relative to this file) and make sure too run `npm run build` in
 // ../../smoldot/wasm-node/javascript.
-import * as smoldot from 'smoldot';
+import * as smoldot from 'smoldot-bitswap';
 import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store } from './api.js';
-import { setupKeyringAndSigners, waitForChainReady } from './common.js';
+import { setupKeyringAndSigners, waitForChainReady, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Constants
-const SYNC_WAIT_SEC = 15;
+// Increased sync time for parachain mode where smoldot needs more time to sync relay + para
+const SYNC_WAIT_SEC = 30;
 const SMOLDOT_LOG_LEVEL = 3; // 0=off, 1=error, 2=warn, 3=info, 4=debug, 5=trace
-const HTTP_IPFS_API = 'http://127.0.0.1:8080'   // Local IPFS HTTP gateway
 
 const TCP_BOOTNODE_REGEX = /^(\/ip[46]\/[^/]+)\/tcp\/(\d+)\/p2p\/(.+)$/;
 const WS_BOOTNODE_REGEX = /\/tcp\/\d+\/ws\/p2p\//;
@@ -97,7 +98,7 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
 
 async function fetchCidSmoldot(client, cid) {
     const cidString = cid.toString();
-    console.log(`⬇️ Fetching CID via smoldot 'bitswap_block' RPC: ${cidString}`);
+    console.log(`⬇️ Fetching CID via smoldot \`bitswap_block\` RPC: ${cidString}`);
     const result = await client._request("bitswap_block", [cidString]);
 
     // Make sure to strip the leading "0x" prefix.
@@ -107,10 +108,12 @@ async function fetchCidSmoldot(client, cid) {
 async function main() {
     await cryptoWaitReady();
 
+    logHeader('AUTHORIZE AND STORE TEST (Smoldot `bitswap_block` RPC)');
+
     // Get chainspec path from command line argument (required - main chain: relay for para, or solo)
     const chainSpecPath = process.argv[2];
     if (!chainSpecPath) {
-        console.error('❌ Error: Chain spec path is required as first argument');
+        logError('Chain spec path is required as first argument');
         console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path]');
         console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path>');
         console.error('  For solochains: <solo-chain-spec-path>');
@@ -120,20 +123,27 @@ async function main() {
     // Optional parachain chainspec path (only needed for parachains)
     const parachainSpecPath = process.argv[3] || null;
 
+    logConfig({
+        'Mode': 'Smoldot Light Client',
+        'Chain Spec': chainSpecPath,
+        'Parachain Spec': parachainSpecPath || 'N/A (solochain)',
+    });
+
     let sd, client, resultCode;
     try {
         // Init Smoldot PAPI client and typed api.
         ({ client, sd } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
-        // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?
+        // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?`
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
 
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
         await waitForChainReady(bulletinAPI);
 
-        // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Alice');
+        // Signers: Use Bob for the account being authorized to avoid nonce conflicts
+        // when running after ws test (which uses Alice) on the same chain.
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
@@ -144,17 +154,17 @@ async function main() {
             bulletinAPI,
             sudoSigner,
             whoAddress,
-            1,
-            BigInt(dataToStore.length)
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
         );
 
         // Store data.
-        const cid = await store(bulletinAPI, whoSigner, dataToStore);
-        console.log("✅ Data stored successfully with CID:", cid);
+        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
+        logSuccess(`Data stored successfully with CID: ${cid}`);
 
         // Read back from IPFS
         let downloadedContent = await fetchCidSmoldot(client, cid);
-        console.log("✅ Downloaded content:", downloadedContent.toString());
+        logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,
             expectedCid,
@@ -165,12 +175,13 @@ async function main() {
             downloadedContent.toString(),
             '❌ dataToStore does not match downloadedContent!'
         );
-        console.log(`✅ Verified content!`);
+        logSuccess('Verified content!');
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Authorize and Store Test (Smoldot `bitswap_block` RPC)');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();
