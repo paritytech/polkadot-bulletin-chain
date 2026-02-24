@@ -44,12 +44,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `frame_system_extensions`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> frame_system::ExtensionsWeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::frame_system::ExtensionsWeightInfo for WeightInfo<T> {
 	/// Storage: `System::BlockHash` (r:1 w:0)
 	/// Proof: `System::BlockHash` (`max_values`: None, `max_size`: Some(44), added: 2519, mode: `MaxEncodedLen`)
 	fn check_genesis() -> Weight {

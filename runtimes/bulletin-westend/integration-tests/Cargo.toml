@@ -8,19 +8,23 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-frame-support = { workspace = true, default-features = true }
-frame-system = { workspace = true, default-features = true }
-sp-core = { workspace = true, default-features = true }
-sp-keyring = { workspace = true, default-features = true }
-sp-runtime = { workspace = true, default-features = true }
-xcm = { workspace = true, default-features = true }
-xcm-executor = { workspace = true, default-features = true }
+# Polkadot SDK umbrella crate
+polkadot-sdk = { workspace = true, features = [
+	"std",
+	"cumulus-primitives-core",
+	"emulated-integration-tests-common",
+	"frame-support",
+	"parachains-common",
+	"parachains-runtimes-test-utils",
+	"sp-core",
+	"sp-keyring",
+	"sp-runtime",
+	"staging-xcm",
+	"staging-xcm-executor",
+	"xcm-emulator",
+] }
 
-# Emulator framework
-xcm-emulator = { workspace = true }
-emulated-integration-tests-common = { workspace = true }
-
-# Emulated chains from Polkadot SDK
+# Emulated chains from Polkadot SDK (not available through umbrella)
 westend-emulated-chain = { workspace = true }
 westend-runtime = { workspace = true }
 asset-hub-westend-emulated-chain = { workspace = true }
@@ -28,28 +32,17 @@ asset-hub-westend-runtime = { workspace = true }
 
 # Local runtime
 bulletin-westend-runtime = { workspace = true, default-features = true }
-cumulus-primitives-core = { workspace = true, default-features = true }
-parachains-common = { workspace = true, default-features = true }
 
 [features]
 runtime-benchmarks = [
+	"polkadot-sdk/runtime-benchmarks",
 	"asset-hub-westend-runtime/runtime-benchmarks",
 	"bulletin-westend-runtime/runtime-benchmarks",
-	"cumulus-primitives-core/runtime-benchmarks",
-	"frame-support/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
-	"parachains-common/runtime-benchmarks",
-	"sp-runtime/runtime-benchmarks",
 	"westend-runtime/runtime-benchmarks",
-	"xcm-executor/runtime-benchmarks",
-	"xcm/runtime-benchmarks",
 ]
 try-runtime = [
+	"polkadot-sdk/try-runtime",
 	"asset-hub-westend-runtime/try-runtime",
 	"bulletin-westend-runtime/try-runtime",
-	"frame-support/try-runtime",
-	"frame-system/try-runtime",
-	"parachains-common/try-runtime",
-	"sp-runtime/try-runtime",
 	"westend-runtime/try-runtime",
 ]

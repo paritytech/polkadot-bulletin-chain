@@ -22,19 +22,19 @@ use crate::{
 };
 
 use codec::Encode;
-use frame_support::{
+use crate::frame_support::{
 	parameter_types,
 	traits::{Contains, Equals, Everything, Nothing},
 	weights::Weight,
 };
-use sp_core::ConstU32;
-use sp_runtime::traits::Get;
-use xcm::latest::prelude::*;
-use xcm_builder::{
+use crate::sp_core::ConstU32;
+use crate::sp_runtime::traits::Get;
+use crate::xcm::latest::prelude::*;
+use crate::xcm_builder::{
 	AllowExplicitUnpaidExecutionFrom, FixedWeightBounds, FrameTransactionalProcessor,
 	LocalExporter, LocationAsSuperuser, TrailingSetTopicAsId, WithComputedOrigin,
 };
-use xcm_executor::{
+use crate::xcm_executor::{
 	traits::{WeightTrader, WithOriginFilter},
 	AssetsInHolding,
 };
@@ -101,7 +101,7 @@ pub type Barrier = TrailingSetTopicAsId<
 
 /// XCM executor configuration.
 pub struct XcmConfig;
-impl xcm_executor::Config for XcmConfig {
+impl crate::xcm_executor::Config for XcmConfig {
 	type RuntimeCall = RuntimeCall;
 	type XcmSender = XcmRouter;
 	type AssetTransactor = ();
@@ -175,7 +175,7 @@ impl<Execute: ExecuteXcm<Call>, Call, AsOrigin: Get<Location>> SendXcm
 		let weight_limit = Weight::MAX;
 
 		// execute the XCM program
-		let mut message_hash = message.using_encoded(sp_io::hashing::blake2_256);
+		let mut message_hash = message.using_encoded(crate::sp_io::hashing::blake2_256);
 		Execute::prepare_and_execute(
 			AsOrigin::get(),
 			message,
@@ -209,16 +209,16 @@ pub(crate) mod tests {
 		},
 		Runtime,
 	};
-	use bp_messages::{
+	use crate::bp_messages::{
 		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
 		MessageKey,
 	};
 	use codec::Encode;
-	use pallet_bridge_messages::Config as MessagesConfig;
-	use sp_keyring::Sr25519Keyring as AccountKeyring;
-	use xcm::{prelude::VersionedXcm, VersionedInteriorLocation};
-	use xcm_builder::{BridgeMessage, DispatchBlobError};
-	use xcm_executor::traits::{Properties, ShouldExecute};
+	use crate::pallet_bridge_messages::Config as MessagesConfig;
+	use crate::sp_keyring::Sr25519Keyring as AccountKeyring;
+	use crate::xcm::{prelude::VersionedXcm, VersionedInteriorLocation};
+	use crate::xcm_builder::{BridgeMessage, DispatchBlobError};
+	use crate::xcm_executor::traits::{Properties, ShouldExecute};
 
 	type Dispatcher =
 		<Runtime as MessagesConfig<WithPeoplePolkadotMessagesInstance>>::MessageDispatch;
@@ -246,7 +246,7 @@ pub(crate) mod tests {
 				.transact(
 					origin_kind,
 					None,
-					RuntimeCall::System(frame_system::Call::set_storage {
+					RuntimeCall::System(crate::frame_system::Call::set_storage {
 						items: vec![(test_storage_key(), test_storage_value())],
 					})
 					.encode(),
@@ -263,7 +263,7 @@ pub(crate) mod tests {
 	fn messages_from_people_polkadot_are_dispatched_and_executed() {
 		run_test(|| {
 			// Ok - dispatches OriginKind::Superuser from a people chain.
-			assert_eq!(frame_support::storage::unhashed::get_raw(&test_storage_key()), None);
+			assert_eq!(crate::frame_support::storage::unhashed::get_raw(&test_storage_key()), None);
 			assert_eq!(
 				Dispatcher::dispatch(DispatchMessage {
 					key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
@@ -278,7 +278,7 @@ pub(crate) mod tests {
 				XcmBlobMessageDispatchResult::Dispatched
 			);
 			assert_eq!(
-				frame_support::storage::unhashed::get_raw(&test_storage_key()),
+				crate::frame_support::storage::unhashed::get_raw(&test_storage_key()),
 				Some(test_storage_value()),
 			);
 		});
@@ -355,7 +355,7 @@ pub(crate) mod tests {
 			Transact {
 				origin_kind: OriginKind::Superuser,
 				fallback_max_weight: None,
-				call: RuntimeCall::System(frame_system::Call::remark { remark: vec![42] })
+				call: RuntimeCall::System(crate::frame_system::Call::remark { remark: vec![42] })
 					.encode()
 					.into(),
 			},

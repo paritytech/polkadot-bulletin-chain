@@ -1,4 +1,4 @@
-use sc_cli::RunCmd;
+use crate::sc_cli::RunCmd;
 
 #[derive(Debug, clap::Parser)]
 pub struct Cli {
@@ -14,33 +14,33 @@ pub struct Cli {
 pub enum Subcommand {
 	/// Key management cli utilities
 	#[command(subcommand)]
-	Key(sc_cli::KeySubcommand),
+	Key(crate::sc_cli::KeySubcommand),
 
 	/// Build a chain specification.
-	BuildSpec(sc_cli::BuildSpecCmd),
+	BuildSpec(crate::sc_cli::BuildSpecCmd),
 
 	/// Validate blocks.
-	CheckBlock(sc_cli::CheckBlockCmd),
+	CheckBlock(crate::sc_cli::CheckBlockCmd),
 
 	/// Export blocks.
-	ExportBlocks(sc_cli::ExportBlocksCmd),
+	ExportBlocks(crate::sc_cli::ExportBlocksCmd),
 
 	/// Export the state of a given block into a chain spec.
-	ExportState(sc_cli::ExportStateCmd),
+	ExportState(crate::sc_cli::ExportStateCmd),
 
 	/// Import blocks.
-	ImportBlocks(sc_cli::ImportBlocksCmd),
+	ImportBlocks(crate::sc_cli::ImportBlocksCmd),
 
 	/// Remove the whole chain.
-	PurgeChain(sc_cli::PurgeChainCmd),
+	PurgeChain(crate::sc_cli::PurgeChainCmd),
 
 	/// Revert the chain to a previous state.
-	Revert(sc_cli::RevertCmd),
+	Revert(crate::sc_cli::RevertCmd),
 
 	/// Sub-commands concerned with benchmarking.
 	#[command(subcommand)]
-	Benchmark(frame_benchmarking_cli::BenchmarkCmd),
+	Benchmark(crate::frame_benchmarking_cli::BenchmarkCmd),
 
 	/// Db meta columns information.
-	ChainInfo(sc_cli::ChainInfoCmd),
+	ChainInfo(crate::sc_cli::ChainInfoCmd),
 }

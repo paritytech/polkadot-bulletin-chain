@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `cumulus_pallet_xcmp_queue`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> cumulus_pallet_xcmp_queue::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::cumulus_pallet_xcmp_queue::WeightInfo for WeightInfo<T> {
 	/// Storage: `XcmpQueue::QueueConfig` (r:1 w:1)
 	/// Proof: `XcmpQueue::QueueConfig` (`max_values`: Some(1), `max_size`: Some(12), added: 507, mode: `MaxEncodedLen`)
 	fn set_config_with_u32() -> Weight {

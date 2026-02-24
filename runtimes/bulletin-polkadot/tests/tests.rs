@@ -1,3 +1,24 @@
+// Re-export SDK crates from umbrella for bare name usage
+use polkadot_sdk::bp_header_chain;
+use polkadot_sdk::bp_messages;
+use polkadot_sdk::bp_polkadot_core;
+use polkadot_sdk::bp_runtime;
+use polkadot_sdk::bp_test_utils;
+use polkadot_sdk::frame_support;
+use polkadot_sdk::frame_system;
+use polkadot_sdk::pallet_bridge_grandpa;
+use polkadot_sdk::pallet_bridge_messages;
+use polkadot_sdk::pallet_bridge_parachains;
+use polkadot_sdk::pallet_proxy;
+use polkadot_sdk::pallet_sudo;
+use polkadot_sdk::sp_consensus_grandpa;
+use polkadot_sdk::sp_core;
+use polkadot_sdk::sp_io;
+use polkadot_sdk::sp_keyring;
+use polkadot_sdk::sp_runtime;
+use polkadot_sdk::sp_tracing;
+use polkadot_sdk::sp_trie;
+
 use bp_header_chain::{justification::GrandpaJustification, HeaderChain, InitializationData};
 use bp_messages::{
 	ChainWithMessages, DeliveredMessages, InboundLaneData, LaneState, OutboundLaneData,

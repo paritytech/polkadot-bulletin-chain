@@ -5,12 +5,12 @@ use crate::{
 	node_primitives::Block,
 	service,
 };
-use frame_benchmarking_cli::{
+use crate::frame_benchmarking_cli::{
 	BenchmarkCmd, ExtrinsicFactory, SubstrateRemarkBuilder, SUBSTRATE_REFERENCE_HARDWARE,
 };
-use sc_cli::SubstrateCli;
-use sc_network::config::NetworkBackendType;
-use sc_service::PartialComponents;
+use crate::sc_cli::SubstrateCli;
+use crate::sc_network::config::NetworkBackendType;
+use crate::sc_service::PartialComponents;
 use std::{sync::Arc, time::Duration};
 
 /// Log target for this file.
@@ -41,7 +41,7 @@ impl SubstrateCli for Cli {
 		2017
 	}
 
-	fn load_spec(&self, id: &str) -> Result<Box<dyn sc_service::ChainSpec>, String> {
+	fn load_spec(&self, id: &str) -> Result<Box<dyn crate::sc_service::ChainSpec>, String> {
 		Ok(match id {
 			"dev" | "polkadot-dev" | "bulletin-polkadot-dev" => Box::new(chain_spec::bulletin_polkadot_development_config()?),
 			"local" | "polkadot-local" | "bulletin-polkadot-local" => Box::new(chain_spec::bulletin_polkadot_local_testnet_config()?),
@@ -60,7 +60,7 @@ impl SubstrateCli for Cli {
 
 /// Parse and run command line arguments
 #[allow(clippy::result_large_err)]
-pub fn run() -> sc_cli::Result<()> {
+pub fn run() -> crate::sc_cli::Result<()> {
 	let cli = Cli::from_args();
 
 	match &cli.subcommand {
@@ -109,8 +109,8 @@ pub fn run() -> sc_cli::Result<()> {
 				let PartialComponents { client, task_manager, backend, .. } =
 					service::new_partial(&config)?;
 				let aux_revert = Box::new(|client: Arc<service::FullClient>, backend, blocks| {
-					sc_consensus_babe::revert(client.clone(), backend, blocks)?;
-					sc_consensus_grandpa::revert(client, blocks)?;
+					crate::sc_consensus_babe::revert(client.clone(), backend, blocks)?;
+					crate::sc_consensus_grandpa::revert(client, blocks)?;
 					Ok(())
 				});
 				Ok((cmd.run(client, backend, Some(aux_revert)), task_manager))
@@ -132,7 +132,7 @@ pub fn run() -> sc_cli::Result<()> {
 							)
 						}
 
-						cmd.run_with_spec::<sp_runtime::traits::HashingFor<Block>, ()>(Some(
+						cmd.run_with_spec::<crate::sp_runtime::traits::HashingFor<Block>, ()>(Some(
 							config.chain_spec,
 						))
 					},
@@ -157,7 +157,7 @@ pub fn run() -> sc_cli::Result<()> {
 					},
 					BenchmarkCmd::Overhead(cmd) => {
 						if cmd.params.runtime.is_some() {
-							return Err(sc_cli::Error::Input(
+							return Err(crate::sc_cli::Error::Input(
 								"Bulletin binary does not support `--runtime` flag for `benchmark overhead`. Please provide a chain spec or use the `frame-omni-bencher`."
 									.into(),
 							))
@@ -218,8 +218,8 @@ pub fn run() -> sc_cli::Result<()> {
 					}
 				}
 
-				service::new_full::<sc_network::Litep2pNetworkBackend>(config)
-					.map_err(sc_cli::Error::Service)
+				service::new_full::<crate::sc_network::Litep2pNetworkBackend>(config)
+					.map_err(crate::sc_cli::Error::Service)
 			})
 		},
 	}

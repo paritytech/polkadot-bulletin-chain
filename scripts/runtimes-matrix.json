@@ -3,6 +3,7 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "path": "runtimes/bulletin-polkadot",
+    "benchmarks_default_template": "templates/umbrella-weight-template.hbs",
     "blocktime": 6000,
     "integration_tests": true,
     "benchmarks_templates": {
@@ -17,6 +18,7 @@
     "name": "bulletin-westend",
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
+    "benchmarks_default_template": "templates/umbrella-weight-template.hbs",
     "uris": [
       "wss://westend-bulletin-rpc.polkadot.io"
     ],
@@ -31,6 +33,7 @@
     "name": "bulletin-paseo",
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
+    "benchmarks_default_template": "templates/umbrella-weight-template.hbs",
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],

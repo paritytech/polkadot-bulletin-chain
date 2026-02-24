@@ -24,14 +24,14 @@ use crate::{
 	BulletinWestendParaReceiver, BulletinWestendParaSender, WestendMockNet, BULLETIN_PARA_ID,
 };
 use asset_hub_westend_emulated_chain::AssetHubWestend;
-use frame_support::{
+use crate::frame_support::{
 	assert_ok,
 	traits::fungible::{Inspect, Mutate},
 };
-use parachains_common::Balance;
-use xcm::{latest::prelude::*, VersionedXcm};
-use xcm_emulator::{Chain, Network, Parachain, TestExt};
-use xcm_executor::traits::TransferType;
+use crate::parachains_common::Balance;
+use crate::xcm::{latest::prelude::*, VersionedXcm};
+use crate::xcm_emulator::{Chain, Network, Parachain, TestExt};
+use crate::xcm_executor::traits::TransferType;
 
 /// Asset Hub Westend parachain ID.
 const ASSET_HUB_PARA_ID: u32 = 1000;

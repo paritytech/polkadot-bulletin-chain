@@ -17,11 +17,11 @@
 
 use crate::*;
 use alloc::{vec, vec::Vec};
-use cumulus_primitives_core::ParaId;
-use frame_support::build_struct_json_patch;
-use parachains_common::{AccountId, AuraId};
-use sp_genesis_builder::PresetId;
-use sp_keyring::Sr25519Keyring;
+use crate::cumulus_primitives_core::ParaId;
+use crate::frame_support::build_struct_json_patch;
+use crate::parachains_common::{AccountId, AuraId};
+use crate::sp_genesis_builder::PresetId;
+use crate::sp_keyring::Sr25519Keyring;
 use testnet_parachains_constants::westend::{
 	currency::UNITS as WND, xcm_version::SAFE_XCM_VERSION,
 };

@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `pallet_bridge_messages`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> pallet_bridge_messages::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::pallet_bridge_messages::WeightInfo for WeightInfo<T> {
 	/// Storage: `BridgePolkadotMessages::PalletOperatingMode` (r:1 w:0)
 	/// Proof: `BridgePolkadotMessages::PalletOperatingMode` (`max_values`: Some(1), `max_size`: Some(2), added: 497, mode: `MaxEncodedLen`)
 	/// Storage: `BridgePolkadotParachains::ImportedParaHeads` (r:1 w:0)

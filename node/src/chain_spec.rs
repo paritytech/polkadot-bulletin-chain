@@ -1,6 +1,6 @@
-use sc_chain_spec::ChainSpecExtension;
-use sc_service::ChainType;
-use sp_runtime::{Deserialize, Serialize};
+use crate::sc_chain_spec::ChainSpecExtension;
+use crate::sc_service::ChainType;
+use crate::sp_runtime::{Deserialize, Serialize};
 
 const PROTOCOL_ID: &str = "dot-bulletin";
 
@@ -14,11 +14,11 @@ pub struct Extensions {
 	/// The light sync state.
 	///
 	/// This value will be set by the `sync-state rpc` implementation.
-	pub light_sync_state: sc_sync_state_rpc::LightSyncStateExtension,
+	pub light_sync_state: crate::sc_sync_state_rpc::LightSyncStateExtension,
 }
 
 /// Specialized `ChainSpec`. This is a specialization of the general Substrate ChainSpec type.
-pub type ChainSpec = sc_service::GenericChainSpec<Extensions>;
+pub type ChainSpec = crate::sc_service::GenericChainSpec<Extensions>;
 
 pub fn bulletin_polkadot_development_config() -> Result<ChainSpec, String> {
 	Ok(ChainSpec::builder(
@@ -30,7 +30,7 @@ pub fn bulletin_polkadot_development_config() -> Result<ChainSpec, String> {
 	.with_id("dev")
 	.with_chain_type(ChainType::Development)
 	.with_protocol_id(PROTOCOL_ID)
-	.with_genesis_config_preset_name(sp_genesis_builder::DEV_RUNTIME_PRESET)
+	.with_genesis_config_preset_name(crate::sp_genesis_builder::DEV_RUNTIME_PRESET)
 	.build())
 }
 
@@ -44,7 +44,7 @@ pub fn bulletin_polkadot_local_testnet_config() -> Result<ChainSpec, String> {
 	.with_id("local_testnet")
 	.with_chain_type(ChainType::Local)
 	.with_protocol_id(PROTOCOL_ID)
-	.with_genesis_config_preset_name(sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET)
+	.with_genesis_config_preset_name(crate::sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET)
 	.build())
 }
 

@@ -6,11 +6,11 @@ use crate::{
 };
 use alloc::{vec, vec::Vec};
 use scale_info::prelude::format;
-use sp_consensus_babe::AuthorityId as BabeId;
-use sp_consensus_grandpa::AuthorityId as GrandpaId;
-use sp_core::{sr25519, Pair, Public};
-use sp_genesis_builder::PresetId;
-use sp_runtime::traits::{IdentifyAccount, Verify};
+use crate::sp_consensus_babe::AuthorityId as BabeId;
+use crate::sp_consensus_grandpa::AuthorityId as GrandpaId;
+use crate::sp_core::{sr25519, Pair, Public};
+use crate::sp_genesis_builder::PresetId;
+use crate::sp_runtime::traits::{IdentifyAccount, Verify};
 
 type AccountPublic = <Signature as Verify>::Signer;
 
@@ -94,7 +94,7 @@ fn testnet_genesis(
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 	let patch = match id.as_ref() {
-		sp_genesis_builder::DEV_RUNTIME_PRESET => testnet_genesis(
+		crate::sp_genesis_builder::DEV_RUNTIME_PRESET => testnet_genesis(
 			// Initial PoA authorities
 			vec![authority_keys_from_seed("Alice")],
 			// Bridges pallet owner
@@ -102,7 +102,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			// Sudo
 			Some(get_account_id_from_seed::<sr25519::Public>("Alice")),
 		),
-		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => testnet_genesis(
+		crate::sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => testnet_genesis(
 			// Initial PoA authorities
 			vec![
 				authority_keys_from_seed("Alice"),
@@ -127,7 +127,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 /// List of supported presets.
 pub fn preset_names() -> Vec<PresetId> {
 	vec![
-		PresetId::from(sp_genesis_builder::DEV_RUNTIME_PRESET),
-		PresetId::from(sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET),
+		PresetId::from(crate::sp_genesis_builder::DEV_RUNTIME_PRESET),
+		PresetId::from(crate::sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET),
 	]
 }

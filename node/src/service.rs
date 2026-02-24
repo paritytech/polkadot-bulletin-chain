@@ -2,25 +2,25 @@
 
 use crate::{fake_runtime_api::RuntimeApi, node_primitives::Block};
 use futures::FutureExt;
-use sc_client_api::{Backend, BlockBackend};
-use sc_consensus_grandpa::SharedVoterState;
-use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
-use sc_telemetry::{Telemetry, TelemetryWorker};
-use sc_transaction_pool_api::OffchainTransactionPoolFactory;
-use sp_api::{ApiExt, ProvideRuntimeApi};
-use sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
-use sp_transaction_storage_proof::runtime_api::TransactionStorageApi;
+use crate::sc_client_api::{Backend, BlockBackend};
+use crate::sc_consensus_grandpa::SharedVoterState;
+use crate::sc_service::{error::Error as ServiceError, Configuration, TaskManager};
+use crate::sc_telemetry::{Telemetry, TelemetryWorker};
+use crate::sc_transaction_pool_api::OffchainTransactionPoolFactory;
+use crate::sp_api::{ApiExt, ProvideRuntimeApi};
+use crate::sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
+use crate::sp_transaction_storage_proof::runtime_api::TransactionStorageApi;
 use std::{sync::Arc, time::Duration};
 
-pub(crate) type FullClient = sc_service::TFullClient<
+pub(crate) type FullClient = crate::sc_service::TFullClient<
 	Block,
 	RuntimeApi,
-	sc_executor::WasmExecutor<sp_io::SubstrateHostFunctions>,
+	crate::sc_executor::WasmExecutor<crate::sp_io::SubstrateHostFunctions>,
 >;
-type FullBackend = sc_service::TFullBackend<Block>;
-type FullSelectChain = sc_consensus::LongestChain<FullBackend, Block>;
+type FullBackend = crate::sc_service::TFullBackend<Block>;
+type FullSelectChain = crate::sc_consensus::LongestChain<FullBackend, Block>;
 type FullGrandpaBlockImport =
-	sc_consensus_grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>;
+	crate::sc_consensus_grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>;
 
 /// The minimum period of blocks on which justifications will be
 /// imported and generated.
@@ -31,23 +31,23 @@ const GRANDPA_JUSTIFICATION_PERIOD: u32 = 512;
 pub fn new_partial(
 	config: &Configuration,
 ) -> Result<
-	sc_service::PartialComponents<
+	crate::sc_service::PartialComponents<
 		FullClient,
 		FullBackend,
 		FullSelectChain,
-		sc_consensus::DefaultImportQueue<Block>,
-		sc_transaction_pool::TransactionPoolHandle<Block, FullClient>,
+		crate::sc_consensus::DefaultImportQueue<Block>,
+		crate::sc_transaction_pool::TransactionPoolHandle<Block, FullClient>,
 		(
-			sc_consensus_babe::BabeBlockImport<
+			crate::sc_consensus_babe::BabeBlockImport<
 				Block,
 				FullClient,
 				FullGrandpaBlockImport,
 				BabeCreateInherentDataProviders<Block>,
 				FullSelectChain,
 			>,
-			sc_consensus_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
-			sc_consensus_babe::BabeLink<Block>,
-			sc_consensus_babe::BabeWorkerHandle<Block>,
+			crate::sc_consensus_grandpa::LinkHalf<Block, FullClient, FullSelectChain>,
+			crate::sc_consensus_babe::BabeLink<Block>,
+			crate::sc_consensus_babe::BabeWorkerHandle<Block>,
 			Option<Telemetry>,
 		),
 	>,
@@ -57,16 +57,16 @@ pub fn new_partial(
 		.telemetry_endpoints
 		.clone()
 		.filter(|x| !x.is_empty())
-		.map(|endpoints| -> Result<_, sc_telemetry::Error> {
+		.map(|endpoints| -> Result<_, crate::sc_telemetry::Error> {
 			let worker = TelemetryWorker::new(16)?;
 			let telemetry = worker.handle().new_telemetry(endpoints);
 			Ok((worker, telemetry))
 		})
 		.transpose()?;
 
-	let executor = sc_service::new_wasm_executor::<sp_io::SubstrateHostFunctions>(&config.executor);
+	let executor = crate::sc_service::new_wasm_executor::<crate::sp_io::SubstrateHostFunctions>(&config.executor);
 	let (client, backend, keystore_container, task_manager) =
-		sc_service::new_full_parts::<Block, RuntimeApi, _>(
+		crate::sc_service::new_full_parts::<Block, RuntimeApi, _>(
 			config,
 			telemetry.as_ref().map(|(_, telemetry)| telemetry.handle()),
 			executor,
@@ -78,10 +78,10 @@ pub fn new_partial(
 		telemetry
 	});
 
-	let select_chain = sc_consensus::LongestChain::new(backend.clone());
+	let select_chain = crate::sc_consensus::LongestChain::new(backend.clone());
 
 	let transaction_pool = Arc::from(
-		sc_transaction_pool::Builder::new(
+		crate::sc_transaction_pool::Builder::new(
 			task_manager.spawn_essential_handle(),
 			client.clone(),
 			config.role.is_authority().into(),
@@ -91,7 +91,7 @@ pub fn new_partial(
 		.build(),
 	);
 
-	let (grandpa_block_import, grandpa_link) = sc_consensus_grandpa::block_import(
+	let (grandpa_block_import, grandpa_link) = crate::sc_consensus_grandpa::block_import(
 		client.clone(),
 		GRANDPA_JUSTIFICATION_PERIOD,
 		&client,
@@ -100,15 +100,15 @@ pub fn new_partial(
 	)?;
 	let justification_import = grandpa_block_import.clone();
 
-	let babe_config = sc_consensus_babe::configuration(&*client)?;
+	let babe_config = crate::sc_consensus_babe::configuration(&*client)?;
 	let slot_duration = babe_config.slot_duration();
-	let (block_import, babe_link) = sc_consensus_babe::block_import(
+	let (block_import, babe_link) = crate::sc_consensus_babe::block_import(
 		babe_config,
 		grandpa_block_import,
 		client.clone(),
 		Arc::new(move |_, _| async move {
-			let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
-			let slot = sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
+			let timestamp = crate::sp_timestamp::InherentDataProvider::from_system_time();
+			let slot = crate::sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
 				*timestamp,
 				slot_duration,
 			);
@@ -120,7 +120,7 @@ pub fn new_partial(
 
 	let slot_duration = babe_link.config().slot_duration();
 	let (import_queue, babe_worker_handle) =
-		sc_consensus_babe::import_queue(sc_consensus_babe::ImportQueueParams {
+		crate::sc_consensus_babe::import_queue(crate::sc_consensus_babe::ImportQueueParams {
 			link: babe_link.clone(),
 			block_import: block_import.clone(),
 			justification_import: Some(Box::new(justification_import)),
@@ -131,7 +131,7 @@ pub fn new_partial(
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
 		})?;
 
-	Ok(sc_service::PartialComponents {
+	Ok(crate::sc_service::PartialComponents {
 		client,
 		backend,
 		task_manager,
@@ -146,11 +146,11 @@ pub fn new_partial(
 /// Builds a new service for a full client.
 #[allow(clippy::result_large_err)]
 pub fn new_full<
-	N: sc_network::NetworkBackend<Block, <Block as sp_runtime::traits::Block>::Hash>,
+	N: crate::sc_network::NetworkBackend<Block, <Block as crate::sp_runtime::traits::Block>::Hash>,
 >(
 	config: Configuration,
 ) -> Result<TaskManager, ServiceError> {
-	let sc_service::PartialComponents {
+	let crate::sc_service::PartialComponents {
 		client,
 		backend,
 		mut task_manager,
@@ -161,19 +161,19 @@ pub fn new_full<
 		other: (block_import, grandpa_link, babe_link, babe_worker_handle, mut telemetry),
 	} = new_partial(&config)?;
 
-	let mut net_config = sc_network::config::FullNetworkConfiguration::<_, _, N>::new(
+	let mut net_config = crate::sc_network::config::FullNetworkConfiguration::<_, _, N>::new(
 		&config.network,
 		config.prometheus_registry().cloned(),
 	);
 	let metrics = N::register_notification_metrics(config.prometheus_registry());
 
 	let peer_store_handle = net_config.peer_store_handle();
-	let grandpa_protocol_name = sc_consensus_grandpa::protocol_standard_name(
+	let grandpa_protocol_name = crate::sc_consensus_grandpa::protocol_standard_name(
 		&client.block_hash(0).ok().flatten().expect("Genesis block exists; qed"),
 		&config.chain_spec,
 	);
 	let (grandpa_protocol_config, grandpa_notification_service) =
-		sc_consensus_grandpa::grandpa_peers_set_config::<_, N>(
+		crate::sc_consensus_grandpa::grandpa_peers_set_config::<_, N>(
 			grandpa_protocol_name.clone(),
 			metrics.clone(),
 			peer_store_handle,
@@ -181,7 +181,7 @@ pub fn new_full<
 	net_config.add_notification_protocol(grandpa_protocol_config);
 
 	let (network, system_rpc_tx, tx_handler_controller, sync_service) =
-		sc_service::build_network(sc_service::BuildNetworkParams {
+		crate::sc_service::build_network(crate::sc_service::BuildNetworkParams {
 			config: &config,
 			net_config,
 			client: client.clone(),
@@ -197,7 +197,7 @@ pub fn new_full<
 
 	if config.offchain_worker.enabled {
 		let offchain_workers =
-			sc_offchain::OffchainWorkers::new(sc_offchain::OffchainWorkerOptions {
+			crate::sc_offchain::OffchainWorkers::new(crate::sc_offchain::OffchainWorkerOptions {
 				runtime_api_provider: client.clone(),
 				is_validator: config.role.is_authority(),
 				keystore: Some(keystore_container.keystore()),
@@ -236,7 +236,7 @@ pub fn new_full<
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
 		let shared_voter_state = shared_voter_state.clone();
 
-		let finality_proof_provider = sc_consensus_grandpa::FinalityProofProvider::new_for_service(
+		let finality_proof_provider = crate::sc_consensus_grandpa::FinalityProofProvider::new_for_service(
 			backend.clone(),
 			Some(shared_authority_set.clone()),
 		);
@@ -263,7 +263,7 @@ pub fn new_full<
 		})
 	};
 
-	let _rpc_handlers = sc_service::spawn_tasks(sc_service::SpawnTasksParams {
+	let _rpc_handlers = crate::sc_service::spawn_tasks(crate::sc_service::SpawnTasksParams {
 		network: Arc::new(network.clone()),
 		client: client.clone(),
 		keystore: keystore_container.keystore(),
@@ -280,7 +280,7 @@ pub fn new_full<
 	})?;
 
 	if role.is_authority() {
-		let proposer_factory = sc_basic_authorship::ProposerFactory::new(
+		let proposer_factory = crate::sc_basic_authorship::ProposerFactory::new(
 			task_manager.spawn_handle(),
 			client.clone(),
 			transaction_pool.clone(),
@@ -290,7 +290,7 @@ pub fn new_full<
 
 		let client_clone = client.clone();
 		let slot_duration = babe_link.config().slot_duration();
-		let babe_config = sc_consensus_babe::BabeParams {
+		let babe_config = crate::sc_consensus_babe::BabeParams {
 			keystore: keystore_container.keystore(),
 			client: client.clone(),
 			select_chain,
@@ -301,10 +301,10 @@ pub fn new_full<
 			create_inherent_data_providers: move |parent, ()| {
 				let client_clone = client_clone.clone();
 				async move {
-					let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
+					let timestamp = crate::sp_timestamp::InherentDataProvider::from_system_time();
 
 					let slot =
-						sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
+						crate::sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
 							*timestamp,
 							slot_duration,
 						);
@@ -326,7 +326,7 @@ pub fn new_full<
 						}
 					};
 					let storage_proof =
-						sp_transaction_storage_proof::registration::new_data_provider(
+						crate::sp_transaction_storage_proof::registration::new_data_provider(
 							&*client_clone,
 							&parent,
 							retention_period,
@@ -338,12 +338,12 @@ pub fn new_full<
 			force_authoring,
 			backoff_authoring_blocks,
 			babe_link,
-			block_proposal_slot_portion: sc_consensus_babe::SlotProportion::new(0.5),
+			block_proposal_slot_portion: crate::sc_consensus_babe::SlotProportion::new(0.5),
 			max_block_proposal_slot_portion: None,
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
 		};
 
-		let babe = sc_consensus_babe::start_babe(babe_config)?;
+		let babe = crate::sc_consensus_babe::start_babe(babe_config)?;
 		task_manager.spawn_essential_handle().spawn_blocking(
 			"babe-proposer",
 			Some("block-authoring"),
@@ -356,7 +356,7 @@ pub fn new_full<
 		// need a keystore, regardless of which protocol we use below.
 		let keystore = if role.is_authority() { Some(keystore_container.keystore()) } else { None };
 
-		let grandpa_config = sc_consensus_grandpa::Config {
+		let grandpa_config = crate::sc_consensus_grandpa::Config {
 			// FIXME #1578 make this available through chainspec
 			gossip_duration: Duration::from_millis(333),
 			justification_generation_period: 512,
@@ -374,13 +374,13 @@ pub fn new_full<
 		// and vote data availability than the observer. The observer has not
 		// been tested extensively yet and having most nodes in a network run it
 		// could lead to finality stalls.
-		let grandpa_config = sc_consensus_grandpa::GrandpaParams {
+		let grandpa_config = crate::sc_consensus_grandpa::GrandpaParams {
 			config: grandpa_config,
 			link: grandpa_link,
 			network,
 			sync: Arc::new(sync_service),
 			notification_service: grandpa_notification_service,
-			voting_rule: sc_consensus_grandpa::VotingRulesBuilder::default().build(),
+			voting_rule: crate::sc_consensus_grandpa::VotingRulesBuilder::default().build(),
 			prometheus_registry,
 			shared_voter_state,
 			telemetry: telemetry.as_ref().map(|x| x.handle()),
@@ -392,7 +392,7 @@ pub fn new_full<
 		task_manager.spawn_essential_handle().spawn_blocking(
 			"grandpa-voter",
 			None,
-			sc_consensus_grandpa::run_grandpa_voter(grandpa_config)?,
+			crate::sc_consensus_grandpa::run_grandpa_voter(grandpa_config)?,
 		);
 	}
 
