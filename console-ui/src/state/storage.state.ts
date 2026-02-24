@@ -2,7 +2,7 @@ import { BehaviorSubject, combineLatest, switchMap, of, from, catchError } from 
 import { bind } from "@react-rxjs/core";
 import { api$ } from "./chain.state";
 import { selectedAccount$ } from "./wallet.state";
-import { SS58String, TypedApi, Enum } from "polkadot-api";
+import { SS58String, TypedApi, Enum, Binary } from "polkadot-api";
 import { bulletin_westend } from "@polkadot-api/descriptors";
 
 export interface Authorization {
@@ -63,7 +63,48 @@ export async function fetchAccountAuthorization(
   }
 }
 
-// Preimage authorizations
+// Single preimage authorization check (for Upload page unsigned tx flow)
+const preimageAuthSubject = new BehaviorSubject<Authorization | null>(null);
+const preimageAuthLoadingSubject = new BehaviorSubject<boolean>(false);
+
+export async function checkPreimageAuthorization(
+  api: TypedApi<typeof bulletin_westend>,
+  contentHash: Uint8Array
+): Promise<Authorization | null> {
+  preimageAuthLoadingSubject.next(true);
+
+  try {
+    const auth = await api.query.TransactionStorage.Authorizations.getValue(
+      Enum("Preimage", Binary.fromBytes(contentHash))
+    );
+
+    if (!auth) {
+      preimageAuthSubject.next(null);
+      return null;
+    }
+
+    const authorization: Authorization = {
+      transactions: BigInt(auth.extent.transactions),
+      bytes: auth.extent.bytes,
+      expiresAt: auth.expiration ?? undefined,
+    };
+
+    preimageAuthSubject.next(authorization);
+    return authorization;
+  } catch (err) {
+    console.error("Failed to check preimage authorization:", err);
+    preimageAuthSubject.next(null);
+    return null;
+  } finally {
+    preimageAuthLoadingSubject.next(false);
+  }
+}
+
+export function clearPreimageAuth(): void {
+  preimageAuthSubject.next(null);
+}
+
+// Preimage authorizations (list view for Authorizations page)
 const preimageAuthsSubject = new BehaviorSubject<PreimageAuthorization[]>([]);
 const preimageAuthsLoadingSubject = new BehaviorSubject<boolean>(false);
 
@@ -164,6 +205,8 @@ combineLatest([api$, selectedAccount$]).pipe(
 export const [useAuthorization] = bind(authorizationSubject, null);
 export const [useAuthorizationLoading] = bind(authorizationLoadingSubject, false);
 export const [useAuthorizationError] = bind(authorizationErrorSubject, undefined);
+export const [usePreimageAuth] = bind(preimageAuthSubject, null);
+export const [usePreimageAuthLoading] = bind(preimageAuthLoadingSubject, false);
 export const [usePreimageAuthorizations] = bind(preimageAuthsSubject, []);
 export const [usePreimageAuthsLoading] = bind(preimageAuthsLoadingSubject, false);
 export const [useRecentStorageEvents] = bind(recentEventsSubject, []);

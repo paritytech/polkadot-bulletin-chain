@@ -49,6 +49,12 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
         endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
         lightClient: false,
       },
+      previewnet: {
+        id: "previewnet",
+        name: "Bulletin Previewnet",
+        endpoints: ["wss://previewnet.substrate.dev/bulletin"],
+        lightClient: false,
+      },
       dotspark: {
         id: "dotspark",
         name: "Bulletin (Prototypes dotspark)",
@@ -90,6 +96,7 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     local: bulletin_westend,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
+    previewnet: bulletin_westend,
     dotspark: bulletin_dotspark,
   },
   web3storage: {
@@ -156,9 +163,24 @@ export interface ChainState {
   ss58Format?: number;
 }
 
-const initialStorageType: StorageType = "bulletin";
+const STORAGE_KEY_STORAGE_TYPE = "bulletin-storage-type";
+const STORAGE_KEY_NETWORK = "bulletin-network";
+
+function loadInitialSelection(): { storageType: StorageType; network: Network } {
+  const savedType = localStorage.getItem(STORAGE_KEY_STORAGE_TYPE) as StorageType | null;
+  const storageType = savedType && STORAGE_CONFIGS[savedType] ? savedType : "bulletin";
+  const config = STORAGE_CONFIGS[storageType];
+
+  const savedNetwork = localStorage.getItem(STORAGE_KEY_NETWORK);
+  const networkId = savedNetwork && config.networks[savedNetwork] ? savedNetwork : config.defaultNetwork;
+
+  return { storageType, network: config.networks[networkId]! };
+}
+
+const initial = loadInitialSelection();
+const initialStorageType = initial.storageType;
 const initialConfig = STORAGE_CONFIGS[initialStorageType];
-const initialNetwork = initialConfig.networks[initialConfig.defaultNetwork]!;
+const initialNetwork = initial.network;
 
 const storageTypeSubject = new BehaviorSubject<StorageType>(initialStorageType);
 const networksSubject = new BehaviorSubject<Record<string, Network>>(initialConfig.networks);
@@ -198,6 +220,7 @@ export function switchStorageType(type: StorageType): void {
   const config = STORAGE_CONFIGS[type];
   storageTypeSubject.next(type);
   networksSubject.next(config.networks);
+  localStorage.setItem(STORAGE_KEY_STORAGE_TYPE, type);
   connectToNetwork(config.defaultNetwork);
 }
 
@@ -222,6 +245,7 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
   }
 
   networkSubject.next(network);
+  localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
   statusSubject.next("connecting");
   errorSubject.next(undefined);
   apiSubject.next(undefined);

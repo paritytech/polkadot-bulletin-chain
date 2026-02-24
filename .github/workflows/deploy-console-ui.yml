@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "console-ui/**"
+      - "docs/**"
       - ".github/workflows/deploy-console-ui.yml"
   workflow_dispatch:
 
