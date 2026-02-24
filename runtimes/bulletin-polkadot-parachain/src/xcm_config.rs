@@ -206,6 +206,7 @@ pub type WaivedLocations = (
 	Equals<RootLocation>,
 	RelayOrOtherSystemParachains<AllSiblingSystemParachains, Runtime>,
 	Equals<RelayTreasuryLocation>,
+	Equals<AssetHubLocation>,
 );
 
 /// Helper type to match DOT (relay native token) from Asset Hub.

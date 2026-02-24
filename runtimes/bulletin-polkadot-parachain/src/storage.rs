@@ -16,15 +16,26 @@
 
 //! Storage-specific configurations.
 
-use super::{Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use alloc::vec::Vec;
 use crate::xcm_config::PeopleLocation;
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, Equals},
+	traits::{EitherOfDiverse, Equals, SortedMembers},
 };
+use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
 use pallets_common::NoCurrency;
+use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+
+/// Provides test accounts for use with `EnsureSignedBy`.
+pub struct TestAccounts;
+impl SortedMembers<AccountId> for TestAccounts {
+	fn sorted_members() -> Vec<AccountId> {
+		alloc::vec![Sr25519Keyring::Alice.to_account_id()]
+	}
+}
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
@@ -48,16 +59,17 @@ impl pallet_transaction_storage::Config for Runtime {
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
-	/// Set to 1 MB for now to match BitSwap's recommended max
-	type MaxTransactionSize = crate::ConstU32<{ 1 * 1024 * 1024 }>;
+	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
-		// Root can do whatever.
-		crate::EnsureRoot<Self::AccountId>,
-		// People chain can also handle authorizations.
-		EnsureXcm<Equals<PeopleLocation>>,
-		// TODO: Open this to other origins or locations (e.g., a smart contract on AH).
-		// First we need to determine the proper incentives
+		EitherOfDiverse<
+			// Root can do whatever.
+			crate::EnsureRoot<Self::AccountId>,
+			// People chain can also handle authorizations.
+			EnsureXcm<Equals<PeopleLocation>>,
+		>,
+		// Test accounts can also authorize for testing purposes.
+		EnsureSignedBy<TestAccounts, Self::AccountId>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
