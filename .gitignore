@@ -10,14 +10,19 @@
 .envrc
 .direnv
 .idea
+.vscode
 
 # Node.js
 **/node_modules/
-package-lock.json
+tsconfig.tsbuildinfo
 
-# Polkadot API generated files
-.papi/
+# Polkadot API generated files (descriptors dir is gitignored inside .papi)
 
 # Local test files
 kubo/
 zombienet-*
+
+# Build outputs
+**/dist/
+console-ui/.vite/
+console-ui/tsconfig.tsbuildinfo
