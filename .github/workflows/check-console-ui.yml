@@ -1,6 +1,11 @@
 name: Check Console UI
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "console-ui/**"
+      - ".github/workflows/check-console-ui.yml"
   pull_request:
     branches: [main]
     paths:

@@ -6,13 +6,7 @@ name: Check Runtime Migrations
 on:
   push:
     branches: [main, "release-*"]
-    paths-ignore:
-      - "console-ui/**"
-      - "docs/**"
   pull_request:
-    paths-ignore:
-      - "console-ui/**"
-      - "docs/**"
   workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'  # Daily at 5 AM UTC
@@ -27,7 +21,35 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            FILES=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files --paginate --jq '.[].filename')
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            FILES=$(gh api repos/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.event.after }} --jq '.files[].filename')
+          else
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if echo "$FILES" | grep -qvE '^(console-ui/|docs/)'; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+
   runtime-matrix:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
@@ -212,7 +234,10 @@ jobs:
   confirmMigrationsPassed:
     runs-on: ubuntu-latest
     name: All migrations passed
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [check-migrations]
+    if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    needs: [changes, check-migrations]
     steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
       - run: echo '### Good job! All the migrations passed 🚀' >> $GITHUB_STEP_SUMMARY
