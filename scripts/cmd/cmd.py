@@ -145,7 +145,7 @@ if args.command == 'bench':
             xcm_path = f"./{config['path']}/src/weights/xcm"
             output_path = default_path if not pallet.startswith("pallet_xcm_benchmarks") else xcm_path
             templates = config.get("benchmarks_templates", {}) or {}
-            template = templates.get(pallet)
+            template = templates.get(pallet) or config.get("benchmarks_default_template")
             excluded_extrinsics = config.get("benchmarks_exclude_extrinsics", {}) or {}
             excluded = excluded_extrinsics.get(pallet, [])
             excluded_string = ",".join(f"{pallet}::{e}" for e in excluded)

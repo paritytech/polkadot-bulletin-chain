@@ -14,4 +14,4 @@
 // You should have received a copy of the GNU General Public License
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
-pub use polkadot_primitives::{AccountId, Balance, Block, BlockNumber, Hash, Nonce};
+pub use crate::polkadot_primitives::{AccountId, Balance, Block, BlockNumber, Hash, Nonce};

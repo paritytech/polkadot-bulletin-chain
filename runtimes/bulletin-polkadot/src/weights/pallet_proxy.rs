@@ -43,12 +43,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `pallet_proxy`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> pallet_proxy::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::pallet_proxy::WeightInfo for WeightInfo<T> {
 	/// Storage: `Proxy::Proxies` (r:1 w:0)
 	/// Proof: `Proxy::Proxies` (`max_values`: None, `max_size`: Some(649), added: 3124, mode: `MaxEncodedLen`)
 	/// The range of component `p` is `[1, 15]`.

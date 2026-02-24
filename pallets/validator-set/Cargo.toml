@@ -7,6 +7,7 @@ repository.workspace = true
 license = 'Apache-2.0'
 
 [dependencies]
+serde = { optional = true, features = ["derive"], workspace = true, default-features = true }
 codec = { workspace = true, features = ["derive"] }
 log = { workspace = true, default-features = true }
 scale-info = { features = ["derive"], workspace = true }
@@ -39,6 +40,7 @@ std = [
 	'pallet-session/std',
 	'polkadot-sdk-frame/std',
 	'scale-info/std',
+	"serde?/std",
 ]
 try-runtime = [
 	"pallet-session/try-runtime",

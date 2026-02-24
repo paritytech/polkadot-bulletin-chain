@@ -20,88 +20,90 @@ clap = { features = ["derive"], workspace = true }
 futures = { features = ["thread-pool"], workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
-
-sc-chain-spec = { workspace = true }
-frame-support = { workspace = true, optional = true }
-frame-system-rpc-runtime-api = { workspace = true }
-frame-try-runtime = { workspace = true, optional = true }
-pallet-transaction-payment = { workspace = true }
-sc-cli = { workspace = true }
-sc-client-api = { workspace = true }
-sc-consensus = { workspace = true }
-sc-consensus-babe = { workspace = true }
-sc-consensus-babe-rpc = { workspace = true }
-sc-consensus-grandpa = { workspace = true }
-sp-consensus-grandpa = { workspace = true }
-sc-consensus-grandpa-rpc = { workspace = true }
-sc-executor = { workspace = true }
-sc-network = { workspace = true }
-sc-offchain = { workspace = true }
-sc-rpc = { workspace = true }
-sc-service = { workspace = true }
-sc-sync-state-rpc = { workspace = true }
-sc-telemetry = { workspace = true }
-sc-transaction-pool = { workspace = true }
-sc-transaction-pool-api = { workspace = true }
-sp-consensus = { workspace = true }
-sp-consensus-babe = { workspace = true }
-sp-core = { workspace = true }
-sp-inherents = { workspace = true }
-sp-io = { workspace = true }
-sp-keystore = { workspace = true }
-sp-runtime = { workspace = true }
-sp-timestamp = { workspace = true }
-sp-transaction-storage-proof = { workspace = true }
-sp-transaction-pool = { workspace = true }
-sp-version = { workspace = true }
-sp-session = { workspace = true }
-sp-offchain = { workspace = true }
-
-# These dependencies are used for the node's RPCs
 jsonrpsee = { features = ["server"], workspace = true }
-sc-basic-authorship = { workspace = true }
-sp-api = { workspace = true }
-sp-block-builder = { workspace = true }
-sp-blockchain = { workspace = true }
-sp-genesis-builder = { workspace = true }
-sp-weights = { workspace = true }
-pallet-transaction-payment-rpc-runtime-api = { workspace = true }
-polkadot-primitives = { workspace = true }
-substrate-frame-rpc-system = { workspace = true }
 
-# These dependencies are used for runtime benchmarking
-frame-benchmarking-cli = { workspace = true }
-frame-benchmarking = { optional = true, workspace = true, default-features = true }
+# Polkadot SDK umbrella crate - using specific features instead of "node" to avoid
+# pulling in unnecessary crates like assets-common which has runtime-benchmarks issues
+polkadot-sdk = { workspace = true, features = [
+	# Benchmarking
+	"frame-benchmarking",
+	"frame-benchmarking-cli",
+	# Frame
+	"frame-support",
+	"frame-system-rpc-runtime-api",
+	"frame-try-runtime",
+	# Pallets
+	"pallet-transaction-payment",
+	"pallet-transaction-payment-rpc",
+	# Polkadot
+	"polkadot-primitives",
+	# Substrate client
+	"sc-basic-authorship",
+	"sc-chain-spec",
+	"sc-cli",
+	"sc-client-api",
+	"sc-consensus",
+	"sc-consensus-babe",
+	"sc-consensus-babe-rpc",
+	"sc-consensus-grandpa",
+	"sc-consensus-grandpa-rpc",
+	"sc-executor",
+	"sc-network",
+	"sc-offchain",
+	"sc-rpc",
+	"sc-service",
+	"sc-sync-state-rpc",
+	"sc-telemetry",
+	"sc-transaction-pool",
+	"sc-transaction-pool-api",
+	# Substrate primitives
+	"sp-api",
+	"sp-block-builder",
+	"sp-blockchain",
+	"sp-consensus",
+	"sp-consensus-babe",
+	"sp-consensus-grandpa",
+	"sp-core",
+	"sp-genesis-builder",
+	"sp-inherents",
+	"sp-io",
+	"sp-keystore",
+	"sp-offchain",
+	"sp-runtime",
+	"sp-session",
+	"sp-timestamp",
+	"sp-transaction-pool",
+	"sp-transaction-storage-proof",
+	"sp-version",
+	"sp-weights",
+	# RPC
+	"substrate-frame-rpc-system",
+] }
 
 # Local Dependencies
 bulletin-polkadot-runtime = { workspace = true }
-
 # TODO: remove when bulletin-polkadot is upgraded live with TX storage runtime API
 pallet-transaction-storage = { workspace = true }
 
 [build-dependencies]
-substrate-build-script-utils = { workspace = true }
+polkadot-sdk = { workspace = true, features = ["substrate-build-script-utils"] }
 
 [features]
-# Dependencies that are only required if runtime benchmarking should be built.
+default = ["std"]
+std = [
+	"serde/std",
+	"tracing/std",
+	"bulletin-polkadot-runtime/std",
+	"pallet-transaction-storage/std",
+	"polkadot-sdk/std",
+]
 runtime-benchmarks = [
 	"bulletin-polkadot-runtime/runtime-benchmarks",
-	"frame-benchmarking-cli/runtime-benchmarks",
-	"frame-benchmarking/runtime-benchmarks",
-	"frame-support/runtime-benchmarks",
-	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
-	"polkadot-primitives/runtime-benchmarks",
-	"sc-service/runtime-benchmarks",
-	"sp-runtime/runtime-benchmarks",
+	"polkadot-sdk/runtime-benchmarks",
 ]
-# Enable features that allow the runtime to be tried and debugged. Name might be subject to change
-# in the near future.
 try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
-	"frame-support/try-runtime",
-	"frame-try-runtime/try-runtime",
-	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
-	"sp-runtime/try-runtime",
+	"polkadot-sdk/try-runtime",
 ]

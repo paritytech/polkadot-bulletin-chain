@@ -1,10 +1,11 @@
 //! Expose the auto generated weight files.
 
-use ::pallet_bridge_grandpa::WeightInfoExt as GrandpaWeightInfoExt;
-use ::pallet_bridge_messages::WeightInfoExt as MessagesWeightInfoExt;
-use ::pallet_bridge_parachains::WeightInfoExt as ParachainsWeightInfoExt;
-use ::pallet_bridge_relayers::WeightInfo as _;
-use frame_support::weights::Weight;
+use crate::{
+	frame_support::weights::Weight, pallet_bridge_grandpa::WeightInfoExt as GrandpaWeightInfoExt,
+	pallet_bridge_messages::WeightInfoExt as MessagesWeightInfoExt,
+	pallet_bridge_parachains::WeightInfoExt as ParachainsWeightInfoExt,
+	pallet_bridge_relayers::WeightInfo as _,
+};
 
 pub mod bridge_polkadot_relayers;
 pub mod frame_system;

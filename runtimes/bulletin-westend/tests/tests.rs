@@ -16,6 +16,14 @@
 
 #![cfg(test)]
 
+// Re-export SDK crates from umbrella for bare name usage
+use polkadot_sdk::{
+	cumulus_pallet_weight_reclaim, frame_metadata_hash_extension, frame_support, frame_system,
+	pallet_skip_feeless_payment, pallet_transaction_payment, parachains_common,
+	parachains_runtimes_test_utils, sp_core, sp_io, sp_keyring, sp_runtime, staging_xcm as xcm,
+	xcm_runtime_apis,
+};
+
 use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},

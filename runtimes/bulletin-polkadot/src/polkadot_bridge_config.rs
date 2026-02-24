@@ -1,36 +1,39 @@
 use crate::{
+	bp_messages::{
+		source_chain::MessagesBridge,
+		target_chain::{DispatchMessage, MessageDispatch},
+		LegacyLaneId,
+	},
+	bp_parachains::SingleParaStoredHeaderDataBuilder,
+	bp_runtime::messages::MessageDispatchResult,
+	frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound},
+	pallet_xcm_bridge_hub::XcmAsPlainPayload,
+	sp_runtime::SaturatedConversion,
+	xcm::prelude::*,
+	xcm_builder::{
+		BridgeBlobDispatcher, BridgeMessage, DispatchBlob, DispatchBlobError, HaulBlob,
+		HaulBlobError, HaulBlobExporter,
+	},
 	xcm_config::{ImmediateExecutingXcmRouter, UniversalLocation, XcmConfig},
+	xcm_executor::XcmExecutor,
 	ConstU32, Runtime, RuntimeCall, RuntimeEvent,
 };
-use bp_messages::{
-	source_chain::MessagesBridge,
-	target_chain::{DispatchMessage, MessageDispatch},
-	LegacyLaneId,
-};
-use bp_parachains::SingleParaStoredHeaderDataBuilder;
-use bp_runtime::messages::MessageDispatchResult;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::marker::PhantomData;
-use frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
-use pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use scale_info::TypeInfo;
-use sp_runtime::SaturatedConversion;
-use xcm::prelude::*;
-use xcm_builder::{
-	BridgeBlobDispatcher, BridgeMessage, DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError,
-	HaulBlobExporter,
-};
-use xcm_executor::XcmExecutor;
 
-use frame_support::weights::Weight;
+use crate::frame_support::weights::Weight;
 
 // TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
 pub mod bp_polkadot {
-	use bp_header_chain::ChainWithGrandpa;
-	use bp_polkadot_core::*;
-	use bp_runtime::{decl_bridge_finality_runtime_apis, Chain, ChainId};
-	use frame_support::weights::Weight;
-	use sp_runtime::StateVersion;
+	use crate::{
+		bp_header_chain::{self, ChainWithGrandpa},
+		bp_polkadot_core::*,
+		bp_runtime::{self, decl_bridge_finality_runtime_apis, Chain, ChainId},
+		frame_support::weights::Weight,
+		sp_api,
+		sp_runtime::StateVersion,
+	};
 
 	/// Polkadot Chain
 	pub struct Polkadot;
@@ -83,15 +86,18 @@ pub mod bp_polkadot {
 
 // TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
 pub mod bp_people_polkadot {
+	use crate::{
+		bp_messages::{self, *},
+		bp_runtime::{
+			self, decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain,
+			ChainId, Parachain,
+		},
+		frame_support::{dispatch::DispatchClass, weights::Weight},
+		sp_api,
+		sp_runtime::StateVersion,
+	};
 	use bp_bridge_hub_cumulus::*;
 	pub use bp_bridge_hub_cumulus::{BlockNumber, Hash, Hasher, Header, EXTRA_STORAGE_PROOF_SIZE};
-	use bp_messages::*;
-	use bp_runtime::{
-		decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain, ChainId,
-		Parachain,
-	};
-	use frame_support::{dispatch::DispatchClass, weights::Weight};
-	use sp_runtime::StateVersion;
 
 	/// PeoplePolkadot parachain.
 	#[derive(Debug)]
@@ -182,7 +188,7 @@ parameter_types! {
 
 /// An instance of `pallet_bridge_grandpa` used to bridge with Polkadot.
 pub type WithPolkadotBridgeGrandpaInstance = ();
-impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtime {
+impl crate::pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::pallet_bridge_grandpa::WeightInfo<Runtime>;
 
@@ -194,7 +200,7 @@ impl pallet_bridge_grandpa::Config<WithPolkadotBridgeGrandpaInstance> for Runtim
 
 /// An instance of `pallet_bridge_parachains` used to bridge with Polkadot.
 pub type WithPolkadotBridgeParachainsInstance = ();
-impl pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for Runtime {
+impl crate::pallet_bridge_parachains::Config<WithPolkadotBridgeParachainsInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::pallet_bridge_parachains::WeightInfo<Runtime>;
 
@@ -233,8 +239,8 @@ pub struct XcmBlobMessageDispatch<DispatchBlob, Weights> {
 	_marker: PhantomData<(DispatchBlob, Weights)>,
 }
 
-impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoExt> MessageDispatch
-	for XcmBlobMessageDispatch<BlobDispatcher, Weights>
+impl<BlobDispatcher: DispatchBlob, Weights: crate::pallet_bridge_messages::WeightInfoExt>
+	MessageDispatch for XcmBlobMessageDispatch<BlobDispatcher, Weights>
 {
 	type DispatchPayload = XcmAsPlainPayload;
 	type DispatchLevelResult = XcmBlobMessageDispatchResult;
@@ -300,13 +306,13 @@ impl<BlobDispatcher: DispatchBlob, Weights: pallet_bridge_messages::WeightInfoEx
 
 /// An instance of `pallet_bridge_messages` used to bridge with Polkadot Bridge Hub.
 pub type WithPeoplePolkadotMessagesInstance = ();
-impl pallet_bridge_messages::Config<WithPeoplePolkadotMessagesInstance> for Runtime {
+impl crate::pallet_bridge_messages::Config<WithPeoplePolkadotMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = crate::weights::pallet_bridge_messages::WeightInfo<Runtime>;
 
 	type ThisChain = bp_polkadot_bulletin::PolkadotBulletin;
 	type BridgedChain = bp_people_polkadot::PeoplePolkadot;
-	type BridgedHeaderChain = pallet_bridge_parachains::ParachainHeaders<
+	type BridgedHeaderChain = crate::pallet_bridge_parachains::ParachainHeaders<
 		Runtime,
 		WithPolkadotBridgeParachainsInstance,
 		bp_people_polkadot::PeoplePolkadot,
@@ -356,7 +362,7 @@ where
 			})
 			.and_then(|xcm| {
 				xcm.try_into()
-					.map(Xcm::<<XcmConfig as xcm_executor::Config>::RuntimeCall>::from)
+					.map(Xcm::<<XcmConfig as crate::xcm_executor::Config>::RuntimeCall>::from)
 					.map_err(drop)
 			})
 			.and_then(|xcm| XcmExecutor::<XcmConfig>::prepare(xcm, Weight::MAX).map_err(drop))
@@ -389,7 +395,7 @@ pub struct XcmBlobHauler<Runtime, MessagesInstance> {
 
 impl<Runtime, MessagesInstance: 'static> HaulBlob for XcmBlobHauler<Runtime, MessagesInstance>
 where
-	Runtime: pallet_bridge_messages::Config<
+	Runtime: crate::pallet_bridge_messages::Config<
 		MessagesInstance,
 		LaneId = LegacyLaneId,
 		OutboundPayload = XcmAsPlainPayload,
@@ -397,7 +403,7 @@ where
 {
 	fn haul_blob(blob: XcmAsPlainPayload) -> Result<(), HaulBlobError> {
 		let send_message_args =
-			pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::validate_message(
+			crate::pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::validate_message(
 				XCM_LANE, &blob,
 			)
 			.map_err(|e| {
@@ -407,9 +413,10 @@ where
 				);
 				HaulBlobError::Transport("MessageSenderError")
 			})?;
-		let artifacts = pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::send_message(
-			send_message_args,
-		);
+		let artifacts =
+			crate::pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::send_message(
+				send_message_args,
+			);
 		log::info!(
 			target: LOG_TARGET_BRIDGE_DISPATCH,
 			"haul_blob result - ok: {:?} on lane: {:?}. Enqueued messages: {}",
@@ -436,16 +443,16 @@ pub mod benchmarking {
 
 	/// Proof of messages, coming from PeoplePolkadot.
 	pub type FromPeoplePolkadotMessagesProof =
-		bp_messages::target_chain::FromBridgedChainMessagesProof<
+		crate::bp_messages::target_chain::FromBridgedChainMessagesProof<
 			bp_people_polkadot::Hash,
-			pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
+			crate::pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
 		>;
 
 	/// Message delivery proof for `PeoplePolkadot` messages.
 	pub type ToPeoplePolkadotMessagesDeliveryProof =
-		bp_messages::source_chain::FromBridgedChainMessagesDeliveryProof<
+		crate::bp_messages::source_chain::FromBridgedChainMessagesDeliveryProof<
 			bp_people_polkadot::Hash,
-			pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
+			crate::pallet_bridge_messages::LaneIdOf<Runtime, WithPeoplePolkadotMessagesInstance>,
 		>;
 }
 
@@ -481,8 +488,8 @@ pub(crate) mod tests {
 	// 	use frame_support::assert_ok;
 	// 	use sp_api::HeaderT;
 	// 	use sp_consensus_grandpa::{AuthorityList, SetId};
-	use sp_keyring::Sr25519Keyring as AccountKeyring;
-	use sp_runtime::{
+	use crate::sp_keyring::Sr25519Keyring as AccountKeyring;
+	use crate::sp_runtime::{
 		// 		generic::Era,
 		// 		transaction_validity::{InvalidTransaction, TransactionValidityError},
 		BuildStorage,
@@ -517,15 +524,17 @@ pub(crate) mod tests {
 	// } 	}
 
 	pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
-		sp_tracing::try_init_simple();
-		let mut t = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
+		crate::sp_tracing::try_init_simple();
+		let mut t = crate::frame_system::GenesisConfig::<Runtime>::default()
+			.build_storage()
+			.unwrap();
 		pallet_relayer_set::GenesisConfig::<Runtime> {
 			initial_relayers: vec![relayer_signer().into()],
 		}
 		.assimilate_storage(&mut t)
 		.unwrap();
 
-		sp_io::TestExternalities::new(t).execute_with(test)
+		crate::sp_io::TestExternalities::new(t).execute_with(test)
 	}
 
 	// 	fn submit_messages_from_polkadot_bridge_hub(

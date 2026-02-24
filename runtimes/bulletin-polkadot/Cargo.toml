@@ -16,42 +16,73 @@ codec = { workspace = true, features = ["derive"] }
 log = { workspace = true }
 scale-info = { features = ["derive"], workspace = true }
 serde_json = { features = ["alloc"], workspace = true }
-frame-executive = { workspace = true }
-frame-support = { workspace = true }
-frame-system = { workspace = true }
-frame-try-runtime = { workspace = true, optional = true }
-pallet-authorship = { workspace = true }
-pallet-babe = { workspace = true }
-pallet-grandpa = { workspace = true }
-pallet-offences = { workspace = true }
-pallet-session = { workspace = true }
-pallet-timestamp = { workspace = true }
-pallet-sudo = { workspace = true }
-pallet-proxy = { workspace = true }
-pallet-utility = { workspace = true }
+
+# Polkadot SDK umbrella crate
+polkadot-sdk = { workspace = true, default-features = false, features = [
+	"bp-header-chain",
+	"bp-messages",
+	"bp-parachains",
+	"bp-polkadot-core",
+	"bp-runtime",
+	"bp-test-utils",
+	"bp-xcm-bridge-hub",
+	"bridge-runtime-common",
+	"frame-executive",
+	"frame-support",
+	"frame-system",
+	"frame-system-rpc-runtime-api",
+	"frame-try-runtime",
+	"pallet-authorship",
+	"pallet-babe",
+	"pallet-bridge-grandpa",
+	"pallet-bridge-messages",
+	"pallet-bridge-parachains",
+	"pallet-bridge-relayers",
+	"pallet-grandpa",
+	"pallet-offences",
+	"pallet-proxy",
+	"pallet-session",
+	"pallet-staking",
+	"pallet-sudo",
+	"pallet-timestamp",
+	"pallet-transaction-payment",
+	"pallet-transaction-payment-rpc-runtime-api",
+	"pallet-utility",
+	"pallet-xcm",
+	"pallet-xcm-bridge-hub",
+	"parachains-common",
+	"runtime",
+	"sp-api",
+	"sp-block-builder",
+	"sp-consensus-babe",
+	"sp-consensus-grandpa",
+	"sp-core",
+	"sp-genesis-builder",
+	"sp-inherents",
+	"sp-io",
+	"sp-keyring",
+	"sp-offchain",
+	"sp-runtime",
+	"sp-session",
+	"sp-staking",
+	"sp-std",
+	"sp-storage",
+	"sp-tracing",
+	"sp-transaction-pool",
+	"sp-transaction-storage-proof",
+	"sp-trie",
+	"sp-version",
+	"staging-xcm",
+	"staging-xcm-builder",
+	"staging-xcm-executor",
+] }
+
+# Crates excluded from umbrella - must remain as individual dependencies
+bp-bridge-hub-cumulus = { workspace = true }
+bp-polkadot-bulletin = { workspace = true }
+
+# Needed individually for disable-logging feature (can't pass crate-specific features through umbrella)
 sp-api = { workspace = true }
-sp-block-builder = { workspace = true }
-sp-consensus-babe = { workspace = true }
-sp-consensus-grandpa = { workspace = true }
-sp-core = { workspace = true }
-sp-genesis-builder = { workspace = true }
-sp-inherents = { workspace = true }
-sp-io = { workspace = true }
-sp-keyring = { workspace = true }
-sp-offchain = { workspace = true }
-sp-runtime = { workspace = true }
-sp-session = { workspace = true }
-sp-transaction-pool = { workspace = true }
-sp-transaction-storage-proof = { workspace = true }
-sp-version = { workspace = true }
-sp-storage = { optional = true, workspace = true }
-
-# Used for the node's RPCs
-frame-system-rpc-runtime-api = { workspace = true }
-
-# Used for runtime benchmarking
-frame-benchmarking = { workspace = true, optional = true }
-frame-system-benchmarking = { workspace = true, optional = true }
 
 # Local dependencies
 pallet-relayer-set = { workspace = true }
@@ -59,47 +90,36 @@ pallet-transaction-storage = { workspace = true }
 pallet-validator-set = { workspace = true }
 pallets-common = { workspace = true }
 
-# Bridge dependencies
-bp-header-chain = { workspace = true }
-bp-messages = { workspace = true }
-bp-parachains = { workspace = true }
-
-bp-polkadot-bulletin = { workspace = true }
-bp-polkadot-core = { workspace = true }
-bp-runtime = { workspace = true }
-bridge-runtime-common = { workspace = true }
-pallet-bridge-grandpa = { workspace = true }
-pallet-bridge-parachains = { workspace = true }
-pallet-bridge-messages = { workspace = true }
-pallet-bridge-relayers = { workspace = true }
-pallet-xcm-bridge-hub = { workspace = true }
-pallet-transaction-payment = { workspace = true }
-pallet-transaction-payment-rpc-runtime-api = { workspace = true }
-bp-bridge-hub-cumulus = { workspace = true }
-
-# XCM dependencies
-xcm = { workspace = true }
-xcm-builder = { workspace = true }
-xcm-executor = { workspace = true }
-
-# TODO: just to pass `--features runtime-benchmarks` or `--features try-runtime`
-pallet-xcm = { optional = true, workspace = true }
-pallet-staking = { optional = true, workspace = true }
-sp-staking = { optional = true, workspace = true }
-parachains-common = { optional = true, workspace = true }
-
 [build-dependencies]
+polkadot-sdk = { optional = true, workspace = true, features = ["substrate-wasm-builder"] }
 substrate-wasm-builder = { optional = true, workspace = true }
 
 [dev-dependencies]
-bp-test-utils = { workspace = true }
-bridge-runtime-common = { workspace = true, features = ["integrity-test"] }
-pallet-bridge-messages = { workspace = true, features = ["test-helpers"] }
+pallet-bridge-messages = { workspace = true, features = ["std", "test-helpers"] }
+polkadot-sdk = { workspace = true, default-features = false, features = [
+	"bp-header-chain",
+	"bp-messages",
+	"bp-polkadot-core",
+	"bp-runtime",
+	"bp-test-utils",
+	"bridge-runtime-common",
+	"frame-support",
+	"frame-system",
+	"pallet-bridge-grandpa",
+	"pallet-bridge-messages",
+	"pallet-bridge-parachains",
+	"pallet-proxy",
+	"pallet-sudo",
+	"sp-consensus-grandpa",
+	"sp-core",
+	"sp-io",
+	"sp-keyring",
+	"sp-runtime",
+	"sp-tracing",
+	"sp-trie",
+] }
 hex = { workspace = true }
-sp-io = { workspace = true }
-sp-trie = { workspace = true }
 static_assertions = { workspace = true }
-sp-tracing = { workspace = true }
 
 [features]
 default = ["std"]
@@ -108,148 +128,33 @@ std = [
 	"log/std",
 	"scale-info/std",
 	"serde_json/std",
-
+	"polkadot-sdk/std",
 	"bp-bridge-hub-cumulus/std",
-	"frame-executive/std",
-	"frame-support/std",
-	"frame-system/std",
-	"frame-try-runtime?/std",
-	"pallet-authorship/std",
-	"pallet-babe/std",
-	"pallet-grandpa/std",
-	"pallet-offences/std",
-	"pallet-proxy/std",
-	"pallet-session/std",
-	"pallet-sudo/std",
-	"pallet-timestamp/std",
-	"pallet-utility/std",
+	"bp-polkadot-bulletin/std",
 	"sp-api/std",
-	"sp-block-builder/std",
-	"sp-consensus-babe/std",
-	"sp-consensus-grandpa/std",
-	"sp-core/std",
-	"sp-inherents/std",
-	"sp-io/std",
-	"sp-offchain/std",
-	"sp-runtime/std",
-	"sp-session/std",
-	"sp-tracing/std",
-	"sp-transaction-pool/std",
-	"sp-transaction-storage-proof/std",
-	"sp-version/std",
-
-	"frame-system-rpc-runtime-api/std",
-
-	"frame-benchmarking?/std",
-	"frame-system-benchmarking?/std",
-
 	"pallet-relayer-set/std",
-	"pallet-transaction-payment-rpc-runtime-api/std",
-	"pallet-transaction-payment/std",
 	"pallet-transaction-storage/std",
 	"pallet-validator-set/std",
 	"pallets-common/std",
-
-	"bp-header-chain/std",
-	"bp-messages/std",
-	"bp-parachains/std",
-	"bp-polkadot-bulletin/std",
-	"bp-polkadot-core/std",
-	"bp-runtime/std",
-	"bridge-runtime-common/std",
-	"pallet-bridge-grandpa/std",
-	"pallet-bridge-messages/std",
-	"pallet-bridge-parachains/std",
-	"pallet-xcm-bridge-hub/std",
-
-	"xcm-builder/std",
-	"xcm-executor/std",
-	"xcm/std",
-
-	"pallet-bridge-relayers/std",
-	"pallet-staking?/std",
-	"pallet-xcm?/std",
-	"parachains-common?/std",
-	"sp-genesis-builder/std",
-	"sp-keyring/std",
-	"sp-staking?/std",
-	"sp-storage?/std",
-	"sp-trie/std",
-	"substrate-wasm-builder",
+	"polkadot-sdk",
 ]
 runtime-benchmarks = [
-	"frame-support/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
-	"pallet-babe/runtime-benchmarks",
-	"pallet-grandpa/runtime-benchmarks",
-	"pallet-offences/runtime-benchmarks",
-	"pallet-proxy/runtime-benchmarks",
-	"pallet-sudo/runtime-benchmarks",
-	"pallet-timestamp/runtime-benchmarks",
-	"pallet-utility/runtime-benchmarks",
-	"sp-runtime/runtime-benchmarks",
-	"sp-storage",
-
-	"frame-benchmarking/runtime-benchmarks",
-	"frame-system-benchmarking/runtime-benchmarks",
-
-	"bridge-runtime-common/runtime-benchmarks",
-	"pallet-bridge-grandpa/runtime-benchmarks",
-	"pallet-bridge-messages/runtime-benchmarks",
-	"pallet-bridge-parachains/runtime-benchmarks",
-	"pallet-xcm-bridge-hub/runtime-benchmarks",
-
+	"polkadot-sdk/runtime-benchmarks",
 	"pallet-relayer-set/runtime-benchmarks",
-	"pallet-session/runtime-benchmarks",
-	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
-
-	"pallet-bridge-relayers/runtime-benchmarks",
 	"pallets-common/runtime-benchmarks",
-	"xcm-builder/runtime-benchmarks",
-	"xcm-executor/runtime-benchmarks",
-	"xcm/runtime-benchmarks",
-
-	"pallet-staking/runtime-benchmarks",
-	"pallet-xcm/runtime-benchmarks",
-	"parachains-common/runtime-benchmarks",
-	"sp-staking/runtime-benchmarks",
 ]
 try-runtime = [
-	"frame-executive/try-runtime",
-	"frame-support/try-runtime",
-	"frame-system/try-runtime",
-	"frame-try-runtime/try-runtime",
-	"pallet-authorship/try-runtime",
-	"pallet-babe/try-runtime",
-	"pallet-grandpa/try-runtime",
-	"pallet-offences/try-runtime",
-	"pallet-proxy/try-runtime",
-	"pallet-session/try-runtime",
-	"pallet-sudo/try-runtime",
-	"pallet-timestamp/try-runtime",
-	"pallet-utility/try-runtime",
-
-	"pallet-bridge-grandpa/try-runtime",
-	"pallet-bridge-messages/try-runtime",
-	"pallet-bridge-parachains/try-runtime",
-	"pallet-xcm-bridge-hub/try-runtime",
-
-	"pallet-bridge-relayers/try-runtime",
+	"polkadot-sdk/try-runtime",
 	"pallet-relayer-set/try-runtime",
-	"pallet-staking/try-runtime",
-	"pallet-transaction-payment/try-runtime",
 	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
-	"pallet-xcm?/try-runtime",
 	"pallets-common/try-runtime",
-	"parachains-common?/try-runtime",
-	"sp-runtime/try-runtime",
 ]
 
 # Enable metadata hash generation at compile time for the `CheckMetadataHash` extension.
-metadata-hash = ["substrate-wasm-builder?/metadata-hash"]
+metadata-hash = ["substrate-wasm-builder/metadata-hash"]
 
 # A feature that should be enabled when the runtime should be built for on-chain
 # deployment. This will disable stuff that shouldn't be part of the on-chain wasm

@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `frame_benchmarking::baseline`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> frame_benchmarking::baseline::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::frame_benchmarking::baseline::WeightInfo for WeightInfo<T> {
 	/// The range of component `i` is `[0, 1000000]`.
 	fn addition(_i: u32, ) -> Weight {
 		// Proof Size summary in bytes:

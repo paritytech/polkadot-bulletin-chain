@@ -18,6 +18,13 @@
 //! This crate contains integration tests demonstrating WND reserve transfers
 //! between Asset Hub and Bulletin chain using the xcm-emulator framework.
 
+// Re-export SDK crates from umbrella so submodules can use bare crate names
+use polkadot_sdk::{
+	cumulus_primitives_core, emulated_integration_tests_common, frame_support, parachains_common,
+	sp_core, sp_keyring, sp_runtime, staging_xcm as xcm, staging_xcm_executor as xcm_executor,
+	xcm_emulator,
+};
+
 #[cfg(test)]
 mod tests;
 

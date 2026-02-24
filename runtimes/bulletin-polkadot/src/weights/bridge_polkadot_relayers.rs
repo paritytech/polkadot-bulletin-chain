@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `pallet_bridge_relayers`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> pallet_bridge_relayers::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::pallet_bridge_relayers::WeightInfo for WeightInfo<T> {
 	/// Storage: `BridgeRelayers::RelayerRewards` (r:1 w:1)
 	/// Proof: `BridgeRelayers::RelayerRewards` (`max_values`: None, `max_size`: Some(102), added: 2577, mode: `MaxEncodedLen`)
 	/// Storage: `System::Account` (r:1 w:1)

@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `pallet_collator_selection`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> pallet_collator_selection::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::pallet_collator_selection::WeightInfo for WeightInfo<T> {
 	/// Storage: `Session::NextKeys` (r:20 w:0)
 	/// Proof: `Session::NextKeys` (`max_values`: None, `max_size`: None, mode: `Measured`)
 	/// Storage: `CollatorSelection::Invulnerables` (r:0 w:1)

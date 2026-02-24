@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `pallet_transaction_storage`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::pallet_transaction_storage::WeightInfo for WeightInfo<T> {
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
 	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(36866), added: 37361, mode: `MaxEncodedLen`)
 	/// The range of component `l` is `[1, 8388608]`.

@@ -42,12 +42,12 @@
 #![allow(unused_imports)]
 #![allow(missing_docs)]
 
-use frame_support::{traits::Get, weights::Weight};
+use crate::frame_support::{traits::Get, weights::Weight};
 use core::marker::PhantomData;
 
 /// Weight functions for `cumulus_pallet_parachain_system`.
 pub struct WeightInfo<T>(PhantomData<T>);
-impl<T: frame_system::Config> cumulus_pallet_parachain_system::WeightInfo for WeightInfo<T> {
+impl<T: crate::frame_system::Config> crate::cumulus_pallet_parachain_system::WeightInfo for WeightInfo<T> {
 	/// Storage: `ParachainSystem::LastDmqMqcHead` (r:1 w:1)
 	/// Proof: `ParachainSystem::LastDmqMqcHead` (`max_values`: Some(1), `max_size`: None, mode: `Measured`)
 	/// Storage: `MessageQueue::BookStateFor` (r:1 w:1)

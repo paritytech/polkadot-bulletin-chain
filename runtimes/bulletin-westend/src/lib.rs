@@ -36,6 +36,47 @@ pub mod xcm_config;
 
 extern crate alloc;
 
+// Import SDK crates from umbrella for construct_runtime! and submodules
+use polkadot_sdk::{
+	cumulus_pallet_aura_ext, cumulus_pallet_parachain_system, cumulus_pallet_weight_reclaim,
+	cumulus_pallet_xcm, cumulus_pallet_xcmp_queue, cumulus_primitives_aura,
+	cumulus_primitives_core, cumulus_primitives_utility, frame_executive,
+	frame_metadata_hash_extension, frame_support, frame_system, frame_system_rpc_runtime_api,
+	pallet_aura, pallet_authorship, pallet_balances, pallet_collator_selection,
+	pallet_message_queue, pallet_session, pallet_skip_feeless_payment, pallet_sudo,
+	pallet_timestamp, pallet_transaction_payment, pallet_transaction_payment_rpc_runtime_api,
+	pallet_utility, pallet_xcm, parachains_common, polkadot_parachain_primitives,
+	polkadot_runtime_common, sp_api, sp_block_builder, sp_consensus_aura, sp_core,
+	sp_genesis_builder, sp_inherents, sp_keyring, sp_offchain, sp_runtime, sp_session,
+	sp_transaction_pool, sp_transaction_storage_proof, sp_version,
+	staging_parachain_info as parachain_info, staging_xcm as xcm,
+	staging_xcm_builder as xcm_builder, staging_xcm_executor as xcm_executor,
+	testnet_parachains_constants, xcm_runtime_apis,
+};
+
+// Benchmarking imports (only used with runtime-benchmarks feature)
+#[cfg(feature = "runtime-benchmarks")]
+use polkadot_sdk::cumulus_pallet_session_benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+use polkadot_sdk::frame_benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+use polkadot_sdk::frame_system_benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+use polkadot_sdk::pallet_xcm_benchmarks;
+#[cfg(feature = "runtime-benchmarks")]
+use polkadot_sdk::sp_storage;
+
+// Try-runtime imports
+#[cfg(feature = "try-runtime")]
+use polkadot_sdk::frame_try_runtime;
+
+// Re-export local pallets so weight files generated from the template can use crate::pallet_*
+use pallet_transaction_storage;
+
+use crate::xcm_runtime_apis::{
+	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
+	fees::Error as XcmPaymentApiError,
+};
 use alloc::{vec, vec::Vec};
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
@@ -85,10 +126,6 @@ use xcm::{prelude::*, Version as XcmVersion};
 use xcm_config::AssetHubLocation;
 use xcm_config::{
 	FellowshipLocation, GovernanceLocation, TokenRelayLocation, XcmOriginToTransactDispatchOrigin,
-};
-use xcm_runtime_apis::{
-	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
-	fees::Error as XcmPaymentApiError,
 };
 
 /// The address format for describing accounts.
@@ -617,7 +654,7 @@ construct_runtime!(
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
-	frame_benchmarking::define_benchmarks!(
+	crate::frame_benchmarking::define_benchmarks!(
 		[frame_system, SystemBench::<Runtime>]
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
@@ -890,22 +927,22 @@ impl_runtime_apis! {
 	}
 
 	#[cfg(feature = "runtime-benchmarks")]
-	impl frame_benchmarking::Benchmark<Block> for Runtime {
+	impl crate::frame_benchmarking::Benchmark<Block> for Runtime {
 		fn benchmark_metadata(extra: bool) -> (
-			Vec<frame_benchmarking::BenchmarkList>,
-			Vec<frame_support::traits::StorageInfo>,
+			Vec<crate::frame_benchmarking::BenchmarkList>,
+			Vec<crate::frame_support::traits::StorageInfo>,
 		) {
-			use frame_benchmarking::BenchmarkList;
-			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
-			use cumulus_pallet_session_benchmarking::Pallet as SessionBench;
-			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
+			use crate::frame_benchmarking::BenchmarkList;
+			use crate::frame_support::traits::StorageInfoTrait;
+			use crate::frame_system_benchmarking::Pallet as SystemBench;
+			use crate::cumulus_pallet_session_benchmarking::Pallet as SessionBench;
+			use crate::pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 
 			// This is defined once again in dispatch_benchmark, because list_benchmarks!
 			// and add_benchmarks! are macros exported by define_benchmarks! macros and those types
 			// are referenced in that call.
-			type XcmBalances = pallet_xcm_benchmarks::fungible::Pallet::<Runtime>;
-			type XcmGeneric = pallet_xcm_benchmarks::generic::Pallet::<Runtime>;
+			type XcmBalances = crate::pallet_xcm_benchmarks::fungible::Pallet::<Runtime>;
+			type XcmGeneric = crate::pallet_xcm_benchmarks::generic::Pallet::<Runtime>;
 
 			let mut list = Vec::<BenchmarkList>::new();
 			list_benchmarks!(list, extra);
@@ -916,44 +953,44 @@ impl_runtime_apis! {
 
 		#[allow(non_local_definitions)]
 		fn dispatch_benchmark(
-			config: frame_benchmarking::BenchmarkConfig
-		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
-			use frame_benchmarking::{BenchmarkBatch, BenchmarkError};
-			use sp_storage::TrackedStorageKey;
+			config: crate::frame_benchmarking::BenchmarkConfig
+		) -> Result<Vec<crate::frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
+			use crate::frame_benchmarking::{BenchmarkBatch, BenchmarkError};
+			use crate::sp_storage::TrackedStorageKey;
 			use codec::Encode;
 
-			use frame_system_benchmarking::Pallet as SystemBench;
-			impl frame_system_benchmarking::Config for Runtime {
+			use crate::frame_system_benchmarking::Pallet as SystemBench;
+			impl crate::frame_system_benchmarking::Config for Runtime {
 				fn setup_set_code_requirements(code: &alloc::vec::Vec<u8>) -> Result<(), BenchmarkError> {
 					ParachainSystem::initialize_for_set_code_benchmark(code.len() as u32);
 					Ok(())
 				}
 
 				fn verify_set_code() {
-					System::assert_last_event(cumulus_pallet_parachain_system::Event::<Runtime>::ValidationFunctionStored.into());
+					System::assert_last_event(crate::cumulus_pallet_parachain_system::Event::<Runtime>::ValidationFunctionStored.into());
 				}
 			}
 
-			use cumulus_pallet_session_benchmarking::Pallet as SessionBench;
-			impl cumulus_pallet_session_benchmarking::Config for Runtime {
+			use crate::cumulus_pallet_session_benchmarking::Pallet as SessionBench;
+			impl crate::cumulus_pallet_session_benchmarking::Config for Runtime {
 				fn generate_session_keys_and_proof(owner: Self::AccountId) -> (Self::Keys, Vec<u8>) {
 					let keys = SessionKeys::generate(&owner.encode(), None);
 					(keys.keys, keys.proof.encode())
 				}
 			}
 
-			use xcm::latest::prelude::*;
+			use crate::xcm::latest::prelude::*;
 			use xcm_config::TokenRelayLocation;
 
-			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
-			impl pallet_xcm::benchmarking::Config for Runtime {
+			use crate::pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
+			impl crate::pallet_xcm::benchmarking::Config for Runtime {
 				type DeliveryHelper = (
-					cumulus_primitives_utility::ToParentDeliveryHelper<
+					crate::cumulus_primitives_utility::ToParentDeliveryHelper<
 						xcm_config::XcmConfig,
 						ExistentialDepositAsset,
 						xcm_config::PriceForParentDelivery,
 					>,
-					polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
+					crate::polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
 						xcm_config::XcmConfig,
 						ExistentialDepositAsset,
 						PriceForSiblingParachainDelivery,
@@ -998,16 +1035,16 @@ impl_runtime_apis! {
 				).into());
 			}
 
-			impl pallet_xcm_benchmarks::Config for Runtime {
+			impl crate::pallet_xcm_benchmarks::Config for Runtime {
 				type XcmConfig = xcm_config::XcmConfig;
 
 				type DeliveryHelper = (
-					cumulus_primitives_utility::ToParentDeliveryHelper<
+					crate::cumulus_primitives_utility::ToParentDeliveryHelper<
 						xcm_config::XcmConfig,
 						ExistentialDepositAsset,
 						xcm_config::PriceForParentDelivery,
 					>,
-					polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
+					crate::polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
 						xcm_config::XcmConfig,
 						ExistentialDepositAsset,
 						PriceForSiblingParachainDelivery,
@@ -1041,7 +1078,7 @@ impl_runtime_apis! {
 				));
 			}
 
-			impl pallet_xcm_benchmarks::fungible::Config for Runtime {
+			impl crate::pallet_xcm_benchmarks::fungible::Config for Runtime {
 				type TransactAsset = Balances;
 
 				type CheckedAccount = CheckedAccount;
@@ -1056,7 +1093,7 @@ impl_runtime_apis! {
 				}
 			}
 
-			impl pallet_xcm_benchmarks::generic::Config for Runtime {
+			impl crate::pallet_xcm_benchmarks::generic::Config for Runtime {
 				type RuntimeCall = RuntimeCall;
 				type TransactAsset = Balances;
 
@@ -1073,7 +1110,7 @@ impl_runtime_apis! {
 				}
 
 				fn transact_origin_and_runtime_call() -> Result<(Location, RuntimeCall), BenchmarkError> {
-					Ok((TokenRelayLocation::get(), frame_system::Call::remark_with_event { remark: vec![] }.into()))
+					Ok((TokenRelayLocation::get(), crate::frame_system::Call::remark_with_event { remark: vec![] }.into()))
 				}
 
 				fn subscribe_origin() -> Result<Location, BenchmarkError> {
@@ -1110,10 +1147,10 @@ impl_runtime_apis! {
 				}
 			}
 
-			type XcmBalances = pallet_xcm_benchmarks::fungible::Pallet::<Runtime>;
-			type XcmGeneric = pallet_xcm_benchmarks::generic::Pallet::<Runtime>;
+			type XcmBalances = crate::pallet_xcm_benchmarks::fungible::Pallet::<Runtime>;
+			type XcmGeneric = crate::pallet_xcm_benchmarks::generic::Pallet::<Runtime>;
 
-			use frame_support::traits::WhitelistedStorageKeys;
+			use crate::frame_support::traits::WhitelistedStorageKeys;
 			let whitelist: Vec<TrackedStorageKey> = AllPalletsWithSystem::whitelisted_storage_keys();
 
 			let mut batches = Vec::<BenchmarkBatch>::new();

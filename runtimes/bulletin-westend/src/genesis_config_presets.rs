@@ -15,13 +15,15 @@
 
 //! # Bulletin Westend Runtime genesis config presets
 
-use crate::*;
+use crate::{
+	cumulus_primitives_core::ParaId,
+	frame_support::build_struct_json_patch,
+	parachains_common::{AccountId, AuraId},
+	sp_genesis_builder::PresetId,
+	sp_keyring::Sr25519Keyring,
+	*,
+};
 use alloc::{vec, vec::Vec};
-use cumulus_primitives_core::ParaId;
-use frame_support::build_struct_json_patch;
-use parachains_common::{AccountId, AuraId};
-use sp_genesis_builder::PresetId;
-use sp_keyring::Sr25519Keyring;
 use testnet_parachains_constants::westend::{
 	currency::UNITS as WND, xcm_version::SAFE_XCM_VERSION,
 };
