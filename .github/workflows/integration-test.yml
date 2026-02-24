@@ -25,7 +25,11 @@ env:
 
 jobs:
   changes:
-      uses: ./.github/workflows/check-changed-files.yml
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   setup:
     if: needs.changes.outputs.should-run == 'true'
     needs: [changes]
