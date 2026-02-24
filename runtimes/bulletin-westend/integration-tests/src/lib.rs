@@ -19,16 +19,11 @@
 //! between Asset Hub and Bulletin chain using the xcm-emulator framework.
 
 // Re-export SDK crates from umbrella so submodules can use bare crate names
-use polkadot_sdk::cumulus_primitives_core;
-use polkadot_sdk::emulated_integration_tests_common;
-use polkadot_sdk::frame_support;
-use polkadot_sdk::parachains_common;
-use polkadot_sdk::sp_core;
-use polkadot_sdk::sp_keyring;
-use polkadot_sdk::sp_runtime;
-use polkadot_sdk::staging_xcm as xcm;
-use polkadot_sdk::staging_xcm_executor as xcm_executor;
-use polkadot_sdk::xcm_emulator;
+use polkadot_sdk::{
+	cumulus_primitives_core, emulated_integration_tests_common, frame_support, parachains_common,
+	sp_core, sp_keyring, sp_runtime, staging_xcm as xcm, staging_xcm_executor as xcm_executor,
+	xcm_emulator,
+};
 
 #[cfg(test)]
 mod tests;

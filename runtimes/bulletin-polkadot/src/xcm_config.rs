@@ -21,23 +21,25 @@ use crate::{
 	AllPalletsWithSystem, RuntimeCall, RuntimeOrigin,
 };
 
+use crate::{
+	frame_support::{
+		parameter_types,
+		traits::{Contains, Equals, Everything, Nothing},
+		weights::Weight,
+	},
+	sp_core::ConstU32,
+	sp_runtime::traits::Get,
+	xcm::latest::prelude::*,
+	xcm_builder::{
+		AllowExplicitUnpaidExecutionFrom, FixedWeightBounds, FrameTransactionalProcessor,
+		LocalExporter, LocationAsSuperuser, TrailingSetTopicAsId, WithComputedOrigin,
+	},
+	xcm_executor::{
+		traits::{WeightTrader, WithOriginFilter},
+		AssetsInHolding,
+	},
+};
 use codec::Encode;
-use crate::frame_support::{
-	parameter_types,
-	traits::{Contains, Equals, Everything, Nothing},
-	weights::Weight,
-};
-use crate::sp_core::ConstU32;
-use crate::sp_runtime::traits::Get;
-use crate::xcm::latest::prelude::*;
-use crate::xcm_builder::{
-	AllowExplicitUnpaidExecutionFrom, FixedWeightBounds, FrameTransactionalProcessor,
-	LocalExporter, LocationAsSuperuser, TrailingSetTopicAsId, WithComputedOrigin,
-};
-use crate::xcm_executor::{
-	traits::{WeightTrader, WithOriginFilter},
-	AssetsInHolding,
-};
 
 parameter_types! {
 	/// The Polkadot Bulletin Chain network ID.
@@ -203,22 +205,22 @@ impl<Execute: ExecuteXcm<Call>, Call, AsOrigin: Get<Location>> SendXcm
 pub(crate) mod tests {
 	use super::*;
 	use crate::{
+		bp_messages::{
+			target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
+			MessageKey,
+		},
+		pallet_bridge_messages::Config as MessagesConfig,
 		polkadot_bridge_config::{
 			bp_people_polkadot::PEOPLE_POLKADOT_PARACHAIN_ID, tests::run_test,
 			WithPeoplePolkadotMessagesInstance, XcmBlobMessageDispatchResult, XCM_LANE,
 		},
+		sp_keyring::Sr25519Keyring as AccountKeyring,
+		xcm::{prelude::VersionedXcm, VersionedInteriorLocation},
+		xcm_builder::{BridgeMessage, DispatchBlobError},
+		xcm_executor::traits::{Properties, ShouldExecute},
 		Runtime,
 	};
-	use crate::bp_messages::{
-		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
-		MessageKey,
-	};
 	use codec::Encode;
-	use crate::pallet_bridge_messages::Config as MessagesConfig;
-	use crate::sp_keyring::Sr25519Keyring as AccountKeyring;
-	use crate::xcm::{prelude::VersionedXcm, VersionedInteriorLocation};
-	use crate::xcm_builder::{BridgeMessage, DispatchBlobError};
-	use crate::xcm_executor::traits::{Properties, ShouldExecute};
 
 	type Dispatcher =
 		<Runtime as MessagesConfig<WithPeoplePolkadotMessagesInstance>>::MessageDispatch;

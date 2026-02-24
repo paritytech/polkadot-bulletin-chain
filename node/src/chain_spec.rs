@@ -1,6 +1,8 @@
-use crate::sc_chain_spec::ChainSpecExtension;
-use crate::sc_service::ChainType;
-use crate::sp_runtime::{Deserialize, Serialize};
+use crate::{
+	sc_chain_spec::ChainSpecExtension,
+	sc_service::ChainType,
+	sp_runtime::{Deserialize, Serialize},
+};
 
 const PROTOCOL_ID: &str = "dot-bulletin";
 

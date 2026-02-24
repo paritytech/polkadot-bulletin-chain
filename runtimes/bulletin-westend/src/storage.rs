@@ -17,16 +17,18 @@
 //! Storage-specific configurations.
 
 use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
-use alloc::vec::Vec;
-use crate::frame_support::{
-	parameter_types,
-	traits::{EitherOfDiverse, Equals, SortedMembers},
+use crate::{
+	frame_support::{
+		parameter_types,
+		traits::{EitherOfDiverse, Equals, SortedMembers},
+	},
+	frame_system::EnsureSignedBy,
+	pallet_xcm::EnsureXcm,
+	sp_keyring::Sr25519Keyring,
+	sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority},
 };
-use crate::frame_system::EnsureSignedBy;
-use crate::pallet_xcm::EnsureXcm;
+use alloc::vec::Vec;
 use pallets_common::NoCurrency;
-use crate::sp_keyring::Sr25519Keyring;
-use crate::sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
 
 /// Provides test accounts for use with `EnsureSignedBy`.

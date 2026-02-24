@@ -7,21 +7,23 @@
 
 use std::sync::Arc;
 
-use crate::node_primitives::{AccountId, Block, BlockNumber, Hash, Nonce};
-use jsonrpsee::RpcModule;
-use crate::sc_consensus_babe::{BabeApi, BabeWorkerHandle};
-use crate::sc_consensus_grandpa::{
-	FinalityProofProvider, GrandpaJustificationStream, SharedAuthoritySet, SharedVoterState,
+use crate::{
+	node_primitives::{AccountId, Block, BlockNumber, Hash, Nonce},
+	sc_consensus_babe::{BabeApi, BabeWorkerHandle},
+	sc_consensus_grandpa::{
+		FinalityProofProvider, GrandpaJustificationStream, SharedAuthoritySet, SharedVoterState,
+	},
+	sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer},
+	sc_rpc::SubscriptionTaskExecutor,
+	sc_sync_state_rpc::{SyncState, SyncStateApiServer},
+	sc_transaction_pool_api::TransactionPool,
+	sp_api::ProvideRuntimeApi,
+	sp_block_builder::BlockBuilder,
+	sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata},
+	sp_consensus::SelectChain,
+	sp_keystore::KeystorePtr,
 };
-use crate::sc_consensus_grandpa_rpc::{Grandpa, GrandpaApiServer};
-use crate::sc_rpc::SubscriptionTaskExecutor;
-use crate::sc_sync_state_rpc::{SyncState, SyncStateApiServer};
-use crate::sc_transaction_pool_api::TransactionPool;
-use crate::sp_api::ProvideRuntimeApi;
-use crate::sp_block_builder::BlockBuilder;
-use crate::sp_blockchain::{Error as BlockChainError, HeaderBackend, HeaderMetadata};
-use crate::sp_consensus::SelectChain;
-use crate::sp_keystore::KeystorePtr;
+use jsonrpsee::RpcModule;
 
 /// Full client dependencies.
 pub struct FullDeps<C, P, SC, B> {
@@ -76,8 +78,10 @@ where
 	SC: SelectChain<Block> + 'static,
 	B: crate::sc_client_api::Backend<Block> + Send + Sync + 'static,
 {
-	use crate::sc_consensus_babe_rpc::{Babe, BabeApiServer};
-	use crate::substrate_frame_rpc_system::{System, SystemApiServer};
+	use crate::{
+		sc_consensus_babe_rpc::{Babe, BabeApiServer},
+		substrate_frame_rpc_system::{System, SystemApiServer},
+	};
 
 	let mut module = RpcModule::new(());
 	let FullDeps { client, pool, select_chain, chain_spec, babe, grandpa } = deps;

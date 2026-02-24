@@ -9,49 +9,18 @@ extern crate alloc;
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
 // Import SDK crates from umbrella for construct_runtime! and submodules
-use polkadot_sdk::bp_header_chain;
-use polkadot_sdk::bp_messages;
-use polkadot_sdk::bp_polkadot_core;
-use polkadot_sdk::bp_runtime;
-use polkadot_sdk::bridge_runtime_common;
-use polkadot_sdk::frame_executive;
-use polkadot_sdk::frame_support;
-use polkadot_sdk::frame_system;
-use polkadot_sdk::frame_system_rpc_runtime_api;
-use polkadot_sdk::pallet_authorship;
-use polkadot_sdk::pallet_babe;
-use polkadot_sdk::pallet_bridge_grandpa;
-use polkadot_sdk::pallet_bridge_messages;
-use polkadot_sdk::pallet_bridge_parachains;
-use polkadot_sdk::pallet_bridge_relayers;
-use polkadot_sdk::pallet_grandpa;
-use polkadot_sdk::pallet_offences;
-use polkadot_sdk::pallet_proxy;
-use polkadot_sdk::pallet_session;
-use polkadot_sdk::pallet_sudo;
-use polkadot_sdk::pallet_timestamp;
-use polkadot_sdk::pallet_transaction_payment;
-use polkadot_sdk::pallet_transaction_payment_rpc_runtime_api;
-use polkadot_sdk::pallet_utility;
-use polkadot_sdk::pallet_xcm_bridge_hub;
-use polkadot_sdk::sp_api;
-use polkadot_sdk::sp_block_builder;
-use polkadot_sdk::sp_consensus_babe;
-use polkadot_sdk::sp_consensus_grandpa;
-use polkadot_sdk::sp_core;
-use polkadot_sdk::sp_genesis_builder;
-use polkadot_sdk::sp_inherents;
-use polkadot_sdk::sp_io;
-use polkadot_sdk::sp_keyring;
-use polkadot_sdk::sp_offchain;
-use polkadot_sdk::sp_runtime;
-use polkadot_sdk::sp_session;
-use polkadot_sdk::sp_transaction_pool;
-use polkadot_sdk::sp_transaction_storage_proof;
-use polkadot_sdk::sp_version;
-use polkadot_sdk::staging_xcm as xcm;
-use polkadot_sdk::staging_xcm_builder as xcm_builder;
-use polkadot_sdk::staging_xcm_executor as xcm_executor;
+use polkadot_sdk::{
+	bp_header_chain, bp_messages, bp_polkadot_core, bp_runtime, bridge_runtime_common,
+	frame_executive, frame_support, frame_system, frame_system_rpc_runtime_api, pallet_authorship,
+	pallet_babe, pallet_bridge_grandpa, pallet_bridge_messages, pallet_bridge_parachains,
+	pallet_bridge_relayers, pallet_grandpa, pallet_offences, pallet_proxy, pallet_session,
+	pallet_sudo, pallet_timestamp, pallet_transaction_payment,
+	pallet_transaction_payment_rpc_runtime_api, pallet_utility, pallet_xcm_bridge_hub, sp_api,
+	sp_block_builder, sp_consensus_babe, sp_consensus_grandpa, sp_core, sp_genesis_builder,
+	sp_inherents, sp_io, sp_keyring, sp_offchain, sp_runtime, sp_session, sp_transaction_pool,
+	sp_transaction_storage_proof, sp_version, staging_xcm as xcm,
+	staging_xcm_builder as xcm_builder, staging_xcm_executor as xcm_executor,
+};
 
 use polkadot_sdk::bp_parachains;
 
@@ -76,8 +45,8 @@ use pallet_relayer_set;
 use pallet_transaction_storage;
 use pallet_validator_set;
 
-use alloc::vec::Vec;
 use crate::bp_runtime::OwnedBridgeModule;
+use alloc::vec::Vec;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{
 	derive_impl,
@@ -855,19 +824,25 @@ mod benches {
 		[crate::pallet_utility, Utility]
 	);
 
-	pub use crate::frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList};
-	pub use crate::frame_system_benchmarking::{
-		extensions::Pallet as SystemExtensionsBench, Pallet as SystemBench,
+	pub use crate::{
+		frame_benchmarking::{baseline::Pallet as Baseline, BenchmarkBatch, BenchmarkList},
+		frame_system_benchmarking::{
+			extensions::Pallet as SystemExtensionsBench, Pallet as SystemBench,
+		},
 	};
 
-	pub use crate::frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys};
-	pub use crate::sp_storage::TrackedStorageKey;
+	pub use crate::{
+		frame_support::traits::{StorageInfoTrait, WhitelistedStorageKeys},
+		sp_storage::TrackedStorageKey,
+	};
 
 	impl crate::frame_system_benchmarking::Config for Runtime {}
 	impl crate::frame_benchmarking::baseline::Config for Runtime {}
 
-	use crate::bridge_runtime_common::parachains_benchmarking::prepare_parachain_heads_proof;
-	use crate::pallet_bridge_parachains::benchmarking::Config as BridgeParachainsConfig;
+	use crate::{
+		bridge_runtime_common::parachains_benchmarking::prepare_parachain_heads_proof,
+		pallet_bridge_parachains::benchmarking::Config as BridgeParachainsConfig,
+	};
 
 	impl BridgeParachainsConfig<bridge_config::WithPolkadotBridgeParachainsInstance> for Runtime {
 		fn parachains() -> Vec<crate::bp_polkadot_core::parachains::ParaId> {
@@ -885,7 +860,10 @@ mod benches {
 			crate::bp_parachains::RelayBlockNumber,
 			crate::bp_parachains::RelayBlockHash,
 			crate::bp_polkadot_core::parachains::ParaHeadsProof,
-			Vec<(crate::bp_polkadot_core::parachains::ParaId, crate::bp_polkadot_core::parachains::ParaHash)>,
+			Vec<(
+				crate::bp_polkadot_core::parachains::ParaId,
+				crate::bp_polkadot_core::parachains::ParaHash,
+			)>,
 		) {
 			prepare_parachain_heads_proof::<
 				Runtime,
@@ -894,15 +872,17 @@ mod benches {
 		}
 	}
 
-	use crate::bridge_runtime_common::messages_benchmarking::{
-		generate_xcm_builder_bridge_message_sample, prepare_message_delivery_proof_from_parachain,
-		prepare_message_proof_from_parachain,
-	};
-	use crate::pallet_bridge_messages::{
-		benchmarking::{
-			Config as BridgeMessagesConfig, MessageDeliveryProofParams, MessageProofParams,
+	use crate::{
+		bridge_runtime_common::messages_benchmarking::{
+			generate_xcm_builder_bridge_message_sample,
+			prepare_message_delivery_proof_from_parachain, prepare_message_proof_from_parachain,
 		},
-		LaneIdOf,
+		pallet_bridge_messages::{
+			benchmarking::{
+				Config as BridgeMessagesConfig, MessageDeliveryProofParams, MessageProofParams,
+			},
+			LaneIdOf,
+		},
 	};
 
 	impl BridgeMessagesConfig<bridge_config::WithPeoplePolkadotMessagesInstance> for Runtime {

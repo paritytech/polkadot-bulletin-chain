@@ -1,37 +1,39 @@
 use crate::{
+	bp_messages::{
+		source_chain::MessagesBridge,
+		target_chain::{DispatchMessage, MessageDispatch},
+		LegacyLaneId,
+	},
+	bp_parachains::SingleParaStoredHeaderDataBuilder,
+	bp_runtime::messages::MessageDispatchResult,
+	frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound},
+	pallet_xcm_bridge_hub::XcmAsPlainPayload,
+	sp_runtime::SaturatedConversion,
+	xcm::prelude::*,
+	xcm_builder::{
+		BridgeBlobDispatcher, BridgeMessage, DispatchBlob, DispatchBlobError, HaulBlob,
+		HaulBlobError, HaulBlobExporter,
+	},
 	xcm_config::{ImmediateExecutingXcmRouter, UniversalLocation, XcmConfig},
+	xcm_executor::XcmExecutor,
 	ConstU32, Runtime, RuntimeCall, RuntimeEvent,
 };
-use crate::bp_messages::{
-	source_chain::MessagesBridge,
-	target_chain::{DispatchMessage, MessageDispatch},
-	LegacyLaneId,
-};
-use crate::bp_runtime::messages::MessageDispatchResult;
-use crate::bp_parachains::SingleParaStoredHeaderDataBuilder;
 use codec::{Decode, DecodeWithMemTracking, Encode};
-use crate::frame_support::{parameter_types, CloneNoBound, EqNoBound, PartialEqNoBound};
-use crate::pallet_xcm_bridge_hub::XcmAsPlainPayload;
 use core::marker::PhantomData;
 use scale_info::TypeInfo;
-use crate::sp_runtime::SaturatedConversion;
-use crate::xcm::prelude::*;
-use crate::xcm_builder::{
-	BridgeBlobDispatcher, BridgeMessage, DispatchBlob, DispatchBlobError, HaulBlob, HaulBlobError,
-	HaulBlobExporter,
-};
-use crate::xcm_executor::XcmExecutor;
 
 use crate::frame_support::weights::Weight;
 
 // TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
 pub mod bp_polkadot {
-	use crate::bp_header_chain::{self, ChainWithGrandpa};
-	use crate::bp_polkadot_core::*;
-	use crate::bp_runtime::{self, decl_bridge_finality_runtime_apis, Chain, ChainId};
-	use crate::frame_support::weights::Weight;
-	use crate::sp_api;
-	use crate::sp_runtime::StateVersion;
+	use crate::{
+		bp_header_chain::{self, ChainWithGrandpa},
+		bp_polkadot_core::*,
+		bp_runtime::{self, decl_bridge_finality_runtime_apis, Chain, ChainId},
+		frame_support::weights::Weight,
+		sp_api,
+		sp_runtime::StateVersion,
+	};
 
 	/// Polkadot Chain
 	pub struct Polkadot;
@@ -84,16 +86,18 @@ pub mod bp_polkadot {
 
 // TODO: when migrated to the Fellows, we can remove and reuse Fellows ones
 pub mod bp_people_polkadot {
+	use crate::{
+		bp_messages::{self, *},
+		bp_runtime::{
+			self, decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain,
+			ChainId, Parachain,
+		},
+		frame_support::{dispatch::DispatchClass, weights::Weight},
+		sp_api,
+		sp_runtime::StateVersion,
+	};
 	use bp_bridge_hub_cumulus::*;
 	pub use bp_bridge_hub_cumulus::{BlockNumber, Hash, Hasher, Header, EXTRA_STORAGE_PROOF_SIZE};
-	use crate::bp_messages::{self, *};
-	use crate::bp_runtime::{
-		self, decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain, ChainId,
-		Parachain,
-	};
-	use crate::frame_support::{dispatch::DispatchClass, weights::Weight};
-	use crate::sp_api;
-	use crate::sp_runtime::StateVersion;
 
 	/// PeoplePolkadot parachain.
 	#[derive(Debug)]
@@ -235,8 +239,8 @@ pub struct XcmBlobMessageDispatch<DispatchBlob, Weights> {
 	_marker: PhantomData<(DispatchBlob, Weights)>,
 }
 
-impl<BlobDispatcher: DispatchBlob, Weights: crate::pallet_bridge_messages::WeightInfoExt> MessageDispatch
-	for XcmBlobMessageDispatch<BlobDispatcher, Weights>
+impl<BlobDispatcher: DispatchBlob, Weights: crate::pallet_bridge_messages::WeightInfoExt>
+	MessageDispatch for XcmBlobMessageDispatch<BlobDispatcher, Weights>
 {
 	type DispatchPayload = XcmAsPlainPayload;
 	type DispatchLevelResult = XcmBlobMessageDispatchResult;
@@ -409,9 +413,10 @@ where
 				);
 				HaulBlobError::Transport("MessageSenderError")
 			})?;
-		let artifacts = crate::pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::send_message(
-			send_message_args,
-		);
+		let artifacts =
+			crate::pallet_bridge_messages::Pallet::<Runtime, MessagesInstance>::send_message(
+				send_message_args,
+			);
 		log::info!(
 			target: LOG_TARGET_BRIDGE_DISPATCH,
 			"haul_blob result - ok: {:?} on lane: {:?}. Enqueued messages: {}",
@@ -520,8 +525,9 @@ pub(crate) mod tests {
 
 	pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 		crate::sp_tracing::try_init_simple();
-		let mut t =
-			crate::frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
+		let mut t = crate::frame_system::GenesisConfig::<Runtime>::default()
+			.build_storage()
+			.unwrap();
 		pallet_relayer_set::GenesisConfig::<Runtime> {
 			initial_relayers: vec![relayer_signer().into()],
 		}

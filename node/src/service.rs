@@ -1,15 +1,18 @@
 //! Service and ServiceFactory implementation. Specialized wrapper over substrate service.
 
-use crate::{fake_runtime_api::RuntimeApi, node_primitives::Block};
+use crate::{
+	fake_runtime_api::RuntimeApi,
+	node_primitives::Block,
+	sc_client_api::{Backend, BlockBackend},
+	sc_consensus_grandpa::SharedVoterState,
+	sc_service::{error::Error as ServiceError, Configuration, TaskManager},
+	sc_telemetry::{Telemetry, TelemetryWorker},
+	sc_transaction_pool_api::OffchainTransactionPoolFactory,
+	sp_api::{ApiExt, ProvideRuntimeApi},
+	sp_consensus_babe::inherents::BabeCreateInherentDataProviders,
+	sp_transaction_storage_proof::runtime_api::TransactionStorageApi,
+};
 use futures::FutureExt;
-use crate::sc_client_api::{Backend, BlockBackend};
-use crate::sc_consensus_grandpa::SharedVoterState;
-use crate::sc_service::{error::Error as ServiceError, Configuration, TaskManager};
-use crate::sc_telemetry::{Telemetry, TelemetryWorker};
-use crate::sc_transaction_pool_api::OffchainTransactionPoolFactory;
-use crate::sp_api::{ApiExt, ProvideRuntimeApi};
-use crate::sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
-use crate::sp_transaction_storage_proof::runtime_api::TransactionStorageApi;
 use std::{sync::Arc, time::Duration};
 
 pub(crate) type FullClient = crate::sc_service::TFullClient<
@@ -19,8 +22,12 @@ pub(crate) type FullClient = crate::sc_service::TFullClient<
 >;
 type FullBackend = crate::sc_service::TFullBackend<Block>;
 type FullSelectChain = crate::sc_consensus::LongestChain<FullBackend, Block>;
-type FullGrandpaBlockImport =
-	crate::sc_consensus_grandpa::GrandpaBlockImport<FullBackend, Block, FullClient, FullSelectChain>;
+type FullGrandpaBlockImport = crate::sc_consensus_grandpa::GrandpaBlockImport<
+	FullBackend,
+	Block,
+	FullClient,
+	FullSelectChain,
+>;
 
 /// The minimum period of blocks on which justifications will be
 /// imported and generated.
@@ -64,7 +71,9 @@ pub fn new_partial(
 		})
 		.transpose()?;
 
-	let executor = crate::sc_service::new_wasm_executor::<crate::sp_io::SubstrateHostFunctions>(&config.executor);
+	let executor = crate::sc_service::new_wasm_executor::<crate::sp_io::SubstrateHostFunctions>(
+		&config.executor,
+	);
 	let (client, backend, keystore_container, task_manager) =
 		crate::sc_service::new_full_parts::<Block, RuntimeApi, _>(
 			config,
@@ -236,10 +245,11 @@ pub fn new_full<
 		let shared_authority_set = grandpa_link.shared_authority_set().clone();
 		let shared_voter_state = shared_voter_state.clone();
 
-		let finality_proof_provider = crate::sc_consensus_grandpa::FinalityProofProvider::new_for_service(
-			backend.clone(),
-			Some(shared_authority_set.clone()),
-		);
+		let finality_proof_provider =
+			crate::sc_consensus_grandpa::FinalityProofProvider::new_for_service(
+				backend.clone(),
+				Some(shared_authority_set.clone()),
+			);
 
 		Box::new(move |subscription_executor| {
 			let deps = crate::rpc::FullDeps {

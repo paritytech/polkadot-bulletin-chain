@@ -2,15 +2,15 @@ use crate::{
 	benchmarking::inherent_benchmark_data,
 	chain_spec,
 	cli::{Cli, Subcommand},
+	frame_benchmarking_cli::{
+		BenchmarkCmd, ExtrinsicFactory, SubstrateRemarkBuilder, SUBSTRATE_REFERENCE_HARDWARE,
+	},
 	node_primitives::Block,
+	sc_cli::SubstrateCli,
+	sc_network::config::NetworkBackendType,
+	sc_service::PartialComponents,
 	service,
 };
-use crate::frame_benchmarking_cli::{
-	BenchmarkCmd, ExtrinsicFactory, SubstrateRemarkBuilder, SUBSTRATE_REFERENCE_HARDWARE,
-};
-use crate::sc_cli::SubstrateCli;
-use crate::sc_network::config::NetworkBackendType;
-use crate::sc_service::PartialComponents;
 use std::{sync::Arc, time::Duration};
 
 /// Log target for this file.

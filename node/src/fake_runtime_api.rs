@@ -19,18 +19,22 @@
 //! These are used to provide a type that implements these runtime APIs without requiring to import
 //! the native runtimes.
 
-use crate::node_primitives::{AccountId, Balance, Block, Nonce};
-use crate::pallet_transaction_payment::{FeeDetails, RuntimeDispatchInfo};
-use crate::sp_consensus_grandpa::AuthorityId as GrandpaId;
-
-use crate::sp_core::OpaqueMetadata;
-use crate::sp_runtime::{
-	traits::Block as BlockT,
-	transaction_validity::{TransactionSource, TransactionValidity},
-	ApplyExtrinsicResult,
+use crate::{
+	node_primitives::{AccountId, Balance, Block, Nonce},
+	pallet_transaction_payment::{FeeDetails, RuntimeDispatchInfo},
+	sp_consensus_grandpa::AuthorityId as GrandpaId,
 };
-use crate::sp_version::RuntimeVersion;
-use crate::sp_weights::Weight;
+
+use crate::{
+	sp_core::OpaqueMetadata,
+	sp_runtime::{
+		traits::Block as BlockT,
+		transaction_validity::{TransactionSource, TransactionValidity},
+		ApplyExtrinsicResult,
+	},
+	sp_version::RuntimeVersion,
+	sp_weights::Weight,
+};
 
 #[allow(dead_code)]
 struct Runtime;

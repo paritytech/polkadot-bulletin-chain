@@ -1,5 +1,7 @@
-use crate::sc_cli::Result;
-use crate::sp_inherents::{InherentData, InherentDataProvider};
+use crate::{
+	sc_cli::Result,
+	sp_inherents::{InherentData, InherentDataProvider},
+};
 use std::time::Duration;
 
 /// Generates inherent data for the `benchmark overhead` command.

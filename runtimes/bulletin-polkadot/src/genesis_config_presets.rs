@@ -1,16 +1,17 @@
 use crate::{
-	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig,
-	BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig, BridgePolkadotParachainsConfig,
-	RelayerSetConfig, RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig,
-	ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
+	bridge_config::XCM_LANE,
+	opaque::SessionKeys,
+	sp_consensus_babe::AuthorityId as BabeId,
+	sp_consensus_grandpa::AuthorityId as GrandpaId,
+	sp_core::{sr25519, Pair, Public},
+	sp_genesis_builder::PresetId,
+	sp_runtime::traits::{IdentifyAccount, Verify},
+	AccountId, BabeConfig, BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig,
+	BridgePolkadotParachainsConfig, RelayerSetConfig, RuntimeGenesisConfig, SessionConfig,
+	Signature, SudoConfig, ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
 };
 use alloc::{vec, vec::Vec};
 use scale_info::prelude::format;
-use crate::sp_consensus_babe::AuthorityId as BabeId;
-use crate::sp_consensus_grandpa::AuthorityId as GrandpaId;
-use crate::sp_core::{sr25519, Pair, Public};
-use crate::sp_genesis_builder::PresetId;
-use crate::sp_runtime::traits::{IdentifyAccount, Verify};
 
 type AccountPublic = <Signature as Verify>::Signer;
 

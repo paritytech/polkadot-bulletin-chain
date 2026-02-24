@@ -19,40 +19,42 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
-use crate::frame_support::{
-	parameter_types,
-	traits::{
-		fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
-		Everything, LinearStoragePrice, Nothing,
+use crate::{
+	frame_support::{
+		parameter_types,
+		traits::{
+			fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
+			Everything, LinearStoragePrice, Nothing,
+		},
 	},
-};
-use crate::frame_system::EnsureRoot;
-use crate::pallet_collator_selection::StakingPotAccountId;
-use crate::pallet_xcm::{AuthorizedAliasers, XcmPassthrough};
-use crate::parachains_common::{
-	xcm_config::{
-		AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
-		ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+	frame_system::EnsureRoot,
+	pallet_collator_selection::StakingPotAccountId,
+	pallet_xcm::{AuthorizedAliasers, XcmPassthrough},
+	parachains_common::{
+		xcm_config::{
+			AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
+			ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+		},
+		TREASURY_PALLET_ID,
 	},
-	TREASURY_PALLET_ID,
+	polkadot_parachain_primitives::primitives::Sibling,
+	polkadot_runtime_common::xcm_sender::ExponentialPrice,
+	sp_runtime::traits::AccountIdConversion,
+	xcm::latest::{prelude::*, WESTEND_GENESIS_HASH},
+	xcm_builder::{
+		AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
+		AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
+		AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
+		DescribeAllTerminal, DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor,
+		FungibleAdapter, HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset,
+		RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative,
+		SiblingParachainConvertsVia, SignedAccountId32AsNative, SignedToAccountId32,
+		SovereignSignedViaLocation, TakeWeightCredit, TrailingSetTopicAsId, UsingComponents,
+		WeightInfoBounds, WithComputedOrigin, WithUniqueTopic, XcmFeeManagerFromComponents,
+	},
+	xcm_executor::XcmExecutor,
 };
-use crate::polkadot_parachain_primitives::primitives::Sibling;
-use crate::polkadot_runtime_common::xcm_sender::ExponentialPrice;
-use crate::sp_runtime::traits::AccountIdConversion;
 use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
-use crate::xcm::latest::{prelude::*, WESTEND_GENESIS_HASH};
-use crate::xcm_builder::{
-	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
-	AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
-	AllowKnownQueryResponses, AllowSubscriptionsFrom, AllowTopLevelPaidExecutionFrom,
-	DescribeAllTerminal, DescribeFamily, EnsureXcmOrigin, FrameTransactionalProcessor,
-	FungibleAdapter, HashedDescription, IsConcrete, LocationAsSuperuser, ParentIsPreset,
-	RelayChainAsNative, SendXcmFeeToAccount, SiblingParachainAsNative, SiblingParachainConvertsVia,
-	SignedAccountId32AsNative, SignedToAccountId32, SovereignSignedViaLocation, TakeWeightCredit,
-	TrailingSetTopicAsId, UsingComponents, WeightInfoBounds, WithComputedOrigin, WithUniqueTopic,
-	XcmFeeManagerFromComponents,
-};
-use crate::xcm_executor::XcmExecutor;
 
 // Re-export
 pub use testnet_parachains_constants::westend::locations::{GovernanceLocation, PeopleLocation};
@@ -188,7 +190,8 @@ pub type WaivedLocations = (
 /// Helper type to match the relay chain native token from Asset Hub.
 /// Non-system parachains should trust Asset Hub as the reserve location for the relay token.
 pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
-impl<Origin> crate::frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
+impl<Origin> crate::frame_support::traits::ContainsPair<Asset, Location>
+	for IsRelayTokenFrom<Origin>
 where
 	Origin: crate::frame_support::traits::Get<Location>,
 {

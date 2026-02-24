@@ -16,16 +16,19 @@
 mod pallet_xcm_benchmarks_fungible;
 mod pallet_xcm_benchmarks_generic;
 
-use crate::{xcm_config::MaxAssetsIntoHolding, Runtime};
+use crate::{
+	frame_support::weights::Weight,
+	sp_runtime::BoundedVec,
+	xcm::{
+		latest::{prelude::*, AssetTransferFilter},
+		DoubleEncoded,
+	},
+	xcm_config::MaxAssetsIntoHolding,
+	Runtime,
+};
 use alloc::vec::Vec;
-use crate::frame_support::weights::Weight;
 use pallet_xcm_benchmarks_fungible::WeightInfo as XcmFungibleWeight;
 use pallet_xcm_benchmarks_generic::WeightInfo as XcmGeneric;
-use crate::sp_runtime::BoundedVec;
-use crate::xcm::{
-	latest::{prelude::*, AssetTransferFilter},
-	DoubleEncoded,
-};
 
 trait WeighAssets {
 	fn weigh_assets(&self, weight: Weight) -> Weight;
