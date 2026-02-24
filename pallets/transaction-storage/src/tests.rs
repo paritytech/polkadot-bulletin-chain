@@ -609,6 +609,41 @@ fn signed_renew_prefers_preimage_authorization() {
 	});
 }
 
+#[test]
+fn validate_signed_account_authorization_has_provides_tag() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1u64;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000,));
+
+		let call = Call::store { data: vec![0u8; 2000] };
+
+		// validate_signed still doesn't consume authorization (correct behaviour).
+		for _ in 0..10 {
+			assert_ok!(TransactionStorage::validate_signed(&who, &call));
+		}
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+		);
+
+		let vt = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert!(!vt.provides.is_empty(), "validate_signed must emit a `provides` tag");
+
+		// Two calls with the same signer + content produce identical tags, confirming
+		// that the mempool will deduplicate them.
+		let vt2 = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert_eq!(vt.provides, vt2.provides);
+
+		// pre_dispatch still enforces the authorization: only the first succeeds.
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			InvalidTransaction::Payment,
+		);
+	});
+}
+
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`

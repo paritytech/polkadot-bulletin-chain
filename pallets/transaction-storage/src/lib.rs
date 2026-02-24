@@ -1136,23 +1136,30 @@ pub mod pallet {
 			// This allows anyone to store/renew pre-authorized content without consuming their
 			// own account authorization.
 			let consume = context.consume_authorization();
-			Self::check_authorization(
+			let used_preimage_auth = Self::check_authorization(
 				AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				consume,
 			)
-			.or_else(|_| {
+			.is_ok();
+
+			if !used_preimage_auth {
 				Self::check_authorization(
 					AuthorizationScope::Account(who.clone()),
 					size as u32,
 					consume,
-				)
-			})?;
+				)?;
+			}
 
-			Ok(context.want_valid_transaction().then(|| ValidTransaction {
-				priority: T::StoreRenewPriority::get(),
-				longevity: T::StoreRenewLongevity::get(),
-				..Default::default()
+			Ok(context.want_valid_transaction().then(|| {
+				let builder = ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+					.priority(T::StoreRenewPriority::get())
+					.longevity(T::StoreRenewLongevity::get());
+				if used_preimage_auth {
+					builder.and_provides(content_hash).into()
+				} else {
+					builder.and_provides((who, content_hash)).into()
+				}
 			}))
 		}
 
