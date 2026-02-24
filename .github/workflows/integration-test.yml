@@ -259,7 +259,7 @@ jobs:
             ${{ env.TEST_DIR }}/*.log
 
   integration-tests-complete:
-    name: Integration Tests
+    name: All integration tests passed
     needs: [changes, integration-tests]
     if: always()
     runs-on: ubuntu-latest
