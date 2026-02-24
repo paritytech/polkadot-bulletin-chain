@@ -545,6 +545,13 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
+impl pallet_utility::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type PalletsOrigin = OriginCaller;
+	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
+}
+
 #[frame_support::runtime]
 mod runtime {
 	#[runtime::runtime]
@@ -573,6 +580,8 @@ mod runtime {
 	pub type ParachainInfo = parachain_info;
 	#[runtime::pallet_index(5)]
 	pub type WeightReclaim = cumulus_pallet_weight_reclaim;
+	#[runtime::pallet_index(6)]
+	pub type Utility = pallet_utility;
 
 	// Monetary stuff.
 	#[runtime::pallet_index(10)]

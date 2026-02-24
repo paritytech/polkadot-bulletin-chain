@@ -27,4 +27,5 @@ frame_benchmarking::define_benchmarks!(
 	[pallet_xcm_benchmarks::fungible, XcmBalances]
 	[pallet_xcm_benchmarks::generic, XcmGeneric]
 	[cumulus_pallet_weight_reclaim, WeightReclaim]
+	[pallet_utility, Utility]
 );
