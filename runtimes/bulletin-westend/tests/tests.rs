@@ -659,47 +659,39 @@ fn people_chain_can_authorize_storage_with_transact() {
 /// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
 ///
 /// The available block weight accounts for:
-/// - The `avg_block_initialization` margin (AVERAGE_ON_INITIALIZE_RATIO = 5%) that FRAME
-///   reserves from `max_total` for on_initialize hooks.
-/// - The collator-side 85% PoV cap: collators limit the actual PoV to 85% of
-///   `max_pov_size` to leave headroom for relay-chain state proof overhead.
-///   See `cumulus/client/consensus/aura/src/collators/lookahead.rs`.
+/// - The `avg_block_initialization` margin (AVERAGE_ON_INITIALIZE_RATIO = 5%) that FRAME reserves
+///   from `max_total` for on_initialize hooks.
+/// - The collator-side 85% PoV cap: collators limit the actual PoV to 85% of `max_pov_size` to
+///   leave headroom for relay-chain state proof overhead. See
+///   `cumulus/client/consensus/aura/src/collators/lookahead.rs`.
 #[test]
 fn transaction_storage_weight_sanity() {
-	let max_block_txs =
-		<<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
-	let max_tx_size =
-		<<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get();
+	let max_block_txs = <<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
+	let max_tx_size = <<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get();
 
 	let block_weights = runtime::RuntimeBlockWeights::get();
 	let normal = block_weights.get(DispatchClass::Normal);
 	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
 	let base_extrinsic = normal.base_extrinsic;
 
-	let max_extrinsic = normal
-		.max_extrinsic
-		.expect("Normal class must have a max_extrinsic weight");
+	let max_extrinsic =
+		normal.max_extrinsic.expect("Normal class must have a max_extrinsic weight");
 
 	// init_weight = max_total - max_extrinsic - base_extrinsic (the AVERAGE_ON_INITIALIZE_RATIO
 	// reservation that FRAME sets aside for on_initialize hooks).
-	let init_weight = normal_max_total
-		.saturating_sub(max_extrinsic)
-		.saturating_sub(base_extrinsic);
+	let init_weight = normal_max_total.saturating_sub(max_extrinsic).saturating_sub(base_extrinsic);
 
 	// Collators cap the PoV at 85% of max_pov_size to reserve headroom for the
 	// relay-chain state proof (not runtime-enforced, but blocks exceeding it are rejected).
 	// Reference: cumulus/client/consensus/aura/src/collators/lookahead.rs
 	const COLLATOR_MAX_POV_PERCENT: u64 = 85;
-	let collator_pov_limit =
-		block_weights.max_block.proof_size() * COLLATOR_MAX_POV_PERCENT / 100;
+	let collator_pov_limit = block_weights.max_block.proof_size() * COLLATOR_MAX_POV_PERCENT / 100;
 
 	// Effective budget = max_total minus init reservation, with proof_size capped by the
 	// collator PoV limit.
 	let after_init = normal_max_total.saturating_sub(init_weight);
-	let effective_normal = Weight::from_parts(
-		after_init.ref_time(),
-		after_init.proof_size().min(collator_pov_limit),
-	);
+	let effective_normal =
+		Weight::from_parts(after_init.ref_time(), after_init.proof_size().min(collator_pov_limit));
 
 	let block_length = runtime::RuntimeBlockLength::get();
 	let normal_length = *block_length.max.get(DispatchClass::Normal);
@@ -758,14 +750,24 @@ fn transaction_storage_weight_sanity() {
 	let max_txs_by_weight = effective_normal.ref_time() / store_weight.ref_time();
 	println!("--- transaction_storage weight sanity (westend) ---");
 	println!("  MaxBlockTransactions:       {max_block_txs}");
-	println!("  MaxTransactionSize:         {} bytes ({} MiB)", max_tx_size, max_tx_size / (1024 * 1024));
+	println!(
+		"  MaxTransactionSize:         {} bytes ({} MiB)",
+		max_tx_size,
+		max_tx_size / (1024 * 1024)
+	);
 	println!("  Normal max_total:           {:?}", normal_max_total);
 	println!("  Init reservation:           {:?}", init_weight);
-	println!("  Collator PoV cap (85%):     {} bytes ({:.1} MiB)",
-		collator_pov_limit, collator_pov_limit as f64 / (1024.0 * 1024.0));
+	println!(
+		"  Collator PoV cap (85%):     {} bytes ({:.1} MiB)",
+		collator_pov_limit,
+		collator_pov_limit as f64 / (1024.0 * 1024.0)
+	);
 	println!("  Effective normal budget:    {:?}", effective_normal);
 	println!("  max_extrinsic:              {:?}", max_extrinsic);
-	println!("  Normal length limit:        {normal_length} bytes ({} MiB)", normal_length / (1024 * 1024));
+	println!(
+		"  Normal length limit:        {normal_length} bytes ({} MiB)",
+		normal_length / (1024 * 1024)
+	);
 	println!("  store(max_size) weight:     {:?}", max_store_dispatch);
 	println!("  store(even_split) weight:   {:?} (at {per_tx_size} bytes)", store_weight);
 	println!("  renew weight:               {:?}", renew_weight);

@@ -1041,25 +1041,20 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 /// on_initialize hooks.
 #[test]
 fn transaction_storage_weight_sanity() {
-	let max_block_txs =
-		<<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
-	let max_tx_size =
-		<<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get();
+	let max_block_txs = <<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
+	let max_tx_size = <<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get();
 
 	let block_weights = runtime::BlockWeights::get();
 	let normal = block_weights.get(DispatchClass::Normal);
 	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
 	let base_extrinsic = normal.base_extrinsic;
 
-	let max_extrinsic = normal
-		.max_extrinsic
-		.expect("Normal class must have a max_extrinsic weight");
+	let max_extrinsic =
+		normal.max_extrinsic.expect("Normal class must have a max_extrinsic weight");
 
 	// init_weight = max_total - max_extrinsic - base_extrinsic (the avg_block_initialization
 	// reservation that FRAME sets aside for on_initialize hooks; 10% for solochain).
-	let init_weight = normal_max_total
-		.saturating_sub(max_extrinsic)
-		.saturating_sub(base_extrinsic);
+	let init_weight = normal_max_total.saturating_sub(max_extrinsic).saturating_sub(base_extrinsic);
 	let effective_normal = normal_max_total.saturating_sub(init_weight);
 
 	let block_length = runtime::BlockLength::get();
@@ -1119,12 +1114,19 @@ fn transaction_storage_weight_sanity() {
 	let max_txs_by_weight = effective_normal.ref_time() / store_weight.ref_time();
 	println!("--- transaction_storage weight sanity (polkadot) ---");
 	println!("  MaxBlockTransactions:       {max_block_txs}");
-	println!("  MaxTransactionSize:         {} bytes ({} MiB)", max_tx_size, max_tx_size / (1024 * 1024));
+	println!(
+		"  MaxTransactionSize:         {} bytes ({} MiB)",
+		max_tx_size,
+		max_tx_size / (1024 * 1024)
+	);
 	println!("  Normal max_total:           {:?}", normal_max_total);
 	println!("  Init reservation:           {:?}", init_weight);
 	println!("  Effective normal budget:    {:?}", effective_normal);
 	println!("  max_extrinsic:              {:?}", max_extrinsic);
-	println!("  Normal length limit:        {normal_length} bytes ({} MiB)", normal_length / (1024 * 1024));
+	println!(
+		"  Normal length limit:        {normal_length} bytes ({} MiB)",
+		normal_length / (1024 * 1024)
+	);
 	println!("  store(max_size) weight:     {:?}", max_store_dispatch);
 	println!("  store(even_split) weight:   {:?} (at {per_tx_size} bytes)", store_weight);
 	println!("  renew weight:               {:?}", renew_weight);
