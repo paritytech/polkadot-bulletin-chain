@@ -1,5 +1,11 @@
 # CLAUDE.md - Polkadot Bulletin Chain
 
+## Claude Preferences
+
+**Git commit rules:**
+- NEVER add Co-Authored-By lines to commits
+- NEVER use git push --force or git push -f
+
 ## Project Overview
 
 Polkadot Bulletin Chain is a specialized blockchain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It serves as a storage solution primarily for the People/Proof-of-Personhood chain, functioning as a bridge-connected parachain with integrated IPFS support.
