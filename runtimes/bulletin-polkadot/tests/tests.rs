@@ -1119,18 +1119,18 @@ fn transaction_storage_weight_sanity() {
 		max_tx_size,
 		max_tx_size / (1024 * 1024)
 	);
-	println!("  Normal max_total:           {:?}", normal_max_total);
-	println!("  Init reservation:           {:?}", init_weight);
-	println!("  Effective normal budget:    {:?}", effective_normal);
-	println!("  max_extrinsic:              {:?}", max_extrinsic);
+	println!("  Normal max_total:           {normal_max_total:?}");
+	println!("  Init reservation:           {init_weight:?}");
+	println!("  Effective normal budget:    {effective_normal:?}");
+	println!("  max_extrinsic:              {max_extrinsic:?}");
 	println!(
 		"  Normal length limit:        {normal_length} bytes ({} MiB)",
 		normal_length / (1024 * 1024)
 	);
-	println!("  store(max_size) weight:     {:?}", max_store_dispatch);
-	println!("  store(even_split) weight:   {:?} (at {per_tx_size} bytes)", store_weight);
-	println!("  renew weight:               {:?}", renew_weight);
-	println!("  check_proof weight:         {:?}", check_proof_weight);
+	println!("  store(max_size) weight:     {max_store_dispatch:?}");
+	println!("  store(even_split) weight:   {store_weight:?} (at {per_tx_size} bytes)");
+	println!("  renew weight:               {renew_weight:?}");
+	println!("  check_proof weight:         {check_proof_weight:?}");
 	println!("  Max store txs by weight:    {max_txs_by_weight}");
 	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
 }
