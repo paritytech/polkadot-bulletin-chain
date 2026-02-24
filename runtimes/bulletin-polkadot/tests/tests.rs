@@ -15,7 +15,12 @@ use bulletin_polkadot_runtime::{
 	},
 	AccountId, BridgePolkadotGrandpa, BridgePolkadotMessages,
 };
-use frame_support::{assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get};
+use frame_support::{
+	assert_ok,
+	dispatch::{DispatchClass, GetDispatchInfo},
+	pallet_prelude::Hooks,
+	traits::Get,
+};
 use pallet_bridge_messages::{
 	messages_generation::{encode_all_messages, encode_lane_data, prepare_messages_storage_proof},
 	BridgedChainOf, LaneIdOf, ThisChainOf,
@@ -23,7 +28,8 @@ use pallet_bridge_messages::{
 use pallet_bridge_parachains::ParachainHeaders;
 use pallet_transaction_storage::{
 	cids::{calculate_cid, CidConfig, HashingAlgorithm},
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
+	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, WeightInfo,
+	BAD_DATA_SIZE,
 };
 use runtime::{
 	bridge_config::bp_people_polkadot, BuildStorage, Executive, Hash, Header, Runtime, RuntimeCall,
@@ -1023,4 +1029,106 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
 		);
 	});
+}
+
+/// Sanity checks for transaction-storage weight/size limits.
+///
+/// Verifies that the runtime's weight configuration, block length limits, and
+/// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
+///
+/// The available block weight accounts for the `avg_block_initialization` margin
+/// (10% for `with_sensible_defaults`) that FRAME reserves from `max_total` for
+/// on_initialize hooks.
+#[test]
+fn transaction_storage_weight_sanity() {
+	let max_block_txs =
+		<<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
+	let max_tx_size =
+		<<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get();
+
+	let block_weights = runtime::BlockWeights::get();
+	let normal = block_weights.get(DispatchClass::Normal);
+	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
+	let base_extrinsic = normal.base_extrinsic;
+
+	let max_extrinsic = normal
+		.max_extrinsic
+		.expect("Normal class must have a max_extrinsic weight");
+
+	// init_weight = max_total - max_extrinsic - base_extrinsic (the avg_block_initialization
+	// reservation that FRAME sets aside for on_initialize hooks; 10% for solochain).
+	let init_weight = normal_max_total
+		.saturating_sub(max_extrinsic)
+		.saturating_sub(base_extrinsic);
+	let effective_normal = normal_max_total.saturating_sub(init_weight);
+
+	let block_length = runtime::BlockLength::get();
+	let normal_length = *block_length.max.get(DispatchClass::Normal);
+
+	type W = <Runtime as pallet_transaction_storage::Config>::WeightInfo;
+
+	// --- 1. MaxTransactionSize must fit within the normal block length limit.
+	assert!(
+		max_tx_size < normal_length,
+		"MaxTransactionSize ({max_tx_size}) >= normal block length ({normal_length}): \
+		 a single max-size store extrinsic wouldn't fit by length",
+	);
+
+	// --- 2. A single store(MaxTransactionSize) must fit within max_extrinsic.
+	let max_store_dispatch = W::store(max_tx_size);
+	assert!(
+		max_store_dispatch.all_lte(max_extrinsic),
+		"store({max_tx_size}) dispatch weight {max_store_dispatch:?} exceeds \
+		 max_extrinsic {max_extrinsic:?} (which accounts for init overhead + base)",
+	);
+
+	// --- 3. MaxBlockTransactions store calls at an evenly-split size must fit in the
+	//    effective normal budget (ref_time). Each extrinsic costs dispatch + base.
+	let per_tx_size = normal_length / max_block_txs;
+	let store_weight = W::store(per_tx_size).saturating_add(base_extrinsic);
+	let total_store_ref_time = store_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_store_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) store calls at {per_tx_size} bytes each: \
+		 total ref_time {total_store_ref_time} exceeds effective normal limit {} \
+		 (max_total {} minus init reservation {})",
+		effective_normal.ref_time(),
+		normal_max_total.ref_time(),
+		init_weight.ref_time(),
+	);
+
+	// --- 4. MaxBlockTransactions renew calls must fit by ref_time.
+	let renew_weight = W::renew().saturating_add(base_extrinsic);
+	let total_renew_ref_time = renew_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_renew_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) renew calls: \
+		 total ref_time {total_renew_ref_time} exceeds effective normal limit {}",
+		effective_normal.ref_time(),
+	);
+
+	// --- 5. check_proof (DispatchClass::Mandatory, once per block) must fit in max block.
+	let check_proof_weight = W::check_proof();
+	assert!(
+		check_proof_weight.all_lte(block_weights.max_block),
+		"check_proof weight {check_proof_weight:?} exceeds max block {:?}",
+		block_weights.max_block,
+	);
+
+	// --- Diagnostics (visible with --nocapture).
+	let max_txs_by_weight = effective_normal.ref_time() / store_weight.ref_time();
+	println!("--- transaction_storage weight sanity (polkadot) ---");
+	println!("  MaxBlockTransactions:       {max_block_txs}");
+	println!("  MaxTransactionSize:         {} bytes ({} MiB)", max_tx_size, max_tx_size / (1024 * 1024));
+	println!("  Normal max_total:           {:?}", normal_max_total);
+	println!("  Init reservation:           {:?}", init_weight);
+	println!("  Effective normal budget:    {:?}", effective_normal);
+	println!("  max_extrinsic:              {:?}", max_extrinsic);
+	println!("  Normal length limit:        {normal_length} bytes ({} MiB)", normal_length / (1024 * 1024));
+	println!("  store(max_size) weight:     {:?}", max_store_dispatch);
+	println!("  store(even_split) weight:   {:?} (at {per_tx_size} bytes)", store_weight);
+	println!("  renew weight:               {:?}", renew_weight);
+	println!("  check_proof weight:         {:?}", check_proof_weight);
+	println!("  Max store txs by weight:    {max_txs_by_weight}");
+	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
 }
