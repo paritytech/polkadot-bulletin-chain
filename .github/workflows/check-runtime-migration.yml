@@ -22,30 +22,7 @@ permissions: {}
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      should-run: ${{ steps.check.outputs.should-run }}
-    steps:
-      - id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            FILES=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files --paginate --jq '.[].filename')
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
-            FILES=$(gh api repos/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.event.after }} --jq '.files[].filename')
-          else
-            echo "should-run=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          if echo "$FILES" | grep -qvE '^(console-ui/|docs/)'; then
-            echo "should-run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should-run=false" >> $GITHUB_OUTPUT
-          fi
+    uses: ./.github/workflows/check-changed-files.yml
 
   runtime-matrix:
     if: needs.changes.outputs.should-run == 'true'
