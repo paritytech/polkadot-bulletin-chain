@@ -24,7 +24,15 @@ env:
   ZOMBIENET_BIN_DIR: ${{ github.workspace }}/.zombienet-bin
 
 jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   setup:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     name: Setup
     runs-on: ubuntu-latest
     steps:
@@ -90,6 +98,8 @@ jobs:
           chmod +x zombienet-linux-x64
 
   runtime-matrix:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
@@ -229,16 +239,13 @@ jobs:
             ${{ env.TEST_DIR }}/*.log
 
   integration-tests-complete:
-    name: Integration Tests
-    needs: [integration-tests]
+    name: All integration tests passed
+    needs: [changes, integration-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Check integration test results
-        env:
-          TEST_RESULT: ${{ needs.integration-tests.result }}
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: |
-          if [ "$TEST_RESULT" != "success" ]; then
-            echo "Integration tests failed or were cancelled"
-            exit 1
-          fi
+          echo "Integration tests failed or were cancelled"
+          exit 1
