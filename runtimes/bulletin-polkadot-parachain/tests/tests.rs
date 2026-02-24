@@ -85,7 +85,6 @@ fn construct_extrinsic(
 		),
 		bulletin_polkadot_parachain_runtime::ValidateSigned,
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-		pallet_transaction_storage::extension::ProvideCidConfig::<Runtime>::new(),
 	);
 	let tx_ext: TxExtension =
 		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
