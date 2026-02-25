@@ -21,6 +21,7 @@
     "multiformats": "^13.4.1",
     "polkadot-api": "^1.22.0",
     "smoldot": "^2.0.40",
+    "bulletin-helia": "file:./bulletin-helia",
     "ws": "^8.18.0"
   },
   "devDependencies": {

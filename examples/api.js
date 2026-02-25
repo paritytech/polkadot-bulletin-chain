@@ -228,6 +228,31 @@ export async function fetchCid(httpIpfsApi, cid) {
     return Buffer.from(await res.arrayBuffer())
 }
 
+import { IPFSClient } from 'bulletin-helia/ipfs';
+import { CLILogger } from 'bulletin-helia/logger-cli';
+
+/**
+ * Fetch raw bytes for a CID via direct P2P connection to Bulletin nodes.
+ *
+ * @param {string[]} peerMultiaddrs - Multiaddrs of Bulletin nodes to connect to
+ * @param {string} cidInput - CID to fetch (string or CID object)
+ * @param {object} [options]
+ * @param {object} [options.logger] - Logger instance (BaseLogger). Defaults to CLILogger.
+ * @returns {Promise<Buffer>} Raw bytes of the fetched block
+ */
+export async function fetchCidViaP2P(peerMultiaddrs, cidInput, { logger } = {}) {
+    const cidString = typeof cidInput === 'string' ? cidInput : cidInput.toString();
+    const client = new IPFSClient({ logger: logger ?? new CLILogger(), peerMultiaddrs });
+
+    try {
+        await client.initialize();
+        const bytes = await client.fetchRawBytes(cidString);
+        return Buffer.from(bytes);
+    } finally {
+        await client.stop().catch(() => {});
+    }
+}
+
 /**
  * Read the file, chunk it, store in Bulletin and return CIDs.
  * @param {object} typedApi - PAPI typed API
