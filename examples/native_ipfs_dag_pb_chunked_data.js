@@ -2,7 +2,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
-import { generateTextImage, fileToDisk, filesAreEqual, newSigner, HTTP_IPFS_API } from './common.js';
+import { generateTextImage, fileToDisk, filesAreEqual, newSigner, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
@@ -12,6 +12,12 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import * as dagPB from "@ipld/dag-pb";
+
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 // ---- CONFIG ----
 const CHUNK_SIZE = 6 * 1024 // 6 KB
@@ -28,12 +34,12 @@ async function main() {
         generateTextImage(filePath, "Hello, Bulletin dag - " + new Date().toString());
 
         // Create PAPI client with WebSocket provider
-        client = createClient(withPolkadotSdkCompat(getWsProvider('ws://localhost:10000')));
+        client = createClient(withPolkadotSdkCompat(getWsProvider(NODE_WS)));
         // Get typed API with generated descriptors
         const typedApi = client.getTypedApi(bulletin);
 
         // Create signers
-        const { signer: sudoSigner } = newSigner('//Alice');
+        const { signer: sudoSigner } = newSigner(SEED);
         const { signer: whoSigner, address: whoAddress } = newSigner('//Nativeipfsdagsigner');
 
         console.log('✅ Connected to Bulletin node')
@@ -55,17 +61,17 @@ async function main() {
 
         // Store DAG file directly to the Bulletin. with DAG-PB / SHA2_256 content_hash.
         // !!! (No IPFS magic needed: ipfs.dag.put or ipfs.block.put(dagBytes, { format: 'dag-pb', mhtype: 'sha2-256'}))
-        let rootCid = await store(typedApi, whoSigner, dagBytes, 0x70, 0x12);
+        let { cid: rootCid } = await store(typedApi, whoSigner, dagBytes, 0x70, 0x12);
         assert.deepStrictEqual(expectedRootCid, rootCid);
 
         // Read by rootCID directly over IPFS gateway, which handles download all the chunks.
         // (Other words Bulletin is compatible)
         console.log('🧱 DAG stored on Bulletin with CID:', rootCid.toString())
         console.log('\n🌐 Try opening in browser:')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
         console.log("   (You'll see binary content since this is an image)")
         console.log('')
-        console.log(`   http://127.0.0.1:8080/ipfs/${convertCid(rootCid, 0x55)}`)
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${convertCid(rootCid, 0x55)}`)
         console.log("   (You'll see the DAG file itself)")
 
         // Download the content from IPFS HTTP gateway.

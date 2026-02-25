@@ -79,7 +79,7 @@ tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
 
 ```shell
 docker pull ipfs/kubo:latest
-docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080 -p 5001:5001 ipfs/kubo:latest
+docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4011:4011 -p 8283:8283 -p 5011:5011 ipfs/kubo:latest
 docker logs -f ipfs-node
 ```
 

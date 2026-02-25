@@ -6,7 +6,8 @@ import fs from "fs";
 import assert from "assert";
 
 // ---- CONFIG ----
-export const HTTP_IPFS_API = 'http://127.0.0.1:8080';   // Local IPFS HTTP gateway
+export const DEFAULT_IPFS_API_URL = 'http://127.0.0.1:5011';     // IPFS HTTP API (for ipfs-http-client)
+export const DEFAULT_IPFS_GATEWAY_URL = 'http://127.0.0.1:8283'; // IPFS HTTP Gateway (for /ipfs/CID requests)
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
 
@@ -47,7 +48,7 @@ export function newSigner(seed) {
  *
  * @param {string} file
  * @param {string} text
- * @param {"small" | "big"} size
+ * @param {"small" | "big32" | "big64" | "big96"} size
  */
 export function generateTextImage(file, text, size = "small") {
     console.log(`Generating ${size} image with text: ${text} to the file: ${file}...`);
@@ -60,13 +61,31 @@ export function generateTextImage(file, text, size = "small") {
             noise: 1,
         },
         // ~33 MiB
-        big: {
+        big32: {
             width: 6500,
             height: 5500,
             quality: 0.95,
             shapes: 1000,
             noise: 50,
             targetBytes: 32 * 1024 * 1024,
+        },
+        // ~64 MiB
+        big64: {
+            width: 7500,
+            height: 5500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 65 * 1024 * 1024,
+        },
+        // ~96 MiB
+        big96: {
+            width: 9000,
+            height: 6500,
+            quality: 0.95,
+            shapes: 1000,
+            noise: 50,
+            targetBytes: 98 * 1024 * 1024,
         },
     };
 
@@ -108,7 +127,7 @@ export function generateTextImage(file, text, size = "small") {
 
     // 🔧 Big images: tune quality to hit target size
     let imageBytes;
-    if (size === "big" && cfg.targetBytes) {
+    if ((size === "big32" || size === "big64" || size === "big96") && cfg.targetBytes) {
         let quality = cfg.quality;
 
         do {
@@ -262,7 +281,7 @@ export function toHex(bytes) {
 //         console.error("Unknown command:", command);
 //         console.error("Usage:");
 //         console.error(
-//             '  node common.js generateTextImage "TEXT" [small|big]'
+//             '  node common.js generateTextImage "TEXT" [small|big32|big64|big96]'
 //         );
 //         process.exit(1);
 // }

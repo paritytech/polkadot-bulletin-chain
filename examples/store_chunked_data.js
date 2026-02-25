@@ -6,7 +6,8 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, HTTP_IPFS_API } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
+import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
@@ -14,10 +15,12 @@ import { getWsProvider } from "polkadot-api/ws-provider";
 import { Binary } from '@polkadot-api/substrate-bindings';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
-// ---- CONFIG ----
-const NODE_WS = 'ws://localhost:10000';
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
+const args = process.argv.slice(2);
+const NODE_WS = args[0] || 'ws://localhost:10000';
+const SEED = args[1] || '//Alice';
+const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const CHUNK_SIZE = 6 * 1024 // 6 KB
-// -----------------
 
 /**
  * Reads metadata JSON from IPFS by metadataCid.
@@ -87,7 +90,7 @@ export async function storeMetadata(typedApi, signer, chunks) {
     console.log(`🧾 Metadata size: ${jsonBytes.length} bytes`);
 
     // 2️⃣ Store JSON bytes in Bulletin
-    const metadataCid = await store(typedApi, signer, jsonBytes);
+    const { cid: metadataCid } = await store(typedApi, signer, jsonBytes);
     console.log('🧩 Metadata CID:', metadataCid.toString());
 
     return { metadataCid };
@@ -138,7 +141,7 @@ async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
     // Store DAG bytes in Bulletin using PAPI store function
-    const rawDagCid = await store(typedApi, whoSigner, dagFileBytes);
+    const { cid: rawDagCid } = await store(typedApi, whoSigner, dagFileBytes);
     console.log('📤 DAG proof "bytes" stored in Bulletin with CID:', rawDagCid.toString());
 
     // This can be a serious pallet, this is just a demonstration.
@@ -156,6 +159,9 @@ async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes
 async function main() {
     await cryptoWaitReady()
 
+    logHeader('STORE CHUNKED DATA TEST');
+    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
+
     let client, resultCode;
     try {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletin-chunked-"));
@@ -167,7 +173,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Chunkedsigner');
+        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
         // Authorize an account.
         await authorizeAccount(
@@ -209,10 +215,10 @@ async function main() {
         );
         console.log('🧱 DAG stored on IPFS with CID:', rawDagCid.toString())
         console.log('\n🌐 Try opening in browser:')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rootCid.toString()}`)
-        console.log('   (You’ll see binary content since this is an image)')
-        console.log(`   http://127.0.0.1:8080/ipfs/${rawDagCid.toString()}`)
-        console.log('   (You’ll see the encoded DAG descriptor content)')
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
+        console.log("   (You'll see binary content since this is an image)")
+        console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
+        console.log("   (You'll see the encoded DAG descriptor content)")
 
         // Download the content from IPFS HTTP gateway
         const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
@@ -223,15 +229,16 @@ async function main() {
 
         // Download the DAG descriptor raw file itself.
         const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
-        console.log(`✅ Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
+        logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
         assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
         const dagNode = dagPB.decode(downloadedDagBytes);
         console.log('📄 Decoded DAG node:', dagNode);
 
-        console.log(`\n\n\n✅✅✅ Test passed! ✅✅✅`);
+        logTestResult(true, 'Store Chunked Data Test');
         resultCode = 0;
     } catch (error) {
-        console.error("❌ Error:", error);
+        logError(`Error: ${error.message}`);
+        console.error(error);
         resultCode = 1;
     } finally {
         if (client) client.destroy();

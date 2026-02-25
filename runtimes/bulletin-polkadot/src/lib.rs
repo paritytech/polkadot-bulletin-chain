@@ -13,9 +13,9 @@ use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{
 	derive_impl,
-	traits::{InstanceFilter, ValidatorRegistration},
+	traits::{EitherOfDiverse, InstanceFilter, SortedMembers, ValidatorRegistration},
 };
-use frame_system::EnsureRoot;
+use frame_system::{EnsureRoot, EnsureSignedBy};
 use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
 use pallet_bridge_messages::Call as BridgeMessagesCall;
 use pallet_bridge_parachains::Call as BridgeParachainsCall;
@@ -342,6 +342,14 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
 }
 
+/// Provides test accounts for use with `EnsureSignedBy`.
+pub struct TestAccounts;
+impl SortedMembers<AccountId> for TestAccounts {
+	fn sorted_members() -> alloc::vec::Vec<AccountId> {
+		alloc::vec![sp_keyring::Sr25519Keyring::Alice.to_account_id()]
+	}
+}
+
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -353,7 +361,11 @@ impl pallet_transaction_storage::Config for Runtime {
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
-	type Authorizer = EnsureRoot<Self::AccountId>;
+	type Authorizer = EitherOfDiverse<
+		EnsureRoot<Self::AccountId>,
+		// Test accounts can also authorize for testing purposes.
+		EnsureSignedBy<TestAccounts, Self::AccountId>,
+	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
@@ -715,7 +727,6 @@ pub type TxExtension = (
 	frame_system::CheckWeight<Runtime>,
 	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
-	pallet_transaction_storage::extension::ProvideCidConfig<Runtime>,
 );
 
 /// Unchecked extrinsic type as expected by this runtime.
@@ -736,7 +747,8 @@ pub type Executive = frame_executive::Executive<
 #[allow(deprecated, missing_docs)]
 pub mod migrations {
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = ();
+	pub type Unreleased =
+		(pallet_transaction_storage::migrations::v1::MigrateV0ToV1<crate::Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
