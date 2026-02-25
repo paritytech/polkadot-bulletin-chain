@@ -2089,6 +2089,7 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-transaction-storage",
+ "pallet-utility",
  "pallet-xcm",
  "pallet-xcm-benchmarks",
  "pallets-common",
