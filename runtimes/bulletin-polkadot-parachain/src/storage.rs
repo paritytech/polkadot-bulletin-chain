@@ -17,8 +17,8 @@
 //! Storage-specific configurations.
 
 use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
-use alloc::vec::Vec;
 use crate::xcm_config::PeopleLocation;
+use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
 	traits::{EitherOfDiverse, Equals, SortedMembers},
