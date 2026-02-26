@@ -2147,6 +2147,7 @@ dependencies = [
  "staging-xcm",
  "staging-xcm-executor",
  "westend-emulated-chain",
+ "westend-runtime",
  "xcm-emulator",
 ]
 
