@@ -725,6 +725,73 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 	});
 }
 
+#[test]
+fn validate_signed_account_authorization_has_provides_tag() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1u64;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000,));
+
+		let call = Call::store { data: vec![0u8; 2000] };
+
+		// validate_signed still doesn't consume authorization (correct behaviour).
+		for _ in 0..2 {
+			assert_ok!(TransactionStorage::validate_signed(&who, &call));
+		}
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+		);
+
+		let vt = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert!(!vt.provides.is_empty(), "validate_signed must emit a `provides` tag");
+
+		// Two calls with the same signer + content produce identical tags, confirming
+		// that the mempool will deduplicate them.
+		let vt2 = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert_eq!(vt.provides, vt2.provides);
+
+		// pre_dispatch still enforces the authorization: only the first succeeds.
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			InvalidTransaction::Payment,
+		);
+
+		// Now test the preimage-authorized path: signed preimage tags must match unsigned
+		// preimage tags so the pool deduplicates across both submission types.
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			2000,
+		));
+		// Re-authorize account so validate_signed can fall through if needed.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+
+		let signed_vt = TransactionStorage::validate_signed(&who, &call).unwrap();
+		let unsigned_vt = <TransactionStorage as ValidateUnsigned>::validate_unsigned(
+			TransactionSource::External,
+			&call,
+		)
+		.unwrap();
+		assert_eq!(
+			signed_vt.provides, unsigned_vt.provides,
+			"signed preimage path must produce the same tag as unsigned preimage path"
+		);
+
+		// A different signer submitting the same pre-authorized content must get the same
+		// tag, proving dedup is content-based, not signer-based.
+		let other_who = 2u64;
+		let other_vt = TransactionStorage::validate_signed(&other_who, &call).unwrap();
+		assert_eq!(
+			signed_vt.provides, other_vt.provides,
+			"different signers with same preimage-authorized content must share the same tag"
+		);
+	});
+}
+
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`

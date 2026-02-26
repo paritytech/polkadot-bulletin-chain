@@ -2162,7 +2162,6 @@ dependencies = [
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",
- "frame-system",
  "parachains-common",
  "sp-core",
  "sp-keyring",
