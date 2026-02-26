@@ -1,6 +1,6 @@
 ---
 name: format
-description: Run all formatting and cleaning checks before committing code
+description: Run all formatting, linting and cleaning checks before committing code
 ---
 
 Run all formatting, linting, and cleaning tasks that should be done before committing code. Fix any issues found automatically where possible.
