@@ -1040,13 +1040,13 @@ pub mod pallet {
 			};
 
 			if consume {
-				if Authorizations::<T>::mutate(&scope, consume_authorization)? {
-					Self::authorization_removed(&scope);
+				if Authorizations::<T>::mutate(scope, consume_authorization)? {
+					Self::authorization_removed(scope);
 				}
 			} else {
 				// Note we call consume_authorization on a temporary; the authorization in storage
 				// is untouched and doesn't actually get consumed
-				let mut authorization = Authorizations::<T>::get(&scope);
+				let mut authorization = Authorizations::<T>::get(scope);
 				consume_authorization(&mut authorization)?;
 			}
 
@@ -1057,7 +1057,7 @@ pub mod pallet {
 		fn check_authorization_expired(
 			scope: &AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
-			let Some(authorization) = Authorizations::<T>::get(&scope) else {
+			let Some(authorization) = Authorizations::<T>::get(scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
 			if Self::expired(authorization.expiration) {
