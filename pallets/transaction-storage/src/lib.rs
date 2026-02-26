@@ -1359,10 +1359,10 @@ impl<T: Config> Pallet<T> {
 /// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
 ///
 /// The available block weight accounts for:
-/// - The `avg_block_initialization` margin that FRAME reserves from `max_total` for
-///   on_initialize hooks (e.g. 5% for parachains, 10% for `with_sensible_defaults`).
-/// - For parachains, the collator-side PoV cap: collators limit the actual PoV to a percentage
-///   of `max_pov_size` to leave headroom for relay-chain state proof overhead. See
+/// - The `avg_block_initialization` margin that FRAME reserves from `max_total` for on_initialize
+///   hooks (e.g. 5% for parachains, 10% for `with_sensible_defaults`).
+/// - For parachains, the collator-side PoV cap: collators limit the actual PoV to a percentage of
+///   `max_pov_size` to leave headroom for relay-chain state proof overhead. See
 ///   `cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs`.
 ///
 /// # Parameters
