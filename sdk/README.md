@@ -7,7 +7,37 @@ Multi-language client SDKs for Polkadot Bulletin Chain.
 - **[Rust](rust/)** - no_std compatible, works in native apps and ink! smart contracts
 - **[TypeScript](typescript/)** - Browser and Node.js compatible
 
-Both SDKs provide CID calculation, automatic chunking, authorization management, and DAG-PB manifest generation. Transaction submission is partially implemented (authorization and renew operations work; `store().send()` is not yet implemented).
+Both SDKs provide CID calculation, automatic chunking, authorization management, and DAG-PB manifest generation.
+
+## Architecture: Bring Your Own Client
+
+Both SDKs follow a **BYOC (Bring Your Own Client)** pattern - you provide the blockchain client and signer:
+
+```
+┌─────────────────────────────────────────┐
+│           Your Application              │
+├─────────────────────────────────────────┤
+│  Bulletin SDK  │  Your Other Code       │
+│       │        │       │                │
+│       └────────┴───────┘                │
+│               │                         │
+│      ┌────────▼────────┐                │
+│      │  Shared Client  │ ◄── You create │
+│      │  (PAPI/subxt)   │                │
+│      └────────┬────────┘                │
+└───────────────┼─────────────────────────┘
+                ▼
+    ┌───────────────────────┐
+    │  RPC / Light Client   │ ◄── Your choice!
+    └───────────────────────┘
+```
+
+**This enables:**
+- ✅ **Light client support** - Use smoldot instead of RPC endpoints
+- ✅ **Connection reuse** - Share one client across your entire app
+- ✅ **Browser wallets** - TypeScript SDK works with Talisman, SubWallet, etc.
+- ✅ **Custom transports** - HTTP, WebSocket, or any compatible provider
+- ✅ **No hidden connections** - You control all network access
 
 ## Quick Build & Test
 

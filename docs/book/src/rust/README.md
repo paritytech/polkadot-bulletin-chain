@@ -8,11 +8,46 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 ## Key Features
 
-- **Direct subxt Integration**: Tightly coupled to `subxt` for type-safe blockchain interaction
+- **Bring Your Own Client (BYOC)**: Accept an existing `subxt` client - enables light clients, connection reuse
 - **Flexible Architecture**: Use `AsyncBulletinClient` for full automation or `BulletinClient` for manual preparation
 - **Builder Pattern**: Fluent API for configuring store operations
 - **Mock Testing**: `MockBulletinClient` allows testing without a blockchain node
 - **Runtime Metadata**: Users configure subxt with their own metadata for maximum flexibility
+
+## Architecture
+
+The SDK follows a **Bring Your Own Client** pattern:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Your Application                      │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌─────────────────────────────┐ │
+│  │  Bulletin SDK   │    │     Your Other Code         │ │
+│  │                 │    │                             │ │
+│  │ AsyncBulletinClient  │ queries, subscriptions, etc │ │
+│  └────────┬────────┘    └──────────────┬──────────────┘ │
+│           │                            │                │
+│           └──────────┬─────────────────┘                │
+│                      ▼                                  │
+│           ┌──────────────────┐                          │
+│           │  Shared subxt    │  ◄── You create this    │
+│           │  OnlineClient    │                          │
+│           └────────┬─────────┘                          │
+│                    │                                    │
+└────────────────────┼────────────────────────────────────┘
+                     ▼
+        ┌────────────────────────┐
+        │   RPC / Light Client   │
+        │   (your choice!)       │
+        └────────────────────────┘
+```
+
+**Benefits:**
+- **Connection reuse** - Share one client across SDK and other code
+- **Light client support** - Use smoldot instead of RPC
+- **Custom transports** - HTTP, WebSocket, or custom providers
+- **No hidden connections** - You control all network access
 
 ## Modules
 
@@ -51,6 +86,58 @@ let result = client
     .send()
     .await?;
 ```
+
+### Connection Reuse
+
+The SDK accepts an existing subxt client, so you can share one connection:
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+use subxt::{OnlineClient, PolkadotConfig};
+
+// Create ONE shared subxt client for your whole app
+let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
+
+// SDK uses the shared client
+let client = AsyncBulletinClient::new(api.clone());
+
+// Your other code also uses the same client
+let block_number = api.blocks().at_latest().await?.number();
+let events = api.events().at_latest().await?;
+
+// Both SDK and your queries share one WebSocket connection!
+let result = client.store(data).send().await?;
+```
+
+### Light Client Support (smoldot)
+
+The SDK accepts any subxt `OnlineClient`, including those backed by smoldot:
+
+```rust
+use subxt::{OnlineClient, PolkadotConfig};
+use subxt::lightclient::{LightClient, ChainConfig};
+use bulletin_sdk_rust::prelude::*;
+
+// 1. Create light client with chain spec
+let chain_spec = std::fs::read_to_string("bulletin-chain-spec.json")?;
+let (lightclient, rpc) = LightClient::relay_chain(ChainConfig {
+    chain_spec: &chain_spec,
+    ..Default::default()
+})?;
+
+// 2. Create subxt client from light client RPC
+let api = OnlineClient::<PolkadotConfig>::from_rpc_client(rpc).await?;
+
+// 3. SDK works exactly the same - it doesn't know about the transport!
+let client = AsyncBulletinClient::new(api);
+let result = client.store(data).send().await?;
+```
+
+**Benefits of light clients:**
+- No trusted RPC endpoint required
+- Verifies chain state cryptographically
+- Works in browser via smoldot WASM
+- Better for user privacy
 
 ### Using Multiple Accounts
 

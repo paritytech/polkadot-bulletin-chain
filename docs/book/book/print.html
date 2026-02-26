@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c08dc049.js";
+            window.path_to_searchindex_js = "searchindex-9ab37509.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-5689f54b.js"></script>
@@ -882,11 +882,43 @@ message PBLink {
 </ul>
 <h2 id="key-features"><a class="header" href="#key-features">Key Features</a></h2>
 <ul>
-<li><strong>Direct subxt Integration</strong>: Tightly coupled to <code>subxt</code> for type-safe blockchain interaction</li>
+<li><strong>Bring Your Own Client (BYOC)</strong>: Accept an existing <code>subxt</code> client - enables light clients, connection reuse</li>
 <li><strong>Flexible Architecture</strong>: Use <code>AsyncBulletinClient</code> for full automation or <code>BulletinClient</code> for manual preparation</li>
 <li><strong>Builder Pattern</strong>: Fluent API for configuring store operations</li>
 <li><strong>Mock Testing</strong>: <code>MockBulletinClient</code> allows testing without a blockchain node</li>
 <li><strong>Runtime Metadata</strong>: Users configure subxt with their own metadata for maximum flexibility</li>
+</ul>
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<p>The SDK follows a <strong>Bring Your Own Client</strong> pattern:</p>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│                    Your Application                      │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌─────────────────────────────┐ │
+│  │  Bulletin SDK   │    │     Your Other Code         │ │
+│  │                 │    │                             │ │
+│  │ AsyncBulletinClient  │ queries, subscriptions, etc │ │
+│  └────────┬────────┘    └──────────────┬──────────────┘ │
+│           │                            │                │
+│           └──────────┬─────────────────┘                │
+│                      ▼                                  │
+│           ┌──────────────────┐                          │
+│           │  Shared subxt    │  ◄── You create this    │
+│           │  OnlineClient    │                          │
+│           └────────┬─────────┘                          │
+│                    │                                    │
+└────────────────────┼────────────────────────────────────┘
+                     ▼
+        ┌────────────────────────┐
+        │   RPC / Light Client   │
+        │   (your choice!)       │
+        └────────────────────────┘
+</code></pre>
+<p><strong>Benefits:</strong></p>
+<ul>
+<li><strong>Connection reuse</strong> - Share one client across SDK and other code</li>
+<li><strong>Light client support</strong> - Use smoldot instead of RPC</li>
+<li><strong>Custom transports</strong> - HTTP, WebSocket, or custom providers</li>
+<li><strong>No hidden connections</strong> - You control all network access</li>
 </ul>
 <h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
 <ul>
@@ -925,6 +957,55 @@ let result = client
     .send()
     .await?;
 <span class="boring">}</span></code></pre>
+<h3 id="connection-reuse"><a class="header" href="#connection-reuse">Connection Reuse</a></h3>
+<p>The SDK accepts an existing subxt client, so you can share one connection:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use bulletin_sdk_rust::prelude::*;
+use subxt::{OnlineClient, PolkadotConfig};
+
+// Create ONE shared subxt client for your whole app
+let api = OnlineClient::&lt;PolkadotConfig&gt;::from_url("ws://localhost:9944").await?;
+
+// SDK uses the shared client
+let client = AsyncBulletinClient::new(api.clone());
+
+// Your other code also uses the same client
+let block_number = api.blocks().at_latest().await?.number();
+let events = api.events().at_latest().await?;
+
+// Both SDK and your queries share one WebSocket connection!
+let result = client.store(data).send().await?;
+<span class="boring">}</span></code></pre>
+<h3 id="light-client-support-smoldot"><a class="header" href="#light-client-support-smoldot">Light Client Support (smoldot)</a></h3>
+<p>The SDK accepts any subxt <code>OnlineClient</code>, including those backed by smoldot:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use subxt::{OnlineClient, PolkadotConfig};
+use subxt::lightclient::{LightClient, ChainConfig};
+use bulletin_sdk_rust::prelude::*;
+
+// 1. Create light client with chain spec
+let chain_spec = std::fs::read_to_string("bulletin-chain-spec.json")?;
+let (lightclient, rpc) = LightClient::relay_chain(ChainConfig {
+    chain_spec: &amp;chain_spec,
+    ..Default::default()
+})?;
+
+// 2. Create subxt client from light client RPC
+let api = OnlineClient::&lt;PolkadotConfig&gt;::from_rpc_client(rpc).await?;
+
+// 3. SDK works exactly the same - it doesn't know about the transport!
+let client = AsyncBulletinClient::new(api);
+let result = client.store(data).send().await?;
+<span class="boring">}</span></code></pre>
+<p><strong>Benefits of light clients:</strong></p>
+<ul>
+<li>No trusted RPC endpoint required</li>
+<li>Verifies chain state cryptographically</li>
+<li>Works in browser via smoldot WASM</li>
+<li>Better for user privacy</li>
+</ul>
 <h3 id="using-multiple-accounts"><a class="header" href="#using-multiple-accounts">Using Multiple Accounts</a></h3>
 <p>If you need to use different accounts, you need to handle signing at the transaction level.
 The SDK client uses subxt directly, so you control the signer when creating transactions.</p>
@@ -3185,12 +3266,19 @@ try {
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="papi-integration"><a class="header" href="#papi-integration">PAPI Integration</a></h1>
-<p>The TypeScript SDK is tightly coupled to Polkadot API (PAPI) for blockchain interaction. You must provide a configured PAPI client and signer when creating the SDK client.</p>
+<p>The TypeScript SDK follows a <strong>Bring Your Own Client (BYOC)</strong> pattern - you provide a configured PAPI client and signer. This design enables:</p>
+<ul>
+<li><strong>Light client support</strong> via smoldot (no RPC endpoint required)</li>
+<li><strong>Connection reuse</strong> - share one client across SDK and other code</li>
+<li><strong>Browser wallet integration</strong> - use Talisman, SubWallet, etc.</li>
+<li><strong>Custom transports</strong> - HTTP, WebSocket, or any PAPI-compatible provider</li>
+</ul>
 <h2 id="setup"><a class="header" href="#setup">Setup</a></h2>
 <p>First, install the required dependencies:</p>
 <pre><code class="language-bash">npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 </code></pre>
-<h2 id="basic-connection"><a class="header" href="#basic-connection">Basic Connection</a></h2>
+<h2 id="connection-options"><a class="header" href="#connection-options">Connection Options</a></h2>
+<h3 id="websocket-connection-traditional"><a class="header" href="#websocket-connection-traditional">WebSocket Connection (Traditional)</a></h3>
 <pre><code class="language-typescript">import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { AsyncBulletinClient } from '@bulletin/sdk';
@@ -3222,6 +3310,93 @@ const result = await client.store(data).send();
 
 console.log('Stored with CID:', result.cid.toString());
 </code></pre>
+<h3 id="light-client-connection-smoldot"><a class="header" href="#light-client-connection-smoldot">Light Client Connection (Smoldot)</a></h3>
+<p>For trustless, decentralized connections without relying on RPC endpoints:</p>
+<pre><code class="language-typescript">import { createClient } from 'polkadot-api';
+import { getSmProvider } from 'polkadot-api/sm-provider';
+import { startFromWorker } from 'polkadot-api/smoldot/from-worker';
+import SmWorker from 'polkadot-api/smoldot/worker?worker';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+
+// 1. Start smoldot in a web worker
+const smoldot = startFromWorker(new SmWorker());
+
+// 2. Add the Bulletin chain spec
+const bulletinChainSpec = await fetch('/chainspecs/bulletin.json').then(r =&gt; r.text());
+const chain = await smoldot.addChain({ chainSpec: bulletinChainSpec });
+
+// 3. Create PAPI client with smoldot provider
+const smProvider = getSmProvider(chain);
+const papiClient = createClient(smProvider);
+
+// 4. Get typed API and create SDK client
+const api = papiClient.getTypedApi(bulletinDescriptor);
+const client = new AsyncBulletinClient(api, signer);
+
+// Use normally - SDK doesn't know or care about the transport!
+const result = await client.store(data).send();
+</code></pre>
+<p><strong>Benefits of light clients:</strong></p>
+<ul>
+<li>No trusted RPC endpoint required</li>
+<li>Verifies chain state cryptographically</li>
+<li>Works offline after initial sync</li>
+<li>Better for user privacy</li>
+</ul>
+<h3 id="relay-chain--parachain-light-client"><a class="header" href="#relay-chain--parachain-light-client">Relay Chain + Parachain (Light Client)</a></h3>
+<p>For parachains, connect through the relay chain:</p>
+<pre><code class="language-typescript">import { createClient } from 'polkadot-api';
+import { getSmProvider } from 'polkadot-api/sm-provider';
+import { startFromWorker } from 'polkadot-api/smoldot/from-worker';
+import SmWorker from 'polkadot-api/smoldot/worker?worker';
+
+// Start smoldot
+const smoldot = startFromWorker(new SmWorker());
+
+// Add relay chain first
+const relayChainSpec = await fetch('/chainspecs/polkadot.json').then(r =&gt; r.text());
+const relayChain = await smoldot.addChain({ chainSpec: relayChainSpec });
+
+// Add Bulletin as parachain
+const bulletinChainSpec = await fetch('/chainspecs/bulletin-parachain.json').then(r =&gt; r.text());
+const bulletinChain = await smoldot.addChain({
+    chainSpec: bulletinChainSpec,
+    potentialRelayChains: [relayChain],
+});
+
+// Create client
+const papiClient = createClient(getSmProvider(bulletinChain));
+const api = papiClient.getTypedApi(bulletinDescriptor);
+const client = new AsyncBulletinClient(api, signer);
+</code></pre>
+<h2 id="connection-reuse-1"><a class="header" href="#connection-reuse-1">Connection Reuse</a></h2>
+<p>The SDK accepts an existing PAPI client, so you can share one connection across your entire application:</p>
+<pre><code class="language-typescript">import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider/web';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+
+// Create ONE shared PAPI client for your whole app
+const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
+const papiClient = createClient(wsProvider);
+const api = papiClient.getTypedApi(bulletinDescriptor);
+
+// SDK uses the shared client
+const bulletinClient = new AsyncBulletinClient(api, signer);
+
+// Your other code also uses the same client
+const blockNumber = await api.query.System.Number.getValue();
+const events = await api.query.System.Events.getValue();
+
+// Both SDK operations and your queries share one WebSocket connection!
+const result = await bulletinClient.store(data).send();
+</code></pre>
+<p><strong>Why connection sharing matters:</strong></p>
+<ul>
+<li>Avoids hitting connection limits on RPC endpoints</li>
+<li>Reduces memory usage</li>
+<li>Single subscription for block updates</li>
+<li>Consistent chain state across your app</li>
+</ul>
 <h2 id="chain-descriptors"><a class="header" href="#chain-descriptors">Chain Descriptors</a></h2>
 <p>You’ll need to generate chain descriptors for your Bulletin Chain instance. These provide type information to PAPI:</p>
 <pre><code class="language-bash">npx papi add wss://bulletin-rpc.polkadot.io -n bulletin

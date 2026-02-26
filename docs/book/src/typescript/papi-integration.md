@@ -1,6 +1,11 @@
 # PAPI Integration
 
-The TypeScript SDK is tightly coupled to Polkadot API (PAPI) for blockchain interaction. You must provide a configured PAPI client and signer when creating the SDK client.
+The TypeScript SDK follows a **Bring Your Own Client (BYOC)** pattern - you provide a configured PAPI client and signer. This design enables:
+
+- **Light client support** via smoldot (no RPC endpoint required)
+- **Connection reuse** - share one client across SDK and other code
+- **Browser wallet integration** - use Talisman, SubWallet, etc.
+- **Custom transports** - HTTP, WebSocket, or any PAPI-compatible provider
 
 ## Setup
 
@@ -10,7 +15,9 @@ First, install the required dependencies:
 npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 ```
 
-## Basic Connection
+## Connection Options
+
+### WebSocket Connection (Traditional)
 
 ```typescript
 import { createClient } from 'polkadot-api';
@@ -44,6 +51,103 @@ const result = await client.store(data).send();
 
 console.log('Stored with CID:', result.cid.toString());
 ```
+
+### Light Client Connection (Smoldot)
+
+For trustless, decentralized connections without relying on RPC endpoints:
+
+```typescript
+import { createClient } from 'polkadot-api';
+import { getSmProvider } from 'polkadot-api/sm-provider';
+import { startFromWorker } from 'polkadot-api/smoldot/from-worker';
+import SmWorker from 'polkadot-api/smoldot/worker?worker';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+
+// 1. Start smoldot in a web worker
+const smoldot = startFromWorker(new SmWorker());
+
+// 2. Add the Bulletin chain spec
+const bulletinChainSpec = await fetch('/chainspecs/bulletin.json').then(r => r.text());
+const chain = await smoldot.addChain({ chainSpec: bulletinChainSpec });
+
+// 3. Create PAPI client with smoldot provider
+const smProvider = getSmProvider(chain);
+const papiClient = createClient(smProvider);
+
+// 4. Get typed API and create SDK client
+const api = papiClient.getTypedApi(bulletinDescriptor);
+const client = new AsyncBulletinClient(api, signer);
+
+// Use normally - SDK doesn't know or care about the transport!
+const result = await client.store(data).send();
+```
+
+**Benefits of light clients:**
+- No trusted RPC endpoint required
+- Verifies chain state cryptographically
+- Works offline after initial sync
+- Better for user privacy
+
+### Relay Chain + Parachain (Light Client)
+
+For parachains, connect through the relay chain:
+
+```typescript
+import { createClient } from 'polkadot-api';
+import { getSmProvider } from 'polkadot-api/sm-provider';
+import { startFromWorker } from 'polkadot-api/smoldot/from-worker';
+import SmWorker from 'polkadot-api/smoldot/worker?worker';
+
+// Start smoldot
+const smoldot = startFromWorker(new SmWorker());
+
+// Add relay chain first
+const relayChainSpec = await fetch('/chainspecs/polkadot.json').then(r => r.text());
+const relayChain = await smoldot.addChain({ chainSpec: relayChainSpec });
+
+// Add Bulletin as parachain
+const bulletinChainSpec = await fetch('/chainspecs/bulletin-parachain.json').then(r => r.text());
+const bulletinChain = await smoldot.addChain({
+    chainSpec: bulletinChainSpec,
+    potentialRelayChains: [relayChain],
+});
+
+// Create client
+const papiClient = createClient(getSmProvider(bulletinChain));
+const api = papiClient.getTypedApi(bulletinDescriptor);
+const client = new AsyncBulletinClient(api, signer);
+```
+
+## Connection Reuse
+
+The SDK accepts an existing PAPI client, so you can share one connection across your entire application:
+
+```typescript
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws-provider/web';
+import { AsyncBulletinClient } from '@bulletin/sdk';
+
+// Create ONE shared PAPI client for your whole app
+const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
+const papiClient = createClient(wsProvider);
+const api = papiClient.getTypedApi(bulletinDescriptor);
+
+// SDK uses the shared client
+const bulletinClient = new AsyncBulletinClient(api, signer);
+
+// Your other code also uses the same client
+const blockNumber = await api.query.System.Number.getValue();
+const events = await api.query.System.Events.getValue();
+
+// Both SDK operations and your queries share one WebSocket connection!
+const result = await bulletinClient.store(data).send();
+```
+
+**Why connection sharing matters:**
+- Avoids hitting connection limits on RPC endpoints
+- Reduces memory usage
+- Single subscription for block updates
+- Consistent chain state across your app
 
 ## Chain Descriptors
 
