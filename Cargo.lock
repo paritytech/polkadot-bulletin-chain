@@ -2134,13 +2134,10 @@ dependencies = [
 name = "bulletin-sdk-rust"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "cid",
- "multihash 0.19.3",
  "pallet-transaction-storage",
  "parity-scale-codec",
  "scale-info",
- "serde",
  "sp-core",
  "sp-io",
  "sp-runtime",
@@ -2148,8 +2145,6 @@ dependencies = [
  "subxt-signer 0.44.2",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
- "unsigned-varint 0.8.0",
 ]
 
 [[package]]
