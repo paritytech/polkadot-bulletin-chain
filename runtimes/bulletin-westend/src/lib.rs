@@ -301,12 +301,7 @@ fn validate_inner_calls(
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {
-		RuntimeCall::TransactionStorage(inner_call) =>
-			if consume {
-				TransactionStorage::pre_dispatch_signed(who, inner_call)
-			} else {
-				TransactionStorage::validate_signed(who, inner_call).map(|_| ())
-			},
+		storage_call @ RuntimeCall::TransactionStorage(_) => validate_storage_calls(who, storage_call, 0, consume)?
 		RuntimeCall::Utility(utility_call) => {
 			for inner in utility_inner_calls(utility_call) {
 				validate_inner_calls(who, inner, depth + 1, consume)?;
@@ -328,8 +323,8 @@ fn validate_inner_calls(
 	}
 }
 
-/// Validate only TransactionStorage calls within sudo wrappers.
-/// Non-storage calls are allowed through since sudo provides its own authorization.
+/// Validate only TransactionStorage calls.
+/// Non-storage calls are allowed to pass through.
 fn validate_storage_calls(
 	who: &AccountId,
 	call: &RuntimeCall,
