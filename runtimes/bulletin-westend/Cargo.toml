@@ -39,6 +39,8 @@ pallet-utility = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-transaction-storage = { workspace = true }
+pallet-storage-provider = { workspace = true }
+storage-primitives = { workspace = true }
 pallets-common = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
@@ -117,6 +119,7 @@ std = [
 	"pallet-message-queue/std",
 	"pallet-session/std",
 	"pallet-skip-feeless-payment/std",
+	"pallet-storage-provider/std",
 	"pallet-sudo/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
@@ -148,6 +151,7 @@ std = [
 	"sp-transaction-pool/std",
 	"sp-transaction-storage-proof/std",
 	"sp-version/std",
+	"storage-primitives/std",
 	"substrate-wasm-builder",
 	"testnet-parachains-constants/std",
 	"tracing/std",
@@ -173,6 +177,7 @@ runtime-benchmarks = [
 	"pallet-message-queue/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
 	"pallet-skip-feeless-payment/runtime-benchmarks",
+	"pallet-storage-provider/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
@@ -208,6 +213,7 @@ try-runtime = [
 	"pallet-message-queue/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-skip-feeless-payment/try-runtime",
+	"pallet-storage-provider/try-runtime",
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
