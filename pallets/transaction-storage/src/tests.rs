@@ -780,6 +780,15 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			signed_vt.provides, unsigned_vt.provides,
 			"signed preimage path must produce the same tag as unsigned preimage path"
 		);
+
+		// A different signer submitting the same pre-authorized content must get the same
+		// tag, proving dedup is content-based, not signer-based.
+		let other_who = 2u64;
+		let other_vt = TransactionStorage::validate_signed(&other_who, &call).unwrap();
+		assert_eq!(
+			signed_vt.provides, other_vt.provides,
+			"different signers with same preimage-authorized content must share the same tag"
+		);
 	});
 }
 
