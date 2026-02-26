@@ -6,6 +6,11 @@
 - NEVER add Co-Authored-By lines to commits
 - NEVER use git push --force or git push -f
 
+**Automatic formatting:**
+- ALWAYS run `/format` after generating or modifying Rust code
+- ALWAYS run `/format` before creating any git commit
+- This ensures all code follows project formatting standards (Rust, TOML, feature propagation) and passes clippy
+
 ## Project Overview
 
 Polkadot Bulletin Chain is a specialized blockchain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It serves as a storage solution primarily for the People/Proof-of-Personhood chain, functioning as a bridge-connected parachain with integrated IPFS support.

@@ -16,7 +16,6 @@
     "@polkadot/util-crypto": "^13.5.8",
     "canvas": "^3.2.0",
     "fs": "^0.0.1-security",
-    "ipfs-http-client": "^60.0.1",
     "ipfs-unixfs": "^11.2.0",
     "multiformats": "^13.4.1",
     "polkadot-api": "^1.22.0",

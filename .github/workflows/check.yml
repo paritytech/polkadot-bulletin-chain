@@ -212,7 +212,7 @@ jobs:
   all-tests-passed:
     name: All tests passed
     if: always()
-    needs: [changes, clippy, test, benchmarks]
+    needs: [changes, check-fmt, check, clippy, test, benchmarks]
     runs-on: ubuntu-latest
     steps:
       - name: Decide outcome
