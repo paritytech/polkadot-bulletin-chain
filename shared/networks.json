@@ -20,10 +20,10 @@
         "endpoints": ["wss://paseo-bulletin-rpc.polkadot.io"],
         "lightClient": false
       },
-      "dotspark": {
-        "id": "dotspark",
-        "name": "Bulletin (Prototypes dotspark)",
-        "endpoints": ["wss://bulletin.dotspark.app"],
+      "previewnet": {
+        "id": "previewnet",
+        "name": "Bulletin Previewnet",
+        "endpoints": ["wss://previewnet.substrate.dev/bulletin"],
         "lightClient": false
       },
       "polkadot": {

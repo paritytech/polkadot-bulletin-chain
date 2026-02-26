@@ -75,7 +75,7 @@ export const ENDPOINTS = {
   LOCAL: BULLETIN_NETWORKS.local?.endpoints[0] ?? "ws://localhost:10000",
   WESTEND: BULLETIN_NETWORKS.westend?.endpoints[0] ?? "wss://westend-bulletin-rpc.polkadot.io",
   PASEO: BULLETIN_NETWORKS.paseo?.endpoints[0] ?? "wss://paseo-bulletin-rpc.polkadot.io",
-  DOTSPARK: BULLETIN_NETWORKS.dotspark?.endpoints[0] ?? "wss://bulletin.dotspark.app",
+  PREVIEWNET: BULLETIN_NETWORKS.previewnet?.endpoints[0] ?? "wss://previewnet.substrate.dev/bulletin",
 } as const;
 
 // Re-export the raw config for direct access

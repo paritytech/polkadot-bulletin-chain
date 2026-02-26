@@ -4,7 +4,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_dotspark, web3_storage } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, web3_storage } from "@polkadot-api/descriptors";
 import {
   BULLETIN_NETWORKS,
   WEB3_STORAGE_NETWORKS,
@@ -47,7 +47,7 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     local: bulletin_westend,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
-    dotspark: bulletin_dotspark,
+    previewnet: bulletin_westend,
   },
   web3storage: {
     local: web3_storage,
