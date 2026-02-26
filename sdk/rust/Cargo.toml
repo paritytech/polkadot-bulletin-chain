@@ -1,11 +1,11 @@
 [package]
 name = "bulletin-sdk-rust"
 version = "0.1.0"
-edition = "2021"
-authors = ["Parity Technologies <admin@parity.io>"]
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
 license = "GPL-3.0-or-later"
 description = "Off-chain client SDK for Polkadot Bulletin Chain"
-repository = "https://github.com/paritytech/polkadot-bulletin-chain"
 
 [dependencies]
 # Core dependencies (no_std compatible)
