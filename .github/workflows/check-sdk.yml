@@ -1,0 +1,90 @@
+name: Check SDKs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+
+jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  rust-sdk:
+    name: Rust SDK
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
+    runs-on: parity-default
+    timeout-minutes: 30
+    container:
+      image: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+    env:
+      SKIP_WASM_BUILD: 1
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          shared-key: "bulletin-cache-sdk-rust"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy
+        run: cargo clippy -p bulletin-sdk-rust --all-targets --locked --quiet -- -D warnings
+
+      - name: Test
+        run: cargo test -p bulletin-sdk-rust
+
+  typescript-sdk:
+    name: TypeScript SDK
+    needs: [changes]
+    if: needs.changes.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - name: Install dependencies
+        working-directory: sdk/typescript
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: sdk/typescript
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: sdk/typescript
+        run: npm run build
+
+      - name: Unit tests
+        working-directory: sdk/typescript
+        run: npm test
+
+  sdk-checks-passed:
+    name: SDK checks passed
+    if: always()
+    needs: [changes, rust-sdk, typescript-sdk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
