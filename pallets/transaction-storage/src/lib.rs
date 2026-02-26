@@ -1003,7 +1003,7 @@ pub mod pallet {
 		/// Check that authorization exists for data of the given size to be stored in a single
 		/// transaction. If `consume` is `true`, the authorization is consumed.
 		fn check_authorization(
-			scope: AuthorizationScopeFor<T>,
+			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
 		) -> Result<(), TransactionValidityError> {
@@ -1055,7 +1055,7 @@ pub mod pallet {
 
 		/// Check that authorization with the given scope exists in storage but has expired.
 		fn check_authorization_expired(
-			scope: AuthorizationScopeFor<T>,
+			scope: &AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
@@ -1091,7 +1091,7 @@ pub mod pallet {
 			let content_hash = content_hash();
 
 			Self::check_authorization(
-				AuthorizationScope::Preimage(content_hash),
+				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				context.consume_authorization(),
 			)?;
@@ -1122,7 +1122,7 @@ pub mod pallet {
 					)
 				},
 				Call::<T>::remove_expired_account_authorization { who } => {
-					Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
+					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredAccountAuthorization",
@@ -1134,7 +1134,7 @@ pub mod pallet {
 					}))
 				},
 				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
-					Self::check_authorization_expired(AuthorizationScope::Preimage(*content_hash))?;
+					Self::check_authorization_expired(&AuthorizationScope::Preimage(*content_hash))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
@@ -1197,7 +1197,7 @@ pub mod pallet {
 			// own account authorization.
 			let consume = context.consume_authorization();
 			let used_preimage_auth = Self::check_authorization(
-				AuthorizationScope::Preimage(content_hash),
+				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				consume,
 			)
@@ -1205,7 +1205,7 @@ pub mod pallet {
 
 			if !used_preimage_auth {
 				Self::check_authorization(
-					AuthorizationScope::Account(who.clone()),
+					&AuthorizationScope::Account(who.clone()),
 					size as u32,
 					consume,
 				)?;
