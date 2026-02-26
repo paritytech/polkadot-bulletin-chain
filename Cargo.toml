@@ -141,6 +141,7 @@ asset-hub-westend-emulated-chain = { git = "https://github.com/paritytech/polkad
 asset-hub-westend-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "c7b9c08825acc61f1adde54535a41855c04962a2", default-features = true }
 emulated-integration-tests-common = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "c7b9c08825acc61f1adde54535a41855c04962a2", default-features = true }
 westend-emulated-chain = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "c7b9c08825acc61f1adde54535a41855c04962a2", default-features = true }
+westend-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "c7b9c08825acc61f1adde54535a41855c04962a2", default-features = true }
 xcm-emulator = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "c7b9c08825acc61f1adde54535a41855c04962a2", default-features = true }
 
 # Runtime metadata hash extension
