@@ -1069,7 +1069,7 @@ pub mod pallet {
 
 		fn check_store_renew_unsigned(
 			size: usize,
-			hash: impl FnOnce() -> ContentHash,
+			content_hash: impl FnOnce() -> ContentHash,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
@@ -1080,17 +1080,17 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
-			let hash = hash();
+			let content_hash = content_hash();
 
 			Self::check_authorization(
-				AuthorizationScope::Preimage(hash),
+				AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				context.consume_authorization(),
 			)?;
 
 			Ok(context.want_valid_transaction().then(|| {
 				ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-					.and_provides(hash)
+					.and_provides(content_hash)
 					.priority(T::StoreRenewPriority::get())
 					.longevity(T::StoreRenewLongevity::get())
 					.into()
