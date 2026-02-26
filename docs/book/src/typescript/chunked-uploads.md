@@ -2,10 +2,6 @@
 
 The Bulletin SDK automatically handles chunking for large files. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks.
 
-> **Implementation Status**: CID calculation, chunking, and DAG-PB manifest generation are fully functional.
-> Transaction submission for `store().send()` is not yet implemented (throws `NOT_IMPLEMENTED`).
-> Use `storeChunked()` for CID calculation and manifest generation, then submit transactions via PAPI directly.
-
 ## Automatic Chunking (Recommended)
 
 For most use cases, simply use `store()` - it automatically chunks large files:

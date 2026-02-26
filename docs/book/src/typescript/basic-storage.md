@@ -2,11 +2,6 @@
 
 This guide shows how to store data using the `AsyncBulletinClient` with direct PAPI integration.
 
-> **Implementation Status**: CID calculation, chunking, and DAG-PB manifest generation are fully functional.
-> Transaction submission for `store().send()` is not yet implemented (throws `NOT_IMPLEMENTED`).
-> Authorization operations (`authorizeAccount`, `authorizePreimage`, `renew`) work.
-> See the [examples](../../../../examples/) directory for current working patterns using PAPI directly.
-
 ## Quick Start
 
 The `store()` method with builder pattern automatically handles both small and large files:

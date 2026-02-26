@@ -53,6 +53,9 @@ Proceed to [Installation](./installation.md) to get started.
 
 ## Guides
 
+- [Installation](./installation.md) - Install the SDK
+- [Authorization](./authorization.md) - Manage authorization for storage
 - [Basic Storage](./basic-storage.md) - Store small files with a single transaction
 - [Chunked Uploads](./chunked-uploads.md) - Handle large files with automatic chunking
+- [Renewal](./renewal.md) - Extend data retention period
 - [PAPI Integration](./papi-integration.md) - Integrate with Polkadot API
