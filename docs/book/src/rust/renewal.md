@@ -379,4 +379,4 @@ impl StorageManager {
 
 - [Basic Storage](./basic-storage.md) - Storing data
 - [Chunked Uploads](./chunked-uploads.md) - Large file handling
-- [Data Retrieval](../concepts/retrieval.md) - Fetching via IPFS
+- [Data Retrieval](../concepts/retrieval.md) - Fetching from validator nodes

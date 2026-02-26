@@ -168,7 +168,7 @@ const config = {
 ### Manifest Creation
 
 ```typescript
-// With manifest (IPFS-compatible, recommended)
+// With manifest (recommended for large files)
 const config = {
     chunkSize: 1024 * 1024,
     maxParallel: 8,

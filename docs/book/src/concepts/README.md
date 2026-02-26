@@ -5,10 +5,10 @@ This section covers the fundamental concepts you need to understand when working
 ## Data Lifecycle
 
 ```
-1. AUTHORIZE       2. STORE           3. RETRIEVE        4. RENEW
-   ↓                  ↓                  ↓                  ↓
-Get permission    Submit data       Fetch via IPFS    Extend retention
-(faucet/sudo)     + receive CID     using CID         before expiration
+1. AUTHORIZE       2. STORE           3. RETRIEVE             4. RENEW
+   ↓                  ↓                  ↓                       ↓
+Get permission    Submit data       Fetch from validators   Extend retention
+(faucet/sudo)     + receive CID     via light client        before expiration
 ```
 
 ### 1. Authorization (Faucet)
@@ -33,11 +33,11 @@ Once authorized, submit data to the chain:
 
 ### 3. Retrieval
 
-Data is retrieved via **IPFS**, not directly from the chain:
+Data is retrieved from Bulletin validator nodes:
 
-- Use any IPFS gateway: `https://ipfs.io/ipfs/{cid}`
-- Connect directly to Bulletin nodes via Bitswap protocol
-- Chunked data is automatically reassembled by IPFS
+- **Coming soon**: Smoldot light client with `bitswap_block` RPC (decentralized)
+- **Available now**: Direct P2P connection to validators via libp2p/Helia
+- **Deprecated**: Public IPFS gateways (centralized, not recommended)
 - Learn more: [Data Retrieval](./retrieval.md)
 
 ### 4. Renewal
@@ -51,7 +51,7 @@ Data has a **retention period** after which it may be pruned:
 
 ## CIDs (Content Identifiers)
 
-Bulletin Chain uses **CIDs** to identify data. A CID is a self-describing label used in IPFS:
+Bulletin Chain uses **CIDs** (Content Identifiers) to identify data. A CID is a self-describing, content-addressed label:
 
 | Component | Description | Example |
 |-----------|-------------|---------|
@@ -75,6 +75,6 @@ Files larger than the transaction limit must be chunked. The SDKs handle this au
 
 - [Authorization](./authorization.md) - Getting permission to store (faucet)
 - [Storage Model](./storage.md) - How data is stored on-chain
-- [Data Retrieval](./retrieval.md) - Fetching data via IPFS
+- [Data Retrieval](./retrieval.md) - Fetching data from validator nodes
 - [Data Renewal](./renewal.md) - Extending storage retention
-- [Manifests & IPFS](./manifests.md) - DAG-PB format for chunked data
+- [DAG-PB Manifests](./manifests.md) - Manifest format for chunked data

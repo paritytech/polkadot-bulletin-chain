@@ -197,7 +197,7 @@ let config = ChunkerConfig {
 ### Manifest Creation
 
 ```rust
-// With manifest (IPFS-compatible, recommended)
+// With manifest (recommended for large files)
 let config = ChunkerConfig {
     chunk_size: 1024 * 1024,
     max_parallel: 8,
@@ -590,7 +590,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 3. **Choose appropriate chunk size** - 1 MiB is a good default (balances transaction overhead vs. throughput)
 4. **Enable progress tracking** - Use `.with_callback()` to show users what's happening
 5. **Handle failures gracefully** - The SDK will return `InsufficientAuthorization` error before wasting fees
-6. **Keep manifest CID** - Use it to retrieve the complete file from IPFS
+6. **Keep manifest CID** - Use it to retrieve the complete file later
 7. **Test with MockSubmitter** - Fast tests without a node
 
 > **Note**: Authorization checking happens automatically inside `store().send()` when you configure `.with_account()`. You don't need to manually check - the SDK does it for you!

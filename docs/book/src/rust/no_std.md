@@ -28,7 +28,7 @@ The following SDK features are fully functional in no_std environments:
 
 - ✅ **CID Calculation**: Compute CIDs for any data
 - ✅ **Chunking**: Split data into optimal chunks
-- ✅ **DAG-PB Generation**: Create IPFS-compatible manifests
+- ✅ **DAG-PB Generation**: Create manifests for chunked data
 - ✅ **Authorization Helpers**: Calculate required authorization
 - ✅ **Type Definitions**: All core types are no_std compatible
 

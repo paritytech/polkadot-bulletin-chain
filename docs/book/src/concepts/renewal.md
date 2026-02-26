@@ -58,7 +58,7 @@ After the retention period, validators may prune the data. The chain no longer g
 
 **You don't need to renew if:**
 - The data only needs to exist temporarily
-- You've pinned the data to external IPFS nodes
+- You've replicated the data to external storage
 - The retention period is sufficient for your use case
 
 ## Renewal Chain
@@ -86,14 +86,12 @@ Like `store`, renewal requires **authorization**:
 - Authorization is consumed based on the data size
 - Pre-authorize enough capacity if you plan multiple renewals
 
-## IPFS Availability
+## Data Availability After Expiration
 
 Even after data expires on-chain:
-- IPFS nodes that cached the data may still serve it
-- Pinning services can maintain availability indefinitely
-- The CID remains valid; only on-chain guarantees expire
-
-For critical data, consider both renewal AND external IPFS pinning.
+- Validator nodes may still have the data cached temporarily
+- The CID remains valid; only on-chain storage guarantees expire
+- Consider replicating critical data to external storage as backup
 
 ## SDK Support
 
@@ -105,4 +103,4 @@ Both SDKs provide renewal helpers:
 
 - [Rust SDK: Renewal](../rust/renewal.md) - SDK-specific implementation
 - [Storage Model](./storage.md) - How data is stored
-- [Data Retrieval](./retrieval.md) - Fetching via IPFS
+- [Data Retrieval](./retrieval.md) - Fetching from validator nodes
