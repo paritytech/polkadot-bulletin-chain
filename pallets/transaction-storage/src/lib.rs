@@ -1067,6 +1067,14 @@ pub mod pallet {
 			}
 		}
 
+		fn preimage_store_renew_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
+			ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
+				.and_provides(content_hash)
+				.priority(T::StoreRenewPriority::get())
+				.longevity(T::StoreRenewLongevity::get())
+				.into()
+		}
+
 		fn check_store_renew_unsigned(
 			size: usize,
 			content_hash: impl FnOnce() -> ContentHash,
@@ -1088,13 +1096,9 @@ pub mod pallet {
 				context.consume_authorization(),
 			)?;
 
-			Ok(context.want_valid_transaction().then(|| {
-				ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-					.and_provides(content_hash)
-					.priority(T::StoreRenewPriority::get())
-					.longevity(T::StoreRenewLongevity::get())
-					.into()
-			}))
+			Ok(context
+				.want_valid_transaction()
+				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -1208,13 +1212,14 @@ pub mod pallet {
 			}
 
 			Ok(context.want_valid_transaction().then(|| {
-				let builder = ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
-					.priority(T::StoreRenewPriority::get())
-					.longevity(T::StoreRenewLongevity::get());
 				if used_preimage_auth {
-					builder.and_provides(content_hash).into()
+					Self::preimage_store_renew_valid_transaction(content_hash)
 				} else {
-					builder.and_provides((who, content_hash)).into()
+					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+						.and_provides((who, content_hash))
+						.priority(T::StoreRenewPriority::get())
+						.longevity(T::StoreRenewLongevity::get())
+						.into()
 				}
 			}))
 		}
