@@ -51,13 +51,15 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
 	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(36866), added: 37361, mode: `MaxEncodedLen`)
 	/// The range of component `l` is `[1, 8388608]`.
-	fn store(_l: u32, ) -> Weight {
+	fn store(l: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `6`
+		//  Measured:  `136`
 		//  Estimated: `38351`
-		// Minimum execution time: 25_540_000 picoseconds.
-		Weight::from_parts(85_350_614_000, 0)
+		// Minimum execution time: 18_550_000 picoseconds.
+		Weight::from_parts(18_930_000, 0)
 			.saturating_add(Weight::from_parts(0, 38351))
+			// Standard Error: 12
+			.saturating_add(Weight::from_parts(6_876, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
