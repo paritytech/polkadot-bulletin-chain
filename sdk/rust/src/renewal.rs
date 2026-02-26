@@ -54,9 +54,7 @@ impl RenewalOperation {
 	pub fn validate(&self) -> Result<()> {
 		// Block 0 is typically genesis and unlikely to have user transactions
 		if self.block == 0 {
-			return Err(Error::RenewalFailed(
-				"Block 0 is not a valid renewal target".into(),
-			));
+			return Err(Error::RenewalFailed("Block 0 is not a valid renewal target".into()));
 		}
 		Ok(())
 	}
@@ -124,8 +122,7 @@ impl RenewalTracker {
 		retention_period: u32,
 	) -> bool {
 		for entry in &mut self.entries {
-			if entry.storage_ref.block == old_ref.block
-				&& entry.storage_ref.index == old_ref.index
+			if entry.storage_ref.block == old_ref.block && entry.storage_ref.index == old_ref.index
 			{
 				entry.storage_ref = new_ref;
 				entry.expires_at = new_ref.block.saturating_add(retention_period);

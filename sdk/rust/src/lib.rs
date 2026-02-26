@@ -146,7 +146,6 @@ pub mod async_client;
 #[cfg(feature = "std")]
 pub mod mock_client;
 
-
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};

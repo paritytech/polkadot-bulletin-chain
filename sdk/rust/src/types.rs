@@ -82,10 +82,7 @@ pub enum Error {
 	UnsupportedHashAlgorithm(String),
 
 	/// Renewal target not found.
-	#[cfg_attr(
-		feature = "std",
-		error("Renewal target not found: block {block}, index {index}")
-	)]
+	#[cfg_attr(feature = "std", error("Renewal target not found: block {block}, index {index}"))]
 	RenewalNotFound { block: u32, index: u32 },
 
 	/// Renewal failed.
@@ -313,17 +310,9 @@ pub enum TransactionStatusEvent {
 	/// Transaction has been broadcast to peers.
 	Broadcasted { num_peers: usize },
 	/// Transaction is now in a best block.
-	InBestBlock {
-		block_hash: String,
-		block_number: Option<u32>,
-		extrinsic_index: Option<u32>,
-	},
+	InBestBlock { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
 	/// Transaction has been finalized.
-	Finalized {
-		block_hash: String,
-		block_number: Option<u32>,
-		extrinsic_index: Option<u32>,
-	},
+	Finalized { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
 	/// Transaction was in a block that got reorganized.
 	NoLongerInBestBlock,
 	/// Transaction is not valid anymore (e.g., nonce too low).

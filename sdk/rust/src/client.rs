@@ -14,7 +14,9 @@ use crate::{
 	dag::{DagBuilder, UnixFsDagBuilder},
 	renewal::RenewalOperation,
 	storage::{BatchStorageOperation, StorageOperation},
-	types::{ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result, StorageRef, StoreOptions},
+	types::{
+		ChunkerConfig, Error, ProgressCallback, ProgressEvent, Result, StorageRef, StoreOptions,
+	},
 };
 use alloc::vec::Vec;
 
