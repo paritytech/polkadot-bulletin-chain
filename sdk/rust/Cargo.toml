@@ -8,9 +8,9 @@ license = "GPL-3.0-or-later"
 description = "Off-chain client SDK for Polkadot Bulletin Chain"
 
 [dependencies]
-# Core dependencies (no_std compatible)
-codec = { workspace = true, default-features = false }
-scale-info = { workspace = true, default-features = false, features = [
+# Core dependencies
+codec = { workspace = true }
+scale-info = { workspace = true, features = [
 	"derive",
 ] }
 
@@ -20,15 +20,15 @@ multihash = { version = "0.19", default-features = false }
 unsigned-varint = { version = "0.8", default-features = false }
 
 # Re-export pallet types
-pallet-transaction-storage = { workspace = true, default-features = false }
+pallet-transaction-storage = { workspace = true }
 
 # Substrate primitives
-sp-core = { workspace = true, default-features = false }
-sp-runtime = { workspace = true, default-features = false }
-sp-io = { workspace = true, default-features = false }
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+sp-io = { workspace = true }
 
 # Serialization for DAG-PB
-serde = { version = "1.0", default-features = false, features = [
+serde = { workspace = true, features = [
 	"alloc",
 	"derive",
 ], optional = true }
