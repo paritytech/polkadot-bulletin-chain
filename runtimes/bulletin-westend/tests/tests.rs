@@ -648,16 +648,6 @@ fn people_chain_can_authorize_storage_with_transact() {
 }
 
 /// Sanity checks for transaction-storage weight/size limits.
-///
-/// Verifies that the runtime's weight configuration, block length limits, and
-/// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
-///
-/// The available block weight accounts for:
-/// - The `avg_block_initialization` margin (AVERAGE_ON_INITIALIZE_RATIO = 5%) that FRAME reserves
-///   from `max_total` for on_initialize hooks.
-/// - The collator-side 85% PoV cap: collators limit the actual PoV to 85% of `max_pov_size` to
-///   leave headroom for relay-chain state proof overhead. See
-///   `cumulus/client/consensus/aura/src/collators/lookahead.rs`.
 #[test]
 fn transaction_storage_weight_sanity() {
 	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
