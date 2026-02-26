@@ -1351,3 +1351,134 @@ impl<T: Config> Pallet<T> {
 		Ok(())
 	}
 }
+
+/// Sanity-check that the runtime's weight/size configuration is consistent with
+/// `MaxBlockTransactions` and `MaxTransactionSize`.
+///
+/// Verifies that the runtime's weight configuration, block length limits, and
+/// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
+///
+/// The available block weight accounts for:
+/// - The `avg_block_initialization` margin that FRAME reserves from `max_total` for on_initialize
+///   hooks (e.g. 5% for parachains, 10% for `with_sensible_defaults`).
+/// - For parachains, the collator-side PoV cap: collators limit the actual PoV to a percentage of
+///   `max_pov_size` to leave headroom for relay-chain state proof overhead. See
+///   `cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs`.
+///
+/// # Parameters
+///
+/// - `collator_pov_percent`: for parachains, the collator-side PoV cap (e.g. `Some(85)`).
+///   Solochains should pass `None`.
+///
+/// # Panics
+///
+/// Panics with a descriptive message if any check fails.
+#[cfg(any(test, feature = "std"))]
+pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
+	use frame_support::{dispatch::DispatchClass, weights::Weight};
+
+	let block_weights = <T as frame_system::Config>::BlockWeights::get();
+	let normal_length =
+		*<T as frame_system::Config>::BlockLength::get().max.get(DispatchClass::Normal);
+
+	let max_block_txs = T::MaxBlockTransactions::get();
+	let max_tx_size = T::MaxTransactionSize::get();
+
+	let normal = block_weights.get(DispatchClass::Normal);
+	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
+	let base_extrinsic = normal.base_extrinsic;
+	let max_extrinsic =
+		normal.max_extrinsic.expect("Normal class must have a max_extrinsic weight");
+
+	// init_weight = max_total - max_extrinsic - base_extrinsic (the avg_block_initialization
+	// reservation that FRAME sets aside for on_initialize hooks).
+	let init_weight = normal_max_total.saturating_sub(max_extrinsic).saturating_sub(base_extrinsic);
+
+	let after_init = normal_max_total.saturating_sub(init_weight);
+	let effective_normal = if let Some(pov_percent) = collator_pov_percent {
+		// Collators cap the PoV to reserve headroom for the relay-chain state proof.
+		// Reference: cumulus/client/consensus/aura/src/collators/lookahead.rs
+		let pov_limit = block_weights.max_block.proof_size() * pov_percent / 100;
+		Weight::from_parts(after_init.ref_time(), after_init.proof_size().min(pov_limit))
+	} else {
+		after_init
+	};
+
+	// 1. MaxTransactionSize must fit within the normal block length limit.
+	assert!(
+		max_tx_size < normal_length,
+		"MaxTransactionSize ({max_tx_size}) >= normal block length ({normal_length}): \
+		 a single max-size store extrinsic wouldn't fit by length",
+	);
+
+	// 2. A single store(MaxTransactionSize) must fit within max_extrinsic.
+	let max_store_dispatch = T::WeightInfo::store(max_tx_size);
+	assert!(
+		max_store_dispatch.all_lte(max_extrinsic),
+		"store({max_tx_size}) dispatch weight {max_store_dispatch:?} exceeds \
+		 max_extrinsic {max_extrinsic:?} (which accounts for init overhead + base)",
+	);
+
+	// 3. MaxBlockTransactions store calls at an evenly-split size must fit in the effective normal
+	//    budget (ref_time). Each extrinsic costs dispatch + base.
+	let per_tx_size = normal_length / max_block_txs;
+	let store_weight = T::WeightInfo::store(per_tx_size).saturating_add(base_extrinsic);
+	let total_store_ref_time = store_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_store_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) store calls at {per_tx_size} bytes each: \
+		 total ref_time {total_store_ref_time} exceeds effective normal limit {} \
+		 (max_total {} minus init reservation {})",
+		effective_normal.ref_time(),
+		normal_max_total.ref_time(),
+		init_weight.ref_time(),
+	);
+
+	// 4. MaxBlockTransactions renew calls must fit by ref_time.
+	let renew_weight = T::WeightInfo::renew().saturating_add(base_extrinsic);
+	let total_renew_ref_time = renew_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_renew_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) renew calls: \
+		 total ref_time {total_renew_ref_time} exceeds effective normal limit {}",
+		effective_normal.ref_time(),
+	);
+
+	// 5. check_proof (DispatchClass::Mandatory, once per block) must fit in max block.
+	let check_proof_weight = T::WeightInfo::check_proof();
+	assert!(
+		check_proof_weight.all_lte(block_weights.max_block),
+		"check_proof weight {check_proof_weight:?} exceeds max block {:?}",
+		block_weights.max_block,
+	);
+
+	// Diagnostics (visible with --nocapture).
+	let max_txs_by_weight = effective_normal.ref_time() / store_weight.ref_time();
+	println!("--- transaction_storage weight sanity ---");
+	println!("  MaxBlockTransactions:       {max_block_txs}");
+	println!(
+		"  MaxTransactionSize:         {max_tx_size} bytes ({} MiB)",
+		max_tx_size / (1024 * 1024)
+	);
+	println!("  Normal max_total:           {normal_max_total:?}");
+	println!("  Init reservation:           {init_weight:?}");
+	if let Some(pov_percent) = collator_pov_percent {
+		let pov_limit = block_weights.max_block.proof_size() * pov_percent / 100;
+		println!(
+			"  Collator PoV cap ({pov_percent}%):      {pov_limit} bytes ({:.1} MiB)",
+			pov_limit as f64 / (1024.0 * 1024.0)
+		);
+	}
+	println!("  Effective normal budget:    {effective_normal:?}");
+	println!("  max_extrinsic:              {max_extrinsic:?}");
+	println!(
+		"  Normal length limit:        {normal_length} bytes ({} MiB)",
+		normal_length / (1024 * 1024)
+	);
+	println!("  store(max_size) weight:     {max_store_dispatch:?}");
+	println!("  store(even_split) weight:   {store_weight:?} (at {per_tx_size} bytes)");
+	println!("  renew weight:               {renew_weight:?}");
+	println!("  check_proof weight:         {check_proof_weight:?}");
+	println!("  Max store txs by weight:    {max_txs_by_weight}");
+	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
+}
