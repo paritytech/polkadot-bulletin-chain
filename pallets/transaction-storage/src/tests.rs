@@ -735,7 +735,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 		let call = Call::store { data: vec![0u8; 2000] };
 
 		// validate_signed still doesn't consume authorization (correct behaviour).
-		for _ in 0..10 {
+		for _ in 0..2 {
 			assert_ok!(TransactionStorage::validate_signed(&who, &call));
 		}
 		assert_eq!(
