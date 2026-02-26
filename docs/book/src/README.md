@@ -7,15 +7,15 @@ Welcome to the official documentation for the **Polkadot Bulletin Chain** - a de
 Polkadot Bulletin Chain is a specialized blockchain that provides **distributed data storage and retrieval infrastructure**. It allows users to:
 
 - **Store** arbitrary data on-chain with proof-of-storage guarantees
-- **Retrieve** data via IPFS using content-addressed identifiers (CIDs)
+- **Retrieve** data directly from validator nodes via the Bitswap protocol
 - **Verify** data existence and timestamps through blockchain consensus
 
 Unlike typical file storage systems (like Filecoin or Arweave), Bulletin Chain focuses on:
 
 1. **Immutability**: Once a CID is on-chain, it cannot be changed
-2. **Verifiability**: Data is content-addressed using standard IPFS CIDs
+2. **Verifiability**: Data is content-addressed using standard CIDs
 3. **Flexibility**: Supports both small direct storage and large chunked storage
-4. **Integration**: Seamlessly works with standard IPFS tools and gateways
+4. **Decentralization**: Data retrieval via light client (smoldot) without centralized gateways
 
 ## Key Concepts
 
@@ -23,7 +23,7 @@ Unlike typical file storage systems (like Filecoin or Arweave), Bulletin Chain f
 |------|---------|-------------|
 | 1 | **Authorize** | Get permission to store (faucet on testnet) |
 | 2 | **Store** | Submit data to the chain, receive a CID |
-| 3 | **Retrieve** | Fetch data via IPFS using the CID |
+| 3 | **Retrieve** | Fetch data from validator nodes using the CID |
 | 4 | **Renew** | Extend storage before the retention period expires |
 
 ## Accessing Bulletin Chain
@@ -39,16 +39,21 @@ There are multiple ways to interact with Bulletin Chain:
 
 The SDKs provide high-level abstractions for:
 - Automatic data chunking for large files
-- CID calculation (IPFS-compatible)
+- CID calculation (content-addressed identifiers)
 - DAG-PB manifest generation
 - Authorization management
 
-### IPFS
+> **Note**: The SDKs currently support storage operations only. Data retrieval will be added once the smoldot `bitswap_block` RPC is production-ready. See [Data Retrieval](./concepts/retrieval.md) for current options.
 
-Data retrieval happens through IPFS:
-- Public gateways: `https://ipfs.io/ipfs/{cid}`
-- Direct from Bulletin nodes via Bitswap protocol
-- Standard `ipfs` CLI tools
+### Data Retrieval
+
+| Method | Status | Description |
+|--------|--------|-------------|
+| **Smoldot Light Client** | Coming Soon | Decentralized retrieval via `bitswap_block` RPC |
+| **Direct P2P (Helia)** | Available | Connect to validator nodes via libp2p |
+| **IPFS Gateways** | Deprecated | Centralized, not recommended |
+
+See [Data Retrieval](./concepts/retrieval.md) for details.
 
 ## Quick Start
 
@@ -61,10 +66,7 @@ const data = new TextEncoder().encode("Hello, Bulletin!");
 const operation = client.prepareStore(data);
 
 // Submit via PAPI, get CID back
-// ...
-
-// Retrieve via IPFS gateway
-const response = await fetch(`https://ipfs.io/ipfs/${cid}`);
+// See TypeScript SDK documentation for full example
 ```
 
 ```rust
@@ -76,10 +78,7 @@ let data = b"Hello, Bulletin!".to_vec();
 let operation = client.prepare_store(data, None)?;
 
 // Submit via subxt, get CID back
-// ...
-
-// Retrieve via IPFS gateway
-let response = reqwest::get(format!("https://ipfs.io/ipfs/{}", cid)).await?;
+// See Rust SDK documentation for full example
 ```
 
 ## Networks
