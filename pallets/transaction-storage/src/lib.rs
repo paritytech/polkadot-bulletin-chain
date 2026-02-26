@@ -1067,9 +1067,17 @@ pub mod pallet {
 			}
 		}
 
+		fn preimage_store_renew_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
+			ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
+				.and_provides(content_hash)
+				.priority(T::StoreRenewPriority::get())
+				.longevity(T::StoreRenewLongevity::get())
+				.into()
+		}
+
 		fn check_store_renew_unsigned(
 			size: usize,
-			hash: impl FnOnce() -> ContentHash,
+			content_hash: impl FnOnce() -> ContentHash,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
@@ -1080,21 +1088,17 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
-			let hash = hash();
+			let content_hash = content_hash();
 
 			Self::check_authorization(
-				AuthorizationScope::Preimage(hash),
+				AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				context.consume_authorization(),
 			)?;
 
-			Ok(context.want_valid_transaction().then(|| {
-				ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-					.and_provides(hash)
-					.priority(T::StoreRenewPriority::get())
-					.longevity(T::StoreRenewLongevity::get())
-					.into()
-			}))
+			Ok(context
+				.want_valid_transaction()
+				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -1192,23 +1196,31 @@ pub mod pallet {
 			// This allows anyone to store/renew pre-authorized content without consuming their
 			// own account authorization.
 			let consume = context.consume_authorization();
-			Self::check_authorization(
+			let used_preimage_auth = Self::check_authorization(
 				AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				consume,
 			)
-			.or_else(|_| {
+			.is_ok();
+
+			if !used_preimage_auth {
 				Self::check_authorization(
 					AuthorizationScope::Account(who.clone()),
 					size as u32,
 					consume,
-				)
-			})?;
+				)?;
+			}
 
-			Ok(context.want_valid_transaction().then(|| ValidTransaction {
-				priority: T::StoreRenewPriority::get(),
-				longevity: T::StoreRenewLongevity::get(),
-				..Default::default()
+			Ok(context.want_valid_transaction().then(|| {
+				if used_preimage_auth {
+					Self::preimage_store_renew_valid_transaction(content_hash)
+				} else {
+					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+						.and_provides((who, content_hash))
+						.priority(T::StoreRenewPriority::get())
+						.longevity(T::StoreRenewLongevity::get())
+						.into()
+				}
 			}))
 		}
 
