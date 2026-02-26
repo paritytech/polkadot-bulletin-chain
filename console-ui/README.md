@@ -110,13 +110,26 @@ console-ui/
 
 ## SDK Documentation
 
-The console-ui uses the Bulletin SDK. To view the SDK documentation locally:
+The console-ui includes the Bulletin SDK documentation. To build and view the docs locally:
+
+### Quick Setup (generates docs for console-ui)
 
 ```bash
 # Install mdbook if not already installed
 cargo install mdbook
 
-# Build and serve the documentation
+# From console-ui directory, build docs into public/docs/
+npm run build:docs
+
+# Start dev server - docs available at http://localhost:5173/docs/
+npm run dev
+```
+
+### Standalone Documentation Server
+
+To serve just the documentation:
+
+```bash
 cd docs/book
 mdbook serve --open
 ```

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:docs": "mdbook build ../docs/book && mkdir -p public/docs && cp -r ../docs/book/book/* public/docs/",
     "preview": "vite preview",
     "papi:generate": "papi add -w ws://localhost:10000 bulletin",
     "papi:update": "papi"
