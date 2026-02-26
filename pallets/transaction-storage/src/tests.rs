@@ -757,6 +757,29 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			TransactionStorage::pre_dispatch_signed(&who, &call),
 			InvalidTransaction::Payment,
 		);
+
+		// Now test the preimage-authorized path: signed preimage tags must match unsigned
+		// preimage tags so the pool deduplicates across both submission types.
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			2000,
+		));
+		// Re-authorize account so validate_signed can fall through if needed.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+
+		let signed_vt = TransactionStorage::validate_signed(&who, &call).unwrap();
+		let unsigned_vt = <TransactionStorage as ValidateUnsigned>::validate_unsigned(
+			TransactionSource::External,
+			&call,
+		)
+		.unwrap();
+		assert_eq!(
+			signed_vt.provides, unsigned_vt.provides,
+			"signed preimage path must produce the same tag as unsigned preimage path"
+		);
 	});
 }
 
