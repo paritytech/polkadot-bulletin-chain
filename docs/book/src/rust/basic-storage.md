@@ -29,11 +29,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // 1. Connect to Bulletin Chain
-    // Available endpoints (see shared/networks.ts for full list):
-    //   - Local:    ws://localhost:10000
-    //   - Westend:  wss://westend-bulletin-rpc.polkadot.io
-    //   - Paseo:    wss://paseo-bulletin-rpc.polkadot.io
-    //   - Dotspark: wss://bulletin.dotspark.app
+    // Available endpoints (see shared/networks.json for full list):
+    //   - Local:   ws://localhost:10000
+    //   - Westend: wss://westend-bulletin-rpc.polkadot.io
+    //   - Paseo:   wss://paseo-bulletin-rpc.polkadot.io
     let ws_url = std::env::var("BULLETIN_WS_URL")
         .unwrap_or_else(|_| "wss://paseo-bulletin-rpc.polkadot.io".to_string());
     let signer = /* your PairSigner */;

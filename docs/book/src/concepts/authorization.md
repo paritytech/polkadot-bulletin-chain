@@ -9,7 +9,6 @@ Authorization is granted by **privileged accounts**:
 | Network | Authorizer | How to Request |
 |---------|------------|----------------|
 | **Testnets** (Paseo, Westend) | [Sudo account](#finding-the-sudo-account) | Use the **Faucet** in the Console UI |
-| **Dotspark** | [Sudo account](#finding-the-sudo-account) | Use the Faucet or contact operators |
 | **Mainnet** (Polkadot) | Governance (ideally) | Contact chain operators for now |
 
 ### Finding the Sudo Account

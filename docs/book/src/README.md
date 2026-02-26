@@ -87,7 +87,6 @@ let operation = client.prepare_store(data, None)?;
 |---------|----------|--------|
 | Paseo (Testnet) | `wss://paseo-bulletin-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
-| Dotspark | `wss://bulletin.dotspark.app` | Active |
 | Local Dev | `ws://localhost:10000` | - |
 
 See [shared/networks.json](https://github.com/paritytech/polkadot-bulletin-chain/blob/main/shared/networks.json) for the full configuration.
