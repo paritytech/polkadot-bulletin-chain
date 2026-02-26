@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # TODO: remove before merging to main
+    branches: [main, naren-client, bko-on-naren-client]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -45,6 +46,12 @@ jobs:
       - name: Clippy
         run: cargo clippy -p bulletin-sdk-rust --all-targets --locked --quiet -- -D warnings
 
+      - name: Check
+        run: |
+          cargo check -p bulletin-sdk-rust
+          cargo check -p bulletin-sdk-rust --features=runtime-benchmarks
+          cargo check -p bulletin-sdk-rust --features=try-runtime
+
       - name: Test
         run: cargo test -p bulletin-sdk-rust
 
@@ -80,7 +87,7 @@ jobs:
         run: npm test
 
   sdk-checks-passed:
-    name: SDK checks passed
+    name: All SDK checks passed
     if: always()
     needs: [changes, rust-sdk, typescript-sdk]
     runs-on: ubuntu-latest
