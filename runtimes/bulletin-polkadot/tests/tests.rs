@@ -1035,13 +1035,5 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 /// on_initialize hooks.
 #[test]
 fn transaction_storage_weight_sanity() {
-	let block_weights = runtime::BlockWeights::get();
-	let normal_length = *runtime::BlockLength::get()
-		.max
-		.get(frame_support::dispatch::DispatchClass::Normal);
-	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
-		&block_weights,
-		normal_length,
-		None,
-	);
+	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
 }
