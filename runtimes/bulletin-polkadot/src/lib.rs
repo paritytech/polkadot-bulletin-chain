@@ -43,8 +43,8 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, Randomness,
-		StorageInfo,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, OriginTrait,
+		Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
@@ -550,21 +550,29 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		// TransactionStorage is handled by AuthorizeStorageSigned extension, which transforms
+		// the origin. If origin is no longer a system signed origin, pass through.
+		let who = match origin.as_system_origin_signer() {
+			Some(who) => who.clone(),
+			None => return Ok((ValidTransaction::default(), (), origin)),
+		};
 
 		let validity = match call {
-			// Transaction storage call
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			// TransactionStorage calls are validated by AuthorizeStorageSigned extension.
+			// Store/renew origins are transformed so they won't reach here.
+			// Authorizer calls still have a signed origin and need to pass through.
+			RuntimeCall::TransactionStorage(_) => ValidTransaction::default(),
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
+				ValidatorSet::validate_set_keys(&who)?;
+				ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
-				}),
-			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+				}
+			},
+			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(&who)?,
 
 			// Bridge-related calls
 			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
@@ -584,48 +592,51 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			}) |
 			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-
-			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
-				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
-					.map_err(|_| InvalidTransaction::BadSigner.into())
-					.map(|()| ValidTransaction {
-						priority: BridgeTxPriority::get(),
-						longevity: BridgeTxLongevity::get(),
-						..Default::default()
-					}),
-
-			// Sudo calls
-			RuntimeCall::Proxy(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::Sudo(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::Utility(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(ValidTransaction {
-					priority: SudoPriority::get(),
+			) => {
+				RelayerSet::validate_bridge_tx(&who)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
 					longevity: BridgeTxLongevity::get(),
 					..Default::default()
-				}),
+				}
+			},
+
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) => {
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}
+			},
+
+			// Sudo calls
+			RuntimeCall::Proxy(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::Sudo(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::Utility(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
 
 			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
-		}?;
+			_ => return Err(InvalidTransaction::Call.into()),
+		};
 
 		Ok((validity, (), origin))
 	}
@@ -638,11 +649,15 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		// If origin is no longer a system signed origin, pass through.
+		// (Store/renew calls have their origin transformed by AuthorizeStorageSigned.)
+		let who = match origin.as_system_origin_signer() {
+			Some(who) => who,
+			None => return Ok(None),
+		};
 		match call {
-			// Transaction storage validation
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+			// TransactionStorage is fully handled by AuthorizeStorageSigned extension.
+			RuntimeCall::TransactionStorage(_) => Ok(None),
 
 			// Session key management
 			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
@@ -717,6 +732,9 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 }
 
 /// The SignedExtension to the basic transaction logic.
+///
+/// NOTE: `AuthorizeStorageSigned` must come before `ValidateSigned` because it transforms
+/// the origin for signed TransactionStorage calls, and `ValidateSigned` needs to detect this.
 pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -725,6 +743,7 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
+	pallet_transaction_storage::extension::AuthorizeStorageSigned<Runtime>,
 	ValidateSigned,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
