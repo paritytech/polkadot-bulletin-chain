@@ -90,7 +90,7 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     local: bulletin_westend,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
-    previewnet: bulletin_westend
+    previewnet: bulletin_westend,
   },
   web3storage: {
     local: web3_storage,
