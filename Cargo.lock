@@ -2140,7 +2140,6 @@ dependencies = [
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",
- "frame-system",
  "parachains-common",
  "sp-core",
  "sp-keyring",
@@ -2148,7 +2147,6 @@ dependencies = [
  "staging-xcm",
  "staging-xcm-executor",
  "westend-emulated-chain",
- "westend-runtime",
  "xcm-emulator",
 ]
 
