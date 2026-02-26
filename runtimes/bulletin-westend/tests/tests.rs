@@ -660,13 +660,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 ///   `cumulus/client/consensus/aura/src/collators/lookahead.rs`.
 #[test]
 fn transaction_storage_weight_sanity() {
-	let block_weights = runtime::RuntimeBlockWeights::get();
-	let normal_length = *runtime::RuntimeBlockLength::get()
-		.max
-		.get(frame_support::dispatch::DispatchClass::Normal);
 	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
-		&block_weights,
-		normal_length,
 		// Collator-side PoV cap: default 85% of max_pov_size.
 		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
 		Some(85),

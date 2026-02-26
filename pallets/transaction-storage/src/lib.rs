@@ -1355,19 +1355,17 @@ impl<T: Config> Pallet<T> {
 /// Sanity-check that the runtime's weight/size configuration is consistent with
 /// `MaxBlockTransactions` and `MaxTransactionSize`.
 ///
-/// - `block_weights`: the runtime's `BlockWeights` (from `frame_system`).
-/// - `normal_length`: the normal-class block length limit in bytes.
 /// - `collator_pov_percent`: for parachains, the collator-side PoV cap (e.g. `Some(85)`).
 ///   Solochains should pass `None`.
 ///
 /// Panics with a descriptive message if any check fails.
 #[cfg(any(test, feature = "std"))]
-pub fn ensure_weight_sanity<T: Config>(
-	block_weights: &frame_system::limits::BlockWeights,
-	normal_length: u32,
-	collator_pov_percent: Option<u64>,
-) {
+pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	use frame_support::{dispatch::DispatchClass, weights::Weight};
+
+	let block_weights = <T as frame_system::Config>::BlockWeights::get();
+	let normal_length =
+		*<T as frame_system::Config>::BlockLength::get().max.get(DispatchClass::Normal);
 
 	let max_block_txs = T::MaxBlockTransactions::get();
 	let max_tx_size = T::MaxTransactionSize::get();
