@@ -1134,7 +1134,9 @@ pub mod pallet {
 					}))
 				},
 				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
-					Self::check_authorization_expired(&AuthorizationScope::Preimage(*content_hash))?;
+					Self::check_authorization_expired(&AuthorizationScope::Preimage(
+						*content_hash,
+					))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
