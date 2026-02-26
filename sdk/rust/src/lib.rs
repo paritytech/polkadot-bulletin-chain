@@ -6,13 +6,37 @@
 //! Off-chain client SDK for Polkadot Bulletin Chain that simplifies data storage
 //! with automatic chunking, authorization management, and DAG-PB manifest generation.
 //!
-//! ## Features
+//! ## Storage Operations (Supported)
 //!
 //! - **Automatic Chunking**: Split large files into optimal chunks (default 1 MiB)
-//! - **DAG-PB Manifests**: IPFS-compatible manifest generation for chunked data
+//! - **DAG-PB Manifests**: Manifest generation for chunked data
 //! - **Authorization Management**: Helper functions for account and preimage authorization
 //! - **Progress Tracking**: Callback-based progress events for uploads
 //! - **no_std Compatible**: Core functionality works in no_std environments
+//!
+//! ## Data Retrieval (Not Yet Supported)
+//!
+//! **Important**: This SDK currently does NOT provide data retrieval functionality.
+//!
+//! ### Deprecated: IPFS Gateway Retrieval
+//!
+//! Retrieving data via public IPFS gateways (e.g., `https://ipfs.io/ipfs/{cid}`) is
+//! **deprecated** and not recommended. Public gateways are centralized infrastructure
+//! that goes against the decentralization goals of the Bulletin Chain.
+//!
+//! ### Future: Smoldot Light Client Retrieval
+//!
+//! Data retrieval will be supported via the smoldot light client's `bitswap_block` RPC.
+//! This approach allows fully decentralized data retrieval directly from Bulletin
+//! validator nodes without relying on centralized gateways.
+//!
+//! See: <https://github.com/paritytech/polkadot-bulletin-chain/pull/264>
+//!
+//! ### Current Workaround: Direct P2P via libp2p
+//!
+//! For applications that need retrieval now, connect directly to Bulletin validator
+//! nodes using libp2p with their P2P multiaddrs. This is decentralized but requires
+//! additional dependencies. See the console-ui implementation for reference.
 //!
 //! ## Usage
 //!

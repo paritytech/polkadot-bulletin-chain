@@ -6,7 +6,7 @@
     - [Storage Model](./concepts/storage.md)
     - [Data Retrieval](./concepts/retrieval.md)
     - [Data Renewal](./concepts/renewal.md)
-    - [Manifests & IPFS](./concepts/manifests.md)
+    - [DAG-PB Manifests](./concepts/manifests.md)
 - [Rust SDK](./rust/README.md)
     - [Installation](./rust/installation.md)
     - [Authorization](./rust/authorization.md)

@@ -1,174 +1,140 @@
 # Data Retrieval
 
-The Bulletin Chain uses a **write-to-chain, read-from-IPFS** model. Data is stored on-chain via transactions, but retrieval happens through the IPFS network.
+The Bulletin Chain uses a **write-to-chain, read-from-network** model. Data is stored on-chain via transactions, and retrieval happens through the Bulletin validator network.
 
-## How It Works
+> **Important**: The SDK currently focuses on **storage operations only**. Data retrieval functionality will be added in a future release using the smoldot light client.
+
+## Retrieval Status
+
+| Method | Status | Description |
+|--------|--------|-------------|
+| **Smoldot `bitswap_block`** | Coming Soon | Decentralized retrieval via light client |
+| **Direct P2P (Helia/libp2p)** | Available | Connect directly to validator nodes |
+| **IPFS Gateways** | Deprecated | Centralized, not recommended |
+
+## Future: Smoldot Light Client Retrieval (Recommended)
+
+Data retrieval will be supported via the smoldot light client's `bitswap_block` RPC. This approach allows **fully decentralized** data retrieval directly from Bulletin validator nodes without relying on centralized gateways.
 
 ```
 ┌─────────────┐     store()      ┌──────────────────┐
 │   Your App  │ ───────────────► │  Bulletin Chain  │
 └─────────────┘                  └──────────────────┘
        │                                  │
-       │                                  │ Bitswap/IPFS
+       │   bitswap_block RPC              │ Validators serve data
+       │   (via smoldot)                  │ via Bitswap protocol
        │                                  ▼
-       │   fetch by CID           ┌──────────────────┐
-       └─────────────────────────►│   IPFS Gateway   │
+       └─────────────────────────►┌──────────────────┐
+                                  │ Validator Nodes  │
                                   └──────────────────┘
 ```
 
-1. **Store**: Use the SDK to store data on-chain. You get back a **CID** (Content Identifier).
-2. **Retrieve**: Use the CID to fetch data from any IPFS gateway or directly from a Bulletin node running with `--ipfs-server`.
-
-## Why This Architecture?
-
-- **Efficiency**: IPFS is optimized for content distribution; blockchains are optimized for consensus.
-- **Scalability**: Data can be served by any IPFS node, not just Bulletin validators.
-- **Compatibility**: Standard IPFS tools work out of the box.
-- **Availability**: Data remains accessible via IPFS even during chain upgrades.
-
-## Retrieval Methods
-
-### 1. IPFS HTTP Gateway (Recommended)
-
-The simplest way to retrieve data is through an IPFS HTTP gateway:
+### How It Will Work
 
 ```javascript
-// JavaScript/TypeScript
-const cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
-const gateway = "https://ipfs.io";
+// Future SDK API (not yet available)
+import { retrieve } from "@bulletin/sdk";
 
+// Retrieves data via smoldot's bitswap_block RPC
+const data = await retrieve(client, cid);
+```
+
+Under the hood, this will use smoldot's custom `bitswap_block` RPC:
+
+```javascript
+// Low-level API (requires smoldot-bitswap fork)
+const result = await client._request("bitswap_block", [cidString]);
+const data = hexToBytes(result.slice(2)); // Strip "0x" prefix
+```
+
+See the development progress: [PR #264](https://github.com/paritytech/polkadot-bulletin-chain/pull/264)
+
+## Current Workaround: Direct P2P via Helia
+
+For applications that need retrieval now, you can connect directly to Bulletin validator nodes using libp2p/Helia. This is **decentralized** but requires additional dependencies.
+
+### Example (Browser)
+
+```typescript
+import { createHelia } from "helia";
+import { unixfs } from "@helia/unixfs";
+import { webSockets } from "@libp2p/websockets";
+import { noise } from "@chainsafe/libp2p-noise";
+import { yamux } from "@chainsafe/libp2p-yamux";
+
+// Bulletin validator node multiaddrs
+const BULLETIN_PEERS = [
+  "/dns4/bulletin-westend-rpc.polkadot.io/tcp/443/wss/p2p/12D3KooW...",
+  // Add more validator multiaddrs
+];
+
+async function fetchFromBulletin(cidString: string): Promise<Uint8Array> {
+  const helia = await createHelia({
+    libp2p: {
+      transports: [webSockets()],
+      connectionEncrypters: [noise()],
+      streamMuxers: [yamux()],
+    },
+  });
+
+  // Connect to Bulletin validators
+  for (const addr of BULLETIN_PEERS) {
+    await helia.libp2p.dial(multiaddr(addr));
+  }
+
+  const fs = unixfs(helia);
+  const chunks: Uint8Array[] = [];
+
+  for await (const chunk of fs.cat(CID.parse(cidString))) {
+    chunks.push(chunk);
+  }
+
+  await helia.stop();
+  return concatenate(chunks);
+}
+```
+
+See the console-ui implementation for a complete reference: `console-ui/src/lib/helia.ts`
+
+## Deprecated: IPFS Gateway Retrieval
+
+> **Warning**: Public IPFS gateways are **centralized infrastructure** and go against the decentralization goals of Bulletin Chain. This method is **deprecated** and not recommended for production use.
+
+Public gateways like `ipfs.io`, `cloudflare-ipfs.com`, etc. are:
+- Centralized single points of failure
+- Subject to rate limits and availability issues
+- Not guaranteed to have Bulletin Chain data
+
+If you must use gateways temporarily:
+
+```javascript
+// DEPRECATED - use only as last resort
+const gateway = "https://ipfs.io";
 const response = await fetch(`${gateway}/ipfs/${cid}`);
 const data = await response.arrayBuffer();
 ```
 
-```rust
-// Rust (using reqwest)
-let cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
-let gateway = "https://ipfs.io";
-
-let url = format!("{}/ipfs/{}", gateway, cid);
-let data = reqwest::get(&url).await?.bytes().await?;
-```
-
-```bash
-# curl
-curl "https://ipfs.io/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
-```
-
-### 2. Direct from Bulletin Node
-
-If you're running a Bulletin node with the `--ipfs-server` flag, you can fetch data directly via Bitswap:
-
-```bash
-# Start node with IPFS server enabled
-./polkadot-bulletin-chain --ipfs-server --chain bulletin-paseo
-
-# The node exposes Bitswap on its libp2p port
-# Connect your IPFS client to the node's multiaddr
-```
-
-### 3. Local IPFS Node
-
-If you run a local IPFS node, it can fetch from the Bulletin network:
-
-```bash
-# Ensure your IPFS node can discover Bulletin nodes (via DHT or direct peering)
-ipfs cat bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi
-```
-
-## Public IPFS Gateways
-
-Here are some public gateways you can use:
-
-| Gateway | URL |
-|---------|-----|
-| IPFS.io | `https://ipfs.io/ipfs/{cid}` |
-| Cloudflare | `https://cloudflare-ipfs.com/ipfs/{cid}` |
-| Pinata | `https://gateway.pinata.cloud/ipfs/{cid}` |
-| w3s.link | `https://w3s.link/ipfs/{cid}` |
-
-> **Note**: Public gateways may have rate limits. For production use, consider running your own gateway or using a dedicated service.
-
 ## Retrieving Chunked Data
 
-For large files stored via `prepare_store_chunked`, the root CID points to a DAG-PB manifest. IPFS gateways automatically reassemble the chunks:
+For large files stored via `prepare_store_chunked`, the root CID points to a DAG-PB manifest. The retrieval method (smoldot, Helia, or gateway) will automatically reassemble the chunks:
 
 ```javascript
-// The gateway handles reassembly automatically
-const rootCid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
-const response = await fetch(`https://ipfs.io/ipfs/${rootCid}`);
-const fullFile = await response.arrayBuffer(); // Reassembled automatically
+// Root CID automatically resolves to complete file
+const fullFile = await retrieve(client, rootCid);
 ```
 
-If you need to manually retrieve chunks (e.g., for streaming or partial downloads):
+For manual chunk retrieval (streaming, partial downloads):
 
 ```javascript
-// 1. Fetch the manifest to get chunk CIDs
-const manifestResponse = await fetch(`https://ipfs.io/ipfs/${rootCid}?format=dag-json`);
-const manifest = await manifestResponse.json();
+// 1. Fetch manifest to get chunk CIDs
+const manifest = await retrieveManifest(client, rootCid);
 
 // 2. Fetch individual chunks
 for (const link of manifest.Links) {
-    const chunkCid = link.Hash["/"];
-    const chunk = await fetch(`https://ipfs.io/ipfs/${chunkCid}`);
-    // Process chunk...
+  const chunkCid = link.Hash;
+  const chunk = await retrieve(client, chunkCid);
+  // Process chunk...
 }
-```
-
-## Complete Example: Store and Retrieve
-
-### TypeScript
-
-```typescript
-import { BulletinClient, CidCodec, HashAlgorithm } from "@polkadot-bulletin/sdk";
-
-// Store
-const client = new BulletinClient();
-const data = new TextEncoder().encode("Hello, Bulletin!");
-const operation = client.prepareStore(data);
-const cidBytes = operation.calculateCid();
-
-// Submit transaction (via PAPI)
-// ... submit operation.data to chain ...
-
-// Convert CID bytes to string for retrieval
-import { CID } from "multiformats/cid";
-const cid = CID.decode(cidBytes);
-const cidString = cid.toString();
-
-// Retrieve via gateway
-const gateway = "https://ipfs.io";
-const response = await fetch(`${gateway}/ipfs/${cidString}`);
-const retrieved = new Uint8Array(await response.arrayBuffer());
-
-console.log(new TextDecoder().decode(retrieved)); // "Hello, Bulletin!"
-```
-
-### Rust
-
-```rust
-use bulletin_sdk_rust::prelude::*;
-
-// Store
-let client = BulletinClient::new();
-let data = b"Hello, Bulletin!".to_vec();
-let operation = client.prepare_store(data, None)?;
-let cid_data = operation.calculate_cid()?;
-let cid_bytes = cid_data.to_bytes().unwrap();
-
-// Submit transaction (via subxt)
-// ... submit operation.data() to chain ...
-
-// Convert CID to string for retrieval
-let cid = cid::Cid::try_from(cid_bytes.as_slice())?;
-let cid_string = cid.to_string();
-
-// Retrieve via gateway (using reqwest)
-let gateway = "https://ipfs.io";
-let url = format!("{}/ipfs/{}", gateway, cid_string);
-let retrieved = reqwest::get(&url).await?.bytes().await?;
-
-println!("{}", String::from_utf8_lossy(&retrieved)); // "Hello, Bulletin!"
 ```
 
 ## Data Availability
@@ -178,50 +144,52 @@ println!("{}", String::from_utf8_lossy(&retrieved)); // "Hello, Bulletin!"
 Data stored on Bulletin Chain is retained for a configurable **retention period** (check chain constants for the current value). After this period:
 
 - The on-chain transaction data may be pruned
-- IPFS nodes that have cached the data may still serve it
-- For long-term availability, consider pinning to a dedicated IPFS pinning service
+- Validator nodes may no longer serve the data
+- Use [renewal](./renewal.md) to extend retention if needed
 
-### Ensuring Availability
+### Ensuring Long-Term Availability
 
-For critical data, consider:
+For critical data that must outlive the retention period:
 
-1. **Pinning Services**: Pin your CIDs to services like Pinata, web3.storage, or Filebase
-2. **Self-Hosting**: Run your own IPFS node and pin important data
-3. **Multiple Gateways**: Don't rely on a single gateway for retrieval
+1. **Renew before expiration** - Use the SDK's renewal functionality
+2. **Run your own node** - Run a Bulletin node with `--ipfs-server` to serve your data
+3. **Replicate externally** - Store copies in other systems as backup
 
 ## Verifying Data Integrity
 
-The CID includes a cryptographic hash of the content. When you retrieve data, you can verify it matches:
+The CID includes a cryptographic hash of the content. After retrieval, verify the data matches:
 
 ```typescript
+import { calculateCid } from "@bulletin/sdk";
 import { CID } from "multiformats/cid";
-import { sha256 } from "multiformats/hashes/sha2";
 
-const retrieved = await fetch(`https://ipfs.io/ipfs/${cidString}`);
-const data = new Uint8Array(await retrieved.arrayBuffer());
+// After retrieving data
+const retrievedData = await retrieve(client, cidString);
 
-// Recompute hash and verify
-const hash = await sha256.digest(data);
-const computedCid = CID.create(1, 0x55, hash); // 0x55 = raw codec
+// Verify integrity
+const computedCid = await calculateCid(retrievedData);
+const originalCid = CID.parse(cidString);
 
-if (computedCid.toString() === cidString) {
-    console.log("Data integrity verified!");
+if (computedCid.equals(originalCid)) {
+  console.log("Data integrity verified!");
+} else {
+  console.error("Data corruption detected!");
 }
 ```
 
 ## SDK Roadmap
 
-> **Note**: Currently the SDK focuses on storage operations. Retrieval helpers are planned for future releases:
->
-> - `retrieve(cid, gateway)` - Fetch data from IPFS gateway
-> - `retrieveChunked(cid, gateway)` - Stream chunked data
-> - `verifyIntegrity(cid, data)` - Verify data matches CID
+The SDK will support retrieval once the smoldot `bitswap_block` RPC is production-ready:
 
-For now, use standard HTTP clients or IPFS libraries for retrieval as shown above.
+| Feature | Status |
+|---------|--------|
+| `retrieve(client, cid)` | Planned |
+| `retrieveChunked(client, cid)` | Planned |
+| `verifyIntegrity(cid, data)` | Planned |
+| Streaming support | Planned |
 
 ## Next Steps
 
 - [Storage Model](./storage.md) - Understanding how data is stored
-- [Manifests & IPFS](./manifests.md) - DAG-PB format details
-- [Chunked Uploads (Rust)](../rust/chunked-uploads.md) - Storing large files
-- [Chunked Uploads (TypeScript)](../typescript/chunked-uploads.md) - Storing large files
+- [Manifests](./manifests.md) - DAG-PB format for chunked data
+- [Renewal](./renewal.md) - Extending data retention
