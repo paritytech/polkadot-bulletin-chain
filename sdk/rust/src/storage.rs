@@ -22,6 +22,8 @@ pub struct StorageOperation {
 	/// CID configuration.
 	pub cid_config: CidConfig,
 	/// Whether to wait for finalization.
+	/// Note: Currently unused - reserved for when `AsyncBulletinClient` transaction
+	/// submission is fully implemented. For now, users submit via subxt directly.
 	pub wait_finalization: bool,
 }
 
@@ -73,6 +75,8 @@ pub struct BatchStorageOperation {
 	/// Individual storage operations.
 	pub operations: Vec<StorageOperation>,
 	/// Whether to wait for finalization.
+	/// Note: Currently unused - reserved for when `AsyncBulletinClient` transaction
+	/// submission is fully implemented. For now, users submit via subxt directly.
 	pub wait_finalization: bool,
 }
 
