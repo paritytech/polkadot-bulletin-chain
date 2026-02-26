@@ -1361,15 +1361,12 @@ pub fn ensure_weight_sanity<T: Config>(
 	let normal = block_weights.get(DispatchClass::Normal);
 	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
 	let base_extrinsic = normal.base_extrinsic;
-	let max_extrinsic = normal
-		.max_extrinsic
-		.expect("Normal class must have a max_extrinsic weight");
+	let max_extrinsic =
+		normal.max_extrinsic.expect("Normal class must have a max_extrinsic weight");
 
 	// init_weight = max_total - max_extrinsic - base_extrinsic (the avg_block_initialization
 	// reservation that FRAME sets aside for on_initialize hooks).
-	let init_weight = normal_max_total
-		.saturating_sub(max_extrinsic)
-		.saturating_sub(base_extrinsic);
+	let init_weight = normal_max_total.saturating_sub(max_extrinsic).saturating_sub(base_extrinsic);
 
 	let after_init = normal_max_total.saturating_sub(init_weight);
 	let effective_normal = if let Some(pov_percent) = collator_pov_percent {
@@ -1396,8 +1393,8 @@ pub fn ensure_weight_sanity<T: Config>(
 		 max_extrinsic {max_extrinsic:?} (which accounts for init overhead + base)",
 	);
 
-	// 3. MaxBlockTransactions store calls at an evenly-split size must fit in the
-	//    effective normal budget (ref_time). Each extrinsic costs dispatch + base.
+	// 3. MaxBlockTransactions store calls at an evenly-split size must fit in the effective normal
+	//    budget (ref_time). Each extrinsic costs dispatch + base.
 	let per_tx_size = normal_length / max_block_txs;
 	let store_weight = T::WeightInfo::store(per_tx_size).saturating_add(base_extrinsic);
 	let total_store_ref_time = store_weight.ref_time().saturating_mul(max_block_txs as u64);

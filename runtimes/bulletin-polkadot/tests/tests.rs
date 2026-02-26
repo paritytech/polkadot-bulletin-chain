@@ -15,12 +15,7 @@ use bulletin_polkadot_runtime::{
 	},
 	AccountId, BridgePolkadotGrandpa, BridgePolkadotMessages,
 };
-use frame_support::{
-	assert_ok,
-	dispatch::GetDispatchInfo,
-	pallet_prelude::Hooks,
-	traits::Get,
-};
+use frame_support::{assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get};
 use pallet_bridge_messages::{
 	messages_generation::{encode_all_messages, encode_lane_data, prepare_messages_storage_proof},
 	BridgedChainOf, LaneIdOf, ThisChainOf,
@@ -28,8 +23,7 @@ use pallet_bridge_messages::{
 use pallet_bridge_parachains::ParachainHeaders;
 use pallet_transaction_storage::{
 	cids::{calculate_cid, CidConfig, HashingAlgorithm},
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
-	BAD_DATA_SIZE,
+	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
 };
 use runtime::{
 	bridge_config::bp_people_polkadot, BuildStorage, Executive, Hash, Header, Runtime, RuntimeCall,

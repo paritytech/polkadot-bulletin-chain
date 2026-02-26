@@ -23,11 +23,7 @@ use bulletin_westend_runtime::{
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
 	UncheckedExtrinsic,
 };
-use frame_support::{
-	assert_err, assert_ok,
-	dispatch::GetDispatchInfo,
-	pallet_prelude::Hooks,
-};
+use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
 use pallet_transaction_storage::{
 	cids::{calculate_cid, CidConfig, HashingAlgorithm},
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
