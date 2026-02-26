@@ -328,6 +328,10 @@ impl<AccountId, HoldReason> ReservableCurrency<AccountId> for NoCurrency<Account
 	}
 }
 
+/// Maximum nesting depth for utility wrapper validation. Prevents stack overflow
+/// from adversarially deep nesting.
+pub const MAX_INNER_CALL_DEPTH: u32 = 8;
+
 /// Extract inner calls from a utility call variant.
 pub fn utility_inner_calls<T: pallet_utility::Config>(
 	call: &pallet_utility::Call<T>,

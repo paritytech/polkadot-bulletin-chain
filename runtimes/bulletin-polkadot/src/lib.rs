@@ -508,19 +508,9 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
-/// Maximum nesting depth for utility wrapper validation. Prevents stack overflow
-/// from adversarially deep nesting. Extrinsic size limits provide a natural bound,
-/// but this makes it explicit.
-const MAX_INNER_CALL_DEPTH: u32 = 8;
-
-/// Extract inner calls from a utility call variant.
-///
-/// Every variant that wraps a `RuntimeCall` must be listed here so that
-/// `validate_inner_calls` can inspect them. The wildcard arm returns an empty
-/// vec — if a new wrapping variant is added to pallet_utility, the pallet-side
-/// defense-in-depth (`consume_dispatch_authorization`) still catches bypasses
-/// at dispatch time.
-use pallets_common::{proxy_inner_calls, sudo_inner_calls, utility_inner_calls};
+use pallets_common::{
+	proxy_inner_calls, sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH,
+};
 
 /// Recursively validate inner calls of wrapper extrinsics. Each inner call must
 /// be in the ValidateSigned allowlist, and TransactionStorage calls are checked
@@ -542,12 +532,8 @@ fn validate_inner_calls(
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {
-		RuntimeCall::TransactionStorage(inner_call) =>
-			if consume {
-				TransactionStorage::pre_dispatch_signed(who, inner_call)
-			} else {
-				TransactionStorage::validate_signed(who, inner_call).map(|_| ())
-			},
+		storage_call @ RuntimeCall::TransactionStorage(_) =>
+			validate_storage_calls(who, storage_call, depth, consume),
 		RuntimeCall::Utility(utility_call) => {
 			for inner in utility_inner_calls(utility_call) {
 				validate_inner_calls(who, inner, depth + 1, consume)?;
@@ -580,8 +566,8 @@ fn validate_inner_calls(
 	}
 }
 
-/// Validate only TransactionStorage calls within sudo/proxy wrappers.
-/// Non-storage calls are allowed through since sudo/proxy provide their own authorization.
+/// Validate only TransactionStorage calls.
+/// Non-storage calls are allowed to pass through.
 fn validate_storage_calls(
 	who: &AccountId,
 	call: &RuntimeCall,

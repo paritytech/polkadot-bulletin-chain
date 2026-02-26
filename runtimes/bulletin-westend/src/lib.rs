@@ -275,11 +275,7 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
 }
 
-/// Maximum nesting depth for utility wrapper validation. Prevents stack overflow
-/// from adversarially deep nesting.
-const MAX_INNER_CALL_DEPTH: u32 = 8;
-
-use pallets_common::{sudo_inner_calls, utility_inner_calls};
+use pallets_common::{sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH};
 
 /// Recursively validate inner calls of wrapper extrinsics. TransactionStorage calls
 /// are required to pass their own signed validation; utility wrappers are recursed into.
@@ -301,7 +297,8 @@ fn validate_inner_calls(
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {
-		storage_call @ RuntimeCall::TransactionStorage(_) => validate_storage_calls(who, storage_call, 0, consume)?
+		storage_call @ RuntimeCall::TransactionStorage(_) =>
+			validate_storage_calls(who, storage_call, depth, consume),
 		RuntimeCall::Utility(utility_call) => {
 			for inner in utility_inner_calls(utility_call) {
 				validate_inner_calls(who, inner, depth + 1, consume)?;
