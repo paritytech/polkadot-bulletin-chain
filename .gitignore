@@ -10,6 +10,7 @@
 .envrc
 .direnv
 .idea
+.vscode
 
 # Node.js
 **/node_modules/
@@ -20,7 +21,9 @@ tsconfig.tsbuildinfo
 # Local test files
 kubo/
 zombienet-*
-console-ui/dist/
+
+# Build outputs
+**/dist/
 console-ui/.vite/
 console-ui/tsconfig.tsbuildinfo
 

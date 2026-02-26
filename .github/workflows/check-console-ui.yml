@@ -1,14 +1,14 @@
 name: Check Console UI
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: [console-ui, main]
-    paths:
-      - "console-ui/**"
-      - ".github/workflows/check-console-ui.yml"
+    branches: [main]
 
 jobs:
   build:
+    name: Check Console UI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
