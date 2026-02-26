@@ -1173,11 +1173,22 @@ fn authorize_storage_extension_transforms_origin() {
 		assert_eq!(val, Some(AuthorizationScope::Account(caller)));
 
 		// Verify the origin was transformed and can be extracted with EnsureAuthorized
+		let origin_for_prepare = transformed_origin.clone();
 		let extracted = EnsureAuthorized::<Test>::try_origin(transformed_origin);
 		assert!(extracted.is_ok());
 		let (who, scope) = extracted.unwrap();
 		assert_eq!(who, caller);
 		assert_eq!(scope, AuthorizationScope::Account(caller));
+
+		// Run prepare — this should call pre_dispatch_signed and consume the authorization
+		let ext2 = AuthorizeStorageSigned::<Test>::default();
+		assert_ok!(ext2.prepare(val, &origin_for_prepare, &call, &info, 0));
+
+		// Authorization (1 transaction, 16 bytes) should now be fully consumed
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(caller),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
 	});
 }
 
