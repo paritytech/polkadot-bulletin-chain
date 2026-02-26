@@ -30,6 +30,10 @@ jobs:
           cache: npm
           cache-dependency-path: console-ui/package-lock.json
 
+      - name: Build SDK
+        working-directory: sdk/typescript
+        run: npm ci && npm run build
+
       - name: Install dependencies
         working-directory: console-ui
         run: npm ci
