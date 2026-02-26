@@ -973,8 +973,6 @@ pub mod pallet {
 			RetentionPeriod::<T>::get()
 		}
 
-		/// Check and consume authorization for a store/renew operation at dispatch time.
-		///
 		/// Returns `true` if a blob of the given size can be stored.
 		fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)
