@@ -1003,7 +1003,7 @@ pub mod pallet {
 		/// Check that authorization exists for data of the given size to be stored in a single
 		/// transaction. If `consume` is `true`, the authorization is consumed.
 		fn check_authorization(
-			scope: AuthorizationScopeFor<T>,
+			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
 		) -> Result<(), TransactionValidityError> {
@@ -1055,7 +1055,7 @@ pub mod pallet {
 
 		/// Check that authorization with the given scope exists in storage but has expired.
 		fn check_authorization_expired(
-			scope: AuthorizationScopeFor<T>,
+			scope: &AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
@@ -1067,9 +1067,17 @@ pub mod pallet {
 			}
 		}
 
+		fn preimage_store_renew_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
+			ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
+				.and_provides(content_hash)
+				.priority(T::StoreRenewPriority::get())
+				.longevity(T::StoreRenewLongevity::get())
+				.into()
+		}
+
 		fn check_store_renew_unsigned(
 			size: usize,
-			hash: impl FnOnce() -> ContentHash,
+			content_hash: impl FnOnce() -> ContentHash,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
@@ -1080,21 +1088,17 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
-			let hash = hash();
+			let content_hash = content_hash();
 
 			Self::check_authorization(
-				AuthorizationScope::Preimage(hash),
+				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				context.consume_authorization(),
 			)?;
 
-			Ok(context.want_valid_transaction().then(|| {
-				ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-					.and_provides(hash)
-					.priority(T::StoreRenewPriority::get())
-					.longevity(T::StoreRenewLongevity::get())
-					.into()
-			}))
+			Ok(context
+				.want_valid_transaction()
+				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -1118,7 +1122,7 @@ pub mod pallet {
 					)
 				},
 				Call::<T>::remove_expired_account_authorization { who } => {
-					Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
+					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredAccountAuthorization",
@@ -1130,7 +1134,9 @@ pub mod pallet {
 					}))
 				},
 				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
-					Self::check_authorization_expired(AuthorizationScope::Preimage(*content_hash))?;
+					Self::check_authorization_expired(&AuthorizationScope::Preimage(
+						*content_hash,
+					))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
@@ -1192,23 +1198,31 @@ pub mod pallet {
 			// This allows anyone to store/renew pre-authorized content without consuming their
 			// own account authorization.
 			let consume = context.consume_authorization();
-			Self::check_authorization(
-				AuthorizationScope::Preimage(content_hash),
+			let used_preimage_auth = Self::check_authorization(
+				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				consume,
 			)
-			.or_else(|_| {
+			.is_ok();
+
+			if !used_preimage_auth {
 				Self::check_authorization(
-					AuthorizationScope::Account(who.clone()),
+					&AuthorizationScope::Account(who.clone()),
 					size as u32,
 					consume,
-				)
-			})?;
+				)?;
+			}
 
-			Ok(context.want_valid_transaction().then(|| ValidTransaction {
-				priority: T::StoreRenewPriority::get(),
-				longevity: T::StoreRenewLongevity::get(),
-				..Default::default()
+			Ok(context.want_valid_transaction().then(|| {
+				if used_preimage_auth {
+					Self::preimage_store_renew_valid_transaction(content_hash)
+				} else {
+					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+						.and_provides((who, content_hash))
+						.priority(T::StoreRenewPriority::get())
+						.longevity(T::StoreRenewLongevity::get())
+						.into()
+				}
 			}))
 		}
 
