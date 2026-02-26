@@ -646,3 +646,13 @@ fn people_chain_can_authorize_storage_with_transact() {
 			));
 		})
 }
+
+/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+#[test]
+fn transaction_storage_weight_sanity() {
+	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
+		// Collator-side PoV cap: default 85% of max_pov_size.
+		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
+		Some(85),
+	);
+}
