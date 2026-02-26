@@ -1025,14 +1025,7 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 	});
 }
 
-/// Sanity checks for transaction-storage weight/size limits.
-///
-/// Verifies that the runtime's weight configuration, block length limits, and
-/// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
-///
-/// The available block weight accounts for the `avg_block_initialization` margin
-/// (10% for `with_sensible_defaults`) that FRAME reserves from `max_total` for
-/// on_initialize hooks.
+/// See [`pallet_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
 	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);

@@ -1355,8 +1355,22 @@ impl<T: Config> Pallet<T> {
 /// Sanity-check that the runtime's weight/size configuration is consistent with
 /// `MaxBlockTransactions` and `MaxTransactionSize`.
 ///
+/// Verifies that the runtime's weight configuration, block length limits, and
+/// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
+///
+/// The available block weight accounts for:
+/// - The `avg_block_initialization` margin that FRAME reserves from `max_total` for
+///   on_initialize hooks (e.g. 5% for parachains, 10% for `with_sensible_defaults`).
+/// - For parachains, the collator-side PoV cap: collators limit the actual PoV to a percentage
+///   of `max_pov_size` to leave headroom for relay-chain state proof overhead. See
+///   `cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs`.
+///
+/// # Parameters
+///
 /// - `collator_pov_percent`: for parachains, the collator-side PoV cap (e.g. `Some(85)`).
 ///   Solochains should pass `None`.
+///
+/// # Panics
 ///
 /// Panics with a descriptive message if any check fails.
 #[cfg(any(test, feature = "std"))]

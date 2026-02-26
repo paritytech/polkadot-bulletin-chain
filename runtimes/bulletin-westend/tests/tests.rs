@@ -647,7 +647,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 		})
 }
 
-/// Sanity checks for transaction-storage weight/size limits.
+/// See [`pallet_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
 	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
