@@ -4,9 +4,8 @@
 //! Authorize and store data on Bulletin Chain using subxt.
 //!
 //! This example demonstrates:
-//! 1. Using BulletinConfig with ProvideCidConfig extension from the SDK
-//! 2. Authorizing an account to store data
-//! 3. Storing data on the Bulletin Chain
+//! 1. Authorizing an account to store data
+//! 2. Storing data on the Bulletin Chain
 //!
 //! ## Setup
 //!
@@ -18,10 +17,9 @@
 //!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
 
 use anyhow::{anyhow, Result};
-use bulletin_sdk_rust::subxt_config::BulletinConfig;
 use clap::Parser;
 use std::str::FromStr;
-use subxt::{utils::AccountId32, OnlineClient};
+use subxt::{utils::AccountId32, OnlineClient, PolkadotConfig};
 use subxt_signer::sr25519::Keypair;
 use tracing::info;
 use tracing_subscriber::FmtSubscriber;
@@ -44,9 +42,6 @@ struct Args {
 #[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
 pub mod bulletin {}
 
-// Note: ProvideCidConfig and BulletinConfig are now provided by bulletin-sdk-rust
-// See sdk/rust/src/subxt_config.rs for implementation
-
 #[tokio::main]
 async fn main() -> Result<()> {
 	// Initialize tracing subscriber (RUST_LOG env var overrides the default "info" level)
@@ -62,10 +57,9 @@ async fn main() -> Result<()> {
 	let account_id: AccountId32 = keypair.public_key().into();
 	info!("Using account: {}", account_id);
 
-	// Connect to Bulletin Chain node using our custom BulletinConfig
-	// BulletinConfig includes ProvideCidConfig in extrinsic params
+	// Connect to Bulletin Chain node
 	info!("Connecting to {}...", args.ws);
-	let api = OnlineClient::<BulletinConfig>::from_url(&args.ws)
+	let api = OnlineClient::<PolkadotConfig>::from_url(&args.ws)
 		.await
 		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
 	info!("Connected successfully!");

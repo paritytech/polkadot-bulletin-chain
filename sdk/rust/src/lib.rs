@@ -43,10 +43,9 @@
 //!
 //! ```ignore
 //! use subxt::{OnlineClient, PolkadotConfig};
-//! use bulletin_sdk_rust::subxt_config::BulletinConfig;
 //!
 //! // Connect to the chain
-//! let api = OnlineClient::<BulletinConfig>::from_url("ws://localhost:9944").await?;
+//! let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
 //!
 //! // Build and submit the transaction
 //! // (exact call depends on your runtime's metadata)
@@ -147,9 +146,6 @@ pub mod async_client;
 #[cfg(feature = "std")]
 pub mod mock_client;
 
-// Subxt configuration and custom signed extensions (std-only)
-#[cfg(feature = "std")]
-pub mod subxt_config;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
@@ -192,9 +188,6 @@ pub mod prelude {
 
 	#[cfg(feature = "std")]
 	pub use crate::mock_client::{MockBulletinClient, MockClientConfig, MockOperation};
-
-	#[cfg(feature = "std")]
-	pub use crate::subxt_config::{BulletinConfig, BulletinExtrinsicParams, ProvideCidConfig};
 }
 
 #[cfg(test)]
