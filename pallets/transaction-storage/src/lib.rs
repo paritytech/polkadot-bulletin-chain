@@ -29,7 +29,6 @@ extern crate alloc;
 mod benchmarking;
 pub mod weights;
 
-pub mod cids;
 pub mod migrations;
 #[cfg(test)]
 mod mock;
@@ -37,7 +36,6 @@ mod mock;
 mod tests;
 
 use alloc::vec::Vec;
-use cids::{calculate_cid, Cid, CidCodec, CidConfig, ContentHash, HashingAlgorithm, RAW_CODEC};
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
 use polkadot_sdk_frame::{
@@ -51,6 +49,10 @@ use polkadot_sdk_frame::{
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
 	CHUNK_SIZE, INHERENT_IDENTIFIER,
+};
+use transaction_storage_primitives::{
+	cids::{calculate_cid, Cid, CidCodec, CidConfig, HashingAlgorithm, RAW_CODEC},
+	ContentHash,
 };
 
 /// A type alias for the balance type from this pallet's point of view.
