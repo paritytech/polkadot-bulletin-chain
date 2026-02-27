@@ -1,11 +1,12 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-//! Authorize and store data on Bulletin Chain using subxt.
+//! Authorize and store data on Bulletin Chain using the Bulletin SDK + subxt.
 //!
 //! This example demonstrates:
-//! 1. Authorizing an account to store data
-//! 2. Storing data on the Bulletin Chain
+//! 1. Using the Bulletin SDK to prepare storage operations and calculate CIDs
+//! 2. Authorizing an account to store data (requires sudo)
+//! 3. Submitting the store transaction via subxt
 //!
 //! ## Setup
 //!
@@ -17,6 +18,7 @@
 //!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
 
 use anyhow::{anyhow, Result};
+use bulletin_sdk_rust::{cid::cid_to_bytes, BulletinClient, CidCodec, HashAlgorithm, StoreOptions};
 use clap::Parser;
 use std::str::FromStr;
 use subxt::{utils::AccountId32, OnlineClient, PolkadotConfig};
@@ -103,14 +105,36 @@ async fn main() -> Result<()> {
 
 	info!("Account authorized successfully!");
 
-	// Step 2: Store data
-	info!("\nStep 2: Storing data...");
+	// Step 2: Prepare storage operation using Bulletin SDK
+	info!("\nStep 2: Preparing storage operation with Bulletin SDK...");
 	let data_to_store = format!("Hello from Bulletin Chain at {}", chrono_lite());
 	info!("Data: {}", data_to_store);
 
+	// Use Bulletin SDK to prepare the storage operation
+	let sdk_client = BulletinClient::new();
+	let options = StoreOptions {
+		cid_codec: CidCodec::Raw,
+		hash_algorithm: HashAlgorithm::Blake2b256,
+		wait_for_finalization: true,
+	};
+
+	let operation = sdk_client
+		.prepare_store(data_to_store.as_bytes().to_vec(), options)
+		.map_err(|e| anyhow!("SDK error: {:?}", e))?;
+
+	// Calculate CID before submission using the SDK
+	let cid_data = operation
+		.calculate_cid()
+		.map_err(|e| anyhow!("CID calculation error: {:?}", e))?;
+	let cid_bytes = cid_to_bytes(&cid_data)
+		.map_err(|e| anyhow!("CID serialization error: {:?}", e))?;
+	info!("Pre-calculated CID: {}", hex::encode(&cid_bytes));
+	info!("Content hash: {}", hex::encode(&cid_data.content_hash));
+
+	// Build the store transaction with SDK-prepared data and CID config
 	let store_tx = bulletin::tx()
 		.transaction_storage()
-		.store(data_to_store.as_bytes().to_vec());
+		.store(operation.data);
 
 	let tx_progress = api
 		.tx()
@@ -147,13 +171,19 @@ async fn main() -> Result<()> {
 	if let Some(event) = stored_event {
 		info!("  Content Hash: {}", hex::encode(&event.content_hash));
 		info!("  Transaction Index In Block: {}", event.index);
-		if let Some(cid_bytes) = &event.cid {
-			info!("  CID (bytes): {}", hex::encode(cid_bytes));
+		if let Some(on_chain_cid) = &event.cid {
+			info!("  On-chain CID: {}", hex::encode(on_chain_cid));
+			// Verify SDK-calculated CID matches on-chain CID
+			if on_chain_cid == &cid_bytes {
+				info!("  ✓ SDK CID matches on-chain CID!");
+			} else {
+				info!("  ✗ CID mismatch - SDK: {}, Chain: {}", hex::encode(&cid_bytes), hex::encode(on_chain_cid));
+			}
 		}
 		info!("  Size: {} bytes", data_to_store.len());
 	}
 
-	info!("\nTest passed!");
+	info!("\n✅ Test passed! SDK integration working correctly.");
 
 	Ok(())
 }

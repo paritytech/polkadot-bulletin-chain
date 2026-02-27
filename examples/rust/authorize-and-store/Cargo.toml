@@ -9,7 +9,7 @@ name = "authorize-and-store"
 path = "src/main.rs"
 
 [dependencies]
-# Bulletin SDK (provides BulletinConfig and ProvideCidConfig)
+# Bulletin SDK for data preparation (CID calculation, chunking, options)
 bulletin-sdk-rust = { path = "../../../sdk/rust" }
 
 # Subxt for blockchain interaction
