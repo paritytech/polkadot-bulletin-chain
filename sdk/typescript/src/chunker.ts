@@ -12,8 +12,11 @@ import {
   BulletinError,
 } from "./types.js";
 
-/** Maximum chunk size allowed (2 MiB, matches Bitswap limit) */
-export const MAX_CHUNK_SIZE = 2 * 1024 * 1024;
+/** Maximum chunk size allowed (8 MiB, matches chain's MaxTransactionSize) */
+export const MAX_CHUNK_SIZE = 8 * 1024 * 1024;
+
+/** Maximum file size allowed (64 MiB) */
+export const MAX_FILE_SIZE = 64 * 1024 * 1024;
 
 /**
  * Fixed-size chunker that splits data into equal-sized chunks
@@ -45,6 +48,12 @@ export class FixedSizeChunker {
   chunk(data: Uint8Array): Chunk[] {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+    }
+    if (data.length > MAX_FILE_SIZE) {
+      throw new BulletinError(
+        `Data size ${data.length} exceeds maximum allowed size of ${MAX_FILE_SIZE} (64 MiB)`,
+        "FILE_TOO_LARGE",
+      );
     }
 
     const chunks: Chunk[] = [];

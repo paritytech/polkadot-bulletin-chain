@@ -76,12 +76,30 @@ describe('Chunker', () => {
 
   it('should throw error for chunk size exceeding maximum', () => {
     const config: ChunkerConfig = {
-      chunkSize: 10 * 1024 * 1024, // 10 MiB > MAX (2 MiB)
+      chunkSize: 10 * 1024 * 1024, // 10 MiB > MAX (8 MiB)
       maxParallel: 8,
       createManifest: true,
     };
 
     expect(() => new FixedSizeChunker(config)).toThrow();
+  });
+
+  it('should calculate chunks correctly for 64 MiB file', () => {
+    // This test verifies chunk calculation for large files (64 MiB)
+    // without actually allocating the memory
+    const config: ChunkerConfig = {
+      chunkSize: 8 * 1024 * 1024, // 8 MiB (MAX_CHUNK_SIZE)
+      maxParallel: 8,
+      createManifest: true,
+    };
+
+    const chunker = new FixedSizeChunker(config);
+
+    // 64 MiB / 8 MiB = 8 chunks
+    expect(chunker.numChunks(64 * 1024 * 1024)).toBe(8);
+
+    // Verify chunk size
+    expect(chunker.chunkSize).toBe(8 * 1024 * 1024);
   });
 
   it('should throw error for zero chunk size', () => {
@@ -93,6 +111,10 @@ describe('Chunker', () => {
 
     expect(() => new FixedSizeChunker(config)).toThrow();
   });
+
+  // Note: Testing 64+ MiB allocations is skipped due to memory constraints in test environment.
+  // The MAX_FILE_SIZE (64 MiB) limit is enforced in chunker.ts:chunk() method.
+  // Manual testing: new FixedSizeChunker().chunk(new Uint8Array(65 * 1024 * 1024)) throws FILE_TOO_LARGE
 
   it('should validate chunk data integrity', () => {
     const data = new Uint8Array(3 * 1024 * 1024);
