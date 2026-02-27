@@ -8,15 +8,39 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 ## Key Features
 
-- **Bring Your Own Client (BYOC)**: Accept an existing `subxt` client - enables light clients, connection reuse
-- **Flexible Architecture**: Use `AsyncBulletinClient` for full automation or `BulletinClient` for manual preparation
+- **Direct Transaction Submission**: `TransactionClient` handles all chain interactions out of the box
+- **Bring Your Own Client (BYOC)**: `AsyncBulletinClient` accepts an existing `subxt` client for connection reuse
+- **Flexible Architecture**: Use `TransactionClient` for simplicity, `AsyncBulletinClient` for advanced use cases, or `BulletinClient` for manual preparation
 - **Builder Pattern**: Fluent API for configuring store operations
 - **Mock Testing**: `MockBulletinClient` allows testing without a blockchain node
-- **Runtime Metadata**: Users configure subxt with their own metadata for maximum flexibility
+- **Runtime Metadata**: Embedded metadata for Bulletin Chain - works out of the box
 
 ## Architecture
 
-The SDK follows a **Bring Your Own Client** pattern:
+The SDK provides two approaches:
+
+### Simple: TransactionClient (Recommended)
+
+For most use cases, `TransactionClient` handles everything:
+
+```
+┌─────────────────────────────────────────┐
+│            Your Application              │
+├─────────────────────────────────────────┤
+│         TransactionClient               │
+│    (connects, submits, tracks progress) │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+        ┌────────────────────┐
+        │  Bulletin Chain    │
+        │   (WebSocket)      │
+        └────────────────────┘
+```
+
+### Advanced: Bring Your Own Client (BYOC)
+
+For advanced use cases (connection reuse, light clients), use `AsyncBulletinClient`:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -43,7 +67,7 @@ The SDK follows a **Bring Your Own Client** pattern:
         └────────────────────────┘
 ```
 
-**Benefits:**
+**Benefits of BYOC:**
 - **Connection reuse** - Share one client across SDK and other code
 - **Light client support** - Use smoldot instead of RPC
 - **Custom transports** - HTTP, WebSocket, or custom providers
@@ -51,7 +75,8 @@ The SDK follows a **Bring Your Own Client** pattern:
 
 ## Modules
 
-- `async_client`: High-level async client with transaction submission (`AsyncBulletinClient`)
+- `transaction`: Direct transaction submission with progress tracking (`TransactionClient`) - **recommended for most use cases**
+- `async_client`: High-level async client with BYOC pattern (`AsyncBulletinClient`)
 - `mock_client`: Mock client for testing without blockchain (`MockBulletinClient`)
 - `client`: Core client for operation preparation (`BulletinClient`)
 - `chunker`: Splits data into chunks (`FixedSizeChunker`)
@@ -60,6 +85,49 @@ The SDK follows a **Bring Your Own Client** pattern:
 - `authorization`: Authorization management
 
 ## Quick Start
+
+> **Complete Working Examples**: See [`examples/rust/authorize-and-store`](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples/rust/authorize-and-store) for runnable examples demonstrating authorization, storage, and chunked uploads with DAG-PB manifests.
+
+### Using TransactionClient (Recommended)
+
+The simplest way to interact with Bulletin Chain:
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+use subxt_signer::sr25519::Keypair;
+use std::str::FromStr;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to Bulletin Chain
+    let client = TransactionClient::new("ws://localhost:10000").await?;
+
+    // Create signer (dev account for testing)
+    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
+    let signer = Keypair::from_uri(&uri)?;
+    let account = subxt::utils::AccountId32::from(signer.public_key().0);
+
+    // Authorize account (requires sudo)
+    client.authorize_account(account.clone(), 10, 10 * 1024 * 1024, &signer).await?;
+
+    // Store data with progress tracking
+    let data = b"Hello, Bulletin!".to_vec();
+    let receipt = client.store_with_progress(
+        data,
+        &signer,
+        Some(std::sync::Arc::new(|event| {
+            println!("Progress: {:?}", event);
+        })),
+    ).await?;
+
+    println!("Stored in block: {}", receipt.block_hash);
+    Ok(())
+}
+```
+
+### Using AsyncBulletinClient (Advanced)
+
+For connection reuse or light client integration:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -87,9 +155,9 @@ let result = client
     .await?;
 ```
 
-### Connection Reuse
+### Connection Reuse (AsyncBulletinClient)
 
-The SDK accepts an existing subxt client, so you can share one connection:
+When using `AsyncBulletinClient`, the SDK accepts an existing subxt client, so you can share one connection:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -109,9 +177,9 @@ let events = api.events().at_latest().await?;
 let result = client.store(data).send().await?;
 ```
 
-### Light Client Support (smoldot)
+### Light Client Support (smoldot) - AsyncBulletinClient
 
-The SDK accepts any subxt `OnlineClient`, including those backed by smoldot:
+When using `AsyncBulletinClient`, the SDK accepts any subxt `OnlineClient`, including those backed by smoldot:
 
 ```rust
 use subxt::{OnlineClient, PolkadotConfig};
