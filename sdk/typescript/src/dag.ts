@@ -89,39 +89,4 @@ export class UnixFsDagBuilder {
     };
   }
 
-  /**
-   * Parse a DAG-PB manifest back into its components
-   */
-  async parse(dagBytes: Uint8Array): Promise<{
-    chunkCids: CID[];
-    totalSize: number;
-  }> {
-    try {
-      const dagNode = dagPB.decode(dagBytes);
-
-      if (!dagNode.Data) {
-        throw new Error("DAG node has no data");
-      }
-
-      const unixfs = UnixFS.unmarshal(dagNode.Data);
-
-      if (unixfs.type !== "file") {
-        throw new Error(`Expected file type, got ${unixfs.type}`);
-      }
-
-      const chunkCids = dagNode.Links.map((link) => link.Hash);
-      const totalSize = unixfs.fileSize();
-
-      return {
-        chunkCids,
-        totalSize: Number(totalSize),
-      };
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to parse DAG-PB manifest: ${error}`,
-        "DAG_DECODING_FAILED",
-        error,
-      );
-    }
-  }
 }

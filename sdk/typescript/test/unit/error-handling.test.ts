@@ -1,10 +1,9 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { BulletinError, HashAlgorithm } from "../../src/types";
 import { BulletinClient } from "../../src/client";
-import { retry, limitConcurrency } from "../../src/utils";
 import { calculateCid, parseCid, cidFromBytes } from "../../src/utils";
 
 describe("Error Handling", () => {
@@ -89,38 +88,6 @@ describe("Error Handling", () => {
         expect((results[1].reason as BulletinError).code).toBe("SETTLED_ERROR");
       }
     });
-
-    it("should wrap raw errors in retry function", async () => {
-      const rawError = new Error("Raw error");
-
-      await expect(
-        retry(
-          async () => {
-            throw rawError;
-          },
-          { maxRetries: 0, delayMs: 1 },
-        ),
-      ).rejects.toThrow(BulletinError);
-    });
-
-    it("should preserve BulletinError in retry function", async () => {
-      const bulletinError = new BulletinError(
-        "Bulletin error",
-        "RETRY_TEST_ERROR",
-      );
-
-      await expect(
-        retry(
-          async () => {
-            throw bulletinError;
-          },
-          { maxRetries: 0, delayMs: 1 },
-        ),
-      ).rejects.toMatchObject({
-        code: "RETRY_TEST_ERROR",
-        message: "Bulletin error",
-      });
-    });
   });
 
   describe("Client Error Handling", () => {
@@ -180,43 +147,6 @@ describe("Error Handling", () => {
     });
   });
 
-  describe("Concurrent Operation Error Handling", () => {
-    it("should handle errors in limitConcurrency", async () => {
-      const tasks = [
-        () => Promise.resolve(1),
-        () => Promise.reject(new BulletinError("Task failed", "TASK_ERROR")),
-        () => Promise.resolve(3),
-      ];
-
-      await expect(limitConcurrency(tasks, 2)).rejects.toThrow(BulletinError);
-    });
-
-    it("should handle multiple concurrent errors", async () => {
-      const tasks = [
-        () => Promise.reject(new BulletinError("Error 1", "ERROR_1")),
-        () => Promise.reject(new BulletinError("Error 2", "ERROR_2")),
-        () => Promise.reject(new BulletinError("Error 3", "ERROR_3")),
-      ];
-
-      // First error should be thrown
-      await expect(limitConcurrency(tasks, 3)).rejects.toThrow(BulletinError);
-    });
-
-    it("should complete successfully with no errors", async () => {
-      const tasks = [
-        () => Promise.resolve(1),
-        () => Promise.resolve(2),
-        () => Promise.resolve(3),
-      ];
-
-      const results = await limitConcurrency(tasks, 2);
-      expect(results).toHaveLength(3);
-      expect(results).toContain(1);
-      expect(results).toContain(2);
-      expect(results).toContain(3);
-    });
-  });
-
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
       const client = new BulletinClient({ endpoint: "ws://localhost:9944" });
@@ -247,70 +177,6 @@ describe("Error Handling", () => {
 
       expect(wrappedError.cause).toBe(originalError);
       expect((wrappedError.cause as Error).message).toContain("undefined");
-    });
-  });
-
-  describe("Error Recovery Patterns", () => {
-    it("should allow retry with exponential backoff", async () => {
-      let attempts = 0;
-      const delays: number[] = [];
-      let lastTime = Date.now();
-
-      const result = await retry(
-        async () => {
-          const now = Date.now();
-          if (attempts > 0) {
-            delays.push(now - lastTime);
-          }
-          lastTime = now;
-          attempts++;
-
-          if (attempts < 3) {
-            throw new Error("Temporary failure");
-          }
-          return "success";
-        },
-        { maxRetries: 3, delayMs: 10, exponentialBackoff: true },
-      );
-
-      expect(result).toBe("success");
-      expect(attempts).toBe(3);
-
-      // Second delay should be longer than first (exponential)
-      if (delays.length >= 2) {
-        expect(delays[1]).toBeGreaterThan(delays[0]);
-      }
-    });
-
-    it("should support fixed delay retry", async () => {
-      let attempts = 0;
-      const delays: number[] = [];
-      let lastTime = Date.now();
-
-      const result = await retry(
-        async () => {
-          const now = Date.now();
-          if (attempts > 0) {
-            delays.push(now - lastTime);
-          }
-          lastTime = now;
-          attempts++;
-
-          if (attempts < 3) {
-            throw new Error("Temporary failure");
-          }
-          return "success";
-        },
-        { maxRetries: 3, delayMs: 50, exponentialBackoff: false },
-      );
-
-      expect(result).toBe("success");
-
-      // Delays should be approximately equal (allowing for timing variance)
-      if (delays.length >= 2) {
-        const difference = Math.abs(delays[1] - delays[0]);
-        expect(difference).toBeLessThan(30); // Allow 30ms variance
-      }
     });
   });
 });

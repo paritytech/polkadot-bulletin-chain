@@ -6,7 +6,7 @@
  */
 
 import { CID } from "multiformats/cid";
-import { FixedSizeChunker, reassembleChunks } from "./chunker.js";
+import { FixedSizeChunker } from "./chunker.js";
 import { UnixFsDagBuilder } from "./dag.js";
 import { calculateCid } from "./utils.js";
 import {

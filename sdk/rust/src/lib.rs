@@ -203,7 +203,6 @@ pub mod prelude {
 		renewal::{RenewalOperation, RenewalTracker, TrackedEntry},
 		storage::{BatchStorageOperation, StorageOperation},
 		types::*,
-		utils,
 	};
 
 	#[cfg(feature = "std")]

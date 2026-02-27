@@ -117,65 +117,6 @@ impl BatchStorageOperation {
 	}
 }
 
-/// Helper functions for storage operations (requires std for subxt).
-#[cfg(feature = "std")]
-pub mod helpers {
-	use super::*;
-
-	/// Prepare transaction call data for `store` extrinsic.
-	///
-	/// Note: This is a helper that prepares the parameters.
-	/// Actual transaction submission requires subxt integration.
-	pub fn prepare_store_call(data: Vec<u8>) -> Vec<u8> {
-		// The actual call building would be done with subxt
-		// This is just a placeholder to show the structure
-		data
-	}
-
-	/// Prepare batch transaction call data for multiple `store` calls.
-	///
-	/// Note: This uses `Utility.batch_all` to submit multiple transactions atomically.
-	#[must_use = "call data must be submitted to the blockchain"]
-	pub fn prepare_batch_store_calls(operations: &BatchStorageOperation) -> Result<Vec<Vec<u8>>> {
-		let mut calls = Vec::with_capacity(operations.len());
-
-		for op in &operations.operations {
-			calls.push(prepare_store_call(op.data.clone()));
-		}
-
-		Ok(calls)
-	}
-
-	/// Estimate weight/fees for a storage operation.
-	///
-	/// # Warning: Rough Estimate Only
-	///
-	/// This function provides a **rough order-of-magnitude estimate** using hardcoded
-	/// placeholder values. **Do not rely on this for accurate fee prediction.**
-	///
-	/// The actual fees depend on:
-	/// - Runtime weight configuration (`WeightToFee`)
-	/// - Current chain congestion and fee multiplier
-	/// - Transaction length fees
-	/// - Any runtime-specific fee adjustments
-	///
-	/// For accurate fee estimation, use subxt's `payment_queryInfo` RPC or
-	/// the `TransactionPaymentApi::query_info` runtime API against a live node.
-	///
-	/// # Returns
-	///
-	/// A placeholder estimate in plancks (smallest unit). This value is intentionally
-	/// conservative and may significantly differ from actual fees.
-	pub fn estimate_fees(data_size: usize) -> u64 {
-		// WARNING: These are placeholder values for rough estimation only.
-		// Actual fees are determined by runtime configuration.
-		const BASE_FEE: u64 = 1_000_000; // Placeholder base fee
-		const PER_BYTE_FEE: u64 = 100; // Placeholder per-byte fee
-
-		BASE_FEE.saturating_add((data_size as u64).saturating_mul(PER_BYTE_FEE))
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
