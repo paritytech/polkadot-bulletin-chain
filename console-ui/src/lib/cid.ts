@@ -27,7 +27,7 @@ async function hashData(data: Uint8Array, algorithm: number): Promise<Uint8Array
       return new Uint8Array(hashBuffer);
     }
     case HASH_CODES.blake2b256: {
-      const { blake2b } = await import("@noble/hashes/blake2");
+      const { blake2b } = await import("@noble/hashes/blake2.js");
       return blake2b(data, { dkLen: 32 });
     }
     case HASH_CODES.keccak256: {
