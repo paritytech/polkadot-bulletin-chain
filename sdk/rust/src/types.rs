@@ -253,6 +253,15 @@ impl CidCodec {
 			CidCodec::DagCbor => 0x71,
 		}
 	}
+
+	/// Get the codec name as a string.
+	pub fn name(&self) -> &'static str {
+		match self {
+			CidCodec::Raw => "raw",
+			CidCodec::DagPb => "dag-pb",
+			CidCodec::DagCbor => "dag-cbor",
+		}
+	}
 }
 
 /// Authorization scope types.

@@ -5,7 +5,7 @@
 
 use crate::{
 	cid::{ContentHash, HashingAlgorithm},
-	types::{CidCodec, Error, Result},
+	types::{Error, Result},
 };
 use alloc::{string::String, vec::Vec};
 
@@ -50,43 +50,6 @@ pub fn bytes_to_hex(bytes: &[u8]) -> String {
 		hex.push_str(&alloc::format!("{byte:02x}"));
 	}
 	hex
-}
-
-/// Parse CID from string representation
-///
-/// # Example
-/// ```no_run
-/// use bulletin_sdk_rust::utils::parse_cid_string;
-///
-/// let cid = parse_cid_string("bafkreiabcd1234...").unwrap();
-/// ```
-pub fn parse_cid_string(cid_str: &str) -> Result<Vec<u8>> {
-	// Try to parse as base58 or base32 CID
-	// This is a simplified version - full CID parsing would require the `cid` crate
-	if cid_str.starts_with("Qm") || cid_str.starts_with("bafy") || cid_str.starts_with("bafk") {
-		// These are IPFS CID formats
-		// For full implementation, use: cid::Cid::try_from(cid_str)
-		Err(Error::InvalidCid("CID parsing requires 'cid' crate".into()))
-	} else if cid_str.starts_with("0x") {
-		// Raw hex format
-		hex_to_bytes(cid_str)
-	} else {
-		Err(Error::InvalidCid("Unknown CID format".into()))
-	}
-}
-
-/// Format CID bytes as string
-///
-/// # Example
-/// ```
-/// use bulletin_sdk_rust::utils::format_cid;
-///
-/// let cid_bytes = vec![0x12, 0x20, 0xab, 0xcd];
-/// let formatted = format_cid(&cid_bytes);
-/// assert_eq!(formatted, "0x1220abcd");
-/// ```
-pub fn format_cid(cid: &[u8]) -> String {
-	alloc::format!("0x{}", bytes_to_hex(cid))
 }
 
 /// Calculate content hash (Blake2b-256) from data
@@ -199,23 +162,6 @@ pub fn optimal_chunk_size(data_size: u64) -> u64 {
 	}
 }
 
-/// Get codec name as string
-///
-/// # Example
-/// ```
-/// use bulletin_sdk_rust::{utils::codec_name, types::CidCodec};
-///
-/// assert_eq!(codec_name(CidCodec::Raw), "raw");
-/// assert_eq!(codec_name(CidCodec::DagPb), "dag-pb");
-/// ```
-pub fn codec_name(codec: CidCodec) -> &'static str {
-	match codec {
-		CidCodec::Raw => "raw",
-		CidCodec::DagPb => "dag-pb",
-		CidCodec::DagCbor => "dag-cbor",
-	}
-}
-
 /// Get hash algorithm name as string
 ///
 /// # Example
@@ -289,20 +235,6 @@ mod tests {
 		// Different data should produce different hash
 		let hash3 = hash_data(b"Different data");
 		assert_ne!(hash, hash3);
-	}
-
-	#[test]
-	fn test_format_cid() {
-		let cid = vec![0x12, 0x20, 0xab, 0xcd];
-		let formatted = format_cid(&cid);
-		assert_eq!(formatted, "0x1220abcd");
-	}
-
-	#[test]
-	fn test_codec_name() {
-		assert_eq!(codec_name(CidCodec::Raw), "raw");
-		assert_eq!(codec_name(CidCodec::DagPb), "dag-pb");
-		assert_eq!(codec_name(CidCodec::DagCbor), "dag-cbor");
 	}
 
 	#[test]
