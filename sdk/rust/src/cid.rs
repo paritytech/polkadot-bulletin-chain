@@ -10,9 +10,10 @@ extern crate alloc;
 
 use crate::types::{CidCodec, Error, HashAlgorithm, Result};
 
-// Re-export CID types from the pallet
-pub use pallet_transaction_storage::cids::{
-	calculate_cid, Cid, CidConfig, CidData, CidError, ContentHash, HashingAlgorithm,
+// Re-export CID types from transaction-storage-primitives
+pub use transaction_storage_primitives::{
+	cids::{calculate_cid, Cid, CidConfig, CidData, CidError, HashingAlgorithm},
+	ContentHash,
 };
 
 /// Convert SDK CidCodec enum to pallet CidCodec (u64).
