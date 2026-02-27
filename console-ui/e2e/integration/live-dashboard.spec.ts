@@ -4,25 +4,26 @@
  * Run with: npx playwright test --project=integration
  *
  * Prerequisites:
- *   ./target/release/polkadot-bulletin-chain --dev
+ *   ./target/release/polkadot-bulletin-chain --dev --rpc-port 10000
  *   (node must be running on ws://localhost:10000)
  */
 import { test, expect } from "@playwright/test";
 
 test.describe("Live Dashboard", () => {
   test.beforeEach(async ({ page }) => {
-    // Set localStorage to use local dev node
-    await page.goto("/");
-    await page.evaluate(() => {
+    // Set localStorage before JS runs so the app starts with "local" network
+    await page.addInitScript(() => {
       localStorage.setItem("bulletin-storage-type", "bulletin");
       localStorage.setItem("bulletin-network", "local");
     });
-    await page.reload();
+    await page.goto("/");
   });
 
   test("connects to local node and shows chain info", async ({ page }) => {
-    // Wait for connection to establish
-    await expect(page.getByText("connected")).toBeVisible({ timeout: 30_000 });
+    // Wait for connection — block number badge only shows when connected
+    await expect(page.locator("header .font-mono")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Chain info should be populated
     await expect(page.getByText("Chain Info")).toBeVisible();
@@ -32,11 +33,8 @@ test.describe("Live Dashboard", () => {
 
   test("block number increments", async ({ page }) => {
     // Wait for connection
-    await expect(page.getByText("connected")).toBeVisible({ timeout: 30_000 });
-
-    // Get initial block number from the header badge
     const blockBadge = page.locator("header .font-mono");
-    await expect(blockBadge).toBeVisible();
+    await expect(blockBadge).toBeVisible({ timeout: 30_000 });
     const initialText = await blockBadge.textContent();
 
     // Wait for block number to change (blocks produced every ~6s)
