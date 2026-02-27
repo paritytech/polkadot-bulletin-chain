@@ -17,12 +17,12 @@ import {
 } from "@/components/ui/Select";
 import { FileUpload } from "@/components/FileUpload";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useApi, useChainState } from "@/state/chain.state";
+import { useApi, useChainState, useCreateBulletinClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { AsyncBulletinClient, getContentHash, bytesToHex, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, bytesToHex, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
   { value: HashAlgorithm.Blake2b256, label: "Blake2b-256 (default)" },
@@ -45,6 +45,7 @@ interface UploadResult {
 
 export function Upload() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
   const { network } = useChainState();
   const navigate = useNavigate();
   const selectedAccount = useSelectedAccount();
@@ -106,7 +107,7 @@ export function Upload() {
       const contentHashHex = bytesToHex(contentHash);
 
       // Create SDK client with user's signer
-      const bulletinClient = new AsyncBulletinClient(api, selectedAccount.polkadotSigner);
+      const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
 
       // Progress callback for transaction status updates
       const handleProgress = (event: ProgressEvent) => {

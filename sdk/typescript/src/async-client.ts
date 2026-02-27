@@ -66,12 +66,8 @@ interface PapiTransaction {
       error: (err: unknown) => void
     }): { unsubscribe(): void }
   }
-  submit(): Promise<{
-    waitFor(status: string): Promise<{
-      blockNumber: number
-      events: RuntimeEvent[]
-    }>
-  }>
+  /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
+  getBareTx(): Promise<string>
   decodedCall: unknown
 }
 
@@ -92,7 +88,7 @@ export interface BulletinTypedApi {
         bytes: bigint
       }): PapiTransaction
       authorize_preimage(args: {
-        content_hash: Uint8Array
+        content_hash: Binary | Uint8Array
         max_size: bigint
       }): PapiTransaction
       renew(args: { block: number; index: number }): PapiTransaction
@@ -102,6 +98,23 @@ export interface BulletinTypedApi {
     }
   }
 }
+
+/**
+ * Function type for submitting raw transactions to the chain.
+ *
+ * Matches the signature of `PolkadotClient.submit` from polkadot-api.
+ * Pass `papiClient.submit` directly when constructing the client.
+ */
+export type SubmitFn = (
+  transaction: string,
+  at?: string,
+) => Promise<{
+  ok: boolean
+  block: { hash: string; number: number; index: number }
+  txHash: string
+  events: Array<{ type: string; value?: { type?: string; value?: unknown } }>
+  dispatchError?: { type: string; value: unknown }
+}>
 
 /**
  * Transaction receipt from a successful submission
@@ -237,7 +250,7 @@ export class StoreBuilder {
  * const api = client.getTypedApi(bulletinDescriptor);
  *
  * // Create SDK client
- * const bulletinClient = new AsyncBulletinClient(api, signer);
+ * const bulletinClient = new AsyncBulletinClient(api, signer, papiClient.submit);
  *
  * // Store data
  * const result = await bulletinClient.store(data).send();
@@ -248,6 +261,8 @@ export class AsyncBulletinClient {
   public api: BulletinTypedApi
   /** Signer for transaction signing */
   public signer: PolkadotSigner
+  /** Submit function for broadcasting raw transactions (from PolkadotClient.submit) */
+  public submit: SubmitFn
   /** Client configuration */
   public config: Required<AsyncClientConfig>
   /** Account for authorization checks (optional) */
@@ -261,15 +276,18 @@ export class AsyncBulletinClient {
    *
    * @param api - Configured PAPI TypedApi instance
    * @param signer - Polkadot signer for transaction signing
+   * @param submit - Raw transaction submit function (pass `papiClient.submit`)
    * @param config - Optional client configuration
    */
   constructor(
     api: BulletinTypedApi,
     signer: PolkadotSigner,
+    submit: SubmitFn,
     config?: Partial<AsyncClientConfig>,
   ) {
     this.api = api
     this.signer = signer
+    this.submit = submit
     this.config = {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       maxParallel: config?.maxParallel ?? 8,
@@ -893,7 +911,7 @@ export class AsyncBulletinClient {
   ): Promise<TransactionReceipt> {
     try {
       const authCall = this.api.tx.TransactionStorage.authorize_preimage({
-        content_hash: contentHash,
+        content_hash: new Binary(contentHash),
         max_size: maxSize,
       }).decodedCall
 
@@ -953,19 +971,19 @@ export class AsyncBulletinClient {
   }
 
   /**
-   * Store preimage-authorized content as unsigned transaction
+   * Store preimage-authorized content as an unsigned (bare) transaction.
    *
    * Use this for content that has been pre-authorized via `authorizePreimage()`.
-   * Unsigned transactions don't require fees and can be submitted by anyone who
-   * has the preauthorized content.
+   * The transaction is encoded as a bare (unsigned) extrinsic and submitted
+   * via the client's `submit` function (from `PolkadotClient.submit`).
    *
    * @param data - The preauthorized content to store
    * @param options - Store options (codec, hashing algorithm, etc.)
-   * @param progressCallback - Optional progress callback for chunked uploads
+   * @param _progressCallback - Optional progress callback for chunked uploads
    *
    * @example
    * ```typescript
-   * import { blake2b256 } from '@noble/hashes/blake2b';
+   * import { blake2b256 } from '@polkadot-labs/hdkd-helpers';
    *
    * // First, authorize the content hash (requires sudo)
    * const data = Binary.fromText('Hello, Bulletin!');
@@ -981,14 +999,11 @@ export class AsyncBulletinClient {
     options?: StoreOptions,
     _progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
-    // Convert Binary to Uint8Array if needed
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    // For now, only support single-chunk unsigned transactions
-    // Chunked unsigned transactions would require submitting multiple unsigned txs
     if (dataBytes.length > this.config.chunkingThreshold) {
       throw new BulletinError(
         "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
@@ -997,44 +1012,44 @@ export class AsyncBulletinClient {
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-
-    // Calculate CID using defaults if not specified
     const cidCodec = opts.cidCodec ?? CidCodec.Raw
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
-
     const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
 
     try {
-      // Submit as unsigned transaction
-      // PAPI's unsigned transaction API: create tx without signer, then submit
       const tx = this.api.tx.TransactionStorage.store({ data: dataBytes })
+      const bareTxHex = await tx.getBareTx()
+      const finalized = await this.submit(bareTxHex)
 
-      // For unsigned transactions, PAPI requires submitting without calling signAndSubmit
-      // Instead, we need to use the raw submission API
-      // Note: The exact API depends on PAPI version, this may need adjustment
-      const result = await tx.submit()
+      if (!finalized.ok) {
+        throw new BulletinError(
+          `Transaction dispatch failed: ${JSON.stringify(finalized.dispatchError)}`,
+          "TRANSACTION_FAILED",
+        )
+      }
 
-      // Wait for finalization
-      const finalized = await result.waitFor("finalized")
-
-      // Extract extrinsic index from Stored event
       const storedEvent = finalized.events.find(
-        (e: RuntimeEvent) =>
+        (e) =>
           e.type === "TransactionStorage" && e.value?.type === "Stored",
       )
 
-      const extrinsicIndex = storedEvent?.value?.value?.index
-      const blockNumber = finalized.blockNumber
+      const extrinsicIndex =
+        storedEvent?.value?.value != null &&
+        typeof storedEvent.value.value === "object" &&
+        "index" in storedEvent.value.value
+          ? (storedEvent.value.value as { index?: number }).index
+          : undefined
 
       return {
         cid,
         size: dataBytes.length,
-        blockNumber,
+        blockNumber: finalized.block.number,
         extrinsicIndex,
         chunks: undefined,
       }
     } catch (error) {
+      if (error instanceof BulletinError) throw error
       throw new BulletinError(
         `Failed to store with preimage auth: ${error}`,
         "TRANSACTION_FAILED",

@@ -57,6 +57,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
+    "@polkadot-labs/hdkd": "^0.0.26",
+    "@polkadot-labs/hdkd-helpers": "^0.0.27",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^22.10.5",
     "happy-dom": "^20.7.0",
