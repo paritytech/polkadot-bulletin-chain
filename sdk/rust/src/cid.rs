@@ -49,10 +49,6 @@ impl CidCodec {
 	}
 }
 
-/// Convert SDK CidCodec enum to pallet CidCodec (u64).
-pub fn codec_to_u64(codec: CidCodec) -> u64 {
-	codec.code()
-}
 
 /// Calculate CID for data using SDK configuration types.
 pub fn calculate_cid_with_config(
