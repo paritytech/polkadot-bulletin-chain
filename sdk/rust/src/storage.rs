@@ -33,10 +33,8 @@ impl StorageOperation {
 	/// Returns an error if the hash algorithm is not supported.
 	#[must_use = "storage operation must be submitted to the blockchain"]
 	pub fn new(data: Vec<u8>, options: StoreOptions) -> Result<Self> {
-		let cid_config = CidConfig {
-			codec: options.cid_codec.code(),
-			hashing: crate::cid::hash_algorithm_to_pallet(options.hash_algorithm)?,
-		};
+		let cid_config =
+			CidConfig { codec: options.cid_codec.code(), hashing: options.hash_algorithm };
 
 		Ok(Self { data, cid_config, wait_finalization: options.wait_for_finalization })
 	}
@@ -120,14 +118,14 @@ impl BatchStorageOperation {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::types::{CidCodec, HashAlgorithm};
+	use crate::cid::{CidCodec, HashingAlgorithm};
 
 	#[test]
 	fn test_storage_operation_new() {
 		let data = vec![1, 2, 3, 4, 5];
 		let options = StoreOptions {
 			cid_codec: CidCodec::Raw,
-			hash_algorithm: HashAlgorithm::Blake2b256,
+			hash_algorithm: HashingAlgorithm::Blake2b256,
 			wait_for_finalization: false,
 		};
 

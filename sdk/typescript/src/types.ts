@@ -5,7 +5,7 @@
  * Common types and interfaces for the Bulletin SDK
  */
 
-import { CID } from "multiformats/cid";
+import type { CID } from "multiformats/cid"
 
 /**
  * CID codec types supported by Bulletin Chain
@@ -36,11 +36,11 @@ export enum HashAlgorithm {
  */
 export interface ChunkerConfig {
   /** Size of each chunk in bytes (default: 1 MiB) */
-  chunkSize: number;
+  chunkSize: number
   /** Maximum number of parallel uploads (default: 8) */
-  maxParallel: number;
+  maxParallel: number
   /** Whether to create a DAG-PB manifest (default: true) */
-  createManifest: boolean;
+  createManifest: boolean
 }
 
 /**
@@ -53,48 +53,48 @@ export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
   chunkSize: 1024 * 1024, // 1 MiB (default)
   maxParallel: 8,
   createManifest: true,
-};
+}
 
 /**
  * A single chunk of data
  */
 export interface Chunk {
   /** The chunk data */
-  data: Uint8Array;
+  data: Uint8Array
   /** The CID of this chunk (calculated after encoding) */
-  cid?: CID;
+  cid?: CID
   /** Index of this chunk in the sequence */
-  index: number;
+  index: number
   /** Total number of chunks */
-  totalChunks: number;
+  totalChunks: number
 }
 
 /**
  * Transaction confirmation level
  */
-export type WaitFor = "best_block" | "finalized";
+export type WaitFor = "best_block" | "finalized"
 
 /**
  * Options for storing data
  */
 export interface StoreOptions {
   /** CID codec to use (default: raw) */
-  cidCodec?: CidCodec;
+  cidCodec?: CidCodec
   /** Hashing algorithm to use (default: blake2b-256) */
-  hashingAlgorithm?: HashAlgorithm;
+  hashingAlgorithm?: HashAlgorithm
   /**
    * What to wait for before returning (default: "best_block")
    * - "best_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    * @deprecated Use `waitFor` instead
    */
-  waitForFinalization?: boolean;
+  waitForFinalization?: boolean
   /**
    * What to wait for before returning (default: "best_block")
    * - "best_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    */
-  waitFor?: WaitFor;
+  waitFor?: WaitFor
 }
 
 /**
@@ -104,16 +104,16 @@ export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
   waitFor: "best_block",
-};
+}
 
 /**
  * Details about chunks in a chunked upload
  */
 export interface ChunkDetails {
   /** CIDs of all stored chunks */
-  chunkCids: CID[];
+  chunkCids: CID[]
   /** Number of chunks */
-  numChunks: number;
+  numChunks: number
 }
 
 /**
@@ -128,17 +128,17 @@ export interface StoreResult {
    * - For single uploads: CID of the data
    * - For chunked uploads: CID of the manifest
    */
-  cid: CID;
+  cid: CID
   /** Size of the stored data in bytes */
-  size: number;
+  size: number
   /** Block number where data was stored (if known) */
-  blockNumber?: number;
+  blockNumber?: number
   /** Extrinsic index within the block (required for renew operations)
    * This value comes from the `Stored` event's `index` field
    */
-  extrinsicIndex?: number;
+  extrinsicIndex?: number
   /** Chunk details (only present for chunked uploads) */
-  chunks?: ChunkDetails;
+  chunks?: ChunkDetails
 }
 
 /**
@@ -146,13 +146,13 @@ export interface StoreResult {
  */
 export interface ChunkedStoreResult {
   /** CIDs of all stored chunks */
-  chunkCids: CID[];
+  chunkCids: CID[]
   /** The manifest CID (if manifest was created) */
-  manifestCid?: CID;
+  manifestCid?: CID
   /** Total size of all chunks in bytes */
-  totalSize: number;
+  totalSize: number
   /** Number of chunks */
-  numChunks: number;
+  numChunks: number
 }
 
 /**
@@ -170,13 +170,13 @@ export enum AuthorizationScope {
  */
 export interface Authorization {
   /** The authorization scope */
-  scope: AuthorizationScope;
+  scope: AuthorizationScope
   /** Number of transactions authorized */
-  transactions: number;
+  transactions: number
   /** Maximum total size in bytes */
-  maxSize: bigint;
+  maxSize: bigint
   /** Block number when authorization expires (if known) */
-  expiresAt?: number;
+  expiresAt?: number
 }
 
 /**
@@ -188,7 +188,7 @@ export type ChunkProgressEvent =
   | { type: "chunk_failed"; index: number; total: number; error: Error }
   | { type: "manifest_started" }
   | { type: "manifest_created"; cid: CID }
-  | { type: "completed"; manifestCid?: CID };
+  | { type: "completed"; manifestCid?: CID }
 
 /**
  * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
@@ -196,18 +196,28 @@ export type ChunkProgressEvent =
 export type TransactionStatusEvent =
   | { type: "signed"; txHash: string }
   | { type: "broadcasted" }
-  | { type: "best_block"; blockHash: string; blockNumber: number; txIndex?: number }
-  | { type: "finalized"; blockHash: string; blockNumber: number; txIndex?: number };
+  | {
+      type: "best_block"
+      blockHash: string
+      blockNumber: number
+      txIndex?: number
+    }
+  | {
+      type: "finalized"
+      blockHash: string
+      blockNumber: number
+      txIndex?: number
+    }
 
 /**
  * Combined progress event types
  */
-export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent;
+export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent
 
 /**
  * Progress callback type
  */
-export type ProgressCallback = (event: ProgressEvent) => void;
+export type ProgressCallback = (event: ProgressEvent) => void
 
 /**
  * SDK error class
@@ -216,10 +226,10 @@ export class BulletinError extends Error {
   constructor(
     message: string,
     public readonly code: string,
-    public readonly cause?: unknown,
+    override readonly cause?: unknown,
   ) {
-    super(message);
-    this.name = "BulletinError";
+    super(message, { cause })
+    this.name = "BulletinError"
   }
 }
 
@@ -228,17 +238,17 @@ export class BulletinError extends Error {
  */
 export interface ClientConfig {
   /** RPC endpoint URL */
-  endpoint: string;
+  endpoint: string
   /** Default chunk size for large files (default: 1 MiB) */
-  defaultChunkSize?: number;
+  defaultChunkSize?: number
   /** Maximum parallel uploads (default: 8) */
-  maxParallel?: number;
+  maxParallel?: number
   /** Whether to create manifests for chunked uploads (default: true) */
-  createManifest?: boolean;
+  createManifest?: boolean
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
-  chunkingThreshold?: number;
+  chunkingThreshold?: number
   /** Check authorization before uploading to fail fast (default: true).
    * Queries blockchain for current authorization and validates before submission. */
-  checkAuthorizationBeforeUpload?: boolean;
+  checkAuthorizationBeforeUpload?: boolean
 }

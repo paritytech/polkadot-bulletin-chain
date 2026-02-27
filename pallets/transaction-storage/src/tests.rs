@@ -18,7 +18,6 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
-	cids::{CidConfig, HashingAlgorithm},
 	mock::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
 		TransactionStorage,
@@ -39,6 +38,7 @@ use polkadot_sdk_frame::{
 	traits::StorageVersion,
 };
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
+use transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;

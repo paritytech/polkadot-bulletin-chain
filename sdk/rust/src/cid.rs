@@ -8,47 +8,55 @@
 
 extern crate alloc;
 
-use crate::types::{CidCodec, Error, HashAlgorithm, Result};
+use crate::types::{Error, Result};
+use codec::{Decode, Encode};
+use scale_info::TypeInfo;
 
-// Re-export CID types from the pallet
-pub use pallet_transaction_storage::cids::{
-	calculate_cid, Cid, CidConfig, CidData, CidError, ContentHash, HashingAlgorithm,
+// Re-export CID types from transaction-storage-primitives
+pub use transaction_storage_primitives::{
+	cids::{calculate_cid, Cid, CidConfig, CidData, CidError, HashingAlgorithm},
+	ContentHash,
 };
 
-/// Convert SDK CidCodec enum to pallet CidCodec (u64).
-pub fn codec_to_u64(codec: CidCodec) -> u64 {
-	codec.code()
+/// CID codec types.
+#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo, PartialEq, Eq)]
+pub enum CidCodec {
+	/// Raw binary (0x55).
+	Raw,
+	/// DAG-PB (0x70).
+	DagPb,
+	/// DAG-CBOR (0x71).
+	DagCbor,
 }
 
-/// Convert SDK HashAlgorithm to pallet HashingAlgorithm.
-///
-/// Returns an error if the algorithm is not supported by the pallet.
-pub fn hash_algorithm_to_pallet(algo: HashAlgorithm) -> Result<HashingAlgorithm> {
-	match algo {
-		HashAlgorithm::Blake2b256 => Ok(HashingAlgorithm::Blake2b256),
-		HashAlgorithm::Sha2_256 => Ok(HashingAlgorithm::Sha2_256),
-		HashAlgorithm::Sha2_512 =>
-			Err(Error::UnsupportedHashAlgorithm("SHA2-512 is not supported by the pallet".into())),
-		HashAlgorithm::Keccak256 => Ok(HashingAlgorithm::Keccak256),
+impl CidCodec {
+	/// Get the multicodec code.
+	pub fn code(&self) -> u64 {
+		match self {
+			CidCodec::Raw => 0x55,
+			CidCodec::DagPb => 0x70,
+			CidCodec::DagCbor => 0x71,
+		}
+	}
+
+	/// Get the codec name as a string.
+	pub fn name(&self) -> &'static str {
+		match self {
+			CidCodec::Raw => "raw",
+			CidCodec::DagPb => "dag-pb",
+			CidCodec::DagCbor => "dag-cbor",
+		}
 	}
 }
 
-/// Create a CidConfig from SDK types.
-///
-/// Returns an error if the hash algorithm is not supported.
-pub fn create_config(codec: CidCodec, hash_algo: HashAlgorithm) -> Result<CidConfig> {
-	Ok(CidConfig { codec: codec_to_u64(codec), hashing: hash_algorithm_to_pallet(hash_algo)? })
-}
 
 /// Calculate CID for data using SDK configuration types.
-///
-/// Returns an error if the hash algorithm is not supported or CID calculation fails.
 pub fn calculate_cid_with_config(
 	data: &[u8],
 	codec: CidCodec,
-	hash_algo: HashAlgorithm,
+	hash_algo: HashingAlgorithm,
 ) -> Result<CidData> {
-	let config = create_config(codec, hash_algo)?;
+	let config = CidConfig { codec: codec.code(), hashing: hash_algo };
 	calculate_cid(data, config).map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
 }
 
@@ -114,7 +122,7 @@ mod tests {
 	#[test]
 	fn test_calculate_cid_with_config() {
 		let data = b"Hello, Bulletin!";
-		let result = calculate_cid_with_config(data, CidCodec::DagPb, HashAlgorithm::Sha2_256);
+		let result = calculate_cid_with_config(data, CidCodec::DagPb, HashingAlgorithm::Sha2_256);
 		assert!(result.is_ok());
 
 		let cid_data = result.unwrap();
@@ -145,26 +153,6 @@ mod tests {
 		let reparsed = cid_from_string(&string);
 		assert!(reparsed.is_ok());
 		assert_eq!(cid, reparsed.unwrap());
-	}
-
-	#[test]
-	fn test_sha2_512_returns_error() {
-		let data = b"Hello, Bulletin!";
-		let result = calculate_cid_with_config(data, CidCodec::Raw, HashAlgorithm::Sha2_512);
-		assert!(result.is_err());
-		assert!(matches!(result.unwrap_err(), Error::UnsupportedHashAlgorithm(_)));
-	}
-
-	#[test]
-	fn test_hash_algorithm_to_pallet_supported() {
-		assert!(hash_algorithm_to_pallet(HashAlgorithm::Blake2b256).is_ok());
-		assert!(hash_algorithm_to_pallet(HashAlgorithm::Sha2_256).is_ok());
-		assert!(hash_algorithm_to_pallet(HashAlgorithm::Keccak256).is_ok());
-	}
-
-	#[test]
-	fn test_hash_algorithm_to_pallet_unsupported() {
-		assert!(hash_algorithm_to_pallet(HashAlgorithm::Sha2_512).is_err());
 	}
 
 	// ==================== Malformed CID Handling Tests ====================
