@@ -74,9 +74,9 @@ jobs:
         working-directory: sdk/typescript
         run: npm ci
 
-      - name: Typecheck
+      - name: Lint
         working-directory: sdk/typescript
-        run: npm run typecheck
+        run: npm run lint
 
       - name: Build
         working-directory: sdk/typescript

@@ -5,38 +5,114 @@
  * Async client with full transaction submission support
  */
 
-import { CID } from "multiformats/cid";
-import { PolkadotSigner, TypedApi, Binary } from "polkadot-api";
-import { FixedSizeChunker, reassembleChunks } from "./chunker.js";
-import { UnixFsDagBuilder } from "./dag.js";
-import { calculateCid } from "./utils.js";
+import type { CID } from "multiformats/cid"
+import { Binary, type PolkadotSigner } from "polkadot-api"
+import { FixedSizeChunker } from "./chunker.js"
+import { UnixFsDagBuilder } from "./dag.js"
 import {
-  ClientConfig,
-  StoreOptions,
-  DEFAULT_STORE_OPTIONS,
-  ChunkerConfig,
-  DEFAULT_CHUNKER_CONFIG,
-  ChunkedStoreResult,
-  StoreResult,
-  ProgressCallback,
   BulletinError,
+  type ChunkedStoreResult,
+  type ChunkerConfig,
   CidCodec,
+  DEFAULT_CHUNKER_CONFIG,
+  DEFAULT_STORE_OPTIONS,
   HashAlgorithm,
-  ChunkDetails,
-  Authorization,
-  WaitFor,
-} from "./types.js";
+  type ProgressCallback,
+  type StoreOptions,
+  type StoreResult,
+  type WaitFor,
+} from "./types.js"
+import { calculateCid } from "./utils.js"
+
+/**
+ * Minimal interface for a decoded PAPI runtime event.
+ *
+ * PAPI events from chain metadata have the shape:
+ * `{ type: "PalletName", value: { type: "EventName", value: { ...fields } } }`
+ */
+interface RuntimeEvent {
+  type: string
+  value?: { type?: string; value?: { index?: number } }
+}
+
+/**
+ * Minimal interface for PAPI transaction status events
+ * (union of TxSigned, TxBroadcasted, TxBestBlocksState, TxFinalized).
+ */
+interface TxStatusEvent {
+  txHash?: string
+  type?: string
+  found?: boolean
+  block?: { hash: string; number: number; index?: number }
+  events?: RuntimeEvent[]
+}
+
+/**
+ * Minimal interface for a PAPI transaction.
+ *
+ * Describes the subset of PAPI's `Transaction` type that the SDK uses.
+ * The actual type is generic over chain descriptors; this interface avoids
+ * requiring generated chain types as a dependency.
+ */
+interface PapiTransaction {
+  signAndSubmit(signer: PolkadotSigner): Promise<{
+    block?: { hash: string; number: number }
+    txHash: string
+    events?: RuntimeEvent[]
+  }>
+  signSubmitAndWatch(signer: PolkadotSigner): {
+    subscribe(observer: {
+      next: (ev: TxStatusEvent) => void
+      error: (err: unknown) => void
+    }): { unsubscribe(): void }
+  }
+  submit(): Promise<{
+    waitFor(status: string): Promise<{
+      blockNumber: number
+      events: RuntimeEvent[]
+    }>
+  }>
+  decodedCall: unknown
+}
+
+/**
+ * Minimal interface for the PAPI typed API.
+ *
+ * Describes the pallets and extrinsics the SDK interacts with.
+ * Users pass their actual `TypedApi<ChainDescriptor>` which satisfies
+ * this interface structurally.
+ */
+export interface BulletinTypedApi {
+  tx: {
+    TransactionStorage: {
+      store(args: { data: Binary | Uint8Array }): PapiTransaction
+      authorize_account(args: {
+        who: string
+        transactions: number
+        bytes: bigint
+      }): PapiTransaction
+      authorize_preimage(args: {
+        content_hash: Uint8Array
+        max_size: bigint
+      }): PapiTransaction
+      renew(args: { block: number; index: number }): PapiTransaction
+    }
+    Sudo: {
+      sudo(args: { call: unknown }): PapiTransaction
+    }
+  }
+}
 
 /**
  * Transaction receipt from a successful submission
  */
 export interface TransactionReceipt {
   /** Block hash containing the transaction */
-  blockHash: string;
+  blockHash: string
   /** Transaction hash */
-  txHash: string;
+  txHash: string
   /** Block number (if known) */
-  blockNumber?: number;
+  blockNumber?: number
 }
 
 /**
@@ -44,15 +120,15 @@ export interface TransactionReceipt {
  */
 export interface AsyncClientConfig {
   /** Default chunk size for large files (default: 1 MiB) */
-  defaultChunkSize?: number;
+  defaultChunkSize?: number
   /** Maximum parallel uploads (default: 8) */
-  maxParallel?: number;
+  maxParallel?: number
   /** Whether to create manifests for chunked uploads (default: true) */
-  createManifest?: boolean;
+  createManifest?: boolean
   /** Threshold for automatic chunking (default: 2 MiB) */
-  chunkingThreshold?: number;
+  chunkingThreshold?: number
   /** Check authorization before uploading to fail fast (default: true) */
-  checkAuthorizationBeforeUpload?: boolean;
+  checkAuthorizationBeforeUpload?: boolean
 }
 
 /**
@@ -71,51 +147,51 @@ export interface AsyncClientConfig {
  * ```
  */
 export class StoreBuilder {
-  private data: Uint8Array;
-  private options: StoreOptions = { ...DEFAULT_STORE_OPTIONS };
-  private callback?: ProgressCallback;
+  private data: Uint8Array
+  private options: StoreOptions = { ...DEFAULT_STORE_OPTIONS }
+  private callback?: ProgressCallback
 
   constructor(
     private client: AsyncBulletinClient,
     data: Binary | Uint8Array,
   ) {
     // Convert Binary to Uint8Array if needed
-    this.data = data instanceof Uint8Array ? data : data.asBytes();
+    this.data = data instanceof Uint8Array ? data : data.asBytes()
   }
 
   /** Set the CID codec */
   withCodec(codec: CidCodec): this {
-    this.options.cidCodec = codec;
-    return this;
+    this.options.cidCodec = codec
+    return this
   }
 
   /** Set the hash algorithm */
   withHashAlgorithm(algorithm: HashAlgorithm): this {
-    this.options.hashingAlgorithm = algorithm;
-    return this;
+    this.options.hashingAlgorithm = algorithm
+    return this
   }
 
   /** Set whether to wait for finalization */
   withFinalization(wait: boolean): this {
-    this.options.waitForFinalization = wait;
-    return this;
+    this.options.waitForFinalization = wait
+    return this
   }
 
   /** Set custom store options */
   withOptions(options: StoreOptions): this {
-    this.options = options;
-    return this;
+    this.options = options
+    return this
   }
 
   /** Set progress callback for chunked uploads */
   withCallback(callback: ProgressCallback): this {
-    this.callback = callback;
-    return this;
+    this.callback = callback
+    return this
   }
 
   /** Execute the store operation (signed transaction, uses account authorization) */
   async send(): Promise<StoreResult> {
-    return this.client.storeWithOptions(this.data, this.options, this.callback);
+    return this.client.storeWithOptions(this.data, this.options, this.callback)
   }
 
   /**
@@ -139,7 +215,7 @@ export class StoreBuilder {
       this.data,
       this.options,
       this.callback,
-    );
+    )
   }
 }
 
@@ -169,13 +245,13 @@ export class StoreBuilder {
  */
 export class AsyncBulletinClient {
   /** PAPI client for blockchain interaction */
-  public api: any;
+  public api: BulletinTypedApi
   /** Signer for transaction signing */
-  public signer: PolkadotSigner;
+  public signer: PolkadotSigner
   /** Client configuration */
-  public config: Required<AsyncClientConfig>;
+  public config: Required<AsyncClientConfig>
   /** Account for authorization checks (optional) */
-  private account?: string;
+  private account?: string
 
   /**
    * Create a new async client with PAPI client and signer
@@ -188,12 +264,12 @@ export class AsyncBulletinClient {
    * @param config - Optional client configuration
    */
   constructor(
-    api: any,
+    api: BulletinTypedApi,
     signer: PolkadotSigner,
     config?: Partial<AsyncClientConfig>,
   ) {
-    this.api = api;
-    this.signer = signer;
+    this.api = api
+    this.signer = signer
     this.config = {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       maxParallel: config?.maxParallel ?? 8,
@@ -201,7 +277,7 @@ export class AsyncBulletinClient {
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
       checkAuthorizationBeforeUpload:
         config?.checkAuthorizationBeforeUpload ?? true,
-    };
+    }
   }
 
   /**
@@ -211,8 +287,15 @@ export class AsyncBulletinClient {
    * query authorization state before uploading and fail fast if insufficient.
    */
   withAccount(account: string): this {
-    this.account = account;
-    return this;
+    this.account = account
+    return this
+  }
+
+  /**
+   * Get the account set for authorization checks
+   */
+  getAccount(): string | undefined {
+    return this.account
   }
 
   /**
@@ -221,19 +304,19 @@ export class AsyncBulletinClient {
    * Uses PAPI's signAndSubmit which returns a promise resolving to the
    * finalized result directly.
    */
-  private async signAndSubmitFinalized(tx: any): Promise<{
-    blockHash: string;
-    txHash: string;
-    blockNumber?: number;
-    events?: any[];
+  private async signAndSubmitFinalized(tx: PapiTransaction): Promise<{
+    blockHash: string
+    txHash: string
+    blockNumber?: number
+    events?: RuntimeEvent[]
   }> {
-    const result = await tx.signAndSubmit(this.signer);
+    const result = await tx.signAndSubmit(this.signer)
     return {
-      blockHash: result.block?.hash,
+      blockHash: result.block?.hash ?? "",
       txHash: result.txHash,
       blockNumber: result.block?.number,
       events: result.events,
-    };
+    }
   }
 
   /**
@@ -247,60 +330,61 @@ export class AsyncBulletinClient {
    * @param waitFor - What to wait for: "best_block" (faster) or "finalized" (safer, default)
    */
   private async signAndSubmitWithProgress(
-    tx: any,
+    tx: PapiTransaction,
     progressCallback?: ProgressCallback,
     waitFor: "best_block" | "finalized" = "finalized",
   ): Promise<{
-    blockHash: string;
-    txHash: string;
-    blockNumber?: number;
-    txIndex?: number;
-    events?: any[];
+    blockHash: string
+    txHash: string
+    blockNumber?: number
+    txIndex?: number
+    events?: RuntimeEvent[]
   }> {
     return new Promise((resolve, reject) => {
-      let resolved = false;
-      let txHash: string | undefined;
+      let resolved = false
+      let txHash: string | undefined
 
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
-        next: (ev: any) => {
+        next: (ev: TxStatusEvent) => {
           // Emit signed event when we first get a tx hash
           if (ev.txHash && !txHash) {
-            txHash = ev.txHash as string;
+            txHash = ev.txHash as string
             if (progressCallback) {
-              progressCallback({ type: "signed", txHash: txHash });
+              progressCallback({ type: "signed", txHash: txHash })
             }
           }
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted" });
+            progressCallback({ type: "broadcasted" })
           }
 
           // Handle best block state
-          if (ev.type === "txBestBlocksState" && ev.found) {
+          if (ev.type === "txBestBlocksState" && ev.found && ev.block) {
             if (progressCallback) {
               progressCallback({
                 type: "best_block",
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
-              });
+              })
             }
 
             // If waiting for best_block, resolve here
             if (waitFor === "best_block" && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
+              resolved = true
+              subscription.unsubscribe()
 
               // Extract tx index from Stored event if available
-              let storedIndex: number | undefined;
+              let storedIndex: number | undefined
               if (ev.events) {
                 const storedEvent = ev.events.find(
-                  (e: any) =>
-                    e.type === "TransactionStorage" && e.value?.type === "Stored",
-                );
+                  (e: RuntimeEvent) =>
+                    e.type === "TransactionStorage" &&
+                    e.value?.type === "Stored",
+                )
                 if (storedEvent?.value?.value?.index !== undefined) {
-                  storedIndex = storedEvent.value.value.index;
+                  storedIndex = storedEvent.value.value.index
                 }
               }
 
@@ -310,34 +394,35 @@ export class AsyncBulletinClient {
                 blockNumber: ev.block.number,
                 txIndex: storedIndex,
                 events: ev.events,
-              });
+              })
             }
           }
 
           // Handle finalized state
-          if (ev.type === "finalized") {
+          if (ev.type === "finalized" && ev.block) {
             if (progressCallback) {
               progressCallback({
                 type: "finalized",
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
-              });
+              })
             }
 
             if (!resolved) {
-              resolved = true;
-              subscription.unsubscribe();
+              resolved = true
+              subscription.unsubscribe()
 
               // Extract tx index from Stored event if available
-              let storedIndex: number | undefined;
+              let storedIndex: number | undefined
               if (ev.events) {
                 const storedEvent = ev.events.find(
-                  (e: any) =>
-                    e.type === "TransactionStorage" && e.value?.type === "Stored",
-                );
+                  (e: RuntimeEvent) =>
+                    e.type === "TransactionStorage" &&
+                    e.value?.type === "Stored",
+                )
                 if (storedEvent?.value?.value?.index !== undefined) {
-                  storedIndex = storedEvent.value.value.index;
+                  storedIndex = storedEvent.value.value.index
                 }
               }
 
@@ -347,27 +432,27 @@ export class AsyncBulletinClient {
                 blockNumber: ev.block.number,
                 txIndex: storedIndex,
                 events: ev.events,
-              });
+              })
             }
           }
         },
-        error: (err: any) => {
+        error: (err: unknown) => {
           if (!resolved) {
-            resolved = true;
-            reject(err);
+            resolved = true
+            reject(err)
           }
         },
-      });
+      })
 
       // Timeout after 2 minutes
       setTimeout(() => {
         if (!resolved) {
-          resolved = true;
-          subscription.unsubscribe();
-          reject(new BulletinError("Transaction timed out", "TIMEOUT"));
+          resolved = true
+          subscription.unsubscribe()
+          reject(new BulletinError("Transaction timed out", "TIMEOUT"))
         }
-      }, 120000);
-    });
+      }, 120000)
+    })
   }
 
   /**
@@ -398,7 +483,7 @@ export class AsyncBulletinClient {
    * ```
    */
   store(data: Binary | Uint8Array): StoreBuilder {
-    return new StoreBuilder(this, data);
+    return new StoreBuilder(this, data)
   }
 
   /**
@@ -415,9 +500,9 @@ export class AsyncBulletinClient {
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
     // Convert Binary to Uint8Array if needed
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
     // Decide whether to chunk based on threshold
@@ -428,10 +513,10 @@ export class AsyncBulletinClient {
         undefined,
         options,
         progressCallback,
-      );
+      )
     } else {
       // Small data - single transaction
-      return this.storeInternalSingle(dataBytes, options, progressCallback);
+      return this.storeInternalSingle(dataBytes, options, progressCallback)
     }
   }
 
@@ -444,44 +529,48 @@ export class AsyncBulletinClient {
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     // Calculate CID using defaults if not specified
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
-    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw
+    const hashAlgorithm =
+      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
     // Determine wait strategy (support both old and new options)
-    const waitFor: WaitFor = opts.waitFor ??
-      (opts.waitForFinalization ? "finalized" : "best_block");
+    const waitFor: WaitFor =
+      opts.waitFor ?? (opts.waitForFinalization ? "finalized" : "best_block")
 
-    const cid = await calculateCid(data, cidCodec, hashAlgorithm);
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 
     try {
       const tx = this.api.tx.TransactionStorage.store({
         data: new Binary(data),
-      });
+      })
 
       // Use progress-aware submission if callback provided, otherwise use simple submission
       const result = progressCallback
         ? await this.signAndSubmitWithProgress(tx, progressCallback, waitFor)
-        : await this.signAndSubmitFinalized(tx);
+        : await this.signAndSubmitFinalized(tx)
 
       return {
         cid,
         size: data.length,
         blockNumber: result.blockNumber,
-        extrinsicIndex: "txIndex" in result ? (result.txIndex as number | undefined) : undefined,
+        extrinsicIndex:
+          "txIndex" in result
+            ? (result.txIndex as number | undefined)
+            : undefined,
         chunks: undefined,
-      };
+      }
     } catch (error) {
       throw new BulletinError(
         `Failed to store data: ${error}`,
         "TRANSACTION_FAILED",
         error,
-      );
+      )
     }
   }
 
@@ -499,15 +588,15 @@ export class AsyncBulletinClient {
       chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
       maxParallel: config?.maxParallel ?? this.config.maxParallel,
       createManifest: config?.createManifest ?? this.config.createManifest,
-    };
+    }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     // Chunk the data
-    const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(data);
+    const chunker = new FixedSizeChunker(chunkerConfig)
+    const chunks = chunker.chunk(data)
 
-    const chunkCids: CID[] = [];
+    const chunkCids: CID[] = []
 
     // Submit each chunk sequentially
     for (const chunk of chunks) {
@@ -516,23 +605,23 @@ export class AsyncBulletinClient {
           type: "chunk_started",
           index: chunk.index,
           total: chunks.length,
-        });
+        })
       }
 
       try {
         const cid = await calculateCid(
           chunk.data,
           opts.cidCodec ?? CidCodec.Raw,
-          opts.hashingAlgorithm!,
-        );
-        chunk.cid = cid;
+          opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
+        )
+        chunk.cid = cid
 
         const tx = this.api.tx.TransactionStorage.store({
           data: new Binary(chunk.data),
-        });
-        await this.signAndSubmitFinalized(tx);
+        })
+        await this.signAndSubmitFinalized(tx)
 
-        chunkCids.push(cid);
+        chunkCids.push(cid)
 
         if (progressCallback) {
           progressCallback({
@@ -540,7 +629,7 @@ export class AsyncBulletinClient {
             index: chunk.index,
             total: chunks.length,
             cid,
-          });
+          })
         }
       } catch (error) {
         if (progressCallback) {
@@ -549,42 +638,51 @@ export class AsyncBulletinClient {
             index: chunk.index,
             total: chunks.length,
             error: error as Error,
-          });
+          })
         }
-        throw error;
+        throw error
       }
     }
 
     // Optionally create and submit manifest
-    let manifestCid: CID | undefined;
+    let manifestCid: CID | undefined
     if (chunkerConfig.createManifest) {
       if (progressCallback) {
-        progressCallback({ type: "manifest_started" });
+        progressCallback({ type: "manifest_started" })
       }
 
-      const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, opts.hashingAlgorithm!);
+      const builder = new UnixFsDagBuilder()
+      const manifest = await builder.build(
+        chunks,
+        opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
+      )
 
       const manifestTx = this.api.tx.TransactionStorage.store({
         data: new Binary(manifest.dagBytes),
-      });
-      await this.signAndSubmitFinalized(manifestTx);
+      })
+      await this.signAndSubmitFinalized(manifestTx)
 
-      manifestCid = manifest.rootCid;
+      manifestCid = manifest.rootCid
 
       if (progressCallback) {
         progressCallback({
           type: "manifest_created",
           cid: manifest.rootCid,
-        });
+        })
       }
     }
 
     if (progressCallback) {
-      progressCallback({ type: "completed", manifestCid });
+      progressCallback({ type: "completed", manifestCid })
     }
 
-    const primaryCid = manifestCid ?? chunkCids[0];
+    const primaryCid = manifestCid ?? chunkCids[0]
+    if (!primaryCid) {
+      throw new BulletinError(
+        "No CID produced from chunked upload",
+        "CID_CALCULATION_FAILED",
+      )
+    }
 
     return {
       cid: primaryCid,
@@ -595,7 +693,7 @@ export class AsyncBulletinClient {
         chunkCids,
         numChunks: chunks.length,
       },
-    };
+    }
   }
 
   /**
@@ -617,10 +715,10 @@ export class AsyncBulletinClient {
     progressCallback?: ProgressCallback,
   ): Promise<ChunkedStoreResult> {
     // Convert Binary to Uint8Array if needed
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
     const chunkerConfig: ChunkerConfig = {
@@ -628,19 +726,20 @@ export class AsyncBulletinClient {
       chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
       maxParallel: config?.maxParallel ?? this.config.maxParallel,
       createManifest: config?.createManifest ?? this.config.createManifest,
-    };
+    }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     // Extract options with defaults
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
-    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw
+    const hashAlgorithm =
+      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
     // Chunk the data
-    const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(dataBytes);
+    const chunker = new FixedSizeChunker(chunkerConfig)
+    const chunks = chunker.chunk(dataBytes)
 
-    const chunkCids: CID[] = [];
+    const chunkCids: CID[] = []
 
     // Submit each chunk
     for (const chunk of chunks) {
@@ -649,21 +748,21 @@ export class AsyncBulletinClient {
           type: "chunk_started",
           index: chunk.index,
           total: chunks.length,
-        });
+        })
       }
 
       try {
         // Calculate CID for this chunk
-        const cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm);
+        const cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm)
 
-        chunk.cid = cid;
+        chunk.cid = cid
 
         const tx = this.api.tx.TransactionStorage.store({
           data: new Binary(chunk.data),
-        });
-        await this.signAndSubmitFinalized(tx);
+        })
+        await this.signAndSubmitFinalized(tx)
 
-        chunkCids.push(cid);
+        chunkCids.push(cid)
 
         if (progressCallback) {
           progressCallback({
@@ -671,7 +770,7 @@ export class AsyncBulletinClient {
             index: chunk.index,
             total: chunks.length,
             cid,
-          });
+          })
         }
       } catch (error) {
         if (progressCallback) {
@@ -680,42 +779,42 @@ export class AsyncBulletinClient {
             index: chunk.index,
             total: chunks.length,
             error: error as Error,
-          });
+          })
         }
         // Wrap raw errors in BulletinError for consistent error handling
         if (error instanceof BulletinError) {
-          throw error;
+          throw error
         }
         throw new BulletinError(
           `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
           "CHUNK_FAILED",
           error,
-        );
+        )
       }
     }
 
     // Optionally create and submit manifest
-    let manifestCid: CID | undefined;
+    let manifestCid: CID | undefined
     if (chunkerConfig.createManifest) {
       if (progressCallback) {
-        progressCallback({ type: "manifest_started" });
+        progressCallback({ type: "manifest_started" })
       }
 
-      const builder = new UnixFsDagBuilder();
-      const manifest = await builder.build(chunks, hashAlgorithm);
+      const builder = new UnixFsDagBuilder()
+      const manifest = await builder.build(chunks, hashAlgorithm)
 
       const manifestTx = this.api.tx.TransactionStorage.store({
         data: new Binary(manifest.dagBytes),
-      });
-      await this.signAndSubmitFinalized(manifestTx);
+      })
+      await this.signAndSubmitFinalized(manifestTx)
 
-      manifestCid = manifest.rootCid;
+      manifestCid = manifest.rootCid
 
       if (progressCallback) {
         progressCallback({
           type: "manifest_created",
           cid: manifest.rootCid,
-        });
+        })
       }
     }
 
@@ -723,7 +822,7 @@ export class AsyncBulletinClient {
       progressCallback({
         type: "completed",
         manifestCid,
-      });
+      })
     }
 
     return {
@@ -731,7 +830,7 @@ export class AsyncBulletinClient {
       manifestCid,
       totalSize: dataBytes.length,
       numChunks: chunks.length,
-    };
+    }
   }
 
   /**
@@ -755,26 +854,26 @@ export class AsyncBulletinClient {
         who,
         transactions,
         bytes,
-      }).decodedCall;
+      }).decodedCall
 
-      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
+      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall })
 
       // Use progress-aware submission if callback provided
       const result = progressCallback
         ? await this.signAndSubmitWithProgress(sudoTx, progressCallback)
-        : await this.signAndSubmitFinalized(sudoTx);
+        : await this.signAndSubmitFinalized(sudoTx)
 
       return {
         blockHash: result.blockHash,
         txHash: result.txHash,
         blockNumber: result.blockNumber,
-      };
+      }
     } catch (error) {
       throw new BulletinError(
         `Failed to authorize account: ${error}`,
         "AUTHORIZATION_FAILED",
         error,
-      );
+      )
     }
   }
 
@@ -796,26 +895,26 @@ export class AsyncBulletinClient {
       const authCall = this.api.tx.TransactionStorage.authorize_preimage({
         content_hash: contentHash,
         max_size: maxSize,
-      }).decodedCall;
+      }).decodedCall
 
-      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall });
+      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall })
 
       // Use progress-aware submission if callback provided
       const result = progressCallback
         ? await this.signAndSubmitWithProgress(sudoTx, progressCallback)
-        : await this.signAndSubmitFinalized(sudoTx);
+        : await this.signAndSubmitFinalized(sudoTx)
 
       return {
         blockHash: result.blockHash,
         txHash: result.txHash,
         blockNumber: result.blockNumber,
-      };
+      }
     } catch (error) {
       throw new BulletinError(
         `Failed to authorize preimage: ${error}`,
         "AUTHORIZATION_FAILED",
         error,
-      );
+      )
     }
   }
 
@@ -832,24 +931,24 @@ export class AsyncBulletinClient {
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
     try {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index });
+      const tx = this.api.tx.TransactionStorage.renew({ block, index })
 
       // Use progress-aware submission if callback provided
       const result = progressCallback
         ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx);
+        : await this.signAndSubmitFinalized(tx)
 
       return {
         blockHash: result.blockHash,
         txHash: result.txHash,
         blockNumber: result.blockNumber,
-      };
+      }
     } catch (error) {
       throw new BulletinError(
         `Failed to renew: ${error}`,
         "TRANSACTION_FAILED",
         error,
-      );
+      )
     }
   }
 
@@ -880,12 +979,12 @@ export class AsyncBulletinClient {
   async storeWithPreimageAuth(
     data: Binary | Uint8Array,
     options?: StoreOptions,
-    progressCallback?: ProgressCallback,
+    _progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
     // Convert Binary to Uint8Array if needed
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
     // For now, only support single-chunk unsigned transactions
@@ -894,38 +993,39 @@ export class AsyncBulletinClient {
       throw new BulletinError(
         "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
         "UNSUPPORTED_OPERATION",
-      );
+      )
     }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     // Calculate CID using defaults if not specified
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
-    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw
+    const hashAlgorithm =
+      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
-    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm);
+    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
 
     try {
       // Submit as unsigned transaction
       // PAPI's unsigned transaction API: create tx without signer, then submit
-      const tx = this.api.tx.TransactionStorage.store({ data: dataBytes });
+      const tx = this.api.tx.TransactionStorage.store({ data: dataBytes })
 
       // For unsigned transactions, PAPI requires submitting without calling signAndSubmit
       // Instead, we need to use the raw submission API
       // Note: The exact API depends on PAPI version, this may need adjustment
-      const result = await tx.submit();
+      const result = await tx.submit()
 
       // Wait for finalization
-      const finalized = await result.waitFor("finalized");
+      const finalized = await result.waitFor("finalized")
 
       // Extract extrinsic index from Stored event
       const storedEvent = finalized.events.find(
-        (e: any) =>
-          e.type === "TransactionStorage" && e.value.type === "Stored",
-      );
+        (e: RuntimeEvent) =>
+          e.type === "TransactionStorage" && e.value?.type === "Stored",
+      )
 
-      const extrinsicIndex = storedEvent?.value.value?.index;
-      const blockNumber = finalized.blockNumber;
+      const extrinsicIndex = storedEvent?.value?.value?.index
+      const blockNumber = finalized.blockNumber
 
       return {
         cid,
@@ -933,13 +1033,13 @@ export class AsyncBulletinClient {
         blockNumber,
         extrinsicIndex,
         chunks: undefined,
-      };
+      }
     } catch (error) {
       throw new BulletinError(
         `Failed to store with preimage auth: ${error}`,
         "TRANSACTION_FAILED",
         error,
-      );
+      )
     }
   }
 
@@ -947,18 +1047,18 @@ export class AsyncBulletinClient {
    * Estimate authorization needed for storing data
    */
   estimateAuthorization(dataSize: number): {
-    transactions: number;
-    bytes: number;
+    transactions: number
+    bytes: number
   } {
-    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize);
-    let transactions = numChunks;
-    let bytes = dataSize;
+    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize)
+    let transactions = numChunks
+    let bytes = dataSize
 
     if (this.config.createManifest) {
-      transactions += 1;
-      bytes += numChunks * 10 + 1000;
+      transactions += 1
+      bytes += numChunks * 10 + 1000
     }
 
-    return { transactions, bytes };
+    return { transactions, bytes }
   }
 }
