@@ -1,6 +1,6 @@
 # Chunked Uploads
 
-The Bulletin SDK automatically handles chunking for large files. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks.
+The Bulletin SDK automatically handles chunking for large files up to **64 MiB**. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks of up to **8 MiB** each (matching the chain's MaxTransactionSize).
 
 ## Automatic Chunking (Recommended)
 
@@ -171,7 +171,7 @@ The `store_chunked()` method:
 
 ```rust
 let config = ChunkerConfig {
-    chunk_size: 2 * 1024 * 1024,  // 2 MiB chunks (max is 2 MiB for Bitswap)
+    chunk_size: 8 * 1024 * 1024,  // 8 MiB chunks (MAX_CHUNK_SIZE)
     max_parallel: 4,
     create_manifest: true,
 };
@@ -179,8 +179,21 @@ let config = ChunkerConfig {
 
 **Guidelines:**
 - Minimum: 1 MiB (1,048,576 bytes)
-- Maximum: 2 MiB (2,097,152 bytes) - Bitswap compatibility limit
+- Maximum: 8 MiB (8,388,608 bytes) - matches chain's MaxTransactionSize
 - Default: 1 MiB - good balance of efficiency and compatibility
+- Maximum file size: 64 MiB (MAX_FILE_SIZE)
+
+### Upload Timing
+
+Bulletin Chain has a **6 second block time**. Each chunk requires one transaction, so:
+
+| File Size | Chunk Size | Chunks | Transactions | Min Time (sequential) |
+|-----------|------------|--------|--------------|----------------------|
+| 8 MiB | 8 MiB | 1 | 2 (data + manifest) | ~12 seconds |
+| 32 MiB | 8 MiB | 4 | 5 | ~30 seconds |
+| 64 MiB | 8 MiB | 8 | 9 | ~54 seconds |
+
+**Note**: Times shown are for sequential uploads waiting for each transaction to be included in a block. Actual times may vary based on network conditions and finalization requirements.
 
 ### Parallel Uploads
 

@@ -84,6 +84,21 @@ describe("Chunker", () => {
     expect(() => new FixedSizeChunker(config)).toThrow()
   })
 
+  it("should calculate chunks correctly for 64 MiB file", () => {
+    const config: ChunkerConfig = {
+      chunkSize: 2 * 1024 * 1024, // 2 MiB (MAX_CHUNK_SIZE)
+      maxParallel: 8,
+      createManifest: true,
+    }
+
+    const chunker = new FixedSizeChunker(config)
+
+    // 64 MiB / 2 MiB = 32 chunks
+    expect(chunker.numChunks(64 * 1024 * 1024)).toBe(32)
+
+    expect(chunker.chunkSize).toBe(2 * 1024 * 1024)
+  })
+
   it("should throw error for zero chunk size", () => {
     const config: ChunkerConfig = {
       chunkSize: 0,

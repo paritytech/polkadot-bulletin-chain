@@ -337,17 +337,17 @@ mod tests {
 	#[test]
 	fn test_validate_chunk_size() {
 		assert!(validate_chunk_size(1_048_576).is_ok()); // 1 MiB - valid
-		assert!(validate_chunk_size(2 * 1024 * 1024).is_ok()); // 2 MiB - valid (max)
+		assert!(validate_chunk_size(2 * 1024 * 1024).is_ok()); // 2 MiB - valid
+		assert!(validate_chunk_size(8 * 1024 * 1024).is_ok()); // 8 MiB - valid (max)
 		assert!(validate_chunk_size(0).is_err()); // Zero - invalid
-		assert!(validate_chunk_size(3 * 1024 * 1024).is_err()); // 3 MiB - exceeds limit
-		assert!(validate_chunk_size(10_000_000).is_err()); // > 2 MiB - invalid
+		assert!(validate_chunk_size(9 * 1024 * 1024).is_err()); // 9 MiB - exceeds limit
 	}
 
 	#[test]
 	fn test_optimal_chunk_size() {
 		assert_eq!(optimal_chunk_size(500_000), 500_000);
 		assert_eq!(optimal_chunk_size(100_000_000), 1_048_576); // 1 MiB
-		assert_eq!(optimal_chunk_size(1_000_000_000), 2_097_152); // 2 MiB (max)
+		assert_eq!(optimal_chunk_size(1_000_000_000), 8_388_608); // 8 MiB (max)
 	}
 
 	#[test]

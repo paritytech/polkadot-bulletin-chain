@@ -65,8 +65,8 @@ describe("Utils", () => {
 
   describe("validateChunkSize", () => {
     it("should validate valid chunk sizes", () => {
-      expect(() => validateChunkSize(1024 * 1024)).not.toThrow()
-      expect(() => validateChunkSize(2 * 1024 * 1024)).not.toThrow()
+      expect(() => validateChunkSize(1024 * 1024)).not.toThrow() // 1 MiB
+      expect(() => validateChunkSize(2 * 1024 * 1024)).not.toThrow() // 2 MiB (MAX_CHUNK_SIZE)
     })
 
     it("should reject zero size", () => {
@@ -92,7 +92,7 @@ describe("Utils", () => {
     })
 
     it("should return maximum for very large data", () => {
-      expect(optimalChunkSize(1_000_000_000)).toBe(2_097_152)
+      expect(optimalChunkSize(1_000_000_000)).toBe(2_097_152) // MAX_CHUNK_SIZE = 2 MiB
     })
   })
 

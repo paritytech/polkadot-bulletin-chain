@@ -159,7 +159,7 @@ Now that you've stored your first data:
 2. **[TypeScript SDK](./typescript/README.md)** - Full TypeScript documentation
 3. **[Rust SDK](./rust/README.md)** - Full Rust documentation
 4. **[Authorization](./concepts/authorization.md)** - Learn about authorization management
-5. **[Chunked Uploads](./typescript/chunked-uploads.md)** - Store files larger than 2 MiB
+5. **[Chunked Uploads](./typescript/chunked-uploads.md)** - Store files up to 64 MiB with automatic chunking
 
 ## Testnet Faucet
 

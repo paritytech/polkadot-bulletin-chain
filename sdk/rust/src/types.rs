@@ -16,12 +16,19 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum Error {
-	/// Chunk size exceeds maximum allowed (2 MiB).
+	/// Chunk size exceeds maximum allowed (8 MiB).
 	#[cfg_attr(
 		feature = "std",
-		error("Chunk size {0} exceeds maximum allowed size of 2097152 bytes (2 MiB)")
+		error("Chunk size {0} exceeds maximum allowed size of 8388608 bytes (8 MiB)")
 	)]
 	ChunkTooLarge(u64),
+
+	/// File size exceeds maximum allowed (64 MiB).
+	#[cfg_attr(
+		feature = "std",
+		error("File size {0} exceeds maximum allowed size of 67108864 bytes (64 MiB)")
+	)]
+	FileTooLarge(u64),
 
 	/// Data is empty.
 	#[cfg_attr(feature = "std", error("Data cannot be empty"))]

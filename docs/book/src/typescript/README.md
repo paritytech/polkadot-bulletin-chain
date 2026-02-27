@@ -5,8 +5,8 @@ The `@bulletin/sdk` package provides a modern, type-safe client for Node.js and 
 ## Features
 
 ### Core Storage
-- **Unified API**: Single `store()` method handles both small and large files
-- **Automatic Chunking**: Files larger than 2 MiB are automatically chunked
+- **Unified API**: Single `store()` method handles both small and large files (up to 64 MiB)
+- **Automatic Chunking**: Files are automatically chunked (up to 8 MiB per chunk)
 - **Progress Tracking**: Real-time callbacks for upload progress
 - **DAG-PB Manifests**: Standard manifest generation for chunked data
 - **CID Support**: Multiple codecs (Raw, DAG-PB, DAG-CBOR) and hash algorithms
