@@ -2136,7 +2136,6 @@ name = "bulletin-sdk-rust"
 version = "0.1.0"
 dependencies = [
  "cid",
- "pallet-transaction-storage",
  "parity-scale-codec",
  "scale-info",
  "sp-core",
@@ -2146,6 +2145,7 @@ dependencies = [
  "subxt-signer 0.44.2",
  "thiserror 2.0.18",
  "tokio",
+ "transaction-storage-primitives",
 ]
 
 [[package]]
