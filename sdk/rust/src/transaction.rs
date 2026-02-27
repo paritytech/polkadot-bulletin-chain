@@ -102,7 +102,7 @@ impl TransactionClient {
 						}
 						TxStatus::Broadcasted => {
 							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_broadcasted(0)); // num_peers not available in subxt 0.44
+								callback(ProgressEvent::tx_broadcasted());
 							}
 						}
 						TxStatus::InBestBlock(in_block) => {
