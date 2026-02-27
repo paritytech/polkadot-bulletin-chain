@@ -6,24 +6,24 @@
  * for creating IPFS-compatible manifests
  */
 
-import { CID } from "multiformats/cid";
-import * as dagPB from "@ipld/dag-pb";
-import { UnixFS } from "ipfs-unixfs";
-import { Chunk, BulletinError, HashAlgorithm } from "./types.js";
-import { calculateCid } from "./utils.js";
+import * as dagPB from "@ipld/dag-pb"
+import { UnixFS } from "ipfs-unixfs"
+import type { CID } from "multiformats/cid"
+import { BulletinError, type Chunk, HashAlgorithm } from "./types.js"
+import { calculateCid } from "./utils.js"
 
 /**
  * DAG-PB manifest representing a file composed of multiple chunks
  */
 export interface DagManifest {
   /** The root CID of the manifest */
-  rootCid: CID;
+  rootCid: CID
   /** CIDs of all chunks in order */
-  chunkCids: CID[];
+  chunkCids: CID[]
   /** Total size of the file in bytes */
-  totalSize: number;
+  totalSize: number
   /** Encoded DAG-PB bytes */
-  dagBytes: Uint8Array;
+  dagBytes: Uint8Array
 }
 
 /**
@@ -41,7 +41,7 @@ export class UnixFsDagBuilder {
       throw new BulletinError(
         "Cannot build DAG from empty chunks",
         "EMPTY_DATA",
-      );
+      )
     }
 
     // Ensure all chunks have CIDs
@@ -50,20 +50,20 @@ export class UnixFsDagBuilder {
         throw new BulletinError(
           `Chunk at index ${chunk.index} does not have a CID`,
           "DAG_ENCODING_FAILED",
-        );
+        )
       }
-      return chunk.cid;
-    });
+      return chunk.cid
+    })
 
     // Calculate total size and block sizes
-    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0);
-    const blockSizes = chunks.map((chunk) => BigInt(chunk.data.length));
+    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0)
+    const blockSizes = chunks.map((chunk) => BigInt(chunk.data.length))
 
     // Build UnixFS file metadata (no inline data here)
     const fileData = new UnixFS({
       type: "file",
       blockSizes,
-    });
+    })
 
     // DAG-PB node: our file with chunk links
     const dagNode = dagPB.prepare({
@@ -73,55 +73,55 @@ export class UnixFsDagBuilder {
         Tsize: chunk.data.length,
         Hash: chunkCids[i],
       })),
-    });
+    })
 
     // Encode DAG-PB
-    const dagBytes = dagPB.encode(dagNode);
+    const dagBytes = dagPB.encode(dagNode)
 
     // Calculate root CID using DAG-PB codec
-    const rootCid = await calculateCid(dagBytes, 0x70, hashAlgorithm);
+    const rootCid = await calculateCid(dagBytes, 0x70, hashAlgorithm)
 
     return {
       rootCid,
       chunkCids,
       totalSize,
       dagBytes,
-    };
+    }
   }
 
   /**
    * Parse a DAG-PB manifest back into its components
    */
   async parse(dagBytes: Uint8Array): Promise<{
-    chunkCids: CID[];
-    totalSize: number;
+    chunkCids: CID[]
+    totalSize: number
   }> {
     try {
-      const dagNode = dagPB.decode(dagBytes);
+      const dagNode = dagPB.decode(dagBytes)
 
       if (!dagNode.Data) {
-        throw new Error("DAG node has no data");
+        throw new Error("DAG node has no data")
       }
 
-      const unixfs = UnixFS.unmarshal(dagNode.Data);
+      const unixfs = UnixFS.unmarshal(dagNode.Data)
 
       if (unixfs.type !== "file") {
-        throw new Error(`Expected file type, got ${unixfs.type}`);
+        throw new Error(`Expected file type, got ${unixfs.type}`)
       }
 
-      const chunkCids = dagNode.Links.map((link) => link.Hash);
-      const totalSize = unixfs.fileSize();
+      const chunkCids = dagNode.Links.map((link) => link.Hash)
+      const totalSize = unixfs.fileSize()
 
       return {
         chunkCids,
         totalSize: Number(totalSize),
-      };
+      }
     } catch (error) {
       throw new BulletinError(
         `Failed to parse DAG-PB manifest: ${error}`,
         "DAG_DECODING_FAILED",
         error,
-      );
+      )
     }
   }
 }
