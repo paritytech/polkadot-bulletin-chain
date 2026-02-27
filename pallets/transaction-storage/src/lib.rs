@@ -1267,25 +1267,28 @@ pub mod pallet {
 				)?;
 			}
 
-			let valid_tx = context.want_valid_transaction().then(|| {
-				if used_preimage_auth {
-					Self::preimage_store_renew_valid_transaction(content_hash)
+			let (valid_tx, scope) = if context.want_valid_transaction() {
+				let (valid_tx, scope) = if used_preimage_auth {
+					(
+						Self::preimage_store_renew_valid_transaction(content_hash),
+						AuthorizationScope::Preimage(content_hash),
+					)
 				} else {
-					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
-						.and_provides((who, content_hash))
-						.priority(T::StoreRenewPriority::get())
-						.longevity(T::StoreRenewLongevity::get())
-						.into()
-				}
-			});
-
-			let scope = if used_preimage_auth {
-				AuthorizationScope::Preimage(content_hash)
+					(
+						ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+							.and_provides((who, content_hash))
+							.priority(T::StoreRenewPriority::get())
+							.longevity(T::StoreRenewLongevity::get())
+							.into(),
+						AuthorizationScope::Account(who.clone()),
+					)
+				};
+				(Some(valid_tx), Some(scope))
 			} else {
-				AuthorizationScope::Account(who.clone())
+				(None, None)
 			};
 
-			Ok((valid_tx, Some(scope)))
+			Ok((valid_tx, scope))
 		}
 
 		/// Verifies that the provided proof corresponds to a randomly selected chunk from a list of
