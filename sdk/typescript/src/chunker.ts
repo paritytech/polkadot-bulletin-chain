@@ -53,7 +53,7 @@ export class FixedSizeChunker {
       throw new BulletinError(
         `Data size ${data.length} exceeds maximum allowed size of ${MAX_FILE_SIZE} (64 MiB)`,
         "FILE_TOO_LARGE",
-      );
+      )
     }
 
     const chunks: Chunk[] = []

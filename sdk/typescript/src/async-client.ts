@@ -1030,8 +1030,7 @@ export class AsyncBulletinClient {
       }
 
       const storedEvent = finalized.events.find(
-        (e) =>
-          e.type === "TransactionStorage" && e.value?.type === "Stored",
+        (e) => e.type === "TransactionStorage" && e.value?.type === "Stored",
       )
 
       const extrinsicIndex =
