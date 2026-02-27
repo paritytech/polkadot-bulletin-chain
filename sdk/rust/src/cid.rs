@@ -8,13 +8,46 @@
 
 extern crate alloc;
 
-use crate::types::{CidCodec, Error, Result};
+use crate::types::{Error, Result};
+use codec::{Decode, Encode};
+use scale_info::TypeInfo;
 
 // Re-export CID types from transaction-storage-primitives
 pub use transaction_storage_primitives::{
 	cids::{calculate_cid, Cid, CidConfig, CidData, CidError, HashingAlgorithm},
 	ContentHash,
 };
+
+/// CID codec types.
+#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo, PartialEq, Eq)]
+pub enum CidCodec {
+	/// Raw binary (0x55).
+	Raw,
+	/// DAG-PB (0x70).
+	DagPb,
+	/// DAG-CBOR (0x71).
+	DagCbor,
+}
+
+impl CidCodec {
+	/// Get the multicodec code.
+	pub fn code(&self) -> u64 {
+		match self {
+			CidCodec::Raw => 0x55,
+			CidCodec::DagPb => 0x70,
+			CidCodec::DagCbor => 0x71,
+		}
+	}
+
+	/// Get the codec name as a string.
+	pub fn name(&self) -> &'static str {
+		match self {
+			CidCodec::Raw => "raw",
+			CidCodec::DagPb => "dag-pb",
+			CidCodec::DagCbor => "dag-cbor",
+		}
+	}
+}
 
 /// Convert SDK CidCodec enum to pallet CidCodec (u64).
 pub fn codec_to_u64(codec: CidCodec) -> u64 {

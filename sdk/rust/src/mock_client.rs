@@ -13,8 +13,8 @@
 use {
 	crate::{
 		authorization::AuthorizationManager,
-		cid::HashingAlgorithm,
-		types::{CidCodec, Error, ProgressCallback, Result, StoreOptions, StoreResult},
+		cid::{CidCodec, HashingAlgorithm},
+		types::{Error, ProgressCallback, Result, StoreOptions, StoreResult},
 	},
 	alloc::{
 		string::{String, ToString},

@@ -16,8 +16,8 @@ extern crate alloc;
 pub const MAX_MANIFEST_CHUNKS: usize = 1_000_000;
 
 use crate::{
-	cid::{calculate_cid, CidConfig, CidData, HashingAlgorithm},
-	types::{Chunk, CidCodec, Error, Result},
+	cid::{calculate_cid, CidCodec, CidConfig, CidData, HashingAlgorithm},
+	types::{Chunk, Error, Result},
 };
 use alloc::vec::Vec;
 

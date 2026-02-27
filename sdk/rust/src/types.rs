@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use crate::cid::HashingAlgorithm;
+use crate::cid::{CidCodec, HashingAlgorithm};
 use alloc::{string::String, vec::Vec};
 use codec::{Decode, Encode};
 use scale_info::TypeInfo;
@@ -229,37 +229,6 @@ impl Default for StoreOptions {
 			cid_codec: CidCodec::Raw,
 			hash_algorithm: HashingAlgorithm::Blake2b256,
 			wait_for_finalization: false,
-		}
-	}
-}
-
-/// CID codec types.
-#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo, PartialEq, Eq)]
-pub enum CidCodec {
-	/// Raw binary (0x55).
-	Raw,
-	/// DAG-PB (0x70).
-	DagPb,
-	/// DAG-CBOR (0x71).
-	DagCbor,
-}
-
-impl CidCodec {
-	/// Get the multicodec code.
-	pub fn code(&self) -> u64 {
-		match self {
-			CidCodec::Raw => 0x55,
-			CidCodec::DagPb => 0x70,
-			CidCodec::DagCbor => 0x71,
-		}
-	}
-
-	/// Get the codec name as a string.
-	pub fn name(&self) -> &'static str {
-		match self {
-			CidCodec::Raw => "raw",
-			CidCodec::DagPb => "dag-pb",
-			CidCodec::DagCbor => "dag-cbor",
 		}
 	}
 }

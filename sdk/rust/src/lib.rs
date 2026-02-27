@@ -174,13 +174,13 @@ pub mod mock_client;
 pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
-	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, CidCodec,
-	Error, ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions,
-	StoreResult, TransactionStatusEvent,
+	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, Error,
+	ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions, StoreResult,
+	TransactionStatusEvent,
 };
 
 // Re-export CID types from pallet
-pub use cid::{calculate_cid, Cid, CidConfig, CidData, ContentHash, HashingAlgorithm};
+pub use cid::{calculate_cid, Cid, CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm};
 
 // Re-export key traits
 pub use chunker::Chunker;

@@ -23,10 +23,8 @@
 use {
 	crate::{
 		authorization::AuthorizationManager,
-		cid::HashingAlgorithm,
-		types::{
-			ChunkerConfig, CidCodec, Error, ProgressCallback, Result, StoreOptions, StoreResult,
-		},
+		cid::{CidCodec, HashingAlgorithm},
+		types::{ChunkerConfig, Error, ProgressCallback, Result, StoreOptions, StoreResult},
 	},
 	alloc::vec::Vec,
 	sp_runtime::AccountId32,

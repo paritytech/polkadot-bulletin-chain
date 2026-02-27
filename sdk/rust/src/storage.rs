@@ -148,7 +148,7 @@ pub mod helpers {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{cid::HashingAlgorithm, types::CidCodec};
+	use crate::cid::{CidCodec, HashingAlgorithm};
 
 	#[test]
 	fn test_storage_operation_new() {
