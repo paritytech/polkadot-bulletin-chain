@@ -137,7 +137,7 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode 
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes) {
+async function storeProof(typedApi, whoSigner, rootCID, dagFileBytes) {
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
     // Store DAG bytes in Bulletin using PAPI store function
@@ -147,8 +147,7 @@ async function storeProof(typedApi, sudoSigner, whoSigner, rootCID, dagFileBytes
     // This can be a serious pallet, this is just a demonstration.
     const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
     const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    const sudoTx = typedApi.tx.Sudo.sudo({ call: remarkTx.decodedCall });
-    await sudoTx.signSubmitAndWatch(sudoSigner).subscribe({
+    await remarkTx.signSubmitAndWatch(whoSigner).subscribe({
         next: (ev) => console.log(`✅ Proof remark event:`, ev.type),
         error: (err) => console.error(`❌ Proof remark error:`, err),
     });
@@ -173,12 +172,12 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
         // Authorize an account.
         await authorizeAccount(
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             whoAddress,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
@@ -204,7 +203,7 @@ async function main() {
         const { rootCid, dagBytes } = await buildUnixFSDag(metadataJson, 0xb220)
 
         // Store DAG and proof to the Bulletin.
-        let { rawDagCid } = await storeProof(bulletinAPI, sudoSigner, whoSigner, rootCid, Buffer.from(dagBytes));
+        let { rawDagCid } = await storeProof(bulletinAPI, whoSigner, rootCid, Buffer.from(dagBytes));
         await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
 
         // Store DAG into IPFS.

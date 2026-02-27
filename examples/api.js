@@ -20,7 +20,7 @@ function toBinary(data) {
 
 export async function authorizeAccount(
     typedApi,
-    sudoSigner,
+    authorizationSigner,
     whos,
     transactions,
     bytes,
@@ -67,20 +67,17 @@ export async function authorizeAccount(
         }).decodedCall
     );
 
-    // Wrap in Sudo(Utility::batchAll(...))
+    // Wrap in Utility::batchAll(...)
     const batchTx = typedApi.tx.Utility.batch_all({
         calls: authorizeCalls
     });
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: batchTx.decodedCall
-    });
 
-    await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
+    await waitForTransaction(batchTx, authorizationSigner, "BatchAuthorize", txMode);
 }
 
 export async function authorizePreimage(
     typedApi,
-    sudoSigner,
+    authorizationSigner,
     contentHashes,
     maxSize = CHUNK_SIZE,
     txMode = TX_MODE_IN_BLOCK,
@@ -102,15 +99,12 @@ export async function authorizePreimage(
             }).decodedCall
         );
 
-        // Wrap in Sudo(Utility::batchAll(...))
+        // Wrap in Utility::batchAll(...)
         const batchTx = typedApi.tx.Utility.batch_all({
             calls: authorizeCalls
         });
-        const sudoTx = typedApi.tx.Sudo.sudo({
-            call: batchTx.decodedCall
-        });
 
-        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
+        await waitForTransaction(batchTx, authorizationSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
     }
 }
 
