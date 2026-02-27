@@ -6,7 +6,8 @@
 //! This example demonstrates:
 //! 1. Using the Bulletin SDK's TransactionClient for all chain interactions
 //! 2. Authorizing an account to store data (requires sudo)
-//! 3. Storing data and verifying the CID
+//! 3. Storing small data with CID verification
+//! 4. Storing large data with DAG-PB manifest (chunked upload)
 //!
 //! ## Usage
 //!
@@ -110,6 +111,66 @@ async fn main() -> Result<()> {
 	info!("  Block hash: {}", store_receipt.block_hash);
 	info!("  Extrinsic hash: {}", store_receipt.extrinsic_hash);
 	info!("  Data size: {} bytes", store_receipt.data_size);
+
+	// Step 4: Demonstrate chunked storage with DAG-PB manifest
+	info!("\n--- Step 3: Chunked Storage with DAG-PB Manifest ---");
+
+	// Create larger data that will be chunked (3 MiB)
+	let large_data_size = 3 * 1024 * 1024; // 3 MiB
+	let large_data: Vec<u8> = (0..large_data_size).map(|i| (i % 256) as u8).collect();
+	info!("Large data size: {} bytes ({} MiB)", large_data.len(), large_data.len() / 1024 / 1024);
+
+	// Configure chunking
+	let chunker_config = ChunkerConfig {
+		chunk_size: 1024 * 1024, // 1 MiB chunks
+		max_parallel: 4,
+		create_manifest: true, // Create DAG-PB manifest
+	};
+
+	let dag_options = StoreOptions {
+		cid_codec: CidCodec::DagPb, // Use DAG-PB codec for manifest
+		hash_algorithm: HashAlgorithm::Blake2b256,
+		wait_for_finalization: true,
+	};
+
+	// Prepare chunked storage using SDK
+	let progress_callback = std::sync::Arc::new(|event: ProgressEvent| {
+		info!("Chunk progress: {:?}", event);
+	});
+
+	let (batch_operation, manifest_data) = sdk_client
+		.prepare_store_chunked(&large_data, Some(chunker_config), dag_options, Some(progress_callback))
+		.map_err(|e| anyhow!("Chunking failed: {:?}", e))?;
+
+	info!("Prepared {} chunks", batch_operation.operations.len());
+
+	// Submit each chunk
+	for (i, chunk_op) in batch_operation.operations.iter().enumerate() {
+		info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
+
+		let chunk_receipt = client
+			.store(chunk_op.data.clone(), &keypair)
+			.await
+			.map_err(|e| anyhow!("Chunk {} store failed: {:?}", i + 1, e))?;
+
+		info!("  Chunk {} stored in block: {}", i + 1, chunk_receipt.block_hash);
+	}
+
+	// Submit the manifest if created
+	if let Some(manifest) = manifest_data {
+		info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
+
+		let manifest_receipt = client
+			.store(manifest, &keypair)
+			.await
+			.map_err(|e| anyhow!("Manifest store failed: {:?}", e))?;
+
+		info!("✅ DAG-PB manifest stored!");
+		info!("  Manifest block hash: {}", manifest_receipt.block_hash);
+		info!("  Use this manifest CID to retrieve the complete file via IPFS/Bitswap");
+	}
+
+	info!("\n✅ All examples completed successfully!");
 
 	Ok(())
 }

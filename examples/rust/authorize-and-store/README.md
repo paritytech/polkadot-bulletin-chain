@@ -95,7 +95,7 @@ INFO   Data size: 42 bytes
 
 ## SDK Integration
 
-The example uses two SDK clients:
+### Simple Storage
 
 ```rust
 // TransactionClient for chain interaction
@@ -109,3 +109,42 @@ let cid = operation.calculate_cid()?;
 // Store with progress tracking
 let receipt = client.store_with_progress(data, &signer, Some(callback)).await?;
 ```
+
+### Chunked Storage with DAG-PB Manifest
+
+For large files (> 2 MiB), use chunked storage with DAG-PB manifests:
+
+```rust
+// Configure chunking
+let chunker_config = ChunkerConfig {
+    chunk_size: 1024 * 1024,  // 1 MiB chunks
+    max_parallel: 4,
+    create_manifest: true,     // Create DAG-PB manifest
+};
+
+let options = StoreOptions {
+    cid_codec: CidCodec::DagPb,
+    hash_algorithm: HashAlgorithm::Blake2b256,
+    wait_for_finalization: true,
+};
+
+// Prepare chunked storage
+let (batch, manifest) = sdk_client.prepare_store_chunked(
+    &large_data,
+    Some(chunker_config),
+    options,
+    Some(progress_callback),
+)?;
+
+// Submit each chunk
+for chunk_op in batch.operations.iter() {
+    client.store(chunk_op.data.clone(), &signer).await?;
+}
+
+// Submit the manifest
+if let Some(manifest_data) = manifest {
+    client.store(manifest_data, &signer).await?;
+}
+```
+
+The manifest CID can be used to retrieve the complete file via IPFS/Bitswap.
