@@ -417,23 +417,6 @@ export function formatThroughput(bytesPerSecond: number): string {
 }
 
 /**
- * Validate SS58 address format
- *
- * Basic validation - checks format only, not checksum
- *
- * @example
- * ```typescript
- * isValidSS58('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'); // true
- * ```
- */
-export function isValidSS58(address: string): boolean {
-  // SS58 addresses typically start with 1-5 and are base58 encoded
-  // This is a basic check - full validation requires the ss58-registry
-  const ss58Regex = /^[1-9A-HJ-NP-Za-km-z]{47,48}$/
-  return ss58Regex.test(address)
-}
-
-/**
  * Truncate string with ellipsis
  *
  * @example

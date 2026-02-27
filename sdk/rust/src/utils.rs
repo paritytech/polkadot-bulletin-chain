@@ -9,9 +9,6 @@ use crate::{
 };
 use alloc::{string::String, vec::Vec};
 
-#[cfg(feature = "std")]
-use sp_runtime::AccountId32;
-
 /// Convert hex string to bytes
 ///
 /// # Example
@@ -53,39 +50,6 @@ pub fn bytes_to_hex(bytes: &[u8]) -> String {
 		hex.push_str(&alloc::format!("{byte:02x}"));
 	}
 	hex
-}
-
-/// Convert SS58 address to AccountId32
-///
-/// # Example
-/// ```no_run
-/// use bulletin_sdk_rust::utils::ss58_to_account_id;
-///
-/// let account = ss58_to_account_id("5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY").unwrap();
-/// ```
-#[cfg(feature = "std")]
-pub fn ss58_to_account_id(ss58: &str) -> Result<AccountId32> {
-	use sp_core::crypto::Ss58Codec;
-
-	AccountId32::from_ss58check(ss58)
-		.map_err(|e| Error::InvalidConfig(alloc::format!("Invalid SS58 address: {e:?}")))
-}
-
-/// Convert AccountId32 to SS58 address
-///
-/// # Example
-/// ```
-/// use bulletin_sdk_rust::utils::account_id_to_ss58;
-/// use sp_runtime::AccountId32;
-///
-/// let account = AccountId32::new([0u8; 32]);
-/// let ss58 = account_id_to_ss58(&account, 42);
-/// ```
-#[cfg(feature = "std")]
-pub fn account_id_to_ss58(account: &AccountId32, prefix: u16) -> String {
-	use sp_core::crypto::Ss58Codec;
-
-	account.to_ss58check_with_version(prefix.into())
 }
 
 /// Parse CID from string representation

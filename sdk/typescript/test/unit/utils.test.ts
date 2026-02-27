@@ -13,7 +13,6 @@ import {
   hexToBytes,
   isBrowser,
   isNode,
-  isValidSS58,
   measureTime,
   optimalChunkSize,
   retry,
@@ -237,23 +236,6 @@ describe("Utils", () => {
     it("should format throughput", () => {
       const formatted = formatThroughput(1_048_576)
       expect(formatted).toContain("MB/s")
-    })
-  })
-
-  describe("isValidSS58", () => {
-    it("should validate valid SS58 addresses", () => {
-      expect(
-        isValidSS58("5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"),
-      ).toBe(true)
-      expect(
-        isValidSS58("5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"),
-      ).toBe(true)
-    })
-
-    it("should reject invalid addresses", () => {
-      expect(isValidSS58("invalid")).toBe(false)
-      expect(isValidSS58("0x1234")).toBe(false)
-      expect(isValidSS58("")).toBe(false)
     })
   })
 
