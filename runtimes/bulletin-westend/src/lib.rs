@@ -275,77 +275,69 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
 }
 
-use pallets_common::{sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH};
+use pallets_common::{sudo_inner_calls, utility_inner_calls, ValidationMode, MAX_INNER_CALL_DEPTH};
 
-/// Recursively validate inner calls of wrapper extrinsics. TransactionStorage calls
-/// are required to pass their own signed validation; utility wrappers are recursed into.
-/// All other recognized calls are allowed through; unknown calls are rejected.
+/// Validate only TransactionStorage calls, recursing through Utility wrappers.
+/// Non-storage calls pass through.
+fn validate_storage_calls(
+	who: &AccountId,
+	call: &RuntimeCall,
+	depth: u32,
+	mode: ValidationMode,
+) -> Result<(), TransactionValidityError> {
+	if depth >= MAX_INNER_CALL_DEPTH {
+		return Err(InvalidTransaction::ExhaustsResources.into());
+	}
+	match call {
+		RuntimeCall::TransactionStorage(inner_call) => match mode {
+			ValidationMode::Check =>
+				TransactionStorage::validate_signed(who, inner_call).map(|_| ()),
+			ValidationMode::Consume => TransactionStorage::pre_dispatch_signed(who, inner_call),
+		},
+		RuntimeCall::Utility(utility_call) => {
+			for inner in utility_inner_calls(utility_call) {
+				validate_storage_calls(who, inner, depth + 1, mode)?;
+			}
+			Ok(())
+		},
+		_ => Ok(()),
+	}
+}
+
+/// Recursively validate inner calls of wrapper extrinsics against the allowlist.
+/// TransactionStorage calls must pass signed validation. Utility is strict (enforces the
+/// full allowlist) because it adds no authorization. Sudo is permissive (only checks
+/// TransactionStorage auth) because the sudo pallet enforces its own sudo-key check at
+/// dispatch time, and must be able to call anything (e.g. `set_code`).
 ///
-/// When `consume` is true (called from `prepare()`), authorization is consumed
-/// for TransactionStorage calls. When false (called from `validate()`), it only
-/// checks that authorization exists.
-///
-/// NOTE: The allowlist here must be kept in sync with the top-level `validate()` match
-/// arms in [`ValidateSigned`]. If a new pallet call is accepted there, add it here too.
+/// NOTE: The allowlist here must be kept in sync with the `validate()` match arms
+/// in [`ValidateSigned`]. If a new pallet call is accepted there, add it here too.
 fn validate_inner_calls(
 	who: &AccountId,
 	call: &RuntimeCall,
 	depth: u32,
-	consume: bool,
+	mode: ValidationMode,
 ) -> Result<(), TransactionValidityError> {
 	if depth >= MAX_INNER_CALL_DEPTH {
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {
 		storage_call @ RuntimeCall::TransactionStorage(_) =>
-			validate_storage_calls(who, storage_call, depth, consume),
+			validate_storage_calls(who, storage_call, depth, mode),
 		RuntimeCall::Utility(utility_call) => {
 			for inner in utility_inner_calls(utility_call) {
-				validate_inner_calls(who, inner, depth + 1, consume)?;
+				validate_inner_calls(who, inner, depth + 1, mode)?;
 			}
 			Ok(())
 		},
-		// Sudo has its own authorization (sudo key check). We only inspect
-		// inner calls for TransactionStorage authorization.
 		RuntimeCall::Sudo(sudo_call) => {
 			for inner in sudo_inner_calls(sudo_call) {
-				validate_storage_calls(who, inner, depth + 1, consume)?;
+				validate_storage_calls(who, inner, depth + 1, mode)?;
 			}
 			Ok(())
 		},
-		// Allow calls that are accepted at the top level.
 		RuntimeCall::System(..) | RuntimeCall::Balances(..) | RuntimeCall::Session(..) => Ok(()),
-		// Reject anything else.
 		_ => Err(InvalidTransaction::Call.into()),
-	}
-}
-
-/// Validate only TransactionStorage calls.
-/// Non-storage calls are allowed to pass through.
-fn validate_storage_calls(
-	who: &AccountId,
-	call: &RuntimeCall,
-	depth: u32,
-	consume: bool,
-) -> Result<(), TransactionValidityError> {
-	if depth >= MAX_INNER_CALL_DEPTH {
-		return Err(InvalidTransaction::ExhaustsResources.into());
-	}
-	match call {
-		RuntimeCall::TransactionStorage(inner_call) =>
-			if consume {
-				TransactionStorage::pre_dispatch_signed(who, inner_call)
-			} else {
-				TransactionStorage::validate_signed(who, inner_call).map(|_| ())
-			},
-		RuntimeCall::Utility(utility_call) => {
-			for inner in utility_inner_calls(utility_call) {
-				validate_storage_calls(who, inner, depth + 1, consume)?;
-			}
-			Ok(())
-		},
-		// Allow all non-storage calls through.
-		_ => Ok(()),
 	}
 }
 
@@ -398,14 +390,18 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 
 			RuntimeCall::Utility(utility_call) => {
 				for inner in utility_inner_calls(utility_call) {
-					validate_inner_calls(who, inner, 0, false)?;
+					validate_inner_calls(who, inner, 0, ValidationMode::Check)?;
 				}
-				Ok(ValidTransaction::default())
+				Ok(ValidTransaction {
+					priority: storage::UtilityPriority::get(),
+					longevity: storage::UtilityLongevity::get(),
+					..Default::default()
+				})
 			},
 
 			RuntimeCall::Sudo(sudo_call) => {
 				for inner in sudo_inner_calls(sudo_call) {
-					validate_storage_calls(who, inner, 0, false)?;
+					validate_storage_calls(who, inner, 0, ValidationMode::Check)?;
 				}
 				Ok(ValidTransaction {
 					priority: storage::SudoPriority::get(),
@@ -436,12 +432,12 @@ impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
 				},
 				RuntimeCall::Utility(utility_call) => {
 					for inner in utility_inner_calls(utility_call) {
-						validate_inner_calls(who, inner, 0, true)?;
+						validate_inner_calls(who, inner, 0, ValidationMode::Consume)?;
 					}
 				},
 				RuntimeCall::Sudo(sudo_call) =>
 					for inner in sudo_inner_calls(sudo_call) {
-						validate_storage_calls(who, inner, 0, true)?;
+						validate_storage_calls(who, inner, 0, ValidationMode::Consume)?;
 					},
 				_ => {},
 			}

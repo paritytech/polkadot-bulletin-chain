@@ -48,6 +48,8 @@ parameter_types! {
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+	pub const UtilityPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
+	pub const UtilityLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 }
 
 /// The main business of the Bulletin chain.

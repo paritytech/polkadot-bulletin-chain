@@ -101,17 +101,38 @@ pub type Barrier = TrailingSetTopicAsId<
 
 /// Calls that are safe to dispatch from XCM. Blocks storage-mutating
 /// TransactionStorage calls — those require on-chain authorization that XCM cannot provide.
+/// Recursively inspects wrapper calls (Utility, Proxy, Sudo) to prevent bypass via nesting.
 pub struct XcmSafeCallFilter;
-impl Contains<RuntimeCall> for XcmSafeCallFilter {
-	fn contains(call: &RuntimeCall) -> bool {
-		!matches!(
-			call,
+impl XcmSafeCallFilter {
+	fn contains_blocked_storage_call(call: &RuntimeCall, depth: u32) -> bool {
+		use pallets_common::{
+			proxy_inner_calls, sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH,
+		};
+		if depth >= MAX_INNER_CALL_DEPTH {
+			return true;
+		}
+		match call {
 			RuntimeCall::TransactionStorage(
 				pallet_transaction_storage::Call::store { .. } |
-					pallet_transaction_storage::Call::store_with_cid_config { .. } |
-					pallet_transaction_storage::Call::renew { .. }
-			)
-		)
+				pallet_transaction_storage::Call::store_with_cid_config { .. } |
+				pallet_transaction_storage::Call::renew { .. },
+			) => true,
+			RuntimeCall::Utility(utility_call) => utility_inner_calls(utility_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			RuntimeCall::Proxy(proxy_call) => proxy_inner_calls(proxy_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			RuntimeCall::Sudo(sudo_call) => sudo_inner_calls(sudo_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			_ => false,
+		}
+	}
+}
+impl Contains<RuntimeCall> for XcmSafeCallFilter {
+	fn contains(call: &RuntimeCall) -> bool {
+		!Self::contains_blocked_storage_call(call, 0)
 	}
 }
 
@@ -461,6 +482,61 @@ pub(crate) mod tests {
 				result.dispatch_level_result,
 				XcmBlobMessageDispatchResult::Dispatched,
 				"XCM Transact store must be blocked even with authorization",
+			);
+
+			// Authorization must not have been consumed.
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Authorization should remain unconsumed since XCM was blocked",
+			);
+		});
+	}
+
+	/// XCM Transact with `store` wrapped in `utility::batch` must also be blocked.
+	/// The `XcmSafeCallFilter` recursively inspects inner calls.
+	#[test]
+	fn xcm_transact_wrapped_store_is_blocked() {
+		run_test(|| {
+			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+
+			let data = vec![42u8; 100];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			// Authorize the preimage so we can verify the filter blocks it
+			// regardless of authorization state.
+			assert_ok!(crate::TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash,
+				data.len() as u64,
+			));
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			// Wrap store in utility::batch — the filter must recurse into it.
+			let batch_call =
+				RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_call] });
+
+			let result = Dispatcher::dispatch(DispatchMessage {
+				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+				data: DispatchMessageData {
+					payload: Ok(encoded_xcm_transact_from_people_polkadot(
+						OriginKind::Superuser,
+						batch_call,
+					)),
+				},
+			});
+
+			assert_ne!(
+				result.dispatch_level_result,
+				XcmBlobMessageDispatchResult::Dispatched,
+				"XCM Transact batch(store) must be blocked by recursive filter",
 			);
 
 			// Authorization must not have been consumed.
