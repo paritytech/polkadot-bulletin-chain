@@ -13,12 +13,11 @@ use crate::{
 };
 use subxt::{OnlineClient, PolkadotConfig};
 use subxt::blocks::BlockRef;
+use subxt::utils::AccountId32;
 use subxt_signer::sr25519::Keypair;
-use sp_runtime::AccountId32;
-use futures::StreamExt;
 
 // Subxt metadata for TransactionStorage pallet
-#[subxt::subxt(runtime_metadata_path = "../metadata.scale", substitute_type_path = "sp_core::crypto::AccountId32")]
+#[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
 
 /// Transaction submission client for Bulletin Chain.
@@ -101,9 +100,9 @@ impl TransactionClient {
 								callback(ProgressEvent::tx_validated());
 							}
 						}
-						TxStatus::Broadcasted { num_peers } => {
+						TxStatus::Broadcasted => {
 							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_broadcasted(num_peers));
+								callback(ProgressEvent::tx_broadcasted(0)); // num_peers not available in subxt 0.44
 							}
 						}
 						TxStatus::InBestBlock(in_block) => {
@@ -220,13 +219,21 @@ impl TransactionClient {
 			.transaction_storage()
 			.authorize_account(who.clone(), transactions, bytes);
 
-		let result = self
+		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
 			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?
-			.wait_for_finalized_success()
+			.wait_for_finalized()
+			.await
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+
+		let block_hash = format!("{:?}", in_block.block_hash());
+
+		// Verify success
+		in_block
+			.wait_for_success()
 			.await
 			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
 
@@ -234,7 +241,7 @@ impl TransactionClient {
 			account: who,
 			transactions,
 			bytes,
-			block_hash: format!("{:?}", result.block_hash()),
+			block_hash,
 		})
 	}
 
@@ -251,20 +258,28 @@ impl TransactionClient {
 			.transaction_storage()
 			.authorize_preimage(content_hash, max_size);
 
-		let result = self
+		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
 			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?
-			.wait_for_finalized_success()
+			.wait_for_finalized()
+			.await
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+
+		let block_hash = format!("{:?}", in_block.block_hash());
+
+		// Verify success
+		in_block
+			.wait_for_success()
 			.await
 			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
 
 		Ok(PreimageAuthorizationReceipt {
 			content_hash,
 			max_size,
-			block_hash: format!("{:?}", result.block_hash()),
+			block_hash,
 		})
 	}
 
@@ -279,20 +294,28 @@ impl TransactionClient {
 			.transaction_storage()
 			.renew(block, index);
 
-		let result = self
+		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
 			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?
-			.wait_for_finalized_success()
+			.wait_for_finalized()
+			.await
+			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?;
+
+		let block_hash = format!("{:?}", in_block.block_hash());
+
+		// Verify success
+		in_block
+			.wait_for_success()
 			.await
 			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?;
 
 		Ok(RenewReceipt {
 			original_block: block,
 			transaction_index: index,
-			block_hash: format!("{:?}", result.block_hash()),
+			block_hash,
 		})
 	}
 

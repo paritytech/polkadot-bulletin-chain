@@ -1,10 +1,13 @@
 # Rust Authorize and Store Example
 
-This example demonstrates using the `bulletin-sdk-rust` with a subxt-based TransactionSubmitter.
+This example demonstrates using the `bulletin-sdk-rust` crate to interact with Bulletin Chain.
 
-**⚠️  Status**: This example is currently incomplete and requires metadata generation from a running node before it can be compiled and tested. It has been updated to use subxt 0.44 metadata codegen but the API compatibility still needs verification with actual runtime metadata.
+## Features
 
-**Note**: This example is excluded from the main workspace due to dependency conflicts between `subxt` and the polkadot-sdk dependencies. Build it separately from its directory.
+- Uses SDK's `TransactionClient` for all chain interactions
+- Uses SDK's `BulletinClient` for CID calculation
+- Progress tracking via callbacks
+- No manual metadata generation required
 
 ## Prerequisites
 
@@ -17,24 +20,7 @@ This example demonstrates using the `bulletin-sdk-rust` with a subxt-based Trans
    ./target/release/polkadot-bulletin-chain --dev --tmp
    ```
 
-   This typically runs on `ws://localhost:10000`, but your setup may differ.
-
-2. **Generate metadata** (required before first build):
-   ```bash
-   cd examples/rust-authorize-and-store
-   ./fetch_metadata.sh <WS_URL>
-   ```
-
-   Where `<WS_URL>` is your node's WebSocket endpoint (e.g., `ws://localhost:10000` or `ws://your-node:9944`).
-
-   Or manually:
-   ```bash
-   # Install subxt CLI if not already installed
-   cargo install subxt-cli
-
-   # Fetch metadata from your running node
-   subxt metadata --url <WS_URL> -f bytes > bulletin_metadata.scale
-   ```
+   This typically runs on `ws://localhost:10000`.
 
 ## Usage
 
@@ -48,114 +34,78 @@ Where:
 - `<WS_URL>`: WebSocket URL of your Bulletin Chain node (default: `ws://localhost:10000`)
 - `<SEED>`: Account seed phrase or dev seed like `//Alice` (default: `//Alice`)
 
+### Example
+
+```bash
+# Using defaults (localhost, Alice)
+cargo run --release
+
+# Custom endpoint
+cargo run --release -- --ws ws://your-node:9944 --seed "//Bob"
+```
+
 ### Controlling Log Output
 
-This example uses `tracing` for structured logging. You can control the log level using the `RUST_LOG` environment variable:
+Control the log level using the `RUST_LOG` environment variable:
 
-**Default output (INFO level):**
 ```bash
-cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+# Default (INFO level)
+cargo run --release
+
+# Debug output
+RUST_LOG=debug cargo run --release
+
+# Only warnings and errors
+RUST_LOG=warn cargo run --release
 ```
 
-**Debug output (more verbose):**
-```bash
-RUST_LOG=debug cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+## Example Output
+
 ```
-
-**Trace output (most verbose):**
-```bash
-RUST_LOG=trace cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
-```
-
-**Filter by module (only this example's logs at debug level):**
-```bash
-RUST_LOG=authorize_and_store=debug cargo run --release -- --ws ws://localhost:10000
-```
-
-**Multiple filters (example at debug, subxt at info):**
-```bash
-RUST_LOG=authorize_and_store=debug,subxt=info cargo run --release -- --ws ws://localhost:10000
-```
-
-**Quiet mode (warnings and errors only):**
-```bash
-RUST_LOG=warn cargo run --release -- --ws ws://localhost:10000
-```
-
-### Log Level Guide
-
-- `error` - Only errors
-- `warn` - Errors and warnings
-- `info` - Normal operation info (default)
-- `debug` - Detailed debugging information
-- `trace` - Very detailed trace information
-
-### Advanced Command-Line Usage
-
-**Save logs to a file:**
-```bash
-RUST_LOG=debug cargo run --release -- --ws ws://localhost:10000 2>&1 | tee output.log
-```
-
-**Filter and search logs:**
-```bash
-# Show only lines containing "CID"
-RUST_LOG=info cargo run --release -- --ws ws://localhost:10000 2>&1 | grep CID
-
-# Search through saved logs
-grep -i "error\|failed" output.log
-```
-
-**Disable color output (for log files):**
-```bash
-NO_COLOR=1 RUST_LOG=info cargo run --release -- --ws ws://localhost:10000
-```
-
-**Combine with timestamp:**
-```bash
-RUST_LOG=info cargo run --release -- --ws ws://localhost:10000 2>&1 | ts '[%Y-%m-%d %H:%M:%S]'
-```
-
-**Real-time monitoring with less:**
-```bash
-RUST_LOG=debug cargo run --release -- --ws ws://localhost:10000 2>&1 | less -R
-```
-
-### Example Output
-
-With `RUST_LOG=info` (default), you'll see output like:
-```
-INFO Using account: d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d
-INFO Connecting to ws://localhost:10000...
+INFO Using account: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+INFO Connecting to ws://localhost:10000 using Bulletin SDK...
 INFO Connected successfully!
 INFO
-Step 1: Authorizing account...
+Step 1: Authorizing account using SDK...
 INFO Account authorized successfully!
+INFO   Block hash: 0x1234...
+INFO   Transactions: 100
+INFO   Bytes: 104857600
 INFO
-Step 2: Storing data...
-INFO Data stored successfully!
-INFO   CID: 1220a4e9...
-INFO   Size: 42 bytes
+Step 2: Storing data using SDK...
+INFO Data: Hello from Bulletin SDK at 1234567890s
+INFO Pre-calculated CID: 0155...
+INFO Content hash: a4e9...
+INFO Progress: TransactionValidated
+INFO Progress: TransactionBroadcasted { num_peers: 0 }
+INFO Progress: TransactionInBestBlock { ... }
+INFO Progress: TransactionFinalized { ... }
+INFO
+✅ Data stored successfully using Bulletin SDK!
+INFO   Block hash: 0x5678...
+INFO   Extrinsic hash: 0x9abc...
+INFO   Data size: 42 bytes
 ```
-
-For more information on filtering syntax, see the [tracing-subscriber documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
 
 ## How it Works
 
-1. **Metadata Codegen**: The `#[subxt::subxt]` macro generates Rust types from `bulletin_metadata.scale` at compile time
-2. **Custom Extension**: We handle Bulletin Chain's custom `ProvideCidConfig` signed extension for CID configuration
-3. **SDK Integration**: The generated types are used with `bulletin-sdk-rust`'s `TransactionSubmitter` trait
+1. **TransactionClient**: Connects to the chain and submits transactions
+2. **BulletinClient**: Prepares data and calculates CIDs locally
+3. **Progress Tracking**: Receives real-time updates as transactions progress
 
-## Updating Metadata
+## SDK Integration
 
-When the Bulletin Chain runtime changes, regenerate the metadata:
+The example uses two SDK clients:
 
-```bash
-./fetch_metadata.sh ws://localhost:10000
-```
+```rust
+// TransactionClient for chain interaction
+let client = TransactionClient::new("ws://localhost:10000").await?;
 
-Then rebuild:
-```bash
-cargo clean
-cargo build --release
+// BulletinClient for data preparation
+let sdk_client = BulletinClient::new();
+let operation = sdk_client.prepare_store(data, options)?;
+let cid = operation.calculate_cid()?;
+
+// Store with progress tracking
+let receipt = client.store_with_progress(data, &signer, Some(callback)).await?;
 ```

@@ -3688,8 +3688,6 @@ dependencies = [
  "bulletin-sdk-rust",
  "clap",
  "hex",
- "parity-scale-codec",
- "scale-info",
  "subxt",
  "subxt-signer",
  "tokio",

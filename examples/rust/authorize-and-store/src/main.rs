@@ -1,34 +1,29 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-//! Authorize and store data on Bulletin Chain using the Bulletin SDK + subxt.
+//! Authorize and store data on Bulletin Chain using the Bulletin SDK.
 //!
 //! This example demonstrates:
-//! 1. Using the Bulletin SDK to prepare storage operations and calculate CIDs
+//! 1. Using the Bulletin SDK's TransactionClient for all chain interactions
 //! 2. Authorizing an account to store data (requires sudo)
-//! 3. Submitting the store transaction via subxt
-//!
-//! ## Setup
-//!
-//! Before running this example, generate metadata from a running node:
-//!   ./fetch_metadata.sh ws://localhost:10000
+//! 3. Storing data and verifying the CID
 //!
 //! ## Usage
 //!
 //!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
 
 use anyhow::{anyhow, Result};
-use bulletin_sdk_rust::{cid::cid_to_bytes, BulletinClient, CidCodec, HashAlgorithm, StoreOptions};
+use bulletin_sdk_rust::prelude::*;
 use clap::Parser;
 use std::str::FromStr;
-use subxt::{utils::AccountId32, OnlineClient, PolkadotConfig};
+use subxt::utils::AccountId32;
 use subxt_signer::sr25519::Keypair;
 use tracing::info;
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
 #[command(name = "authorize-and-store")]
-#[command(about = "Authorize and store data on Bulletin Chain using subxt")]
+#[command(about = "Authorize and store data on Bulletin Chain using the Bulletin SDK")]
 struct Args {
 	/// WebSocket URL of the Bulletin Chain node
 	#[arg(long, default_value = "ws://localhost:10000")]
@@ -39,78 +34,47 @@ struct Args {
 	seed: String,
 }
 
-// Generate types from metadata using subxt codegen
-// This reads bulletin_metadata.scale and generates all the necessary types at compile time
-#[subxt::subxt(runtime_metadata_path = "bulletin_metadata.scale")]
-pub mod bulletin {}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-	// Initialize tracing subscriber (RUST_LOG env var overrides the default "info" level)
+	// Initialize tracing subscriber
 	let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
 		.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-		let subscriber = FmtSubscriber::builder().with_env_filter(env_filter).finish();
-		tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+	let subscriber = FmtSubscriber::builder().with_env_filter(env_filter).finish();
+	tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
 	let args = Args::parse();
 
 	// Parse keypair from seed
 	let keypair = keypair_from_seed(&args.seed)?;
-	let account_id: AccountId32 = keypair.public_key().into();
+	let account_id = AccountId32::from(keypair.public_key().0);
 	info!("Using account: {}", account_id);
 
-	// Connect to Bulletin Chain node
-	info!("Connecting to {}...", args.ws);
-	let api = OnlineClient::<PolkadotConfig>::from_url(&args.ws)
+	// Step 1: Connect using SDK's TransactionClient
+	info!("Connecting to {} using Bulletin SDK...", args.ws);
+	let client = TransactionClient::new(&args.ws)
 		.await
-		.map_err(|e| anyhow!("Failed to connect: {e:?}"))?;
+		.map_err(|e| anyhow!("Failed to connect: {:?}", e))?;
 	info!("Connected successfully!");
 
-	// Step 1: Authorize the account to store data (requires sudo)
-	info!("\nStep 1: Authorizing account...");
+	// Step 2: Authorize the account to store data
+	info!("\nStep 1: Authorizing account using SDK...");
 
-	// To wrap a call in sudo, we need to construct the RuntimeCall manually.
-	// The runtime type depends on which node we're connected to (polkadot vs westend).
-	// Use feature flags to select the correct runtime at compile time.
-	use bulletin::runtime_types;
-
-	#[cfg(feature = "polkadot-runtime")]
-	let authorize_call = runtime_types::bulletin_polkadot_runtime::RuntimeCall::TransactionStorage(
-		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
-			who: account_id.clone(),
-			transactions: 100,
-			bytes: 100 * 1024 * 1024,
-		},
-	);
-
-	#[cfg(feature = "westend-runtime")]
-	let authorize_call = runtime_types::bulletin_westend_runtime::RuntimeCall::TransactionStorage(
-		runtime_types::pallet_transaction_storage::pallet::Call::authorize_account {
-			who: account_id.clone(),
-			transactions: 100,
-			bytes: 100 * 1024 * 1024,
-		},
-	);
-
-	// Wrap in sudo call (Alice is sudo in dev mode)
-	let sudo_tx = bulletin::tx().sudo().sudo(authorize_call);
-
-	api.tx()
-		.sign_and_submit_then_watch_default(&sudo_tx, &keypair)
+	let auth_receipt = client
+		.authorize_account(account_id.clone(), 100, 100 * 1024 * 1024, &keypair)
 		.await
-		.map_err(|e| anyhow!("Failed to submit authorization: {e:?}"))?
-		.wait_for_finalized_success()
-		.await
-		.map_err(|e| anyhow!("Authorization transaction failed: {e:?}"))?;
+		.map_err(|e| anyhow!("Authorization failed: {:?}", e))?;
 
 	info!("Account authorized successfully!");
+	info!("  Block hash: {}", auth_receipt.block_hash);
+	info!("  Transactions: {}", auth_receipt.transactions);
+	info!("  Bytes: {}", auth_receipt.bytes);
 
-	// Step 2: Prepare storage operation using Bulletin SDK
-	info!("\nStep 2: Preparing storage operation with Bulletin SDK...");
-	let data_to_store = format!("Hello from Bulletin Chain at {}", chrono_lite());
+	// Step 3: Prepare and store data using SDK
+	info!("\nStep 2: Storing data using SDK...");
+	let data_to_store = format!("Hello from Bulletin SDK at {}", chrono_lite());
 	info!("Data: {}", data_to_store);
 
-	// Use Bulletin SDK to prepare the storage operation
+	// Calculate CID before submission using SDK utilities
 	let sdk_client = BulletinClient::new();
 	let options = StoreOptions {
 		cid_codec: CidCodec::Raw,
@@ -122,7 +86,6 @@ async fn main() -> Result<()> {
 		.prepare_store(data_to_store.as_bytes().to_vec(), options)
 		.map_err(|e| anyhow!("SDK error: {:?}", e))?;
 
-	// Calculate CID before submission using the SDK
 	let cid_data = operation
 		.calculate_cid()
 		.map_err(|e| anyhow!("CID calculation error: {:?}", e))?;
@@ -131,59 +94,22 @@ async fn main() -> Result<()> {
 	info!("Pre-calculated CID: {}", hex::encode(&cid_bytes));
 	info!("Content hash: {}", hex::encode(&cid_data.content_hash));
 
-	// Build the store transaction with SDK-prepared data and CID config
-	let store_tx = bulletin::tx()
-		.transaction_storage()
-		.store(operation.data);
-
-	let tx_progress = api
-		.tx()
-		.sign_and_submit_then_watch_default(&store_tx, &keypair)
+	// Store using SDK's TransactionClient with progress callback
+	let store_receipt = client
+		.store_with_progress(
+			data_to_store.as_bytes().to_vec(),
+			&keypair,
+			Some(std::sync::Arc::new(|event| {
+				info!("Progress: {:?}", event);
+			})),
+		)
 		.await
-		.map_err(|e| anyhow!("Failed to submit store: {e:?}"))?;
+		.map_err(|e| anyhow!("Store failed: {:?}", e))?;
 
-	let tx_in_block = tx_progress
-		.wait_for_finalized()
-		.await
-		.map_err(|e| anyhow!("Store transaction not finalized: {e:?}"))?;
-
-	let block_hash = tx_in_block.block_hash();
-	let block = api
-		.blocks()
-		.at(block_hash)
-		.await
-		.map_err(|e| anyhow!("Failed to get block: {e:?}"))?;
-
-	let events = tx_in_block
-		.wait_for_success()
-		.await
-		.map_err(|e| anyhow!("Store transaction failed: {e:?}"))?;
-
-	info!("Data stored successfully!");
-	info!("  Block number: {}", block.number());
-	info!("  Block hash: {:?}", block_hash);
-
-	// Find the Stored event to get the CID and index
-	let stored_event = events
-		.find_first::<bulletin::transaction_storage::events::Stored>()
-		.map_err(|e| anyhow!("Failed to find Stored event: {e:?}"))?;
-
-	if let Some(event) = stored_event {
-		info!("  Content Hash: {}", hex::encode(&event.content_hash));
-		info!("  Transaction Index In Block: {}", event.index);
-		if let Some(on_chain_cid) = &event.cid {
-			info!("  On-chain CID: {}", hex::encode(on_chain_cid));
-			// Verify SDK-calculated CID matches on-chain CID
-			if on_chain_cid == &cid_bytes {
-				info!("  ✓ SDK CID matches on-chain CID!");
-			} else {
-				info!("  ✗ CID mismatch - SDK: {}, Chain: {}", hex::encode(&cid_bytes), hex::encode(on_chain_cid));
-			}
-		}
-		info!("  Size: {} bytes", data_to_store.len());
-	}
-
-	info!("\n✅ Test passed! SDK integration working correctly.");
+	info!("\n✅ Data stored successfully using Bulletin SDK!");
+	info!("  Block hash: {}", store_receipt.block_hash);
+	info!("  Extrinsic hash: {}", store_receipt.extrinsic_hash);
+	info!("  Data size: {} bytes", store_receipt.data_size);
 
 	Ok(())
 }
