@@ -16,8 +16,8 @@ extern crate alloc;
 pub const MAX_MANIFEST_CHUNKS: usize = 1_000_000;
 
 use crate::{
-	cid::{calculate_cid, CidConfig, CidData},
-	types::{Chunk, CidCodec, Error, HashAlgorithm, Result},
+	cid::{calculate_cid, CidConfig, CidData, HashingAlgorithm},
+	types::{Chunk, CidCodec, Error, Result},
 };
 use alloc::vec::Vec;
 
@@ -37,7 +37,7 @@ pub struct DagManifest {
 /// Builder for creating DAG-PB manifests.
 pub trait DagBuilder {
 	/// Build a DAG-PB manifest from chunks.
-	fn build(&self, chunks: &[Chunk], hash_algo: HashAlgorithm) -> Result<DagManifest>;
+	fn build(&self, chunks: &[Chunk], hash_algo: HashingAlgorithm) -> Result<DagManifest>;
 }
 
 /// UnixFS DAG-PB builder following IPFS UnixFS v1 specification.
@@ -160,7 +160,7 @@ impl UnixFsDagBuilder {
 }
 
 impl DagBuilder for UnixFsDagBuilder {
-	fn build(&self, chunks: &[Chunk], hash_algo: HashAlgorithm) -> Result<DagManifest> {
+	fn build(&self, chunks: &[Chunk], hash_algo: HashingAlgorithm) -> Result<DagManifest> {
 		if chunks.is_empty() {
 			return Err(Error::EmptyData);
 		}
@@ -181,10 +181,7 @@ impl DagBuilder for UnixFsDagBuilder {
 		let mut total_size = 0u64;
 
 		for chunk in chunks {
-			let cid_config = CidConfig {
-				codec: CidCodec::Raw.code(),
-				hashing: crate::cid::hash_algorithm_to_pallet(hash_algo)?,
-			};
+			let cid_config = CidConfig { codec: CidCodec::Raw.code(), hashing: hash_algo };
 
 			let cid_data = calculate_cid(&chunk.data, cid_config)
 				.map_err(|_| Error::DagEncodingFailed("Failed to calculate chunk CID".into()))?;
@@ -213,10 +210,7 @@ impl DagBuilder for UnixFsDagBuilder {
 		let dag_bytes = Self::encode_dag_node(&links, &unixfs_data);
 
 		// Calculate root CID (using dag-pb codec)
-		let root_config = CidConfig {
-			codec: CidCodec::DagPb.code(),
-			hashing: crate::cid::hash_algorithm_to_pallet(hash_algo)?,
-		};
+		let root_config = CidConfig { codec: CidCodec::DagPb.code(), hashing: hash_algo };
 
 		let root_cid = calculate_cid(&dag_bytes, root_config)
 			.map_err(|_| Error::DagEncodingFailed("Failed to calculate root CID".into()))?;
@@ -276,7 +270,7 @@ mod tests {
 		let chunks = chunker.chunk(&data).unwrap();
 
 		let builder = UnixFsDagBuilder::new();
-		let manifest = builder.build(&chunks, HashAlgorithm::Blake2b256).unwrap();
+		let manifest = builder.build(&chunks, HashingAlgorithm::Blake2b256).unwrap();
 
 		assert_eq!(manifest.chunk_cids.len(), 3);
 		assert_eq!(manifest.total_size, 5000);
@@ -293,7 +287,7 @@ mod tests {
 		let chunks = chunker.chunk(&data).unwrap();
 
 		let builder = UnixFsDagBuilder::new();
-		let manifest = builder.build(&chunks, HashAlgorithm::Blake2b256).unwrap();
+		let manifest = builder.build(&chunks, HashingAlgorithm::Blake2b256).unwrap();
 
 		assert_eq!(manifest.chunk_cids.len(), 1);
 		assert_eq!(manifest.total_size, 100);
@@ -303,7 +297,7 @@ mod tests {
 	fn test_build_dag_manifest_empty_chunks() {
 		let chunks: Vec<Chunk> = vec![];
 		let builder = UnixFsDagBuilder::new();
-		let result = builder.build(&chunks, HashAlgorithm::Blake2b256);
+		let result = builder.build(&chunks, HashingAlgorithm::Blake2b256);
 		assert!(result.is_err());
 	}
 

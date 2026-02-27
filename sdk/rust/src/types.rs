@@ -5,6 +5,7 @@
 
 extern crate alloc;
 
+use crate::cid::HashingAlgorithm;
 use alloc::{string::String, vec::Vec};
 use codec::{Decode, Encode};
 use scale_info::TypeInfo;
@@ -83,10 +84,6 @@ pub enum Error {
 	/// Submission failed.
 	#[cfg_attr(feature = "std", error("Submission failed: {0}"))]
 	SubmissionFailed(String),
-
-	/// Unsupported hash algorithm.
-	#[cfg_attr(feature = "std", error("Unsupported hash algorithm: {0}"))]
-	UnsupportedHashAlgorithm(String),
 
 	/// Renewal target not found.
 	#[cfg_attr(feature = "std", error("Renewal target not found: block {block}, index {index}"))]
@@ -221,7 +218,7 @@ pub struct StoreOptions {
 	/// CID codec to use (default: raw).
 	pub cid_codec: CidCodec,
 	/// Hashing algorithm to use (default: blake2b-256).
-	pub hash_algorithm: HashAlgorithm,
+	pub hash_algorithm: HashingAlgorithm,
 	/// Whether to wait for finalization (default: false).
 	pub wait_for_finalization: bool,
 }
@@ -230,7 +227,7 @@ impl Default for StoreOptions {
 	fn default() -> Self {
 		Self {
 			cid_codec: CidCodec::Raw,
-			hash_algorithm: HashAlgorithm::Blake2b256,
+			hash_algorithm: HashingAlgorithm::Blake2b256,
 			wait_for_finalization: false,
 		}
 	}
@@ -254,31 +251,6 @@ impl CidCodec {
 			CidCodec::Raw => 0x55,
 			CidCodec::DagPb => 0x70,
 			CidCodec::DagCbor => 0x71,
-		}
-	}
-}
-
-/// Hash algorithm types.
-#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo, PartialEq, Eq)]
-pub enum HashAlgorithm {
-	/// BLAKE2b-256 (0xb220).
-	Blake2b256,
-	/// SHA2-256 (0x12).
-	Sha2_256,
-	/// SHA2-512 (0x13).
-	Sha2_512,
-	/// Keccak-256 (0x1b).
-	Keccak256,
-}
-
-impl HashAlgorithm {
-	/// Get the multihash code.
-	pub fn code(&self) -> u64 {
-		match self {
-			HashAlgorithm::Blake2b256 => 0xb220,
-			HashAlgorithm::Sha2_256 => 0x12,
-			HashAlgorithm::Sha2_512 => 0x13,
-			HashAlgorithm::Keccak256 => 0x1b,
 		}
 	}
 }

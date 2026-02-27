@@ -175,8 +175,8 @@ pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
 	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, CidCodec,
-	Error, HashAlgorithm, ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef,
-	StoreOptions, StoreResult, TransactionStatusEvent,
+	Error, ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions,
+	StoreResult, TransactionStatusEvent,
 };
 
 // Re-export CID types from pallet

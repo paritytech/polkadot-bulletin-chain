@@ -4,8 +4,8 @@
 //! Utility functions and helpers for Bulletin SDK
 
 use crate::{
-	cid::ContentHash,
-	types::{CidCodec, Error, HashAlgorithm, Result},
+	cid::{ContentHash, HashingAlgorithm},
+	types::{CidCodec, Error, Result},
 };
 use alloc::{string::String, vec::Vec};
 
@@ -256,17 +256,17 @@ pub fn codec_name(codec: CidCodec) -> &'static str {
 ///
 /// # Example
 /// ```
-/// use bulletin_sdk_rust::{utils::hash_algorithm_name, types::HashAlgorithm};
+/// use bulletin_sdk_rust::{utils::hash_algorithm_name, HashingAlgorithm};
 ///
-/// assert_eq!(hash_algorithm_name(HashAlgorithm::Blake2b256), "blake2b-256");
-/// assert_eq!(hash_algorithm_name(HashAlgorithm::Sha2_256), "sha2-256");
+/// assert_eq!(hash_algorithm_name(HashingAlgorithm::Blake2b256), "blake2b-256");
+/// assert_eq!(hash_algorithm_name(HashingAlgorithm::Sha2_256), "sha2-256");
 /// ```
-pub fn hash_algorithm_name(algo: HashAlgorithm) -> &'static str {
+pub fn hash_algorithm_name(algo: HashingAlgorithm) -> &'static str {
 	match algo {
-		HashAlgorithm::Blake2b256 => "blake2b-256",
-		HashAlgorithm::Sha2_256 => "sha2-256",
-		HashAlgorithm::Sha2_512 => "sha2-512",
-		HashAlgorithm::Keccak256 => "keccak-256",
+		HashingAlgorithm::Blake2b256 => "blake2b-256",
+		HashingAlgorithm::Sha2_256 => "sha2-256",
+		HashingAlgorithm::Keccak256 => "keccak-256",
+		_ => "unknown",
 	}
 }
 
@@ -343,8 +343,8 @@ mod tests {
 
 	#[test]
 	fn test_hash_algorithm_name() {
-		assert_eq!(hash_algorithm_name(HashAlgorithm::Blake2b256), "blake2b-256");
-		assert_eq!(hash_algorithm_name(HashAlgorithm::Sha2_256), "sha2-256");
-		assert_eq!(hash_algorithm_name(HashAlgorithm::Keccak256), "keccak-256");
+		assert_eq!(hash_algorithm_name(HashingAlgorithm::Blake2b256), "blake2b-256");
+		assert_eq!(hash_algorithm_name(HashingAlgorithm::Sha2_256), "sha2-256");
+		assert_eq!(hash_algorithm_name(HashingAlgorithm::Keccak256), "keccak-256");
 	}
 }
