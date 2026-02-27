@@ -19,7 +19,7 @@ const api = papiClient.getTypedApi(bulletinDescriptor);
 // 2. Create client with PAPI client and signer
 const client = new AsyncBulletinClient(api, signer);
 
-// 3. Store data using builder pattern (automatically chunks if > 2 MiB)
+// 3. Store data using builder pattern (automatically chunks if > 8 MiB, max 64 MiB)
 const data = Binary.fromText('Hello, Bulletin Chain!');
 const result = await client.store(data).send();
 
@@ -79,9 +79,9 @@ const data = Binary.fromBytes(Buffer.from('Hello'));
 ### 4. Store Data
 
 The `store()` method with builder pattern handles everything:
-- Validates data size
+- Validates data size (max 64 MiB)
 - Checks authorization (if configured)
-- Automatically chunks large files (> 2 MiB by default)
+- Automatically chunks large files into 8 MiB chunks
 - Calculates CID(s)
 - Submits transaction(s)
 - Waits for finalization
