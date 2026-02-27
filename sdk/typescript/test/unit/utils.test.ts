@@ -8,7 +8,6 @@ import {
   calculateThroughput,
   createProgressTracker,
   deepClone,
-  estimateFees,
   formatBytes,
   formatThroughput,
   hexToBytes,
@@ -93,19 +92,6 @@ describe("Utils", () => {
 
     it("should return maximum for very large data", () => {
       expect(optimalChunkSize(1_000_000_000)).toBe(2_097_152) // MAX_CHUNK_SIZE = 2 MiB
-    })
-  })
-
-  describe("estimateFees", () => {
-    it("should estimate fees", () => {
-      const fees = estimateFees(1_000_000)
-      expect(fees).toBeGreaterThan(0n)
-    })
-
-    it("should increase with data size", () => {
-      const fees1 = estimateFees(1_000_000)
-      const fees2 = estimateFees(2_000_000)
-      expect(fees2).toBeGreaterThan(fees1)
     })
   })
 

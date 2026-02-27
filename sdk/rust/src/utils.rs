@@ -235,44 +235,6 @@ pub fn optimal_chunk_size(data_size: u64) -> u64 {
 	}
 }
 
-/// Estimate transaction fees for given data size.
-///
-/// # Warning: Rough Estimate Only
-///
-/// This function provides a **rough order-of-magnitude estimate** using hardcoded
-/// placeholder values. **Do not rely on this for accurate fee prediction.**
-///
-/// The actual fees depend on:
-/// - Runtime weight configuration (`WeightToFee`)
-/// - Current chain congestion and fee multiplier
-/// - Transaction length fees
-/// - Any runtime-specific fee adjustments
-///
-/// For accurate fee estimation, use subxt's `payment_queryInfo` RPC or
-/// the `TransactionPaymentApi::query_info` runtime API against a live node.
-///
-/// # Returns
-///
-/// A placeholder estimate in plancks (smallest unit). This value is intentionally
-/// conservative and may significantly differ from actual fees.
-///
-/// # Example
-/// ```
-/// use bulletin_sdk_rust::utils::estimate_fees;
-///
-/// // Returns a rough placeholder estimate - do not use for actual fee calculation
-/// let fees = estimate_fees(1_000_000); // 1 MB
-/// assert!(fees > 0);
-/// ```
-pub fn estimate_fees(data_size: u64) -> u64 {
-	// WARNING: These are placeholder values for rough estimation only.
-	// Actual fees are determined by runtime configuration.
-	const BASE_FEE: u64 = 1_000_000; // Placeholder base fee
-	const PER_BYTE_FEE: u64 = 100; // Placeholder per-byte fee
-
-	BASE_FEE.saturating_add(data_size.saturating_mul(PER_BYTE_FEE))
-}
-
 /// Get codec name as string
 ///
 /// # Example
@@ -348,13 +310,6 @@ mod tests {
 		assert_eq!(optimal_chunk_size(500_000), 500_000);
 		assert_eq!(optimal_chunk_size(100_000_000), 1_048_576); // 1 MiB
 		assert_eq!(optimal_chunk_size(1_000_000_000), 8_388_608); // 8 MiB (max)
-	}
-
-	#[test]
-	fn test_estimate_fees() {
-		let fees = estimate_fees(1_000_000);
-		assert!(fees > 0);
-		assert_eq!(fees, 1_000_000 + 1_000_000 * 100);
 	}
 
 	#[test]

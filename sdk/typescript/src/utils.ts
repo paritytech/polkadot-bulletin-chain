@@ -210,25 +210,6 @@ export function optimalChunkSize(dataSize: number): number {
 }
 
 /**
- * Estimate transaction fees for given data size
- *
- * This is a rough estimate and actual fees may vary.
- *
- * @example
- * ```typescript
- * const fees = estimateFees(1_000_000); // 1 MB
- * ```
- */
-export function estimateFees(dataSize: number): bigint {
-  // Base fee + per-byte fee
-  // These are placeholder values - actual fees depend on chain configuration
-  const BASE_FEE = 1_000_000n // Base transaction fee
-  const PER_BYTE_FEE = 100n // Fee per byte
-
-  return BASE_FEE + BigInt(dataSize) * PER_BYTE_FEE
-}
-
-/**
  * Retry helper for async operations
  *
  * @example
