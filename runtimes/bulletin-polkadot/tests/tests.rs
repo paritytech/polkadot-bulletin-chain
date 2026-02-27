@@ -1025,6 +1025,12 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 	});
 }
 
+/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+#[test]
+fn transaction_storage_weight_sanity() {
+	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
+}
+
 // ============================================================================
 // Ensure calls wrapped in dispatch wrappers are subject to the same validation
 // as direct submissions. Covers utility (batch, batch_all, force_batch,
