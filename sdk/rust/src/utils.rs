@@ -176,6 +176,7 @@ pub fn hash_algorithm_name(algo: HashingAlgorithm) -> &'static str {
 		HashingAlgorithm::Blake2b256 => "blake2b-256",
 		HashingAlgorithm::Sha2_256 => "sha2-256",
 		HashingAlgorithm::Keccak256 => "keccak-256",
+		_ => "unknown",
 	}
 }
 
