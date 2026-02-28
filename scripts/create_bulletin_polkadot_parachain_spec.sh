@@ -7,7 +7,7 @@ cargo build --release -p bulletin-polkadot-parachain-runtime
 # cargo install staging-chain-spec-builder
 chain-spec-builder create \
         -p 1006 \
-        -c westend \
+        -c polkadot \
         -i bulletin-polkadot \
         -n Bulletin \
         -t local \

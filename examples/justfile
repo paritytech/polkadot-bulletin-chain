@@ -164,11 +164,15 @@ bulletin-polkadot-parachain-zombienet-start test_dir runtime="bulletin-polkadot-
         exit 1
     fi
 
-    # Create chain spec
-    echo "   Creating Polkadot parachain chain spec..."
-    # Ensure binaries are in PATH and run from root directory
+    # Generate chain specs (the relay runtime WASM is checked into
+    # integration-tests/production-runtimes/, so no build step needed)
     ROOT_DIR="{{ justfile_directory() }}/.."
     cd "$ROOT_DIR"
+
+    echo "   Creating Polkadot relay chain spec..."
+    PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_polkadot_relay_spec.sh
+
+    echo "   Creating Polkadot parachain chain spec..."
     PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_polkadot_parachain_spec.sh
     cd -
 
@@ -546,8 +550,8 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:1
             PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
         elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
-            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1006.json"
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/polkadot-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/polkadot-local-1006.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
         else
             CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
@@ -646,9 +650,9 @@ run-authorize-and-store runtime mode="ws": npm-install
             PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
         elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
-            # Polkadot parachain: relay chain (westend-local) + parachain spec
-            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1006.json"
+            # Polkadot parachain: relay chain (polkadot-local) + parachain spec
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/polkadot-local.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/polkadot-local-1006.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
         else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
