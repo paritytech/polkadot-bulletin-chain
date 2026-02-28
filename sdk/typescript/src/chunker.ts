@@ -89,4 +89,3 @@ export class FixedSizeChunker {
     return this.config.chunkSize
   }
 }
-
