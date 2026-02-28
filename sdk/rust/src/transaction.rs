@@ -5,15 +5,11 @@
 //!
 //! This module provides the actual blockchain interaction layer using subxt.
 
-#![cfg(feature = "std")]
-
 use crate::{
 	cid::ContentHash,
 	types::{Error, ProgressCallback, ProgressEvent, Result},
 };
-use subxt::{OnlineClient, PolkadotConfig};
-use subxt::blocks::BlockRef;
-use subxt::utils::AccountId32;
+use subxt::{blocks::BlockRef, utils::AccountId32, OnlineClient, PolkadotConfig};
 use subxt_signer::sr25519::Keypair;
 
 // Subxt metadata for TransactionStorage pallet
@@ -33,7 +29,7 @@ impl TransactionClient {
 	pub async fn new(endpoint: &str) -> Result<Self> {
 		let api = OnlineClient::<PolkadotConfig>::from_url(endpoint)
 			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to connect: {:?}", e)))?;
+			.map_err(|e| Error::NetworkError(format!("Failed to connect: {e:?}")))?;
 
 		Ok(Self { api })
 	}
@@ -51,11 +47,7 @@ impl TransactionClient {
 	/// Store data on-chain.
 	///
 	/// Submits a `TransactionStorage.store` extrinsic.
-	pub async fn store(
-		&self,
-		data: Vec<u8>,
-		signer: &Keypair,
-	) -> Result<StoreReceipt> {
+	pub async fn store(&self, data: Vec<u8>, signer: &Keypair) -> Result<StoreReceipt> {
 		self.store_with_progress(data, signer, None).await
 	}
 
@@ -75,16 +67,14 @@ impl TransactionClient {
 		signer: &Keypair,
 		progress_callback: Option<ProgressCallback>,
 	) -> Result<StoreReceipt> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.store(data.clone());
+		let tx = bulletin::tx().transaction_storage().store(data.clone());
 
 		let mut progress = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Transaction submission failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Transaction submission failed: {e:?}")))?;
 
 		let mut final_block_hash = None;
 		let mut final_extrinsic_hash = None;
@@ -95,22 +85,21 @@ impl TransactionClient {
 				Ok(status) => {
 					use subxt::tx::TxStatus;
 					match status {
-						TxStatus::Validated => {
+						TxStatus::Validated =>
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::tx_validated());
-							}
-						}
-						TxStatus::Broadcasted => {
+							},
+						TxStatus::Broadcasted =>
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::tx_broadcasted());
-							}
-						}
+							},
 						TxStatus::InBestBlock(in_block) => {
 							let block_hash = format!("{:?}", in_block.block_hash());
 							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
 
 							// Try to get block number
-							let block_number = self.get_block_number(in_block.block_hash()).await.ok();
+							let block_number =
+								self.get_block_number(in_block.block_hash()).await.ok();
 
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::tx_in_best_block(
@@ -122,13 +111,14 @@ impl TransactionClient {
 
 							final_block_hash = Some(block_hash);
 							final_extrinsic_hash = Some(extrinsic_hash);
-						}
+						},
 						TxStatus::InFinalizedBlock(in_block) => {
 							let block_hash = format!("{:?}", in_block.block_hash());
 							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
 
 							// Try to get block number
-							let block_number = self.get_block_number(in_block.block_hash()).await.ok();
+							let block_number =
+								self.get_block_number(in_block.block_hash()).await.ok();
 
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::tx_finalized(
@@ -142,44 +132,53 @@ impl TransactionClient {
 							final_extrinsic_hash = Some(extrinsic_hash);
 
 							// Check for success
-							in_block
-								.wait_for_success()
-								.await
-								.map_err(|e| Error::StorageFailed(format!("Transaction failed: {:?}", e)))?;
+							in_block.wait_for_success().await.map_err(|e| {
+								Error::StorageFailed(format!("Transaction failed: {e:?}"))
+							})?;
 
 							break;
-						}
+						},
 						TxStatus::NoLongerInBestBlock => {
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::Transaction(
 									crate::types::TransactionStatusEvent::NoLongerInBestBlock,
 								));
 							}
-						}
+						},
 						TxStatus::Invalid { message } => {
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::Invalid { error: message.clone() },
+									crate::types::TransactionStatusEvent::Invalid {
+										error: message.clone(),
+									},
 								));
 							}
-							return Err(Error::StorageFailed(format!("Transaction invalid: {}", message)));
-						}
+							return Err(Error::StorageFailed(format!(
+								"Transaction invalid: {message}"
+							)));
+						},
 						TxStatus::Dropped { message } => {
 							if let Some(ref callback) = progress_callback {
 								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::Dropped { error: message.clone() },
+									crate::types::TransactionStatusEvent::Dropped {
+										error: message.clone(),
+									},
 								));
 							}
-							return Err(Error::StorageFailed(format!("Transaction dropped: {}", message)));
-						}
+							return Err(Error::StorageFailed(format!(
+								"Transaction dropped: {message}"
+							)));
+						},
 						TxStatus::Error { message } => {
-							return Err(Error::StorageFailed(format!("Transaction error: {}", message)));
-						}
+							return Err(Error::StorageFailed(format!(
+								"Transaction error: {message}"
+							)));
+						},
 					}
-				}
+				},
 				Err(e) => {
-					return Err(Error::StorageFailed(format!("Status error: {:?}", e)));
-				}
+					return Err(Error::StorageFailed(format!("Status error: {e:?}")));
+				},
 			}
 		}
 
@@ -200,7 +199,7 @@ impl TransactionClient {
 			.blocks()
 			.at(block_hash)
 			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to get block: {:?}", e)))?;
+			.map_err(|e| Error::NetworkError(format!("Failed to get block: {e:?}")))?;
 
 		Ok(block.number())
 	}
@@ -215,19 +214,21 @@ impl TransactionClient {
 		bytes: u64,
 		signer: &Keypair,
 	) -> Result<AuthorizationReceipt> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.authorize_account(who.clone(), transactions, bytes);
+		let tx = bulletin::tx().transaction_storage().authorize_account(
+			who.clone(),
+			transactions,
+			bytes,
+		);
 
 		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {e:?}")))?
 			.wait_for_finalized()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {e:?}")))?;
 
 		let block_hash = format!("{:?}", in_block.block_hash());
 
@@ -235,14 +236,9 @@ impl TransactionClient {
 		in_block
 			.wait_for_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {e:?}")))?;
 
-		Ok(AuthorizationReceipt {
-			account: who,
-			transactions,
-			bytes,
-			block_hash,
-		})
+		Ok(AuthorizationReceipt { account: who, transactions, bytes, block_hash })
 	}
 
 	/// Authorize a preimage (by content hash) to be stored.
@@ -254,19 +250,17 @@ impl TransactionClient {
 		max_size: u64,
 		signer: &Keypair,
 	) -> Result<PreimageAuthorizationReceipt> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.authorize_preimage(content_hash, max_size);
+		let tx = bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
 		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {e:?}")))?
 			.wait_for_finalized()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {e:?}")))?;
 
 		let block_hash = format!("{:?}", in_block.block_hash());
 
@@ -274,35 +268,24 @@ impl TransactionClient {
 		in_block
 			.wait_for_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {e:?}")))?;
 
-		Ok(PreimageAuthorizationReceipt {
-			content_hash,
-			max_size,
-			block_hash,
-		})
+		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash })
 	}
 
 	/// Renew/extend the retention period for stored data.
-	pub async fn renew(
-		&self,
-		block: u32,
-		index: u32,
-		signer: &Keypair,
-	) -> Result<RenewReceipt> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.renew(block, index);
+	pub async fn renew(&self, block: u32, index: u32, signer: &Keypair) -> Result<RenewReceipt> {
+		let tx = bulletin::tx().transaction_storage().renew(block, index);
 
 		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Renew failed: {e:?}")))?
 			.wait_for_finalized()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Renew failed: {e:?}")))?;
 
 		let block_hash = format!("{:?}", in_block.block_hash());
 
@@ -310,13 +293,9 @@ impl TransactionClient {
 		in_block
 			.wait_for_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Renew failed: {e:?}")))?;
 
-		Ok(RenewReceipt {
-			original_block: block,
-			transaction_index: index,
-			block_hash,
-		})
+		Ok(RenewReceipt { original_block: block, transaction_index: index, block_hash })
 	}
 
 	/// Refresh an account authorization (extends expiry).
@@ -327,18 +306,16 @@ impl TransactionClient {
 		who: AccountId32,
 		signer: &Keypair,
 	) -> Result<()> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.refresh_account_authorization(who);
+		let tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
 
 		self.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {e:?}")))?;
 
 		Ok(())
 	}
@@ -359,10 +336,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {e:?}")))?;
 
 		Ok(())
 	}
@@ -373,18 +350,16 @@ impl TransactionClient {
 		who: AccountId32,
 		signer: &Keypair,
 	) -> Result<()> {
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.remove_expired_account_authorization(who);
+		let tx = bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
 
 		self.api
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Removal failed: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Removal failed: {e:?}")))?;
 
 		Ok(())
 	}
@@ -403,10 +378,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?
+			.map_err(|e| Error::StorageFailed(format!("Removal failed: {e:?}")))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?;
+			.map_err(|e| Error::StorageFailed(format!("Removal failed: {e:?}")))?;
 
 		Ok(())
 	}
