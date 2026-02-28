@@ -18,13 +18,13 @@ set -euo pipefail
 #   CACHE_DIR         - Clone/build cache directory (default: .cache/fellows-runtimes)
 #
 # Output:
-#   ./integration-tests/production-runtimes/polkadot_runtime.compact.compressed.wasm
+#   ./examples/production-runtimes/polkadot_runtime.compact.compressed.wasm
 
 FELLOWS_VERSION="${FELLOWS_VERSION:-v2.0.7}"
 CACHE_DIR="${CACHE_DIR:-$(pwd)/.cache/fellows-runtimes}"
 REPO_URL="https://github.com/polkadot-fellows/runtimes.git"
 WASM_FILENAME="polkadot_runtime.compact.compressed.wasm"
-OUTPUT_DIR="./integration-tests/production-runtimes"
+OUTPUT_DIR="./examples/production-runtimes"
 OUTPUT_PATH="${OUTPUT_DIR}/${WASM_FILENAME}"
 
 # Check if WASM already exists (cached)

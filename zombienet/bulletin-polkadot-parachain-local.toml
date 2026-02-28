@@ -5,7 +5,7 @@
 # POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node zombienet -p native spawn ./zombienet/bulletin-polkadot-parachain-local.toml
 # NOTE: The polkadot native runtime was removed from the polkadot binary, so we
 # provide a pre-generated relay chain spec built from the polkadot-fellows/runtimes
-# fast-runtime WASM (checked in at integration-tests/production-runtimes/).
+# fast-runtime WASM (checked in at examples/production-runtimes/).
 # Run scripts/create_polkadot_relay_spec.sh to generate the spec from it.
 
 [settings]

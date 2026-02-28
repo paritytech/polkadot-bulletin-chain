@@ -165,7 +165,7 @@ bulletin-polkadot-parachain-zombienet-start test_dir runtime="bulletin-polkadot-
     fi
 
     # Generate chain specs (the relay runtime WASM is checked into
-    # integration-tests/production-runtimes/, so no build step needed)
+    # examples/production-runtimes/, so no build step needed)
     ROOT_DIR="{{ justfile_directory() }}/.."
     cd "$ROOT_DIR"
 

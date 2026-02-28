@@ -8,14 +8,14 @@ set -e
 # polkadot-fellows/runtimes with fast-runtime feature) to generate the spec.
 #
 # Prerequisites:
-#   - The WASM must exist at integration-tests/production-runtimes/ (checked into the repo,
+#   - The WASM must exist at examples/production-runtimes/ (checked into the repo,
 #     or rebuilt via ./scripts/build_polkadot_relay_runtime.sh)
 #   - chain-spec-builder must be in PATH (cargo install staging-chain-spec-builder)
 #
 # Output:
 #   ./zombienet/polkadot-local-relay-spec.json
 
-WASM_PATH="./integration-tests/production-runtimes/polkadot_runtime.compact.compressed.wasm"
+WASM_PATH="./examples/production-runtimes/polkadot_runtime.compact.compressed.wasm"
 OUTPUT_PATH="./zombienet/polkadot-local-relay-spec.json"
 
 if [ ! -f "${WASM_PATH}" ]; then
