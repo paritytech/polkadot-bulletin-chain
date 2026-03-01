@@ -6,9 +6,8 @@
 //! This module re-exports CID types from the pallet and provides
 //! additional utility functions for working with CIDs in the SDK.
 
-extern crate alloc;
-
 use crate::types::{Error, Result};
+use alloc::string::String;
 use codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
@@ -27,6 +26,8 @@ pub enum CidCodec {
 	DagPb,
 	/// DAG-CBOR (0x71).
 	DagCbor,
+	/// Custom codec with an arbitrary multicodec code.
+	Custom(u64),
 }
 
 impl CidCodec {
@@ -36,19 +37,20 @@ impl CidCodec {
 			CidCodec::Raw => 0x55,
 			CidCodec::DagPb => 0x70,
 			CidCodec::DagCbor => 0x71,
+			CidCodec::Custom(code) => *code,
 		}
 	}
 
 	/// Get the codec name as a string.
-	pub fn name(&self) -> &'static str {
+	pub fn name(&self) -> String {
 		match self {
-			CidCodec::Raw => "raw",
-			CidCodec::DagPb => "dag-pb",
-			CidCodec::DagCbor => "dag-cbor",
+			CidCodec::Raw => "raw".into(),
+			CidCodec::DagPb => "dag-pb".into(),
+			CidCodec::DagCbor => "dag-cbor".into(),
+			CidCodec::Custom(code) => alloc::format!("custom(0x{code:x})"),
 		}
 	}
 }
-
 
 /// Calculate CID for data using SDK configuration types.
 pub fn calculate_cid_with_config(

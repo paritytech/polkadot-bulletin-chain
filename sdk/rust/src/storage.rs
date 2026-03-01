@@ -6,8 +6,6 @@
 //! This module provides helpers for building and submitting storage transactions.
 //! The actual submission requires integration with `subxt` (enabled with `std` feature).
 
-extern crate alloc;
-
 use crate::{
 	cid::{CidConfig, CidData},
 	types::{Chunk, Error, Result, StoreOptions},

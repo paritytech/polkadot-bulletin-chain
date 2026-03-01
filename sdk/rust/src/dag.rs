@@ -6,8 +6,6 @@
 //! This module provides functionality to create IPFS-compatible DAG-PB
 //! manifests for chunked data, following the UnixFS specification.
 
-extern crate alloc;
-
 /// Maximum number of chunks supported in a single DAG manifest.
 ///
 /// This limit prevents excessive memory allocation when building manifests.

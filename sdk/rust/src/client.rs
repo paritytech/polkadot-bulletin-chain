@@ -6,8 +6,6 @@
 //! This module provides a simplified API for storing and retrieving data.
 //! Full blockchain integration requires the `std` feature and `subxt`.
 
-extern crate alloc;
-
 use crate::{
 	authorization::AuthorizationManager,
 	chunker::{Chunker, FixedSizeChunker},

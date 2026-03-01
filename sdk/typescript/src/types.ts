@@ -8,7 +8,10 @@
 import type { CID } from "multiformats/cid"
 
 /**
- * CID codec types supported by Bulletin Chain
+ * CID codec types supported by Bulletin Chain.
+ *
+ * For custom codecs not listed here, pass the numeric multicodec code directly
+ * wherever a `CidCodec | number` is accepted.
  */
 export enum CidCodec {
   /** Raw binary (0x55) */
@@ -78,8 +81,8 @@ export type WaitFor = "best_block" | "finalized"
  * Options for storing data
  */
 export interface StoreOptions {
-  /** CID codec to use (default: raw) */
-  cidCodec?: CidCodec
+  /** CID codec to use (default: raw). Accepts a `CidCodec` or a custom numeric multicodec code. */
+  cidCodec?: CidCodec | number
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm
   /**

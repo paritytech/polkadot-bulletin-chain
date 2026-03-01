@@ -3,8 +3,6 @@
 
 //! Common types and error definitions for the Bulletin SDK.
 
-extern crate alloc;
-
 use crate::cid::{CidCodec, HashingAlgorithm};
 use alloc::{string::String, vec::Vec};
 use codec::{Decode, Encode};
