@@ -40,14 +40,29 @@
 //!
 //! ## Usage
 //!
-//! ### Prepare and Submit via Subxt (Recommended)
+//! ### Using TransactionClient (Recommended)
 //!
-//! The SDK prepares storage operations; you submit them via subxt with your
-//! runtime metadata. This gives you full control over transaction parameters.
+//! The SDK provides `TransactionClient` for direct transaction submission:
 //!
-//! > **Note**: `AsyncBulletinClient` exists but is experimental and returns
-//! > placeholder errors. Use `BulletinClient` for preparation and submit
-//! > transactions directly via subxt.
+//! ```ignore
+//! use bulletin_sdk_rust::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Connect to the chain
+//!     let client = TransactionClient::new("ws://localhost:9944").await?;
+//!
+//!     // Store data
+//!     let receipt = client.store(b"Hello, Bulletin!".to_vec(), &signer).await?;
+//!     println!("Stored in block: {}", receipt.block_hash);
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ### Low-Level: Prepare and Submit Separately
+//!
+//! For more control, prepare operations with `BulletinClient` and submit manually:
 //!
 //! ### Step 1: Prepare the Operation
 //!
@@ -166,6 +181,10 @@ pub mod utils;
 #[cfg(feature = "std")]
 pub mod async_client;
 
+// Transaction submission client (std-only)
+#[cfg(feature = "std")]
+pub mod transaction;
+
 // Mock client for testing (std-only)
 #[cfg(feature = "std")]
 pub mod mock_client;
@@ -210,6 +229,12 @@ pub mod prelude {
 
 	#[cfg(feature = "std")]
 	pub use crate::mock_client::{MockBulletinClient, MockClientConfig, MockOperation};
+
+	#[cfg(feature = "std")]
+	pub use crate::transaction::{
+		AuthorizationReceipt, PreimageAuthorizationReceipt, RenewReceipt, StoreReceipt,
+		TransactionClient,
+	};
 }
 
 #[cfg(test)]

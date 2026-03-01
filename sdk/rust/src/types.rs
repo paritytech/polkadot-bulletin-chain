@@ -263,7 +263,7 @@ pub enum TransactionStatusEvent {
 	/// Transaction has been validated and added to the transaction pool.
 	Validated,
 	/// Transaction has been broadcast to peers.
-	Broadcasted { num_peers: usize },
+	Broadcasted,
 	/// Transaction is now in a best block.
 	InBestBlock { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
 	/// Transaction has been finalized.
@@ -323,8 +323,8 @@ impl ProgressEvent {
 	}
 
 	/// Create a Broadcasted transaction event.
-	pub fn tx_broadcasted(num_peers: usize) -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted { num_peers })
+	pub fn tx_broadcasted() -> Self {
+		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted)
 	}
 
 	/// Create an InBestBlock transaction event.
