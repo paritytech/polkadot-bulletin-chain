@@ -2139,7 +2139,6 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-core",
- "sp-io",
  "sp-runtime",
  "subxt 0.44.2",
  "subxt-signer 0.44.2",
