@@ -133,18 +133,6 @@
 //! // Then submit the manifest if present
 //! ```
 //!
-//! ### Testing with MockBulletinClient
-//!
-//! For testing without a running node:
-//!
-//! ```ignore
-//! use bulletin_sdk_rust::prelude::*;
-//!
-//! let client = MockBulletinClient::new();
-//! let result = client.store(data).send().await?;
-//! println!("Mock CID: {:?}", result.cid);
-//! ```
-//!
 //! ## Feature Flags
 //!
 //! - `std` (default): Enable standard library support and subxt helpers
@@ -177,17 +165,9 @@ pub mod storage;
 pub mod types;
 pub mod utils;
 
-// Async client with full transaction support (std-only)
-#[cfg(feature = "std")]
-pub mod async_client;
-
 // Transaction submission client (std-only)
 #[cfg(feature = "std")]
 pub mod transaction;
-
-// Mock client for testing (std-only)
-#[cfg(feature = "std")]
-pub mod mock_client;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
@@ -215,7 +195,7 @@ pub mod prelude {
 		chunker::{Chunker, FixedSizeChunker},
 		cid::{
 			calculate_cid, calculate_cid_default, calculate_cid_with_config, cid_to_bytes, Cid,
-			CidConfig, CidData, ContentHash,
+			CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm,
 		},
 		client::{BulletinClient, ClientConfig},
 		dag::{DagBuilder, DagManifest, UnixFsDagBuilder},
@@ -223,12 +203,6 @@ pub mod prelude {
 		storage::{BatchStorageOperation, StorageOperation},
 		types::*,
 	};
-
-	#[cfg(feature = "std")]
-	pub use crate::async_client::{AsyncBulletinClient, AsyncClientConfig, StoreBuilder};
-
-	#[cfg(feature = "std")]
-	pub use crate::mock_client::{MockBulletinClient, MockClientConfig, MockOperation};
 
 	#[cfg(feature = "std")]
 	pub use crate::transaction::{

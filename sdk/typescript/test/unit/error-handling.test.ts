@@ -140,9 +140,9 @@ describe("Error Handling", () => {
     it("should throw BulletinError for unsupported hash algorithm", async () => {
       const data = new Uint8Array([1, 2, 3, 4, 5])
 
-      // Keccak256 is not fully supported in the SDK
+      // Use an invalid hash algorithm code
       await expect(
-        calculateCid(data, 0x55, HashAlgorithm.Keccak256),
+        calculateCid(data, 0x55, 0xff as HashAlgorithm),
       ).rejects.toThrow(BulletinError)
     })
   })

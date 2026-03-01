@@ -21,6 +21,7 @@ import {
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
+  type WaitFor,
 } from "./types.js"
 import { calculateCid } from "./utils.js"
 
@@ -75,9 +76,9 @@ export class MockStoreBuilder {
     return this
   }
 
-  /** Set whether to wait for finalization */
-  withFinalization(wait: boolean): this {
-    this.options.waitForFinalization = wait
+  /** Set what to wait for before returning */
+  withFinalization(waitFor: WaitFor): this {
+    this.options.waitFor = waitFor
     return this
   }
 

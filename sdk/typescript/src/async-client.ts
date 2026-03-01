@@ -184,9 +184,9 @@ export class StoreBuilder {
     return this
   }
 
-  /** Set whether to wait for finalization */
-  withFinalization(wait: boolean): this {
-    this.options.waitForFinalization = wait
+  /** Set what to wait for before returning */
+  withFinalization(waitFor: WaitFor): this {
+    this.options.waitFor = waitFor
     return this
   }
 
@@ -557,9 +557,7 @@ export class AsyncBulletinClient {
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
-    // Determine wait strategy (support both old and new options)
-    const waitFor: WaitFor =
-      opts.waitFor ?? (opts.waitForFinalization ? "finalized" : "best_block")
+    const waitFor: WaitFor = opts.waitFor ?? "best_block"
 
     const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 

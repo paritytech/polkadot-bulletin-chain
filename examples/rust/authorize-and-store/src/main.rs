@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
 	let sdk_client = BulletinClient::new();
 	let options = StoreOptions {
 		cid_codec: CidCodec::Raw,
-		hash_algorithm: HashAlgorithm::Blake2b256,
+		hash_algorithm: HashingAlgorithm::Blake2b256,
 		wait_for_finalization: true,
 	};
 
@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
 
 	let dag_options = StoreOptions {
 		cid_codec: CidCodec::DagPb, // Use DAG-PB codec for manifest
-		hash_algorithm: HashAlgorithm::Blake2b256,
+		hash_algorithm: HashingAlgorithm::Blake2b256,
 		wait_for_finalization: true,
 	};
 

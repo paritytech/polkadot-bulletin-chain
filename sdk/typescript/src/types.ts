@@ -89,13 +89,6 @@ export interface StoreOptions {
    * What to wait for before returning (default: "best_block")
    * - "best_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
-   * @deprecated Use `waitFor` instead
-   */
-  waitForFinalization?: boolean
-  /**
-   * What to wait for before returning (default: "best_block")
-   * - "best_block": Return when tx is in a best block (faster, may reorg)
-   * - "finalized": Return when tx is finalized (safer, slower)
    */
   waitFor?: WaitFor
 }
