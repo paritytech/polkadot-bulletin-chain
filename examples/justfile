@@ -540,18 +540,9 @@ run-test-rust example test_dir runtime ws_url="ws://localhost:10000" seed="//Ali
     echo "   WS URL: {{ ws_url }}"
     echo "   Seed: {{ seed }}"
 
-    # Build the Rust binary with appropriate runtime feature
-    # Map runtime name to feature flag
-    # bulletin-polkadot-runtime -> polkadot-runtime
-    # bulletin-westend-runtime -> westend-runtime
-    if echo "{{ runtime }}" | grep -q "westend"; then
-        RUNTIME_FEATURE="westend-runtime"
-    else
-        RUNTIME_FEATURE="polkadot-runtime"
-    fi
-
-    echo "🔧 Building with runtime: {{ runtime }} (feature: $RUNTIME_FEATURE)"
-    cargo build --release --manifest-path "rust/{{ example }}/Cargo.toml" --no-default-features --features "$RUNTIME_FEATURE"
+    # Build the Rust binary
+    echo "🔧 Building Rust example: {{ example }}"
+    cargo build --release --manifest-path "rust/{{ example }}/Cargo.toml"
 
     # Run the example
     RUST_LOG=info "./rust/{{ example }}/target/release/{{ example }}" --ws "{{ ws_url }}" --seed "{{ seed }}"
