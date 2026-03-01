@@ -5,7 +5,7 @@
  * Utility functions for CID calculation and data manipulation
  */
 
-import { blake2AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
+import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
@@ -28,13 +28,9 @@ export async function getContentHash(
     case HashAlgorithm.Sha2_256: {
       return sha256AsU8a(data)
     }
-    case HashAlgorithm.Keccak256:
-      // Note: Keccak256 requires additional library
-      // Users should integrate with pallet's hashing via PAPI
-      throw new BulletinError(
-        "Keccak256 hashing requires integration with the pallet via PAPI",
-        "UNSUPPORTED_HASH_ALGORITHM",
-      )
+    case HashAlgorithm.Keccak256: {
+      return keccak256AsU8a(data)
+    }
     default:
       throw new BulletinError(
         `Unsupported hash algorithm: ${hashAlgorithm}`,
