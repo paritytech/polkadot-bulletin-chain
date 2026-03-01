@@ -41,7 +41,7 @@ impl StorageOperation {
 	#[must_use = "CID result should be used or stored"]
 	pub fn calculate_cid(&self) -> Result<CidData> {
 		crate::cid::calculate_cid(&self.data, self.cid_config.clone())
-			.map_err(|_| Error::StorageFailed("Failed to calculate CID".into()))
+			.map_err(|e| Error::StorageFailed(alloc::format!("Failed to calculate CID: {e:?}")))
 	}
 
 	/// Get the size of the data.
@@ -55,9 +55,7 @@ impl StorageOperation {
 			return Err(Error::EmptyData);
 		}
 
-		// Check if data exceeds max chunk size (2 MiB)
-		const MAX_SIZE: usize = 2 * 1024 * 1024;
-		if self.data.len() > MAX_SIZE {
+		if self.data.len() > crate::chunker::MAX_CHUNK_SIZE {
 			return Err(Error::ChunkTooLarge(self.data.len() as u64));
 		}
 
@@ -77,13 +75,27 @@ pub struct BatchStorageOperation {
 }
 
 impl BatchStorageOperation {
-	/// Create a new batch operation.
+	/// Create a new batch operation by borrowing chunk data.
 	#[must_use = "batch operation must be submitted to the blockchain"]
 	pub fn new(chunks: &[Chunk], options: StoreOptions) -> Result<Self> {
-		let mut operations = Vec::with_capacity(chunks.len());
+		Self::from_chunks(chunks.iter().map(|c| c.data.clone()).collect(), options)
+	}
 
-		for chunk in chunks {
-			let op = StorageOperation::new(chunk.data.clone(), options.clone())?;
+	/// Create a new batch operation by taking ownership of chunk data.
+	///
+	/// Avoids cloning the data when the caller no longer needs the chunks.
+	#[must_use = "batch operation must be submitted to the blockchain"]
+	pub fn from_chunks(chunk_data: Vec<Vec<u8>>, options: StoreOptions) -> Result<Self> {
+		let cid_config =
+			CidConfig { codec: options.cid_codec.code(), hashing: options.hash_algorithm };
+		let mut operations = Vec::with_capacity(chunk_data.len());
+
+		for data in chunk_data {
+			let op = StorageOperation {
+				data,
+				cid_config: cid_config.clone(),
+				wait_finalization: options.wait_for_finalization,
+			};
 			op.validate()?;
 			operations.push(op);
 		}

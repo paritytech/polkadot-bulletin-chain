@@ -540,20 +540,7 @@ run-test-rust example test_dir runtime ws_url="ws://localhost:10000" seed="//Ali
     echo "   WS URL: {{ ws_url }}"
     echo "   Seed: {{ seed }}"
 
-    # Fetch metadata from running node (required for subxt compilation)
-    cd "rust/{{ example }}"
-    echo "📥 Fetching metadata from {{ ws_url }}..."
-    ./fetch_metadata.sh "{{ ws_url }}"
-
-    # Touch source file to force rebuild with new metadata
-    # This ensures cargo rebuilds even if only metadata changed
-    touch src/main.rs
-    cd ../..
-
     # Build the Rust binary with appropriate runtime feature
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    EXAMPLE_NAME=$(echo "{{ example }}" | tr '-' '_')
-
     # Map runtime name to feature flag
     # bulletin-polkadot-runtime -> polkadot-runtime
     # bulletin-westend-runtime -> westend-runtime

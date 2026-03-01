@@ -19,7 +19,8 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { bytesToHex, ProgressEvent } from "@bulletin/sdk";
+import { ProgressEvent } from "@bulletin/sdk";
+import { bytesToHex } from "@/utils/format";
 
 interface RenewalTarget {
   blockNumber: number;

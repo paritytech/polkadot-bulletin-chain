@@ -113,10 +113,7 @@ impl BulletinClient {
 			callback(ProgressEvent::chunk_started(0, chunks.len() as u32));
 		}
 
-		// Create batch operation
-		let batch = BatchStorageOperation::new(&chunks, options.clone())?;
-
-		// Optionally create manifest
+		// Build manifest first (needs chunk references), then move chunk data into batch
 		let manifest_data = if chunker_config.create_manifest {
 			if let Some(ref callback) = progress_callback {
 				callback(ProgressEvent::manifest_started());
@@ -136,6 +133,10 @@ impl BulletinClient {
 		} else {
 			None
 		};
+
+		// Move chunk data into batch (avoids cloning)
+		let chunk_data = chunks.into_iter().map(|c| c.data).collect();
+		let batch = BatchStorageOperation::from_chunks(chunk_data, options)?;
 
 		Ok((batch, manifest_data))
 	}
@@ -274,8 +275,8 @@ mod tests {
 		assert!(result.is_ok());
 
 		let op = result.unwrap();
-		assert_eq!(op.block, 100);
-		assert_eq!(op.index, 5);
+		assert_eq!(op.block(), 100);
+		assert_eq!(op.index(), 5);
 	}
 
 	#[test]
@@ -286,8 +287,8 @@ mod tests {
 		assert!(result.is_ok());
 
 		let op = result.unwrap();
-		assert_eq!(op.block, 200);
-		assert_eq!(op.index, 10);
+		assert_eq!(op.block(), 200);
+		assert_eq!(op.index(), 10);
 	}
 
 	#[test]

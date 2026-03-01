@@ -7,7 +7,7 @@
 //! additional utility functions for working with CIDs in the SDK.
 
 use crate::types::{Error, Result};
-use alloc::string::String;
+use alloc::borrow::Cow;
 use codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
@@ -42,12 +42,12 @@ impl CidCodec {
 	}
 
 	/// Get the codec name as a string.
-	pub fn name(&self) -> String {
+	pub fn name(&self) -> Cow<'static, str> {
 		match self {
-			CidCodec::Raw => "raw".into(),
-			CidCodec::DagPb => "dag-pb".into(),
-			CidCodec::DagCbor => "dag-cbor".into(),
-			CidCodec::Custom(code) => alloc::format!("custom(0x{code:x})"),
+			CidCodec::Raw => Cow::Borrowed("raw"),
+			CidCodec::DagPb => Cow::Borrowed("dag-pb"),
+			CidCodec::DagCbor => Cow::Borrowed("dag-cbor"),
+			CidCodec::Custom(code) => Cow::Owned(alloc::format!("custom(0x{code:x})")),
 		}
 	}
 }
@@ -59,13 +59,15 @@ pub fn calculate_cid_with_config(
 	hash_algo: HashingAlgorithm,
 ) -> Result<CidData> {
 	let config = CidConfig { codec: codec.code(), hashing: hash_algo };
-	calculate_cid(data, config).map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
+	calculate_cid(data, config)
+		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to calculate CID: {e:?}")))
 }
 
 /// Calculate CID with default configuration (raw codec, blake2b-256).
 pub fn calculate_cid_default(data: &[u8]) -> Result<CidData> {
 	let config = CidConfig { codec: CidCodec::Raw.code(), hashing: HashingAlgorithm::Blake2b256 };
-	calculate_cid(data, config).map_err(|_| Error::InvalidCid("Failed to calculate CID".into()))
+	calculate_cid(data, config)
+		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to calculate CID: {e:?}")))
 }
 
 /// Convert CidData to bytes (CIDv1 format).

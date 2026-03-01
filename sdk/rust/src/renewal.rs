@@ -31,35 +31,38 @@ use scale_info::TypeInfo;
 /// This contains the parameters needed to call `transactionStorage.renew()`.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct RenewalOperation {
-	/// Block number containing the original storage or previous renewal.
-	pub block: u32,
-	/// Transaction index within the block.
-	pub index: u32,
+	/// The storage reference identifying the data to renew.
+	pub storage_ref: StorageRef,
 }
 
 impl RenewalOperation {
 	/// Create a new renewal operation from a storage reference.
 	pub fn new(storage_ref: StorageRef) -> Self {
-		Self { block: storage_ref.block, index: storage_ref.index }
+		Self { storage_ref }
 	}
 
 	/// Create from raw block and index values.
 	pub fn from_raw(block: u32, index: u32) -> Self {
-		Self { block, index }
+		Self { storage_ref: StorageRef::new(block, index) }
 	}
 
 	/// Validate the renewal operation.
 	pub fn validate(&self) -> Result<()> {
 		// Block 0 is typically genesis and unlikely to have user transactions
-		if self.block == 0 {
+		if self.storage_ref.block == 0 {
 			return Err(Error::RenewalFailed("Block 0 is not a valid renewal target".into()));
 		}
 		Ok(())
 	}
 
-	/// Get the storage reference for this operation.
-	pub fn storage_ref(&self) -> StorageRef {
-		StorageRef::new(self.block, self.index)
+	/// Get the block number.
+	pub fn block(&self) -> u32 {
+		self.storage_ref.block
+	}
+
+	/// Get the transaction index.
+	pub fn index(&self) -> u32 {
+		self.storage_ref.index
 	}
 }
 
@@ -171,8 +174,8 @@ mod tests {
 	fn test_renewal_operation_new() {
 		let storage_ref = StorageRef::new(100, 5);
 		let op = RenewalOperation::new(storage_ref);
-		assert_eq!(op.block, 100);
-		assert_eq!(op.index, 5);
+		assert_eq!(op.block(), 100);
+		assert_eq!(op.index(), 5);
 	}
 
 	#[test]

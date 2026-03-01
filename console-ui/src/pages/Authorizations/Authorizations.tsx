@@ -19,7 +19,8 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash, bytesToHex, hexToBytes, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { bytesToHex, hexToBytes } from "@/utils/format";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
 import { SS58String, Enum } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";

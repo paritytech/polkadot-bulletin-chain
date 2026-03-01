@@ -177,12 +177,12 @@ impl DagBuilder for UnixFsDagBuilder {
 		let mut chunk_cids = Vec::with_capacity(chunks.len());
 		let mut block_sizes = Vec::with_capacity(chunks.len());
 		let mut total_size = 0u64;
+		let cid_config = CidConfig { codec: CidCodec::Raw.code(), hashing: hash_algo };
 
 		for chunk in chunks {
-			let cid_config = CidConfig { codec: CidCodec::Raw.code(), hashing: hash_algo };
-
-			let cid_data = calculate_cid(&chunk.data, cid_config)
-				.map_err(|_| Error::DagEncodingFailed("Failed to calculate chunk CID".into()))?;
+			let cid_data = calculate_cid(&chunk.data, cid_config.clone()).map_err(|e| {
+				Error::DagEncodingFailed(alloc::format!("Failed to calculate chunk CID: {e:?}"))
+			})?;
 
 			let chunk_size = chunk.data.len() as u64;
 			block_sizes.push(chunk_size);
@@ -210,8 +210,9 @@ impl DagBuilder for UnixFsDagBuilder {
 		// Calculate root CID (using dag-pb codec)
 		let root_config = CidConfig { codec: CidCodec::DagPb.code(), hashing: hash_algo };
 
-		let root_cid = calculate_cid(&dag_bytes, root_config)
-			.map_err(|_| Error::DagEncodingFailed("Failed to calculate root CID".into()))?;
+		let root_cid = calculate_cid(&dag_bytes, root_config).map_err(|e| {
+			Error::DagEncodingFailed(alloc::format!("Failed to calculate root CID: {e:?}"))
+		})?;
 
 		Ok(DagManifest { root_cid, chunk_cids, total_size, dag_bytes })
 	}
