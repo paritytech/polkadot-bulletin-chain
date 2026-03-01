@@ -147,10 +147,7 @@ async function storeProof(typedApi, whoSigner, rootCID, dagFileBytes) {
     // This can be a serious pallet, this is just a demonstration.
     const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
     const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    await remarkTx.signSubmitAndWatch(whoSigner).subscribe({
-        next: (ev) => console.log(`✅ Proof remark event:`, ev.type),
-        error: (err) => console.error(`❌ Proof remark error:`, err),
-    });
+    await waitForTransaction(remarkTx, whoSigner, "StoreProofRemark");
     console.log(`📤 DAG proof - "${proof}" - stored in Bulletin`);
     return { rawDagCid }
 }
