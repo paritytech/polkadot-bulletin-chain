@@ -15,10 +15,10 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum Error {
-	/// Chunk size exceeds maximum allowed (8 MiB).
+	/// Chunk size exceeds maximum allowed (2 MiB).
 	#[cfg_attr(
 		feature = "std",
-		error("Chunk size {0} exceeds maximum allowed size of 8388608 bytes (8 MiB)")
+		error("Chunk size {0} exceeds maximum allowed size of 2097152 bytes (2 MiB)")
 	)]
 	ChunkTooLarge(u64),
 
@@ -118,10 +118,6 @@ impl Default for ChunkerConfig {
 pub struct Chunk {
 	/// The chunk data.
 	pub data: Vec<u8>,
-	/// The CID of this chunk as bytes (calculated after encoding).
-	#[codec(skip)]
-	#[scale_info(skip_type_params(T))]
-	pub cid: Option<Vec<u8>>,
 	/// Index of this chunk in the sequence.
 	pub index: u32,
 	/// Total number of chunks.
@@ -131,7 +127,7 @@ pub struct Chunk {
 impl Chunk {
 	/// Create a new chunk.
 	pub fn new(data: Vec<u8>, index: u32, total_chunks: u32) -> Self {
-		Self { data, cid: None, index, total_chunks }
+		Self { data, index, total_chunks }
 	}
 
 	/// Get the size of this chunk.

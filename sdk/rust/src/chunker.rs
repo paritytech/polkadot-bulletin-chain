@@ -6,24 +6,21 @@
 use crate::types::{Chunk, ChunkerConfig, Error, Result};
 use alloc::vec::Vec;
 
-/// Maximum chunk size allowed (8 MiB, matches chain's MaxTransactionSize).
+/// Maximum chunk size allowed (2 MiB).
 ///
-/// This is the maximum data size that can be stored in a single transaction.
-/// For IPFS Bitswap compatibility, consider using smaller chunks (1-2 MiB).
-pub const MAX_CHUNK_SIZE: usize = 8 * 1024 * 1024;
+/// This limit ensures IPFS Bitswap compatibility. The chain's MaxTransactionSize
+/// is 8 MiB, but chunks larger than 2 MiB are not well-supported by Bitswap peers.
+pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// Maximum file size allowed (64 MiB).
 ///
 /// Files larger than this must be handled by the application directly.
 pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
 
-/// Minimum chunk size (1 MiB).
-pub const MIN_CHUNK_SIZE: usize = 1024 * 1024;
-
 /// Default chunk size (1 MiB).
 ///
 /// This provides a good balance between transaction overhead and throughput
-/// for most use cases. Users can configure up to MAX_CHUNK_SIZE (8 MiB).
+/// for most use cases. Users can configure up to MAX_CHUNK_SIZE (2 MiB).
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 
 /// Trait for chunking strategies.
@@ -244,8 +241,8 @@ mod tests {
 
 		// Create chunks where total_chunks doesn't match actual count
 		let chunks = vec![
-			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 3 },
-			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 },
+			Chunk { data: vec![1, 2, 3], index: 0, total_chunks: 3 },
+			Chunk { data: vec![4, 5, 6], index: 1, total_chunks: 3 },
 			// Missing third chunk - only 2 chunks but total_chunks says 3
 		];
 
@@ -260,8 +257,8 @@ mod tests {
 
 		// Create chunks from different files (inconsistent total_chunks)
 		let chunks = vec![
-			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 2 },
-			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 }, // Wrong total
+			Chunk { data: vec![1, 2, 3], index: 0, total_chunks: 2 },
+			Chunk { data: vec![4, 5, 6], index: 1, total_chunks: 3 }, // Wrong total
 		];
 
 		let result = reassemble_chunks(&chunks);
@@ -305,8 +302,8 @@ mod tests {
 	fn test_large_file_chunking_64mb() {
 		// 64 MiB file (MAX_FILE_SIZE) - verify chunk count and metadata
 		let data_size = 64 * 1024 * 1024; // MAX_FILE_SIZE
-		let chunk_size = 8 * 1024 * 1024; // MAX_CHUNK_SIZE
-		let expected_chunks = 8;
+		let chunk_size = 2 * 1024 * 1024; // MAX_CHUNK_SIZE
+		let expected_chunks = 32;
 
 		let config =
 			ChunkerConfig { chunk_size: chunk_size as u32, max_parallel: 8, create_manifest: true };
@@ -325,8 +322,8 @@ mod tests {
 		// Verify first and last chunk metadata
 		assert_eq!(chunks[0].index, 0);
 		assert_eq!(chunks[0].total_chunks, expected_chunks as u32);
-		assert_eq!(chunks[7].index, 7);
-		assert_eq!(chunks[7].total_chunks, expected_chunks as u32);
+		assert_eq!(chunks[31].index, 31);
+		assert_eq!(chunks[31].total_chunks, expected_chunks as u32);
 	}
 
 	#[test]

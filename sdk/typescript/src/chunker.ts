@@ -12,7 +12,7 @@ import {
   DEFAULT_CHUNKER_CONFIG,
 } from "./types.js"
 
-/** Maximum chunk size allowed (2 MiB, matches Bitswap limit) */
+/** Maximum chunk size allowed (2 MiB, Bitswap compatibility limit) */
 export const MAX_CHUNK_SIZE = 2 * 1024 * 1024
 
 /** Maximum file size allowed (64 MiB) */

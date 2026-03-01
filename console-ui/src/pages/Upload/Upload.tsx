@@ -22,7 +22,8 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, bytesToHex, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { bytesToHex } from "@/utils/format";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
   { value: HashAlgorithm.Blake2b256, label: "Blake2b-256 (default)" },

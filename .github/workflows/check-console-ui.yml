@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # TODO: remove before merging to main
+    branches: [ main, naren-client, bko-on-naren-client ]
 
 jobs:
   build:
