@@ -214,17 +214,24 @@ impl TransactionClient {
 		signer: &Keypair,
 		context: &str,
 	) -> Result<String> {
-		let result = self
+		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(tx, signer)
 			.await
 			.map_err(|e| Error::StorageFailed(format!("{context} failed: {e:?}")))?
-			.wait_for_finalized_success()
+			.wait_for_finalized()
 			.await
 			.map_err(|e| Error::StorageFailed(format!("{context} failed: {e:?}")))?;
 
-		Ok(format!("{:?}", result.block_hash()))
+		let block_hash = format!("{:?}", in_block.block_hash());
+
+		in_block
+			.wait_for_success()
+			.await
+			.map_err(|e| Error::StorageFailed(format!("{context} failed: {e:?}")))?;
+
+		Ok(block_hash)
 	}
 
 	/// Authorize an account to store data.
