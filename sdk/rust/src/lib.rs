@@ -195,7 +195,7 @@ pub mod prelude {
 		chunker::{Chunker, FixedSizeChunker},
 		cid::{
 			calculate_cid, calculate_cid_default, calculate_cid_with_config, cid_to_bytes, Cid,
-			CidConfig, CidData, ContentHash,
+			CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm,
 		},
 		client::{BulletinClient, ClientConfig},
 		dag::{DagBuilder, DagManifest, UnixFsDagBuilder},
