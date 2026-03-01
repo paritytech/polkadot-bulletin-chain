@@ -89,35 +89,3 @@ export class FixedSizeChunker {
     return this.config.chunkSize
   }
 }
-
-/**
- * Reassemble chunks back into the original data
- */
-export function reassembleChunks(chunks: Chunk[]): Uint8Array {
-  if (chunks.length === 0) {
-    throw new BulletinError("Cannot reassemble empty chunks", "EMPTY_DATA")
-  }
-
-  // Validate chunk indices are sequential
-  for (let i = 0; i < chunks.length; i++) {
-    if (chunks[i]?.index !== i) {
-      throw new BulletinError(
-        `Chunk index mismatch: expected ${i}, got ${chunks[i]?.index}`,
-        "CHUNKING_FAILED",
-      )
-    }
-  }
-
-  // Calculate total size
-  const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0)
-  const result = new Uint8Array(totalSize)
-
-  // Concatenate all chunks
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk.data, offset)
-    offset += chunk.data.length
-  }
-
-  return result
-}

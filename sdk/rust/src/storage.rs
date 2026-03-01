@@ -115,36 +115,6 @@ impl BatchStorageOperation {
 	}
 }
 
-/// Helper functions for storage operations (requires std for subxt).
-#[cfg(feature = "std")]
-pub mod helpers {
-	use super::*;
-
-	/// Prepare transaction call data for `store` extrinsic.
-	///
-	/// Note: This is a helper that prepares the parameters.
-	/// Actual transaction submission requires subxt integration.
-	pub fn prepare_store_call(data: Vec<u8>) -> Vec<u8> {
-		// The actual call building would be done with subxt
-		// This is just a placeholder to show the structure
-		data
-	}
-
-	/// Prepare batch transaction call data for multiple `store` calls.
-	///
-	/// Note: This uses `Utility.batch_all` to submit multiple transactions atomically.
-	#[must_use = "call data must be submitted to the blockchain"]
-	pub fn prepare_batch_store_calls(operations: &BatchStorageOperation) -> Result<Vec<Vec<u8>>> {
-		let mut calls = Vec::with_capacity(operations.len());
-
-		for op in &operations.operations {
-			calls.push(prepare_store_call(op.data.clone()));
-		}
-
-		Ok(calls)
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
