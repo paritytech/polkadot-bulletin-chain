@@ -79,10 +79,6 @@ pub enum Error {
 	#[cfg_attr(feature = "std", error("Retrieval failed: {0}"))]
 	RetrievalFailed(String),
 
-	/// Submission failed.
-	#[cfg_attr(feature = "std", error("Submission failed: {0}"))]
-	SubmissionFailed(String),
-
 	/// Renewal target not found.
 	#[cfg_attr(feature = "std", error("Renewal target not found: block {block}, index {index}"))]
 	RenewalNotFound { block: u32, index: u32 },
