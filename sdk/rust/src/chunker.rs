@@ -3,8 +3,6 @@
 
 //! Data chunking utilities for splitting large files into smaller pieces.
 
-extern crate alloc;
-
 use crate::types::{Chunk, ChunkerConfig, Error, Result};
 use alloc::vec::Vec;
 

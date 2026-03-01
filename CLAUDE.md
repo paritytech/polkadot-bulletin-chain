@@ -1,6 +1,6 @@
 # CLAUDE.md - Polkadot Bulletin Chain
 
-## Claude Preferences
+## Agent Rules
 
 **Git commit rules:**
 - NEVER add Co-Authored-By lines to commits
@@ -52,15 +52,9 @@ cargo test -p pallet-relayer-set
 # Run runtime tests
 cargo test -p bulletin-polkadot-runtime
 cargo test -p bulletin-westend-runtime
-
-# Run clippy linting
-cargo clippy --all-targets --all-features --workspace -- -D warnings
-
-# Format check
-cargo +nightly fmt --all -- --check
-taplo format --config .config/taplo.toml
-zepter run --config .config/zepter.yaml
 ```
+
+For formatting, linting, and clippy checks, run `/format`.
 
 ## Run Commands
 
@@ -97,7 +91,7 @@ polkadot-bulletin-chain/
 
 ### Key Components
 
-**Node (`node/`)**: Off-chain validator/full-node binary with BaBE + GRANDPA consensus and integrated IPFS (Bitswap/Kademlia).
+**Node (`node/`)**: Off-chain validator/full-node binary with BABE + GRANDPA consensus and integrated IPFS (Bitswap/Kademlia).
 
 **Runtimes**: Two WASM runtimes targeting different networks:
 - `runtimes/bulletin-polkadot/` - Production Polkadot (bridges to People Chain)
@@ -110,10 +104,9 @@ polkadot-bulletin-chain/
 
 ## Development Workflow
 
-1. **Format code**: `cargo +nightly fmt --all -- --check`
-2. **Run clippy**: `cargo clippy --all-targets --all-features --workspace`
-3. **Run tests**: `cargo test`
-4. **Build**: `cargo build --release`
+1. **Format and lint**: Run `/format`
+2. **Run tests**: `cargo test`
+3. **Build**: `cargo build --release`
 
 ### Zombienet Testing
 
@@ -156,7 +149,7 @@ The Polkadot SDK provides:
 - `std` - Standard library features (default)
 - `on-chain-release-build` - Production build that strips logs for smaller wasm size
 
-## Notes
+## Operational Limits & Requirements
 
 - Configurable Storage Retention Period
 - Maximum storage requirement: 1.5-2TB
@@ -164,54 +157,22 @@ The Polkadot SDK provides:
 - Node supports litep2p/Bitswap
 - Solochain validators need BABE and GRANDPA session keys
 
-## Code Review Guidelines (Parity Standards)
+## Code Review Guidelines
 
-These guidelines are used by the Claude Code review bot and should be followed by all contributors.
-
-### Rust Code Quality
-
-- **Error Handling**: Use `Result` types with meaningful error enums. Avoid `unwrap()` and `expect()` in production code; they are acceptable in tests.
-- **Arithmetic Safety**: Use `checked_*`, `saturating_*`, or `wrapping_*` arithmetic to prevent overflow. Never use raw arithmetic operators on user-provided values.
-- **Naming**: Follow Rust naming conventions (snake_case for functions/variables, CamelCase for types).
-- **Complexity**: Prefer simple, readable code. Avoid over-engineering and premature abstractions.
-- **No useless comments**: Comments should mostly explain **why** things are done, not **how**, the code should be readable enough to explain the how.
-
-### FRAME Pallet Standards
-
-- **Storage**: Use appropriate storage types (`StorageValue`, `StorageMap`, `StorageDoubleMap`, `CountedStorageMap`).
-- **Events**: Emit events for all state changes that external observers need to track.
-- **Errors**: Define descriptive error types in the pallet's `Error` enum.
-- **Weights**: All extrinsics must have accurate weight annotations. Update benchmarks when logic changes.
-- **Origins**: Use the principle of least privilege for origin checks.
-- **Hooks**: Be cautious with `on_initialize` and `on_finalize`; they affect block production time in solochains and can brick parachains. Never panic or do unbounded iteration in them. Always benchmark them properly.
-
-### Security Considerations
-
-- **No Panics in Runtime**: Runtime code must never panic. Use defensive programming.
-- **Bounded Collections**: Use `BoundedVec`, `BoundedBTreeMap` etc. to prevent unbounded storage growth.
-- **Input Validation**: Validate all user inputs at the entry point.
-- **Storage Deposits**: Consider requiring deposits for user-created storage items that are returned once the item is cleared.
-
-### Testing Requirements
-
-- **Unit Tests**: All new functionality requires unit tests.
-- **Edge Cases**: Test boundary conditions, error paths, and malicious inputs.
-- **Integration Tests**: Complex features should have integration tests using `sp-io::TestExternalities`.
-- **Benchmark Tests**: Features affecting weights should have benchmark tests.
-
-### PR Requirements
-
-- **Single Responsibility**: Each PR should address one concern.
-- **Tests Pass**: All CI checks must pass (`cargo test`, `cargo clippy`, `cargo fmt`).
-- **No Warnings**: Code should compile without warnings.
-- **Documentation**: Public APIs require rustdoc comments.
+For the full review criteria (Parity Standards), see the `/review` skill. The review bot and all contributors follow those guidelines.
 
 ### Using the Claude Review Bot
-
-The repository has a Claude Code review bot that automatically reviews PRs. You can also interact with it:
 
 - **@claude** - Mention in any comment to ask questions or request help
 - **Assign to claude[bot]** - Assign an issue to have Claude analyze and propose solutions
 - **Label with `claude`** - Add the `claude` label to an issue for Claude to investigate
 
-The bot enforces these guidelines and provides actionable feedback with fix suggestions.
+## SDK Development Guidelines
+
+When developing or modifying the Bulletin SDK (Rust or TypeScript):
+
+- **Scope**: Only implement what is directly needed for core functionality (storage, authorization, CID/chunking)
+- **No kitchen sink**: Don't add generic utilities (retry, sleep, batch, etc.) - users have their own libraries
+- **No placeholders**: Either implement correctly or don't include - no hardcoded placeholder values
+- **No reimplementing**: If functionality exists in standard libraries or common packages (@polkadot/util-crypto, etc.), don't reimplement it
+- **Minimal API surface**: Smaller, focused APIs are easier to maintain and less likely to have bugs

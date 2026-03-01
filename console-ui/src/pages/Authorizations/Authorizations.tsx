@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import { useApi } from "@/state/chain.state";
+import { useApi, useCreateBulletinClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import {
   useAuthorization,
@@ -19,7 +19,7 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { AsyncBulletinClient, getContentHash, bytesToHex, hexToBytes, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, bytesToHex, hexToBytes, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
 import { SS58String, Enum } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
@@ -300,6 +300,7 @@ function PreimageAuthorizationsTab() {
 
 function FaucetAuthorizePreimagePanel() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
 
   const [preimageHash, setPreimageHash] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
@@ -403,7 +404,7 @@ function FaucetAuthorizePreimagePanel() {
       const sizeValue = getSizeValue();
 
       // Create SDK client with Alice signer
-      const bulletinClient = new AsyncBulletinClient(api, aliceSigner);
+      const bulletinClient = createBulletinClient!(aliceSigner);
 
       // Progress callback for transaction status updates
       const handleProgress = (event: ProgressEvent) => {
@@ -573,6 +574,7 @@ function FaucetAuthorizePreimagePanel() {
 
 function FaucetAuthorizeAccountPanel() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
   const selectedAccount = useSelectedAccount();
 
   const [forWho, setForWho] = useState("");
@@ -693,7 +695,7 @@ function FaucetAuthorizeAccountPanel() {
       const bytesValue = getBytesValue();
 
       // Create SDK client with Alice signer
-      const bulletinClient = new AsyncBulletinClient(api, aliceSigner);
+      const bulletinClient = createBulletinClient!(aliceSigner);
 
       // Progress callback for transaction status updates
       const handleProgress = (event: ProgressEvent) => {

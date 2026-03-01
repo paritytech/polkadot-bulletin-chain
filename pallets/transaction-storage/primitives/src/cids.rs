@@ -20,14 +20,12 @@
 //!
 //! See [`CidData`].
 
-use crate::LOG_TARGET;
+use crate::ContentHash;
 use alloc::vec::Vec;
 use cid::{multihash::Multihash, CidGeneric};
 use codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
-use polkadot_sdk_frame::deps::sp_io;
 
-/// 32-byte hash of a stored blob of data.
-pub type ContentHash = [u8; 32];
+const LOG_TARGET: &str = "runtime::transaction-storage::cids";
 
 /// CIDv1 serialized bytes (codec + multihash(ContentHash)).
 pub type Cid = Vec<u8>;
@@ -177,7 +175,6 @@ mod tests {
 		CidGeneric,
 	};
 	use core::str::FromStr;
-	use polkadot_sdk_frame::deps::sp_io;
 
 	#[test]
 	fn test_cid_raw_blake2b_256_roundtrip_works() {

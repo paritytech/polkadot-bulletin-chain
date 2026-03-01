@@ -22,8 +22,6 @@
 //! // api.tx().transaction_storage().renew(operation.block, operation.index)
 //! ```
 
-extern crate alloc;
-
 use crate::types::{Error, Result, StorageRef};
 use codec::{Decode, Encode};
 use scale_info::TypeInfo;
