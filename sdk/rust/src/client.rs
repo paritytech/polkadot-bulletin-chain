@@ -6,8 +6,6 @@
 //! This module provides a simplified API for storing and retrieving data.
 //! Full blockchain integration requires the `std` feature and `subxt`.
 
-extern crate alloc;
-
 use crate::{
 	authorization::AuthorizationManager,
 	chunker::{Chunker, FixedSizeChunker},
@@ -188,55 +186,6 @@ impl BulletinClient {
 impl Default for BulletinClient {
 	fn default() -> Self {
 		Self::new()
-	}
-}
-
-/// Simplified client operations (requires std and subxt for full functionality).
-#[cfg(feature = "std")]
-pub mod async_client {
-	use super::*;
-
-	/// Async Bulletin client wrapper.
-	///
-	/// This would integrate with `subxt` for actual blockchain interaction.
-	/// Users should implement their own version based on their subxt setup.
-	pub struct AsyncBulletinClient {
-		/// The underlying client.
-		pub client: BulletinClient,
-	}
-
-	impl AsyncBulletinClient {
-		/// Create a new async client.
-		pub fn new(config: ClientConfig) -> Self {
-			Self { client: BulletinClient::with_config(config) }
-		}
-
-		/// Store data (placeholder - requires subxt integration).
-		///
-		/// Example integration:
-		/// ```ignore
-		/// use subxt::OnlineClient;
-		///
-		/// async fn store(&self, api: &OnlineClient<PolkadotConfig>, data: Vec<u8>) -> Result<StoreResult> {
-		///     let op = self.client.prepare_store(data, StoreOptions::default())?;
-		///     let cid_config = // convert op.cid_config to runtime type
-		///     let tx = bulletin::tx()
-		///         .transaction_storage()
-		///         .store(op.data, Some(cid_config));
-		///     let result = api.tx().sign_and_submit_then_watch_default(&tx, signer).await?;
-		///     // Process result and return StoreResult
-		/// }
-		/// ```
-		pub async fn store_placeholder(
-			&self,
-			_data: Vec<u8>,
-			_options: StoreOptions,
-		) -> Result<()> {
-			// Placeholder - users should implement with their subxt setup
-			Err(Error::StorageFailed(
-				"This is a placeholder. Implement with subxt integration.".into(),
-			))
-		}
 	}
 }
 

@@ -13,9 +13,8 @@
 use {
 	crate::{
 		authorization::AuthorizationManager,
-		types::{
-			CidCodec, Error, HashAlgorithm, ProgressCallback, Result, StoreOptions, StoreResult,
-		},
+		cid::{CidCodec, HashingAlgorithm},
+		types::{Error, ProgressCallback, Result, StoreOptions, StoreResult},
 	},
 	alloc::{
 		string::{String, ToString},
@@ -82,7 +81,7 @@ impl<'a> MockStoreBuilder<'a> {
 	}
 
 	/// Set the hash algorithm.
-	pub fn with_hash_algorithm(mut self, algorithm: HashAlgorithm) -> Self {
+	pub fn with_hash_algorithm(mut self, algorithm: HashingAlgorithm) -> Self {
 		self.options.hash_algorithm = algorithm;
 		self
 	}
@@ -333,7 +332,7 @@ mod tests {
 		let result = client
 			.store(data.clone())
 			.with_codec(CidCodec::Raw)
-			.with_hash_algorithm(HashAlgorithm::Blake2b256)
+			.with_hash_algorithm(HashingAlgorithm::Blake2b256)
 			.with_finalization(true)
 			.send()
 			.await

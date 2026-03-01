@@ -61,6 +61,7 @@
     "@polkadot-labs/hdkd-helpers": "^0.0.27",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^2.1.9",
     "happy-dom": "^20.7.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",

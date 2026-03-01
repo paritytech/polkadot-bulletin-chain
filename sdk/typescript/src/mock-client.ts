@@ -63,8 +63,8 @@ export class MockStoreBuilder {
     this.data = data instanceof Uint8Array ? data : data.asBytes()
   }
 
-  /** Set the CID codec */
-  withCodec(codec: CidCodec): this {
+  /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
+  withCodec(codec: CidCodec | number): this {
     this.options.cidCodec = codec
     return this
   }

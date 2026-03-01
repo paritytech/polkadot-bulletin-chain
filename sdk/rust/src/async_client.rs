@@ -23,10 +23,8 @@
 use {
 	crate::{
 		authorization::AuthorizationManager,
-		types::{
-			ChunkerConfig, CidCodec, Error, HashAlgorithm, ProgressCallback, Result, StoreOptions,
-			StoreResult,
-		},
+		cid::{CidCodec, HashingAlgorithm},
+		types::{ChunkerConfig, Error, ProgressCallback, Result, StoreOptions, StoreResult},
 	},
 	alloc::vec::Vec,
 	sp_runtime::AccountId32,
@@ -72,7 +70,7 @@ impl Default for AsyncClientConfig {
 /// let result = client
 ///     .store(data)
 ///     .with_codec(CidCodec::DagPb)
-///     .with_hash_algorithm(HashAlgorithm::Sha256)
+///     .with_hash_algorithm(HashingAlgorithm::Sha2_256)
 ///     .with_callback(|event| {
 ///         println!("Progress: {:?}", event);
 ///     })
@@ -101,7 +99,7 @@ impl<'a> StoreBuilder<'a> {
 	}
 
 	/// Set the hash algorithm.
-	pub fn with_hash_algorithm(mut self, algorithm: HashAlgorithm) -> Self {
+	pub fn with_hash_algorithm(mut self, algorithm: HashingAlgorithm) -> Self {
 		self.options.hash_algorithm = algorithm;
 		self
 	}
@@ -223,7 +221,7 @@ impl AsyncBulletinClient {
 	/// let result = client
 	///     .store(data)
 	///     .with_codec(CidCodec::DagPb)
-	///     .with_hash_algorithm(HashAlgorithm::Sha256)
+	///     .with_hash_algorithm(HashingAlgorithm::Sha2_256)
 	///     .with_callback(|event| {
 	///         println!("Progress: {:?}", event);
 	///     })
