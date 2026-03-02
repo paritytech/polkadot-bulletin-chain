@@ -136,7 +136,6 @@ jobs:
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-      options: --privileged
     timeout-minutes: 200
     strategy:
       fail-fast: false
@@ -146,17 +145,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Install and start Docker
-        run: |
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sh get-docker.sh
-          # The host runner bind-mounts /var/run/docker.sock as a directory;
-          # use an alternative socket path for dockerd.
-          dockerd -H unix:///var/run/docker-inner.sock &
-          # Wait for Docker daemon to be ready and symlink for default clients
-          for i in $(seq 1 30); do docker -H unix:///var/run/docker-inner.sock info >/dev/null 2>&1 && break || sleep 1; done
-          echo "DOCKER_HOST=unix:///var/run/docker-inner.sock" >> $GITHUB_ENV
 
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
@@ -209,7 +197,7 @@ jobs:
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE"
+          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo"
 
       - name: Test authorize-and-store ws
         working-directory: examples
@@ -242,7 +230,7 @@ jobs:
       - name: Stop services
         if: always()
         working-directory: examples
-        run: just stop-services "$TEST_DIR"
+        run: just stop-services "$TEST_DIR" "kubo"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
