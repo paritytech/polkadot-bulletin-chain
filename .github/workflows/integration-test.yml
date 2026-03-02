@@ -51,11 +51,9 @@ jobs:
 
   setup:
     if: needs.changes.outputs.should-run == 'true'
-    needs: [changes, set-image]
+    needs: [changes]
     name: Setup
-    runs-on: parity-large
-    container:
-      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
