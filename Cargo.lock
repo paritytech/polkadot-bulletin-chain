@@ -2057,6 +2057,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletin-polkadot-parachain-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "asset-hub-westend-emulated-chain",
+ "asset-hub-westend-runtime",
+ "bulletin-polkadot-parachain-runtime",
+ "cumulus-primitives-core",
+ "emulated-integration-tests-common",
+ "frame-support",
+ "frame-system",
+ "parachains-common",
+ "sp-core",
+ "sp-keyring",
+ "sp-runtime",
+ "staging-xcm",
+ "staging-xcm-executor",
+ "westend-emulated-chain",
+ "westend-runtime",
+ "xcm-emulator",
+]
+
+[[package]]
 name = "bulletin-polkadot-parachain-runtime"
 version = "0.1.0"
 dependencies = [

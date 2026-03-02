@@ -182,6 +182,7 @@ members = [
 	"runtimes/bulletin-polkadot-parachain",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
+	"runtimes/bulletin-polkadot-parachain/integration-tests",
 ]
 [profile.release]
 # Polkadot runtime requires unwinding.
