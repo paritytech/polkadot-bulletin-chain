@@ -202,7 +202,7 @@ const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
 
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
-	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
+	// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
 		BlockLength::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
 	pub RuntimeBlockWeights: BlockWeights = BlockWeights::builder()

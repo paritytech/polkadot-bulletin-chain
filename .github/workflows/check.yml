@@ -154,10 +154,19 @@ jobs:
         run: |
           cargo test -p bulletin-westend-runtime
 
+      - name: Run (Polkadot parachain) runtime tests
+        run: |
+          cargo test -p bulletin-polkadot-parachain-runtime
+
       - name: Run (Westend) XCM integration tests
         run: |
           unset SKIP_WASM_BUILD
           cargo test -p bulletin-westend-integration-tests
+
+      - name: Run (Polkadot parachain) XCM integration tests
+        run: |
+          unset SKIP_WASM_BUILD
+          cargo test -p bulletin-polkadot-parachain-integration-tests
 
   benchmarks:
     name: Check Benchmarks
