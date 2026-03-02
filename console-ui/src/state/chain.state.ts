@@ -4,7 +4,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, web3_storage } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, bulletin_polkadot, web3_storage } from "@polkadot-api/descriptors";
 
 export type StorageType = "bulletin" | "web3storage";
 
@@ -87,10 +87,11 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const DESCRIPTORS: Record<string, Record<string, any>> = {
   bulletin: {
-    local: bulletin_westend,
+    local: bulletin_polkadot,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
     previewnet: bulletin_westend,
+    polkadot: bulletin_polkadot,
   },
   web3storage: {
     local: web3_storage,
