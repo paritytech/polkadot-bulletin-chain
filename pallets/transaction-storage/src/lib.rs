@@ -943,7 +943,7 @@ pub mod pallet {
 		/// Returns the validity of the given call, signed by the given account.
 		///
 		/// This is equivalent to `validate_unsigned` but for signed transactions. It should be
-		/// called from a `SignedExtension` implementation.
+		/// called from a `TransactionExtension` implementation.
 		pub fn validate_signed(who: &T::AccountId, call: &Call<T>) -> TransactionValidity {
 			Self::check_signed(who, call, CheckContext::Validate)?.ok_or(IMPOSSIBLE.into())
 		}
@@ -952,7 +952,7 @@ pub mod pallet {
 		/// authorization for it.
 		///
 		/// This is equivalent to `pre_dispatch` but for signed transactions. It should be called
-		/// from a `SignedExtension` implementation.
+		/// from a `TransactionExtension` implementation.
 		pub fn pre_dispatch_signed(
 			who: &T::AccountId,
 			call: &Call<T>,

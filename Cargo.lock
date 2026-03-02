@@ -9294,6 +9294,9 @@ dependencies = [
 name = "pallets-common"
 version = "0.1.0"
 dependencies = [
+ "pallet-proxy",
+ "pallet-sudo",
+ "pallet-utility",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",

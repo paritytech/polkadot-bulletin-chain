@@ -686,6 +686,10 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 
 		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
 		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 
 		// Preimage authorization for sha2 hash should be consumed.

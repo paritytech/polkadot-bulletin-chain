@@ -99,6 +99,43 @@ pub type Barrier = TrailingSetTopicAsId<
 	>,
 >;
 
+/// Calls that are safe to dispatch from XCM. Blocks storage-mutating
+/// TransactionStorage calls — those require on-chain authorization that XCM cannot provide.
+/// Recursively inspects wrapper calls (Utility, Proxy, Sudo) to prevent bypass via nesting.
+pub struct XcmSafeCallFilter;
+impl XcmSafeCallFilter {
+	fn contains_blocked_storage_call(call: &RuntimeCall, depth: u32) -> bool {
+		use pallets_common::{
+			proxy_inner_calls, sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH,
+		};
+		if depth >= MAX_INNER_CALL_DEPTH {
+			return true;
+		}
+		match call {
+			RuntimeCall::TransactionStorage(
+				pallet_transaction_storage::Call::store { .. } |
+				pallet_transaction_storage::Call::store_with_cid_config { .. } |
+				pallet_transaction_storage::Call::renew { .. },
+			) => true,
+			RuntimeCall::Utility(utility_call) => utility_inner_calls(utility_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			RuntimeCall::Proxy(proxy_call) => proxy_inner_calls(proxy_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			RuntimeCall::Sudo(sudo_call) => sudo_inner_calls(sudo_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			_ => false,
+		}
+	}
+}
+impl Contains<RuntimeCall> for XcmSafeCallFilter {
+	fn contains(call: &RuntimeCall) -> bool {
+		!Self::contains_blocked_storage_call(call, 0)
+	}
+}
+
 /// XCM executor configuration.
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
@@ -127,7 +164,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = XcmSafeCallFilter;
 	type Aliasers = Nothing;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
@@ -207,13 +244,14 @@ pub(crate) mod tests {
 			bp_people_polkadot::PEOPLE_POLKADOT_PARACHAIN_ID, tests::run_test,
 			WithPeoplePolkadotMessagesInstance, XcmBlobMessageDispatchResult, XCM_LANE,
 		},
-		Runtime,
+		Runtime, RuntimeOrigin,
 	};
 	use bp_messages::{
 		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
 		MessageKey,
 	};
 	use codec::Encode;
+	use frame_support::assert_ok;
 	use pallet_bridge_messages::Config as MessagesConfig;
 	use sp_keyring::Sr25519Keyring as AccountKeyring;
 	use xcm::{prelude::VersionedXcm, VersionedInteriorLocation};
@@ -381,5 +419,132 @@ pub(crate) mod tests {
 			),
 			Ok(())
 		);
+	}
+
+	/// Build an XCM bridge message containing `Transact` with an arbitrary
+	/// runtime call dispatched from People Polkadot.
+	fn encoded_xcm_transact_from_people_polkadot(
+		origin_kind: OriginKind,
+		call: RuntimeCall,
+	) -> Vec<u8> {
+		let message = VersionedXcm::from(
+			Xcm::<()>::builder_unsafe()
+				.universal_origin(GlobalConsensus(BridgedNetwork::get()))
+				.descend_origin(Parachain(PEOPLE_POLKADOT_PARACHAIN_ID))
+				.unpaid_execution(Unlimited, None)
+				.transact(origin_kind, None, call.encode())
+				.build(),
+		);
+		let universal_dest: VersionedInteriorLocation = GlobalConsensus(ThisNetwork::get()).into();
+		BridgeMessage { universal_dest, message }.encode()
+	}
+
+	/// XCM Transact with `store` from People Polkadot (Superuser) must be blocked
+	/// unconditionally — even if authorization exists. Storage operations must go
+	/// through signed extrinsics, never through XCM.
+	#[test]
+	fn xcm_transact_store_is_blocked() {
+		run_test(|| {
+			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+
+			let data = vec![42u8; 100];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			// Authorize the preimage so we can verify the filter blocks it
+			// regardless of authorization state.
+			assert_ok!(crate::TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash,
+				data.len() as u64,
+			));
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			let result = Dispatcher::dispatch(DispatchMessage {
+				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+				data: DispatchMessageData {
+					payload: Ok(encoded_xcm_transact_from_people_polkadot(
+						OriginKind::Superuser,
+						store_call,
+					)),
+				},
+			});
+
+			// XcmSafeCallFilter blocks store/store_with_cid_config/renew
+			// unconditionally — authorization does not matter for XCM.
+			assert_ne!(
+				result.dispatch_level_result,
+				XcmBlobMessageDispatchResult::Dispatched,
+				"XCM Transact store must be blocked even with authorization",
+			);
+
+			// Authorization must not have been consumed.
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Authorization should remain unconsumed since XCM was blocked",
+			);
+		});
+	}
+
+	/// XCM Transact with `store` wrapped in `utility::batch` must also be blocked.
+	/// The `XcmSafeCallFilter` recursively inspects inner calls.
+	#[test]
+	fn xcm_transact_wrapped_store_is_blocked() {
+		run_test(|| {
+			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+
+			let data = vec![42u8; 100];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			// Authorize the preimage so we can verify the filter blocks it
+			// regardless of authorization state.
+			assert_ok!(crate::TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash,
+				data.len() as u64,
+			));
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			// Wrap store in utility::batch — the filter must recurse into it.
+			let batch_call =
+				RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_call] });
+
+			let result = Dispatcher::dispatch(DispatchMessage {
+				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+				data: DispatchMessageData {
+					payload: Ok(encoded_xcm_transact_from_people_polkadot(
+						OriginKind::Superuser,
+						batch_call,
+					)),
+				},
+			});
+
+			assert_ne!(
+				result.dispatch_level_result,
+				XcmBlobMessageDispatchResult::Dispatched,
+				"XCM Transact batch(store) must be blocked by recursive filter",
+			);
+
+			// Authorization must not have been consumed.
+			assert_ne!(
+				crate::TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Authorization should remain unconsumed since XCM was blocked",
+			);
+		});
 	}
 }

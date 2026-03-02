@@ -226,6 +226,38 @@ pub type TrustedAliasers = (
 	AuthorizedAliasers<Runtime>,
 );
 
+/// Calls that are safe to dispatch from XCM. Blocks storage-mutating
+/// TransactionStorage calls — those require on-chain authorization that XCM cannot provide.
+/// Recursively inspects wrapper calls (Utility, Sudo) to prevent bypass via nesting.
+pub struct XcmSafeCallFilter;
+impl XcmSafeCallFilter {
+	fn contains_blocked_storage_call(call: &RuntimeCall, depth: u32) -> bool {
+		use pallets_common::{sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH};
+		if depth >= MAX_INNER_CALL_DEPTH {
+			return true;
+		}
+		match call {
+			RuntimeCall::TransactionStorage(
+				pallet_transaction_storage::Call::store { .. } |
+				pallet_transaction_storage::Call::store_with_cid_config { .. } |
+				pallet_transaction_storage::Call::renew { .. },
+			) => true,
+			RuntimeCall::Utility(utility_call) => utility_inner_calls(utility_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			RuntimeCall::Sudo(sudo_call) => sudo_inner_calls(sudo_call)
+				.into_iter()
+				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
+			_ => false,
+		}
+	}
+}
+impl Contains<RuntimeCall> for XcmSafeCallFilter {
+	fn contains(call: &RuntimeCall) -> bool {
+		!Self::contains_blocked_storage_call(call, 0)
+	}
+}
+
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
 	type RuntimeCall = RuntimeCall;
@@ -266,7 +298,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = XcmSafeCallFilter;
 	type Aliasers = TrustedAliasers;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();

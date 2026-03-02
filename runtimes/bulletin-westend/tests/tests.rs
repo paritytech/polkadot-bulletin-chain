@@ -32,8 +32,9 @@ use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
-	transaction_validity, transaction_validity::InvalidTransaction, ApplyExtrinsicResult,
-	BuildStorage, Either,
+	transaction_validity,
+	transaction_validity::{InvalidTransaction, TransactionValidityError},
+	ApplyExtrinsicResult, BuildStorage, Either,
 };
 use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
@@ -655,4 +656,153 @@ fn transaction_storage_weight_sanity() {
 		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
 		Some(85),
 	);
+}
+
+// ============================================================================
+// Ensure calls wrapped in dispatch wrappers are subject to the same validation
+// as direct submissions. Covers utility (batch, batch_all, force_batch,
+// as_derivative) and sudo.
+// ============================================================================
+
+/// Wrap a call in utility dispatcher variants.
+fn wrap_call_utility_variants(call: RuntimeCall) -> Vec<(RuntimeCall, &'static str)> {
+	vec![
+		(
+			RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call.clone()] }),
+			"utility::batch",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: vec![call.clone()] }),
+			"utility::batch_all",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::force_batch { calls: vec![call.clone()] }),
+			"utility::force_batch",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::as_derivative {
+				index: 0,
+				call: Box::new(call),
+			}),
+			"utility::as_derivative",
+		),
+	]
+}
+
+/// Assert that direct and utility-wrapper variants are rejected at validation time.
+fn assert_rejected_at_validation(
+	signer: Sr25519Keyring,
+	call: RuntimeCall,
+	expected: TransactionValidityError,
+	label: &str,
+) {
+	assert_eq!(
+		construct_and_apply_extrinsic(Some(signer.pair()), call.clone()),
+		Err(expected),
+		"{label}: direct",
+	);
+	for (wrapped, name) in wrap_call_utility_variants(call) {
+		assert_eq!(
+			construct_and_apply_extrinsic(Some(signer.pair()), wrapped),
+			Err(expected),
+			"{label}: via {name}",
+		);
+	}
+}
+
+#[test]
+fn wrapped_store_requires_authorization() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: vec![42u8; 100],
+			});
+
+			// Direct + utility wrappers: rejected at validation time.
+			assert_rejected_at_validation(
+				account,
+				store_call.clone(),
+				TransactionValidityError::Invalid(InvalidTransaction::Payment),
+				"store",
+			);
+
+			// sudo_as: inner store is checked for TransactionStorage auth at validation.
+			assert_eq!(
+				construct_and_apply_extrinsic(
+					Some(account.pair()),
+					RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+						who: sp_runtime::MultiAddress::Id(account.to_account_id()),
+						call: Box::new(store_call),
+					}),
+				),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			);
+		});
+}
+
+#[test]
+fn wrapped_store_with_cid_config_requires_authorization() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+
+			let store_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+					cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+					data: vec![42u8; 100],
+				});
+
+			// Direct + utility wrappers: rejected at validation time.
+			assert_rejected_at_validation(
+				account,
+				store_call.clone(),
+				TransactionValidityError::Invalid(InvalidTransaction::Payment),
+				"store_with_cid_config",
+			);
+
+			// sudo_as: inner store_with_cid_config is checked at validation.
+			assert_eq!(
+				construct_and_apply_extrinsic(
+					Some(account.pair()),
+					RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+						who: sp_runtime::MultiAddress::Id(account.to_account_id()),
+						call: Box::new(store_call),
+					}),
+				),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			);
+		});
+}
+
+#[test]
+fn wrapped_call_respects_validate_inner_calls_allowlist() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+
+			// Give Alice balance so fee check passes before ValidateSigned.
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&account.to_account_id(), 1_000_000_000_000).unwrap();
+
+			// PolkadotXcm::send is a standard user-facing call but is NOT in the
+			// validate_inner_calls allowlist, so wrapping it in utility::batch
+			// must be rejected.
+			let blocked_call = RuntimeCall::PolkadotXcm(pallet_xcm::Call::send {
+				dest: Box::new(Location::parent().into()),
+				message: Box::new(xcm::VersionedXcm::from(Xcm::<()>(vec![]))),
+			});
+
+			for (wrapped, name) in wrap_call_utility_variants(blocked_call.clone()) {
+				assert_eq!(
+					construct_and_apply_extrinsic(Some(account.pair()), wrapped),
+					Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+					"PolkadotXcm::transfer_assets via {name} should be rejected",
+				);
+			}
+		});
 }
