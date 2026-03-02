@@ -404,6 +404,7 @@ function FaucetAuthorizePreimagePanel() {
       const contentHashBytes = hexToBytes(normalizedHash);
       const sizeValue = getSizeValue();
 
+<<<<<<< naren-client
       // Create SDK client with Alice signer
       const bulletinClient = createBulletinClient!(aliceSigner);
 
@@ -427,6 +428,19 @@ function FaucetAuthorizePreimagePanel() {
         sizeValue > 0n ? sizeValue : 1024n * 1024n,
         handleProgress
       );
+=======
+      const tx = api.tx.TransactionStorage.authorize_preimage({
+        content_hash: Binary.fromHex(normalizedHash),
+        max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
+      });
+
+      // Wait for finalization (not just best block inclusion) so that
+      // subsequent storage queries can see the new authorization.
+      const result = await tx.signAndSubmit(aliceSigner);
+      if (!result.ok) {
+        throw new Error("Transaction dispatch failed");
+      }
+>>>>>>> main
 
       setSubmitSuccess("Successfully authorized preimage");
       fetchPreimageAuthorizations(api);
@@ -695,6 +709,7 @@ function FaucetAuthorizeAccountPanel() {
       const txCount = parseInt(transactions, 10) || 0;
       const bytesValue = getBytesValue();
 
+<<<<<<< naren-client
       // Create SDK client with Alice signer
       const bulletinClient = createBulletinClient!(aliceSigner);
 
@@ -719,6 +734,19 @@ function FaucetAuthorizeAccountPanel() {
         bytesValue,
         handleProgress
       );
+=======
+      const tx = api.tx.TransactionStorage.authorize_account({
+        who: forWho as SS58String,
+        transactions: Number(txCount),
+        bytes: bytesValue,
+      });
+
+      // Wait for finalization so subsequent queries see the new authorization
+      const result = await tx.signAndSubmit(aliceSigner);
+      if (!result.ok) {
+        throw new Error("Transaction dispatch failed");
+      }
+>>>>>>> main
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
