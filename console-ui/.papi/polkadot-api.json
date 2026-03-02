@@ -19,6 +19,10 @@
       "metadata": ".papi/metadata/web3_storage.scale",
       "genesis": "0x4545454545454545454545454545454545454545454545454545454545454545",
       "codeHash": "0x289091ecfc0d1c0b66b62e22d54788fbcd0314f037c3ed7aebae4c330d21e879"
+    },
+    "bulletin_local": {
+      "wsUrl": "ws://localhost:10000",
+      "metadata": ".papi/metadata/bulletin_local.scale"
     }
   }
 }
