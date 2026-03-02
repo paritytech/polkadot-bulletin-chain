@@ -18,8 +18,9 @@
 //! Transaction storage pallet. Indexes transactions and manages storage proofs.
 //!
 //! This pallet is designed to be used on chains with no transaction fees. It must be used with a
-//! `SignedExtension` implementation that calls the [`validate_signed`](Pallet::validate_signed)
-//! and [`pre_dispatch_signed`](Pallet::pre_dispatch_signed) functions.
+//! `TransactionExtension` implementation that calls the
+//! [`validate_signed`](Pallet::validate_signed) and
+//! [`pre_dispatch_signed`](Pallet::pre_dispatch_signed) functions.
 
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -99,8 +100,21 @@ pub struct AuthorizationExtent {
 }
 
 /// The scope of an authorization.
-#[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
-enum AuthorizationScope<AccountId> {
+///
+/// This type is used both for storage keys and to indicate which authorization
+/// was consumed for a store/renew transaction (passed via custom origin).
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	Debug,
+	Encode,
+	Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
+pub enum AuthorizationScope<AccountId> {
 	/// Authorization for the given account to store arbitrary data.
 	Account(AccountId),
 	/// Authorization for anyone to store data with a specific hash.
@@ -267,6 +281,29 @@ pub mod pallet {
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
+
+	/// Custom origin for authorized signed transaction storage operations.
+	///
+	/// This origin is set by the [`extension::AuthorizeStorageSigned`] transaction extension
+	/// for signed transactions that pass authorization checks. Unsigned transactions
+	/// do not use this origin (they are validated via [`ValidateUnsigned`]).
+	#[pallet::origin]
+	#[derive(
+		Clone,
+		PartialEq,
+		Eq,
+		Debug,
+		codec::Encode,
+		codec::Decode,
+		codec::DecodeWithMemTracking,
+		scale_info::TypeInfo,
+		codec::MaxEncodedLen,
+	)]
+	pub enum Origin<T: Config> {
+		/// A signed transaction that has been authorized to store data.
+		/// Contains the signer and the scope of authorization that was consumed.
+		Authorized { who: T::AccountId, scope: AuthorizationScopeFor<T> },
+	}
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
@@ -940,24 +977,34 @@ pub mod pallet {
 			Self::authorization_extent(AuthorizationScope::Preimage(hash))
 		}
 
-		/// Returns the validity of the given call, signed by the given account.
+		/// Validate a signed TransactionStorage call.
 		///
-		/// This is equivalent to `validate_unsigned` but for signed transactions. It should be
-		/// called from a `SignedExtension` implementation.
-		pub fn validate_signed(who: &T::AccountId, call: &Call<T>) -> TransactionValidity {
-			Self::check_signed(who, call, CheckContext::Validate)?.ok_or(IMPOSSIBLE.into())
+		/// Returns `(ValidTransaction, Some(scope))` for store/renew calls (origin should be
+		/// transformed to carry authorization info).
+		/// Returns `(ValidTransaction, None)` for authorizer calls (origin unchanged).
+		/// Returns `Err(InvalidTransaction::Call)` for other calls.
+		///
+		/// This should be called from a `TransactionExtension` implementation.
+		pub fn validate_signed(
+			who: &T::AccountId,
+			call: &Call<T>,
+		) -> Result<(ValidTransaction, Option<AuthorizationScopeFor<T>>), TransactionValidityError>
+		{
+			let (valid_tx, scope) = Self::check_signed(who, call, CheckContext::Validate)?;
+			Ok((valid_tx.ok_or(IMPOSSIBLE)?, scope))
 		}
 
 		/// Check the validity of the given call, signed by the given account, and consume
 		/// authorization for it.
 		///
 		/// This is equivalent to `pre_dispatch` but for signed transactions. It should be called
-		/// from a `SignedExtension` implementation.
+		/// from a `TransactionExtension` implementation.
 		pub fn pre_dispatch_signed(
 			who: &T::AccountId,
 			call: &Call<T>,
 		) -> Result<(), TransactionValidityError> {
-			Self::check_signed(who, call, CheckContext::PreDispatch).map(|_| ())
+			let _ = Self::check_signed(who, call, CheckContext::PreDispatch)?;
+			Ok(())
 		}
 
 		/// Get ByteFee storage information from the outside of this pallet.
@@ -1157,7 +1204,10 @@ pub mod pallet {
 			who: &T::AccountId,
 			call: &Call<T>,
 			context: CheckContext,
-		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
+		) -> Result<
+			(Option<ValidTransaction>, Option<AuthorizationScopeFor<T>>),
+			TransactionValidityError,
+		> {
 			let (size, content_hash) = match call {
 				Call::<T>::store { data } => {
 					let content_hash = sp_io::hashing::blake2_256(data);
@@ -1179,11 +1229,14 @@ pub mod pallet {
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
-					return Ok(context.want_valid_transaction().then(|| ValidTransaction {
-						priority: T::StoreRenewPriority::get(),
-						longevity: T::StoreRenewLongevity::get(),
-						..Default::default()
-					}));
+					return Ok((
+						context.want_valid_transaction().then(|| ValidTransaction {
+							priority: T::StoreRenewPriority::get(),
+							longevity: T::StoreRenewLongevity::get(),
+							..Default::default()
+						}),
+						None,
+					));
 				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};
@@ -1200,6 +1253,7 @@ pub mod pallet {
 			// This allows anyone to store/renew pre-authorized content without consuming their
 			// own account authorization.
 			let consume = context.consume_authorization();
+
 			let used_preimage_auth = Self::check_authorization(
 				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
@@ -1215,17 +1269,28 @@ pub mod pallet {
 				)?;
 			}
 
-			Ok(context.want_valid_transaction().then(|| {
-				if used_preimage_auth {
-					Self::preimage_store_renew_valid_transaction(content_hash)
+			let (valid_tx, scope) = if context.want_valid_transaction() {
+				let (valid_tx, scope) = if used_preimage_auth {
+					(
+						Self::preimage_store_renew_valid_transaction(content_hash),
+						AuthorizationScope::Preimage(content_hash),
+					)
 				} else {
-					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
-						.and_provides((who, content_hash))
-						.priority(T::StoreRenewPriority::get())
-						.longevity(T::StoreRenewLongevity::get())
-						.into()
-				}
-			}))
+					(
+						ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+							.and_provides((who, content_hash))
+							.priority(T::StoreRenewPriority::get())
+							.longevity(T::StoreRenewLongevity::get())
+							.into(),
+						AuthorizationScope::Account(who.clone()),
+					)
+				};
+				(Some(valid_tx), Some(scope))
+			} else {
+				(None, None)
+			};
+
+			Ok((valid_tx, scope))
 		}
 
 		/// Verifies that the provided proof corresponds to a randomly selected chunk from a list of
@@ -1282,6 +1347,53 @@ pub mod pallet {
 
 			Ok(())
 		}
+	}
+}
+
+pub mod extension;
+
+use frame_support::traits::{EnsureOrigin, OriginTrait};
+
+/// An [`EnsureOrigin`] implementation that extracts the signer and authorization scope
+/// from an [`Origin::Authorized`] origin.
+///
+/// This only works for signed transactions whose origin was transformed by
+/// [`extension::AuthorizeStorageSigned`]. Unsigned transactions have a `None` origin
+/// and will not match.
+///
+/// Example usage in extrinsics:
+/// ```ignore
+/// let (who, scope) = EnsureAuthorized::<T>::try_origin(origin)
+///     .map_err(|_| DispatchError::BadOrigin)?;
+/// ```
+pub struct EnsureAuthorized<T>(core::marker::PhantomData<T>);
+
+impl<OuterOrigin, T: Config> EnsureOrigin<OuterOrigin> for EnsureAuthorized<T>
+where
+	OuterOrigin: OriginTrait + Clone,
+	OuterOrigin::PalletsOrigin: From<pallet::Origin<T>> + TryInto<pallet::Origin<T>>,
+{
+	type Success = (T::AccountId, AuthorizationScopeFor<T>);
+
+	fn try_origin(o: OuterOrigin) -> Result<Self::Success, OuterOrigin> {
+		match o.clone().into_caller().try_into() {
+			Ok(pallet::Origin::Authorized { who, scope }) => Ok((who, scope)),
+			Err(_) => Err(o),
+		}
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<OuterOrigin, ()> {
+		let who: T::AccountId = frame_benchmarking::account("authorized", 0, 0);
+		let mut origin = OuterOrigin::none();
+		origin.set_caller(
+			pallet::Origin::<T>::Authorized {
+				who: who.clone(),
+				scope: AuthorizationScope::Account(who),
+			}
+			.into(),
+		);
+		Ok(origin)
 	}
 }
 
