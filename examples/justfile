@@ -307,7 +307,7 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
     echo "   Log: {{ test_dir }}/ipfs-node.log"
 
 # Connect to chain IPFS nodes using local Kubo
-ipfs-kubo-connect runtime:
+ipfs-kubo-connect test_dir runtime:
     #!/usr/bin/env bash
     set -e
 
@@ -315,6 +315,7 @@ ipfs-kubo-connect runtime:
 
     KUBO_DIR="{{ KUBO_DIR }}"
     IPFS_CMD="$KUBO_DIR/ipfs"
+    export IPFS_PATH="{{ test_dir }}/ipfs-repo"
 
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
@@ -336,9 +337,9 @@ ipfs-kubo-reconnect-start test_dir runtime:
     ROOT_DIR="{{ justfile_directory() }}/.."
     cd "$ROOT_DIR"
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        ./scripts/ipfs-reconnect-westend.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+        IPFS_PATH="{{ test_dir }}/ipfs-repo" ./scripts/ipfs-reconnect-westend.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        ./scripts/ipfs-reconnect-solo.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+        IPFS_PATH="{{ test_dir }}/ipfs-repo" ./scripts/ipfs-reconnect-solo.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
     else
         echo "❌ Unhandled runtime: {{ runtime }} specified!"
         exit 1
@@ -569,7 +570,7 @@ setup-services test_dir runtime ipfs_mode="docker": npm-install
         echo "🔧 Setting up services with Kubo IPFS (runtime: {{ runtime }})..."
         just ipfs-kubo-shutdown "{{ test_dir }}"
         just ipfs-kubo-start "{{ test_dir }}"
-        just ipfs-kubo-connect "{{ runtime }}"
+        just ipfs-kubo-connect "{{ test_dir }}" "{{ runtime }}"
         just ipfs-kubo-reconnect-start "{{ test_dir }}" "{{ runtime }}"
         echo "✅ Services setup complete (Kubo mode)"
     else
