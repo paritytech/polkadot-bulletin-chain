@@ -23,6 +23,8 @@ export default defineConfig({
       name: "integration",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /integration/,
+      // Transaction tests share Alice's signing key — run serially to avoid nonce conflicts
+      fullyParallel: false,
     },
   ],
   webServer: {
