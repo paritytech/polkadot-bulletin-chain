@@ -91,7 +91,6 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     westend: bulletin_westend,
     paseo: bulletin_paseo,
     previewnet: bulletin_westend,
-    polkadot: bulletin_local,
   },
   web3storage: {
     local: web3_storage,
