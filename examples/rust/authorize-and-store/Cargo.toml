@@ -1,0 +1,25 @@
+[package]
+name = "rust-authorize-and-store"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "authorize-and-store"
+path = "src/main.rs"
+
+[dependencies]
+# Bulletin SDK - handles all chain interaction
+bulletin-sdk-rust = { path = "../../../sdk/rust" }
+
+# Subxt types and signer (re-exported types needed for keypair handling)
+subxt = { version = "0.44" }
+subxt-signer = { version = "0.44", features = ["sr25519"] }
+
+# CLI and utilities
+clap = { version = "4.2", features = ["derive"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio = { version = "1.40", features = ["full"] }
+anyhow = "1.0"
+hex = "0.4"

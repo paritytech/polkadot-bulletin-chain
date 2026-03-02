@@ -1,0 +1,54 @@
+{
+  "bulletin": {
+    "defaultNetwork": "paseo",
+    "networks": {
+      "local": {
+        "id": "local",
+        "name": "Local Dev",
+        "endpoints": ["ws://localhost:10000"],
+        "lightClient": false
+      },
+      "westend": {
+        "id": "westend",
+        "name": "Bulletin Westend",
+        "endpoints": ["wss://westend-bulletin-rpc.polkadot.io"],
+        "lightClient": false
+      },
+      "paseo": {
+        "id": "paseo",
+        "name": "Bulletin Paseo",
+        "endpoints": ["wss://paseo-bulletin-rpc.polkadot.io"],
+        "lightClient": false
+      },
+      "previewnet": {
+        "id": "previewnet",
+        "name": "Bulletin Previewnet",
+        "endpoints": ["wss://previewnet.substrate.dev/bulletin"],
+        "lightClient": false
+      },
+      "polkadot": {
+        "id": "polkadot",
+        "name": "Bulletin Polkadot (not released yet)",
+        "endpoints": [],
+        "lightClient": false
+      }
+    }
+  },
+  "web3storage": {
+    "defaultNetwork": "local",
+    "networks": {
+      "local": {
+        "id": "local",
+        "name": "Local Dev",
+        "endpoints": ["ws://localhost:2222"],
+        "lightClient": false
+      },
+      "westend": {
+        "id": "westend",
+        "name": "Web3 Westend (not released yet)",
+        "endpoints": [],
+        "lightClient": false
+      }
+    }
+  }
+}

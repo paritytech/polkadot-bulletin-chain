@@ -163,6 +163,14 @@ jobs:
       - name: Install just
         run: cargo install just --locked || true
 
+      - name: Install subxt-cli
+        run: |
+          if ! command -v subxt &> /dev/null; then
+            cargo install subxt-cli --locked
+          else
+            echo "subxt-cli already installed"
+          fi
+
       - name: Cache Polkadot SDK binaries
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: polkadot-sdk-cache
@@ -223,6 +231,15 @@ jobs:
       - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://localhost:10000"
+
+      # SDK Client Tests
+      - name: Test Rust SDK
+        working-directory: examples
+        run: just test-rust-sdk "${{ env.TEST_DIR }}" "$RUNTIME_PACKAGE"
+
+      - name: Test TypeScript SDK
+        working-directory: examples
+        run: just test-ts-sdk "${{ env.TEST_DIR }}"
 
       - name: Stop services
         if: always()

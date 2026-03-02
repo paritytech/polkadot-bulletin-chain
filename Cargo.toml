@@ -35,6 +35,7 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 
 # Local workspace members
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
+bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
@@ -180,7 +181,13 @@ members = [
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
+	"sdk/rust",
 ]
+# Exclude rust/authorize-and-store example - it uses subxt directly with metadata codegen
+# and is not part of the main workspace build. Build it separately:
+# cd examples/rust/authorize-and-store && cargo build --release
+exclude = ["examples/rust/authorize-and-store"]
+
 [profile.release]
 # Polkadot runtime requires unwinding.
 opt-level = 3

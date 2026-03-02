@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle } from "lucide-react";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, Github, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
   Select,
@@ -21,7 +21,7 @@ import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization, useAuthorizationLoading } from "@/state/storage.state";
 import { formatAddress, formatBlockNumber } from "@/utils/format";
 import { cn } from "@/utils/cn";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 // All navigation items
 const navItems = [
@@ -136,6 +136,84 @@ function NetworkSwitcher() {
   );
 }
 
+function HelpMenu() {
+  const [open, setOpen] = useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
+
+  const helpLinks = [
+    {
+      label: "User Manual",
+      href: "/docs/index.html",
+      icon: BookOpen,
+      external: true,
+      description: "Guides for storing and retrieving data",
+    },
+    {
+      label: "GitHub Repository",
+      href: "https://github.com/paritytech/polkadot-bulletin-chain",
+      icon: Github,
+      external: true,
+      description: "View source code and contribute",
+    },
+  ];
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => setOpen(!open)}
+        className="h-8 w-8"
+      >
+        <HelpCircle className="h-4 w-4" />
+      </Button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-2 shadow-lg z-50">
+            <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
+              Help & Resources
+            </div>
+            {helpLinks.map((link) => (
+              <a
+                key={link.label}
+                href={link.href}
+                target={link.external ? "_blank" : "_self"}
+                rel={link.external ? "noopener noreferrer" : undefined}
+                className="flex items-start gap-3 rounded-sm px-2 py-2 hover:bg-accent transition-colors"
+                onClick={() => setOpen(false)}
+              >
+                <link.icon className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                <div className="flex-1">
+                  <div className="flex items-center gap-1 text-sm font-medium">
+                    {link.label}
+                    {link.external && <ExternalLink className="h-3 w-3" />}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {link.description}
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+      )}
+    </div>
+  );
+}
+
 function AccountDisplay() {
   const selectedAccount = useSelectedAccount();
   const { status } = useWalletState();
@@ -217,6 +295,7 @@ export function Header() {
                 ))}
               </SelectContent>
             </Select>
+            <HelpMenu />
             <AccountDisplay />
 
             {/* Mobile menu button */}

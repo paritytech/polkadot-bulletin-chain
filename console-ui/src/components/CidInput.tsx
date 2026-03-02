@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/utils/cn";
-import { CID } from "multiformats/cid";
+import { CID, parseCid, cidFromBytes } from "@bulletin/sdk";
+import { hexToBytes } from "@/utils/format";
 
 interface CidInputProps {
   value: string;
@@ -29,15 +30,11 @@ export function CidInput({
     // Accept 0x-prefixed hex (raw CID bytes)
     if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
       try {
-        const hex = trimmed.slice(2);
-        if (hex.length === 0 || hex.length % 2 !== 0) {
+        const bytes = hexToBytes(trimmed);
+        if (bytes.length === 0) {
           return { isValid: false, error: "Invalid hex length" };
         }
-        const bytes = new Uint8Array(hex.length / 2);
-        for (let i = 0; i < hex.length; i += 2) {
-          bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-        }
-        const cid = CID.decode(bytes);
+        const cid = cidFromBytes(bytes);
         return { isValid: true, cid };
       } catch {
         return { isValid: false, error: "Invalid CID hex" };
@@ -45,7 +42,7 @@ export function CidInput({
     }
 
     try {
-      const cid = CID.parse(trimmed);
+      const cid = parseCid(trimmed);
       return { isValid: true, cid };
     } catch {
       return { isValid: false, error: "Invalid CID format" };

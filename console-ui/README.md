@@ -19,15 +19,21 @@ A web-based console for interacting with the Polkadot Bulletin Chain. Upload and
 
 ## Getting Started
 
+### Build the SDK First
+
+The console-ui depends on `@bulletin/sdk`. Build it before running the UI:
+
+```bash
+cd sdk/typescript
+npm install
+npm run build
+```
+
 ### Install Dependencies
 
 ```bash
 cd console-ui
 npm install
-# or
-pnpm install
-# or
-bun install
 ```
 
 ### Development
@@ -102,6 +108,38 @@ console-ui/
 └── public/                # Static assets
 ```
 
+## SDK Documentation
+
+The console-ui includes the Bulletin SDK documentation. To build and view the docs locally:
+
+### Quick Setup (generates docs for console-ui)
+
+```bash
+# Install mdbook if not already installed
+cargo install mdbook
+
+# From console-ui directory, build docs into public/docs/
+npm run build:docs
+
+# Start dev server - docs available at http://localhost:5173/docs/
+npm run dev
+```
+
+### Standalone Documentation Server
+
+To serve just the documentation:
+
+```bash
+cd docs/book
+mdbook serve --open
+```
+
+This opens the SDK book at http://localhost:3000 with guides on:
+- Authorization concepts
+- Storage and chunking
+- CID configuration
+- TypeScript and Rust SDK usage
+
 ## Tech Stack
 
 - **React 19** + TypeScript
@@ -110,7 +148,7 @@ console-ui/
 - **Radix UI** for accessible components
 - **RxJS** + @react-rxjs for state management
 - **polkadot-api** for chain interaction
-- **multiformats** for CID handling
+- **@bulletin/sdk** for CID calculation and storage operations
 
 ## License
 

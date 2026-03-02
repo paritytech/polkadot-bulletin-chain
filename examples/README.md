@@ -1,226 +1,161 @@
-# How to Run
+# Polkadot Bulletin Chain - Examples
 
-## Using `just`
+Examples demonstrating how to interact with the Polkadot Bulletin Chain.
 
-[`just`](https://github.com/casey/just) is a command runner (similar to `make`) that helps execute project tasks.
+## Directory Structure
 
-Install just with: 
-- `cargo install just`, if you have cargo package manager,
-- `brew install just`, if you're on Mac OS and have `brew` package manager installed,
-- `sudo apt install just`, if you're using a Linux distribution.  
-
-### Run prerequisites
-
-It's only needed once after checkout or when dependencies change:
-- `just build`
-- `just npm-install`
-
-### Run full workflow example
-- `just run-authorize-and-store papi` - for PAPI,
-- `just run-authorize-and-store pjs` - for PJS.
-
-#### Run individual commands for manual testing
-- `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
-- `just ipfs-init` - Initialize IPFS (if needed),
-- `just ipfs-start` - Start IPFS daemon,
-- `just bulletin-solo-zombienet-start` - Start zombienet,
-- `just ipfs-connect` - Connect to IPFS nodes,
-- `just ipfs-reconnect-start` - Start IPFS reconnect script,
-- `just papi-generate` - Generate PAPI descriptors,
-- `just run-example papi` - Run example with PAPI or PJS,
-- `just teardown-services` - Stop all services
-
-## Manually
-
-
-```shell
-cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
+```
+examples/
+├── *.js                       # JavaScript examples and shared utilities
+├── package.json               # JS dependencies
+├── rust/                      # Rust examples
+│   └── authorize-and-store/   # Rust subxt example
+└── justfile                   # Task automation
 ```
 
-### Download Zombienet
+## Quick Start
 
-```shell
-OS="$(uname -s)"
-ARCH="$(uname -m)"
+### Prerequisites
 
-if [ "$OS" = "Linux" ]; then
-  zb_os=linux
-else
-  zb_os=macos
-fi
-
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-  zb_arch=arm64
-else
-  zb_arch=x64
-fi
-
-zb_bin="zombienet-${zb_os}-${zb_arch}"
-
-wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/${zb_bin}"
-chmod +x "${zb_bin}"
+Install `just` command runner:
+```bash
+cargo install just      # Using cargo
+brew install just       # Using Homebrew (macOS)
+sudo apt install just   # Using apt (Linux)
 ```
 
-### Run Kubo
+### Run Examples
 
-#### Execute Locally
+#### JavaScript Examples
 
-```shell
-wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_darwin-arm64.tar.gz
-tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
-./kubo/ipfs version
-./kubo/ipfs init
-./kubo/ipfs daemon &   # run in the background
+```bash
+cd examples
+
+# Install dependencies
+just npm-install
+
+# Run authorize-and-store (WebSocket mode, full setup/teardown)
+just run-authorize-and-store bulletin-westend-runtime ws
+
+# Run authorize-and-store (Smoldot light client mode)
+just run-authorize-and-store bulletin-westend-runtime smoldot
+
+# Run other standalone examples (full setup/teardown)
+just run-store-chunked-data bulletin-polkadot-runtime
+just run-store-big-data bulletin-polkadot-runtime
+just run-authorize-preimage-and-store-papi bulletin-polkadot-runtime
 ```
 
-#### Use Docker
+#### Rust Examples
 
-* Use `host.docker.internal` (macOS/Windows) or `172.17.0.1` (Linux) for swarm connections
+```bash
+cd examples
 
-```shell
-docker pull ipfs/kubo:latest
-docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4011:4011 -p 8283:8283 -p 5011:5011 ipfs/kubo:latest
-docker logs -f ipfs-node
+# Run Rust SDK tests (services must already be running)
+just test-rust-sdk <test_dir> <runtime>
+
+# Run individual Rust example
+just run-test-rust authorize-and-store <test_dir> <runtime>
 ```
 
-### Run Bulletin Solochain with `--ipfs-server`
+## Available Examples
 
-```shell
-# Bulletin Solochain
+### JavaScript
 
-```shell
-# cd polkadot-bulletin-chain   # make you are in this directory
-cargo build --release -p polkadot-bulletin-chain
+| File | Description |
+|------|-------------|
+| `authorize_and_store_papi.js` | Basic authorization and storage via WebSocket RPC |
+| `authorize_and_store_papi_smoldot.js` | Same workflow using Smoldot light client |
+| `authorize_preimage_and_store_papi.js` | Content-addressed authorization using preimage hashes |
+| `store_chunked_data.js` | Large file storage with DAG-PB chunking |
+| `store_big_data.js` | Very large file handling with parallel chunk uploads |
+| `native_ipfs_dag_pb_chunked_data.js` | Native IPFS DAG-PB chunked data example |
+| `api.js` | Shared transaction and storage API helpers |
+| `common.js` | Shared utilities (signers, image generation, etc.) |
+| `logger.js` | Unified logging functions |
+| `cid_dag_metadata.js` | CID and DAG metadata utilities |
 
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
+### Rust
 
-### Connect IPFS Nodes
+| Directory | Description |
+|-----------|-------------|
+| `rust/authorize-and-store/` | Authorization and storage using subxt |
 
-```shell
-# Uses Kubo
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-# connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
+## Justfile Commands
 
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-# connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
+### Service Management
+
+```bash
+# Start all services (zombienet, IPFS, PAPI descriptors)
+just start-services <test_dir> <runtime>
+
+# Stop all services
+just stop-services <test_dir>
 ```
 
-```shell
-# Uses Docker on macOS/Windows (use dns4/host.docker.internal)
-docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+### Individual Test Recipes (services must be running)
 
-# Uses Docker on Linux (use ip4/172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
+```bash
+just run-test-authorize-and-store <test_dir> <runtime> [mode]
+just run-test-store-chunked-data <test_dir>
+just run-test-store-big-data <test_dir> [image_size]
+just run-test-authorize-preimage-and-store <test_dir>
+just run-test-rust <example> <test_dir> <runtime>
+just test-rust-sdk <test_dir> <runtime>
 ```
 
-```shell
-# Runs a script that reconnects every 2 seconds
-# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
-./scripts/ipfs-reconnect-solo.sh
+### Live Network Tests
+
+```bash
+just run-live-tests-westend <seed> [ipfs_gateway_url] [image_size]
+just run-live-tests-paseo <seed> [ipfs_gateway_url] [image_size]
 ```
 
-### Run Bulletin (Westend) Parachain with `--ipfs-server`
+## Manual Setup
 
-#### Prerequisites 
+If you prefer to run examples without `just`:
 
-```shell
-mkdir -p ~/local_bridge_testing/bin
+### 1. Install Dependencies
 
-# Ensures `polkadot` and `polkadot-parachain` exist
-git clone https://github.com/paritytech/polkadot-sdk.git
-# TODO: unless not merged: https://github.com/paritytech/polkadot-sdk/pull/10370
-git reset --hard origin/bko-bulletin-para-support
-cd polkadot-sdk
-
-cargo build -p polkadot -r
-ls -la target/release/polkadot
-cp target/release/polkadot ~/local_bridge_testing/bin
-cp target/release/polkadot-prepare-worker ~/local_bridge_testing/bin
-cp target/release/polkadot-execute-worker ~/local_bridge_testing/bin
-~/local_bridge_testing/bin/polkadot --version
-# polkadot 1.20.2-165ba47dc91 or higher
-
-cargo build -p polkadot-parachain-bin -r
-ls -la target/release/polkadot-parachain
-cp target/release/polkadot-parachain ~/local_bridge_testing/bin
-~/local_bridge_testing/bin/polkadot-parachain --version
-# polkadot-parachain 1.20.2-165ba47dc91 or higher
-```
-
-#### Launch Parachain
-
-```shell
-# Bulletin Parachain (Westend)
-./scripts/create_bulletin_westend_spec.sh
-POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
-  POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-westend-local.toml
-```
-
-#### Connect IPFS Nodes
-
-```shell
-# Uses Kubo
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-# connect 12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ success
-
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-# connect 12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ success
-```
-
-```shell
-# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-```
-
-```shell
-# Runs a script that reconnects every 2 seconds
-# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
-./scripts/ipfs-reconnect-westend.sh
-```
-
-### Trigger Authorize, Store and IPFS Get
-
-#### Example for Simple Authorizing and Store
-
-
-##### Using Modern PAPI (Polkadot API)
 ```bash
 cd examples
 npm install
-
-# First, generate the PAPI descriptors:
-#  (Generate TypeScript types in `.papi/descriptors/`)
-#  (Create metadata files in `.papi/metadata/bulletin.scale`)
-# Generate PAPI descriptors using local node:
-#   npx papi add -w ws://localhost:10000 bulletin
-#   npx papi
-# or:
-npm run papi:generate
-# or if you already have .papi folder you can always update it
-npm run papi:update
-
-# Then run the PAPI version (from the examples directory)
-node authorize_and_store_papi.js
+npx papi add -w ws://localhost:10000 bulletin
 ```
 
-#### Example for Multipart / Chunked Content / Big Files
+### 2. Start Services
 
-The code stores one file, splits it into chunks, and then uploads those chunks to Bulletin.
+See the justfile for full setup details. At minimum you need:
+- A running Bulletin Chain node (solochain or parachain via zombienet)
+- An IPFS node connected to the chain's IPFS peers
 
-It collects all the partial CIDs for each chunk and saves them as a custom metadata JSON file in Bulletin.
+### 3. Run Examples
 
-Now we have two examples:
-1. **Manual reconstruction** — return the metadata and chunk CIDs, then reconstruct the original file manually.
-2. **IPFS DAG feature** —
-    * converts the metadata into a DAG-PB descriptor,
-    * stores it directly in IPFS,
-    * and allows fetching the entire file using a single root CID from an IPFS HTTP gateway (for example: `http://localhost:8080/ipfs/QmW2WQi7j6c7UgJTarActp7tDNikE4B2qXtFCfLPdsgaTQ`).
+```bash
+cd examples
 
-```shell
-node store_chunked_data.js
+# JavaScript
+node authorize_and_store_papi.js [ws_url] [seed] [http_ipfs_api]
+node store_chunked_data.js [ws_url] [seed] [http_ipfs_api]
+node store_big_data.js [ws_url] [seed] [ipfs_gateway_url] [image_size]
+
+# Rust
+cd rust/authorize-and-store
+./fetch_metadata.sh ws://localhost:10000
+cargo build --release
+./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Alice"
+```
+
+## Troubleshooting
+
+**PAPI descriptors not found:**
+```bash
+cd examples
+npx papi add -w ws://localhost:10000 bulletin
+```
+
+**Metadata errors (Rust):**
+```bash
+cd examples/rust/authorize-and-store
+./fetch_metadata.sh ws://localhost:10000
 ```

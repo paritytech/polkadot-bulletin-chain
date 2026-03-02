@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { formatBytes, bytesToHex } from "@/utils/format";
-import { CID } from "multiformats/cid";
+import { CID, parseCid } from "@bulletin/sdk";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
 import { useNetwork } from "@/state/chain.state";
@@ -169,7 +169,7 @@ export function Download() {
     setCidInput(cid);
     // Try to parse it
     try {
-      const parsed = CID.parse(cid);
+      const parsed = parseCid(cid);
       setIsCidValid(true);
       setParsedCid(parsed);
     } catch {
