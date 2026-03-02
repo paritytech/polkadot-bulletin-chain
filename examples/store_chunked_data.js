@@ -200,7 +200,7 @@ async function main() {
         const { rootCid, dagBytes } = await buildUnixFSDag(metadataJson, 0xb220)
 
         // Store DAG and proof to the Bulletin.
-        let { rawDagCid } = await storeProof(bulletinAPI, whoSigner, rootCid, Buffer.from(dagBytes));
+        let { rawDagCid } = await storeProof(bulletinAPI, authorizationSigner, rootCid, Buffer.from(dagBytes));
         await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
 
         // Store DAG into IPFS.
