@@ -22,7 +22,6 @@ use pallet_bridge_messages::{
 };
 use pallet_bridge_parachains::ParachainHeaders;
 use pallet_transaction_storage::{
-	cids::{calculate_cid, CidConfig, HashingAlgorithm},
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
 };
 use runtime::{
@@ -40,6 +39,7 @@ use sp_runtime::{
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
 use std::collections::HashMap;
+use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 
 fn advance_block() {
 	let current_number = System::block_number();
@@ -1024,4 +1024,10 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
 		);
 	});
+}
+
+/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+#[test]
+fn transaction_storage_weight_sanity() {
+	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
 }
