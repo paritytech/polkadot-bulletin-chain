@@ -203,13 +203,176 @@ _check-docker:
         echo "   Please install Docker Desktop from: https://www.docker.com/products/docker-desktop"
         exit 1
     fi
-    
+
     if ! docker ps &> /dev/null; then
         echo "❌ Error: Docker is not running."
         echo "   Please start Docker Desktop and try again."
         echo "   On macOS: Open Docker Desktop from Applications"
         exit 1
     fi
+
+# ============================================================================
+# Kubo (local) IPFS recipes - alternative to Docker for environments without Docker
+# ============================================================================
+
+KUBO_VERSION := "v0.34.1"
+KUBO_DIR := justfile_directory() + "/../kubo"
+
+# Download and install Kubo IPFS binary
+ipfs-kubo-install:
+    #!/usr/bin/env bash
+    set -e
+    KUBO_DIR="{{ KUBO_DIR }}"
+    if [ -x "$KUBO_DIR/ipfs" ]; then
+        echo "   Kubo already installed at $KUBO_DIR/ipfs"
+        "$KUBO_DIR/ipfs" --version
+        return
+    fi
+    echo "📦 Installing Kubo {{ KUBO_VERSION }}..."
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    TARBALL="kubo_{{ KUBO_VERSION }}_${OS}-${ARCH}.tar.gz"
+    URL="https://dist.ipfs.tech/kubo/{{ KUBO_VERSION }}/${TARBALL}"
+    echo "   Downloading $URL..."
+    mkdir -p "$KUBO_DIR"
+    curl -fsSL "$URL" | tar xz -C "$KUBO_DIR" --strip-components=1 kubo/ipfs
+    chmod +x "$KUBO_DIR/ipfs"
+    "$KUBO_DIR/ipfs" --version
+    echo "   ✓ Kubo installed at $KUBO_DIR/ipfs"
+
+# Start IPFS Kubo daemon locally (no Docker required)
+ipfs-kubo-start test_dir: ipfs-kubo-install
+    #!/usr/bin/env bash
+    set -e
+    echo "🔧 Starting IPFS Kubo daemon (local mode)..."
+
+    KUBO_DIR="{{ KUBO_DIR }}"
+    IPFS_CMD="$KUBO_DIR/ipfs"
+    IPFS_PATH="{{ test_dir }}/ipfs-repo"
+
+    # Use non-standard ports to avoid conflicts with other IPFS instances
+    IPFS_SWARM_PORT=4011
+    IPFS_API_PORT=5011
+    IPFS_GATEWAY_PORT=8283
+
+    # Initialize fresh IPFS repo
+    rm -rf "$IPFS_PATH"
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD init --profile server
+
+    # Configure isolated mode
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD bootstrap rm --all
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Routing.Type '"none"'
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Discovery.MDNS.Enabled false
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Swarm.RelayClient.Enabled false
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Swarm.RelayService.Enabled false
+
+    # Configure custom ports
+    echo "   Configuring ports (swarm: ${IPFS_SWARM_PORT}, api: ${IPFS_API_PORT}, gateway: ${IPFS_GATEWAY_PORT})..."
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
+
+    # Start daemon in background
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD daemon > {{ test_dir }}/ipfs-node.log 2>&1 &
+    IPFS_PID=$!
+    echo $IPFS_PID > {{ test_dir }}/ipfs-kubo.pid
+
+    # Wait for daemon to be ready
+    CUSTOM_API="--api /ip4/127.0.0.1/tcp/${IPFS_API_PORT}"
+    echo "   Waiting for IPFS daemon API to be ready on port ${IPFS_API_PORT}..."
+    for i in $(seq 1 30); do
+        if IPFS_PATH="$IPFS_PATH" $IPFS_CMD $CUSTOM_API id >/dev/null 2>&1; then
+            echo "   IPFS API is ready (PID: $IPFS_PID)"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "   ❌ IPFS API failed to start within 30 seconds"
+            cat {{ test_dir }}/ipfs-node.log
+            exit 1
+        fi
+        sleep 1
+    done
+
+    $IPFS_CMD --version
+
+    # Enable Bitswap debug logging
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD $CUSTOM_API log level bitswap debug
+    IPFS_PATH="$IPFS_PATH" $IPFS_CMD $CUSTOM_API log level bitswap/client debug
+
+    echo "   Log: {{ test_dir }}/ipfs-node.log"
+
+# Connect to chain IPFS nodes using local Kubo
+ipfs-kubo-connect test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🔗 Connecting IPFS nodes (Kubo local, runtime: {{ runtime }})..."
+
+    KUBO_DIR="{{ KUBO_DIR }}"
+    IPFS_CMD="$KUBO_DIR/ipfs"
+    export IPFS_PATH="{{ test_dir }}/ipfs-repo"
+
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
+        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12348/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
+        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
+    else
+        echo "❌ Unhandled runtime: {{ runtime }} specified!"
+        exit 1
+    fi
+
+# Start IPFS reconnect script in background (Kubo local mode)
+ipfs-kubo-reconnect-start test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    echo "🔄 Starting IPFS reconnect script (Kubo local mode, runtime: {{ runtime }})..."
+
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    cd "$ROOT_DIR"
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        IPFS_PATH="{{ test_dir }}/ipfs-repo" ./scripts/ipfs-reconnect-westend.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        IPFS_PATH="{{ test_dir }}/ipfs-repo" ./scripts/ipfs-reconnect-solo.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
+    else
+        echo "❌ Unhandled runtime: {{ runtime }} specified!"
+        exit 1
+    fi
+    cd -
+
+    RECONNECT_PID=$!
+    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
+    echo "   Reconnect PID: $RECONNECT_PID"
+    echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
+    sleep 2
+
+# Shutdown local Kubo IPFS daemon
+ipfs-kubo-shutdown test_dir:
+    #!/usr/bin/env bash
+    echo "🛑 Shutting down IPFS Kubo daemon..."
+    if [ -f "{{ test_dir }}/ipfs-kubo.pid" ]; then
+        PID=$(cat "{{ test_dir }}/ipfs-kubo.pid")
+        if kill -0 $PID 2>/dev/null; then
+            kill $PID 2>/dev/null || true
+            sleep 2
+            kill -9 $PID 2>/dev/null || true
+            echo "   ✓ Kubo daemon stopped (PID: $PID)"
+        else
+            echo "   ⚠ Kubo daemon not running (stale PID: $PID)"
+        fi
+        rm -f "{{ test_dir }}/ipfs-kubo.pid"
+    else
+        echo "   ⚠ No Kubo PID file found"
+    fi
+    rm -rf "{{ test_dir }}/ipfs-repo" 2>/dev/null || true
+
+# ============================================================================
 
 # Start IPFS Docker container
 ipfs-start test_dir: _check-docker
@@ -381,10 +544,11 @@ papi-generate ws_url="ws://localhost:10000": npm-install
     echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
     npx papi add -w "{{ ws_url }}" bulletin
 
-# Setup all services using Docker for IPFS
+# Setup all services for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-setup-services test_dir runtime: npm-install
+#   ipfs_mode - IPFS backend: "docker" (default) or "kubo" (local, no Docker required)
+setup-services test_dir runtime ipfs_mode="docker": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -394,7 +558,7 @@ setup-services test_dir runtime: npm-install
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         just bulletin-solo-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     else
-        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
+        echo "❌ Unhandled runtime: {{ runtime }} specified!"
         exit 1
     fi
 
@@ -402,41 +566,58 @@ setup-services test_dir runtime: npm-install
     just papi-generate
 
     # Start IPFS
-    echo "🔧 Tearing down Docker services if they are running..."
-    just ipfs-shutdown "{{ test_dir }}"
-    echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
-    just ipfs-start "{{ test_dir }}"
-    just ipfs-connect "{{ runtime }}"
-    just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+    if [ "{{ ipfs_mode }}" = "kubo" ]; then
+        echo "🔧 Setting up services with Kubo IPFS (runtime: {{ runtime }})..."
+        just ipfs-kubo-shutdown "{{ test_dir }}"
+        just ipfs-kubo-start "{{ test_dir }}"
+        just ipfs-kubo-connect "{{ test_dir }}" "{{ runtime }}"
+        just ipfs-kubo-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+        echo "✅ Services setup complete (Kubo mode)"
+    else
+        echo "🔧 Tearing down Docker services if they are running..."
+        just ipfs-shutdown "{{ test_dir }}"
+        echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
+        just ipfs-start "{{ test_dir }}"
+        just ipfs-connect "{{ runtime }}"
+        just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
+        echo "✅ Services setup complete (Docker mode)"
+    fi
 
-    echo "✅ Services setup complete (Docker mode)"
-
-# Stop all Docker services
-teardown-services test_dir:
+# Stop all services
+# Parameters:
+#   ipfs_mode - IPFS backend: "docker" (default) or "kubo" (local)
+teardown-services test_dir ipfs_mode="docker":
     #!/usr/bin/env bash
 
     # Stop all background processes
     just kill-pids "{{ test_dir }}"
 
-    # Stop Docker container
-    echo "🧹 Stopping all Docker services..."
-    just ipfs-shutdown "{{ test_dir }}"
-    echo "✅ Docker services stopped"
+    if [ "{{ ipfs_mode }}" = "kubo" ]; then
+        echo "🧹 Stopping Kubo IPFS daemon..."
+        just ipfs-kubo-shutdown "{{ test_dir }}"
+        echo "✅ Kubo services stopped"
+    else
+        echo "🧹 Stopping all Docker services..."
+        just ipfs-shutdown "{{ test_dir }}"
+        echo "✅ Docker services stopped"
+    fi
 
 # Start all services for a runtime (use with run-test-* recipes)
 # Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
-start-services test_dir runtime:
+# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime kubo
+start-services test_dir runtime ipfs_mode="docker":
     #!/usr/bin/env bash
     set -e
     mkdir -p "{{ test_dir }}"
-    just setup-services "{{ test_dir }}" "{{ runtime }}"
+    just setup-services "{{ test_dir }}" "{{ runtime }}" "{{ ipfs_mode }}"
 
 # Stop all services
 # Usage: just stop-services /tmp/my-test-dir
-stop-services test_dir:
+# Usage: just stop-services /tmp/my-test-dir kubo
+stop-services test_dir ipfs_mode="docker":
     #!/usr/bin/env bash
     echo "📁 Stopping services - test directory: {{ test_dir }}"
-    just teardown-services "{{ test_dir }}"
+    just teardown-services "{{ test_dir }}" "{{ ipfs_mode }}"
     echo "✅ Services stopped"
 
 # Run authorize-and-store test only (services must already be running via start-services)

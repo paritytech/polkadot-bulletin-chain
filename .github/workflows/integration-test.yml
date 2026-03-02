@@ -30,6 +30,25 @@ jobs:
       contents: read
       pull-requests: read
 
+  set-image:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
+    # This workaround sets the container image for each job using 'set-image' job output.
+    # env variables don't work for PRs from forks, so we need to use outputs.
+    runs-on: ubuntu-latest
+    outputs:
+      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Set CI image output
+        id: set_image
+        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
+
   setup:
     if: needs.changes.outputs.should-run == 'true'
     needs: [changes]
@@ -38,12 +57,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Free Disk Space (Ubuntu)
-        if: ${{ runner.environment == 'github-hosted' }}
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
-        with:
-          tool-cache: false
 
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
@@ -118,9 +131,11 @@ jobs:
           echo "runtime=$TASKS" >> $GITHUB_OUTPUT
 
   integration-tests:
-    needs: [setup, runtime-matrix]
+    needs: [set-image, setup, runtime-matrix]
     name: Integration Tests (${{ matrix.runtime.name }})
-    runs-on: ubuntu-latest
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
     timeout-minutes: 200
     strategy:
       fail-fast: false
@@ -130,18 +145,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: wasm32-unknown-unknown
-          components: rust-src
-
-      - name: Install system dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libclang-dev
 
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
@@ -194,7 +197,7 @@ jobs:
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE"
+          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo"
 
       - name: Test authorize-and-store ws
         working-directory: examples
@@ -227,7 +230,7 @@ jobs:
       - name: Stop services
         if: always()
         working-directory: examples
-        run: just stop-services "$TEST_DIR"
+        run: just stop-services "$TEST_DIR" "kubo"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)

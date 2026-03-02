@@ -19,11 +19,7 @@ concurrency:
 permissions:
   contents: read
 
-# Parity CI image to use
-# Common variable is defined in the workflow
-# Repo env variable doesn't work for PRs from forks
 env:
-  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
   FRAME_OMNI_BENCHER_BIN_DIR: ${{ github.workspace }}/.frame-omni-bencher-bin
 
 jobs:
@@ -42,7 +38,14 @@ jobs:
     outputs:
       CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
     steps:
-      - id: set_image
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Set CI image output
+        id: set_image
         run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
 
   check-fmt:
