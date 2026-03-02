@@ -151,12 +151,12 @@ jobs:
         run: |
           curl -fsSL https://get.docker.com -o get-docker.sh
           sh get-docker.sh
-          # The host runner mounts /var/run/docker.sock as a directory;
-          # remove it so dockerd can create its unix socket there.
-          rm -rf /var/run/docker.sock
-          dockerd &
-          # Wait for Docker daemon to be ready
-          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break || sleep 1; done
+          # The host runner bind-mounts /var/run/docker.sock as a directory;
+          # use an alternative socket path for dockerd.
+          dockerd -H unix:///var/run/docker-inner.sock &
+          # Wait for Docker daemon to be ready and symlink for default clients
+          for i in $(seq 1 30); do docker -H unix:///var/run/docker-inner.sock info >/dev/null 2>&1 && break || sleep 1; done
+          echo "DOCKER_HOST=unix:///var/run/docker-inner.sock" >> $GITHUB_ENV
 
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
