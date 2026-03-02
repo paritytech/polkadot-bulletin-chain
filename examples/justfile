@@ -226,7 +226,7 @@ ipfs-kubo-install:
     if [ -x "$KUBO_DIR/ipfs" ]; then
         echo "   Kubo already installed at $KUBO_DIR/ipfs"
         "$KUBO_DIR/ipfs" --version
-        return
+        exit 0
     fi
     echo "📦 Installing Kubo {{ KUBO_VERSION }}..."
     ARCH=$(uname -m)
@@ -253,7 +253,7 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
 
     KUBO_DIR="{{ KUBO_DIR }}"
     IPFS_CMD="$KUBO_DIR/ipfs"
-    IPFS_PATH="{{ test_dir }}/ipfs-repo"
+    export IPFS_PATH="{{ test_dir }}/ipfs-repo"
 
     # Use non-standard ports to avoid conflicts with other IPFS instances
     IPFS_SWARM_PORT=4011
@@ -262,23 +262,23 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
 
     # Initialize fresh IPFS repo
     rm -rf "$IPFS_PATH"
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD init --profile server
+    $IPFS_CMD init --profile server
 
     # Configure isolated mode
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD bootstrap rm --all
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Routing.Type '"none"'
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Discovery.MDNS.Enabled false
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Swarm.RelayClient.Enabled false
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Swarm.RelayService.Enabled false
+    $IPFS_CMD bootstrap rm --all
+    $IPFS_CMD config --json Routing.Type '"none"'
+    $IPFS_CMD config --json Discovery.MDNS.Enabled false
+    $IPFS_CMD config --json Swarm.RelayClient.Enabled false
+    $IPFS_CMD config --json Swarm.RelayService.Enabled false
 
     # Configure custom ports
     echo "   Configuring ports (swarm: ${IPFS_SWARM_PORT}, api: ${IPFS_API_PORT}, gateway: ${IPFS_GATEWAY_PORT})..."
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
+    $IPFS_CMD config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
+    $IPFS_CMD config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
+    $IPFS_CMD config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
     # Start daemon in background
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD daemon > {{ test_dir }}/ipfs-node.log 2>&1 &
+    $IPFS_CMD daemon > {{ test_dir }}/ipfs-node.log 2>&1 &
     IPFS_PID=$!
     echo $IPFS_PID > {{ test_dir }}/ipfs-kubo.pid
 
@@ -286,7 +286,7 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
     CUSTOM_API="--api /ip4/127.0.0.1/tcp/${IPFS_API_PORT}"
     echo "   Waiting for IPFS daemon API to be ready on port ${IPFS_API_PORT}..."
     for i in $(seq 1 30); do
-        if IPFS_PATH="$IPFS_PATH" $IPFS_CMD $CUSTOM_API id >/dev/null 2>&1; then
+        if $IPFS_CMD $CUSTOM_API id >/dev/null 2>&1; then
             echo "   IPFS API is ready (PID: $IPFS_PID)"
             break
         fi
@@ -301,8 +301,8 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
     $IPFS_CMD --version
 
     # Enable Bitswap debug logging
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD $CUSTOM_API log level bitswap debug
-    IPFS_PATH="$IPFS_PATH" $IPFS_CMD $CUSTOM_API log level bitswap/client debug
+    $IPFS_CMD $CUSTOM_API log level bitswap debug
+    $IPFS_CMD $CUSTOM_API log level bitswap/client debug
 
     echo "   Log: {{ test_dir }}/ipfs-node.log"
 
@@ -347,7 +347,7 @@ ipfs-kubo-reconnect-start test_dir runtime:
     cd -
 
     RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
+    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect.pid
     echo "   Reconnect PID: $RECONNECT_PID"
     echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
     sleep 2
@@ -573,7 +573,7 @@ setup-services test_dir runtime ipfs_mode="docker": npm-install
         just ipfs-kubo-connect "{{ test_dir }}" "{{ runtime }}"
         just ipfs-kubo-reconnect-start "{{ test_dir }}" "{{ runtime }}"
         echo "✅ Services setup complete (Kubo mode)"
-    else
+    elif [ "{{ ipfs_mode }}" = "docker" ]; then
         echo "🔧 Tearing down Docker services if they are running..."
         just ipfs-shutdown "{{ test_dir }}"
         echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
@@ -581,6 +581,9 @@ setup-services test_dir runtime ipfs_mode="docker": npm-install
         just ipfs-connect "{{ runtime }}"
         just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
         echo "✅ Services setup complete (Docker mode)"
+    else
+        echo "❌ Invalid ipfs_mode: '{{ ipfs_mode }}'. Must be 'docker' or 'kubo'."
+        exit 1
     fi
 
 # Stop all services
@@ -596,10 +599,13 @@ teardown-services test_dir ipfs_mode="docker":
         echo "🧹 Stopping Kubo IPFS daemon..."
         just ipfs-kubo-shutdown "{{ test_dir }}"
         echo "✅ Kubo services stopped"
-    else
+    elif [ "{{ ipfs_mode }}" = "docker" ]; then
         echo "🧹 Stopping all Docker services..."
         just ipfs-shutdown "{{ test_dir }}"
         echo "✅ Docker services stopped"
+    else
+        echo "❌ Invalid ipfs_mode: '{{ ipfs_mode }}'. Must be 'docker' or 'kubo'."
+        exit 1
     fi
 
 # Start all services for a runtime (use with run-test-* recipes)
