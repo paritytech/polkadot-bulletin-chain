@@ -136,6 +136,7 @@ jobs:
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
+      options: --privileged
     timeout-minutes: 200
     strategy:
       fail-fast: false
