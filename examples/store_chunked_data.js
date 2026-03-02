@@ -8,7 +8,7 @@ import { TextDecoder } from 'util'
 import assert from "assert";
 import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
-import { authorizeAccount, fetchCid, store, storeChunkedFile, waitForTransaction, TX_MODE_FINALIZED_BLOCK } from "./api.js";
+import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws-provider";
@@ -137,17 +137,22 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode 
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-async function storeProof(typedApi, authorizationSigner, rootCID, dagFileBytes) {
+// TODO: revisit sudo usage with https://github.com/paritytech/polkadot-bulletin-chain/pull/265
+async function storeProof(typedApi, proofSigner, rootCID, dagFileBytes) {
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
     // Store DAG bytes in Bulletin using PAPI store function
-    const { cid: rawDagCid } = await store(typedApi, authorizationSigner, dagFileBytes);
+    const { cid: rawDagCid } = await store(typedApi, proofSigner, dagFileBytes);
     console.log('📤 DAG proof "bytes" stored in Bulletin with CID:', rawDagCid.toString());
 
     // This can be a serious pallet, this is just a demonstration.
     const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
     const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    await waitForTransaction(remarkTx, authorizationSigner, "StoreProofRemark");
+    const sudoTx = typedApi.tx.Sudo.sudo({ call: remarkTx.decodedCall });
+    await sudoTx.signSubmitAndWatch(proofSigner).subscribe({
+        next: (ev) => console.log(`✅ Proof remark event:`, ev.type),
+        error: (err) => console.error(`❌ Proof remark error:`, err),
+    });
     console.log(`📤 DAG proof - "${proof}" - stored in Bulletin`);
     return { rawDagCid }
 }
