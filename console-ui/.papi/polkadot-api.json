@@ -22,7 +22,7 @@
     },
     "bulletin_local": {
       "wsUrl": "ws://localhost:10000",
-      "metadata": ".papi/metadata/bulletin_local.scale",
+      "metadata": ".papi/metadata/bulletin_local.scale"
     }
   }
 }
