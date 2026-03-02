@@ -19,6 +19,12 @@
       "metadata": ".papi/metadata/web3_storage.scale",
       "genesis": "0x4545454545454545454545454545454545454545454545454545454545454545",
       "codeHash": "0x289091ecfc0d1c0b66b62e22d54788fbcd0314f037c3ed7aebae4c330d21e879"
+    },
+    "bulletin_local": {
+      "wsUrl": "ws://localhost:10000",
+      "metadata": ".papi/metadata/bulletin_local.scale",
+      "genesis": "0x31b4608bb301e7738ccc41487024f1d04c497669a59168b9ef0a1b33adc0a2bd",
+      "codeHash": "0x98de636e1e809365ce43d860fe7be42510b16eb6f147668ae7df70022c4c878a"
     }
   }
 }
