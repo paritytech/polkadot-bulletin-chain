@@ -137,17 +137,17 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode 
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-async function storeProof(typedApi, whoSigner, rootCID, dagFileBytes) {
+async function storeProof(typedApi, authorizationSigner, rootCID, dagFileBytes) {
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
     // Store DAG bytes in Bulletin using PAPI store function
-    const { cid: rawDagCid } = await store(typedApi, whoSigner, dagFileBytes);
+    const { cid: rawDagCid } = await store(typedApi, authorizationSigner, dagFileBytes);
     console.log('📤 DAG proof "bytes" stored in Bulletin with CID:', rawDagCid.toString());
 
     // This can be a serious pallet, this is just a demonstration.
     const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
     const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    await waitForTransaction(remarkTx, whoSigner, "StoreProofRemark");
+    await waitForTransaction(remarkTx, authorizationSigner, "StoreProofRemark");
     console.log(`📤 DAG proof - "${proof}" - stored in Bulletin`);
     return { rawDagCid }
 }
@@ -169,13 +169,13 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
-        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
+        const { authorizationSigner, authorizationAddress, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
-        // Authorize an account.
+        // Authorize accounts (both whoAddress for chunk storage and authorizationAddress for proof storage).
         await authorizeAccount(
             bulletinAPI,
             authorizationSigner,
-            whoAddress,
+            [whoAddress, authorizationAddress],
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
             TX_MODE_FINALIZED_BLOCK

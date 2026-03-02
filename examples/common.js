@@ -22,11 +22,12 @@ export function createSigner(account) {
 }
 
 export function setupKeyringAndSigners(authorizationSeed, accountSeed) {
-  const { signer: authorizationSigner, _ } = newSigner(authorizationSeed);
+  const { signer: authorizationSigner, address: authorizationAddress } = newSigner(authorizationSeed);
   const { signer: whoSigner, address: whoAddress } = newSigner(accountSeed);
 
   return {
     authorizationSigner,
+    authorizationAddress,
     whoSigner,
     whoAddress
   };
