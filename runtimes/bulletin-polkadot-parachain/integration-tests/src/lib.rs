@@ -20,11 +20,11 @@
 //!
 //! NOTE: The Polkadot SDK does not provide Polkadot mainnet emulated chains,
 //! so we use Westend emulated chains as a stand-in. This works because:
-//! - Asset Hub Westend uses parachain ID 1000, matching the Polkadot parachain
-//!   runtime's `AssetHubLocation` configuration.
+//! - Asset Hub Westend uses parachain ID 1000, matching the Polkadot parachain runtime's
+//!   `AssetHubLocation` configuration.
 //! - The xcm-emulator routes messages by topology, not by network ID.
-//! - The reserve transfer logic (`IsRelayTokenFrom<AssetHubLocation>`) checks
-//!   origin and asset location, both of which are network-ID-agnostic.
+//! - The reserve transfer logic (`IsRelayTokenFrom<AssetHubLocation>`) checks origin and asset
+//!   location, both of which are network-ID-agnostic.
 
 #[cfg(test)]
 mod tests;
