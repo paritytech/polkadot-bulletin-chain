@@ -4,7 +4,7 @@
 #
 # Quick start:
 #   just dev              - Start chain (--dev --ipfs-server) + vite dev server
-#   just test             - Run mock Playwright tests (no infra needed)
+#   just test             - Run integration Playwright tests (chain must be running)
 #   just test-e2e         - Full E2E: zombienet + Docker IPFS + integration tests
 #
 # See `just --list` for all available recipes.
@@ -113,13 +113,9 @@ teardown test_dir:
 
 # ── Testing ──────────────────────────────────────────────────────────
 
-# Run mock Playwright tests (no infra needed)
+# Run integration Playwright tests (chain must already be running on ws://localhost:10000)
 test: install ensure-browsers
-    npx playwright test --project=mock
-
-# Run integration Playwright tests (chain must already be running)
-test-integration: ensure-browsers
-    npx playwright test --project=integration
+    npx playwright test
 
 # Full E2E lifecycle: setup → install → integration tests → teardown
 test-e2e runtime="bulletin-westend-runtime":
@@ -142,7 +138,7 @@ test-e2e runtime="bulletin-westend-runtime":
     echo ""
     echo "━━━ Running integration tests ━━━"
     set +e
-    npx playwright test --project=integration
+    npx playwright test
     TEST_EXIT=$?
     set -e
 
@@ -175,7 +171,7 @@ test-e2e-dev: install ensure-browsers build-chain
     echo ""
     echo "━━━ Running integration tests ━━━"
     set +e
-    npx playwright test --project=integration
+    npx playwright test
     TEST_EXIT=$?
     set -e
 
