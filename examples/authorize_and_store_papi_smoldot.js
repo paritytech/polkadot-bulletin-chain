@@ -20,9 +20,8 @@ const WS_BOOTNODE_REGEX = /\/tcp\/\d+\/ws\/p2p\//;
 
 /**
  * Converts a TCP bootnode to WebSocket format for smoldot compatibility.
- * Uses convention: WebSocket port = TCP p2p_port + 1
- *
- * Example: /ip4/127.0.0.1/tcp/30333/p2p/PEER_ID -> /ip4/127.0.0.1/tcp/30334/ws/p2p/PEER_ID
+ * If already a WS address (zombienet default), returns it unchanged.
+ * For plain TCP bootnodes, uses convention: WebSocket port = TCP p2p_port + 1.
  */
 function convertBootNodeToWebSocket(addr) {
     // Already a WebSocket address

@@ -15,9 +15,6 @@ args = [
 	"--ipfs-server",
 	# Increase tx pool from 20->40 MiB
 	# "--pool-kbytes 40960",
-	# Extra WS listener on p2p_port + 1 for smoldot and IPFS/Bitswap.
-	# Note: p2p_port (10001) is already managed by zombienet — do NOT add a duplicate --listen-addr for it.
-	"--listen-addr=/ip4/127.0.0.1/tcp/10002/ws",
 	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 ]
 
@@ -30,8 +27,5 @@ args = [
 	"--ipfs-server",
 	# Increase tx pool from 20->40 MiB
 	# "--pool-kbytes 40960",
-	# Extra WS listener on p2p_port + 1 for smoldot and IPFS/Bitswap.
-	# Note: p2p_port (12347) is already managed by zombienet — do NOT add a duplicate --listen-addr for it.
-	"--listen-addr=/ip4/127.0.0.1/tcp/12348/ws",
 	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 ]

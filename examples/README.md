@@ -130,16 +130,16 @@ For manual setup, configure Peering.Peers in your Kubo config:
 ```shell
 # Local Kubo — configure peering before starting the daemon
 ./kubo/ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/ip4/127.0.0.1/tcp/10002/ws"]},
-  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/ip4/127.0.0.1/tcp/12348/ws"]}
+  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/ip4/127.0.0.1/tcp/10001/ws"]},
+  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/ip4/127.0.0.1/tcp/12347/ws"]}
 ]'
 ```
 
 ```shell
 # Docker Kubo — configure peering, then restart the container
 docker exec ipfs-node ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/dns4/host.docker.internal/tcp/10002/ws"]},
-  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/dns4/host.docker.internal/tcp/12348/ws"]}
+  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/dns4/host.docker.internal/tcp/10001/ws"]},
+  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/dns4/host.docker.internal/tcp/12347/ws"]}
 ]'
 docker restart ipfs-node
 ```
@@ -189,16 +189,16 @@ Configure Peering.Peers for the Westend parachain nodes:
 ```shell
 # Local Kubo
 ./kubo/ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ","Addrs":["/ip4/127.0.0.1/tcp/10002/ws"]},
-  {"ID":"12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ","Addrs":["/ip4/127.0.0.1/tcp/12348/ws"]}
+  {"ID":"12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ","Addrs":["/ip4/127.0.0.1/tcp/10001/ws"]},
+  {"ID":"12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ","Addrs":["/ip4/127.0.0.1/tcp/12347/ws"]}
 ]'
 ```
 
 ```shell
 # Docker Kubo
 docker exec ipfs-node ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ","Addrs":["/dns4/host.docker.internal/tcp/10002/ws"]},
-  {"ID":"12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ","Addrs":["/dns4/host.docker.internal/tcp/12348/ws"]}
+  {"ID":"12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ","Addrs":["/dns4/host.docker.internal/tcp/10001/ws"]},
+  {"ID":"12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ","Addrs":["/dns4/host.docker.internal/tcp/12347/ws"]}
 ]'
 docker restart ipfs-node
 ```

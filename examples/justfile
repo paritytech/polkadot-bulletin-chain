@@ -238,17 +238,17 @@ IPFS_SWARM_PORT := "4011"
 IPFS_API_PORT := "5011"
 IPFS_GATEWAY_PORT := "8283"
 
-# Westend parachain peer IDs and WebSocket ports
+# Westend parachain peer IDs and p2p ports (zombienet binds WS on p2p_port)
 WESTEND_PEER1_ID := "12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
-WESTEND_PEER1_PORT := "10002"
+WESTEND_PEER1_PORT := "10001"
 WESTEND_PEER2_ID := "12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
-WESTEND_PEER2_PORT := "12348"
+WESTEND_PEER2_PORT := "12347"
 
-# Polkadot solo chain peer IDs and WebSocket ports
+# Polkadot solo chain peer IDs and p2p ports (zombienet binds WS on p2p_port)
 POLKADOT_PEER1_ID := "12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
-POLKADOT_PEER1_PORT := "10002"
+POLKADOT_PEER1_PORT := "10001"
 POLKADOT_PEER2_ID := "12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
-POLKADOT_PEER2_PORT := "12348"
+POLKADOT_PEER2_PORT := "12347"
 
 # Download and install Kubo IPFS binary
 ipfs-kubo-install:
