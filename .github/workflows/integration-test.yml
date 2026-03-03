@@ -213,7 +213,7 @@ jobs:
 
       - name: Test chopsticks compatibility
         working-directory: examples
-        run: just run-test-chopsticks "ws://localhost:10000"
+        run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
       - name: Stop services
         if: always()

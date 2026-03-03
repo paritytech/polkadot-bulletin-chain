@@ -491,8 +491,8 @@ ipfs-shutdown test_dir:
 # Generate PAPI descriptors
 # Generate PAPI descriptors from a running node
 # Parameters:
-#   ws_url - WebSocket URL of the node (default: ws://localhost:10000)
-papi-generate ws_url="ws://localhost:10000": npm-install
+#   ws_url - WebSocket URL of the node (default: ws://127.0.0.1:10000)
+papi-generate ws_url="ws://127.0.0.1:10000": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -505,13 +505,20 @@ papi-generate ws_url="ws://localhost:10000": npm-install
     PORT="${PORT%%/*}"
 
     echo "   Waiting for RPC endpoint ${HOST}:${PORT} to accept connections..."
-    for i in $(seq 1 60); do
+    for i in $(seq 1 180); do
         if nc -z "$HOST" "$PORT" 2>/dev/null; then
-            echo "   ✅ RPC endpoint is reachable"
+            echo "   ✅ RPC endpoint is reachable (after ${i}s)"
             break
         fi
-        if [ "$i" -eq 60 ]; then
-            echo "   ❌ RPC endpoint ${HOST}:${PORT} not reachable after 60 seconds"
+        if [ "$i" -eq 180 ]; then
+            echo "   ❌ RPC endpoint ${HOST}:${PORT} not reachable after 180 seconds"
+            echo "   Debug: nc -z ${HOST} ${PORT} exit code: $(nc -z "$HOST" "$PORT" 2>&1; echo $?)"
+            echo "   Debug: /etc/hosts:"
+            cat /etc/hosts 2>/dev/null || true
+            echo "   Debug: getent hosts ${HOST}:"
+            getent hosts "$HOST" 2>/dev/null || true
+            echo "   Debug: ss -tlnp | grep ${PORT}:"
+            ss -tlnp 2>/dev/null | grep "$PORT" || true
             exit 1
         fi
         sleep 1
@@ -603,10 +610,10 @@ stop-services test_dir ipfs_mode="kubo-docker":
 #   test_dir - Test directory where services are running
 #   runtime - Runtime name for smoldot chainspec path resolution
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   ws_url - WebSocket URL (default: ws://localhost:10000, only used in ws mode)
+#   ws_url - WebSocket URL (default: ws://127.0.0.1:10000, only used in ws mode)
 #   seed - Account seed phrase or dev seed (default: //Alice, only used in ws mode)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
 
@@ -636,10 +643,10 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://localhost:1
 # Run store-chunked-data test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
-#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+run-test-store-chunked-data test_dir ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
     node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -647,10 +654,10 @@ run-test-store-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice
 # Run native-ipfs-dag-pb-chunked-data test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
-#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-native-ipfs-dag-pb-chunked-data test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+run-test-native-ipfs-dag-pb-chunked-data test_dir ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
     node native_ipfs_dag_pb_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -659,10 +666,10 @@ run-test-native-ipfs-dag-pb-chunked-data test_dir ws_url="ws://localhost:10000" 
 # Parameters:
 #   test_dir - Test directory where services are running
 #   image_size - Image size preset: small, big32, big64, big96 (default: big64)
-#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
-run-test-store-big-data test_dir image_size="big64" ws_url="ws://localhost:10000" seed="//Alice" ipfs_gateway_url="http://127.0.0.1:8283":
+run-test-store-big-data test_dir image_size="big64" ws_url="ws://127.0.0.1:10000" seed="//Alice" ipfs_gateway_url="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
     node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
@@ -670,10 +677,10 @@ run-test-store-big-data test_dir image_size="big64" ws_url="ws://localhost:10000
 # Run authorize-preimage-and-store test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
-#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://localhost:10000)
+#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-authorize-preimage-and-store test_dir ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
+run-test-authorize-preimage-and-store test_dir ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -726,7 +733,7 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
             node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "http://127.0.0.1:8283"
         fi
     else
-        node $SCRIPT_NAME "ws://localhost:10000" "//Alice" "http://127.0.0.1:8283"
+        node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Alice" "http://127.0.0.1:8283"
     fi
     EXAMPLE_EXIT=$?
     
@@ -744,10 +751,10 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
 # Run store chunked data example
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   ws_url - WebSocket URL (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283" ipfs_mode="kubo-docker": npm-install
+run-store-chunked-data runtime ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -774,10 +781,10 @@ run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http
 # Run store big data example.
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   ws_url - WebSocket URL (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5011)
-run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:5011" ipfs_mode="kubo-docker": npm-install
+run-store-big-data runtime ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:5011" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -804,10 +811,10 @@ run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipf
 # Run authorize preimage and store with PAPI example.
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-#   ws_url - WebSocket URL (default: ws://localhost:10000)
+#   ws_url - WebSocket URL (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283" ipfs_mode="kubo-docker": npm-install
+run-authorize-preimage-and-store-papi runtime ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
