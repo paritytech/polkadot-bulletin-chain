@@ -54,7 +54,7 @@ fn advance_block() {
 	System::set_block_number(next);
 
 	frame_system::BlockWeight::<Runtime>::kill();
-	frame_system::AllExtrinsicsLen::<Runtime>::kill();
+	frame_system::BlockSize::<Runtime>::kill();
 
 	<System as Hooks<_>>::on_initialize(next);
 	<TransactionStorage as Hooks<_>>::on_initialize(next);
