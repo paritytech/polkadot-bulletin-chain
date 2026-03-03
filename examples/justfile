@@ -80,14 +80,19 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
 
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
-        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+        # Resolve command name via PATH, or treat as a file path
+        if command -v "$ZOMBIENET_BINARY" >/dev/null 2>&1; then
+            ZOMBIENET_BIN="$(command -v "$ZOMBIENET_BINARY")"
+        else
+            ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+        fi
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
     # Resolve to absolute path
     ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
 
-    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
+    if [ ! -x "$ZOMBIENET_BIN" ]; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
@@ -132,14 +137,19 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
 
     # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
-        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+        # Resolve command name via PATH, or treat as a file path
+        if command -v "$ZOMBIENET_BINARY" >/dev/null 2>&1; then
+            ZOMBIENET_BIN="$(command -v "$ZOMBIENET_BINARY")"
+        else
+            ZOMBIENET_BIN="$ZOMBIENET_BINARY"
+        fi
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
     # Resolve to absolute path
     ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
 
-    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
+    if [ ! -x "$ZOMBIENET_BIN" ]; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
         echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
