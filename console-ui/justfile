@@ -1,0 +1,222 @@
+# Console UI - Just Commands
+#
+# Local development and E2E testing for the Bulletin Chain console UI.
+#
+# Quick start:
+#   just dev              - Start chain (--dev --ipfs-server) + vite dev server
+#   just test             - Run mock Playwright tests (no infra needed)
+#   just test-e2e         - Full E2E: zombienet + Docker IPFS + integration tests
+#
+# See `just --list` for all available recipes.
+
+# Paths
+root_dir       := justfile_directory() / ".."
+examples_dir   := root_dir / "examples"
+chain_binary   := root_dir / "target/release/polkadot-bulletin-chain"
+
+# ── Defaults ─────────────────────────────────────────────────────────
+
+default: dev
+
+# ── Local Development ────────────────────────────────────────────────
+
+# Start chain (--dev --ipfs-server) and vite dev server
+dev: build-chain
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🚀 Starting local dev environment..."
+
+    # Start chain in background
+    echo "   Chain binary: {{ chain_binary }}"
+    {{ chain_binary }} --dev --ipfs-server --rpc-port 10000 > /tmp/bulletin-dev-chain.log 2>&1 &
+    CHAIN_PID=$!
+    echo "   Chain PID: $CHAIN_PID (log: /tmp/bulletin-dev-chain.log)"
+
+    # Cleanup on exit
+    trap "echo ''; echo '🛑 Stopping chain (PID: $CHAIN_PID)...'; kill $CHAIN_PID 2>/dev/null; wait $CHAIN_PID 2>/dev/null" EXIT INT TERM
+
+    # Wait for chain RPC to be ready
+    echo "   Waiting for chain RPC (ws://localhost:10000)..."
+    for i in $(seq 1 30); do
+        if curl -s -o /dev/null http://localhost:10000; then
+            echo "   Chain RPC is ready"
+            break
+        fi
+        if [ "$i" -eq 30 ]; then
+            echo "   ⚠ Chain RPC not ready after 30s, starting dev server anyway..."
+        fi
+        sleep 1
+    done
+
+    # Run vite dev server in foreground
+    echo "   Starting vite dev server..."
+    npm run dev
+
+# Start chain in background, save PID to test_dir
+chain-start test_dir: build-chain
+    #!/usr/bin/env bash
+    set -e
+    mkdir -p "{{ test_dir }}"
+
+    echo "⚡ Starting chain (--dev --ipfs-server)..."
+    {{ chain_binary }} --dev --ipfs-server --rpc-port 10000 > {{ test_dir }}/chain.log 2>&1 &
+    CHAIN_PID=$!
+    echo $CHAIN_PID > {{ test_dir }}/chain.pid
+    echo "   Chain PID: $CHAIN_PID"
+    echo "   Log: {{ test_dir }}/chain.log"
+
+    # Wait for RPC
+    echo "   Waiting for chain RPC..."
+    for i in $(seq 1 30); do
+        if curl -s -o /dev/null http://localhost:10000; then
+            echo "   Chain RPC is ready"
+            exit 0
+        fi
+        sleep 1
+    done
+    echo "   ⚠ Chain RPC not ready after 30s"
+
+# Stop chain process from test_dir
+chain-stop test_dir:
+    #!/usr/bin/env bash
+    PIDFILE="{{ test_dir }}/chain.pid"
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if kill -0 $PID 2>/dev/null; then
+            echo "🛑 Stopping chain (PID: $PID)..."
+            kill $PID 2>/dev/null || true
+            sleep 2
+            kill -9 $PID 2>/dev/null || true
+            echo "   Chain stopped"
+        else
+            echo "   Chain process (PID: $PID) not running"
+        fi
+        rm "$PIDFILE"
+    else
+        echo "   No chain PID file found at $PIDFILE"
+    fi
+
+# ── Full Infra (reuses examples justfile) ────────────────────────────
+
+# Helper to invoke examples justfile recipes
+_examples *args:
+    just --justfile {{ examples_dir }}/justfile --working-directory {{ examples_dir }} {{ args }}
+
+# Setup zombienet + Docker IPFS + PAPI (full infra)
+setup test_dir runtime="bulletin-westend-runtime":
+    just _examples setup-services "{{ test_dir }}" "{{ runtime }}"
+
+# Teardown zombienet + Docker IPFS
+teardown test_dir:
+    just _examples teardown-services "{{ test_dir }}"
+
+# ── Testing ──────────────────────────────────────────────────────────
+
+# Run mock Playwright tests (no infra needed)
+test: install ensure-browsers
+    npx playwright test --project=mock
+
+# Run integration Playwright tests (chain must already be running)
+test-integration: ensure-browsers
+    npx playwright test --project=integration
+
+# Full E2E lifecycle: setup → install → integration tests → teardown
+test-e2e runtime="bulletin-westend-runtime":
+    #!/usr/bin/env bash
+    set -e
+
+    TEST_DIR="$(just _examples compute-test-dir)"
+    echo "📁 Test directory: $TEST_DIR"
+
+    # Setup full infra (zombienet + Docker IPFS)
+    echo ""
+    echo "━━━ Setting up infrastructure ━━━"
+    just setup "$TEST_DIR" "{{ runtime }}"
+
+    # Install console-ui dependencies and Playwright browsers
+    just install
+    just ensure-browsers
+
+    # Run integration tests
+    echo ""
+    echo "━━━ Running integration tests ━━━"
+    set +e
+    npx playwright test --project=integration
+    TEST_EXIT=$?
+    set -e
+
+    # Teardown
+    echo ""
+    echo "━━━ Tearing down infrastructure ━━━"
+    just teardown "$TEST_DIR"
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $TEST_EXIT -eq 0 ]; then
+        echo "✅ E2E tests passed!"
+    else
+        echo "❌ E2E tests failed with exit code $TEST_EXIT"
+    fi
+    exit $TEST_EXIT
+
+# Full E2E using simple dev chain (--dev --ipfs-server) instead of zombienet
+test-e2e-dev: install ensure-browsers build-chain
+    #!/usr/bin/env bash
+    set -e
+
+    TEST_DIR="$(mktemp -d /tmp/bulletin-e2e-dev-XXXXX)"
+    echo "📁 Test directory: $TEST_DIR"
+
+    # Start dev chain
+    just chain-start "$TEST_DIR"
+
+    # Run integration tests
+    echo ""
+    echo "━━━ Running integration tests ━━━"
+    set +e
+    npx playwright test --project=integration
+    TEST_EXIT=$?
+    set -e
+
+    # Stop chain
+    echo ""
+    echo "━━━ Stopping chain ━━━"
+    just chain-stop "$TEST_DIR"
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $TEST_EXIT -eq 0 ]; then
+        echo "✅ E2E dev tests passed!"
+    else
+        echo "❌ E2E dev tests failed with exit code $TEST_EXIT"
+    fi
+    exit $TEST_EXIT
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+# Install npm dependencies
+install:
+    npm install
+
+# Install Playwright browsers (only if missing)
+ensure-browsers:
+    npx playwright install --with-deps chromium
+
+# Build chain binary (only if missing)
+build-chain:
+    #!/usr/bin/env bash
+    if [ -f "{{ chain_binary }}" ]; then
+        echo "✓ Chain binary exists: {{ chain_binary }}"
+    else
+        echo "🔨 Building chain binary (this may take a while)..."
+        cd "{{ root_dir }}"
+        cargo build --release -p polkadot-bulletin-chain
+    fi
+
+# Generate PAPI descriptors from a running node
+papi-generate ws_url="ws://localhost:10000":
+    #!/usr/bin/env bash
+    set -e
+    echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
+    npx papi add -w "{{ ws_url }}" bulletin
