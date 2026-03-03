@@ -6,7 +6,7 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
+import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
@@ -174,6 +174,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
+        await waitForBlockProduction(bulletinAPI);
         const { authorizationSigner, authorizationAddress, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
         // Authorize accounts (both whoAddress for chunk storage and authorizationAddress for proof storage).

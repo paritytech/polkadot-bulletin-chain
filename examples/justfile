@@ -119,9 +119,8 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    # TODO: replace with better check for produced/finalized block 1 with timeout 60s
-    echo "   Waiting for chain to start (60 seconds)..."
-    sleep 60
+    echo "   Waiting for RPC to accept connections (10 seconds)..."
+    sleep 10
     if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
         echo "   ❌ Zombienet process died during startup. Logs:"
         tail -20 {{ test_dir }}/zombienet.log
@@ -194,7 +193,8 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
         POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
         POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
     EOF
-    (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+    # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
+    (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
 
@@ -202,9 +202,8 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    # TODO: replace with better check for produced/finalized block 1 with timeout 180s
-    echo "   Waiting for chain to start (180 seconds)..."
-    sleep 180
+    echo "   Waiting for RPC to accept connections (10 seconds)..."
+    sleep 10
     if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
         echo "   ❌ Zombienet process died during startup. Logs:"
         tail -20 {{ test_dir }}/zombienet.log
@@ -390,9 +389,18 @@ ipfs-start test_dir runtime: _check-docker
     # Remove old volume to start fresh (no cached peers)
     docker volume rm ipfs-data 2>/dev/null || true
 
-    # Bridge networking with port mapping bound to localhost only.
-    # Container reaches host via host.docker.internal (--add-host for Linux Docker 20.10+).
-    NETWORK_ARGS="-p 127.0.0.1:${IPFS_SWARM_PORT}:${IPFS_SWARM_PORT} -p 127.0.0.1:${IPFS_GATEWAY_PORT}:${IPFS_GATEWAY_PORT} -p 127.0.0.1:${IPFS_API_PORT}:${IPFS_API_PORT} --add-host=host.docker.internal:host-gateway"
+    # Networking: use --network=host on Linux so the container can reach chain nodes
+    # bound on 127.0.0.1 directly. On macOS, Docker Desktop tunnels host.docker.internal
+    # through its VM to the host loopback, so bridge networking with port mapping works.
+    if [[ "$(uname)" == "Linux" ]]; then
+        NETWORK_ARGS="--network=host"
+        # With host networking the container shares the host's loopback,
+        # so chain nodes on 127.0.0.1 are reachable directly.
+        PEER_ADDR="/ip4/127.0.0.1"
+    else
+        NETWORK_ARGS="-p 127.0.0.1:${IPFS_SWARM_PORT}:${IPFS_SWARM_PORT} -p 127.0.0.1:${IPFS_GATEWAY_PORT}:${IPFS_GATEWAY_PORT} -p 127.0.0.1:${IPFS_API_PORT}:${IPFS_API_PORT} --add-host=host.docker.internal:host-gateway"
+        PEER_ADDR="/dns4/host.docker.internal"
+    fi
 
     # Start container - daemon will init and start
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
@@ -431,9 +439,9 @@ ipfs-start test_dir runtime: _check-docker
     # (set before restart so the daemon picks up the config on boot)
     echo "   Configuring Peering.Peers for {{ runtime }}..."
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
+        PEERS="[{\"ID\":\"{{ WESTEND_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ WESTEND_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER2_PORT }}/ws\"]}]"
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        PEERS='[{"ID":"{{ POLKADOT_PEER1_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ POLKADOT_PEER1_PORT }}/ws"]},{"ID":"{{ POLKADOT_PEER2_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ POLKADOT_PEER2_PORT }}/ws"]}]'
+        PEERS="[{\"ID\":\"{{ POLKADOT_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ POLKADOT_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PEER2_PORT }}/ws\"]}]"
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
         exit 1
@@ -487,6 +495,27 @@ ipfs-shutdown test_dir:
 papi-generate ws_url="ws://localhost:10000": npm-install
     #!/usr/bin/env bash
     set -e
+
+    # Extract host and port from ws:// URL and wait for the port to accept connections
+    WS_URL="{{ ws_url }}"
+    HOST_PORT="${WS_URL#ws://}"
+    HOST_PORT="${HOST_PORT#wss://}"
+    HOST="${HOST_PORT%%:*}"
+    PORT="${HOST_PORT##*:}"
+    PORT="${PORT%%/*}"
+
+    echo "   Waiting for RPC endpoint ${HOST}:${PORT} to accept connections..."
+    for i in $(seq 1 60); do
+        if nc -z "$HOST" "$PORT" 2>/dev/null; then
+            echo "   ✅ RPC endpoint is reachable"
+            break
+        fi
+        if [ "$i" -eq 60 ]; then
+            echo "   ❌ RPC endpoint ${HOST}:${PORT} not reachable after 60 seconds"
+            exit 1
+        fi
+        sleep 1
+    done
 
     echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
     npx papi add -w "{{ ws_url }}" bulletin

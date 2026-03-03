@@ -9,13 +9,15 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cargo build --release -p bulletin-westend-runtime
 
 # cargo install staging-chain-spec-builder
+cd "$ROOT_DIR"
+
 chain-spec-builder create \
         -p 2487 \
         -c westend \
         -i bulletin-westend \
         -n Bulletin \
         -t local \
-        -r "$ROOT_DIR/target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm" \
+        -r ./target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm \
         named-preset local_testnet
 
-mv chain_spec.json "$ROOT_DIR/zombienet/bulletin-westend-spec.json"
+mv chain_spec.json ./zombienet/bulletin-westend-spec.json
