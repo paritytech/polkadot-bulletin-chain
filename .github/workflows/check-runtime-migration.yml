@@ -5,7 +5,7 @@ name: Check Runtime Migrations
 
 on:
   push:
-    branches: ["release-*"]
+    branches: [main, "release-*"]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -21,7 +21,15 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   runtime-matrix:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
@@ -206,7 +214,10 @@ jobs:
   confirmMigrationsPassed:
     runs-on: ubuntu-latest
     name: All migrations passed
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [check-migrations]
+    if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    needs: [changes, check-migrations]
     steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
       - run: echo '### Good job! All the migrations passed 🚀' >> $GITHUB_STEP_SUMMARY

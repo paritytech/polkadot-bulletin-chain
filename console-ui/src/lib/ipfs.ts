@@ -8,7 +8,20 @@ export const DEFAULT_IPFS_GATEWAY = "http://127.0.0.1:8283";
  */
 export const IPFS_GATEWAYS: Record<string, string> = {
   local: "http://127.0.0.1:8283",
-  dotspark: "https://ipfs.dotspark.app",
+  paseo: "https://paseo-ipfs.polkadot.io",
+  previewnet: "https://previewnet.substrate.dev",
+};
+
+/**
+ * Preferred download method per network.
+ * Networks with a known IPFS gateway default to "gateway",
+ * others default to "p2p".
+ */
+export const PREFERRED_DOWNLOAD_METHOD: Record<string, "p2p" | "gateway"> = {
+  local: "p2p",
+  westend: "p2p",
+  paseo: "gateway",
+  previewnet: "gateway",
 };
 
 /**

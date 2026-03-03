@@ -5,6 +5,7 @@ import { Header } from "@/components/Header";
 import { Dashboard } from "@/pages/Dashboard/Dashboard";
 import { Upload } from "@/pages/Upload/Upload";
 import { Download } from "@/pages/Download/Download";
+import { Renew } from "@/pages/Renew/Renew";
 import { Explorer } from "@/pages/Explorer/Explorer";
 import { Authorizations } from "@/pages/Authorizations/Authorizations";
 import { Accounts } from "@/pages/Accounts/Accounts";
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="/download" element={<Download />} />
+            <Route path="/renew" element={<Renew />} />
             <Route path="/explorer" element={<Explorer />} />
             <Route path="/authorizations" element={<Authorizations />} />
             <Route path="/accounts" element={<Accounts />} />

@@ -19,14 +19,14 @@ const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
  *
  * @param {string} testName - Name of the test for logging
  * @param {object} bulletinAPI - PAPI typed API
- * @param {object} sudoSigner - Sudo signer for authorization
+ * @param {object} authorizationSigner - Signer for authorization (must be a TestAccount, e.g. Alice)
  * @param {object|null} signer - Signer for store (null for unsigned)
  * @param {string|null} signerAddress - Address of the signer (required if signer is not null)
  * @param {number|null} cidCodec - CID codec (null for default)
  * @param {number|null} mhCode - Multihash code (null for default)
  * @param {object|null} client - Client for unsigned transactions
  */
-async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, signerAddress, cidCodec, mhCode, client) {
+async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, signer, signerAddress, cidCodec, mhCode, client) {
     logSection(testName);
 
     // Data to store
@@ -41,7 +41,7 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
     // Authorize the preimage
     await authorizePreimage(
         bulletinAPI,
-        sudoSigner,
+        authorizationSigner,
         contentHash,
         BigInt(dataToStore.length),
         TX_MODE_FINALIZED_BLOCK
@@ -52,7 +52,7 @@ async function runPreimageStoreTest(testName, bulletinAPI, sudoSigner, signer, s
         logInfo(`Also authorizing account ${signerAddress} to verify preimage auth is preferred`);
         await authorizeAccount(
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             signerAddress,
             10,        // dummy transactions
             BigInt(10000),  // dummy bytes
@@ -98,13 +98,13 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Preimagesigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Preimagesigner');
 
         // Test 1: Unsigned store with preimage auth (default CID config)
         await runPreimageStoreTest(
             "Test 1: Unsigned store with preimage auth",
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             null,       // unsigned
             null,       // no signer address
             null,       // default codec
@@ -117,7 +117,7 @@ async function main() {
         await runPreimageStoreTest(
             "Test 2: Signed store with preimage auth and custom CID",
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             whoSigner,      // signed
             whoAddress,     // signer address for account auth
             0x55,           // raw

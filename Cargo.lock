@@ -2128,6 +2128,7 @@ dependencies = [
  "staging-xcm-executor",
  "static_assertions",
  "substrate-wasm-builder",
+ "transaction-storage-primitives",
 ]
 
 [[package]]
@@ -2140,7 +2141,6 @@ dependencies = [
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",
- "frame-system",
  "parachains-common",
  "sp-core",
  "sp-keyring",
@@ -2219,6 +2219,7 @@ dependencies = [
  "substrate-wasm-builder",
  "testnet-parachains-constants",
  "tracing",
+ "transaction-storage-primitives",
  "westend-runtime-constants",
  "xcm-runtime-apis",
 ]
@@ -9103,13 +9104,13 @@ name = "pallet-transaction-storage"
 version = "4.0.0-dev"
 dependencies = [
  "array-bytes 6.2.3",
- "cid",
  "pallets-common",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
  "sp-transaction-storage-proof",
  "tracing",
+ "transaction-storage-primitives",
 ]
 
 [[package]]
@@ -15754,6 +15755,17 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "transaction-storage-primitives"
+version = "0.1.0"
+dependencies = [
+ "cid",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io",
+ "tracing",
 ]
 
 [[package]]

@@ -404,34 +404,12 @@ function FaucetAuthorizePreimagePanel() {
         max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
       });
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Wait for finalization (not just best block inclusion) so that
+      // subsequent storage queries can see the new authorization.
+      const result = await tx.signAndSubmit(aliceSigner);
+      if (!result.ok) {
+        throw new Error("Transaction dispatch failed");
+      }
 
       setSubmitSuccess("Successfully authorized preimage");
       fetchPreimageAuthorizations(api);
@@ -577,7 +555,7 @@ function FaucetAuthorizePreimagePanel() {
   );
 }
 
-function StorageFaucetTab() {
+function FaucetAuthorizeAccountPanel() {
   const api = useApi();
   const selectedAccount = useSelectedAccount();
 
@@ -597,7 +575,7 @@ function StorageFaucetTab() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
-  // Initialize Alice and Bob accounts
+  // Initialize Alice account
   useEffect(() => {
     const initAccounts = async () => {
       if (!api) return;
@@ -702,34 +680,11 @@ function StorageFaucetTab() {
         bytes: bytesValue,
       });
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Wait for finalization so subsequent queries see the new authorization
+      const result = await tx.signAndSubmit(aliceSigner);
+      if (!result.ok) {
+        throw new Error("Transaction dispatch failed");
+      }
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
@@ -787,42 +742,29 @@ function StorageFaucetTab() {
         </div>
       )}
 
-      {/* Info Card */}
-      <Card className="border-blue-500/50 bg-blue-500/5">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Droplet className="h-5 w-5 text-blue-500" />
-            Storage Faucet
-          </CardTitle>
-          <CardDescription>
-            Authorize storage allowances for accounts using the Alice dev account. This is for testing purposes only. You can authorize an unlimited amount, so please be reasonable.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2 text-sm">
-            {aliceBalance !== null && aliceBalance === 0n && (
-              <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
-                <AlertCircle className="h-4 w-4 inline mr-2" />
-                Warning: Alice account has zero balance. Transactions will fail.
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {hasBalanceIssue && (
+        <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
+          <AlertCircle className="h-4 w-4 inline mr-2" />
+          Warning: Alice account has zero balance. Transactions will fail.
+        </div>
+      )}
 
       {/* Authorization Form */}
       <Card>
         <CardHeader>
-          <CardTitle>Authorize Account</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Authorize Account
+          </CardTitle>
           <CardDescription>
-            Grant storage authorization to any account.
+            Grant storage authorization to any account using the Alice dev account.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAuthorize} className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">
-                Account Address (for_who)
+                Account Address
               </label>
               <Input
                 placeholder="Enter SS58 address..."
@@ -927,16 +869,54 @@ function StorageFaucetTab() {
               ) : (
                 <>
                   <Droplet className="h-4 w-4 mr-2" />
-                  Authorize User
+                  Authorize Account
                 </>
               )}
             </Button>
           </form>
         </CardContent>
       </Card>
+    </div>
+  );
+}
 
-      {/* Authorize Preimage */}
-      <FaucetAuthorizePreimagePanel />
+function StorageFaucetTab() {
+  const [faucetTab, setFaucetTab] = useState<"account" | "preimage">("account");
+
+  return (
+    <div className="space-y-6">
+      {/* Info Card */}
+      <Card className="border-blue-500/50 bg-blue-500/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Droplet className="h-5 w-5 text-blue-500" />
+            Storage Faucet
+          </CardTitle>
+          <CardDescription>
+            Authorize storage allowances using the Alice dev account. This is for testing purposes only.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
+      {/* Sub-tabs for Account vs Preimage */}
+      <Tabs value={faucetTab} onValueChange={(v) => setFaucetTab(v as "account" | "preimage")}>
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="account">
+            <User className="h-4 w-4 mr-2" />
+            Authorize Account
+          </TabsTrigger>
+          <TabsTrigger value="preimage">
+            <FileText className="h-4 w-4 mr-2" />
+            Authorize Preimage
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="account" className="mt-4">
+          <FaucetAuthorizeAccountPanel />
+        </TabsContent>
+        <TabsContent value="preimage" className="mt-4">
+          <FaucetAuthorizePreimagePanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -6,7 +6,6 @@ import fs from "fs";
 import assert from "assert";
 
 // ---- CONFIG ----
-export const DEFAULT_IPFS_API_URL = 'http://127.0.0.1:5011';     // IPFS HTTP API (for ipfs-http-client)
 export const DEFAULT_IPFS_GATEWAY_URL = 'http://127.0.0.1:8283'; // IPFS HTTP Gateway (for /ipfs/CID requests)
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
@@ -22,12 +21,13 @@ export function createSigner(account) {
   );
 }
 
-export function setupKeyringAndSigners(sudoSeed, accountSeed) {
-  const { signer: sudoSigner, _ } = newSigner(sudoSeed);
+export function setupKeyringAndSigners(authorizationSeed, accountSeed) {
+  const { signer: authorizationSigner, address: authorizationAddress } = newSigner(authorizationSeed);
   const { signer: whoSigner, address: whoAddress } = newSigner(accountSeed);
 
   return {
-    sudoSigner,
+    authorizationSigner,
+    authorizationAddress,
     whoSigner,
     whoAddress
   };

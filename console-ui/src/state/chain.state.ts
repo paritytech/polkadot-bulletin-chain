@@ -4,7 +4,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_dotspark, web3_storage } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, web3_storage } from "@polkadot-api/descriptors";
 
 export type StorageType = "bulletin" | "web3storage";
 
@@ -49,10 +49,10 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
         endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
         lightClient: false,
       },
-      dotspark: {
-        id: "dotspark",
-        name: "Bulletin (Prototypes dotspark)",
-        endpoints: ["wss://bulletin.dotspark.app"],
+      previewnet: {
+        id: "previewnet",
+        name: "Bulletin Previewnet",
+        endpoints: ["wss://previewnet.substrate.dev/bulletin"],
         lightClient: false,
       },
       polkadot: {
@@ -90,7 +90,7 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     local: bulletin_westend,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
-    dotspark: bulletin_dotspark,
+    previewnet: bulletin_westend,
   },
   web3storage: {
     local: web3_storage,
@@ -156,9 +156,24 @@ export interface ChainState {
   ss58Format?: number;
 }
 
-const initialStorageType: StorageType = "bulletin";
+const STORAGE_KEY_STORAGE_TYPE = "bulletin-storage-type";
+const STORAGE_KEY_NETWORK = "bulletin-network";
+
+function loadInitialSelection(): { storageType: StorageType; network: Network } {
+  const savedType = localStorage.getItem(STORAGE_KEY_STORAGE_TYPE) as StorageType | null;
+  const storageType = savedType && STORAGE_CONFIGS[savedType] ? savedType : "bulletin";
+  const config = STORAGE_CONFIGS[storageType];
+
+  const savedNetwork = localStorage.getItem(STORAGE_KEY_NETWORK);
+  const networkId = savedNetwork && config.networks[savedNetwork] ? savedNetwork : config.defaultNetwork;
+
+  return { storageType, network: config.networks[networkId]! };
+}
+
+const initial = loadInitialSelection();
+const initialStorageType = initial.storageType;
 const initialConfig = STORAGE_CONFIGS[initialStorageType];
-const initialNetwork = initialConfig.networks[initialConfig.defaultNetwork]!;
+const initialNetwork = initial.network;
 
 const storageTypeSubject = new BehaviorSubject<StorageType>(initialStorageType);
 const networksSubject = new BehaviorSubject<Record<string, Network>>(initialConfig.networks);
@@ -198,6 +213,7 @@ export function switchStorageType(type: StorageType): void {
   const config = STORAGE_CONFIGS[type];
   storageTypeSubject.next(type);
   networksSubject.next(config.networks);
+  localStorage.setItem(STORAGE_KEY_STORAGE_TYPE, type);
   connectToNetwork(config.defaultNetwork);
 }
 
@@ -222,6 +238,7 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
   }
 
   networkSubject.next(network);
+  localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
   statusSubject.next("connecting");
   errorSubject.next(undefined);
   apiSubject.next(undefined);

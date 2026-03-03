@@ -39,14 +39,14 @@ async function main() {
         const typedApi = client.getTypedApi(bulletin);
 
         // Create signers
-        const { signer: sudoSigner } = newSigner(SEED);
+        const { signer: authorizationSigner } = newSigner(SEED);
         const { signer: whoSigner, address: whoAddress } = newSigner('//Nativeipfsdagsigner');
 
         console.log('✅ Connected to Bulletin node')
         console.log(`💳 Using account: ${whoAddress}`)
 
         // Make sure an account can store data.
-        await authorizeAccount(typedApi, sudoSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
+        await authorizeAccount(typedApi, authorizationSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
 
         // Read the file, chunk it, store in Bulletin and return CIDs.
         let { chunks } = await storeChunkedFile(typedApi, whoSigner, filePath, CHUNK_SIZE);

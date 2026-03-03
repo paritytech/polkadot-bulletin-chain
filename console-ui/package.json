@@ -12,11 +12,11 @@
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
     "@chainsafe/libp2p-yamux": "^8.0.1",
-    "@helia/unixfs": "^6.0.3",
+    "@helia/unixfs": "^7.0.4",
     "@libp2p/websockets": "^10.1.2",
     "@multiformats/blake2": "^2.0.2",
     "@multiformats/multiaddr": "^13.0.1",
-    "@noble/hashes": "^1.7.1",
+    "@noble/hashes": "^2.0.1",
     "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot/keyring": "^14.0.1",
     "@polkadot/util-crypto": "^14.0.1",
@@ -29,25 +29,25 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "helia": "^6.0.11",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^0.575.0",
     "multiformats": "^13.3.1",
     "polkadot-api": "^1.23.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.0",
+    "react-router-dom": "^7.13.1",
     "rxjs": "^7.8.1",
     "smoldot": "^2.0.34",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@polkadot-api/cli": "^0.18.1",
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/vite": "^4.2.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^5.1.4",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-lsp": "^0.0.7",
-    "vite": "^6.0.0"
+    "vite": "^7.3.1"
   }
 }

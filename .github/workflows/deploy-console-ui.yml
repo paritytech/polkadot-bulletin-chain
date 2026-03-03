@@ -2,9 +2,10 @@ name: Deploy Console UI to GitHub Pages
 
 on:
   push:
-    branches: [console-ui]
+    branches: [main]
     paths:
       - "console-ui/**"
+      - "docs/**"
       - ".github/workflows/deploy-console-ui.yml"
   workflow_dispatch:
 
