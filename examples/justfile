@@ -506,19 +506,14 @@ papi-generate ws_url="ws://127.0.0.1:10000": npm-install
 
     echo "   Waiting for RPC endpoint ${HOST}:${PORT} to accept connections..."
     for i in $(seq 1 180); do
-        if nc -z "$HOST" "$PORT" 2>/dev/null; then
+        if (echo > /dev/tcp/"$HOST"/"$PORT") 2>/dev/null; then
             echo "   ✅ RPC endpoint is reachable (after ${i}s)"
             break
         fi
         if [ "$i" -eq 180 ]; then
             echo "   ❌ RPC endpoint ${HOST}:${PORT} not reachable after 180 seconds"
-            echo "   Debug: nc -z ${HOST} ${PORT} exit code: $(nc -z "$HOST" "$PORT" 2>&1; echo $?)"
-            echo "   Debug: /etc/hosts:"
-            cat /etc/hosts 2>/dev/null || true
-            echo "   Debug: getent hosts ${HOST}:"
-            getent hosts "$HOST" 2>/dev/null || true
             echo "   Debug: ss -tlnp | grep ${PORT}:"
-            ss -tlnp 2>/dev/null | grep "$PORT" || true
+            ss -tlnp 2>/dev/null | grep "$PORT" || netstat -tlnp 2>/dev/null | grep "$PORT" || true
             exit 1
         fi
         sleep 1
