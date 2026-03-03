@@ -33,21 +33,7 @@ jobs:
   set-image:
     if: needs.changes.outputs.should-run == 'true'
     needs: [changes]
-    # This workaround sets the container image for each job using 'set-image' job output.
-    # env variables don't work for PRs from forks, so we need to use outputs.
-    runs-on: ubuntu-latest
-    outputs:
-      CI_IMAGE: ${{ steps.set_image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - name: Set CI image output
-        id: set_image
-        run: echo "CI_IMAGE=${{ env.CI_IMAGE }}" >> $GITHUB_OUTPUT
+    uses: ./.github/workflows/set-image.yml
 
   setup:
     if: needs.changes.outputs.should-run == 'true'
@@ -197,7 +183,7 @@ jobs:
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo"
+          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
       - name: Test authorize-and-store ws
         working-directory: examples
@@ -230,7 +216,7 @@ jobs:
       - name: Stop services
         if: always()
         working-directory: examples
-        run: just stop-services "$TEST_DIR" "kubo"
+        run: just stop-services "$TEST_DIR" "kubo-native"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)

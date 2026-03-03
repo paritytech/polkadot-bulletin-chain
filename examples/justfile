@@ -84,7 +84,9 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
-    
+    # Resolve to absolute path
+    ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
+
     if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
         echo "❌ Error: Zombienet binary not found"
         echo "   Tried: $ZOMBIENET_BIN"
@@ -105,10 +107,8 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
         zombienet : $ZOMBIENET_BIN
         POLKADOT_BULLETIN_BINARY_PATH : $POLKADOT_BULLETIN_BINARY_PATH
     EOF
-    cd "$ROOT_DIR"
     (yes y | POLKADOT_BULLETIN_BINARY_PATH="$POLKADOT_BULLETIN_BINARY_PATH" \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
-    cd -
 
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
@@ -117,6 +117,11 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     # TODO: replace with better check for produced/finalized block 1 with timeout 60s
     echo "   Waiting for chain to start (60 seconds)..."
     sleep 60
+    if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
+        echo "   ❌ Zombienet process died during startup. Logs:"
+        tail -20 {{ test_dir }}/zombienet.log
+        exit 1
+    fi
 
 # Start westend parachain with zombienet in background
 # Parameters:
@@ -131,6 +136,8 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
     fi
+    # Resolve to absolute path
+    ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
 
     if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
         echo "❌ Error: Zombienet binary not found"
@@ -166,13 +173,9 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
 
     # Create chain spec
     echo "   Creating Westend chain spec..."
-    # Ensure binaries are in PATH and run from root directory
     ROOT_DIR="{{ justfile_directory() }}/.."
-    cd "$ROOT_DIR"
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_westend_spec.sh
-    cd -
+    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/create_bulletin_westend_spec.sh"
 
-    # Run zombienet from root directory so relative paths in config work correctly
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
         runtime   : {{ runtime }}
@@ -181,11 +184,9 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
         POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
         POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
     EOF
-    cd "$ROOT_DIR"
     (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
-    cd -
 
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
@@ -194,6 +195,11 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     # TODO: replace with better check for produced/finalized block 1 with timeout 180s
     echo "   Waiting for chain to start (180 seconds)..."
     sleep 180
+    if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
+        echo "   ❌ Zombienet process died during startup. Logs:"
+        tail -20 {{ test_dir }}/zombienet.log
+        exit 1
+    fi
 
 # Check if Docker is available and running
 _check-docker:
@@ -217,6 +223,23 @@ _check-docker:
 
 KUBO_VERSION := "v0.34.1"
 KUBO_DIR := justfile_directory() + "/../kubo"
+
+# IPFS port configuration (non-standard to avoid conflicts)
+IPFS_SWARM_PORT := "4011"
+IPFS_API_PORT := "5011"
+IPFS_GATEWAY_PORT := "8283"
+
+# Westend parachain peer IDs and WebSocket ports
+WESTEND_PEER1_ID := "12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
+WESTEND_PEER1_PORT := "10002"
+WESTEND_PEER2_ID := "12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
+WESTEND_PEER2_PORT := "12348"
+
+# Polkadot solo chain peer IDs and WebSocket ports
+POLKADOT_PEER1_ID := "12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
+POLKADOT_PEER1_PORT := "10002"
+POLKADOT_PEER2_ID := "12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
+POLKADOT_PEER2_PORT := "12348"
 
 # Download and install Kubo IPFS binary
 ipfs-kubo-install:
@@ -246,7 +269,8 @@ ipfs-kubo-install:
     echo "   ✓ Kubo installed at $KUBO_DIR/ipfs"
 
 # Start IPFS Kubo daemon locally (no Docker required)
-ipfs-kubo-start test_dir: ipfs-kubo-install
+# Peering.Peers is configured before daemon start so Kubo auto-connects to chain nodes.
+ipfs-kubo-start test_dir runtime: ipfs-kubo-install
     #!/usr/bin/env bash
     set -e
     echo "🔧 Starting IPFS Kubo daemon (local mode)..."
@@ -255,10 +279,9 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
     IPFS_CMD="$KUBO_DIR/ipfs"
     export IPFS_PATH="{{ test_dir }}/ipfs-repo"
 
-    # Use non-standard ports to avoid conflicts with other IPFS instances
-    IPFS_SWARM_PORT=4011
-    IPFS_API_PORT=5011
-    IPFS_GATEWAY_PORT=8283
+    IPFS_SWARM_PORT={{ IPFS_SWARM_PORT }}
+    IPFS_API_PORT={{ IPFS_API_PORT }}
+    IPFS_GATEWAY_PORT={{ IPFS_GATEWAY_PORT }}
 
     # Initialize fresh IPFS repo
     rm -rf "$IPFS_PATH"
@@ -276,6 +299,18 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
     $IPFS_CMD config --json Addresses.Swarm "[\"/ip4/0.0.0.0/tcp/${IPFS_SWARM_PORT}\", \"/ip6/::/tcp/${IPFS_SWARM_PORT}\"]"
     $IPFS_CMD config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
     $IPFS_CMD config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
+
+    # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes
+    echo "   Configuring Peering.Peers for {{ runtime }}..."
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        PEERS='[{"ID":"{{ POLKADOT_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PEER1_PORT }}/ws"]},{"ID":"{{ POLKADOT_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PEER2_PORT }}/ws"]}]'
+    else
+        echo "❌ Unhandled runtime: {{ runtime }}"
+        exit 1
+    fi
+    $IPFS_CMD config --json Peering.Peers "$PEERS"
 
     # Start daemon in background
     $IPFS_CMD daemon > {{ test_dir }}/ipfs-node.log 2>&1 &
@@ -306,52 +341,6 @@ ipfs-kubo-start test_dir: ipfs-kubo-install
 
     echo "   Log: {{ test_dir }}/ipfs-node.log"
 
-# Connect to chain IPFS nodes using local Kubo
-ipfs-kubo-connect test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-
-    echo "🔗 Connecting IPFS nodes (Kubo local, runtime: {{ runtime }})..."
-
-    KUBO_DIR="{{ KUBO_DIR }}"
-    IPFS_CMD="$KUBO_DIR/ipfs"
-    export IPFS_PATH="{{ test_dir }}/ipfs-repo"
-
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
-        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12348/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-        $IPFS_CMD swarm connect /ip4/127.0.0.1/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
-    else
-        echo "❌ Unhandled runtime: {{ runtime }} specified!"
-        exit 1
-    fi
-
-# Start IPFS reconnect script in background (Kubo local mode)
-ipfs-kubo-reconnect-start test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-    echo "🔄 Starting IPFS reconnect script (Kubo local mode, runtime: {{ runtime }})..."
-
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    cd "$ROOT_DIR"
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        IPFS_PATH="{{ test_dir }}/ipfs-repo" ./scripts/ipfs-reconnect-westend.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        IPFS_PATH="{{ test_dir }}/ipfs-repo" ./scripts/ipfs-reconnect-solo.sh local 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    else
-        echo "❌ Unhandled runtime: {{ runtime }} specified!"
-        exit 1
-    fi
-    cd -
-
-    RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect.pid
-    echo "   Reconnect PID: $RECONNECT_PID"
-    echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
-    sleep 2
-
 # Shutdown local Kubo IPFS daemon
 ipfs-kubo-shutdown test_dir:
     #!/usr/bin/env bash
@@ -375,15 +364,15 @@ ipfs-kubo-shutdown test_dir:
 # ============================================================================
 
 # Start IPFS Docker container
-ipfs-start test_dir: _check-docker
+# Peering.Peers is configured before daemon restart so Kubo auto-connects to chain nodes.
+ipfs-start test_dir runtime: _check-docker
     #!/usr/bin/env bash
     set -e
     echo "🐳 Starting IPFS Docker container..."
 
-    # Use non-standard ports to avoid conflicts with other IPFS instances
-    IPFS_SWARM_PORT=4011
-    IPFS_API_PORT=5011
-    IPFS_GATEWAY_PORT=8283
+    IPFS_SWARM_PORT={{ IPFS_SWARM_PORT }}
+    IPFS_API_PORT={{ IPFS_API_PORT }}
+    IPFS_GATEWAY_PORT={{ IPFS_GATEWAY_PORT }}
 
     # Pull latest kubo image if not present
     docker pull ipfs/kubo:latest
@@ -391,14 +380,9 @@ ipfs-start test_dir: _check-docker
     # Remove old volume to start fresh (no cached peers)
     docker volume rm ipfs-data 2>/dev/null || true
 
-    # Determine network mode based on OS
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use bridge with port mapping
-        NETWORK_ARGS="-p ${IPFS_SWARM_PORT}:${IPFS_SWARM_PORT} -p ${IPFS_GATEWAY_PORT}:${IPFS_GATEWAY_PORT} -p ${IPFS_API_PORT}:${IPFS_API_PORT}"
-    else
-        # Linux (including CI) - use host networking so container can reach localhost services
-        NETWORK_ARGS="--network host"
-    fi
+    # Bridge networking with port mapping bound to localhost only.
+    # Container reaches host via host.docker.internal (--add-host for Linux Docker 20.10+).
+    NETWORK_ARGS="-p 127.0.0.1:${IPFS_SWARM_PORT}:${IPFS_SWARM_PORT} -p 127.0.0.1:${IPFS_GATEWAY_PORT}:${IPFS_GATEWAY_PORT} -p 127.0.0.1:${IPFS_API_PORT}:${IPFS_API_PORT} --add-host=host.docker.internal:host-gateway"
 
     # Start container - daemon will init and start
     docker run -d --name ipfs-node -v ipfs-data:/data/ipfs $NETWORK_ARGS ipfs/kubo:latest
@@ -433,7 +417,20 @@ ipfs-start test_dir: _check-docker
     docker exec ipfs-node ipfs $DEFAULT_API config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
     docker exec ipfs-node ipfs $DEFAULT_API config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
-    # Restart container to apply config changes (API now on custom port)
+    # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes
+    # (set before restart so the daemon picks up the config on boot)
+    echo "   Configuring Peering.Peers for {{ runtime }}..."
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
+    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
+        PEERS='[{"ID":"{{ POLKADOT_PEER1_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ POLKADOT_PEER1_PORT }}/ws"]},{"ID":"{{ POLKADOT_PEER2_ID }}","Addrs":["/dns4/host.docker.internal/tcp/{{ POLKADOT_PEER2_PORT }}/ws"]}]'
+    else
+        echo "❌ Unhandled runtime: {{ runtime }}"
+        exit 1
+    fi
+    docker exec ipfs-node ipfs $DEFAULT_API config --json Peering.Peers "$PEERS"
+
+    # Restart container to apply config changes (ports + peering, API now on custom port)
     echo "   Restarting daemon with isolated config..."
     docker restart ipfs-node
 
@@ -461,40 +458,6 @@ ipfs-start test_dir: _check-docker
     # Store container name in PID directory for cleanup
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
-# Connect to IPFS nodes using Docker
-ipfs-connect runtime:
-    #!/usr/bin/env bash
-    set -e
-
-    echo "🔗 Connecting IPFS nodes (Docker, runtime: {{ runtime }})..."
-
-    # Detect the correct host and protocol for Docker
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use dns4/host.docker.internal (bridge network)
-        PROTOCOL="dns4"
-        DOCKER_HOST="host.docker.internal"
-    else
-        # Linux - use ip4/127.0.0.1 (host network mode)
-        PROTOCOL="ip4"
-        DOCKER_HOST="127.0.0.1"
-    fi
-
-    echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
-
-    # Different peer IDs and ports for different runtimes
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        # Westend parachain peer IDs (WebSocket ports: 10002, 12348)
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        # Polkadot solo chain peer IDs (WebSocket ports: 10002, 12348)
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
-    else
-        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
-        exit 1
-    fi
-
 # Shutdown IPFS Docker container
 ipfs-shutdown test_dir:
     #!/usr/bin/env bash
@@ -506,32 +469,6 @@ ipfs-shutdown test_dir:
     
     # Clean up container file if it exists
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
-
-# Start IPFS reconnect script in background (Docker mode)
-ipfs-reconnect-start test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-    echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
-    
-    # Use different reconnect script for westend
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    cd "$ROOT_DIR"
-    # TODO: improve this for multiple runtimes
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        ./scripts/ipfs-reconnect-westend.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        ./scripts/ipfs-reconnect-solo.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    else
-        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
-        exit 1
-    fi
-    cd -
-    
-    RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
-    echo "   Reconnect PID: $RECONNECT_PID"
-    echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
-    sleep 2
 
 # Generate PAPI descriptors
 # Generate PAPI descriptors from a running node
@@ -547,8 +484,8 @@ papi-generate ws_url="ws://localhost:10000": npm-install
 # Setup all services for IPFS
 # Parameters:
 #   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-#   ipfs_mode - IPFS backend: "docker" (default) or "kubo" (local, no Docker required)
-setup-services test_dir runtime ipfs_mode="docker": npm-install
+#   ipfs_mode - IPFS backend: "kubo-docker" (default) or "kubo-native" (local, no Docker required)
+setup-services test_dir runtime ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
@@ -565,53 +502,49 @@ setup-services test_dir runtime ipfs_mode="docker": npm-install
     # Generate PAPI descriptors from running node.
     just papi-generate
 
-    # Start IPFS
-    if [ "{{ ipfs_mode }}" = "kubo" ]; then
+    # Start IPFS (Peering.Peers is configured inside the start recipes before daemon launch/restart)
+    if [ "{{ ipfs_mode }}" = "kubo-native" ]; then
         echo "🔧 Setting up services with Kubo IPFS (runtime: {{ runtime }})..."
         just ipfs-kubo-shutdown "{{ test_dir }}"
-        just ipfs-kubo-start "{{ test_dir }}"
-        just ipfs-kubo-connect "{{ test_dir }}" "{{ runtime }}"
-        just ipfs-kubo-reconnect-start "{{ test_dir }}" "{{ runtime }}"
-        echo "✅ Services setup complete (Kubo mode)"
-    elif [ "{{ ipfs_mode }}" = "docker" ]; then
+        just ipfs-kubo-start "{{ test_dir }}" "{{ runtime }}"
+        echo "✅ Services setup complete (kubo-native mode)"
+    elif [ "{{ ipfs_mode }}" = "kubo-docker" ]; then
         echo "🔧 Tearing down Docker services if they are running..."
         just ipfs-shutdown "{{ test_dir }}"
         echo "🐳 Setting up services with Docker IPFS (runtime: {{ runtime }})..."
-        just ipfs-start "{{ test_dir }}"
-        just ipfs-connect "{{ runtime }}"
-        just ipfs-reconnect-start "{{ test_dir }}" "{{ runtime }}"
-        echo "✅ Services setup complete (Docker mode)"
+        just ipfs-start "{{ test_dir }}" "{{ runtime }}"
+        echo "✅ Services setup complete (kubo-docker mode)"
     else
-        echo "❌ Invalid ipfs_mode: '{{ ipfs_mode }}'. Must be 'docker' or 'kubo'."
+        echo "❌ Invalid ipfs_mode: '{{ ipfs_mode }}'. Must be 'kubo-docker' or 'kubo-native'."
         exit 1
     fi
 
 # Stop all services
 # Parameters:
-#   ipfs_mode - IPFS backend: "docker" (default) or "kubo" (local)
-teardown-services test_dir ipfs_mode="docker":
+#   ipfs_mode - IPFS backend: "kubo-docker" (default) or "kubo-native" (local)
+teardown-services test_dir ipfs_mode="kubo-docker":
     #!/usr/bin/env bash
 
     # Stop all background processes
     just kill-pids "{{ test_dir }}"
 
-    if [ "{{ ipfs_mode }}" = "kubo" ]; then
+    if [ "{{ ipfs_mode }}" = "kubo-native" ]; then
         echo "🧹 Stopping Kubo IPFS daemon..."
         just ipfs-kubo-shutdown "{{ test_dir }}"
         echo "✅ Kubo services stopped"
-    elif [ "{{ ipfs_mode }}" = "docker" ]; then
+    elif [ "{{ ipfs_mode }}" = "kubo-docker" ]; then
         echo "🧹 Stopping all Docker services..."
         just ipfs-shutdown "{{ test_dir }}"
         echo "✅ Docker services stopped"
     else
-        echo "❌ Invalid ipfs_mode: '{{ ipfs_mode }}'. Must be 'docker' or 'kubo'."
+        echo "❌ Invalid ipfs_mode: '{{ ipfs_mode }}'. Must be 'kubo-docker' or 'kubo-native'."
         exit 1
     fi
 
 # Start all services for a runtime (use with run-test-* recipes)
 # Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
-# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime kubo
-start-services test_dir runtime ipfs_mode="docker":
+# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime kubo-native
+start-services test_dir runtime ipfs_mode="kubo-docker":
     #!/usr/bin/env bash
     set -e
     mkdir -p "{{ test_dir }}"
@@ -619,8 +552,8 @@ start-services test_dir runtime ipfs_mode="docker":
 
 # Stop all services
 # Usage: just stop-services /tmp/my-test-dir
-# Usage: just stop-services /tmp/my-test-dir kubo
-stop-services test_dir ipfs_mode="docker":
+# Usage: just stop-services /tmp/my-test-dir kubo-native
+stop-services test_dir ipfs_mode="kubo-docker":
     #!/usr/bin/env bash
     echo "📁 Stopping services - test directory: {{ test_dir }}"
     just teardown-services "{{ test_dir }}" "{{ ipfs_mode }}"
@@ -718,19 +651,19 @@ run-test-chopsticks endpoint="wss://westend-bulletin-rpc.polkadot.io": npm-insta
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
 # ============================================================================
 
-# Run authorize and store example with Docker IPFS
+# Run authorize and store example
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
-run-authorize-and-store runtime mode="ws": npm-install
+run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }})..."
+        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
         SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
     elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }})..."
+        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
         SCRIPT_NAME="authorize_and_store_papi.js"
     else
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
@@ -738,7 +671,7 @@ run-authorize-and-store runtime mode="ws": npm-install
     fi
 
     TEST_DIR="$(just compute-test-dir)"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    just setup-services "$TEST_DIR" "{{ runtime }}" "{{ ipfs_mode }}"
 
     set +e
     # Run the script with parameters
@@ -766,23 +699,23 @@ run-authorize-and-store runtime mode="ws": npm-install
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
     
-    just teardown-services "$TEST_DIR"
+    just teardown-services "$TEST_DIR" "{{ ipfs_mode }}"
     exit $EXAMPLE_EXIT
 
-# Run store chunked data example with Docker IPFS
+# Run store chunked data example
 # Parameters:
 #   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
 #   ws_url - WebSocket URL (default: ws://localhost:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283": npm-install
+run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting store chunked data + DAG-PB workflow test (runtime: {{ runtime }})..."
+    echo "🚀 Starting store chunked data + DAG-PB workflow test (runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
 
     TEST_DIR="$(just compute-test-dir)"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    just setup-services "$TEST_DIR" "{{ runtime }}" "{{ ipfs_mode }}"
 
     set +e
     node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -796,7 +729,7 @@ run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
 
-    just teardown-services "$TEST_DIR"
+    just teardown-services "$TEST_DIR" "{{ ipfs_mode }}"
     exit $EXAMPLE_EXIT
 
 # Run store big data example.
@@ -805,14 +738,14 @@ run-store-chunked-data runtime ws_url="ws://localhost:10000" seed="//Alice" http
 #   ws_url - WebSocket URL (default: ws://localhost:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5011)
-run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:5011": npm-install
+run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:5011" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting store big data workflow test ..."
+    echo "🚀 Starting store big data workflow test (runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
 
     TEST_DIR="$(just compute-test-dir)"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    just setup-services "$TEST_DIR" "{{ runtime }}" "{{ ipfs_mode }}"
 
     set +e
     node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -826,7 +759,7 @@ run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipf
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
 
-    just teardown-services "$TEST_DIR"
+    just teardown-services "$TEST_DIR" "{{ ipfs_mode }}"
     exit $EXAMPLE_EXIT
 
 # Run authorize preimage and store with PAPI example.
@@ -835,14 +768,14 @@ run-store-big-data runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipf
 #   ws_url - WebSocket URL (default: ws://localhost:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283": npm-install
+run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed="//Alice" http_ipfs_api="http://127.0.0.1:8283" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    echo "🚀 Starting authorize preimage and store with PAPI workflow test ..."
+    echo "🚀 Starting authorize preimage and store with PAPI workflow test (runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
 
     TEST_DIR="$(just compute-test-dir)"
-    just setup-services "$TEST_DIR" "{{ runtime }}"
+    just setup-services "$TEST_DIR" "{{ runtime }}" "{{ ipfs_mode }}"
 
     set +e
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -856,7 +789,7 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://localhost:10000" seed
         echo "❌ Example failed with exit code $EXAMPLE_EXIT"
     fi
 
-    just teardown-services "$TEST_DIR"
+    just teardown-services "$TEST_DIR" "{{ ipfs_mode }}"
     exit $EXAMPLE_EXIT
 
 # ============================================================================

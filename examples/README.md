@@ -4,31 +4,55 @@
 
 [`just`](https://github.com/casey/just) is a command runner (similar to `make`) that helps execute project tasks.
 
-Install just with: 
+Install just with:
 - `cargo install just`, if you have cargo package manager,
 - `brew install just`, if you're on Mac OS and have `brew` package manager installed,
-- `sudo apt install just`, if you're using a Linux distribution.  
+- `sudo apt install just`, if you're using a Linux distribution.
 
 ### Run prerequisites
 
 It's only needed once after checkout or when dependencies change:
-- `just build`
 - `just npm-install`
 
-### Run full workflow example
-- `just run-authorize-and-store papi` - for PAPI,
-- `just run-authorize-and-store pjs` - for PJS.
+### Run full workflow example (standalone)
 
-#### Run individual commands for manual testing
-- `just setup-services papi` - Setup all services (IPFS, zombienet, reconnect, PAPI descriptors),
-- `just ipfs-init` - Initialize IPFS (if needed),
-- `just ipfs-start` - Start IPFS daemon,
-- `just bulletin-solo-zombienet-start` - Start zombienet,
-- `just ipfs-connect` - Connect to IPFS nodes,
-- `just ipfs-reconnect-start` - Start IPFS reconnect script,
-- `just papi-generate` - Generate PAPI descriptors,
-- `just run-example papi` - Run example with PAPI or PJS,
-- `just teardown-services` - Stop all services
+Standalone recipes handle full setup/teardown automatically:
+
+```bash
+# Solochain (Polkadot runtime) with WebSocket + Kubo Docker IPFS (default)
+just run-authorize-and-store bulletin-polkadot-runtime ws
+
+# Solochain with WebSocket + Kubo native (no Docker required)
+just run-authorize-and-store bulletin-polkadot-runtime ws kubo-native
+
+# Westend parachain with smoldot light client
+just run-authorize-and-store bulletin-westend-runtime smoldot
+```
+
+### IPFS modes
+
+Two IPFS backends are supported:
+
+- **`kubo-docker`** (default) — Runs Kubo inside a Docker container. Requires Docker.
+- **`kubo-native`** — Runs Kubo as a local binary (downloaded automatically). No Docker required.
+
+### Run individual commands for manual testing
+
+```bash
+# Start services (zombienet + IPFS with Peering.Peers auto-reconnect)
+just start-services /tmp/my-test bulletin-polkadot-runtime kubo-native
+
+# Generate PAPI descriptors from running node
+just papi-generate
+
+# Run individual tests (services must be running)
+just run-test-authorize-and-store /tmp/my-test bulletin-polkadot-runtime ws
+just run-test-store-chunked-data /tmp/my-test
+just run-test-store-big-data /tmp/my-test big32
+
+# Stop services
+just stop-services /tmp/my-test kubo-native
+```
 
 ## Manually
 
@@ -75,11 +99,12 @@ tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
 
 #### Use Docker
 
-* Use `host.docker.internal` (macOS/Windows) or `172.17.0.1` (Linux) for swarm connections
-
 ```shell
 docker pull ipfs/kubo:latest
-docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4011:4011 -p 8283:8283 -p 5011:5011 ipfs/kubo:latest
+docker run -d --name ipfs-node -v ipfs-data:/data/ipfs \
+  -p 127.0.0.1:4011:4011 -p 127.0.0.1:8283:8283 -p 127.0.0.1:5011:5011 \
+  --add-host=host.docker.internal:host-gateway \
+  ipfs/kubo:latest
 docker logs -f ipfs-node
 ```
 
@@ -97,34 +122,31 @@ POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
 
 ### Connect IPFS Nodes
 
-```shell
-# Uses Kubo
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-# connect 12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm success
+Kubo's **Peering.Peers** feature handles automatic (re)connection to chain nodes.
+The `just` recipes configure this automatically before starting the IPFS daemon.
 
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-# connect 12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby success
+For manual setup, configure Peering.Peers in your Kubo config:
+
+```shell
+# Local Kubo — configure peering before starting the daemon
+./kubo/ipfs config --json Peering.Peers '[
+  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/ip4/127.0.0.1/tcp/10002/ws"]},
+  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/ip4/127.0.0.1/tcp/12348/ws"]}
+]'
 ```
 
 ```shell
-# Uses Docker on macOS/Windows (use dns4/host.docker.internal)
-docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /dns4/host.docker.internal/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-
-# Uses Docker on Linux (use ip4/172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby
-```
-
-```shell
-# Runs a script that reconnects every 2 seconds
-# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
-./scripts/ipfs-reconnect-solo.sh
+# Docker Kubo — configure peering, then restart the container
+docker exec ipfs-node ipfs config --json Peering.Peers '[
+  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/dns4/host.docker.internal/tcp/10002/ws"]},
+  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/dns4/host.docker.internal/tcp/12348/ws"]}
+]'
+docker restart ipfs-node
 ```
 
 ### Run Bulletin (Westend) Parachain with `--ipfs-server`
 
-#### Prerequisites 
+#### Prerequisites
 
 ```shell
 mkdir -p ~/local_bridge_testing/bin
@@ -162,25 +184,23 @@ POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
 
 #### Connect IPFS Nodes
 
-```shell
-# Uses Kubo
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-# connect 12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ success
+Configure Peering.Peers for the Westend parachain nodes:
 
-./kubo/ipfs swarm connect /ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-# connect 12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ success
+```shell
+# Local Kubo
+./kubo/ipfs config --json Peering.Peers '[
+  {"ID":"12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ","Addrs":["/ip4/127.0.0.1/tcp/10002/ws"]},
+  {"ID":"12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ","Addrs":["/ip4/127.0.0.1/tcp/12348/ws"]}
+]'
 ```
 
 ```shell
-# Uses Docker (replace 127.0.0.1 with 172.17.0.1)
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ
-docker exec -it ipfs-node ipfs swarm connect /ip4/172.17.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ
-```
-
-```shell
-# Runs a script that reconnects every 2 seconds
-# Defaults to 'local' (local Kubo); use 'docker' for the Docker setup
-./scripts/ipfs-reconnect-westend.sh
+# Docker Kubo
+docker exec ipfs-node ipfs config --json Peering.Peers '[
+  {"ID":"12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ","Addrs":["/dns4/host.docker.internal/tcp/10002/ws"]},
+  {"ID":"12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ","Addrs":["/dns4/host.docker.internal/tcp/12348/ws"]}
+]'
+docker restart ipfs-node
 ```
 
 ### Trigger Authorize, Store and IPFS Get
