@@ -25,14 +25,15 @@ fi
 
 cd $POLKADOT_SDK_DIR
 
-# Check out latest master
+# Check out a known-working revision for the relay chain / omni-node binaries.
+# NOTE: this does NOT have to match the Cargo.toml SDK revision — the runtime is
+# compiled separately. This only affects the host binaries (polkadot, omni-node).
+POLKADOT_SDK_REV="81a3af9830ea8b6ff64b066b73b04bb3b675add5"
+
 echo "   Fetching latest changes from polkadot-sdk..."
 git fetch origin
-echo "   Checking out latest master..."
-# TODO:
-# git reset --hard origin/master
-# Let's use the same commit as Cargo.toml to avoid moving Polkadot-SDK
-git reset --hard 81a3af9830ea8b6ff64b066b73b04bb3b675add5
+echo "   Checking out polkadot-sdk revision: $POLKADOT_SDK_REV..."
+git checkout "$POLKADOT_SDK_REV"
 
 # Build polkadot binary
 echo "   Building polkadot binary (this may take a while)..."
