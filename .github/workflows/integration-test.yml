@@ -158,7 +158,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: examples/package.json
+          cache-dependency-path: |
+            examples/package.json
+            console-ui/package-lock.json
 
       - name: Install just
         run: cargo install just --locked || true
@@ -223,6 +225,26 @@ jobs:
       - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://localhost:10000"
+
+      - name: Install console-ui dependencies
+        working-directory: console-ui
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: console-ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Run console-ui Playwright integration tests
+        working-directory: console-ui
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: playwright-report-${{ matrix.runtime.name }}
+          path: console-ui/playwright-report/
+          retention-days: 14
 
       - name: Stop services
         if: always()
