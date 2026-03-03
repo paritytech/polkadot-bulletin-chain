@@ -44,7 +44,7 @@ function AccountAuthorizationsTab() {
 
     setIsSearching(true);
     try {
-      const auth = await api.query.TransactionStorage.Authorizations.getValue(
+      const auth = await api.query.TransactionStorage!.Authorizations!.getValue(
         Enum("Account", searchAddress)
       );
 
@@ -399,7 +399,7 @@ function FaucetAuthorizePreimagePanel() {
       const normalizedHash = preimageHash.startsWith("0x") ? preimageHash : `0x${preimageHash}`;
       const sizeValue = getSizeValue();
 
-      const tx = api.tx.TransactionStorage.authorize_preimage({
+      const tx = api.tx.TransactionStorage!.authorize_preimage!({
         content_hash: Binary.fromHex(normalizedHash),
         max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
       });
@@ -607,7 +607,7 @@ function FaucetAuthorizeAccountPanel() {
         const keyring = new Keyring({ type: "sr25519" });
         const alice = keyring.addFromUri("//Alice");
 
-        const accountInfo = await api.query.System.Account.getValue(alice.address as SS58String);
+        const accountInfo = await api.query.System!.Account!.getValue(alice.address as SS58String);
         setAliceBalance(accountInfo?.data?.free ?? null);
       } catch (err) {
         console.error("Failed to initialize dev accounts:", err);
@@ -651,7 +651,7 @@ function FaucetAuthorizeAccountPanel() {
     const fetchAuth = async () => {
       setIsLoadingAuth(true);
       try {
-        const auth = await api.query.TransactionStorage.Authorizations.getValue(
+        const auth = await api.query.TransactionStorage!.Authorizations!.getValue(
           Enum("Account", forWho)
         );
 
@@ -696,7 +696,7 @@ function FaucetAuthorizeAccountPanel() {
       const txCount = BigInt(parseInt(transactions, 10) || 0);
       const bytesValue = getBytesValue();
 
-      const tx = api.tx.TransactionStorage.authorize_account({
+      const tx = api.tx.TransactionStorage!.authorize_account!({
         who: forWho as SS58String,
         transactions: Number(txCount),
         bytes: bytesValue,
@@ -733,7 +733,7 @@ function FaucetAuthorizeAccountPanel() {
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
-      const auth = await api.query.TransactionStorage.Authorizations.getValue(
+      const auth = await api.query.TransactionStorage!.Authorizations!.getValue(
         Enum("Account", forWho)
       );
       setAuthorization(

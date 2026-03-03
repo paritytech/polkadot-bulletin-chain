@@ -2,8 +2,7 @@ import { BehaviorSubject, combineLatest, switchMap, of, from, catchError } from 
 import { bind } from "@react-rxjs/core";
 import { api$ } from "./chain.state";
 import { selectedAccount$ } from "./wallet.state";
-import { SS58String, TypedApi, Enum, Binary } from "polkadot-api";
-import { bulletin_westend } from "@polkadot-api/descriptors";
+import { SS58String, UnsafeApi, Enum, Binary } from "polkadot-api";
 
 export interface Authorization {
   transactions: bigint;
@@ -29,14 +28,14 @@ const authorizationLoadingSubject = new BehaviorSubject<boolean>(false);
 const authorizationErrorSubject = new BehaviorSubject<string | undefined>(undefined);
 
 export async function fetchAccountAuthorization(
-  api: TypedApi<typeof bulletin_westend>,
+  api: UnsafeApi<void>,
   address: SS58String
 ): Promise<Authorization | null> {
   authorizationLoadingSubject.next(true);
   authorizationErrorSubject.next(undefined);
 
   try {
-    const auth = await api.query.TransactionStorage.Authorizations.getValue(
+    const auth = await api.query.TransactionStorage!.Authorizations!.getValue(
       Enum("Account", address)
     );
 
@@ -68,13 +67,13 @@ const preimageAuthSubject = new BehaviorSubject<Authorization | null>(null);
 const preimageAuthLoadingSubject = new BehaviorSubject<boolean>(false);
 
 export async function checkPreimageAuthorization(
-  api: TypedApi<typeof bulletin_westend>,
+  api: UnsafeApi<void>,
   contentHash: Uint8Array
 ): Promise<Authorization | null> {
   preimageAuthLoadingSubject.next(true);
 
   try {
-    const auth = await api.query.TransactionStorage.Authorizations.getValue(
+    const auth = await api.query.TransactionStorage!.Authorizations!.getValue(
       Enum("Preimage", Binary.fromBytes(contentHash))
     );
 
@@ -109,12 +108,12 @@ const preimageAuthsSubject = new BehaviorSubject<PreimageAuthorization[]>([]);
 const preimageAuthsLoadingSubject = new BehaviorSubject<boolean>(false);
 
 export async function fetchPreimageAuthorizations(
-  api: TypedApi<typeof bulletin_westend>
+  api: UnsafeApi<void>
 ): Promise<PreimageAuthorization[]> {
   preimageAuthsLoadingSubject.next(true);
 
   try {
-    const entries = await api.query.TransactionStorage.Authorizations.getEntries();
+    const entries = await api.query.TransactionStorage!.Authorizations!.getEntries();
 
     const preimageAuths: PreimageAuthorization[] = entries
       .filter(({ keyArgs }: any) => keyArgs[0].type === "Preimage")
@@ -149,12 +148,12 @@ export async function fetchPreimageAuthorizations(
 
 // Transaction info by block/index
 export async function fetchTransactionInfo(
-  api: TypedApi<typeof bulletin_westend>,
+  api: UnsafeApi<void>,
   blockNumber: number,
   index: number
 ): Promise<TransactionInfo | null> {
   try {
-    const infos = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
+    const infos = await api.query.TransactionStorage!.Transactions!.getValue(blockNumber);
 
     if (!infos || infos.length <= index) {
       return null;

@@ -233,7 +233,7 @@ export function Explorer() {
 
       // Fall back to System.BlockHash storage query
       if (!hashHex && api) {
-        const blockHash = await api.query.System.BlockHash.getValue(blockNumber);
+        const blockHash = await api.query.System!.BlockHash!.getValue(blockNumber);
         if (blockHash) {
           const hex = blockHash.asHex();
           // Ignore zero hash (block not in storage)
@@ -321,7 +321,7 @@ export function Explorer() {
       if (api && hashHex) {
         try {
           // Query events - for recent blocks this should work as they're pinned
-          const rawEvents = await api.query.System.Events.getValue({ at: hashHex });
+          const rawEvents = await api.query.System!.Events!.getValue({ at: hashHex });
 
           const events: EventInfo[] = (rawEvents || []).map((event: any, idx: number) => {
             const pallet = event.event?.type || "Unknown";

@@ -178,14 +178,14 @@ export function Upload() {
       const isCustomCid = hashAlgorithm !== "blake2b256" || cidCodec !== "raw";
 
       const tx = isCustomCid
-        ? api.tx.TransactionStorage.store_with_cid_config({
+        ? api.tx.TransactionStorage!.store_with_cid_config!({
             cid: {
               codec: BigInt(codecConfig.codec),
               hashing: toHashingEnum(hashConfig.mhCode),
             },
             data: Binary.fromBytes(data),
           })
-        : api.tx.TransactionStorage.store({
+        : api.tx.TransactionStorage!.store!({
             data: Binary.fromBytes(data),
           });
 

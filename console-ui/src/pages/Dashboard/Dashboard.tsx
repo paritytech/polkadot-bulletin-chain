@@ -283,8 +283,8 @@ function UsageCard() {
     setLoading(true);
 
     Promise.all([
-      api.query.TransactionStorage.Authorizations.getEntries(),
-      api.query.TransactionStorage.Transactions.getEntries(),
+      api.query.TransactionStorage!.Authorizations!.getEntries(),
+      api.query.TransactionStorage!.Transactions!.getEntries(),
     ])
       .then(([authEntries, txEntries]: [any[], any[]]) => {
         if (cancelled) return;

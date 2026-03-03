@@ -67,7 +67,7 @@ export function Renew() {
     async function fetchRetentionPeriod() {
       if (!api) return;
       try {
-        const period = await api.query.TransactionStorage.RetentionPeriod.getValue();
+        const period = await api.query.TransactionStorage!.RetentionPeriod!.getValue();
         setRetentionPeriod(Number(period));
       } catch (err) {
         console.error("Failed to fetch retention period:", err);
@@ -152,7 +152,7 @@ export function Renew() {
     setRenewalSuccess(null);
 
     try {
-      const tx = api.tx.TransactionStorage.renew({
+      const tx = api.tx.TransactionStorage!.renew!({
         block: renewalTarget.blockNumber,
         index: renewalTarget.index,
       });
