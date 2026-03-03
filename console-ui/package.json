@@ -6,9 +6,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "npx playwright test --project=mock",
-    "test:integration": "npx playwright test --project=integration",
-    "test:all": "npx playwright test"
+    "test": "npx playwright test",
+    "test:integration": "npx playwright test"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
