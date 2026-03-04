@@ -498,6 +498,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ) => {
         if (resolved) return
         resolved = true
+        clearTimeout(timerId)
         subscription.unsubscribe()
         resolve({
           blockHash: block.hash,
@@ -556,13 +557,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
+            clearTimeout(timerId)
             reject(err)
           }
         },
       })
 
       // Timeout after 2 minutes
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
         if (!resolved) {
           resolved = true
           subscription.unsubscribe()
@@ -584,6 +586,30 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       )
     }
     return this.api.tx.Sudo.sudo({ call: tx.decodedCall })
+  }
+
+  /**
+   * Submit a transaction, returning a receipt on success or throwing a BulletinError on failure.
+   */
+  private async submitTx(
+    tx: PapiTransaction,
+    errorMessage: string,
+    errorCode: string,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
+    try {
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx)
+
+      return {
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+      }
+    } catch (error) {
+      throw new BulletinError(`${errorMessage}: ${error}`, errorCode, error)
+    }
   }
 
   /**
@@ -851,30 +877,17 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     bytes: bigint,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const authTx = this.api.tx.TransactionStorage.authorize_account({
-        who,
-        transactions,
-        bytes,
-      })
-      const tx = this.wrapInSudo(authTx)
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to authorize account: ${error}`,
-        "AUTHORIZATION_FAILED",
-        error,
-      )
-    }
+    const authTx = this.api.tx.TransactionStorage.authorize_account({
+      who,
+      transactions,
+      bytes,
+    })
+    return this.submitTx(
+      this.wrapInSudo(authTx),
+      "Failed to authorize account",
+      "AUTHORIZATION_FAILED",
+      progressCallback,
+    )
   }
 
   /**
@@ -891,29 +904,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     maxSize: bigint,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const authTx = this.api.tx.TransactionStorage.authorize_preimage({
-        content_hash: new Binary(contentHash),
-        max_size: maxSize,
-      })
-      const tx = this.wrapInSudo(authTx)
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to authorize preimage: ${error}`,
-        "AUTHORIZATION_FAILED",
-        error,
-      )
-    }
+    const authTx = this.api.tx.TransactionStorage.authorize_preimage({
+      content_hash: new Binary(contentHash),
+      max_size: maxSize,
+    })
+    return this.submitTx(
+      this.wrapInSudo(authTx),
+      "Failed to authorize preimage",
+      "AUTHORIZATION_FAILED",
+      progressCallback,
+    )
   }
 
   /**
@@ -928,25 +928,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     index: number,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index })
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to renew: ${error}`,
-        "TRANSACTION_FAILED",
-        error,
-      )
-    }
+    const tx = this.api.tx.TransactionStorage.renew({ block, index })
+    return this.submitTx(
+      tx,
+      "Failed to renew",
+      "TRANSACTION_FAILED",
+      progressCallback,
+    )
   }
 
   /**
@@ -962,27 +950,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     who: string,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const authTx =
-        this.api.tx.TransactionStorage.refresh_account_authorization({ who })
-      const tx = this.wrapInSudo(authTx)
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to refresh account authorization: ${error}`,
-        "AUTHORIZATION_FAILED",
-        error,
-      )
-    }
+    const authTx = this.api.tx.TransactionStorage.refresh_account_authorization(
+      { who },
+    )
+    return this.submitTx(
+      this.wrapInSudo(authTx),
+      "Failed to refresh account authorization",
+      "AUTHORIZATION_FAILED",
+      progressCallback,
+    )
   }
 
   /**
@@ -998,29 +974,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     contentHash: Uint8Array,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const authTx =
-        this.api.tx.TransactionStorage.refresh_preimage_authorization({
-          content_hash: new Binary(contentHash),
-        })
-      const tx = this.wrapInSudo(authTx)
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to refresh preimage authorization: ${error}`,
-        "AUTHORIZATION_FAILED",
-        error,
-      )
-    }
+    const authTx =
+      this.api.tx.TransactionStorage.refresh_preimage_authorization({
+        content_hash: new Binary(contentHash),
+      })
+    return this.submitTx(
+      this.wrapInSudo(authTx),
+      "Failed to refresh preimage authorization",
+      "AUTHORIZATION_FAILED",
+      progressCallback,
+    )
   }
 
   /**
@@ -1035,28 +998,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     who: string,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const tx =
-        this.api.tx.TransactionStorage.remove_expired_account_authorization({
-          who,
-        })
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to remove expired account authorization: ${error}`,
-        "TRANSACTION_FAILED",
-        error,
-      )
-    }
+    const tx =
+      this.api.tx.TransactionStorage.remove_expired_account_authorization({
+        who,
+      })
+    return this.submitTx(
+      tx,
+      "Failed to remove expired account authorization",
+      "TRANSACTION_FAILED",
+      progressCallback,
+    )
   }
 
   /**
@@ -1071,28 +1022,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     contentHash: Uint8Array,
     progressCallback?: ProgressCallback,
   ): Promise<TransactionReceipt> {
-    try {
-      const tx =
-        this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
-          content_hash: new Binary(contentHash),
-        })
-
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to remove expired preimage authorization: ${error}`,
-        "TRANSACTION_FAILED",
-        error,
-      )
-    }
+    const tx =
+      this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
+        content_hash: new Binary(contentHash),
+      })
+    return this.submitTx(
+      tx,
+      "Failed to remove expired preimage authorization",
+      "TRANSACTION_FAILED",
+      progressCallback,
+    )
   }
 
   /**

@@ -62,7 +62,7 @@ export class FixedSizeChunker {
     for (let i = 0; i < totalChunks; i++) {
       const start = i * this.config.chunkSize
       const end = Math.min(start + this.config.chunkSize, data.length)
-      const chunkData = data.slice(start, end)
+      const chunkData = data.subarray(start, end)
 
       chunks.push({
         data: chunkData,

@@ -63,6 +63,15 @@ export type MockOperation =
       contentHash: Uint8Array
     }
 
+const MOCK_BLOCK_HASH =
+  "0x0000000000000000000000000000000000000000000000000000000000000001"
+const MOCK_TX_HASH =
+  "0x0000000000000000000000000000000000000000000000000000000000000002"
+
+function mockReceipt(): TransactionReceipt {
+  return { blockHash: MOCK_BLOCK_HASH, txHash: MOCK_TX_HASH, blockNumber: 1 }
+}
+
 /**
  * Mock Bulletin client for testing
  *
@@ -206,138 +215,63 @@ export class MockBulletinClient implements BulletinClientInterface {
   /**
    * Authorize an account to store data
    */
-  async authorizeAccount(
-    who: string,
-    transactions: number,
-    bytes: bigint,
-  ): Promise<TransactionReceipt> {
+  private throwIfAuthFailure(): void {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
         "AUTHORIZATION_FAILED",
       )
     }
+  }
 
+  async authorizeAccount(
+    who: string,
+    transactions: number,
+    bytes: bigint,
+  ): Promise<TransactionReceipt> {
+    this.throwIfAuthFailure()
     this.operations.push({
       type: "authorize_account",
       who,
       transactions,
       bytes,
     })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    return mockReceipt()
   }
 
-  /**
-   * Authorize a preimage to be stored
-   */
   async authorizePreimage(
     contentHash: Uint8Array,
     maxSize: bigint,
   ): Promise<TransactionReceipt> {
-    if (this.config.simulateAuthFailure) {
-      throw new BulletinError(
-        "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
-      )
-    }
-
-    this.operations.push({
-      type: "authorize_preimage",
-      contentHash,
-      maxSize,
-    })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    this.throwIfAuthFailure()
+    this.operations.push({ type: "authorize_preimage", contentHash, maxSize })
+    return mockReceipt()
   }
 
-  /**
-   * Refresh an account authorization (mock)
-   */
   async refreshAccountAuthorization(who: string): Promise<TransactionReceipt> {
-    if (this.config.simulateAuthFailure) {
-      throw new BulletinError(
-        "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
-      )
-    }
-
-    this.operations.push({
-      type: "refresh_account_authorization",
-      who,
-    })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    this.throwIfAuthFailure()
+    this.operations.push({ type: "refresh_account_authorization", who })
+    return mockReceipt()
   }
 
-  /**
-   * Refresh a preimage authorization (mock)
-   */
   async refreshPreimageAuthorization(
     contentHash: Uint8Array,
   ): Promise<TransactionReceipt> {
-    if (this.config.simulateAuthFailure) {
-      throw new BulletinError(
-        "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
-      )
-    }
-
+    this.throwIfAuthFailure()
     this.operations.push({
       type: "refresh_preimage_authorization",
       contentHash,
     })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    return mockReceipt()
   }
 
-  /**
-   * Remove an expired account authorization (mock)
-   */
   async removeExpiredAccountAuthorization(
     who: string,
   ): Promise<TransactionReceipt> {
-    this.operations.push({
-      type: "remove_expired_account_authorization",
-      who,
-    })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    this.operations.push({ type: "remove_expired_account_authorization", who })
+    return mockReceipt()
   }
 
-  /**
-   * Remove an expired preimage authorization (mock)
-   */
   async removeExpiredPreimageAuthorization(
     contentHash: Uint8Array,
   ): Promise<TransactionReceipt> {
@@ -345,29 +279,12 @@ export class MockBulletinClient implements BulletinClientInterface {
       type: "remove_expired_preimage_authorization",
       contentHash,
     })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    return mockReceipt()
   }
 
-  /**
-   * Renew/extend retention period for stored data (mock)
-   */
   async renew(block: number, index: number): Promise<TransactionReceipt> {
     this.operations.push({ type: "renew", block, index })
-
-    return {
-      blockHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-      txHash:
-        "0x0000000000000000000000000000000000000000000000000000000000000002",
-      blockNumber: 1,
-    }
+    return mockReceipt()
   }
 
   /**

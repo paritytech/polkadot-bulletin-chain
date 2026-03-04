@@ -112,11 +112,6 @@ export function cidToBytes(cid: CID): Uint8Array {
 }
 
 /**
- * Validate chunk size
- *
- * @throws BulletinError if chunk size is invalid
- */
-/**
  * Estimate authorization needed for storing data
  *
  * @param dataSize - Total data size in bytes
