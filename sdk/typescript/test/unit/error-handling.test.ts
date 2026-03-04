@@ -92,7 +92,7 @@ describe("Error Handling", () => {
 
   describe("Client Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStore", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
+      const client = new BulletinClient()
 
       await expect(client.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
@@ -105,7 +105,7 @@ describe("Error Handling", () => {
     })
 
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
+      const client = new BulletinClient()
 
       await expect(
         client.prepareStoreChunked(new Uint8Array(0)),
@@ -149,7 +149,7 @@ describe("Error Handling", () => {
 
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
+      const client = new BulletinClient()
 
       try {
         await client.prepareStore(new Uint8Array(0))

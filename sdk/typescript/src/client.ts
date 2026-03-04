@@ -33,12 +33,11 @@ import { calculateCid, estimateAuthorization } from "./utils.js"
 export class BulletinClient {
   private config: Required<ClientConfig>
 
-  constructor(config: ClientConfig) {
+  constructor(config?: ClientConfig) {
     this.config = {
-      endpoint: config.endpoint,
-      defaultChunkSize: config.defaultChunkSize ?? 1024 * 1024,
-      createManifest: config.createManifest ?? true,
-      chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
+      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
+      createManifest: config?.createManifest ?? true,
+      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
     }
   }
 

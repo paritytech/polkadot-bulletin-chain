@@ -216,8 +216,6 @@ export class BulletinError extends Error {
  * Client configuration
  */
 export interface ClientConfig {
-  /** RPC endpoint URL */
-  endpoint: string
   /** Default chunk size for large files (default: 1 MiB) */
   defaultChunkSize?: number
   /** Whether to create manifests for chunked uploads (default: true) */

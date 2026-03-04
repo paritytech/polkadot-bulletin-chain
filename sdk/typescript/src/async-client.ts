@@ -181,6 +181,53 @@ export interface StoreExecutor {
 }
 
 /**
+ * Shared interface for Bulletin clients (real and mock).
+ *
+ * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
+ */
+export interface BulletinClientInterface extends StoreExecutor {
+  store(data: Binary | Uint8Array): StoreBuilder
+  authorizeAccount(
+    who: string,
+    transactions: number,
+    bytes: bigint,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  authorizePreimage(
+    contentHash: Uint8Array,
+    maxSize: bigint,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  renew(
+    block: number,
+    index: number,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  refreshAccountAuthorization(
+    who: string,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  refreshPreimageAuthorization(
+    contentHash: Uint8Array,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  removeExpiredAccountAuthorization(
+    who: string,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  removeExpiredPreimageAuthorization(
+    contentHash: Uint8Array,
+    cb?: ProgressCallback,
+  ): Promise<TransactionReceipt>
+  estimateAuthorization(dataSize: number): {
+    transactions: number
+    bytes: number
+  }
+  withAccount(account: string): this
+  getAccount(): string | undefined
+}
+
+/**
  * Builder for store operations with fluent API
  *
  * @example
@@ -325,7 +372,7 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
  * const result = await bulletinClient.store(data).send();
  * ```
  */
-export class AsyncBulletinClient implements StoreExecutor {
+export class AsyncBulletinClient implements BulletinClientInterface {
   /** PAPI client for blockchain interaction */
   public api: BulletinTypedApi
   /** Signer for transaction signing */
@@ -378,6 +425,25 @@ export class AsyncBulletinClient implements StoreExecutor {
    */
   getAccount(): string | undefined {
     return this.account
+  }
+
+  /**
+   * Create a store transaction, using store_with_cid_config when non-default CID settings are used.
+   */
+  private createStoreTx(
+    data: Uint8Array,
+    cidCodec: CidCodec | number,
+    hashAlgorithm: HashAlgorithm,
+  ): PapiTransaction {
+    return isNonDefaultCidConfig(cidCodec, hashAlgorithm)
+      ? this.api.tx.TransactionStorage.store_with_cid_config({
+          cid: {
+            codec: BigInt(cidCodec),
+            hashing: hashAlgorithmToScale(hashAlgorithm),
+          },
+          data: new Binary(data),
+        })
+      : this.api.tx.TransactionStorage.store({ data: new Binary(data) })
   }
 
   /**
@@ -615,17 +681,7 @@ export class AsyncBulletinClient implements StoreExecutor {
     const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 
     try {
-      const tx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
-        ? this.api.tx.TransactionStorage.store_with_cid_config({
-            cid: {
-              codec: BigInt(cidCodec),
-              hashing: hashAlgorithmToScale(hashAlgorithm),
-            },
-            data: new Binary(data),
-          })
-        : this.api.tx.TransactionStorage.store({
-            data: new Binary(data),
-          })
+      const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
 
       // Use progress-aware submission if callback provided, otherwise use simple submission
       const result = progressCallback
@@ -704,17 +760,7 @@ export class AsyncBulletinClient implements StoreExecutor {
 
         chunk.cid = cid
 
-        const tx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
-          ? this.api.tx.TransactionStorage.store_with_cid_config({
-              cid: {
-                codec: BigInt(cidCodec),
-                hashing: hashAlgorithmToScale(hashAlgorithm),
-              },
-              data: new Binary(chunk.data),
-            })
-          : this.api.tx.TransactionStorage.store({
-              data: new Binary(chunk.data),
-            })
+        const tx = this.createStoreTx(chunk.data, cidCodec, hashAlgorithm)
         await this.signAndSubmitFinalized(tx)
 
         chunkCids.push(cid)
@@ -757,17 +803,11 @@ export class AsyncBulletinClient implements StoreExecutor {
       const builder = new UnixFsDagBuilder()
       const manifest = await builder.build(chunks, hashAlgorithm)
 
-      const manifestTx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
-        ? this.api.tx.TransactionStorage.store_with_cid_config({
-            cid: {
-              codec: BigInt(cidCodec),
-              hashing: hashAlgorithmToScale(hashAlgorithm),
-            },
-            data: new Binary(manifest.dagBytes),
-          })
-        : this.api.tx.TransactionStorage.store({
-            data: new Binary(manifest.dagBytes),
-          })
+      const manifestTx = this.createStoreTx(
+        manifest.dagBytes,
+        cidCodec,
+        hashAlgorithm,
+      )
       await this.signAndSubmitFinalized(manifestTx)
 
       manifestCid = manifest.rootCid
@@ -1098,15 +1138,7 @@ export class AsyncBulletinClient implements StoreExecutor {
     const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
 
     try {
-      const tx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
-        ? this.api.tx.TransactionStorage.store_with_cid_config({
-            cid: {
-              codec: BigInt(cidCodec),
-              hashing: hashAlgorithmToScale(hashAlgorithm),
-            },
-            data: dataBytes,
-          })
-        : this.api.tx.TransactionStorage.store({ data: dataBytes })
+      const tx = this.createStoreTx(dataBytes, cidCodec, hashAlgorithm)
       const bareTxHex = await tx.getBareTx()
       const finalized = await this.submit(bareTxHex)
 

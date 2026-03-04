@@ -14,8 +14,8 @@
 import type { Binary } from "polkadot-api"
 import {
   type AsyncClientConfig,
+  type BulletinClientInterface,
   StoreBuilder,
-  type StoreExecutor,
   type TransactionReceipt,
 } from "./async-client.js"
 import {
@@ -55,6 +55,8 @@ export type MockOperation =
       type: "refresh_preimage_authorization"
       contentHash: Uint8Array
     }
+  | { type: "renew"; block: number; index: number }
+  | { type: "store_preimage_auth"; dataSize: number; cid: string }
   | { type: "remove_expired_account_authorization"; who: string }
   | {
       type: "remove_expired_preimage_authorization"
@@ -84,7 +86,7 @@ export type MockOperation =
  * expect(ops).toHaveLength(1);
  * ```
  */
-export class MockBulletinClient implements StoreExecutor {
+export class MockBulletinClient implements BulletinClientInterface {
   /** Client configuration */
   public config: Required<
     Omit<MockClientConfig, "simulateAuthFailure" | "simulateStorageFailure">
@@ -349,6 +351,58 @@ export class MockBulletinClient implements StoreExecutor {
         "0x0000000000000000000000000000000000000000000000000000000000000001",
       txHash:
         "0x0000000000000000000000000000000000000000000000000000000000000002",
+      blockNumber: 1,
+    }
+  }
+
+  /**
+   * Renew/extend retention period for stored data (mock)
+   */
+  async renew(block: number, index: number): Promise<TransactionReceipt> {
+    this.operations.push({ type: "renew", block, index })
+
+    return {
+      blockHash:
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+      txHash:
+        "0x0000000000000000000000000000000000000000000000000000000000000002",
+      blockNumber: 1,
+    }
+  }
+
+  /**
+   * Store preimage-authorized content (mock)
+   */
+  async storeWithPreimageAuth(
+    data: Binary | Uint8Array,
+    options?: StoreOptions,
+  ): Promise<StoreResult> {
+    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
+
+    if (dataBytes.length === 0) {
+      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+    }
+
+    if (this.config.simulateStorageFailure) {
+      throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+    }
+
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw
+    const hashAlgorithm =
+      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
+
+    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
+
+    this.operations.push({
+      type: "store_preimage_auth",
+      dataSize: dataBytes.length,
+      cid: cid.toString(),
+    })
+
+    return {
+      cid,
+      size: dataBytes.length,
       blockNumber: 1,
     }
   }

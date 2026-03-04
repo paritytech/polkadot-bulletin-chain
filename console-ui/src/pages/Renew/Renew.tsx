@@ -26,7 +26,7 @@ interface RenewalTarget {
   blockNumber: number;
   index: number;
   info: TransactionInfo;
-  expiresAtBlock: number;
+  expiresAtBlock: number | null;
 }
 
 export function Renew() {
@@ -55,7 +55,7 @@ export function Renew() {
   const [renewalError, setRenewalError] = useState<string | null>(null);
   const [renewalSuccess, setRenewalSuccess] = useState<{
     blockNumber?: number;
-    newExpiresAt: number;
+    newExpiresAt: number | null;
   } | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
 
@@ -128,7 +128,7 @@ export function Renew() {
       }
 
       // Calculate expiration block
-      const expiresAtBlock = retentionPeriod ? blockNum + retentionPeriod : blockNum;
+      const expiresAtBlock = retentionPeriod !== null ? blockNum + retentionPeriod : null;
 
       setRenewalTarget({
         blockNumber: blockNum,
@@ -179,7 +179,7 @@ export function Renew() {
 
       // Calculate new expiration
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
-      const newExpiresAt = retentionPeriod ? renewedAtBlock + retentionPeriod : renewedAtBlock;
+      const newExpiresAt = retentionPeriod !== null ? renewedAtBlock + retentionPeriod : null;
 
       setRenewalSuccess({
         blockNumber: result.blockNumber,
@@ -204,7 +204,7 @@ export function Renew() {
     !isRenewing;
 
   // Calculate blocks until expiration
-  const blocksUntilExpiration = renewalTarget && currentBlockNumber !== undefined
+  const blocksUntilExpiration = renewalTarget && renewalTarget.expiresAtBlock !== null && currentBlockNumber !== undefined
     ? renewalTarget.expiresAtBlock - currentBlockNumber
     : null;
 
@@ -364,27 +364,35 @@ export function Renew() {
                     <span className="text-sm font-medium">Expiration Status</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {isExpired ? (
+                    {renewalTarget.expiresAtBlock === null ? (
+                      <Badge variant="secondary">Unknown</Badge>
+                    ) : isExpired ? (
                       <Badge variant="destructive">Expired</Badge>
                     ) : isExpiringSoon ? (
                       <Badge className="bg-yellow-500">Expiring Soon</Badge>
                     ) : (
                       <Badge variant="secondary">Active</Badge>
                     )}
-                    {blocksUntilExpiration !== null && (
+                    {renewalTarget.expiresAtBlock === null ? (
+                      <span className="text-sm text-muted-foreground">
+                        Expiration unknown — retention period not available
+                      </span>
+                    ) : blocksUntilExpiration !== null ? (
                       <span className="text-sm text-muted-foreground">
                         {isExpired
                           ? `Expired ${Math.abs(blocksUntilExpiration).toLocaleString()} blocks ago`
                           : `${blocksUntilExpiration.toLocaleString()} blocks remaining`}
                       </span>
-                    )}
+                    ) : null}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Expires at block #{renewalTarget.expiresAtBlock.toLocaleString()}
-                    {retentionPeriod && (
-                      <> (Retention period: {retentionPeriod.toLocaleString()} blocks)</>
-                    )}
-                  </p>
+                  {renewalTarget.expiresAtBlock !== null && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Expires at block #{renewalTarget.expiresAtBlock.toLocaleString()}
+                      {retentionPeriod && (
+                        <> (Retention period: {retentionPeriod.toLocaleString()} blocks)</>
+                      )}
+                    </p>
+                  )}
                 </div>
 
                 <Button
@@ -448,7 +456,9 @@ export function Renew() {
                       New Expiration Block
                     </p>
                     <p className="font-mono">
-                      #{renewalSuccess.newExpiresAt.toLocaleString()}
+                      {renewalSuccess.newExpiresAt !== null
+                        ? `#${renewalSuccess.newExpiresAt.toLocaleString()}`
+                        : "Unknown"}
                     </p>
                   </div>
                 </div>
