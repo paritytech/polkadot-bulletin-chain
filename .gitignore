@@ -26,3 +26,9 @@ zombienet-*
 **/dist/
 console-ui/.vite/
 console-ui/tsconfig.tsbuildinfo
+
+# Playwright
+console-ui/test-results/
+console-ui/playwright-report/
+console-ui/blob-report/
+console-ui/playwright/.cache/
