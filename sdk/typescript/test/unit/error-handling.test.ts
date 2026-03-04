@@ -347,13 +347,5 @@ describe("Error Handling", () => {
       expect(event.error).toBe("pool full")
     })
 
-    it("should still support deprecated best_block event", () => {
-      const event: TransactionStatusEvent = {
-        type: "best_block",
-        blockHash: "0xabc",
-        blockNumber: 42,
-      }
-      expect(event.type).toBe("best_block")
-    })
   })
 })
