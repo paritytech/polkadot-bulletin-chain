@@ -34,6 +34,8 @@ POLKADOT_SDK_REV="81a3af9830ea8b6ff64b066b73b04bb3b675add5"
 CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "")
 if [ "$CURRENT_REV" = "$POLKADOT_SDK_REV" ] \
     && [ -x "$BIN_DIR/polkadot" ] \
+    && [ -x "$BIN_DIR/polkadot-prepare-worker" ] \
+    && [ -x "$BIN_DIR/polkadot-execute-worker" ] \
     && [ -x "$BIN_DIR/polkadot-omni-node" ] \
     && [ -x "$BIN_DIR/chain-spec-builder" ]; then
     echo "   ✅ Already at correct revision ($POLKADOT_SDK_REV) with binaries present. Skipping build."
