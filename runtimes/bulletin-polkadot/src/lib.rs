@@ -530,10 +530,10 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
-pub struct ValidateSigned;
+pub struct AllowedSignedCalls;
 
-impl TransactionExtension<RuntimeCall> for ValidateSigned {
-	const IDENTIFIER: &'static str = "ValidateSigned";
+impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
+	const IDENTIFIER: &'static str = "AllowedSignedCalls";
 
 	type Implicit = ();
 	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
@@ -741,8 +741,8 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 
 /// The SignedExtension to the basic transaction logic.
 ///
-/// NOTE: `AuthorizeStorageSigned` must come before `ValidateSigned` because it transforms
-/// the origin for signed TransactionStorage calls, and `ValidateSigned` needs to detect this.
+/// NOTE: `AuthorizeStorageSigned` must come before `AllowedSignedCalls` because it transforms
+/// the origin for signed TransactionStorage calls, and `AllowedSignedCalls` needs to detect this.
 pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -752,7 +752,7 @@ pub type TxExtension = (
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
 	pallet_transaction_storage::extension::AuthorizeStorageSigned<Runtime>,
-	ValidateSigned,
+	AllowedSignedCalls,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
 

@@ -281,7 +281,7 @@ fn construct_extrinsic(
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
 		pallet_transaction_storage::extension::AuthorizeStorageSigned::<Runtime>::default(),
-		runtime::ValidateSigned,
+		runtime::AllowedSignedCalls,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
 	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
@@ -980,7 +980,7 @@ fn sudo_kill_works() {
 #[test]
 fn alice_can_sign_authorize_account_extrinsic() {
 	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
-	// from Alice must pass ValidateSigned and succeed at dispatch.
+	// from Alice must pass AllowedSignedCalls and succeed at dispatch.
 	run_test(|| {
 		let alice = sudo_relayer_signer(); // Alice
 		let target = non_relay_signer();
