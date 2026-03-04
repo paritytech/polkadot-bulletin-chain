@@ -26,7 +26,7 @@ interface RenewalTarget {
   blockNumber: number;
   index: number;
   info: TransactionInfo;
-  expiresAtBlock: number | null;
+  expiresAtBlock: number;
 }
 
 export function Renew() {
@@ -55,7 +55,7 @@ export function Renew() {
   const [renewalError, setRenewalError] = useState<string | null>(null);
   const [renewalSuccess, setRenewalSuccess] = useState<{
     blockNumber?: number;
-    newExpiresAt: number | null;
+    newExpiresAt: number;
   } | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
 
@@ -127,8 +127,8 @@ export function Renew() {
         return;
       }
 
-      // Calculate expiration block
-      const expiresAtBlock = retentionPeriod !== null ? blockNum + retentionPeriod : null;
+      // retentionPeriod is guaranteed non-null here (lookup button is disabled until loaded)
+      const expiresAtBlock = blockNum + retentionPeriod!;
 
       setRenewalTarget({
         blockNumber: blockNum,
@@ -177,9 +177,9 @@ export function Renew() {
         handleProgress,
       );
 
-      // Calculate new expiration
+      // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
-      const newExpiresAt = retentionPeriod !== null ? renewedAtBlock + retentionPeriod : null;
+      const newExpiresAt = renewedAtBlock + retentionPeriod!;
 
       setRenewalSuccess({
         blockNumber: result.blockNumber,
@@ -204,7 +204,7 @@ export function Renew() {
     !isRenewing;
 
   // Calculate blocks until expiration
-  const blocksUntilExpiration = renewalTarget && renewalTarget.expiresAtBlock !== null && currentBlockNumber !== undefined
+  const blocksUntilExpiration = renewalTarget && currentBlockNumber !== undefined
     ? renewalTarget.expiresAtBlock - currentBlockNumber
     : null;
 
@@ -301,7 +301,7 @@ export function Renew() {
 
               <Button
                 onClick={handleLookup}
-                disabled={!api || isLookingUp || !blockInput || !indexInput}
+                disabled={!api || isLookingUp || !blockInput || !indexInput || retentionPeriod === null}
                 className="w-full"
               >
                 {isLookingUp ? (
@@ -364,35 +364,27 @@ export function Renew() {
                     <span className="text-sm font-medium">Expiration Status</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {renewalTarget.expiresAtBlock === null ? (
-                      <Badge variant="secondary">Unknown</Badge>
-                    ) : isExpired ? (
+                    {isExpired ? (
                       <Badge variant="destructive">Expired</Badge>
                     ) : isExpiringSoon ? (
                       <Badge className="bg-yellow-500">Expiring Soon</Badge>
                     ) : (
                       <Badge variant="secondary">Active</Badge>
                     )}
-                    {renewalTarget.expiresAtBlock === null ? (
-                      <span className="text-sm text-muted-foreground">
-                        Expiration unknown — retention period not available
-                      </span>
-                    ) : blocksUntilExpiration !== null ? (
+                    {blocksUntilExpiration !== null && (
                       <span className="text-sm text-muted-foreground">
                         {isExpired
                           ? `Expired ${Math.abs(blocksUntilExpiration).toLocaleString()} blocks ago`
                           : `${blocksUntilExpiration.toLocaleString()} blocks remaining`}
                       </span>
-                    ) : null}
+                    )}
                   </div>
-                  {renewalTarget.expiresAtBlock !== null && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Expires at block #{renewalTarget.expiresAtBlock.toLocaleString()}
-                      {retentionPeriod && (
-                        <> (Retention period: {retentionPeriod.toLocaleString()} blocks)</>
-                      )}
-                    </p>
-                  )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Expires at block #{renewalTarget.expiresAtBlock.toLocaleString()}
+                    {retentionPeriod && (
+                      <> (Retention period: {retentionPeriod.toLocaleString()} blocks)</>
+                    )}
+                  </p>
                 </div>
 
                 <Button
@@ -456,9 +448,7 @@ export function Renew() {
                       New Expiration Block
                     </p>
                     <p className="font-mono">
-                      {renewalSuccess.newExpiresAt !== null
-                        ? `#${renewalSuccess.newExpiresAt.toLocaleString()}`
-                        : "Unknown"}
+                      #{renewalSuccess.newExpiresAt.toLocaleString()}
                     </p>
                   </div>
                 </div>

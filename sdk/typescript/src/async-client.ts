@@ -164,28 +164,22 @@ export interface AsyncClientConfig {
 }
 
 /**
- * Interface for clients that support store operations via the builder pattern.
+ * Shared interface for Bulletin clients (real and mock).
  *
- * Both `AsyncBulletinClient` and `MockBulletinClient` implement this.
+ * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
  */
-export interface StoreExecutor {
+export interface BulletinClientInterface {
+  /** Store data with options (used internally by StoreBuilder) */
   storeWithOptions(
     data: Binary | Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult>
+  /** Store preimage-authorized content as unsigned transaction */
   storeWithPreimageAuth?(
     data: Binary | Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult>
-}
-
-/**
- * Shared interface for Bulletin clients (real and mock).
- *
- * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
- */
-export interface BulletinClientInterface extends StoreExecutor {
   store(data: Binary | Uint8Array): StoreBuilder
   authorizeAccount(
     who: string,
@@ -248,7 +242,7 @@ export class StoreBuilder {
   private callback?: ProgressCallback
 
   constructor(
-    private executor: StoreExecutor,
+    private executor: BulletinClientInterface,
     data: Binary | Uint8Array,
   ) {
     this.data = toBytes(data)
