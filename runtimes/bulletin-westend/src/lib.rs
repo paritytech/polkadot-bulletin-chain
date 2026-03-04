@@ -201,11 +201,20 @@ pub fn native_version() -> NativeVersion {
 /// We allow for 90% of the block to be consumed by normal transactions.
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
 
+/// Block length.
+const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
+
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
 	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
-		BlockLength::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+		BlockLength::builder()
+		.max_length(MAX_BLOCK_LENGTH)
+		.modify_max_length_for_class(
+			DispatchClass::Normal,
+			|m| *m = NORMAL_DISPATCH_RATIO * MAX_BLOCK_LENGTH,
+		)
+		.build();
 	pub RuntimeBlockWeights: BlockWeights = BlockWeights::builder()
 		.base_block(BlockExecutionWeight::get())
 		.for_class(DispatchClass::all(), |weights| {
@@ -1049,8 +1058,10 @@ impl_runtime_apis! {
 				}
 			}
 
+			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
 			use xcm_config::TokenRelayLocation;
+			use xcm_executor::AssetsInHolding;
 
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 			impl pallet_xcm::benchmarking::Config for Runtime {
@@ -1127,15 +1138,13 @@ impl_runtime_apis! {
 				fn valid_destination() -> Result<Location, BenchmarkError> {
 					Ok(TokenRelayLocation::get())
 				}
-				fn worst_case_holding(_depositable_count: u32) -> Assets {
+				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
+					use pallet_xcm_benchmarks::MockCredit;
 					// just concrete assets according to relay chain.
-					let assets: Vec<Asset> = vec![
-						Asset {
-							id: AssetId(TokenRelayLocation::get()),
-							fun: Fungible(1_000_000 * UNITS),
-						}
-					];
-					assets.into()
+					AssetsInHolding::new_from_fungible_credit(
+						AssetId(TokenRelayLocation::get()),
+						Box::new(MockCredit(1_000_000 * UNITS)),
+					)
 				}
 			}
 

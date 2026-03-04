@@ -73,7 +73,6 @@ impl<T: Config, NewValue: Get<BlockNumberFor<T>>> OnRuntimeUpgrade
 pub mod v1 {
 	use super::*;
 	use crate::{
-		cids::{CidCodec, ContentHash, HashingAlgorithm, RAW_CODEC},
 		pallet::{Pallet, Transactions},
 		TransactionInfo,
 	};
@@ -88,6 +87,10 @@ pub mod v1 {
 		sp_runtime::traits::{BlakeTwo256, Hash},
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
+	use transaction_storage_primitives::{
+		cids::{CidCodec, HashingAlgorithm, RAW_CODEC},
+		ContentHash,
+	};
 
 	/// `TransactionInfo` layout before v1 (no CID fields).
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]

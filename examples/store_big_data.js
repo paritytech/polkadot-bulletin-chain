@@ -12,6 +12,7 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
+    waitForBlockProduction,
     DEFAULT_IPFS_GATEWAY_URL,
 } from "./common.js";
 import {
@@ -257,6 +258,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
+        await waitForBlockProduction(bulletinAPI);
 
         // Let's do parallelism with multiple accounts
         const signers = Array.from({ length: NUM_SIGNERS }, (_, i) => {
@@ -270,10 +272,10 @@ async function main() {
 
         // Authorize accounts (skip for live networks with pre-authorized accounts)
         if (!SKIP_AUTHORIZE) {
-            const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
+            const { authorizationSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
             await authorizeAccount(
                 bulletinAPI,
-                sudoSigner,
+                authorizationSigner,
                 signers.map(a => a.address),
                 100,
                 BigInt(100 * 1024 * 1024), // 100 MiB

@@ -404,34 +404,12 @@ function FaucetAuthorizePreimagePanel() {
         max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
       });
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Wait for finalization (not just best block inclusion) so that
+      // subsequent storage queries can see the new authorization.
+      const result = await tx.signAndSubmit(aliceSigner);
+      if (!result.ok) {
+        throw new Error("Transaction dispatch failed");
+      }
 
       setSubmitSuccess("Successfully authorized preimage");
       fetchPreimageAuthorizations(api);
@@ -702,34 +680,11 @@ function FaucetAuthorizeAccountPanel() {
         bytes: bytesValue,
       });
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Wait for finalization so subsequent queries see the new authorization
+      const result = await tx.signAndSubmit(aliceSigner);
+      if (!result.ok) {
+        throw new Error("Transaction dispatch failed");
+      }
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
