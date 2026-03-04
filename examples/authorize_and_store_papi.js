@@ -27,7 +27,7 @@ async function main() {
         const bulletinAPI = client.getTypedApi(bulletin);
 
         // Signers.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Papisigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Papisigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI - " + new Date().toString();
@@ -36,7 +36,7 @@ async function main() {
         // Authorize an account.
         await authorizeAccount(
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             whoAddress,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB

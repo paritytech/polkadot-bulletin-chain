@@ -1,4 +1,4 @@
-import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
+import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
 import { getWsProvider } from "@polkadot-api/ws-provider";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
@@ -11,6 +11,7 @@ import {
   DEFAULT_NETWORKS,
   type Network,
 } from "../../../shared/networks";
+import { AsyncBulletinClient } from "@bulletin/sdk";
 
 export type StorageType = "bulletin" | "web3storage";
 
@@ -319,6 +320,24 @@ export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
+
+/**
+ * Hook that returns a factory for creating AsyncBulletinClient instances.
+ * Returns undefined if not connected. Call with a signer to get a client.
+ *
+ * @example
+ * ```tsx
+ * const createBulletinClient = useCreateBulletinClient();
+ * // later in a handler:
+ * const bulletinClient = createBulletinClient?.(signer);
+ * ```
+ */
+export function useCreateBulletinClient(): ((signer: PolkadotSigner) => AsyncBulletinClient) | undefined {
+  const api = useApi();
+  const client = useClient();
+  if (!api || !client) return undefined;
+  return (signer: PolkadotSigner) => new AsyncBulletinClient(api, signer, client.submit);
+}
 
 // Direct access to subjects for non-React code
 export const network$ = networkSubject.asObservable();

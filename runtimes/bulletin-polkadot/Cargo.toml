@@ -100,6 +100,7 @@ sp-io = { workspace = true }
 sp-trie = { workspace = true }
 static_assertions = { workspace = true }
 sp-tracing = { workspace = true }
+transaction-storage-primitives = { workspace = true }
 
 [features]
 default = ["std"]
@@ -176,6 +177,7 @@ std = [
 	"sp-storage?/std",
 	"sp-trie/std",
 	"substrate-wasm-builder",
+	"transaction-storage-primitives/std",
 ]
 runtime-benchmarks = [
 	"frame-support/runtime-benchmarks",

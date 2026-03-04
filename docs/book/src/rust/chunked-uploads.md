@@ -2,9 +2,79 @@
 
 The Bulletin SDK automatically handles chunking for large files up to **64 MiB**. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks of up to **8 MiB** each (matching the chain's MaxTransactionSize).
 
-## Automatic Chunking (Recommended)
+> **Complete Working Example**: See [`examples/rust/authorize-and-store`](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples/rust/authorize-and-store) for a complete runnable example demonstrating chunked storage with DAG-PB manifests.
 
-For most use cases, simply use `store()` - it automatically chunks large files:
+## Using TransactionClient with DAG-PB Manifest
+
+For most use cases, use `TransactionClient` with `BulletinClient` for chunking:
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+use subxt_signer::sr25519::Keypair;
+use std::str::FromStr;
+use std::sync::Arc;
+use tracing::info;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect and setup signer
+    let client = TransactionClient::new("ws://localhost:10000").await?;
+    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
+    let signer = Keypair::from_uri(&uri)?;
+
+    // Create large data (3 MiB)
+    let large_data: Vec<u8> = (0..3 * 1024 * 1024)
+        .map(|i| (i % 256) as u8)
+        .collect();
+
+    // Configure chunking
+    let chunker_config = ChunkerConfig {
+        chunk_size: 1024 * 1024,  // 1 MiB chunks
+        max_parallel: 4,
+        create_manifest: true,    // Create DAG-PB manifest
+    };
+
+    let dag_options = StoreOptions {
+        cid_codec: CidCodec::DagPb,
+        hash_algorithm: HashAlgorithm::Blake2b256,
+        wait_for_finalization: true,
+    };
+
+    // Prepare chunks using BulletinClient
+    let sdk_client = BulletinClient::new();
+    let progress_callback = Arc::new(|event: ProgressEvent| {
+        info!("Chunk progress: {:?}", event);
+    });
+
+    let (batch_operation, manifest_data) = sdk_client
+        .prepare_store_chunked(&large_data, Some(chunker_config), dag_options, Some(progress_callback))?;
+
+    info!("Prepared {} chunks", batch_operation.operations.len());
+
+    // Submit each chunk
+    for (i, chunk_op) in batch_operation.operations.iter().enumerate() {
+        info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
+        let receipt = client.store(chunk_op.data.clone(), &signer).await?;
+        info!("  Chunk {} stored in block: {}", i + 1, receipt.block_hash);
+    }
+
+    // Submit the manifest
+    if let Some(manifest) = manifest_data {
+        info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
+        let receipt = client.store(manifest, &signer).await?;
+        info!("Manifest stored in block: {}", receipt.block_hash);
+        info!("Use this manifest CID to retrieve the complete file via IPFS/Bitswap");
+    }
+
+    Ok(())
+}
+```
+
+---
+
+## Automatic Chunking with AsyncBulletinClient
+
+For applications using `AsyncBulletinClient`, the `store()` method automatically chunks large files:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;

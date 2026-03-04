@@ -21,12 +21,13 @@ export function createSigner(account) {
   );
 }
 
-export function setupKeyringAndSigners(sudoSeed, accountSeed) {
-  const { signer: sudoSigner, _ } = newSigner(sudoSeed);
+export function setupKeyringAndSigners(authorizationSeed, accountSeed) {
+  const { signer: authorizationSigner, address: authorizationAddress } = newSigner(authorizationSeed);
   const { signer: whoSigner, address: whoAddress } = newSigner(accountSeed);
 
   return {
-    sudoSigner,
+    authorizationSigner,
+    authorizationAddress,
     whoSigner,
     whoAddress
   };

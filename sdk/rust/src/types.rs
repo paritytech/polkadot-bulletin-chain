@@ -3,8 +3,7 @@
 
 //! Common types and error definitions for the Bulletin SDK.
 
-extern crate alloc;
-
+use crate::cid::{CidCodec, HashingAlgorithm};
 use alloc::{string::String, vec::Vec};
 use codec::{Decode, Encode};
 use scale_info::TypeInfo;
@@ -16,10 +15,10 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum Error {
-	/// Chunk size exceeds maximum allowed (8 MiB).
+	/// Chunk size exceeds maximum allowed (2 MiB).
 	#[cfg_attr(
 		feature = "std",
-		error("Chunk size {0} exceeds maximum allowed size of 8388608 bytes (8 MiB)")
+		error("Chunk size {0} exceeds maximum allowed size of 2097152 bytes (2 MiB)")
 	)]
 	ChunkTooLarge(u64),
 
@@ -80,14 +79,6 @@ pub enum Error {
 	#[cfg_attr(feature = "std", error("Retrieval failed: {0}"))]
 	RetrievalFailed(String),
 
-	/// Submission failed.
-	#[cfg_attr(feature = "std", error("Submission failed: {0}"))]
-	SubmissionFailed(String),
-
-	/// Unsupported hash algorithm.
-	#[cfg_attr(feature = "std", error("Unsupported hash algorithm: {0}"))]
-	UnsupportedHashAlgorithm(String),
-
 	/// Renewal target not found.
 	#[cfg_attr(feature = "std", error("Renewal target not found: block {block}, index {index}"))]
 	RenewalNotFound { block: u32, index: u32 },
@@ -146,8 +137,6 @@ impl Error {
 			Error::InvalidConfig(_) => "INVALID_CONFIG",
 			Error::ChunkingFailed(_) => "CHUNKING_FAILED",
 			Error::RetrievalFailed(_) => "RETRIEVAL_FAILED",
-			Error::SubmissionFailed(_) => "SUBMISSION_FAILED",
-			Error::UnsupportedHashAlgorithm(_) => "UNSUPPORTED_HASH_ALGORITHM",
 			Error::RenewalNotFound { .. } => "RENEWAL_NOT_FOUND",
 			Error::RenewalFailed(_) => "RENEWAL_FAILED",
 			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
@@ -168,7 +157,6 @@ impl Error {
 			Error::AuthorizationExpired { .. } |
 				Error::NetworkError(_) |
 				Error::StorageFailed(_) |
-				Error::SubmissionFailed(_) |
 				Error::TransactionFailed(_) |
 				Error::RetrievalFailed(_) |
 				Error::RenewalFailed(_) |
@@ -194,8 +182,6 @@ impl Error {
 			Error::InvalidConfig(_) => "Check configuration parameters",
 			Error::ChunkingFailed(_) => "Verify data integrity and chunker configuration",
 			Error::RetrievalFailed(_) => "The data may not be available yet; try again",
-			Error::SubmissionFailed(_) => "Check node connectivity and try again",
-			Error::UnsupportedHashAlgorithm(_) => "Use blake2b-256, sha2-256, or keccak-256",
 			Error::RenewalNotFound { .. } => "Verify the block number and extrinsic index",
 			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
@@ -236,10 +222,6 @@ impl Default for ChunkerConfig {
 pub struct Chunk {
 	/// The chunk data.
 	pub data: Vec<u8>,
-	/// The CID of this chunk as bytes (calculated after encoding).
-	#[codec(skip)]
-	#[scale_info(skip_type_params(T))]
-	pub cid: Option<Vec<u8>>,
 	/// Index of this chunk in the sequence.
 	pub index: u32,
 	/// Total number of chunks.
@@ -249,7 +231,7 @@ pub struct Chunk {
 impl Chunk {
 	/// Create a new chunk.
 	pub fn new(data: Vec<u8>, index: u32, total_chunks: u32) -> Self {
-		Self { data, cid: None, index, total_chunks }
+		Self { data, index, total_chunks }
 	}
 
 	/// Get the size of this chunk.
@@ -334,7 +316,7 @@ pub struct StoreOptions {
 	/// CID codec to use (default: raw).
 	pub cid_codec: CidCodec,
 	/// Hashing algorithm to use (default: blake2b-256).
-	pub hash_algorithm: HashAlgorithm,
+	pub hash_algorithm: HashingAlgorithm,
 	/// Whether to wait for finalization (default: false).
 	pub wait_for_finalization: bool,
 }
@@ -343,55 +325,8 @@ impl Default for StoreOptions {
 	fn default() -> Self {
 		Self {
 			cid_codec: CidCodec::Raw,
-			hash_algorithm: HashAlgorithm::Blake2b256,
+			hash_algorithm: HashingAlgorithm::Blake2b256,
 			wait_for_finalization: false,
-		}
-	}
-}
-
-/// CID codec types.
-#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo, PartialEq, Eq)]
-pub enum CidCodec {
-	/// Raw binary (0x55).
-	Raw,
-	/// DAG-PB (0x70).
-	DagPb,
-	/// DAG-CBOR (0x71).
-	DagCbor,
-}
-
-impl CidCodec {
-	/// Get the multicodec code.
-	pub fn code(&self) -> u64 {
-		match self {
-			CidCodec::Raw => 0x55,
-			CidCodec::DagPb => 0x70,
-			CidCodec::DagCbor => 0x71,
-		}
-	}
-}
-
-/// Hash algorithm types.
-#[derive(Debug, Clone, Copy, Encode, Decode, TypeInfo, PartialEq, Eq)]
-pub enum HashAlgorithm {
-	/// BLAKE2b-256 (0xb220).
-	Blake2b256,
-	/// SHA2-256 (0x12).
-	Sha2_256,
-	/// SHA2-512 (0x13).
-	Sha2_512,
-	/// Keccak-256 (0x1b).
-	Keccak256,
-}
-
-impl HashAlgorithm {
-	/// Get the multihash code.
-	pub fn code(&self) -> u64 {
-		match self {
-			HashAlgorithm::Blake2b256 => 0xb220,
-			HashAlgorithm::Sha2_256 => 0x12,
-			HashAlgorithm::Sha2_512 => 0x13,
-			HashAlgorithm::Keccak256 => 0x1b,
 		}
 	}
 }
@@ -428,7 +363,7 @@ pub enum TransactionStatusEvent {
 	/// Transaction has been validated and added to the transaction pool.
 	Validated,
 	/// Transaction has been broadcast to peers.
-	Broadcasted { num_peers: usize },
+	Broadcasted,
 	/// Transaction is now in a best block.
 	InBestBlock { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
 	/// Transaction has been finalized.
@@ -447,8 +382,7 @@ impl TransactionStatusEvent {
 		match self {
 			TransactionStatusEvent::Validated =>
 				"Transaction validated and added to the pool".into(),
-			TransactionStatusEvent::Broadcasted { num_peers } =>
-				alloc::format!("Transaction broadcast to {num_peers} peers"),
+			TransactionStatusEvent::Broadcasted => "Transaction broadcast to peers".into(),
 			TransactionStatusEvent::InBestBlock { block_hash, block_number, .. } =>
 				match block_number {
 					Some(n) => alloc::format!("Transaction in best block #{n} ({block_hash})"),
@@ -516,8 +450,8 @@ impl ProgressEvent {
 	}
 
 	/// Create a Broadcasted transaction event.
-	pub fn tx_broadcasted(num_peers: usize) -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted { num_peers })
+	pub fn tx_broadcasted() -> Self {
+		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted)
 	}
 
 	/// Create an InBestBlock transaction event.
@@ -586,8 +520,6 @@ mod tests {
 			Error::InvalidConfig("bad config".into()),
 			Error::ChunkingFailed("chunk err".into()),
 			Error::RetrievalFailed("not found".into()),
-			Error::SubmissionFailed("sub fail".into()),
-			Error::UnsupportedHashAlgorithm("sha3".into()),
 			Error::RenewalNotFound { block: 1, index: 0 },
 			Error::RenewalFailed("renew err".into()),
 			Error::CidCalculationFailed("calc fail".into()),
@@ -617,8 +549,6 @@ mod tests {
 			"INVALID_CONFIG",
 			"CHUNKING_FAILED",
 			"RETRIEVAL_FAILED",
-			"SUBMISSION_FAILED",
-			"UNSUPPORTED_HASH_ALGORITHM",
 			"RENEWAL_NOT_FOUND",
 			"RENEWAL_FAILED",
 			"CID_CALCULATION_FAILED",
@@ -642,7 +572,6 @@ mod tests {
 			"AUTHORIZATION_EXPIRED",
 			"NETWORK_ERROR",
 			"STORAGE_FAILED",
-			"SUBMISSION_FAILED",
 			"TRANSACTION_FAILED",
 			"RETRIEVAL_FAILED",
 			"RENEWAL_FAILED",
@@ -673,7 +602,7 @@ mod tests {
 	fn test_transaction_status_event_description() {
 		let events = vec![
 			(TransactionStatusEvent::Validated, "validated"),
-			(TransactionStatusEvent::Broadcasted { num_peers: 5 }, "5 peers"),
+			(TransactionStatusEvent::Broadcasted, "broadcast"),
 			(
 				TransactionStatusEvent::InBestBlock {
 					block_hash: "0xabc".into(),

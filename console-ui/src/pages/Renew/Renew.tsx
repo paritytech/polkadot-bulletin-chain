@@ -14,12 +14,13 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useApi, useBlockNumber, useChainState } from "@/state/chain.state";
+import { useApi, useBlockNumber, useChainState, useCreateBulletinClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { AsyncBulletinClient, bytesToHex, ProgressEvent } from "@bulletin/sdk";
+import { ProgressEvent } from "@bulletin/sdk";
+import { bytesToHex } from "@/utils/format";
 
 interface RenewalTarget {
   blockNumber: number;
@@ -30,6 +31,7 @@ interface RenewalTarget {
 
 export function Renew() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
   const { network } = useChainState();
   const selectedAccount = useSelectedAccount();
   const currentBlockNumber = useBlockNumber();
@@ -152,7 +154,7 @@ export function Renew() {
 
     try {
       // Create SDK client with user's signer
-      const bulletinClient = new AsyncBulletinClient(api, selectedAccount.polkadotSigner);
+      const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
 
       // Progress callback for transaction status updates
       const handleProgress = (event: ProgressEvent) => {

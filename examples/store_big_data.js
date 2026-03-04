@@ -270,10 +270,10 @@ async function main() {
 
         // Authorize accounts (skip for live networks with pre-authorized accounts)
         if (!SKIP_AUTHORIZE) {
-            const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
+            const { authorizationSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
             await authorizeAccount(
                 bulletinAPI,
-                sudoSigner,
+                authorizationSigner,
                 signers.map(a => a.address),
                 100,
                 BigInt(100 * 1024 * 1024), // 100 MiB

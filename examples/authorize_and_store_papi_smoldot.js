@@ -134,7 +134,7 @@ async function main() {
 
         // Signers: Use Bob for the account being authorized to avoid nonce conflicts
         // when running after ws test (which uses Alice) on the same chain.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
@@ -143,7 +143,7 @@ async function main() {
         // Authorize an account.
         await authorizeAccount(
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             whoAddress,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB

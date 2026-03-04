@@ -1,299 +1,229 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
-import { describe, it, expect, vi } from "vitest";
-import { BulletinError, ErrorCode, HashAlgorithm } from "../../src/types";
-import type { TransactionStatusEvent } from "../../src/types";
-import { BulletinClient } from "../../src/client";
-import { retry, limitConcurrency } from "../../src/utils";
-import { calculateCid, parseCid, cidFromBytes } from "../../src/utils";
+import { describe, expect, it } from "vitest"
+import { BulletinClient } from "../../src/client"
+import { BulletinError, ErrorCode, HashAlgorithm } from "../../src/types"
+import type { TransactionStatusEvent } from "../../src/types"
+import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
 describe("Error Handling", () => {
   describe("BulletinError", () => {
     it("should create error with code", () => {
-      const error = new BulletinError("Test error", "TEST_CODE");
+      const error = new BulletinError("Test error", "TEST_CODE")
 
-      expect(error.message).toBe("Test error");
-      expect(error.code).toBe("TEST_CODE");
-      expect(error.name).toBe("BulletinError");
-      expect(error.cause).toBeUndefined();
-    });
+      expect(error.message).toBe("Test error")
+      expect(error.code).toBe("TEST_CODE")
+      expect(error.name).toBe("BulletinError")
+      expect(error.cause).toBeUndefined()
+    })
 
     it("should create error with cause", () => {
-      const cause = new Error("Original error");
-      const error = new BulletinError("Wrapped error", "WRAPPED", cause);
+      const cause = new Error("Original error")
+      const error = new BulletinError("Wrapped error", "WRAPPED", cause)
 
-      expect(error.message).toBe("Wrapped error");
-      expect(error.code).toBe("WRAPPED");
-      expect(error.cause).toBe(cause);
-    });
+      expect(error.message).toBe("Wrapped error")
+      expect(error.code).toBe("WRAPPED")
+      expect(error.cause).toBe(cause)
+    })
 
     it("should be instanceof Error", () => {
-      const error = new BulletinError("Test", "CODE");
+      const error = new BulletinError("Test", "CODE")
 
-      expect(error).toBeInstanceOf(Error);
-      expect(error).toBeInstanceOf(BulletinError);
-    });
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toBeInstanceOf(BulletinError)
+    })
 
     it("should preserve stack trace", () => {
-      const error = new BulletinError("Test", "CODE");
+      const error = new BulletinError("Test", "CODE")
 
-      expect(error.stack).toBeDefined();
-      expect(error.stack).toContain("BulletinError");
-    });
-  });
+      expect(error.stack).toBeDefined()
+      expect(error.stack).toContain("BulletinError")
+    })
+  })
 
   describe("Async Error Propagation", () => {
     it("should propagate BulletinError through async chain", async () => {
       const asyncFunction = async () => {
-        throw new BulletinError("Async error", "ASYNC_ERROR");
-      };
+        throw new BulletinError("Async error", "ASYNC_ERROR")
+      }
 
-      await expect(asyncFunction()).rejects.toThrow(BulletinError);
+      await expect(asyncFunction()).rejects.toThrow(BulletinError)
       await expect(asyncFunction()).rejects.toMatchObject({
         code: "ASYNC_ERROR",
         message: "Async error",
-      });
-    });
+      })
+    })
 
     it("should preserve error type through Promise.all", async () => {
       const promises = [
         Promise.resolve(1),
         Promise.reject(new BulletinError("Error in promise", "PROMISE_ERROR")),
         Promise.resolve(3),
-      ];
+      ]
 
       try {
-        await Promise.all(promises);
-        expect.fail("Should have thrown");
+        await Promise.all(promises)
+        expect.fail("Should have thrown")
       } catch (error) {
-        expect(error).toBeInstanceOf(BulletinError);
-        expect((error as BulletinError).code).toBe("PROMISE_ERROR");
+        expect(error).toBeInstanceOf(BulletinError)
+        expect((error as BulletinError).code).toBe("PROMISE_ERROR")
       }
-    });
+    })
 
     it("should preserve error type through Promise.allSettled", async () => {
       const promises = [
         Promise.resolve(1),
         Promise.reject(new BulletinError("Error", "SETTLED_ERROR")),
         Promise.resolve(3),
-      ];
+      ]
 
-      const results = await Promise.allSettled(promises);
+      const results = await Promise.allSettled(promises)
 
-      expect(results[0].status).toBe("fulfilled");
-      expect(results[1].status).toBe("rejected");
-      expect(results[2].status).toBe("fulfilled");
+      expect(results[0].status).toBe("fulfilled")
+      expect(results[1].status).toBe("rejected")
+      expect(results[2].status).toBe("fulfilled")
 
       if (results[1].status === "rejected") {
-        expect(results[1].reason).toBeInstanceOf(BulletinError);
-        expect((results[1].reason as BulletinError).code).toBe("SETTLED_ERROR");
+        expect(results[1].reason).toBeInstanceOf(BulletinError)
+        expect((results[1].reason as BulletinError).code).toBe("SETTLED_ERROR")
       }
-    });
-
-    it("should wrap raw errors in retry function", async () => {
-      const rawError = new Error("Raw error");
-
-      await expect(
-        retry(
-          async () => {
-            throw rawError;
-          },
-          { maxRetries: 0, delayMs: 1 },
-        ),
-      ).rejects.toThrow(BulletinError);
-    });
-
-    it("should preserve BulletinError in retry function", async () => {
-      const bulletinError = new BulletinError(
-        "Bulletin error",
-        "RETRY_TEST_ERROR",
-      );
-
-      await expect(
-        retry(
-          async () => {
-            throw bulletinError;
-          },
-          { maxRetries: 0, delayMs: 1 },
-        ),
-      ).rejects.toMatchObject({
-        code: "RETRY_TEST_ERROR",
-        message: "Bulletin error",
-      });
-    });
-  });
+    })
+  })
 
   describe("Client Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStore", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" });
+      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
 
       await expect(client.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
-      );
-      await expect(client.prepareStore(new Uint8Array(0))).rejects.toMatchObject(
-        {
-          code: "EMPTY_DATA",
-        },
-      );
-    });
+      )
+      await expect(
+        client.prepareStore(new Uint8Array(0)),
+      ).rejects.toMatchObject({
+        code: "EMPTY_DATA",
+      })
+    })
 
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" });
+      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
 
       await expect(
         client.prepareStoreChunked(new Uint8Array(0)),
-      ).rejects.toThrow(BulletinError);
+      ).rejects.toThrow(BulletinError)
       await expect(
         client.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toMatchObject({
         code: "EMPTY_DATA",
-      });
-    });
-  });
+      })
+    })
+  })
 
   describe("CID Error Handling", () => {
     it("should throw BulletinError for invalid CID string", () => {
-      expect(() => parseCid("not-a-valid-cid")).toThrow(BulletinError);
-      expect(() => parseCid("not-a-valid-cid")).toThrow("Failed to parse CID");
-    });
+      expect(() => parseCid("not-a-valid-cid")).toThrow(BulletinError)
+      expect(() => parseCid("not-a-valid-cid")).toThrow("Failed to parse CID")
+    })
 
     it("should throw BulletinError for empty CID string", () => {
-      expect(() => parseCid("")).toThrow(BulletinError);
-    });
+      expect(() => parseCid("")).toThrow(BulletinError)
+    })
 
     it("should throw BulletinError for invalid CID bytes", () => {
-      const invalidBytes = new Uint8Array([0xff, 0xff, 0xff]);
-      expect(() => cidFromBytes(invalidBytes)).toThrow(BulletinError);
-    });
+      const invalidBytes = new Uint8Array([0xff, 0xff, 0xff])
+      expect(() => cidFromBytes(invalidBytes)).toThrow(BulletinError)
+    })
 
     it("should throw BulletinError for empty CID bytes", () => {
-      expect(() => cidFromBytes(new Uint8Array(0))).toThrow(BulletinError);
-    });
+      expect(() => cidFromBytes(new Uint8Array(0))).toThrow(BulletinError)
+    })
 
     it("should throw BulletinError for unsupported hash algorithm", async () => {
-      const data = new Uint8Array([1, 2, 3, 4, 5]);
+      const data = new Uint8Array([1, 2, 3, 4, 5])
 
-      // Keccak256 is not fully supported in the SDK
+      // Use an invalid hash algorithm code
       await expect(
-        calculateCid(data, 0x55, HashAlgorithm.Keccak256),
-      ).rejects.toThrow(BulletinError);
-    });
-  });
-
-  describe("Concurrent Operation Error Handling", () => {
-    it("should handle errors in limitConcurrency", async () => {
-      const tasks = [
-        () => Promise.resolve(1),
-        () => Promise.reject(new BulletinError("Task failed", "TASK_ERROR")),
-        () => Promise.resolve(3),
-      ];
-
-      await expect(limitConcurrency(tasks, 2)).rejects.toThrow(BulletinError);
-    });
-
-    it("should handle multiple concurrent errors", async () => {
-      const tasks = [
-        () => Promise.reject(new BulletinError("Error 1", "ERROR_1")),
-        () => Promise.reject(new BulletinError("Error 2", "ERROR_2")),
-        () => Promise.reject(new BulletinError("Error 3", "ERROR_3")),
-      ];
-
-      // First error should be thrown
-      await expect(limitConcurrency(tasks, 3)).rejects.toThrow(BulletinError);
-    });
-
-    it("should complete successfully with no errors", async () => {
-      const tasks = [
-        () => Promise.resolve(1),
-        () => Promise.resolve(2),
-        () => Promise.resolve(3),
-      ];
-
-      const results = await limitConcurrency(tasks, 2);
-      expect(results).toHaveLength(3);
-      expect(results).toContain(1);
-      expect(results).toContain(2);
-      expect(results).toContain(3);
-    });
-  });
+        calculateCid(data, 0x55, 0xff as HashAlgorithm),
+      ).rejects.toThrow(BulletinError)
+    })
+  })
 
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" });
+      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
 
       try {
-        await client.prepareStore(new Uint8Array(0));
-        expect.fail("Should have thrown");
+        await client.prepareStore(new Uint8Array(0))
+        expect.fail("Should have thrown")
       } catch (error) {
-        expect(error).toBeInstanceOf(BulletinError);
-        const bulletinError = error as BulletinError;
+        expect(error).toBeInstanceOf(BulletinError)
+        const bulletinError = error as BulletinError
 
         // Error should have meaningful message
-        expect(bulletinError.message.length).toBeGreaterThan(10);
+        expect(bulletinError.message.length).toBeGreaterThan(10)
 
         // Error should have a code
-        expect(bulletinError.code).toBeDefined();
-        expect(bulletinError.code.length).toBeGreaterThan(0);
+        expect(bulletinError.code).toBeDefined()
+        expect(bulletinError.code.length).toBeGreaterThan(0)
       }
-    });
+    })
 
     it("should include cause when wrapping errors", () => {
-      const originalError = new TypeError("Cannot read property of undefined");
+      const originalError = new TypeError("Cannot read property of undefined")
       const wrappedError = new BulletinError(
         "Operation failed",
         "OP_FAILED",
         originalError,
-      );
+      )
 
-      expect(wrappedError.cause).toBe(originalError);
-      expect((wrappedError.cause as Error).message).toContain("undefined");
-    });
-  });
+      expect(wrappedError.cause).toBe(originalError)
+      expect((wrappedError.cause as Error).message).toContain("undefined")
+    })
+  })
 
   describe("ErrorCode enum", () => {
     it("should have all expected codes as string values", () => {
       // ErrorCode values equal their key names (string enum)
-      expect(ErrorCode.EMPTY_DATA).toBe("EMPTY_DATA");
-      expect(ErrorCode.FILE_TOO_LARGE).toBe("FILE_TOO_LARGE");
-      expect(ErrorCode.CHUNK_TOO_LARGE).toBe("CHUNK_TOO_LARGE");
-      expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE");
-      expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG");
-      expect(ErrorCode.INVALID_CID).toBe("INVALID_CID");
-      expect(ErrorCode.UNSUPPORTED_HASH_ALGORITHM).toBe("UNSUPPORTED_HASH_ALGORITHM");
-      expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM");
-      expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED");
-      expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED");
-      expect(ErrorCode.DAG_DECODING_FAILED).toBe("DAG_DECODING_FAILED");
-      expect(ErrorCode.AUTHORIZATION_NOT_FOUND).toBe("AUTHORIZATION_NOT_FOUND");
-      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe("INSUFFICIENT_AUTHORIZATION");
-      expect(ErrorCode.AUTHORIZATION_EXPIRED).toBe("AUTHORIZATION_EXPIRED");
-      expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED");
-      expect(ErrorCode.SUBMISSION_FAILED).toBe("SUBMISSION_FAILED");
-      expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED");
-      expect(ErrorCode.STORAGE_FAILED).toBe("STORAGE_FAILED");
-      expect(ErrorCode.NETWORK_ERROR).toBe("NETWORK_ERROR");
-      expect(ErrorCode.CHUNKING_FAILED).toBe("CHUNKING_FAILED");
-      expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED");
-      expect(ErrorCode.RETRIEVAL_FAILED).toBe("RETRIEVAL_FAILED");
-      expect(ErrorCode.RENEWAL_NOT_FOUND).toBe("RENEWAL_NOT_FOUND");
-      expect(ErrorCode.RENEWAL_FAILED).toBe("RENEWAL_FAILED");
-      expect(ErrorCode.TIMEOUT).toBe("TIMEOUT");
-      expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION");
-      expect(ErrorCode.RETRY_EXHAUSTED).toBe("RETRY_EXHAUSTED");
-    });
+      expect(ErrorCode.EMPTY_DATA).toBe("EMPTY_DATA")
+      expect(ErrorCode.FILE_TOO_LARGE).toBe("FILE_TOO_LARGE")
+      expect(ErrorCode.CHUNK_TOO_LARGE).toBe("CHUNK_TOO_LARGE")
+      expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
+      expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
+      expect(ErrorCode.INVALID_CID).toBe("INVALID_CID")
+      expect(ErrorCode.UNSUPPORTED_HASH_ALGORITHM).toBe("UNSUPPORTED_HASH_ALGORITHM")
+      expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM")
+      expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED")
+      expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED")
+      expect(ErrorCode.DAG_DECODING_FAILED).toBe("DAG_DECODING_FAILED")
+      expect(ErrorCode.AUTHORIZATION_NOT_FOUND).toBe("AUTHORIZATION_NOT_FOUND")
+      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe("INSUFFICIENT_AUTHORIZATION")
+      expect(ErrorCode.AUTHORIZATION_EXPIRED).toBe("AUTHORIZATION_EXPIRED")
+      expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED")
+      expect(ErrorCode.SUBMISSION_FAILED).toBe("SUBMISSION_FAILED")
+      expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED")
+      expect(ErrorCode.STORAGE_FAILED).toBe("STORAGE_FAILED")
+      expect(ErrorCode.NETWORK_ERROR).toBe("NETWORK_ERROR")
+      expect(ErrorCode.CHUNKING_FAILED).toBe("CHUNKING_FAILED")
+      expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED")
+      expect(ErrorCode.RETRIEVAL_FAILED).toBe("RETRIEVAL_FAILED")
+      expect(ErrorCode.RENEWAL_NOT_FOUND).toBe("RENEWAL_NOT_FOUND")
+      expect(ErrorCode.RENEWAL_FAILED).toBe("RENEWAL_FAILED")
+      expect(ErrorCode.TIMEOUT).toBe("TIMEOUT")
+      expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION")
+      expect(ErrorCode.RETRY_EXHAUSTED).toBe("RETRY_EXHAUSTED")
+    })
 
     it("should be usable with BulletinError", () => {
-      const error = new BulletinError("test", ErrorCode.EMPTY_DATA);
-      expect(error.code).toBe("EMPTY_DATA");
-    });
+      const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
+      expect(error.code).toBe("EMPTY_DATA")
+    })
 
     it("should remain backward compatible with string comparisons", () => {
-      const error = new BulletinError("test", ErrorCode.EMPTY_DATA);
+      const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expect(error.code === "EMPTY_DATA").toBe(true);
-    });
-  });
+      expect(error.code === "EMPTY_DATA").toBe(true)
+    })
+  })
 
   describe("BulletinError retryable getter", () => {
     it("should return true for retryable error codes", () => {
@@ -306,13 +236,13 @@ describe("Error Handling", () => {
         ErrorCode.RETRIEVAL_FAILED,
         ErrorCode.RENEWAL_FAILED,
         ErrorCode.TIMEOUT,
-      ];
+      ]
 
       for (const code of retryableCodes) {
-        const error = new BulletinError("test", code);
-        expect(error.retryable).toBe(true);
+        const error = new BulletinError("test", code)
+        expect(error.retryable).toBe(true)
       }
-    });
+    })
 
     it("should return false for non-retryable error codes", () => {
       const nonRetryableCodes = [
@@ -334,47 +264,47 @@ describe("Error Handling", () => {
         ErrorCode.RENEWAL_NOT_FOUND,
         ErrorCode.UNSUPPORTED_OPERATION,
         ErrorCode.RETRY_EXHAUSTED,
-      ];
+      ]
 
       for (const code of nonRetryableCodes) {
-        const error = new BulletinError("test", code);
-        expect(error.retryable).toBe(false);
+        const error = new BulletinError("test", code)
+        expect(error.retryable).toBe(false)
       }
-    });
+    })
 
     it("should return false for unknown codes", () => {
-      const error = new BulletinError("test", "UNKNOWN_CODE");
-      expect(error.retryable).toBe(false);
-    });
-  });
+      const error = new BulletinError("test", "UNKNOWN_CODE")
+      expect(error.retryable).toBe(false)
+    })
+  })
 
   describe("BulletinError recoveryHint getter", () => {
     it("should return actionable hints for all ErrorCode values", () => {
       for (const code of Object.values(ErrorCode)) {
-        const error = new BulletinError("test", code);
-        expect(error.recoveryHint).toBeDefined();
-        expect(error.recoveryHint.length).toBeGreaterThan(0);
-        expect(error.recoveryHint).not.toBe("No recovery hint available");
+        const error = new BulletinError("test", code)
+        expect(error.recoveryHint).toBeDefined()
+        expect(error.recoveryHint.length).toBeGreaterThan(0)
+        expect(error.recoveryHint).not.toBe("No recovery hint available")
       }
-    });
+    })
 
     it("should return fallback for unknown codes", () => {
-      const error = new BulletinError("test", "UNKNOWN_CODE");
-      expect(error.recoveryHint).toBe("No recovery hint available");
-    });
-  });
+      const error = new BulletinError("test", "UNKNOWN_CODE")
+      expect(error.recoveryHint).toBe("No recovery hint available")
+    })
+  })
 
   describe("TransactionStatusEvent variants", () => {
     it("should support validated event", () => {
-      const event: TransactionStatusEvent = { type: "validated" };
-      expect(event.type).toBe("validated");
-    });
+      const event: TransactionStatusEvent = { type: "validated" }
+      expect(event.type).toBe("validated")
+    })
 
     it("should support broadcasted event with numPeers", () => {
-      const event: TransactionStatusEvent = { type: "broadcasted", numPeers: 5 };
-      expect(event.type).toBe("broadcasted");
-      expect(event.numPeers).toBe(5);
-    });
+      const event: TransactionStatusEvent = { type: "broadcasted", numPeers: 5 }
+      expect(event.type).toBe("broadcasted")
+      expect(event.numPeers).toBe(5)
+    })
 
     it("should support in_best_block event", () => {
       const event: TransactionStatusEvent = {
@@ -382,101 +312,38 @@ describe("Error Handling", () => {
         blockHash: "0xabc",
         blockNumber: 42,
         txIndex: 1,
-      };
-      expect(event.type).toBe("in_best_block");
-      expect(event.blockHash).toBe("0xabc");
-      expect(event.blockNumber).toBe(42);
-      expect(event.txIndex).toBe(1);
-    });
+      }
+      expect(event.type).toBe("in_best_block")
+      expect(event.blockHash).toBe("0xabc")
+      expect(event.blockNumber).toBe(42)
+      expect(event.txIndex).toBe(1)
+    })
 
     it("should support no_longer_in_best_block event", () => {
-      const event: TransactionStatusEvent = { type: "no_longer_in_best_block" };
-      expect(event.type).toBe("no_longer_in_best_block");
-    });
+      const event: TransactionStatusEvent = { type: "no_longer_in_best_block" }
+      expect(event.type).toBe("no_longer_in_best_block")
+    })
 
     it("should support invalid event", () => {
-      const event: TransactionStatusEvent = { type: "invalid", error: "nonce too low" };
-      expect(event.type).toBe("invalid");
-      expect(event.error).toBe("nonce too low");
-    });
+      const event: TransactionStatusEvent = { type: "invalid", error: "nonce too low" }
+      expect(event.type).toBe("invalid")
+      expect(event.error).toBe("nonce too low")
+    })
 
     it("should support dropped event", () => {
-      const event: TransactionStatusEvent = { type: "dropped", error: "pool full" };
-      expect(event.type).toBe("dropped");
-      expect(event.error).toBe("pool full");
-    });
+      const event: TransactionStatusEvent = { type: "dropped", error: "pool full" }
+      expect(event.type).toBe("dropped")
+      expect(event.error).toBe("pool full")
+    })
 
     it("should still support deprecated best_block event", () => {
       const event: TransactionStatusEvent = {
         type: "best_block",
         blockHash: "0xabc",
         blockNumber: 42,
-      };
-      expect(event.type).toBe("best_block");
-    });
-  });
-
-  describe("Error Recovery Patterns", () => {
-    it("should allow retry with exponential backoff", async () => {
-      let attempts = 0;
-      const delays: number[] = [];
-      let lastTime = Date.now();
-
-      const result = await retry(
-        async () => {
-          const now = Date.now();
-          if (attempts > 0) {
-            delays.push(now - lastTime);
-          }
-          lastTime = now;
-          attempts++;
-
-          if (attempts < 3) {
-            throw new Error("Temporary failure");
-          }
-          return "success";
-        },
-        { maxRetries: 3, delayMs: 10, exponentialBackoff: true },
-      );
-
-      expect(result).toBe("success");
-      expect(attempts).toBe(3);
-
-      // Second delay should be longer than first (exponential)
-      if (delays.length >= 2) {
-        expect(delays[1]).toBeGreaterThan(delays[0]);
       }
-    });
+      expect(event.type).toBe("best_block")
+    })
+  })
 
-    it("should support fixed delay retry", async () => {
-      let attempts = 0;
-      const delays: number[] = [];
-      let lastTime = Date.now();
-
-      const result = await retry(
-        async () => {
-          const now = Date.now();
-          if (attempts > 0) {
-            delays.push(now - lastTime);
-          }
-          lastTime = now;
-          attempts++;
-
-          if (attempts < 3) {
-            throw new Error("Temporary failure");
-          }
-          return "success";
-        },
-        { maxRetries: 3, delayMs: 50, exponentialBackoff: false },
-      );
-
-      expect(result).toBe("success");
-
-      // Delays should be approximately equal (allowing for timing variance)
-      if (delays.length >= 2) {
-        const difference = Math.abs(delays[1] - delays[0]);
-        expect(difference).toBeLessThan(30); // Allow 30ms variance
-      }
-    });
-  });
-});
+})

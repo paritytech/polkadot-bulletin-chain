@@ -5,24 +5,22 @@
  * High-level client for interacting with Bulletin Chain
  */
 
-import { CID } from "multiformats/cid";
-import { FixedSizeChunker, reassembleChunks } from "./chunker.js";
-import { UnixFsDagBuilder } from "./dag.js";
-import { calculateCid } from "./utils.js";
+import type { CID } from "multiformats/cid"
+import { FixedSizeChunker } from "./chunker.js"
+import { UnixFsDagBuilder } from "./dag.js"
 import {
-  ClientConfig,
-  StoreOptions,
-  DEFAULT_STORE_OPTIONS,
-  ChunkerConfig,
-  DEFAULT_CHUNKER_CONFIG,
-  ChunkedStoreResult,
-  ProgressCallback,
-  ProgressEvent,
   BulletinError,
   ErrorCode,
-  Chunk,
+  type Chunk,
+  type ChunkerConfig,
   CidCodec,
-} from "./types.js";
+  type ClientConfig,
+  DEFAULT_CHUNKER_CONFIG,
+  DEFAULT_STORE_OPTIONS,
+  type ProgressCallback,
+  type StoreOptions,
+} from "./types.js"
+import { calculateCid } from "./utils.js"
 
 /**
  * High-level client for Bulletin Chain operations
@@ -34,7 +32,7 @@ import {
  * transactions to the TransactionStorage pallet.
  */
 export class BulletinClient {
-  private config: Required<ClientConfig>;
+  private config: Required<ClientConfig>
 
   constructor(config: ClientConfig) {
     this.config = {
@@ -45,7 +43,7 @@ export class BulletinClient {
       chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
       checkAuthorizationBeforeUpload:
         config.checkAuthorizationBeforeUpload ?? true,
-    };
+    }
   }
 
   /**
@@ -58,18 +56,19 @@ export class BulletinClient {
     options?: StoreOptions,
   ): Promise<{ data: Uint8Array; cid: CID }> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA);
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     // Calculate CID using defaults if not specified
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
-    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw
+    const hashAlgorithm =
+      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
-    const cid = await calculateCid(data, cidCodec, hashAlgorithm);
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 
-    return { data, cid };
+    return { data, cid }
   }
 
   /**
@@ -84,11 +83,11 @@ export class BulletinClient {
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<{
-    chunks: Chunk[];
-    manifest?: { data: Uint8Array; cid: CID };
+    chunks: Chunk[]
+    manifest?: { data: Uint8Array; cid: CID }
   }> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA);
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const chunkerConfig: ChunkerConfig = {
@@ -96,17 +95,18 @@ export class BulletinClient {
       chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
       maxParallel: config?.maxParallel ?? this.config.maxParallel,
       createManifest: config?.createManifest ?? this.config.createManifest,
-    };
+    }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options };
+    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     // Extract options with defaults
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw;
-    const hashAlgorithm = opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm;
+    const cidCodec = opts.cidCodec ?? CidCodec.Raw
+    const hashAlgorithm =
+      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
     // Chunk the data
-    const chunker = new FixedSizeChunker(chunkerConfig);
-    const chunks = chunker.chunk(data);
+    const chunker = new FixedSizeChunker(chunkerConfig)
+    const chunks = chunker.chunk(data)
 
     // Calculate CIDs for each chunk
     for (const chunk of chunks) {
@@ -115,11 +115,11 @@ export class BulletinClient {
           type: "chunk_started",
           index: chunk.index,
           total: chunks.length,
-        });
+        })
       }
 
       try {
-        chunk.cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm);
+        chunk.cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm)
 
         if (progressCallback) {
           progressCallback({
@@ -127,7 +127,7 @@ export class BulletinClient {
             index: chunk.index,
             total: chunks.length,
             cid: chunk.cid,
-          });
+          })
         }
       } catch (error) {
         if (progressCallback) {
@@ -136,40 +136,40 @@ export class BulletinClient {
             index: chunk.index,
             total: chunks.length,
             error: error as Error,
-          });
+          })
         }
         // Wrap raw errors in BulletinError for consistent error handling
         if (error instanceof BulletinError) {
-          throw error;
+          throw error
         }
         throw new BulletinError(
           `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
           ErrorCode.CHUNK_FAILED,
           error,
-        );
+        )
       }
     }
 
     // Optionally create manifest
-    let manifest: { data: Uint8Array; cid: CID } | undefined;
+    let manifest: { data: Uint8Array; cid: CID } | undefined
     if (chunkerConfig.createManifest) {
       if (progressCallback) {
-        progressCallback({ type: "manifest_started" });
+        progressCallback({ type: "manifest_started" })
       }
 
-      const builder = new UnixFsDagBuilder();
-      const dagManifest = await builder.build(chunks, hashAlgorithm);
+      const builder = new UnixFsDagBuilder()
+      const dagManifest = await builder.build(chunks, hashAlgorithm)
 
       manifest = {
         data: dagManifest.dagBytes,
         cid: dagManifest.rootCid,
-      };
+      }
 
       if (progressCallback) {
         progressCallback({
           type: "manifest_created",
           cid: dagManifest.rootCid,
-        });
+        })
       }
     }
 
@@ -177,10 +177,10 @@ export class BulletinClient {
       progressCallback({
         type: "completed",
         manifestCid: manifest?.cid,
-      });
+      })
     }
 
-    return { chunks, manifest };
+    return { chunks, manifest }
   }
 
   /**
@@ -189,20 +189,20 @@ export class BulletinClient {
    * Returns (num_transactions, total_bytes) needed for authorization
    */
   estimateAuthorization(dataSize: number): {
-    transactions: number;
-    bytes: number;
+    transactions: number
+    bytes: number
   } {
-    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize);
-    let transactions = numChunks;
-    let bytes = dataSize;
+    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize)
+    let transactions = numChunks
+    let bytes = dataSize
 
     if (this.config.createManifest) {
-      transactions += 1;
+      transactions += 1
       // Estimate manifest size (~10 bytes per chunk + 1KB overhead)
-      bytes += numChunks * 10 + 1000;
+      bytes += numChunks * 10 + 1000
     }
 
-    return { transactions, bytes };
+    return { transactions, bytes }
   }
 }
 

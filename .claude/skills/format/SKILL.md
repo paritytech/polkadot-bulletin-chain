@@ -34,5 +34,5 @@ Run all formatting, linting, and cleaning tasks that should be done before commi
 - If `taplo` or `zepter` are not installed, inform the user how to install them:
   - `cargo install taplo-cli`
   - `cargo install zepter`
-- If nightly fmt is not installed help user install with `rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt`
+- If nightly fmt is not installed help user install with `rustup component add rustfmt --toolchain nightly`
 - Report all errors found and fix them where possible

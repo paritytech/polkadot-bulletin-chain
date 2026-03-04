@@ -40,14 +40,29 @@
 //!
 //! ## Usage
 //!
-//! ### Prepare and Submit via Subxt (Recommended)
+//! ### Using TransactionClient (Recommended)
 //!
-//! The SDK prepares storage operations; you submit them via subxt with your
-//! runtime metadata. This gives you full control over transaction parameters.
+//! The SDK provides `TransactionClient` for direct transaction submission:
 //!
-//! > **Note**: `AsyncBulletinClient` exists but is experimental and returns
-//! > placeholder errors. Use `BulletinClient` for preparation and submit
-//! > transactions directly via subxt.
+//! ```ignore
+//! use bulletin_sdk_rust::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Connect to the chain
+//!     let client = TransactionClient::new("ws://localhost:9944").await?;
+//!
+//!     // Store data
+//!     let receipt = client.store(b"Hello, Bulletin!".to_vec(), &signer).await?;
+//!     println!("Stored in block: {}", receipt.block_hash);
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ### Low-Level: Prepare and Submit Separately
+//!
+//! For more control, prepare operations with `BulletinClient` and submit manually:
 //!
 //! ### Step 1: Prepare the Operation
 //!
@@ -118,18 +133,6 @@
 //! // Then submit the manifest if present
 //! ```
 //!
-//! ### Testing with MockBulletinClient
-//!
-//! For testing without a running node:
-//!
-//! ```ignore
-//! use bulletin_sdk_rust::prelude::*;
-//!
-//! let client = MockBulletinClient::new();
-//! let result = client.store(data).send().await?;
-//! println!("Mock CID: {:?}", result.cid);
-//! ```
-//!
 //! ## Feature Flags
 //!
 //! - `std` (default): Enable standard library support and subxt helpers
@@ -162,25 +165,21 @@ pub mod storage;
 pub mod types;
 pub mod utils;
 
-// Async client with full transaction support (std-only)
+// Transaction submission client (std-only)
 #[cfg(feature = "std")]
-pub mod async_client;
-
-// Mock client for testing (std-only)
-#[cfg(feature = "std")]
-pub mod mock_client;
+pub mod transaction;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
-	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, CidCodec,
-	Error, HashAlgorithm, ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef,
-	StoreOptions, StoreResult, TransactionStatusEvent,
+	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, Error,
+	ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions, StoreResult,
+	TransactionStatusEvent,
 };
 
 // Re-export CID types from pallet
-pub use cid::{calculate_cid, Cid, CidConfig, CidData, ContentHash, HashingAlgorithm};
+pub use cid::{calculate_cid, Cid, CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm};
 
 // Re-export key traits
 pub use chunker::Chunker;
@@ -196,21 +195,20 @@ pub mod prelude {
 		chunker::{Chunker, FixedSizeChunker},
 		cid::{
 			calculate_cid, calculate_cid_default, calculate_cid_with_config, cid_to_bytes, Cid,
-			CidConfig, CidData, ContentHash,
+			CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm,
 		},
 		client::{BulletinClient, ClientConfig},
 		dag::{DagBuilder, DagManifest, UnixFsDagBuilder},
 		renewal::{RenewalOperation, RenewalTracker, TrackedEntry},
 		storage::{BatchStorageOperation, StorageOperation},
 		types::*,
-		utils,
 	};
 
 	#[cfg(feature = "std")]
-	pub use crate::async_client::{AsyncBulletinClient, AsyncClientConfig, StoreBuilder};
-
-	#[cfg(feature = "std")]
-	pub use crate::mock_client::{MockBulletinClient, MockClientConfig, MockOperation};
+	pub use crate::transaction::{
+		AuthorizationReceipt, PreimageAuthorizationReceipt, RenewReceipt, StoreReceipt,
+		TransactionClient,
+	};
 }
 
 #[cfg(test)]

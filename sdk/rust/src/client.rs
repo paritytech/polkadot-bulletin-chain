@@ -6,8 +6,6 @@
 //! This module provides a simplified API for storing and retrieving data.
 //! Full blockchain integration requires the `std` feature and `subxt`.
 
-extern crate alloc;
-
 use crate::{
 	authorization::AuthorizationManager,
 	chunker::{Chunker, FixedSizeChunker},
@@ -115,10 +113,7 @@ impl BulletinClient {
 			callback(ProgressEvent::chunk_started(0, chunks.len() as u32));
 		}
 
-		// Create batch operation
-		let batch = BatchStorageOperation::new(&chunks, options.clone())?;
-
-		// Optionally create manifest
+		// Build manifest first (needs chunk references), then move chunk data into batch
 		let manifest_data = if chunker_config.create_manifest {
 			if let Some(ref callback) = progress_callback {
 				callback(ProgressEvent::manifest_started());
@@ -138,6 +133,10 @@ impl BulletinClient {
 		} else {
 			None
 		};
+
+		// Move chunk data into batch (avoids cloning)
+		let chunk_data = chunks.into_iter().map(|c| c.data).collect();
+		let batch = BatchStorageOperation::from_chunks(chunk_data, options)?;
 
 		Ok((batch, manifest_data))
 	}
@@ -188,55 +187,6 @@ impl BulletinClient {
 impl Default for BulletinClient {
 	fn default() -> Self {
 		Self::new()
-	}
-}
-
-/// Simplified client operations (requires std and subxt for full functionality).
-#[cfg(feature = "std")]
-pub mod async_client {
-	use super::*;
-
-	/// Async Bulletin client wrapper.
-	///
-	/// This would integrate with `subxt` for actual blockchain interaction.
-	/// Users should implement their own version based on their subxt setup.
-	pub struct AsyncBulletinClient {
-		/// The underlying client.
-		pub client: BulletinClient,
-	}
-
-	impl AsyncBulletinClient {
-		/// Create a new async client.
-		pub fn new(config: ClientConfig) -> Self {
-			Self { client: BulletinClient::with_config(config) }
-		}
-
-		/// Store data (placeholder - requires subxt integration).
-		///
-		/// Example integration:
-		/// ```ignore
-		/// use subxt::OnlineClient;
-		///
-		/// async fn store(&self, api: &OnlineClient<PolkadotConfig>, data: Vec<u8>) -> Result<StoreResult> {
-		///     let op = self.client.prepare_store(data, StoreOptions::default())?;
-		///     let cid_config = // convert op.cid_config to runtime type
-		///     let tx = bulletin::tx()
-		///         .transaction_storage()
-		///         .store(op.data, Some(cid_config));
-		///     let result = api.tx().sign_and_submit_then_watch_default(&tx, signer).await?;
-		///     // Process result and return StoreResult
-		/// }
-		/// ```
-		pub async fn store_placeholder(
-			&self,
-			_data: Vec<u8>,
-			_options: StoreOptions,
-		) -> Result<()> {
-			// Placeholder - users should implement with their subxt setup
-			Err(Error::StorageFailed(
-				"This is a placeholder. Implement with subxt integration.".into(),
-			))
-		}
 	}
 }
 
@@ -325,8 +275,8 @@ mod tests {
 		assert!(result.is_ok());
 
 		let op = result.unwrap();
-		assert_eq!(op.block, 100);
-		assert_eq!(op.index, 5);
+		assert_eq!(op.block(), 100);
+		assert_eq!(op.index(), 5);
 	}
 
 	#[test]
@@ -337,8 +287,8 @@ mod tests {
 		assert!(result.is_ok());
 
 		let op = result.unwrap();
-		assert_eq!(op.block, 200);
-		assert_eq!(op.index, 10);
+		assert_eq!(op.block(), 200);
+		assert_eq!(op.index(), 10);
 	}
 
 	#[test]
