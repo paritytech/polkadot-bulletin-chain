@@ -118,7 +118,10 @@ export function cidToBytes(cid: CID): Uint8Array {
  */
 export function validateChunkSize(size: number): void {
   if (size <= 0) {
-    throw new BulletinError("Chunk size must be positive", ErrorCode.INVALID_CHUNK_SIZE)
+    throw new BulletinError(
+      "Chunk size must be positive",
+      ErrorCode.INVALID_CHUNK_SIZE,
+    )
   }
 
   if (size > MAX_CHUNK_SIZE) {

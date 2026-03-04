@@ -10,13 +10,13 @@ import { FixedSizeChunker } from "./chunker.js"
 import { UnixFsDagBuilder } from "./dag.js"
 import {
   BulletinError,
-  ErrorCode,
   type Chunk,
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type ProgressCallback,
   type StoreOptions,
 } from "./types.js"

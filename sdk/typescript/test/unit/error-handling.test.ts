@@ -3,8 +3,8 @@
 
 import { describe, expect, it } from "vitest"
 import { BulletinClient } from "../../src/client"
-import { BulletinError, ErrorCode, HashAlgorithm } from "../../src/types"
 import type { TransactionStatusEvent } from "../../src/types"
+import { BulletinError, ErrorCode, type HashAlgorithm } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
 describe("Error Handling", () => {
@@ -190,13 +190,17 @@ describe("Error Handling", () => {
       expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
       expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
       expect(ErrorCode.INVALID_CID).toBe("INVALID_CID")
-      expect(ErrorCode.UNSUPPORTED_HASH_ALGORITHM).toBe("UNSUPPORTED_HASH_ALGORITHM")
+      expect(ErrorCode.UNSUPPORTED_HASH_ALGORITHM).toBe(
+        "UNSUPPORTED_HASH_ALGORITHM",
+      )
       expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM")
       expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED")
       expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED")
       expect(ErrorCode.DAG_DECODING_FAILED).toBe("DAG_DECODING_FAILED")
       expect(ErrorCode.AUTHORIZATION_NOT_FOUND).toBe("AUTHORIZATION_NOT_FOUND")
-      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe("INSUFFICIENT_AUTHORIZATION")
+      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe(
+        "INSUFFICIENT_AUTHORIZATION",
+      )
       expect(ErrorCode.AUTHORIZATION_EXPIRED).toBe("AUTHORIZATION_EXPIRED")
       expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED")
       expect(ErrorCode.SUBMISSION_FAILED).toBe("SUBMISSION_FAILED")
@@ -325,17 +329,21 @@ describe("Error Handling", () => {
     })
 
     it("should support invalid event", () => {
-      const event: TransactionStatusEvent = { type: "invalid", error: "nonce too low" }
+      const event: TransactionStatusEvent = {
+        type: "invalid",
+        error: "nonce too low",
+      }
       expect(event.type).toBe("invalid")
       expect(event.error).toBe("nonce too low")
     })
 
     it("should support dropped event", () => {
-      const event: TransactionStatusEvent = { type: "dropped", error: "pool full" }
+      const event: TransactionStatusEvent = {
+        type: "dropped",
+        error: "pool full",
+      }
       expect(event.type).toBe("dropped")
       expect(event.error).toBe("pool full")
     })
-
   })
-
 })

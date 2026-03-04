@@ -9,7 +9,7 @@
 import * as dagPB from "@ipld/dag-pb"
 import { UnixFS } from "ipfs-unixfs"
 import type { CID } from "multiformats/cid"
-import { BulletinError, ErrorCode, type Chunk, HashAlgorithm } from "./types.js"
+import { BulletinError, type Chunk, ErrorCode, HashAlgorithm } from "./types.js"
 import { calculateCid } from "./utils.js"
 
 /**

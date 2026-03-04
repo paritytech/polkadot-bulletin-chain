@@ -15,9 +15,9 @@ import type { Binary } from "polkadot-api"
 import type { AsyncClientConfig, TransactionReceipt } from "./async-client.js"
 import {
   BulletinError,
-  ErrorCode,
   CidCodec,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,
@@ -220,7 +220,10 @@ export class MockBulletinClient {
 
     // Simulate storage failure
     if (this.config.simulateStorageFailure) {
-      throw new BulletinError("Simulated storage failure", ErrorCode.TRANSACTION_FAILED)
+      throw new BulletinError(
+        "Simulated storage failure",
+        ErrorCode.TRANSACTION_FAILED,
+      )
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }

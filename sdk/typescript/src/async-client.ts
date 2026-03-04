@@ -11,12 +11,12 @@ import { FixedSizeChunker } from "./chunker.js"
 import { UnixFsDagBuilder } from "./dag.js"
 import {
   BulletinError,
-  ErrorCode,
   type ChunkedStoreResult,
   type ChunkerConfig,
   CidCodec,
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,
@@ -380,7 +380,10 @@ export class AsyncBulletinClient {
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted", numPeers: (ev as any).nPeers })
+            progressCallback({
+              type: "broadcasted",
+              numPeers: (ev as any).nPeers,
+            })
           }
 
           // Handle best block state
