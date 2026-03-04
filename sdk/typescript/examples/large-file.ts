@@ -60,7 +60,6 @@ async function main() {
   // 4. Create client with custom config (directly with PAPI client and signer)
   const client = new AsyncBulletinClient(api, signer, {
     defaultChunkSize: 1024 * 1024, // 1 MiB chunks
-    maxParallel: 8,
     createManifest: true,
   })
 
