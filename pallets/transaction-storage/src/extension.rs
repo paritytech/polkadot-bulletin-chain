@@ -40,18 +40,18 @@ type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 /// All other calls and unsigned transactions are passed through unchanged.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
 #[scale_info(skip_type_params(T))]
-pub struct AuthorizeStorageSigned<T>(PhantomData<T>);
+pub struct ValidateStorageCalls<T>(PhantomData<T>);
 
-impl<T> Default for AuthorizeStorageSigned<T> {
+impl<T> Default for ValidateStorageCalls<T> {
 	fn default() -> Self {
 		Self(PhantomData)
 	}
 }
 
-impl<T: Config + Send + Sync> fmt::Debug for AuthorizeStorageSigned<T> {
+impl<T: Config + Send + Sync> fmt::Debug for ValidateStorageCalls<T> {
 	#[cfg(feature = "std")]
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "AuthorizeStorageSigned")
+		write!(f, "ValidateStorageCalls")
 	}
 
 	#[cfg(not(feature = "std"))]
@@ -60,13 +60,13 @@ impl<T: Config + Send + Sync> fmt::Debug for AuthorizeStorageSigned<T> {
 	}
 }
 
-impl<T: Config + Send + Sync> TransactionExtension<RuntimeCallOf<T>> for AuthorizeStorageSigned<T>
+impl<T: Config + Send + Sync> TransactionExtension<RuntimeCallOf<T>> for ValidateStorageCalls<T>
 where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,
 	T::RuntimeOrigin: OriginTrait + AsSystemOriginSigner<T::AccountId> + From<Origin<T>>,
 	<T::RuntimeOrigin as OriginTrait>::PalletsOrigin: From<Origin<T>> + TryInto<Origin<T>>,
 {
-	const IDENTIFIER: &'static str = "AuthorizeStorageSigned";
+	const IDENTIFIER: &'static str = "ValidateStorageCalls";
 
 	type Implicit = ();
 	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {

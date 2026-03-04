@@ -127,7 +127,7 @@ type AuthorizationScopeFor<T> = AuthorizationScope<<T as frame_system::Config>::
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum AuthorizedCaller<AccountId> {
 	/// A signed transaction whose origin was transformed to
-	/// [`pallet::Origin::Authorized`] by [`extension::AuthorizeStorageSigned`].
+	/// [`pallet::Origin::Authorized`] by [`extension::ValidateStorageCalls`].
 	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
 	/// A root call (e.g. via `sudo`).
 	Root,
@@ -304,7 +304,7 @@ pub mod pallet {
 
 	/// Custom origin for authorized signed transaction storage operations.
 	///
-	/// This origin is set by the [`extension::AuthorizeStorageSigned`] transaction extension
+	/// This origin is set by the [`extension::ValidateStorageCalls`] transaction extension
 	/// for signed transactions that pass authorization checks. Unsigned transactions
 	/// do not use this origin (they are validated via [`ValidateUnsigned`]).
 	#[pallet::origin]
@@ -828,7 +828,7 @@ pub mod pallet {
 		///
 		/// Accepted origins:
 		///
-		/// - [`Origin::Authorized`] (set by [`extension::AuthorizeStorageSigned`]) →
+		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
@@ -838,7 +838,7 @@ pub mod pallet {
 		pub fn ensure_authorized(
 			origin: OriginFor<T>,
 		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
-			// 1. Try pallet::Origin::Authorized (set by AuthorizeStorageSigned extension)
+			// 1. Try pallet::Origin::Authorized (set by ValidateStorageCalls extension)
 			if let Ok(Origin::Authorized { who, scope }) = origin.clone().into_caller().try_into() {
 				return Ok(AuthorizedCaller::Signed { who, scope });
 			}

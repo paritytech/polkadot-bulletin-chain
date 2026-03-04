@@ -83,7 +83,7 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		pallet_transaction_storage::extension::AuthorizeStorageSigned::<Runtime>::default(),
+		pallet_transaction_storage::extension::ValidateStorageCalls::<Runtime>::default(),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
 	let tx_ext: TxExtension =

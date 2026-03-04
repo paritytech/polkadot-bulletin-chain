@@ -18,7 +18,7 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
-	extension::AuthorizeStorageSigned,
+	extension::ValidateStorageCalls,
 	mock::{
 		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, StoreRenewPriority,
 		System, Test, TransactionStorage,
@@ -1082,7 +1082,7 @@ fn try_state_passes_with_preimage_authorization() {
 	});
 }
 
-// ---- AuthorizeStorageSigned extension tests ----
+// ---- ValidateStorageCalls extension tests ----
 
 #[test]
 fn ensure_authorized_extracts_custom_origin() {
@@ -1152,8 +1152,8 @@ fn authorize_storage_extension_transforms_origin() {
 		let info: DispatchInfoOf<RuntimeCall> = Default::default();
 		let origin = RuntimeOrigin::signed(caller);
 
-		// Run AuthorizeStorageSigned::validate - this should transform the origin
-		let ext = AuthorizeStorageSigned::<Test>::default();
+		// Run ValidateStorageCalls::validate - this should transform the origin
+		let ext = ValidateStorageCalls::<Test>::default();
 		let result = ext.validate(
 			origin,
 			&call,
@@ -1184,7 +1184,7 @@ fn authorize_storage_extension_transforms_origin() {
 		);
 
 		// Run prepare — this should call pre_dispatch_signed and consume the authorization
-		let ext2 = AuthorizeStorageSigned::<Test>::default();
+		let ext2 = ValidateStorageCalls::<Test>::default();
 		assert_ok!(ext2.prepare(val, &origin_for_prepare, &call, &info, 0));
 
 		// Authorization (1 transaction, 16 bytes) should now be fully consumed
@@ -1216,8 +1216,8 @@ fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
 		let info: DispatchInfoOf<RuntimeCall> = Default::default();
 		let origin = RuntimeOrigin::signed(caller);
 
-		// Run AuthorizeStorageSigned::validate
-		let ext = AuthorizeStorageSigned::<Test>::default();
+		// Run ValidateStorageCalls::validate
+		let ext = ValidateStorageCalls::<Test>::default();
 		let result = ext.validate(
 			origin,
 			&call,
@@ -1260,8 +1260,8 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		let info: DispatchInfoOf<RuntimeCall> = Default::default();
 		let origin = RuntimeOrigin::signed(caller);
 
-		// Run AuthorizeStorageSigned::validate - should pass through unchanged
-		let ext = AuthorizeStorageSigned::<Test>::default();
+		// Run ValidateStorageCalls::validate - should pass through unchanged
+		let ext = ValidateStorageCalls::<Test>::default();
 		let result = ext.validate(
 			origin.clone(),
 			&call,

@@ -558,7 +558,7 @@ impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		// TransactionStorage is handled by AuthorizeStorageSigned extension, which transforms
+		// TransactionStorage is handled by ValidateStorageCalls extension, which transforms
 		// the origin. If origin is no longer a system signed origin, pass through.
 		let who = match origin.as_system_origin_signer() {
 			Some(who) => who.clone(),
@@ -566,7 +566,7 @@ impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
 		};
 
 		let validity = match call {
-			// TransactionStorage calls are validated by AuthorizeStorageSigned extension.
+			// TransactionStorage calls are validated by ValidateStorageCalls extension.
 			// Store/renew origins are transformed so they won't reach here.
 			// Authorizer calls still have a signed origin and need to pass through.
 			RuntimeCall::TransactionStorage(_) => ValidTransaction::default(),
@@ -658,13 +658,13 @@ impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		// If origin is no longer a system signed origin, pass through.
-		// (Store/renew calls have their origin transformed by AuthorizeStorageSigned.)
+		// (Store/renew calls have their origin transformed by ValidateStorageCalls.)
 		let who = match origin.as_system_origin_signer() {
 			Some(who) => who,
 			None => return Ok(None),
 		};
 		match call {
-			// TransactionStorage is fully handled by AuthorizeStorageSigned extension.
+			// TransactionStorage is fully handled by ValidateStorageCalls extension.
 			RuntimeCall::TransactionStorage(_) => Ok(None),
 
 			// Session key management
@@ -741,7 +741,7 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 
 /// The SignedExtension to the basic transaction logic.
 ///
-/// NOTE: `AuthorizeStorageSigned` must come before `AllowedSignedCalls` because it transforms
+/// NOTE: `ValidateStorageCalls` must come before `AllowedSignedCalls` because it transforms
 /// the origin for signed TransactionStorage calls, and `AllowedSignedCalls` needs to detect this.
 pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
@@ -751,7 +751,7 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	pallet_transaction_storage::extension::AuthorizeStorageSigned<Runtime>,
+	pallet_transaction_storage::extension::ValidateStorageCalls<Runtime>,
 	AllowedSignedCalls,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
