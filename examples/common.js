@@ -173,10 +173,6 @@ function randomColor() {
   return `rgb(${rand255()}, ${rand255()}, ${rand255()})`;
 }
 
-function rand(intensity) {
-    return (Math.random() * intensity - intensity / 2) | 0;
-}
-
 function rand255() {
   return Math.floor(Math.random() * 256);
 }
@@ -184,11 +180,8 @@ function rand255() {
 export function filesAreEqual(path1, path2) {
   const data1 = fs.readFileSync(path1);
   const data2 = fs.readFileSync(path2);
-  assert.deepStrictEqual(data1.length, data2.length)
-
-  for (let i = 0; i < data1.length; i++) {
-    assert.deepStrictEqual(data1[i], data2[i])
-  }
+  assert.strictEqual(data1.length, data2.length, `File sizes differ: ${data1.length} vs ${data2.length}`);
+  assert.ok(data1.equals(data2), 'File contents differ');
 }
 
 export async function fileToDisk(outputPath, fullBuffer) {

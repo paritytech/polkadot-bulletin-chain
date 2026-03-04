@@ -33,18 +33,6 @@ compute-test-dir:
 npm-install:
     npm install
 
-# Helper function to get IPFS command (internal use)
-_ipfs-cmd:
-    #!/usr/bin/env bash
-    if [ -f "../kubo/ipfs" ]; then
-        echo "../kubo/ipfs"
-    elif command -v ipfs &> /dev/null; then
-        echo "ipfs"
-    else
-        echo "❌ Error: IPFS not found." >&2
-        exit 1
-    fi
-
 kill-pids test_dir:
     #!/usr/bin/env bash
     set -e
@@ -71,16 +59,12 @@ kill-pids test_dir:
         fi
     done
 
-# Start solo chain or parachain with zombienet in background
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
+# Resolve the zombienet binary path. Prints the absolute path to stdout.
+# Checks ZOMBIENET_BINARY env var first, then falls back to ../zombienet-*-*.
+_resolve-zombienet-bin:
     #!/usr/bin/env bash
     set -e
-
-    # Find zombienet binary (use env var if set, otherwise search)
     if [ -n "$ZOMBIENET_BINARY" ]; then
-        # Resolve command name via PATH, or treat as a file path
         if command -v "$ZOMBIENET_BINARY" >/dev/null 2>&1; then
             ZOMBIENET_BIN="$(command -v "$ZOMBIENET_BINARY")"
         else
@@ -88,16 +72,57 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
         fi
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
+        if [ -z "$ZOMBIENET_BIN" ]; then
+            echo "❌ Error: Zombienet binary not found" >&2
+            echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory" >&2
+            exit 1
+        fi
     fi
-    # Resolve to absolute path
     ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
-
     if [ ! -x "$ZOMBIENET_BIN" ]; then
-        echo "❌ Error: Zombienet binary not found"
-        echo "   Tried: $ZOMBIENET_BIN"
-        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
+        echo "❌ Error: Zombienet binary not executable: $ZOMBIENET_BIN" >&2
         exit 1
     fi
+    echo "$ZOMBIENET_BIN"
+
+# Wait for an RPC endpoint to accept connections, checking that the background process stays alive.
+# Parameters:
+#   pid - PID of the background process to monitor
+#   log_file - Log file to tail on failure
+#   port - TCP port to check (default: 10000)
+#   timeout - Seconds to wait (default: 30)
+_wait-for-rpc pid log_file port="10000" timeout="30":
+    #!/usr/bin/env bash
+    set -e
+    echo "   Waiting for RPC on 127.0.0.1:{{ port }}..."
+    for i in $(seq 1 {{ timeout }}); do
+        if ! kill -0 {{ pid }} 2>/dev/null; then
+            echo "   ❌ Process (PID {{ pid }}) died during startup. Logs:"
+            tail -20 "{{ log_file }}"
+            exit 1
+        fi
+        if (echo > /dev/tcp/127.0.0.1/{{ port }}) 2>/dev/null; then
+            echo "   ✅ RPC is reachable (after ${i}s)"
+            exit 0
+        fi
+        if [ "$i" -eq {{ timeout }} ]; then
+            echo "   ❌ RPC not reachable after {{ timeout }} seconds"
+            echo "   Debug: ss -tlnp | grep {{ port }}:"
+            ss -tlnp 2>/dev/null | grep {{ port }} || netstat -tlnp 2>/dev/null | grep {{ port }} || true
+            tail -20 "{{ log_file }}"
+            exit 1
+        fi
+        sleep 1
+    done
+
+# Start solo chain or parachain with zombienet in background
+# Parameters:
+#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
+bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
+    #!/usr/bin/env bash
+    set -e
+
+    ZOMBIENET_BIN="$(just _resolve-zombienet-bin)"
 
     echo "   Setting up Polkadot runtime..."
     ROOT_DIR="{{ justfile_directory() }}/.."
@@ -119,13 +144,7 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    echo "   Waiting for RPC to accept connections (30 seconds)..."
-    sleep 30
-    if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
-        echo "   ❌ Zombienet process died during startup. Logs:"
-        tail -20 {{ test_dir }}/zombienet.log
-        exit 1
-    fi
+    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
 # Start westend parachain with zombienet in background
 # Parameters:
@@ -134,26 +153,7 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     #!/usr/bin/env bash
     set -e
 
-    # Find zombienet binary (use env var if set, otherwise search)
-    if [ -n "$ZOMBIENET_BINARY" ]; then
-        # Resolve command name via PATH, or treat as a file path
-        if command -v "$ZOMBIENET_BINARY" >/dev/null 2>&1; then
-            ZOMBIENET_BIN="$(command -v "$ZOMBIENET_BINARY")"
-        else
-            ZOMBIENET_BIN="$ZOMBIENET_BINARY"
-        fi
-    else
-        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
-    fi
-    # Resolve to absolute path
-    ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
-
-    if [ ! -x "$ZOMBIENET_BIN" ]; then
-        echo "❌ Error: Zombienet binary not found"
-        echo "   Tried: $ZOMBIENET_BIN"
-        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
-        exit 1
-    fi
+    ZOMBIENET_BIN="$(just _resolve-zombienet-bin)"
 
     # Run prerequisites setup first
     just setup-parachain-prerequisites
@@ -202,13 +202,7 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    echo "   Waiting for RPC to accept connections (30 seconds)..."
-    sleep 30
-    if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
-        echo "   ❌ Zombienet process died during startup. Logs:"
-        tail -20 {{ test_dir }}/zombienet.log
-        exit 1
-    fi
+    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
 # Check if Docker is available and running
 _check-docker:
@@ -358,7 +352,11 @@ ipfs-kubo-shutdown test_dir:
         PID=$(cat "{{ test_dir }}/ipfs-kubo.pid")
         if kill -0 $PID 2>/dev/null; then
             kill $PID 2>/dev/null || true
-            sleep 2
+            # Wait up to 2s for graceful shutdown before force-killing
+            for _ in $(seq 1 20); do
+                kill -0 $PID 2>/dev/null || break
+                sleep 0.1
+            done
             kill -9 $PID 2>/dev/null || true
             echo "   ✓ Kubo daemon stopped (PID: $PID)"
         else
@@ -383,8 +381,8 @@ ipfs-start test_dir runtime: _check-docker
     IPFS_API_PORT={{ IPFS_API_PORT }}
     IPFS_GATEWAY_PORT={{ IPFS_GATEWAY_PORT }}
 
-    # Pull latest kubo image if not present
-    docker pull ipfs/kubo:latest
+    # Pull kubo image if not already present
+    docker image inspect ipfs/kubo:latest >/dev/null 2>&1 || docker pull ipfs/kubo:latest
 
     # Remove old volume to start fresh (no cached peers)
     docker volume rm ipfs-data 2>/dev/null || true
@@ -495,30 +493,6 @@ ipfs-shutdown test_dir:
 papi-generate ws_url="ws://127.0.0.1:10000": npm-install
     #!/usr/bin/env bash
     set -e
-
-    # Extract host and port from ws:// URL and wait for the port to accept connections
-    WS_URL="{{ ws_url }}"
-    HOST_PORT="${WS_URL#ws://}"
-    HOST_PORT="${HOST_PORT#wss://}"
-    HOST="${HOST_PORT%%:*}"
-    PORT="${HOST_PORT##*:}"
-    PORT="${PORT%%/*}"
-
-    echo "   Waiting for RPC endpoint ${HOST}:${PORT} to accept connections..."
-    for i in $(seq 1 180); do
-        if (echo > /dev/tcp/"$HOST"/"$PORT") 2>/dev/null; then
-            echo "   ✅ RPC endpoint is reachable (after ${i}s)"
-            break
-        fi
-        if [ "$i" -eq 180 ]; then
-            echo "   ❌ RPC endpoint ${HOST}:${PORT} not reachable after 180 seconds"
-            echo "   Debug: ss -tlnp | grep ${PORT}:"
-            ss -tlnp 2>/dev/null | grep "$PORT" || netstat -tlnp 2>/dev/null | grep "$PORT" || true
-            exit 1
-        fi
-        sleep 1
-    done
-
     echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
     npx papi add -w "{{ ws_url }}" bulletin
 
