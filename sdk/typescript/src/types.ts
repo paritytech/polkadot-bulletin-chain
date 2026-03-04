@@ -208,13 +208,6 @@ export type TransactionStatusEvent =
   | { type: "no_longer_in_best_block" }
   | { type: "invalid"; error: string }
   | { type: "dropped"; error: string }
-  /** @deprecated Use `in_best_block` instead */
-  | {
-      type: "best_block"
-      blockHash: string
-      blockNumber: number
-      txIndex?: number
-    }
 
 /**
  * Combined progress event types

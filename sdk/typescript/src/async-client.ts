@@ -387,16 +387,8 @@ export class AsyncBulletinClient {
           if (ev.type === "txBestBlocksState") {
             if (ev.found && ev.block) {
               if (progressCallback) {
-                // Emit new in_best_block event
                 progressCallback({
                   type: "in_best_block",
-                  blockHash: ev.block.hash,
-                  blockNumber: ev.block.number,
-                  txIndex: ev.block.index,
-                })
-                // Also emit deprecated best_block for backward compatibility
-                progressCallback({
-                  type: "best_block",
                   blockHash: ev.block.hash,
                   blockNumber: ev.block.number,
                   txIndex: ev.block.index,
@@ -478,15 +470,6 @@ export class AsyncBulletinClient {
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
-            // Emit invalid/dropped events based on error type
-            if (progressCallback) {
-              const errorMsg = err instanceof Error ? err.message : String(err)
-              if (errorMsg.includes("invalid")) {
-                progressCallback({ type: "invalid", error: errorMsg })
-              } else if (errorMsg.includes("dropped")) {
-                progressCallback({ type: "dropped", error: errorMsg })
-              }
-            }
             reject(err)
           }
         },
