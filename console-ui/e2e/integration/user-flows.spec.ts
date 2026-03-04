@@ -130,8 +130,8 @@ test.describe("Preimage Authorization Flow", () => {
       });
 
       // Extract CID from the result card
-      const cidInput = page.locator("input[readonly]").first();
-      const uploadedCid = await cidInput.inputValue();
+      const cidDisplay = page.locator("input[readonly]").first();
+      const uploadedCid = await cidDisplay.inputValue();
       expect(uploadedCid).toBeTruthy();
       expect(uploadedCid.length).toBeGreaterThan(10);
     });
