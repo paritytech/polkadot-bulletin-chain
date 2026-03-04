@@ -44,7 +44,7 @@ use polkadot_sdk_frame::{
 	prelude::*,
 	traits::{
 		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
-		parameter_types,
+		parameter_types, OriginTrait,
 	},
 };
 use sp_transaction_storage_proof::{
@@ -123,6 +123,22 @@ pub enum AuthorizationScope<AccountId> {
 
 type AuthorizationScopeFor<T> = AuthorizationScope<<T as frame_system::Config>::AccountId>;
 
+/// Describes the caller of a store/renew extrinsic after origin validation.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum AuthorizedCaller<AccountId> {
+	/// A signed transaction whose origin was transformed to
+	/// [`pallet::Origin::Authorized`] by [`extension::AuthorizeStorageSigned`].
+	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
+	/// A root call (e.g. via `sudo`).
+	Root,
+	/// An unsigned transaction validated by [`ValidateUnsigned`].
+	/// TODO: replaced by https://github.com/paritytech/polkadot-bulletin-chain/pull/194
+	Unsigned,
+}
+
+/// Convenience alias for [`AuthorizedCaller`] bound to a runtime's `AccountId`.
+pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::AccountId>;
+
 /// An authorization to store data.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 struct Authorization<BlockNumber> {
@@ -200,7 +216,11 @@ pub mod pallet {
 	}
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config:
+		frame_system::Config<
+		RuntimeOrigin: OriginTrait<PalletsOrigin: From<Origin<Self>> + TryInto<Origin<Self>>>,
+	>
+	{
 		/// The overarching event type.
 		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
@@ -418,7 +438,8 @@ pub mod pallet {
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
-		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
+		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
+			let _caller = Self::ensure_authorized(origin)?;
 			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
 		}
 
@@ -432,10 +453,11 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
 		pub fn store_with_cid_config(
-			_origin: OriginFor<T>,
+			origin: OriginFor<T>,
 			cid: CidConfig,
 			data: Vec<u8>,
 		) -> DispatchResult {
+			let _caller = Self::ensure_authorized(origin)?;
 			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
@@ -454,10 +476,11 @@ pub mod pallet {
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::renew())]
 		pub fn renew(
-			_origin: OriginFor<T>,
+			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
 			index: u32,
 		) -> DispatchResultWithPostInfo {
+			let _caller = Self::ensure_authorized(origin)?;
 			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
 			// In the case of a regular unsigned transaction, this should have been checked by
@@ -800,6 +823,36 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// Validate that `origin` is one of the accepted caller types for store/renew
+		/// extrinsics, and return a typed description of the caller.
+		///
+		/// Accepted origins:
+		///
+		/// - [`Origin::Authorized`] (set by [`extension::AuthorizeStorageSigned`]) →
+		///   [`AuthorizedCaller::Signed`]
+		/// - Root → [`AuthorizedCaller::Root`]
+		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
+		///
+		/// Any other origin (including plain `Signed`) returns
+		/// [`DispatchError::BadOrigin`].
+		pub fn ensure_authorized(
+			origin: OriginFor<T>,
+		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
+			// 1. Try pallet::Origin::Authorized (set by AuthorizeStorageSigned extension)
+			if let Ok(Origin::Authorized { who, scope }) = origin.clone().into_caller().try_into() {
+				return Ok(AuthorizedCaller::Signed { who, scope });
+			}
+
+			// 2. Try root
+			if ensure_root(origin.clone()).is_ok() {
+				return Ok(AuthorizedCaller::Root);
+			}
+
+			// 3. Try none (unsigned)
+			ensure_none(origin)?;
+			Ok(AuthorizedCaller::Unsigned)
+		}
+
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
 		fn do_store(
@@ -1354,51 +1407,6 @@ pub mod pallet {
 }
 
 pub mod extension;
-
-use frame_support::traits::{EnsureOrigin, OriginTrait};
-
-/// An [`EnsureOrigin`] implementation that extracts the signer and authorization scope
-/// from an [`Origin::Authorized`] origin.
-///
-/// This only works for signed transactions whose origin was transformed by
-/// [`extension::AuthorizeStorageSigned`]. Unsigned transactions have a `None` origin
-/// and will not match.
-///
-/// Example usage in extrinsics:
-/// ```ignore
-/// let (who, scope) = EnsureAuthorized::<T>::try_origin(origin)
-///     .map_err(|_| DispatchError::BadOrigin)?;
-/// ```
-pub struct EnsureAuthorized<T>(core::marker::PhantomData<T>);
-
-impl<OuterOrigin, T: Config> EnsureOrigin<OuterOrigin> for EnsureAuthorized<T>
-where
-	OuterOrigin: OriginTrait + Clone,
-	OuterOrigin::PalletsOrigin: From<pallet::Origin<T>> + TryInto<pallet::Origin<T>>,
-{
-	type Success = (T::AccountId, AuthorizationScopeFor<T>);
-
-	fn try_origin(o: OuterOrigin) -> Result<Self::Success, OuterOrigin> {
-		match o.clone().into_caller().try_into() {
-			Ok(pallet::Origin::Authorized { who, scope }) => Ok((who, scope)),
-			Err(_) => Err(o),
-		}
-	}
-
-	#[cfg(feature = "runtime-benchmarks")]
-	fn try_successful_origin() -> Result<OuterOrigin, ()> {
-		let who: T::AccountId = frame_benchmarking::account("authorized", 0, 0);
-		let mut origin = OuterOrigin::none();
-		origin.set_caller(
-			pallet::Origin::<T>::Authorized {
-				who: who.clone(),
-				scope: AuthorizationScope::Account(who),
-			}
-			.into(),
-		);
-		Ok(origin)
-	}
-}
 
 #[cfg(any(test, feature = "try-runtime"))]
 impl<T: Config> Pallet<T> {

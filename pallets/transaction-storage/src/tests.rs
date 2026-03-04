@@ -24,7 +24,7 @@ use super::{
 		System, Test, TransactionStorage,
 	},
 	pallet::Origin,
-	AuthorizationExtent, AuthorizationScope, EnsureAuthorized, Event, TransactionInfo,
+	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
 	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
@@ -37,7 +37,7 @@ use polkadot_sdk_frame::{
 		BoundedVec,
 	},
 	hashing::blake2_256,
-	prelude::{frame_system::RawOrigin, *},
+	prelude::*,
 	testing_prelude::*,
 	traits::StorageVersion,
 };
@@ -192,9 +192,8 @@ fn verify_chunk_proof_works() {
 
 		// Store a couple of transactions in one block.
 		run_to_block(1, || None);
-		let caller = 1;
 		for transaction in transactions.clone() {
-			assert_ok!(TransactionStorage::store(RawOrigin::Signed(caller).into(), transaction));
+			assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), transaction));
 		}
 		run_to_block(2, || None);
 
@@ -1087,47 +1086,49 @@ fn try_state_passes_with_preimage_authorization() {
 
 #[test]
 fn ensure_authorized_extracts_custom_origin() {
-	use polkadot_sdk_frame::traits::EnsureOrigin;
-
 	new_test_ext().execute_with(|| {
 		let who: u64 = 42;
 
-		// Create an authorized origin with Account authorization
+		// 1. Authorized origin with Account scope
 		let authorized_origin: RuntimeOrigin =
 			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(authorized_origin),
+			Ok(AuthorizedCaller::Signed { who, scope: AuthorizationScope::Account(who) }),
+		);
 
-		// EnsureAuthorized should successfully extract the data
-		let result = EnsureAuthorized::<Test>::try_origin(authorized_origin);
-		assert!(result.is_ok());
-		let (extracted_who, extracted_scope) = result.unwrap();
-		assert_eq!(extracted_who, who);
-		assert_eq!(extracted_scope, AuthorizationScope::Account(who));
-
-		// Create an authorized origin with Preimage authorization
+		// 2. Authorized origin with Preimage scope
 		let content_hash = [0u8; 32];
 		let preimage_origin: RuntimeOrigin = Origin::<Test>::Authorized {
 			who: 99,
 			scope: AuthorizationScope::Preimage(content_hash),
 		}
 		.into();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(preimage_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: 99,
+				scope: AuthorizationScope::Preimage(content_hash)
+			}),
+		);
 
-		let result = EnsureAuthorized::<Test>::try_origin(preimage_origin);
-		assert!(result.is_ok());
-		let (extracted_who, extracted_scope) = result.unwrap();
-		assert_eq!(extracted_who, 99);
-		assert_eq!(extracted_scope, AuthorizationScope::Preimage(content_hash));
+		// 3. Root origin → Root
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::root()),
+			Ok(AuthorizedCaller::Root),
+		);
 
-		// A regular signed origin should fail extraction (returns Err with original origin)
-		let signed_origin = RuntimeOrigin::signed(123);
-		assert!(EnsureAuthorized::<Test>::try_origin(signed_origin).is_err());
+		// 4. None origin → Unsigned
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::none()),
+			Ok(AuthorizedCaller::Unsigned),
+		);
 
-		// Root origin should also fail extraction
-		let root_origin = RuntimeOrigin::root();
-		assert!(EnsureAuthorized::<Test>::try_origin(root_origin).is_err());
-
-		// None origin should also fail extraction
-		let none_origin = RuntimeOrigin::none();
-		assert!(EnsureAuthorized::<Test>::try_origin(none_origin).is_err());
+		// 5. Plain signed origin → BadOrigin
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::signed(123)),
+			Err(DispatchError::BadOrigin),
+		);
 	});
 }
 
@@ -1135,7 +1136,7 @@ fn ensure_authorized_extracts_custom_origin() {
 fn authorize_storage_extension_transforms_origin() {
 	use polkadot_sdk_frame::{
 		prelude::TransactionSource,
-		traits::{DispatchInfoOf, EnsureOrigin, TransactionExtension, TxBaseImplication},
+		traits::{DispatchInfoOf, TransactionExtension, TxBaseImplication},
 	};
 
 	new_test_ext().execute_with(|| {
@@ -1172,13 +1173,15 @@ fn authorize_storage_extension_transforms_origin() {
 		// Verify val contains the authorization scope
 		assert_eq!(val, Some(AuthorizationScope::Account(caller)));
 
-		// Verify the origin was transformed and can be extracted with EnsureAuthorized
+		// Verify the origin was transformed and can be extracted with ensure_authorized
 		let origin_for_prepare = transformed_origin.clone();
-		let extracted = EnsureAuthorized::<Test>::try_origin(transformed_origin);
-		assert!(extracted.is_ok());
-		let (who, scope) = extracted.unwrap();
-		assert_eq!(who, caller);
-		assert_eq!(scope, AuthorizationScope::Account(caller));
+		assert_eq!(
+			TransactionStorage::ensure_authorized(transformed_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: caller,
+				scope: AuthorizationScope::Account(caller)
+			}),
+		);
 
 		// Run prepare — this should call pre_dispatch_signed and consume the authorization
 		let ext2 = AuthorizeStorageSigned::<Test>::default();
@@ -1196,7 +1199,7 @@ fn authorize_storage_extension_transforms_origin() {
 fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
 	use polkadot_sdk_frame::{
 		prelude::TransactionSource,
-		traits::{DispatchInfoOf, EnsureOrigin, TransactionExtension, TxBaseImplication},
+		traits::{DispatchInfoOf, TransactionExtension, TxBaseImplication},
 	};
 
 	new_test_ext().execute_with(|| {
@@ -1232,11 +1235,13 @@ fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
 		assert_eq!(val, Some(AuthorizationScope::Preimage(content_hash)));
 
 		// Verify the origin carries preimage authorization
-		let extracted = EnsureAuthorized::<Test>::try_origin(transformed_origin);
-		assert!(extracted.is_ok());
-		let (who, scope) = extracted.unwrap();
-		assert_eq!(who, caller);
-		assert_eq!(scope, AuthorizationScope::Preimage(content_hash));
+		assert_eq!(
+			TransactionStorage::ensure_authorized(transformed_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: caller,
+				scope: AuthorizationScope::Preimage(content_hash)
+			}),
+		);
 	});
 }
 
