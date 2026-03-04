@@ -17,6 +17,12 @@ The `@bulletin/sdk` package provides a modern, type-safe client for Node.js and 
 - **Fail Fast**: Saves transaction fees by validating before submission
 - **Complete Operations**: Authorize, refresh, and manage authorizations
 
+### Error Handling
+- **Typed Error Codes**: `ErrorCode` enum with IDE autocomplete
+- **Retryable Detection**: `error.retryable` identifies transient failures
+- **Recovery Hints**: `error.recoveryHint` provides actionable suggestions
+- **Transaction Events**: Full lifecycle tracking (validated, broadcasted, finalized, etc.)
+
 ### Developer Experience
 - **Full Type Support**: Written in TypeScript with complete definitions
 - **Direct PAPI Integration**: Tightly coupled to Polkadot API for type-safe blockchain interaction
@@ -58,4 +64,5 @@ Proceed to [Installation](./installation.md) to get started.
 - [Basic Storage](./basic-storage.md) - Store small files with a single transaction
 - [Chunked Uploads](./chunked-uploads.md) - Handle large files with automatic chunking
 - [Renewal](./renewal.md) - Extend data retention period
+- [Error Handling](./error-handling.md) - Error codes, retry logic, and recovery hints
 - [PAPI Integration](./papi-integration.md) - Integrate with Polkadot API
