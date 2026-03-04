@@ -1269,6 +1269,9 @@ pub mod pallet {
 				)?;
 			}
 
+			// Only build `ValidTransaction` metadata during pool validation, not block
+			// execution. The tx tag/priority differs depending on whether preimage or account
+			// authorization was used.
 			let (valid_tx, scope) = if context.want_valid_transaction() {
 				let (valid_tx, scope) = if used_preimage_auth {
 					(
