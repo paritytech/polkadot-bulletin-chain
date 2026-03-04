@@ -91,29 +91,9 @@ pub enum Error {
 	#[cfg_attr(feature = "std", error("CID calculation failed: {0}"))]
 	CidCalculationFailed(String),
 
-	/// DAG-PB decoding failed.
-	#[cfg_attr(feature = "std", error("DAG-PB decoding failed: {0}"))]
-	DagDecodingFailed(String),
-
-	/// Authorization call failed (e.g., sudo/authorizer call failure).
-	#[cfg_attr(feature = "std", error("Authorization failed: {0}"))]
-	AuthorizationFailed(String),
-
 	/// On-chain transaction failed (e.g., invalid, dropped, or error).
 	#[cfg_attr(feature = "std", error("Transaction failed: {0}"))]
 	TransactionFailed(String),
-
-	/// Operation timed out.
-	#[cfg_attr(feature = "std", error("Operation timed out: {0}"))]
-	Timeout(String),
-
-	/// Operation is not supported in this context.
-	#[cfg_attr(feature = "std", error("Unsupported operation: {0}"))]
-	UnsupportedOperation(String),
-
-	/// All retry attempts exhausted.
-	#[cfg_attr(feature = "std", error("Retry exhausted: {0}"))]
-	RetryExhausted(String),
 
 	/// Invalid chunk size.
 	#[cfg_attr(feature = "std", error("Invalid chunk size: {0}"))]
@@ -140,12 +120,7 @@ impl Error {
 			Error::RenewalNotFound { .. } => "RENEWAL_NOT_FOUND",
 			Error::RenewalFailed(_) => "RENEWAL_FAILED",
 			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
-			Error::DagDecodingFailed(_) => "DAG_DECODING_FAILED",
-			Error::AuthorizationFailed(_) => "AUTHORIZATION_FAILED",
 			Error::TransactionFailed(_) => "TRANSACTION_FAILED",
-			Error::Timeout(_) => "TIMEOUT",
-			Error::UnsupportedOperation(_) => "UNSUPPORTED_OPERATION",
-			Error::RetryExhausted(_) => "RETRY_EXHAUSTED",
 			Error::InvalidChunkSize(_) => "INVALID_CHUNK_SIZE",
 		}
 	}
@@ -159,8 +134,7 @@ impl Error {
 				Error::StorageFailed(_) |
 				Error::TransactionFailed(_) |
 				Error::RetrievalFailed(_) |
-				Error::RenewalFailed(_) |
-				Error::Timeout(_)
+				Error::RenewalFailed(_)
 		)
 	}
 
@@ -185,12 +159,7 @@ impl Error {
 			Error::RenewalNotFound { .. } => "Verify the block number and extrinsic index",
 			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
-			Error::DagDecodingFailed(_) => "Verify DAG-PB data format",
-			Error::AuthorizationFailed(_) => "Check that the account has authorizer privileges",
 			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
-			Error::Timeout(_) => "Increase timeout or retry",
-			Error::UnsupportedOperation(_) => "This operation is not supported in this context",
-			Error::RetryExhausted(_) => "All retry attempts failed; check underlying cause",
 			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 8 MiB",
 		}
 	}
@@ -523,12 +492,7 @@ mod tests {
 			Error::RenewalNotFound { block: 1, index: 0 },
 			Error::RenewalFailed("renew err".into()),
 			Error::CidCalculationFailed("calc fail".into()),
-			Error::DagDecodingFailed("decode fail".into()),
-			Error::AuthorizationFailed("auth fail".into()),
 			Error::TransactionFailed("tx fail".into()),
-			Error::Timeout("timed out".into()),
-			Error::UnsupportedOperation("not supported".into()),
-			Error::RetryExhausted("retries done".into()),
 			Error::InvalidChunkSize("zero".into()),
 		]
 	}
@@ -552,12 +516,7 @@ mod tests {
 			"RENEWAL_NOT_FOUND",
 			"RENEWAL_FAILED",
 			"CID_CALCULATION_FAILED",
-			"DAG_DECODING_FAILED",
-			"AUTHORIZATION_FAILED",
 			"TRANSACTION_FAILED",
-			"TIMEOUT",
-			"UNSUPPORTED_OPERATION",
-			"RETRY_EXHAUSTED",
 			"INVALID_CHUNK_SIZE",
 		];
 
@@ -575,7 +534,6 @@ mod tests {
 			"TRANSACTION_FAILED",
 			"RETRIEVAL_FAILED",
 			"RENEWAL_FAILED",
-			"TIMEOUT",
 		];
 
 		for error in all_errors() {
