@@ -9,7 +9,7 @@ import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
-import { BulletinError, HashAlgorithm } from "./types.js"
+import { BulletinError, CidCodec, HashAlgorithm } from "./types.js"
 
 /**
  * Calculate content hash using the specified algorithm
@@ -139,6 +139,49 @@ export function estimateAuthorization(
   }
 
   return { transactions, bytes }
+}
+
+/**
+ * SCALE variant type for the on-chain HashingAlgorithm enum
+ */
+export type ScaleHashingAlgorithm =
+  | { type: "Blake2b256" }
+  | { type: "Sha2_256" }
+  | { type: "Keccak256" }
+
+/**
+ * Convert SDK HashAlgorithm (multicodec value) to the SCALE enum variant
+ * expected by PAPI for the on-chain `HashingAlgorithm` type.
+ */
+export function hashAlgorithmToScale(
+  alg: HashAlgorithm,
+): ScaleHashingAlgorithm {
+  switch (alg) {
+    case HashAlgorithm.Blake2b256:
+      return { type: "Blake2b256" }
+    case HashAlgorithm.Sha2_256:
+      return { type: "Sha2_256" }
+    case HashAlgorithm.Keccak256:
+      return { type: "Keccak256" }
+    default:
+      throw new BulletinError(
+        `Unsupported hash algorithm for SCALE encoding: ${alg}`,
+        "INVALID_HASH_ALGORITHM",
+      )
+  }
+}
+
+/**
+ * Check whether store options use non-default CID configuration.
+ *
+ * When true, the SDK should use `store_with_cid_config` instead of `store`
+ * to ensure the on-chain CID matches the client-side CID.
+ */
+export function isNonDefaultCidConfig(
+  cidCodec: CidCodec | number,
+  hashAlgorithm: HashAlgorithm,
+): boolean {
+  return cidCodec !== CidCodec.Raw || hashAlgorithm !== HashAlgorithm.Blake2b256
 }
 
 export function validateChunkSize(size: number): void {

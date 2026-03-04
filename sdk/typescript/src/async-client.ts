@@ -22,7 +22,13 @@ import {
   type StoreResult,
   type WaitFor,
 } from "./types.js"
-import { calculateCid, estimateAuthorization } from "./utils.js"
+import {
+  calculateCid,
+  estimateAuthorization,
+  hashAlgorithmToScale,
+  isNonDefaultCidConfig,
+  type ScaleHashingAlgorithm,
+} from "./utils.js"
 
 /**
  * Minimal interface for a decoded PAPI runtime event.
@@ -82,6 +88,10 @@ export interface BulletinTypedApi {
   tx: {
     TransactionStorage: {
       store(args: { data: Binary | Uint8Array }): PapiTransaction
+      store_with_cid_config(args: {
+        cid: { codec: bigint; hashing: ScaleHashingAlgorithm }
+        data: Binary | Uint8Array
+      }): PapiTransaction
       authorize_account(args: {
         who: string
         transactions: number
@@ -92,6 +102,16 @@ export interface BulletinTypedApi {
         max_size: bigint
       }): PapiTransaction
       renew(args: { block: number; index: number }): PapiTransaction
+      remove_expired_account_authorization(args: {
+        who: string
+      }): PapiTransaction
+      remove_expired_preimage_authorization(args: {
+        content_hash: Binary | Uint8Array
+      }): PapiTransaction
+      refresh_account_authorization(args: { who: string }): PapiTransaction
+      refresh_preimage_authorization(args: {
+        content_hash: Binary | Uint8Array
+      }): PapiTransaction
     }
     Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
@@ -595,9 +615,17 @@ export class AsyncBulletinClient implements StoreExecutor {
     const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 
     try {
-      const tx = this.api.tx.TransactionStorage.store({
-        data: new Binary(data),
-      })
+      const tx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
+        ? this.api.tx.TransactionStorage.store_with_cid_config({
+            cid: {
+              codec: BigInt(cidCodec),
+              hashing: hashAlgorithmToScale(hashAlgorithm),
+            },
+            data: new Binary(data),
+          })
+        : this.api.tx.TransactionStorage.store({
+            data: new Binary(data),
+          })
 
       // Use progress-aware submission if callback provided, otherwise use simple submission
       const result = progressCallback
@@ -676,9 +704,17 @@ export class AsyncBulletinClient implements StoreExecutor {
 
         chunk.cid = cid
 
-        const tx = this.api.tx.TransactionStorage.store({
-          data: new Binary(chunk.data),
-        })
+        const tx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
+          ? this.api.tx.TransactionStorage.store_with_cid_config({
+              cid: {
+                codec: BigInt(cidCodec),
+                hashing: hashAlgorithmToScale(hashAlgorithm),
+              },
+              data: new Binary(chunk.data),
+            })
+          : this.api.tx.TransactionStorage.store({
+              data: new Binary(chunk.data),
+            })
         await this.signAndSubmitFinalized(tx)
 
         chunkCids.push(cid)
@@ -721,9 +757,17 @@ export class AsyncBulletinClient implements StoreExecutor {
       const builder = new UnixFsDagBuilder()
       const manifest = await builder.build(chunks, hashAlgorithm)
 
-      const manifestTx = this.api.tx.TransactionStorage.store({
-        data: new Binary(manifest.dagBytes),
-      })
+      const manifestTx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
+        ? this.api.tx.TransactionStorage.store_with_cid_config({
+            cid: {
+              codec: BigInt(cidCodec),
+              hashing: hashAlgorithmToScale(hashAlgorithm),
+            },
+            data: new Binary(manifest.dagBytes),
+          })
+        : this.api.tx.TransactionStorage.store({
+            data: new Binary(manifest.dagBytes),
+          })
       await this.signAndSubmitFinalized(manifestTx)
 
       manifestCid = manifest.rootCid
@@ -866,6 +910,152 @@ export class AsyncBulletinClient implements StoreExecutor {
   }
 
   /**
+   * Refresh an account authorization (extends expiry)
+   *
+   * Wraps in Sudo if `useSudo: true` is set in config (default: false).
+   * Requires Authorizer origin on-chain.
+   *
+   * @param who - Account address to refresh authorization for
+   * @param progressCallback - Optional callback to receive transaction status events
+   */
+  async refreshAccountAuthorization(
+    who: string,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
+    try {
+      const authTx =
+        this.api.tx.TransactionStorage.refresh_account_authorization({ who })
+      const tx = this.wrapInSudo(authTx)
+
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx)
+
+      return {
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+      }
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to refresh account authorization: ${error}`,
+        "AUTHORIZATION_FAILED",
+        error,
+      )
+    }
+  }
+
+  /**
+   * Refresh a preimage authorization (extends expiry)
+   *
+   * Wraps in Sudo if `useSudo: true` is set in config (default: false).
+   * Requires Authorizer origin on-chain.
+   *
+   * @param contentHash - Blake2b-256 hash of the authorized content
+   * @param progressCallback - Optional callback to receive transaction status events
+   */
+  async refreshPreimageAuthorization(
+    contentHash: Uint8Array,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
+    try {
+      const authTx =
+        this.api.tx.TransactionStorage.refresh_preimage_authorization({
+          content_hash: new Binary(contentHash),
+        })
+      const tx = this.wrapInSudo(authTx)
+
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx)
+
+      return {
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+      }
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to refresh preimage authorization: ${error}`,
+        "AUTHORIZATION_FAILED",
+        error,
+      )
+    }
+  }
+
+  /**
+   * Remove an expired account authorization
+   *
+   * Can be called by anyone (no special origin required).
+   *
+   * @param who - Account address with expired authorization
+   * @param progressCallback - Optional callback to receive transaction status events
+   */
+  async removeExpiredAccountAuthorization(
+    who: string,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
+    try {
+      const tx =
+        this.api.tx.TransactionStorage.remove_expired_account_authorization({
+          who,
+        })
+
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx)
+
+      return {
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+      }
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to remove expired account authorization: ${error}`,
+        "TRANSACTION_FAILED",
+        error,
+      )
+    }
+  }
+
+  /**
+   * Remove an expired preimage authorization
+   *
+   * Can be called by anyone (no special origin required).
+   *
+   * @param contentHash - Blake2b-256 hash of the expired authorization
+   * @param progressCallback - Optional callback to receive transaction status events
+   */
+  async removeExpiredPreimageAuthorization(
+    contentHash: Uint8Array,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
+    try {
+      const tx =
+        this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
+          content_hash: new Binary(contentHash),
+        })
+
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx)
+
+      return {
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+      }
+    } catch (error) {
+      throw new BulletinError(
+        `Failed to remove expired preimage authorization: ${error}`,
+        "TRANSACTION_FAILED",
+        error,
+      )
+    }
+  }
+
+  /**
    * Store preimage-authorized content as an unsigned (bare) transaction.
    *
    * Use this for content that has been pre-authorized via `authorizePreimage()`.
@@ -908,7 +1098,15 @@ export class AsyncBulletinClient implements StoreExecutor {
     const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
 
     try {
-      const tx = this.api.tx.TransactionStorage.store({ data: dataBytes })
+      const tx = isNonDefaultCidConfig(cidCodec, hashAlgorithm)
+        ? this.api.tx.TransactionStorage.store_with_cid_config({
+            cid: {
+              codec: BigInt(cidCodec),
+              hashing: hashAlgorithmToScale(hashAlgorithm),
+            },
+            data: dataBytes,
+          })
+        : this.api.tx.TransactionStorage.store({ data: dataBytes })
       const bareTxHex = await tx.getBareTx()
       const finalized = await this.submit(bareTxHex)
 
