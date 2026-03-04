@@ -275,17 +275,13 @@ const RECOVERY_HINTS: Record<string, string> = {
   [ErrorCode.TRANSACTION_FAILED]:
     "Verify transaction parameters and account nonce",
   [ErrorCode.STORAGE_FAILED]: "Check node connectivity and try again",
-  [ErrorCode.NETWORK_ERROR]:
-    "Check network connectivity to the RPC endpoint",
+  [ErrorCode.NETWORK_ERROR]: "Check network connectivity to the RPC endpoint",
   [ErrorCode.CHUNKING_FAILED]:
     "Verify data integrity and chunker configuration",
   [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
-  [ErrorCode.RETRIEVAL_FAILED]:
-    "The data may not be available yet; try again",
-  [ErrorCode.RENEWAL_NOT_FOUND]:
-    "Verify the block number and extrinsic index",
-  [ErrorCode.RENEWAL_FAILED]:
-    "Check that storage hasn't expired, then retry",
+  [ErrorCode.RETRIEVAL_FAILED]: "The data may not be available yet; try again",
+  [ErrorCode.RENEWAL_NOT_FOUND]: "Verify the block number and extrinsic index",
+  [ErrorCode.RENEWAL_FAILED]: "Check that storage hasn't expired, then retry",
   [ErrorCode.TIMEOUT]: "Increase timeout or retry",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",

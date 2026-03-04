@@ -10,12 +10,12 @@ import { Binary, type PolkadotSigner } from "polkadot-api"
 import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
-  ErrorCode,
   type ChunkedStoreResult,
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,

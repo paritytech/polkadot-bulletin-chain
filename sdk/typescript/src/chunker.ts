@@ -7,10 +7,10 @@
 
 import {
   BulletinError,
-  ErrorCode,
   type Chunk,
   type ChunkerConfig,
   DEFAULT_CHUNKER_CONFIG,
+  ErrorCode,
 } from "./types.js"
 
 /** Maximum chunk size allowed (2 MiB, Bitswap compatibility limit) */
