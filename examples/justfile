@@ -72,15 +72,48 @@ _resolve-zombienet-bin:
         fi
     else
         ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
+        if [ -z "$ZOMBIENET_BIN" ]; then
+            echo "❌ Error: Zombienet binary not found" >&2
+            echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory" >&2
+            exit 1
+        fi
     fi
     ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
     if [ ! -x "$ZOMBIENET_BIN" ]; then
-        echo "❌ Error: Zombienet binary not found" >&2
-        echo "   Tried: $ZOMBIENET_BIN" >&2
-        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory" >&2
+        echo "❌ Error: Zombienet binary not executable: $ZOMBIENET_BIN" >&2
         exit 1
     fi
     echo "$ZOMBIENET_BIN"
+
+# Wait for an RPC endpoint to accept connections, checking that the background process stays alive.
+# Parameters:
+#   pid - PID of the background process to monitor
+#   log_file - Log file to tail on failure
+#   port - TCP port to check (default: 10000)
+#   timeout - Seconds to wait (default: 30)
+_wait-for-rpc pid log_file port="10000" timeout="30":
+    #!/usr/bin/env bash
+    set -e
+    echo "   Waiting for RPC on 127.0.0.1:{{ port }}..."
+    for i in $(seq 1 {{ timeout }}); do
+        if ! kill -0 {{ pid }} 2>/dev/null; then
+            echo "   ❌ Process (PID {{ pid }}) died during startup. Logs:"
+            tail -20 "{{ log_file }}"
+            exit 1
+        fi
+        if (echo > /dev/tcp/127.0.0.1/{{ port }}) 2>/dev/null; then
+            echo "   ✅ RPC is reachable (after ${i}s)"
+            exit 0
+        fi
+        if [ "$i" -eq {{ timeout }} ]; then
+            echo "   ❌ RPC not reachable after {{ timeout }} seconds"
+            echo "   Debug: ss -tlnp | grep {{ port }}:"
+            ss -tlnp 2>/dev/null | grep {{ port }} || netstat -tlnp 2>/dev/null | grep {{ port }} || true
+            tail -20 "{{ log_file }}"
+            exit 1
+        fi
+        sleep 1
+    done
 
 # Start solo chain or parachain with zombienet in background
 # Parameters:
@@ -111,26 +144,7 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    echo "   Waiting for RPC on 127.0.0.1:10000..."
-    for i in $(seq 1 30); do
-        if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
-            echo "   ❌ Zombienet process died during startup. Logs:"
-            tail -20 {{ test_dir }}/zombienet.log
-            exit 1
-        fi
-        if (echo > /dev/tcp/127.0.0.1/10000) 2>/dev/null; then
-            echo "   ✅ RPC is reachable (after ${i}s)"
-            break
-        fi
-        if [ "$i" -eq 30 ]; then
-            echo "   ❌ RPC not reachable after 30 seconds"
-            echo "   Debug: ss -tlnp | grep 10000:"
-            ss -tlnp 2>/dev/null | grep 10000 || netstat -tlnp 2>/dev/null | grep 10000 || true
-            tail -20 {{ test_dir }}/zombienet.log
-            exit 1
-        fi
-        sleep 1
-    done
+    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
 # Start westend parachain with zombienet in background
 # Parameters:
@@ -188,26 +202,7 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    echo "   Waiting for RPC on 127.0.0.1:10000..."
-    for i in $(seq 1 30); do
-        if ! kill -0 $ZOMBIENET_PID 2>/dev/null; then
-            echo "   ❌ Zombienet process died during startup. Logs:"
-            tail -20 {{ test_dir }}/zombienet.log
-            exit 1
-        fi
-        if (echo > /dev/tcp/127.0.0.1/10000) 2>/dev/null; then
-            echo "   ✅ RPC is reachable (after ${i}s)"
-            break
-        fi
-        if [ "$i" -eq 30 ]; then
-            echo "   ❌ RPC not reachable after 30 seconds"
-            echo "   Debug: ss -tlnp | grep 10000:"
-            ss -tlnp 2>/dev/null | grep 10000 || netstat -tlnp 2>/dev/null | grep 10000 || true
-            tail -20 {{ test_dir }}/zombienet.log
-            exit 1
-        fi
-        sleep 1
-    done
+    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
 # Check if Docker is available and running
 _check-docker:
