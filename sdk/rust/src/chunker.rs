@@ -31,7 +31,7 @@ pub trait Chunker {
 	/// Validate chunk size.
 	fn validate_chunk_size(&self, size: usize) -> Result<()> {
 		if size == 0 {
-			return Err(Error::InvalidConfig("Chunk size cannot be zero".into()));
+			return Err(Error::InvalidChunkSize("Chunk size cannot be zero".into()));
 		}
 		if size > MAX_CHUNK_SIZE {
 			return Err(Error::ChunkTooLarge(size as u64));
@@ -50,7 +50,7 @@ impl FixedSizeChunker {
 	/// Create a new fixed-size chunker with the given configuration.
 	pub fn new(config: ChunkerConfig) -> Result<Self> {
 		if config.chunk_size == 0 {
-			return Err(Error::InvalidConfig("Chunk size cannot be zero".into()));
+			return Err(Error::InvalidChunkSize("Chunk size cannot be zero".into()));
 		}
 		if config.chunk_size > MAX_CHUNK_SIZE as u32 {
 			return Err(Error::ChunkTooLarge(config.chunk_size as u64));

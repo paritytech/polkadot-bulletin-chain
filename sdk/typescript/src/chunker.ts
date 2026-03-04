@@ -7,6 +7,7 @@
 
 import {
   BulletinError,
+  ErrorCode,
   type Chunk,
   type ChunkerConfig,
   DEFAULT_CHUNKER_CONFIG,
@@ -31,13 +32,13 @@ export class FixedSizeChunker {
     if (this.config.chunkSize <= 0) {
       throw new BulletinError(
         "Chunk size must be greater than 0",
-        "INVALID_CONFIG",
+        ErrorCode.INVALID_CHUNK_SIZE,
       )
     }
     if (this.config.chunkSize > MAX_CHUNK_SIZE) {
       throw new BulletinError(
         `Chunk size ${this.config.chunkSize} exceeds maximum allowed size of ${MAX_CHUNK_SIZE}`,
-        "CHUNK_TOO_LARGE",
+        ErrorCode.CHUNK_TOO_LARGE,
       )
     }
   }
@@ -47,12 +48,12 @@ export class FixedSizeChunker {
    */
   chunk(data: Uint8Array): Chunk[] {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
     if (data.length > MAX_FILE_SIZE) {
       throw new BulletinError(
         `Data size ${data.length} exceeds maximum allowed size of ${MAX_FILE_SIZE} (64 MiB)`,
-        "FILE_TOO_LARGE",
+        ErrorCode.FILE_TOO_LARGE,
       )
     }
 
@@ -100,7 +101,7 @@ export class FixedSizeChunker {
  */
 export function reassembleChunks(chunks: Chunk[]): Uint8Array {
   if (chunks.length === 0) {
-    throw new BulletinError("No chunks to reassemble", "EMPTY_DATA")
+    throw new BulletinError("No chunks to reassemble", ErrorCode.EMPTY_DATA)
   }
 
   // Sort by index to ensure correct order
@@ -109,7 +110,10 @@ export function reassembleChunks(chunks: Chunk[]): Uint8Array {
   // Validate indices are contiguous starting from 0
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i]?.index !== i) {
-      throw new BulletinError(`Missing chunk at index ${i}`, "MISSING_CHUNK")
+      throw new BulletinError(
+        `Missing chunk at index ${i}`,
+        ErrorCode.CHUNKING_FAILED,
+      )
     }
   }
 
