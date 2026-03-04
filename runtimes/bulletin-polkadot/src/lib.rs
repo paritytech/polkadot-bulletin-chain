@@ -168,6 +168,8 @@ pub fn native_version() -> NativeVersion {
 // There are fewer system operations on this chain (e.g. staking, governance, etc.). Use a higher
 // percentage of the block for data storage.
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
+// Block length.
+const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
 
 parameter_types! {
 	pub const BlockHashCount: BlockNumber = 2400;
@@ -180,8 +182,14 @@ parameter_types! {
 		);
 	// Note: Max transaction size is 8 MB. Set max block size to 10 MB to facilitate data storage.
 	// This is double the "normal" Relay Chain block length limit.
-	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
-		::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+	pub BlockLength: frame_system::limits::BlockLength =
+		frame_system::limits::BlockLength::builder()
+		.max_length(MAX_BLOCK_LENGTH)
+		.modify_max_length_for_class(
+			frame_support::dispatch::DispatchClass::Normal,
+			|m| *m = NORMAL_DISPATCH_RATIO * MAX_BLOCK_LENGTH,
+		)
+		.build();
 	// Let's use substrate one: https://github.com/paritytech/ss58-registry/blob/main/ss58-registry.json
 	// (Note: Possibly we can add new one.)
 	pub const SS58Prefix: u8 = 42;
