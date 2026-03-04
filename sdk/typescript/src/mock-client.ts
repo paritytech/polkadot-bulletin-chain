@@ -12,18 +12,21 @@
  */
 
 import type { Binary } from "polkadot-api"
-import type { AsyncClientConfig, TransactionReceipt } from "./async-client.js"
+import {
+  type AsyncClientConfig,
+  StoreBuilder,
+  type StoreExecutor,
+  type TransactionReceipt,
+} from "./async-client.js"
 import {
   BulletinError,
   CidCodec,
   DEFAULT_STORE_OPTIONS,
-  type HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
-  type WaitFor,
 } from "./types.js"
-import { calculateCid } from "./utils.js"
+import { calculateCid, estimateAuthorization } from "./utils.js"
 
 /**
  * Configuration for the mock Bulletin client
@@ -49,58 +52,6 @@ export type MockOperation =
   | { type: "authorize_preimage"; contentHash: Uint8Array; maxSize: bigint }
 
 /**
- * Builder for mock store operations with fluent API
- */
-export class MockStoreBuilder {
-  private data: Uint8Array
-  private options: StoreOptions = { ...DEFAULT_STORE_OPTIONS }
-  private callback?: ProgressCallback
-
-  constructor(
-    private client: MockBulletinClient,
-    data: Binary | Uint8Array,
-  ) {
-    // Convert Binary to Uint8Array if needed
-    this.data = data instanceof Uint8Array ? data : data.asBytes()
-  }
-
-  /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
-  withCodec(codec: CidCodec | number): this {
-    this.options.cidCodec = codec
-    return this
-  }
-
-  /** Set the hash algorithm */
-  withHashAlgorithm(algorithm: HashAlgorithm): this {
-    this.options.hashingAlgorithm = algorithm
-    return this
-  }
-
-  /** Set what to wait for before returning */
-  withFinalization(waitFor: WaitFor): this {
-    this.options.waitFor = waitFor
-    return this
-  }
-
-  /** Set custom store options */
-  withOptions(options: StoreOptions): this {
-    this.options = options
-    return this
-  }
-
-  /** Set progress callback for chunked uploads */
-  withCallback(callback: ProgressCallback): this {
-    this.callback = callback
-    return this
-  }
-
-  /** Execute the mock store operation */
-  async send(): Promise<StoreResult> {
-    return this.client.storeWithOptions(this.data, this.options, this.callback)
-  }
-}
-
-/**
  * Mock Bulletin client for testing
  *
  * This client simulates blockchain operations without requiring a running node.
@@ -123,7 +74,7 @@ export class MockStoreBuilder {
  * expect(ops).toHaveLength(1);
  * ```
  */
-export class MockBulletinClient {
+export class MockBulletinClient implements StoreExecutor {
   /** Client configuration */
   public config: Required<
     Omit<MockClientConfig, "simulateAuthFailure" | "simulateStorageFailure">
@@ -142,11 +93,9 @@ export class MockBulletinClient {
   constructor(config?: Partial<MockClientConfig>) {
     this.config = {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
-      maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      checkAuthorizationBeforeUpload:
-        config?.checkAuthorizationBeforeUpload ?? true,
+      useSudo: config?.useSudo ?? false,
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
     }
@@ -186,8 +135,8 @@ export class MockBulletinClient {
    *
    * @param data - Data to store (PAPI Binary or Uint8Array)
    */
-  store(data: Binary | Uint8Array): MockStoreBuilder {
-    return new MockStoreBuilder(this, data)
+  store(data: Binary | Uint8Array): StoreBuilder {
+    return new StoreBuilder(this, data)
   }
 
   /**
@@ -205,11 +154,8 @@ export class MockBulletinClient {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    // Simulate authorization check failure
-    if (
-      this.config.checkAuthorizationBeforeUpload &&
-      this.config.simulateAuthFailure
-    ) {
+    // Simulate authorization failure
+    if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Insufficient authorization: need 100 bytes, have 0 bytes",
         "INSUFFICIENT_AUTHORIZATION",
@@ -224,7 +170,6 @@ export class MockBulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
-    // Calculate CID using defaults if not specified (this is real, not mocked)
     const cidCodec = opts.cidCodec ?? CidCodec.Raw
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
@@ -313,15 +258,10 @@ export class MockBulletinClient {
     transactions: number
     bytes: number
   } {
-    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize)
-    let transactions = numChunks
-    let bytes = dataSize
-
-    if (this.config.createManifest) {
-      transactions += 1
-      bytes += numChunks * 10 + 1000
-    }
-
-    return { transactions, bytes }
+    return estimateAuthorization(
+      dataSize,
+      this.config.defaultChunkSize,
+      this.config.createManifest,
+    )
   }
 }

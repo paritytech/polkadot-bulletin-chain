@@ -116,6 +116,31 @@ export function cidToBytes(cid: CID): Uint8Array {
  *
  * @throws BulletinError if chunk size is invalid
  */
+/**
+ * Estimate authorization needed for storing data
+ *
+ * @param dataSize - Total data size in bytes
+ * @param chunkSize - Size of each chunk in bytes
+ * @param createManifest - Whether a DAG-PB manifest will be created
+ */
+export function estimateAuthorization(
+  dataSize: number,
+  chunkSize: number,
+  createManifest: boolean,
+): { transactions: number; bytes: number } {
+  const numChunks = Math.ceil(dataSize / chunkSize)
+  let transactions = numChunks
+  let bytes = dataSize
+
+  if (createManifest) {
+    transactions += 1
+    // Estimate manifest size (~10 bytes per chunk link + 1KB overhead)
+    bytes += numChunks * 10 + 1000
+  }
+
+  return { transactions, bytes }
+}
+
 export function validateChunkSize(size: number): void {
   if (size <= 0) {
     throw new BulletinError("Chunk size must be positive", "INVALID_CHUNK_SIZE")

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest"
 import { BulletinClient } from "../../src/client"
-import { BulletinError, HashAlgorithm } from "../../src/types"
+import { BulletinError, type HashAlgorithm } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
 describe("Error Handling", () => {

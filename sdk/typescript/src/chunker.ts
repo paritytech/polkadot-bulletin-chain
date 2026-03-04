@@ -89,3 +89,38 @@ export class FixedSizeChunker {
     return this.config.chunkSize
   }
 }
+
+/**
+ * Reassemble chunks back into the original data
+ *
+ * Chunks are sorted by index before concatenation to handle out-of-order input.
+ *
+ * @param chunks - Array of chunks to reassemble
+ * @returns The original data as a single Uint8Array
+ */
+export function reassembleChunks(chunks: Chunk[]): Uint8Array {
+  if (chunks.length === 0) {
+    throw new BulletinError("No chunks to reassemble", "EMPTY_DATA")
+  }
+
+  // Sort by index to ensure correct order
+  const sorted = [...chunks].sort((a, b) => a.index - b.index)
+
+  // Validate indices are contiguous starting from 0
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i]?.index !== i) {
+      throw new BulletinError(`Missing chunk at index ${i}`, "MISSING_CHUNK")
+    }
+  }
+
+  // Calculate total size and concatenate
+  const totalSize = sorted.reduce((sum, chunk) => sum + chunk.data.length, 0)
+  const result = new Uint8Array(totalSize)
+  let offset = 0
+  for (const chunk of sorted) {
+    result.set(chunk.data, offset)
+    offset += chunk.data.length
+  }
+
+  return result
+}

@@ -17,62 +17,68 @@
  *   node examples/large-file.js large_video.mp4
  */
 
-import { AsyncBulletinClient, StoreOptions } from '../dist/index.js';
-import { createClient, Binary } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
-import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
-import { getPolkadotSigner } from 'polkadot-api/signer';
-import { DEV_PHRASE } from '@polkadot-labs/hdkd-helpers';
-import { readFile } from 'fs/promises';
+import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
+import { DEV_PHRASE } from "@polkadot-labs/hdkd-helpers"
+import { readFile } from "fs/promises"
+import { Binary, createClient } from "polkadot-api"
+import { getPolkadotSigner } from "polkadot-api/signer"
+import { getWsProvider } from "polkadot-api/ws-provider/node"
+import { AsyncBulletinClient, StoreOptions } from "../dist/index.js"
 
 async function main() {
-  console.log('🚀 Bulletin SDK - Large File Example\n');
+  console.log("🚀 Bulletin SDK - Large File Example\n")
 
   // 1. Get file path from command line
-  const filePath = process.argv[2];
+  const filePath = process.argv[2]
   if (!filePath) {
-    console.error('Usage: node large-file.js <file_path>');
-    console.error('Example: node large-file.js large_video.mp4');
-    process.exit(1);
+    console.error("Usage: node large-file.js <file_path>")
+    console.error("Example: node large-file.js large_video.mp4")
+    process.exit(1)
   }
 
-  console.log('📁 Reading file:', filePath);
+  console.log("📁 Reading file:", filePath)
 
   // 2. Read file data and convert to PAPI Binary
-  const fileBuffer = await readFile(filePath);
-  const data = Binary.fromBytes(fileBuffer);
-  const sizeMB = fileBuffer.length / 1048576;
-  console.log(`📊 File size: ${fileBuffer.length} bytes (${sizeMB.toFixed(2)} MB)\n`);
+  const fileBuffer = await readFile(filePath)
+  const data = Binary.fromBytes(fileBuffer)
+  const sizeMB = fileBuffer.length / 1048576
+  console.log(
+    `📊 File size: ${fileBuffer.length} bytes (${sizeMB.toFixed(2)} MB)\n`,
+  )
 
   // 3. Setup connection
-  console.log('📡 Connecting to Bulletin Chain at ws://localhost:9944...');
-  const wsProvider = getWsProvider('ws://localhost:9944');
-  const papiClient = createClient(wsProvider);
-  const api = papiClient.getTypedApi(/* your chain descriptors */);
+  console.log("📡 Connecting to Bulletin Chain at ws://localhost:9944...")
+  const wsProvider = getWsProvider("ws://localhost:9944")
+  const papiClient = createClient(wsProvider)
+  const api = papiClient.getTypedApi(/* your chain descriptors */)
 
-  const keyring = sr25519CreateDerive(DEV_PHRASE);
-  const signer = getPolkadotSigner(keyring.derive("//Alice"), "Alice", 42);
+  const keyring = sr25519CreateDerive(DEV_PHRASE)
+  const signer = getPolkadotSigner(keyring.derive("//Alice"), "Alice", 42)
 
-  console.log('✅ Connected to Bulletin Chain\n');
+  console.log("✅ Connected to Bulletin Chain\n")
 
   // 4. Create client with custom config (directly with PAPI client and signer)
   const client = new AsyncBulletinClient(api, signer, {
     defaultChunkSize: 1024 * 1024, // 1 MiB chunks
     maxParallel: 8,
     createManifest: true,
-  });
+  })
 
   // 5. Estimate authorization needed
-  const estimate = client.estimateAuthorization(data.asBytes().length);
-  console.log('📋 Authorization estimate:');
-  console.log('   Transactions needed:', estimate.transactions);
-  console.log('   Total bytes:', estimate.bytes, `(${(estimate.bytes / 1048576).toFixed(2)} MB)\n`);
+  const estimate = client.estimateAuthorization(data.asBytes().length)
+  console.log("📋 Authorization estimate:")
+  console.log("   Transactions needed:", estimate.transactions)
+  console.log(
+    "   Total bytes:",
+    estimate.bytes,
+    `(${(estimate.bytes / 1048576).toFixed(2)} MB)\n`,
+  )
 
   // 6. Store with progress tracking
-  console.log('⏳ Uploading with chunking and manifest creation...\n');
+  console.log("⏳ Uploading with chunking and manifest creation...\n")
 
-  let chunksCompleted = 0;
-  let totalChunks = 0;
+  let chunksCompleted = 0
+  let totalChunks = 0
 
   const result = await client.storeChunked(
     data,
@@ -80,66 +86,70 @@ async function main() {
     undefined, // use default options
     (event) => {
       switch (event.type) {
-        case 'chunk_started':
+        case "chunk_started":
           if (totalChunks === 0) {
-            totalChunks = event.total;
-            console.log(`🔨 Starting upload of ${totalChunks} chunks...`);
+            totalChunks = event.total
+            console.log(`🔨 Starting upload of ${totalChunks} chunks...`)
           }
-          break;
+          break
 
-        case 'chunk_completed':
-          chunksCompleted++;
-          const progress = (chunksCompleted / event.total) * 100;
+        case "chunk_completed": {
+          chunksCompleted++
+          const progress = (chunksCompleted / event.total) * 100
           console.log(
-            `   ✅ Chunk ${chunksCompleted}/${event.total} completed (${progress.toFixed(1)}%) - ${event.cid.toString()}`
-          );
-          break;
+            `   ✅ Chunk ${chunksCompleted}/${event.total} completed (${progress.toFixed(1)}%) - ${event.cid.toString()}`,
+          )
+          break
+        }
 
-        case 'chunk_failed':
-          console.log(`   ❌ Chunk ${event.index + 1}/${event.total} failed:`, event.error.message);
-          break;
+        case "chunk_failed":
+          console.log(
+            `   ❌ Chunk ${event.index + 1}/${event.total} failed:`,
+            event.error.message,
+          )
+          break
 
-        case 'manifest_started':
-          console.log('\n📦 Creating DAG-PB manifest...');
-          break;
+        case "manifest_started":
+          console.log("\n📦 Creating DAG-PB manifest...")
+          break
 
-        case 'manifest_created':
-          console.log('   ✅ Manifest created:', event.cid.toString(), '\n');
-          break;
+        case "manifest_created":
+          console.log("   ✅ Manifest created:", event.cid.toString(), "\n")
+          break
 
-        case 'completed':
-          console.log('🎉 Upload complete!');
+        case "completed":
+          console.log("🎉 Upload complete!")
           if (event.manifestCid) {
-            console.log('   Manifest included\n');
+            console.log("   Manifest included\n")
           }
-          break;
+          break
       }
-    }
-  );
+    },
+  )
 
   // 7. Display results
-  console.log('📊 Final Results:');
-  console.log('   Total chunks:', result.numChunks);
-  console.log('   Total size:', result.totalSize, 'bytes');
-  console.log('   Chunk CIDs:', result.chunkCids.length, 'CIDs stored');
+  console.log("📊 Final Results:")
+  console.log("   Total chunks:", result.numChunks)
+  console.log("   Total size:", result.totalSize, "bytes")
+  console.log("   Chunk CIDs:", result.chunkCids.length, "CIDs stored")
 
   if (result.manifestCid) {
-    console.log('\n📦 DAG-PB Manifest:');
-    console.log('   CID:', result.manifestCid.toString());
-    console.log('\n💡 You can retrieve this file via IPFS using:');
-    console.log('   ipfs cat', result.manifestCid.toString());
-    console.log('   Or via HTTP gateway:');
-    console.log('   https://ipfs.io/ipfs/' + result.manifestCid.toString());
+    console.log("\n📦 DAG-PB Manifest:")
+    console.log("   CID:", result.manifestCid.toString())
+    console.log("\n💡 You can retrieve this file via IPFS using:")
+    console.log("   ipfs cat", result.manifestCid.toString())
+    console.log("   Or via HTTP gateway:")
+    console.log("   https://ipfs.io/ipfs/" + result.manifestCid.toString())
   }
 
-  console.log('\n🎉 Chunked upload completed successfully!');
-  console.log('\n💡 Next steps:');
-  console.log('   - Use the manifest CID to retrieve the full file');
-  console.log('   - Access via IPFS gateway');
-  console.log('   - Individual chunks are also stored and accessible');
+  console.log("\n🎉 Chunked upload completed successfully!")
+  console.log("\n💡 Next steps:")
+  console.log("   - Use the manifest CID to retrieve the full file")
+  console.log("   - Access via IPFS gateway")
+  console.log("   - Individual chunks are also stored and accessible")
 
   // Cleanup
-  await papiClient.destroy();
+  await papiClient.destroy()
 }
 
-main().catch(console.error);
+main().catch(console.error)

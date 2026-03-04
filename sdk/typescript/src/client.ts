@@ -19,7 +19,7 @@ import {
   type ProgressCallback,
   type StoreOptions,
 } from "./types.js"
-import { calculateCid } from "./utils.js"
+import { calculateCid, estimateAuthorization } from "./utils.js"
 
 /**
  * High-level client for Bulletin Chain operations
@@ -37,11 +37,8 @@ export class BulletinClient {
     this.config = {
       endpoint: config.endpoint,
       defaultChunkSize: config.defaultChunkSize ?? 1024 * 1024,
-      maxParallel: config.maxParallel ?? 8,
       createManifest: config.createManifest ?? true,
       chunkingThreshold: config.chunkingThreshold ?? 2 * 1024 * 1024,
-      checkAuthorizationBeforeUpload:
-        config.checkAuthorizationBeforeUpload ?? true,
     }
   }
 
@@ -60,7 +57,6 @@ export class BulletinClient {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
-    // Calculate CID using defaults if not specified
     const cidCodec = opts.cidCodec ?? CidCodec.Raw
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
@@ -92,13 +88,11 @@ export class BulletinClient {
     const chunkerConfig: ChunkerConfig = {
       ...DEFAULT_CHUNKER_CONFIG,
       chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
-      maxParallel: config?.maxParallel ?? this.config.maxParallel,
       createManifest: config?.createManifest ?? this.config.createManifest,
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
-    // Extract options with defaults
     const cidCodec = opts.cidCodec ?? CidCodec.Raw
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
@@ -137,7 +131,6 @@ export class BulletinClient {
             error: error as Error,
           })
         }
-        // Wrap raw errors in BulletinError for consistent error handling
         if (error instanceof BulletinError) {
           throw error
         }
@@ -191,37 +184,10 @@ export class BulletinClient {
     transactions: number
     bytes: number
   } {
-    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize)
-    let transactions = numChunks
-    let bytes = dataSize
-
-    if (this.config.createManifest) {
-      transactions += 1
-      // Estimate manifest size (~10 bytes per chunk + 1KB overhead)
-      bytes += numChunks * 10 + 1000
-    }
-
-    return { transactions, bytes }
+    return estimateAuthorization(
+      dataSize,
+      this.config.defaultChunkSize,
+      this.config.createManifest,
+    )
   }
 }
-
-/**
- * Example integration with PAPI (placeholder)
- *
- * ```typescript
- * import { createClient } from 'polkadot-api';
- * import { getWsProvider } from 'polkadot-api/ws-provider/web';
- *
- * // Connect to chain
- * const wsProvider = getWsProvider('ws://localhost:9944');
- * const papiClient = createClient(wsProvider);
- *
- * // Use Bulletin SDK
- * const bulletinClient = new BulletinClient({ endpoint: 'ws://localhost:9944' });
- * const { data, cid } = await bulletinClient.prepareStore(myData);
- *
- * // Submit via PAPI
- * // const tx = api.tx.TransactionStorage.store({ data });
- * // await tx.signAndSubmit(signer);
- * ```
- */
