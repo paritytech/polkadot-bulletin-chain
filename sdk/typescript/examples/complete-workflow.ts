@@ -45,7 +45,11 @@ async function main() {
   console.log("═══ Account Authorization Workflow ═══\n")
 
   // Create client for Alice (sudo account)
-  const aliceClient = new AsyncBulletinClient(api, aliceSigner)
+  const aliceClient = new AsyncBulletinClient(
+    api,
+    aliceSigner,
+    papiClient.submit,
+  )
 
   // Authorize Bob's account
   const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
@@ -72,7 +76,7 @@ async function main() {
   console.log("═══ Store Data Workflow ═══\n")
 
   // Create client for Bob
-  const bobClient = new AsyncBulletinClient(api, bobSigner)
+  const bobClient = new AsyncBulletinClient(api, bobSigner, papiClient.submit)
 
   const message =
     "Hello from Bob! This data is stored with proper authorization."
