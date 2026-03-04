@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "playwright test",
+    "test": "playwright test"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",

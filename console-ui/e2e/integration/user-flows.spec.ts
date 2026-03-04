@@ -4,63 +4,21 @@
  * These tests exercise the UI the same way a real user would:
  * authorize storage, upload data, and download it back.
  *
- * Run with: npx playwright test --project=integration
+ * Run with: playwright test
  *
  * Prerequisites:
  *   ./target/release/polkadot-bulletin-chain --dev --ipfs-server --rpc-port 10000
  *   (node must be running on ws://localhost:10000 with IPFS enabled)
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "../fixtures";
+import { waitForConnection, waitForMinBlock, navigateTo } from "../utils";
 
 // Chain transactions take ~6s per block; generous timeout for multi-step flows
 test.setTimeout(180_000);
 
-/**
- * Set localStorage before any JS runs so the app initializes with "local"
- * network from the start, then navigate to "/" and wait for chain connection.
- */
-async function connectToLocalDev(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("bulletin-storage-type", "bulletin");
-    localStorage.setItem("bulletin-network", "local");
-  });
-  await page.goto("/");
-  // Block number badge only appears when connected + block received
-  await expect(page.locator("header .font-mono")).toBeVisible({
-    timeout: 30_000,
-  });
-}
-
-/** Wait for chain connection after SPA navigation (block number in header). */
-async function waitForConnection(page: Page) {
-  await expect(page.locator("header .font-mono")).toBeVisible({
-    timeout: 30_000,
-  });
-}
-
-/**
- * Wait for the chain to produce enough blocks so that mortal transactions
- * have a valid era. On a freshly started --dev chain, submitting at block 1
- * can produce "Stale" errors because the mortality checkpoint is too recent.
- */
-async function waitForMinBlock(page: Page, minBlock = 3) {
-  await expect(async () => {
-    const text = await page.locator("header .font-mono").textContent();
-    const num = parseInt(text?.replace(/[#,]/g, "") ?? "0", 10);
-    expect(num).toBeGreaterThanOrEqual(minBlock);
-  }).toPass({ timeout: 30_000 });
-}
-
-/** Click a nav link in the header. Uses exact match to avoid Dashboard quick-action links. */
-async function navigateTo(page: Page, name: string) {
-  await page.locator("nav").getByRole("link", { name, exact: true }).click();
-}
-
 test.describe("Preimage Authorization Flow", () => {
-  test("authorize preimage and upload data", async ({ page }) => {
+  test("authorize preimage and upload data", async ({ localPage: page }) => {
     const testData = `Hello Bulletin Chain! Integration test ${Date.now()}`;
-
-    await connectToLocalDev(page);
 
     // ── Step 1: Authorize preimage via Faucet ──────────────────────
 
@@ -82,9 +40,7 @@ test.describe("Preimage Authorization Flow", () => {
         .fill(testData);
 
       // Wait for the hash field to be populated
-      const hashInput = page.locator(
-        "input[placeholder='0x... (32 bytes hex)']",
-      );
+      const hashInput = page.getByTestId("preimage-hash-input");
       await expect(hashInput).not.toHaveValue("", { timeout: 5_000 });
 
       // Submit authorization (Alice signs internally)
@@ -130,7 +86,7 @@ test.describe("Preimage Authorization Flow", () => {
       });
 
       // Extract CID from the result card
-      const cidDisplay = page.locator("input[readonly]").first();
+      const cidDisplay = page.getByTestId("cid-display");
       const uploadedCid = await cidDisplay.inputValue();
       expect(uploadedCid).toBeTruthy();
       expect(uploadedCid.length).toBeGreaterThan(10);
@@ -143,10 +99,8 @@ test.describe("Account Authorization Flow", () => {
     "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
 
   test("authorize account via faucet and verify in lookup", async ({
-    page,
+    localPage: page,
   }) => {
-    await connectToLocalDev(page);
-
     await test.step("authorize account via faucet", async () => {
       await navigateTo(page, "Faucet");
       await expect(
@@ -177,7 +131,7 @@ test.describe("Account Authorization Flow", () => {
       );
       await txInput.fill("50");
 
-      // Submit (Alice authorizes herself via sudo)
+      // Submit (Alice authorizes herself)
       await page
         .getByRole("button", { name: "Authorize Account" })
         .click();
@@ -222,10 +176,8 @@ test.describe("Account Authorization Flow", () => {
 });
 
 test.describe("Preimage Authorization Listing", () => {
-  test("authorized preimage appears in preimage list", async ({ page }) => {
+  test("authorized preimage appears in preimage list", async ({ localPage: page }) => {
     const testData = `Preimage listing test ${Date.now()}`;
-
-    await connectToLocalDev(page);
 
     // Navigate to faucet
     await navigateTo(page, "Faucet");
@@ -242,9 +194,7 @@ test.describe("Preimage Authorization Listing", () => {
       .fill(testData);
 
     // Wait for hash to compute
-    const hashInput = page.locator(
-      "input[placeholder='0x... (32 bytes hex)']",
-    );
+    const hashInput = page.getByTestId("preimage-hash-input");
     await expect(hashInput).not.toHaveValue("", { timeout: 5_000 });
     const expectedHash = await hashInput.inputValue();
 
@@ -258,8 +208,7 @@ test.describe("Preimage Authorization Listing", () => {
       .getByRole("tab", { name: "Preimages", exact: true })
       .click();
 
-    // Scope to the active tab panel to avoid matching the Renew nav button's
-    // RefreshCw icon in the header (both use svg.lucide-refresh-cw).
+    // Scope to the active tab panel to avoid matching other RefreshCw icons
     const activePanel = page.locator(
       '[role="tabpanel"][data-state="active"]',
     );
@@ -268,9 +217,7 @@ test.describe("Preimage Authorization Listing", () => {
     // Use retry with refresh button in case the list is stale from a prior test.
     await expect(async () => {
       // Click refresh to re-fetch from chain
-      const refreshButton = activePanel.locator(
-        "button:has(svg.lucide-refresh-cw)",
-      );
+      const refreshButton = activePanel.getByTestId("refresh-preimage-list");
       if (await refreshButton.isVisible()) {
         await refreshButton.click();
       }
@@ -282,9 +229,7 @@ test.describe("Preimage Authorization Listing", () => {
 });
 
 test.describe("Dashboard Live Data", () => {
-  test("dashboard shows chain info after connection", async ({ page }) => {
-    await connectToLocalDev(page);
-
+  test("dashboard shows chain info after connection", async ({ localPage: page }) => {
     // Dashboard is the landing page
     await expect(page.getByText("Chain Info")).toBeVisible({
       timeout: 15_000,

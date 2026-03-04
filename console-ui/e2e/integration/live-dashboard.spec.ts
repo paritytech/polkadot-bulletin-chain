@@ -1,40 +1,24 @@
 /**
  * Integration tests that require a running Bulletin Chain node.
  *
- * Run with: npx playwright test --project=integration
+ * Run with: playwright test
  *
  * Prerequisites:
  *   ./target/release/polkadot-bulletin-chain --dev --rpc-port 10000
  *   (node must be running on ws://localhost:10000)
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../fixtures";
 
 test.describe("Live Dashboard", () => {
-  test.beforeEach(async ({ page }) => {
-    // Set localStorage before JS runs so the app starts with "local" network
-    await page.addInitScript(() => {
-      localStorage.setItem("bulletin-storage-type", "bulletin");
-      localStorage.setItem("bulletin-network", "local");
-    });
-    await page.goto("/");
-  });
-
-  test("connects to local node and shows chain info", async ({ page }) => {
-    // Wait for connection — block number badge only shows when connected
-    await expect(page.locator("header .font-mono")).toBeVisible({
-      timeout: 30_000,
-    });
-
+  test("connects to local node and shows chain info", async ({ localPage: page }) => {
     // Chain info should be populated
     await expect(page.getByText("Chain Info")).toBeVisible();
-    // Block number should appear (font-mono block number display)
-    await expect(page.locator(".font-mono").first()).toBeVisible();
+    // Block number should appear
+    await expect(page.getByTestId("block-number")).toBeVisible();
   });
 
-  test("block number increments", async ({ page }) => {
-    // Wait for connection
-    const blockBadge = page.locator("header .font-mono");
-    await expect(blockBadge).toBeVisible({ timeout: 30_000 });
+  test("block number increments", async ({ localPage: page }) => {
+    const blockBadge = page.getByTestId("block-number");
     const initialText = await blockBadge.textContent();
 
     // Wait for block number to change (blocks produced every ~6s)

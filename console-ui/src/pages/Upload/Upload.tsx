@@ -351,6 +351,7 @@ export function Upload() {
                   value={uploadResult.cid}
                   readOnly
                   className="font-mono text-sm"
+                  data-testid="cid-display"
                 />
                 <Button
                   variant="outline"
