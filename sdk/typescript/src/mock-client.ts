@@ -23,6 +23,7 @@ import {
   StoreResult,
   ProgressCallback,
   BulletinError,
+  ErrorCode,
   CidCodec,
   HashAlgorithm,
 } from "./types.js";
@@ -202,7 +203,7 @@ export class MockBulletinClient {
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes();
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA");
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA);
     }
 
     // Simulate authorization check failure
@@ -212,7 +213,7 @@ export class MockBulletinClient {
     ) {
       throw new BulletinError(
         "Insufficient authorization: need 100 bytes, have 0 bytes",
-        "INSUFFICIENT_AUTHORIZATION",
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
         { need: 100, available: 0 },
       );
     }
@@ -221,7 +222,7 @@ export class MockBulletinClient {
     if (this.config.simulateStorageFailure) {
       throw new BulletinError(
         "Simulated storage failure",
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
       );
     }
 
@@ -259,7 +260,7 @@ export class MockBulletinClient {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
       );
     }
 
@@ -289,7 +290,7 @@ export class MockBulletinClient {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
       );
     }
 

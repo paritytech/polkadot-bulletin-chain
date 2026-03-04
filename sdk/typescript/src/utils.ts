@@ -8,7 +8,7 @@
 import { CID } from "multiformats/cid";
 import * as digest from "multiformats/hashes/digest";
 import { blake2AsU8a, sha256AsU8a } from "@polkadot/util-crypto";
-import { HashAlgorithm, BulletinError } from "./types.js";
+import { HashAlgorithm, BulletinError, ErrorCode } from "./types.js";
 import { MAX_CHUNK_SIZE } from "./chunker.js";
 
 /**
@@ -33,12 +33,12 @@ export async function getContentHash(
       // Users should integrate with pallet's hashing via PAPI
       throw new BulletinError(
         "Keccak256 hashing requires integration with the pallet via PAPI",
-        "UNSUPPORTED_HASH_ALGORITHM",
+        ErrorCode.UNSUPPORTED_HASH_ALGORITHM,
       );
     default:
       throw new BulletinError(
         `Unsupported hash algorithm: ${hashAlgorithm}`,
-        "INVALID_HASH_ALGORITHM",
+        ErrorCode.INVALID_HASH_ALGORITHM,
       );
   }
 }
@@ -65,7 +65,7 @@ export async function calculateCid(
   } catch (error) {
     throw new BulletinError(
       `Failed to calculate CID: ${error}`,
-      "CID_CALCULATION_FAILED",
+      ErrorCode.CID_CALCULATION_FAILED,
       error,
     );
   }
@@ -87,7 +87,7 @@ export function parseCid(cidString: string): CID {
   } catch (error) {
     throw new BulletinError(
       `Failed to parse CID: ${error}`,
-      "INVALID_CID",
+      ErrorCode.INVALID_CID,
       error,
     );
   }
@@ -102,7 +102,7 @@ export function cidFromBytes(bytes: Uint8Array): CID {
   } catch (error) {
     throw new BulletinError(
       `Failed to decode CID from bytes: ${error}`,
-      "INVALID_CID",
+      ErrorCode.INVALID_CID,
       error,
     );
   }
@@ -169,14 +169,14 @@ export function validateChunkSize(size: number): void {
   if (size <= 0) {
     throw new BulletinError(
       "Chunk size must be positive",
-      "INVALID_CHUNK_SIZE",
+      ErrorCode.INVALID_CHUNK_SIZE,
     );
   }
 
   if (size > MAX_CHUNK_SIZE) {
     throw new BulletinError(
       `Chunk size ${formatBytes(size)} exceeds maximum ${formatBytes(MAX_CHUNK_SIZE)}`,
-      "CHUNK_TOO_LARGE",
+      ErrorCode.CHUNK_TOO_LARGE,
     );
   }
 }
@@ -276,7 +276,7 @@ export async function retry<T>(
   }
   throw new BulletinError(
     lastError?.message || "Retry failed after maximum attempts",
-    "RETRY_EXHAUSTED",
+    ErrorCode.RETRY_EXHAUSTED,
     lastError,
   );
 }

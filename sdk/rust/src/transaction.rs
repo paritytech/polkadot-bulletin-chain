@@ -85,7 +85,7 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Transaction submission failed: {:?}", e)))?;
+			.map_err(|e| Error::SubmissionFailed(format!("Transaction submission failed: {:?}", e)))?;
 
 		let mut final_block_hash = None;
 		let mut final_extrinsic_hash = None;
@@ -146,7 +146,7 @@ impl TransactionClient {
 							in_block
 								.wait_for_success()
 								.await
-								.map_err(|e| Error::StorageFailed(format!("Transaction failed: {:?}", e)))?;
+								.map_err(|e| Error::TransactionFailed(format!("Transaction failed: {:?}", e)))?;
 
 							break;
 						}
@@ -163,7 +163,7 @@ impl TransactionClient {
 									crate::types::TransactionStatusEvent::Invalid { error: message.clone() },
 								));
 							}
-							return Err(Error::StorageFailed(format!("Transaction invalid: {}", message)));
+							return Err(Error::TransactionFailed(format!("Transaction invalid: {}", message)));
 						}
 						TxStatus::Dropped { message } => {
 							if let Some(ref callback) = progress_callback {
@@ -171,15 +171,15 @@ impl TransactionClient {
 									crate::types::TransactionStatusEvent::Dropped { error: message.clone() },
 								));
 							}
-							return Err(Error::StorageFailed(format!("Transaction dropped: {}", message)));
+							return Err(Error::TransactionFailed(format!("Transaction dropped: {}", message)));
 						}
 						TxStatus::Error { message } => {
-							return Err(Error::StorageFailed(format!("Transaction error: {}", message)));
+							return Err(Error::TransactionFailed(format!("Transaction error: {}", message)));
 						}
 					}
 				}
 				Err(e) => {
-					return Err(Error::StorageFailed(format!("Status error: {:?}", e)));
+					return Err(Error::TransactionFailed(format!("Status error: {:?}", e)));
 				}
 			}
 		}
@@ -225,10 +225,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?
+			.map_err(|e| Error::AuthorizationFailed(format!("{:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+			.map_err(|e| Error::AuthorizationFailed(format!("{:?}", e)))?;
 
 		Ok(AuthorizationReceipt {
 			account: who,
@@ -256,10 +256,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?
+			.map_err(|e| Error::AuthorizationFailed(format!("{:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Authorization failed: {:?}", e)))?;
+			.map_err(|e| Error::AuthorizationFailed(format!("{:?}", e)))?;
 
 		Ok(PreimageAuthorizationReceipt {
 			content_hash,
@@ -284,10 +284,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?
+			.map_err(|e| Error::RenewalFailed(format!("{:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Renew failed: {:?}", e)))?;
+			.map_err(|e| Error::RenewalFailed(format!("{:?}", e)))?;
 
 		Ok(RenewReceipt {
 			original_block: block,
@@ -312,10 +312,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?
+			.map_err(|e| Error::AuthorizationFailed(format!("Refresh failed: {:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?;
+			.map_err(|e| Error::AuthorizationFailed(format!("Refresh failed: {:?}", e)))?;
 
 		Ok(())
 	}
@@ -336,10 +336,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?
+			.map_err(|e| Error::AuthorizationFailed(format!("Refresh failed: {:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Refresh failed: {:?}", e)))?;
+			.map_err(|e| Error::AuthorizationFailed(format!("Refresh failed: {:?}", e)))?;
 
 		Ok(())
 	}
@@ -358,10 +358,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?
+			.map_err(|e| Error::AuthorizationFailed(format!("Removal failed: {:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?;
+			.map_err(|e| Error::AuthorizationFailed(format!("Removal failed: {:?}", e)))?;
 
 		Ok(())
 	}
@@ -380,10 +380,10 @@ impl TransactionClient {
 			.tx()
 			.sign_and_submit_then_watch_default(&tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?
+			.map_err(|e| Error::AuthorizationFailed(format!("Removal failed: {:?}", e)))?
 			.wait_for_finalized_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("Removal failed: {:?}", e)))?;
+			.map_err(|e| Error::AuthorizationFailed(format!("Removal failed: {:?}", e)))?;
 
 		Ok(())
 	}

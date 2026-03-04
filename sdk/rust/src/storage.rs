@@ -45,7 +45,7 @@ impl StorageOperation {
 	#[must_use = "CID result should be used or stored"]
 	pub fn calculate_cid(&self) -> Result<CidData> {
 		crate::cid::calculate_cid(&self.data, self.cid_config.clone())
-			.map_err(|_| Error::StorageFailed("Failed to calculate CID".into()))
+			.map_err(|_| Error::CidCalculationFailed("Failed to calculate CID".into()))
 	}
 
 	/// Get the size of the data.
