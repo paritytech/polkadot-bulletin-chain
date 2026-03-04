@@ -115,7 +115,7 @@ teardown test_dir:
 
 # Run integration Playwright tests (chain must already be running on ws://localhost:10000)
 test: install ensure-browsers
-    npx playwright test
+    playwright test
 
 # Full E2E lifecycle: setup → install → integration tests → teardown
 test-e2e runtime="bulletin-westend-runtime":
@@ -138,7 +138,7 @@ test-e2e runtime="bulletin-westend-runtime":
     echo ""
     echo "━━━ Running integration tests ━━━"
     set +e
-    npx playwright test
+    playwright test
     TEST_EXIT=$?
     set -e
 
@@ -171,7 +171,7 @@ test-e2e-dev: install ensure-browsers build-chain
     echo ""
     echo "━━━ Running integration tests ━━━"
     set +e
-    npx playwright test
+    playwright test
     TEST_EXIT=$?
     set -e
 
@@ -199,7 +199,10 @@ install:
 ensure-browsers:
     npx playwright install --with-deps chromium
 
-# Build chain binary (only if missing)
+# Build solochain binary (only if missing).
+# NOTE: The solochain variant will be removed in future.
+# For parachain testing, use `just setup` which requires polkadot-omni-node,
+# polkadot, polkadot-prepare-worker, and polkadot-execute-worker binaries.
 build-chain:
     #!/usr/bin/env bash
     if [ -f "{{ chain_binary }}" ]; then
