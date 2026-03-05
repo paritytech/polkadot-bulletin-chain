@@ -167,4 +167,10 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
+	fn validate_store() -> Weight {
+		T::DbWeight::get().reads_writes(6, 2)
+	}
+	fn validate_renew() -> Weight {
+		T::DbWeight::get().reads_writes(8, 2)
+	}
 }

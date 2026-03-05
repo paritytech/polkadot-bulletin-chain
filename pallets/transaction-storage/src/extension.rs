@@ -17,7 +17,7 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{pallet::Origin, AuthorizationScopeFor, Call, Config, Pallet};
+use crate::{pallet::Origin, weights::WeightInfo, AuthorizationScopeFor, Call, Config, Pallet};
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
 use polkadot_sdk_frame::{
@@ -77,8 +77,16 @@ where
 	type Val = Option<AuthorizationScopeFor<T>>;
 	type Pre = ();
 
-	fn weight(&self, _call: &RuntimeCallOf<T>) -> Weight {
-		Weight::zero()
+	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
+		let Some(inner_call) = call.is_sub_type() else {
+			return Weight::zero();
+		};
+		match inner_call {
+			Call::store { .. } | Call::store_with_cid_config { .. } =>
+				T::WeightInfo::validate_store(),
+			Call::renew { .. } => T::WeightInfo::validate_renew(),
+			_ => Weight::zero(),
+		}
 	}
 
 	fn validate(
