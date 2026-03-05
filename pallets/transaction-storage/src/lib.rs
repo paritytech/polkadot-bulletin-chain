@@ -511,7 +511,7 @@ pub mod pallet {
 			bytes: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
-			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
+			ensure!(transactions > 0 || bytes > 0, Error::<T>::BadDataSize);
 			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
