@@ -2,11 +2,17 @@
 
 set -e
 
+# Resolve repo root relative to this script's location
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 cargo build --release -p bulletin-westend-runtime
 
 # cargo install staging-chain-spec-builder
+cd "$ROOT_DIR"
+
 chain-spec-builder create \
-        -p 1006 \
+        -p 2487 \
         -c westend \
         -i bulletin-westend \
         -n Bulletin \
@@ -14,5 +20,4 @@ chain-spec-builder create \
         -r ./target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm \
         named-preset local_testnet
 
-mv chain_spec.json bulletin-westend-spec.json
-cp bulletin-westend-spec.json ./zombienet/bulletin-westend-spec.json
+mv chain_spec.json ./zombienet/bulletin-westend-spec.json

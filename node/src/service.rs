@@ -7,7 +7,9 @@ use sc_consensus_grandpa::SharedVoterState;
 use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
+use sp_api::{ApiExt, ProvideRuntimeApi};
 use sp_consensus_babe::inherents::BabeCreateInherentDataProviders;
+use sp_transaction_storage_proof::runtime_api::TransactionStorageApi;
 use std::{sync::Arc, time::Duration};
 
 pub(crate) type FullClient = sc_service::TFullClient<
@@ -68,6 +70,7 @@ pub fn new_partial(
 			config,
 			telemetry.as_ref().map(|(_, telemetry)| telemetry.handle()),
 			executor,
+			Default::default(),
 		)?;
 	let client = Arc::new(client);
 
@@ -185,6 +188,7 @@ pub fn new_full<
 			client: client.clone(),
 			transaction_pool: transaction_pool.clone(),
 			spawn_handle: task_manager.spawn_handle(),
+			spawn_essential_handle: task_manager.spawn_essential_handle(),
 			import_queue,
 			block_announce_validator_builder: None,
 			warp_sync_config: None,
@@ -306,10 +310,27 @@ pub fn new_full<
 							slot_duration,
 						);
 
+					// Get the retention period for a proof.
+					let retention_period = {
+						let has_tx_storage_api = client_clone
+							.runtime_api()
+							.has_api::<dyn TransactionStorageApi<Block>>(parent)
+							.unwrap_or(false);
+						if has_tx_storage_api {
+							client_clone.runtime_api().retention_period(parent)?
+						} else {
+							// Fallback for solochain runtimes that do not yet have the transaction
+							// storage API. TODO: remove once bulletin-polkadot is upgraded
+							// with the TX storage runtime API. TODO: also remove the
+							// pallet_transaction_storage dependency.
+							pallet_transaction_storage::DEFAULT_RETENTION_PERIOD
+						}
+					};
 					let storage_proof =
 						sp_transaction_storage_proof::registration::new_data_provider(
 							&*client_clone,
 							&parent,
+							retention_period,
 						)?;
 
 					Ok((slot, timestamp, storage_proof))

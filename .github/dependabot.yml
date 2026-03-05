@@ -6,3 +6,31 @@ updates:
       interval: "weekly"
     ignore:
       - dependency-name: "*"
+
+  - package-ecosystem: "npm"
+    directory: "/console-ui"
+    schedule:
+      interval: "weekly"
+    groups:
+      console-ui-deps:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      console-ui-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/examples"
+    schedule:
+      interval: "weekly"
+    groups:
+      examples-deps:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      examples-security:
+        applies-to: security-updates
+        patterns:
+          - "*"

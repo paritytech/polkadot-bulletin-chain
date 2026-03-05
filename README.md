@@ -245,8 +245,13 @@ or
 
 Run on the dedicated machine from the root directory:
 ```
-python3 scripts/cmd/cmd.py bench bulletin-polkadot
-python3 scripts/cmd/cmd.py bench bulletin-westend
+python3 scripts/cmd/cmd.py bench --runtime bulletin-polkadot
+python3 scripts/cmd/cmd.py bench --runtime bulletin-westend
+```
+
+To run all benchmarks:
+```
+python3 scripts/cmd/cmd.py bench
 ```
 
 # Examples (JavaScript-based)

@@ -15,7 +15,7 @@ use bulletin_polkadot_runtime::{
 	},
 	AccountId, BridgePolkadotGrandpa, BridgePolkadotMessages,
 };
-use frame_support::{assert_ok, dispatch::GetDispatchInfo, traits::Get};
+use frame_support::{assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get};
 use pallet_bridge_messages::{
 	messages_generation::{encode_all_messages, encode_lane_data, prepare_messages_storage_proof},
 	BridgedChainOf, LaneIdOf, ThisChainOf,
@@ -38,6 +38,8 @@ use sp_runtime::{
 	ApplyExtrinsicResult,
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
+use std::collections::HashMap;
+use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 
 fn advance_block() {
 	let current_number = System::block_number();
@@ -265,7 +267,7 @@ fn emulate_sent_messages() {
 fn construct_extrinsic(
 	sender: sp_core::sr25519::Pair,
 	call: RuntimeCall,
-) -> Result<UncheckedExtrinsic, sp_runtime::transaction_validity::TransactionValidityError> {
+) -> Result<UncheckedExtrinsic, TransactionValidityError> {
 	let account_id = sp_runtime::AccountId32::from(sender.public());
 	frame_system::BlockHash::<Runtime>::insert(0, Hash::default());
 	let tx_ext: TxExtension = (
@@ -382,6 +384,163 @@ fn transaction_storage_runtime_sizes() {
 				})
 			),
 			Err(BAD_DATA_SIZE.into())
+		);
+	});
+}
+
+#[test]
+fn store_with_cid_config_works() {
+	run_test(|| {
+		// prepare data
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![0u8; 4 * 1024];
+		let total_bytes: u64 = data.len() as u64;
+		let block_number = System::block_number();
+
+		// Authorize.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			3,
+			3 * total_bytes,
+		));
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 3, bytes: 3 * total_bytes },
+		);
+
+		// 1. Store data WITHOUT a custom cid_config (plain `store`).
+		assert_ok_ok(construct_and_apply_extrinsic(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+		));
+
+		// 2. Store data WITH a cid_config as the default codec for raw data via
+		//    `store_with_cid_config`.
+		// (Should produce the same content_hash as above).
+		assert_ok_ok(construct_and_apply_extrinsic(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+				cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+				data: data.clone(),
+			}),
+		));
+
+		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec) via
+		//    `store_with_cid_config`.
+		assert_ok_ok(construct_and_apply_extrinsic(
+			account.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+				cid: CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 },
+				data: data.clone(),
+			}),
+		));
+
+		// Check the content_hashes and CIDs.
+		runtime::TransactionStorage::on_finalize(block_number);
+		let stored_txs = runtime::TransactionStorage::transaction_roots(block_number)
+			.unwrap()
+			.into_iter()
+			.enumerate()
+			.collect::<HashMap<_, _>>();
+		assert_eq!(stored_txs.len(), 3);
+		assert_eq!(
+			stored_txs[&0].content_hash,
+			calculate_cid(&data, CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 })
+				.unwrap()
+				.content_hash
+		);
+		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
+		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
+	});
+}
+
+#[test]
+fn preimage_authorized_storage_transactions_work() {
+	run_test(|| {
+		advance_block();
+
+		// Use relayer_signer since only relayers can submit transactions in bulletin-polkadot
+		let account = relayer_signer();
+		let data = vec![0u8; 24];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+
+		// Not authorized (no account or preimage auth) should fail to store.
+		assert_eq!(
+			construct_and_apply_extrinsic(account.pair(), call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment))
+		);
+
+		// Authorize preimage (not account).
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			data.len() as u64,
+		));
+
+		// Now should work via preimage authorization.
+		assert_ok_ok(construct_and_apply_extrinsic(account.pair(), call));
+
+		// Verify preimage authorization was consumed.
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+#[test]
+fn signed_store_prefers_preimage_authorization_over_account() {
+	run_test(|| {
+		advance_block();
+
+		// Use relayer_signer since only relayers can submit transactions in bulletin-polkadot
+		let account = relayer_signer();
+		let who: AccountId = account.to_account_id();
+		let data = vec![0u8; 100];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+
+		// Setup: authorize both account and preimage
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			5,
+			500,
+		));
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			data.len() as u64,
+		));
+
+		// Verify both authorizations exist
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent { transactions: 5, bytes: 500 },
+		);
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+
+		// Store data
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		assert_ok_ok(construct_and_apply_extrinsic(account.pair(), call));
+
+		// Verify: preimage authorization was consumed, account authorization unchanged
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Preimage authorization should be consumed"
+		);
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 5, bytes: 500 },
+			"Account authorization should remain unchanged when preimage auth is used"
 		);
 	});
 }
@@ -815,4 +974,59 @@ fn sudo_kill_works() {
 			pallet_sudo::Error::<Runtime>::RequireSudo.into(),
 		);
 	});
+}
+
+#[test]
+fn alice_can_sign_authorize_account_extrinsic() {
+	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
+	// from Alice must pass ValidateSigned and succeed at dispatch.
+	run_test(|| {
+		let alice = sudo_relayer_signer(); // Alice
+		let target = non_relay_signer();
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		assert_ok_ok(construct_and_apply_extrinsic(alice.pair(), call));
+
+		// Verify the authorization was actually applied.
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(target.to_account_id()),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+		);
+	});
+}
+
+#[test]
+fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
+	// A non-TestAccount signer's `authorize_account` extrinsic should be rejected at
+	// validation with BadSigner (checked in pallet's check_signed).
+	run_test(|| {
+		let signer = non_relay_signer(); // Charlie, not a TestAccount
+		let target = relayer_signer();
+
+		// Ensure Charlie's account exists so CheckNonce doesn't reject first.
+		frame_system::Pallet::<Runtime>::inc_providers(&signer.to_account_id());
+
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
+		);
+	});
+}
+
+/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+#[test]
+fn transaction_storage_weight_sanity() {
+	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
 }

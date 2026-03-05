@@ -24,23 +24,35 @@
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 mod benchmarking;
 pub mod weights;
 
+pub mod migrations;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 mod tests;
 
+use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
+use core::fmt::Debug;
 use polkadot_sdk_frame::{
-	deps::{sp_core::sp_std::prelude::*, *},
+	deps::*,
 	prelude::*,
-	traits::fungible::{Balanced, Credit, Inspect, Mutate, MutateHold},
+	traits::{
+		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
+		parameter_types,
+	},
 };
 use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
 	CHUNK_SIZE, INHERENT_IDENTIFIER,
+};
+use transaction_storage_primitives::{
+	cids::{calculate_cid, Cid, CidCodec, CidConfig, HashingAlgorithm, RAW_CODEC},
+	ContentHash,
 };
 
 /// A type alias for the balance type from this pallet's point of view.
@@ -54,12 +66,16 @@ pub use weights::WeightInfo;
 
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
+/// Default retention period for data (in blocks).
+pub const DEFAULT_RETENTION_PERIOD: u32 = 100800;
+parameter_types! {
+	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
+}
+
+// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// TODO: find out what is "allocator" and "allocator limit"
 // Setting higher limit also requires raising the allocator limit.
-// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
-// TODO: not used, can we remove or use?
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
@@ -74,16 +90,13 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
 /// Number of transactions and bytes covered by an authorization.
-#[derive(PartialEq, Eq, RuntimeDebug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[derive(PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct AuthorizationExtent {
 	/// Number of transactions.
 	pub transactions: u32,
 	/// Number of bytes.
 	pub bytes: u64,
 }
-
-/// Hash of a stored blob of data.
-type ContentHash = [u8; 32];
 
 /// The scope of an authorization.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
@@ -108,21 +121,25 @@ struct Authorization<BlockNumber> {
 type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 
 /// State data for a stored transaction.
-#[derive(
-	Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen,
-)]
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct TransactionInfo {
 	/// Chunk trie root.
 	chunk_root: <BlakeTwo256 as Hash>::Output,
+
 	/// Plain hash of indexed data.
-	content_hash: <BlakeTwo256 as Hash>::Output,
+	pub content_hash: ContentHash,
+	/// Used hashing algorithm for `content_hash`.
+	pub hashing: HashingAlgorithm,
+	/// Codec for CID.
+	pub cid_codec: CidCodec,
+
 	/// Size of indexed data in bytes.
 	size: u32,
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
-	/// total chunk value.
+	/// total chunks.
 	block_chunks: ChunkIndex,
 }
 
@@ -194,11 +211,6 @@ pub mod pallet {
 		/// Maximum data set in a single transaction in bytes.
 		#[pallet::constant]
 		type MaxTransactionSize: Get<u32>;
-		/// Storage period for data in blocks. Should match
-		/// [`DEFAULT_STORAGE_PERIOD`](sp_transaction_storage_proof::DEFAULT_STORAGE_PERIOD) for
-		/// block authoring.
-		#[pallet::constant]
-		type StoragePeriod: Get<BlockNumberFor<Self>>;
 		/// Authorizations expire after this many blocks.
 		#[pallet::constant]
 		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;
@@ -230,8 +242,6 @@ pub mod pallet {
 		NotConfigured,
 		/// Renewed extrinsic is not found.
 		RenewedNotFound,
-		/// Attempting to store an empty transaction
-		EmptyTransaction,
 		/// Proof was not expected in this block.
 		UnexpectedProof,
 		/// Proof failed verification.
@@ -244,30 +254,44 @@ pub mod pallet {
 		DoubleCheck,
 		/// Storage proof was not checked in the block.
 		ProofNotChecked,
-		/// Transaction is too large.
-		TransactionTooLarge,
 		/// Authorization was not found.
 		AuthorizationNotFound,
 		/// Authorization has not expired.
 		AuthorizationNotExpired,
+		/// Content hash was not calculated.
+		InvalidContentHash,
 	}
 
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+			// TODO: https://github.com/paritytech/polkadot-sdk/issues/10203 - Replace this with benchmarked weights.
 			let mut weight = Weight::zero();
 			let db_weight = T::DbWeight::get();
+
+			// Run v0→v1 migration if it hasn't been applied yet.
+			// This handles the case where `codeSubstitutes` loaded the fix runtime
+			// without triggering `on_runtime_upgrade` (spec_version unchanged).
+			// Safe alongside the regular `MigrateV0ToV1` wired in Executive: both
+			// check `on_chain_storage_version() < 1`, so whichever runs first bumps
+			// the version and the other becomes a no-op.
+			// TODO: Remove once all chains have been migrated past v1 — after that
+			// this is just a redundant storage read per block.
+			weight.saturating_accrue(migrations::v1::maybe_migrate_v0_to_v1::<T>());
 
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
 			weight.saturating_accrue(db_weight.reads(1));
-			let period = T::StoragePeriod::get();
+			let period = Self::retention_period();
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
 			if obsolete > Zero::zero() {
-				weight.saturating_accrue(db_weight.writes(2));
+				weight.saturating_accrue(db_weight.writes(1));
 				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
 					for tx_info in transactions.iter() {
 						let hash: ContentHash = tx_info.content_hash.into();
@@ -295,49 +319,70 @@ pub mod pallet {
 		}
 
 		fn on_finalize(n: BlockNumberFor<T>) {
-			assert!(
-				<ProofChecked<T>>::take() || {
-					// Proof is not required for early or empty blocks.
-					let number = <frame_system::Pallet<T>>::block_number();
-					let period = T::StoragePeriod::get();
-					let target_number = number.saturating_sub(period);
+			let proof_ok = <ProofChecked<T>>::take() || {
+				// Proof is not required for early or empty blocks.
+				let period = Self::retention_period();
+				let target_number = n.saturating_sub(period);
 
-					target_number.is_zero() || {
-						// An empty block means no transactions were stored, relying on the fact
-						// below that we store transactions only if they contain chunks.
-						!Transactions::<T>::contains_key(target_number)
-					}
-				},
-				"Storage proof must be checked once in the block"
-			);
+				target_number.is_zero() || {
+					// An empty block means no transactions were stored, relying on the fact
+					// below that we store transactions only if they contain chunks.
+					!Transactions::<T>::contains_key(target_number)
+				}
+			};
 
-			// Insert new transactions
+			// During try-runtime testing, no inherents (including storage proofs) are
+			// submitted, so we log instead of panicking.
+			#[cfg(feature = "try-runtime")]
+			if !proof_ok {
+				tracing::warn!(
+					target: LOG_TARGET,
+					"Storage proof was not checked in this block (expected during try-runtime)"
+				);
+			}
+			#[cfg(not(feature = "try-runtime"))]
+			assert!(proof_ok, "Storage proof must be checked once in the block");
+
+			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
-			let total_chunks = transactions.last().map_or(0, |t| t.block_chunks);
+			let total_chunks = TransactionInfo::total_chunks(&transactions);
 			if total_chunks != 0 {
 				<Transactions<T>>::insert(n, transactions);
 			}
 		}
 
+		#[cfg(feature = "try-runtime")]
+		fn try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+			Self::do_try_state(n)
+		}
+
 		fn integrity_test() {
 			assert!(
 				!T::MaxBlockTransactions::get().is_zero(),
-				"Not useful if data cannot be stored"
+				"MaxBlockTransactions must be greater than zero"
 			);
-			assert!(!T::MaxTransactionSize::get().is_zero(), "Not useful if data cannot be stored");
-			assert!(!T::StoragePeriod::get().is_zero(), "Not useful if data is not stored");
+			assert!(
+				!T::MaxTransactionSize::get().is_zero(),
+				"MaxTransactionSize must be greater than zero"
+			);
+			let default_period = DEFAULT_RETENTION_PERIOD.into();
+			let retention_period = GenesisConfig::<T>::default().retention_period;
+			assert_eq!(
+				retention_period, default_period,
+				"GenesisConfig.retention_period must match DEFAULT_RETENTION_PERIOD"
+			);
 			assert!(
 				!T::AuthorizationPeriod::get().is_zero(),
-				"Not useful if authorizations are never valid"
+				"AuthorizationPeriod must be greater than zero"
 			);
 		}
 	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Index and store data off chain. Minimum data size is 1 bytes, maximum is
-		/// `MaxTransactionSize`. Data will be removed after `StoragePeriod` blocks, unless `renew`
-		/// is called.
+		/// Index and store data off chain. Minimum data size is 1 byte, maximum is
+		/// `MaxTransactionSize`. Data will be removed after `RetentionPeriod` blocks, unless
+		/// `renew` is called.
 		///
 		/// Authorization is required to store data using regular signed/unsigned transactions.
 		/// Regular signed transactions require account authorization (see
@@ -351,43 +396,26 @@ pub mod pallet {
 		/// O(n*log(n)) of data size, as all data is pushed to an in-memory trie.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
 		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			// In the case of a regular unsigned transaction, this should have been checked by
-			// pre_dispatch. In the case of a regular signed transaction, this should have been
-			// checked by pre_dispatch_signed.
-			ensure!(Self::data_size_ok(data.len()), Error::<T>::BadDataSize);
+			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
+		}
 
-			// Chunk data and compute storage root
-			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
-			let chunk_count = chunks.len();
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32) as usize);
-			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
-
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = sp_io::hashing::blake2_256(&data);
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, content_hash);
-
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				let total_chunks =
-					transactions.last().map_or(0, |t| t.block_chunks) + (chunk_count as u32);
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: root,
-						size: data.len() as u32,
-						content_hash: content_hash.into(),
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-			TransactionByContentHash::<T>::insert(content_hash, (
-				frame_system::Pallet::<T>::block_number(),
-				index,
-			));
-			Self::deposit_event(Event::Stored { index, content_hash });
-			Ok(())
+		/// Index and store data off chain with an explicit CID configuration.
+		///
+		/// Behaves identically to [`store`](Self::store), but the CID configuration
+		/// (codec and hashing algorithm) is passed directly as a parameter.
+		///
+		/// Emits [`Stored`](Event::Stored) when successful.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
+		pub fn store_with_cid_config(
+			_origin: OriginFor<T>,
+			cid: CidConfig,
+			data: Vec<u8>,
+		) -> DispatchResult {
+			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
 		/// Renew previously stored data. Parameters are the block number that contains previous
@@ -414,23 +442,28 @@ pub mod pallet {
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
-			ensure!(Self::data_size_ok(info.size as usize), Error::<T>::BadDataSize);
+			Self::ensure_data_size_ok(info.size as usize)?;
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = info.content_hash.into();
+			let content_hash = info.content_hash;
 			sp_io::transaction_index::renew(extrinsic_index, content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
+				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
+					return Err(Error::<T>::TooManyTransactions);
+				}
 				let chunks = num_chunks(info.size);
-				let total_chunks = transactions.last().map_or(0, |t| t.block_chunks) + chunks;
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
 				index = transactions.len() as u32;
 				transactions
 					.try_push(TransactionInfo {
 						chunk_root: info.chunk_root,
 						size: info.size,
 						content_hash: info.content_hash,
+						hashing: info.hashing,
+						cid_codec: info.cid_codec,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -443,7 +476,7 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Check storage proof for block number `block_number() - StoragePeriod`. If such a block
+		/// Check storage proof for block number `block_number() - RetentionPeriod`. If such a block
 		/// does not exist, the proof is expected to be `None`.
 		///
 		/// ## Complexity
@@ -461,7 +494,7 @@ pub mod pallet {
 
 			// Get the target block metadata.
 			let number = <frame_system::Pallet<T>>::block_number();
-			let period = T::StoragePeriod::get();
+			let period = Self::retention_period();
 			let target_number = number.saturating_sub(period);
 			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
 			let transactions =
@@ -499,12 +532,13 @@ pub mod pallet {
 			bytes: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
+			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
 			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
 
-		/// Authorize anyone to store a preimage of the given BLAKE2b hash. The authorization will
+		/// Authorize anyone to store a preimage of the given content hash. The authorization will
 		/// expire after a configured number of blocks.
 		///
 		/// If authorization already exists for a preimage of the given hash to be stored, the
@@ -513,7 +547,9 @@ pub mod pallet {
 		///
 		/// Parameters:
 		///
-		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
+		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store) this
+		///   is the BLAKE2b-256 hash; for [`store_with_cid_config`](Self::store_with_cid_config)
+		///   this is the hash produced by the CID config's hashing algorithm.
 		/// - `max_size`: The maximum size, in bytes, of the preimage.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -526,6 +562,7 @@ pub mod pallet {
 			max_size: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
+			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
@@ -670,7 +707,7 @@ pub mod pallet {
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Stored data under specified index.
-		Stored { index: u32, content_hash: ContentHash },
+		Stored { index: u32, content_hash: ContentHash, cid: Option<Cid> },
 		/// Renewed data under specified index.
 		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.
@@ -714,6 +751,14 @@ pub mod pallet {
 	/// Storage fee per transaction.
 	pub type EntryFee<T: Config> = StorageValue<_, BalanceOf<T>>;
 
+	/// Number of blocks for which stored data must be retained.
+	///
+	/// Data older than `RetentionPeriod` blocks is eligible for removal unless it
+	/// has been explicitly renewed. Validators are required to prove possession of
+	/// data corresponding to block `N - RetentionPeriod` when producing block `N`.
+	#[pallet::storage]
+	pub type RetentionPeriod<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
+
 	// Intermediates
 	#[pallet::storage]
 	pub(super) type BlockTransactions<T: Config> =
@@ -732,6 +777,32 @@ pub mod pallet {
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+	#[pallet::genesis_config]
+	pub struct GenesisConfig<T: Config> {
+		pub byte_fee: BalanceOf<T>,
+		pub entry_fee: BalanceOf<T>,
+		pub retention_period: BlockNumberFor<T>,
+	}
+
+	impl<T: Config> Default for GenesisConfig<T> {
+		fn default() -> Self {
+			Self {
+				byte_fee: 10u32.into(),
+				entry_fee: 1000u32.into(),
+				retention_period: DEFAULT_RETENTION_PERIOD.into(),
+			}
+		}
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+		fn build(&self) {
+			ByteFee::<T>::put(self.byte_fee);
+			EntryFee::<T>::put(self.entry_fee);
+			RetentionPeriod::<T>::put(self.retention_period);
+		}
+	}
 
 	#[pallet::inherent]
 	impl<T: Config> ProvideInherent for Pallet<T> {
@@ -774,6 +845,61 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// Common implementation for [`store`](Self::store) and
+		/// [`store_with_cid_config`](Self::store_with_cid_config).
+		fn do_store(
+			data: Vec<u8>,
+			hashing: HashingAlgorithm,
+			cid_codec: CidCodec,
+		) -> DispatchResult {
+			// In the case of a regular unsigned transaction, this should have been checked by
+			// pre_dispatch. In the case of a regular signed transaction, this should have been
+			// checked by pre_dispatch_signed.
+			Self::ensure_data_size_ok(data.len())?;
+
+			// Chunk data and compute storage root
+			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+			let chunk_count = chunks.len() as u32;
+			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
+			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
+
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			let cid_config = CidConfig { codec: cid_codec, hashing };
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
+			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
+
+			let mut index = 0;
+			<BlockTransactions<T>>::mutate(|transactions| {
+				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
+					return Err(Error::<T>::TooManyTransactions);
+				}
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
+				index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root: root,
+						size: data.len() as u32,
+						content_hash: cid.content_hash,
+						hashing,
+						cid_codec,
+						block_chunks: total_chunks,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)
+			})?;
+ 			TransactionByContentHash::<T>::insert(content_hash, (
+				frame_system::Pallet::<T>::block_number(),
+				index,
+			));
+			Self::deposit_event(Event::Stored {
+				index,
+				content_hash: cid.content_hash,
+				cid: cid.to_bytes(),
+			});
+			Ok(())
+		}
+
 		/// Returns `true` if the system is beyond the given expiration point.
 		fn expired(expiration: BlockNumberFor<T>) -> bool {
 			let now = frame_system::Pallet::<T>::block_number();
@@ -869,12 +995,10 @@ pub mod pallet {
 
 		/// Remove an expired authorization.
 		fn remove_expired_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
-			// In the case of a regular unsigned transaction, pre_dispatch should have checked that
-			// the authorization exists and has expired
-			let Some(authorization) = Authorizations::<T>::take(&scope) else {
-				return Err(Error::<T>::AuthorizationNotFound.into());
-			};
+			let authorization =
+				Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(Self::expired(authorization.expiration), Error::<T>::AuthorizationNotExpired);
+			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
 		}
@@ -920,9 +1044,30 @@ pub mod pallet {
 			Self::check_signed(who, call, CheckContext::PreDispatch).map(|_| ())
 		}
 
+		/// Get ByteFee storage information from the outside of this pallet.
+		pub fn byte_fee() -> Option<BalanceOf<T>> {
+			ByteFee::<T>::get()
+		}
+
+		/// Get EntryFee storage information from the outside of this pallet.
+		pub fn entry_fee() -> Option<BalanceOf<T>> {
+			EntryFee::<T>::get()
+		}
+
+		/// Get RetentionPeriod storage information from the outside of this pallet.
+		pub fn retention_period() -> BlockNumberFor<T> {
+			RetentionPeriod::<T>::get()
+		}
+
 		/// Returns `true` if a blob of the given size can be stored.
 		fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)
+		}
+
+		/// Ensures that the given data size is valid for storage.
+		fn ensure_data_size_ok(size: usize) -> Result<(), Error<T>> {
+			ensure!(Self::data_size_ok(size), Error::<T>::BadDataSize);
+			Ok(())
 		}
 
 		/// Returns the [`TransactionInfo`] for the specified store/renew transaction.
@@ -944,7 +1089,7 @@ pub mod pallet {
 		/// Check that authorization exists for data of the given size to be stored in a single
 		/// transaction. If `consume` is `true`, the authorization is consumed.
 		fn check_authorization(
-			scope: AuthorizationScopeFor<T>,
+			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
 		) -> Result<(), TransactionValidityError> {
@@ -981,13 +1126,13 @@ pub mod pallet {
 			};
 
 			if consume {
-				if Authorizations::<T>::mutate(&scope, consume_authorization)? {
-					Self::authorization_removed(&scope);
+				if Authorizations::<T>::mutate(scope, consume_authorization)? {
+					Self::authorization_removed(scope);
 				}
 			} else {
 				// Note we call consume_authorization on a temporary; the authorization in storage
 				// is untouched and doesn't actually get consumed
-				let mut authorization = Authorizations::<T>::get(&scope);
+				let mut authorization = Authorizations::<T>::get(scope);
 				consume_authorization(&mut authorization)?;
 			}
 
@@ -996,9 +1141,9 @@ pub mod pallet {
 
 		/// Check that authorization with the given scope exists in storage but has expired.
 		fn check_authorization_expired(
-			scope: AuthorizationScopeFor<T>,
+			scope: &AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
-			let Some(authorization) = Authorizations::<T>::get(&scope) else {
+			let Some(authorization) = Authorizations::<T>::get(scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
 			if Self::expired(authorization.expiration) {
@@ -1008,9 +1153,17 @@ pub mod pallet {
 			}
 		}
 
+		fn preimage_store_renew_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
+			ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
+				.and_provides(content_hash)
+				.priority(T::StoreRenewPriority::get())
+				.longevity(T::StoreRenewLongevity::get())
+				.into()
+		}
+
 		fn check_store_renew_unsigned(
 			size: usize,
-			hash: impl FnOnce() -> ContentHash,
+			content_hash: impl FnOnce() -> ContentHash,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
@@ -1021,21 +1174,17 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
-			let hash = hash();
+			let content_hash = content_hash();
 
 			Self::check_authorization(
-				AuthorizationScope::Preimage(hash),
+				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				context.consume_authorization(),
 			)?;
 
-			Ok(context.want_valid_transaction().then(|| {
-				ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-					.and_provides(hash)
-					.priority(T::StoreRenewPriority::get())
-					.longevity(T::StoreRenewLongevity::get())
-					.into()
-			}))
+			Ok(context
+				.want_valid_transaction()
+				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -1048,11 +1197,13 @@ pub mod pallet {
 					|| sp_io::hashing::blake2_256(data),
 					context,
 				),
+				Call::<T>::store_with_cid_config { cid, data } =>
+					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
 						info.size as usize,
-						|| info.content_hash.into(),
+						|| info.content_hash,
 						context,
 					)
 				},
@@ -1067,7 +1218,7 @@ pub mod pallet {
 					)
 				},
 				Call::<T>::remove_expired_account_authorization { who } => {
-					Self::check_authorization_expired(AuthorizationScope::Account(who.clone()))?;
+					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredAccountAuthorization",
@@ -1079,7 +1230,9 @@ pub mod pallet {
 					}))
 				},
 				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
-					Self::check_authorization_expired(AuthorizationScope::Preimage(*content_hash))?;
+					Self::check_authorization_expired(&AuthorizationScope::Preimage(
+						*content_hash,
+					))?;
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
@@ -1099,11 +1252,32 @@ pub mod pallet {
 			call: &Call<T>,
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
-			let size = match call {
-				Call::<T>::store { data } => data.len(),
+			let (size, content_hash) = match call {
+				Call::<T>::store { data } => {
+					let content_hash = sp_io::hashing::blake2_256(data);
+					(data.len(), content_hash)
+				},
+				Call::<T>::store_with_cid_config { cid, data } => {
+					let content_hash = cid.hashing.hash(data);
+					(data.len(), content_hash)
+				},
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					info.size as usize
+					(info.size as usize, info.content_hash)
+				},
+				Call::<T>::authorize_account { .. } |
+				Call::<T>::authorize_preimage { .. } |
+				Call::<T>::refresh_account_authorization { .. } |
+				Call::<T>::refresh_preimage_authorization { .. } => {
+					// Verify that the signer satisfies the Authorizer origin.
+					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
+					T::Authorizer::ensure_origin(origin)
+						.map_err(|_| InvalidTransaction::BadSigner)?;
+					return Ok(context.want_valid_transaction().then(|| ValidTransaction {
+						priority: T::StoreRenewPriority::get(),
+						longevity: T::StoreRenewLongevity::get(),
+						..Default::default()
+					}));
 				},
 				Call::<T>::renew_content_hash { content_hash } => {
 					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
@@ -1122,19 +1296,40 @@ pub mod pallet {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 
-			Self::check_authorization(
-				AuthorizationScope::Account(who.clone()),
+			// Prefer preimage authorization if available.
+			// This allows anyone to store/renew pre-authorized content without consuming their
+			// own account authorization.
+			let consume = context.consume_authorization();
+			let used_preimage_auth = Self::check_authorization(
+				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
-				context.consume_authorization(),
-			)?;
+				consume,
+			)
+			.is_ok();
 
-			Ok(context.want_valid_transaction().then(|| ValidTransaction {
-				priority: T::StoreRenewPriority::get(),
-				longevity: T::StoreRenewLongevity::get(),
-				..Default::default()
+			if !used_preimage_auth {
+				Self::check_authorization(
+					&AuthorizationScope::Account(who.clone()),
+					size as u32,
+					consume,
+				)?;
+			}
+
+			Ok(context.want_valid_transaction().then(|| {
+				if used_preimage_auth {
+					Self::preimage_store_renew_valid_transaction(content_hash)
+				} else {
+					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+						.and_provides((who, content_hash))
+						.priority(T::StoreRenewPriority::get())
+						.longevity(T::StoreRenewLongevity::get())
+						.into()
+				}
 			}))
 		}
 
+		/// Verifies that the provided proof corresponds to a randomly selected chunk from a list of
+		/// transactions.
 		pub(crate) fn verify_chunk_proof(
 			proof: TransactionStorageProof,
 			random_hash: &[u8],
@@ -1188,4 +1383,204 @@ pub mod pallet {
 			Ok(())
 		}
 	}
+}
+
+#[cfg(any(test, feature = "try-runtime"))]
+impl<T: Config> Pallet<T> {
+	pub(crate) fn do_try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
+		ensure!(!Self::retention_period().is_zero(), "RetentionPeriod must not be zero");
+		Self::check_transactions_integrity()?;
+		Self::check_no_stale_transactions(n)?;
+		Self::check_authorizations_integrity()?;
+		Ok(())
+	}
+
+	/// Verify that for each block's transaction list:
+	/// - The `block_chunks` field is cumulative: each entry equals the previous cumulative total
+	///   plus `num_chunks(size)`.
+	fn check_transactions_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
+		for (_block, transactions) in Transactions::<T>::iter() {
+			let mut cumulative_chunks: ChunkIndex = 0;
+			for tx in transactions.iter() {
+				let expected_chunks = num_chunks(tx.size);
+				cumulative_chunks = cumulative_chunks.saturating_add(expected_chunks);
+				ensure!(tx.block_chunks == cumulative_chunks, "tx.block_chunks is not cumulative");
+			}
+
+			// The last entry's block_chunks should equal total_chunks for the block.
+			let total = TransactionInfo::total_chunks(&transactions);
+			ensure!(
+				total == cumulative_chunks,
+				"total_chunks mismatch with cumulative block_chunks"
+			);
+		}
+
+		Ok(())
+	}
+
+	/// Verify that no `Transactions` entries exist for blocks older than
+	/// `current_block - retention_period`. These should have been cleaned up
+	/// by `on_initialize`.
+	fn check_no_stale_transactions(
+		n: BlockNumberFor<T>,
+	) -> Result<(), sp_runtime::TryRuntimeError> {
+		let period = Self::retention_period();
+		let oldest_valid = n.saturating_sub(period);
+
+		for (block, _) in Transactions::<T>::iter() {
+			ensure!(block >= oldest_valid, "Stale transaction entry found beyond retention period");
+			ensure!(block <= n, "Transaction entry exists for a future block");
+		}
+
+		Ok(())
+	}
+
+	/// Verify that all stored authorizations have non-zero extent.
+	/// Depleted authorizations (transactions == 0 or bytes == 0) are removed
+	/// upon consumption, so any stored authorization should have both fields > 0.
+	fn check_authorizations_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
+		for (_, authorization) in Authorizations::<T>::iter() {
+			ensure!(
+				authorization.extent.transactions > 0,
+				"Stored authorization has zero transactions remaining"
+			);
+			ensure!(
+				authorization.extent.bytes > 0,
+				"Stored authorization has zero bytes remaining"
+			);
+		}
+
+		Ok(())
+	}
+}
+
+/// Sanity-check that the runtime's weight/size configuration is consistent with
+/// `MaxBlockTransactions` and `MaxTransactionSize`.
+///
+/// Verifies that the runtime's weight configuration, block length limits, and
+/// `MaxBlockTransactions`/`MaxTransactionSize` constants are mutually consistent.
+///
+/// The available block weight accounts for:
+/// - The `avg_block_initialization` margin that FRAME reserves from `max_total` for on_initialize
+///   hooks (e.g. 5% for parachains, 10% for `with_sensible_defaults`).
+/// - For parachains, the collator-side PoV cap: collators limit the actual PoV to a percentage of
+///   `max_pov_size` to leave headroom for relay-chain state proof overhead. See
+///   `cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs`.
+///
+/// # Parameters
+///
+/// - `collator_pov_percent`: for parachains, the collator-side PoV cap (e.g. `Some(85)`).
+///   Solochains should pass `None`.
+///
+/// # Panics
+///
+/// Panics with a descriptive message if any check fails.
+#[cfg(any(test, feature = "std"))]
+pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
+	use frame_support::{dispatch::DispatchClass, weights::Weight};
+
+	let block_weights = <T as frame_system::Config>::BlockWeights::get();
+	let normal_length =
+		*<T as frame_system::Config>::BlockLength::get().max.get(DispatchClass::Normal);
+
+	let max_block_txs = T::MaxBlockTransactions::get();
+	let max_tx_size = T::MaxTransactionSize::get();
+
+	let normal = block_weights.get(DispatchClass::Normal);
+	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
+	let base_extrinsic = normal.base_extrinsic;
+	let max_extrinsic =
+		normal.max_extrinsic.expect("Normal class must have a max_extrinsic weight");
+
+	// init_weight = max_total - max_extrinsic - base_extrinsic (the avg_block_initialization
+	// reservation that FRAME sets aside for on_initialize hooks).
+	let init_weight = normal_max_total.saturating_sub(max_extrinsic).saturating_sub(base_extrinsic);
+
+	let after_init = normal_max_total.saturating_sub(init_weight);
+	let effective_normal = if let Some(pov_percent) = collator_pov_percent {
+		// Collators cap the PoV to reserve headroom for the relay-chain state proof.
+		// Reference: cumulus/client/consensus/aura/src/collators/lookahead.rs
+		let pov_limit = block_weights.max_block.proof_size() * pov_percent / 100;
+		Weight::from_parts(after_init.ref_time(), after_init.proof_size().min(pov_limit))
+	} else {
+		after_init
+	};
+
+	// 1. MaxTransactionSize must fit within the normal block length limit.
+	assert!(
+		max_tx_size < normal_length,
+		"MaxTransactionSize ({max_tx_size}) >= normal block length ({normal_length}): \
+		 a single max-size store extrinsic wouldn't fit by length",
+	);
+
+	// 2. A single store(MaxTransactionSize) must fit within max_extrinsic.
+	let max_store_dispatch = T::WeightInfo::store(max_tx_size);
+	assert!(
+		max_store_dispatch.all_lte(max_extrinsic),
+		"store({max_tx_size}) dispatch weight {max_store_dispatch:?} exceeds \
+		 max_extrinsic {max_extrinsic:?} (which accounts for init overhead + base)",
+	);
+
+	// 3. MaxBlockTransactions store calls at an evenly-split size must fit in the effective normal
+	//    budget (ref_time). Each extrinsic costs dispatch + base.
+	let per_tx_size = normal_length / max_block_txs;
+	let store_weight = T::WeightInfo::store(per_tx_size).saturating_add(base_extrinsic);
+	let total_store_ref_time = store_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_store_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) store calls at {per_tx_size} bytes each: \
+		 total ref_time {total_store_ref_time} exceeds effective normal limit {} \
+		 (max_total {} minus init reservation {})",
+		effective_normal.ref_time(),
+		normal_max_total.ref_time(),
+		init_weight.ref_time(),
+	);
+
+	// 4. MaxBlockTransactions renew calls must fit by ref_time.
+	let renew_weight = T::WeightInfo::renew().saturating_add(base_extrinsic);
+	let total_renew_ref_time = renew_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_renew_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) renew calls: \
+		 total ref_time {total_renew_ref_time} exceeds effective normal limit {}",
+		effective_normal.ref_time(),
+	);
+
+	// 5. check_proof (DispatchClass::Mandatory, once per block) must fit in max block.
+	let check_proof_weight = T::WeightInfo::check_proof();
+	assert!(
+		check_proof_weight.all_lte(block_weights.max_block),
+		"check_proof weight {check_proof_weight:?} exceeds max block {:?}",
+		block_weights.max_block,
+	);
+
+	// Diagnostics (visible with --nocapture).
+	let max_txs_by_weight = effective_normal.ref_time() / store_weight.ref_time();
+	println!("--- transaction_storage weight sanity ---");
+	println!("  MaxBlockTransactions:       {max_block_txs}");
+	println!(
+		"  MaxTransactionSize:         {max_tx_size} bytes ({} MiB)",
+		max_tx_size / (1024 * 1024)
+	);
+	println!("  Normal max_total:           {normal_max_total:?}");
+	println!("  Init reservation:           {init_weight:?}");
+	if let Some(pov_percent) = collator_pov_percent {
+		let pov_limit = block_weights.max_block.proof_size() * pov_percent / 100;
+		println!(
+			"  Collator PoV cap ({pov_percent}%):      {pov_limit} bytes ({:.1} MiB)",
+			pov_limit as f64 / (1024.0 * 1024.0)
+		);
+	}
+	println!("  Effective normal budget:    {effective_normal:?}");
+	println!("  max_extrinsic:              {max_extrinsic:?}");
+	println!(
+		"  Normal length limit:        {normal_length} bytes ({} MiB)",
+		normal_length / (1024 * 1024)
+	);
+	println!("  store(max_size) weight:     {max_store_dispatch:?}");
+	println!("  store(even_split) weight:   {store_weight:?} (at {per_tx_size} bytes)");
+	println!("  renew weight:               {renew_weight:?}");
+	println!("  check_proof weight:         {check_proof_weight:?}");
+	println!("  Max store txs by weight:    {max_txs_by_weight}");
+	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
 }
