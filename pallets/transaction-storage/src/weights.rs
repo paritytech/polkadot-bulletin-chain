@@ -54,6 +54,7 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn store(l: u32, ) -> Weight;
 	fn renew() -> Weight;
+	fn renew_content_hash() -> Weight;
 	fn check_proof() -> Weight;
 	fn authorize_account() -> Weight;
 	fn refresh_account_authorization() -> Weight;
@@ -100,6 +101,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(50_939_000, 40351)
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
+	// TODO: update weights
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(50_939_000, 40351)
+			.saturating_add(T::DbWeight::get().reads(5_u64))
+			.saturating_add(T::DbWeight::get().writes(2_u64))
 	}
 	/// Storage: TransactionStorage ProofChecked (r:1 w:1)
 	/// Proof: TransactionStorage ProofChecked (max_values: Some(1), max_size: Some(1), added: 496, mode: MaxEncodedLen)
@@ -176,6 +184,12 @@ impl WeightInfo for () {
 		Weight::from_parts(50_939_000, 40351)
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(50_939_000, 40351)
+			.saturating_add(RocksDbWeight::get().reads(5_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
 	}
 	/// Storage: TransactionStorage ProofChecked (r:1 w:1)
 	/// Proof: TransactionStorage ProofChecked (max_values: Some(1), max_size: Some(1), added: 496, mode: MaxEncodedLen)

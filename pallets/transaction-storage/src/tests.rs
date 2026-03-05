@@ -37,6 +37,7 @@ type Error = super::Error<Test>;
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
 type Transactions = super::Transactions<Test>;
+type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
@@ -403,5 +404,98 @@ fn stores_various_sizes_with_account_authorization() {
 			Error::BadDataSize,
 		);
 		run_to_block(2, || None);
+	});
+}
+
+#[test]
+fn renew_content_hash_works() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+
+		// Verify the content hash map was populated
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((1, 0)));
+
+		run_to_block(6, || None);
+		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+
+		// Map should now point to the new block
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::Renewed { index: 0, content_hash },
+		));
+	});
+}
+
+#[test]
+fn content_hash_map_cleaned_on_expiry() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		assert!(TransactionByContentHash::get(content_hash).is_some());
+
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Advance past storage period; block 1 data expires at block 12
+		run_to_block(12, proof_provider);
+		assert!(TransactionByContentHash::get(content_hash).is_none());
+	});
+}
+
+#[test]
+fn content_hash_map_not_cleaned_if_renewed() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+
+		// Renew at block 6, which updates the map to point to block 6
+		run_to_block(6, || None);
+		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
+
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 || block_num == 16 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Block 1 data expires at block 12, but the map should still point to block 6
+		run_to_block(12, proof_provider);
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
+
+		// Block 6 data expires at block 17
+		run_to_block(17, proof_provider);
+		assert!(TransactionByContentHash::get(content_hash).is_none());
+	});
+}
+
+#[test]
+fn renew_content_hash_not_found() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let content_hash = [0u8; 32];
+		assert_noop!(
+			TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash),
+			Error::RenewedNotFound,
+		);
 	});
 }
