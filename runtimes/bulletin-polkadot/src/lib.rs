@@ -43,8 +43,8 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, Randomness,
-		StorageInfo,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, OriginTrait,
+		Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
@@ -367,6 +367,48 @@ impl SortedMembers<AccountId> for TestAccounts {
 	}
 }
 
+/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
+/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct RuntimeCallInspector;
+
+impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
+	fn inspect_wrapper(call: &RuntimeCall) -> Option<(alloc::vec::Vec<&RuntimeCall>, bool)> {
+		match call {
+			RuntimeCall::Utility(utility_call) => {
+				let inner = utility_inner_calls(utility_call);
+				if inner.is_empty() {
+					return None;
+				}
+				let preserves_origin = matches!(
+					utility_call,
+					pallet_utility::Call::batch { .. } |
+						pallet_utility::Call::batch_all { .. } |
+						pallet_utility::Call::force_batch { .. }
+				);
+				Some((inner, preserves_origin))
+			},
+			RuntimeCall::Proxy(proxy_call) => {
+				let inner = proxy_inner_calls(proxy_call);
+				if inner.is_empty() {
+					return None;
+				}
+				// Proxy dispatches with delegator's origin
+				Some((inner, false))
+			},
+			RuntimeCall::Sudo(sudo_call) => {
+				let inner = sudo_inner_calls(sudo_call);
+				if inner.is_empty() {
+					return None;
+				}
+				// sudo dispatches with Root, sudo_as with target's origin
+				Some((inner, false))
+			},
+			_ => None,
+		}
+	}
+}
+
 impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -526,75 +568,39 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 }
 
 use pallets_common::{
-	proxy_inner_calls, sudo_inner_calls, utility_inner_calls, ValidationMode, MAX_INNER_CALL_DEPTH,
+	proxy_inner_calls, sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH,
 };
 
-/// Validate only TransactionStorage calls, recursing through Utility wrappers.
-/// Non-storage calls pass through.
-fn validate_storage_calls(
-	who: &AccountId,
-	call: &RuntimeCall,
-	depth: u32,
-	mode: ValidationMode,
-) -> Result<(), TransactionValidityError> {
-	if depth >= MAX_INNER_CALL_DEPTH {
-		return Err(InvalidTransaction::ExhaustsResources.into());
-	}
-	match call {
-		RuntimeCall::TransactionStorage(inner_call) => match mode {
-			ValidationMode::Check =>
-				TransactionStorage::validate_signed(who, inner_call).map(|_| ()),
-			ValidationMode::Consume => TransactionStorage::pre_dispatch_signed(who, inner_call),
-		},
-		RuntimeCall::Utility(utility_call) => {
-			for inner in utility_inner_calls(utility_call) {
-				validate_storage_calls(who, inner, depth + 1, mode)?;
-			}
-			Ok(())
-		},
-		_ => Ok(()),
-	}
-}
-
-/// Recursively validate inner calls of wrapper extrinsics against the allowlist.
-/// TransactionStorage calls must pass signed validation. Utility and Proxy are strict
-/// (enforce the full allowlist) because they don't add hard authorization — proxy's
-/// `ProxyType` filter is defense-in-depth at dispatch, not a gate. Sudo is permissive
-/// (only checks TransactionStorage auth) because the sudo pallet enforces its own
-/// sudo-key check at dispatch time, and must be able to call anything (e.g. `set_code`).
+/// Recursively check that inner calls are in the allowed set.
+/// Storage auth is handled by the pallet's `ValidateStorageCalls` extension.
+/// Sudo inner calls are not allowlisted — sudo enforces its own checks at dispatch.
 ///
 /// NOTE: The allowlist here must be kept in sync with the `validate()` match arms
-/// in [`ValidateSigned`]. If a new pallet call is accepted there, add it here too.
-fn validate_inner_calls(
-	who: &AccountId,
+/// in [`AllowedSignedCalls`]. If a new pallet call is accepted there, add it here too.
+fn validate_inner_calls_allowlist(
 	call: &RuntimeCall,
 	depth: u32,
-	mode: ValidationMode,
 ) -> Result<(), TransactionValidityError> {
 	if depth >= MAX_INNER_CALL_DEPTH {
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {
-		storage_call @ RuntimeCall::TransactionStorage(_) =>
-			validate_storage_calls(who, storage_call, depth, mode),
+		// Storage auth handled by pallet extension
+		RuntimeCall::TransactionStorage(_) => Ok(()),
 		RuntimeCall::Utility(utility_call) => {
 			for inner in utility_inner_calls(utility_call) {
-				validate_inner_calls(who, inner, depth + 1, mode)?;
+				validate_inner_calls_allowlist(inner, depth + 1)?;
 			}
 			Ok(())
 		},
 		RuntimeCall::Proxy(proxy_call) => {
 			for inner in proxy_inner_calls(proxy_call) {
-				validate_inner_calls(who, inner, depth + 1, mode)?;
+				validate_inner_calls_allowlist(inner, depth + 1)?;
 			}
 			Ok(())
 		},
-		RuntimeCall::Sudo(sudo_call) => {
-			for inner in sudo_inner_calls(sudo_call) {
-				validate_storage_calls(who, inner, depth + 1, mode)?;
-			}
-			Ok(())
-		},
+		// Sudo can call anything; its own dispatch checks enforce authorization
+		RuntimeCall::Sudo(_) => Ok(()),
 		RuntimeCall::Session(..) |
 		RuntimeCall::BridgePolkadotGrandpa(..) |
 		RuntimeCall::BridgePolkadotParachains(..) |
@@ -618,17 +624,18 @@ fn validate_inner_calls(
 	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
-pub struct ValidateSigned;
+pub struct AllowedSignedCalls;
 
-impl TransactionExtension<RuntimeCall> for ValidateSigned {
-	const IDENTIFIER: &'static str = "ValidateSigned";
+impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
+	const IDENTIFIER: &'static str = "AllowedSignedCalls";
 
 	type Implicit = ();
 	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
 		Ok(())
 	}
 
-	type Val = ();
+	/// `Some(who)` when the signer was extracted.
+	type Val = Option<AccountId>;
 	/// `Some(who)` if the transaction is a bridge transaction.
 	type Pre = Option<AccountId>;
 
@@ -646,21 +653,35 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		// ValidateStorageCalls may have transformed origin to Authorized for wrapper calls
+		// containing storage operations. Extract signer from either Signed or Authorized.
+		let who = match origin.as_system_origin_signer() {
+			Some(who) => who.clone(),
+			None => match origin.clone().into_caller().try_into() {
+				Ok(pallet_transaction_storage::pallet::Origin::<Runtime>::Authorized {
+					who,
+					..
+				}) => who,
+				_ => return Ok((ValidTransaction::default(), None, origin)),
+			},
+		};
 
 		let validity = match call {
-			// Transaction storage call
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			// TransactionStorage calls are validated by ValidateStorageCalls extension.
+			// Store/renew origins are transformed so they won't reach here via Signed.
+			// Authorizer calls still have a signed origin and need to pass through.
+			RuntimeCall::TransactionStorage(_) => ValidTransaction::default(),
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
+				ValidatorSet::validate_set_keys(&who)?;
+				ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
-				}),
-			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+				}
+			},
+			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(&who)?,
 
 			// Bridge-related calls
 			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
@@ -680,80 +701,81 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			}) |
 			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
+			) => {
+				RelayerSet::validate_bridge_tx(&who)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}
+			},
 
 			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) => {
 				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
-					.map_err(|_| InvalidTransaction::BadSigner.into())
-					.map(|()| ValidTransaction {
-						priority: BridgeTxPriority::get(),
-						longevity: BridgeTxLongevity::get(),
-						..Default::default()
-					}),
+					.map_err(|_| InvalidTransaction::BadSigner)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}
+			},
 
-			// Wrapper calls — recursively validate inner calls
+			// Wrapper calls — allowlisting + priority (storage auth handled by pallet)
 			RuntimeCall::Proxy(proxy_call) => {
 				for inner in proxy_inner_calls(proxy_call) {
-					validate_inner_calls(who, inner, 0, ValidationMode::Check)?;
+					validate_inner_calls_allowlist(inner, 0)?;
 				}
-				Ok(ValidTransaction {
+				ValidTransaction {
 					priority: ProxyPriority::get(),
 					longevity: ProxyLongevity::get(),
 					..Default::default()
-				})
-			},
-			RuntimeCall::Sudo(sudo_call) => {
-				for inner in sudo_inner_calls(sudo_call) {
-					validate_storage_calls(who, inner, 0, ValidationMode::Check)?;
 				}
-				Ok(ValidTransaction {
-					priority: SudoPriority::get(),
-					longevity: SudoLongevity::get(),
-					..Default::default()
-				})
+			},
+			RuntimeCall::Sudo(_) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: SudoLongevity::get(),
+				..Default::default()
 			},
 			RuntimeCall::Utility(utility_call) => {
 				for inner in utility_inner_calls(utility_call) {
-					validate_inner_calls(who, inner, 0, ValidationMode::Check)?;
+					validate_inner_calls_allowlist(inner, 0)?;
 				}
-				Ok(ValidTransaction {
+				ValidTransaction {
 					priority: UtilityPriority::get(),
 					longevity: UtilityLongevity::get(),
 					..Default::default()
-				})
+				}
 			},
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(ValidTransaction {
-					priority: UpgradePriority::get(),
-					longevity: UpgradeLongevity::get(),
-					..Default::default()
-				}),
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => ValidTransaction {
+				priority: UpgradePriority::get(),
+				longevity: UpgradeLongevity::get(),
+				..Default::default()
+			},
 
 			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
-		}?;
+			_ => return Err(InvalidTransaction::Call.into()),
+		};
 
-		Ok((validity, (), origin))
+		Ok((validity, Some(who), origin))
 	}
 
 	fn prepare(
 		self,
-		_val: Self::Val,
+		val: Self::Val,
 		origin: &RuntimeOrigin,
 		call: &RuntimeCall,
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		// Extract signer from either Signed or Authorized origin.
+		let who = match val.as_ref().or_else(|| origin.as_system_origin_signer()) {
+			Some(who) => who,
+			None => return Ok(None),
+		};
 		match call {
-			// Transaction storage — consume authorization
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+			// TransactionStorage is fully handled by ValidateStorageCalls extension.
+			RuntimeCall::TransactionStorage(_) => Ok(None),
 
 			// Session key management
 			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
@@ -787,25 +809,8 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 					.map_err(|_| InvalidTransaction::BadSigner.into())
 					.map(|()| Some(who.clone())),
 
-			// Wrapper calls — recursively consume authorization for inner calls
-			RuntimeCall::Proxy(proxy_call) => {
-				for inner in proxy_inner_calls(proxy_call) {
-					validate_inner_calls(who, inner, 0, ValidationMode::Consume)?;
-				}
-				Ok(None)
-			},
-			RuntimeCall::Sudo(sudo_call) => {
-				for inner in sudo_inner_calls(sudo_call) {
-					validate_storage_calls(who, inner, 0, ValidationMode::Consume)?;
-				}
-				Ok(None)
-			},
-			RuntimeCall::Utility(utility_call) => {
-				for inner in utility_inner_calls(utility_call) {
-					validate_inner_calls(who, inner, 0, ValidationMode::Consume)?;
-				}
-				Ok(None)
-			},
+			// Wrapper calls — storage auth consumption handled by pallet extension
+			RuntimeCall::Proxy(_) | RuntimeCall::Sudo(_) | RuntimeCall::Utility(_) => Ok(None),
 			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => Ok(None),
 
 			// All other calls are invalid
@@ -842,6 +847,9 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 }
 
 /// The SignedExtension to the basic transaction logic.
+///
+/// NOTE: `ValidateStorageCalls` must come before `AllowedSignedCalls` because it transforms
+/// the origin for signed TransactionStorage calls, and `AllowedSignedCalls` needs to detect this.
 pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -850,7 +858,8 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	ValidateSigned,
+	pallet_transaction_storage::extension::ValidateStorageCalls<Runtime, RuntimeCallInspector>,
+	AllowedSignedCalls,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
 

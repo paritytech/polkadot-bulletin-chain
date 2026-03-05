@@ -24,7 +24,7 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
-use pallets_common::NoCurrency;
+use pallets_common::{sudo_inner_calls, utility_inner_calls, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
@@ -41,15 +41,45 @@ parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const SudoLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const SetPurgeKeysLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	pub const UtilityPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
-	pub const UtilityLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
+}
+
+/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
+/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct RuntimeCallInspector;
+
+impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
+	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
+		match call {
+			RuntimeCall::Utility(utility_call) => {
+				let inner = utility_inner_calls(utility_call);
+				if inner.is_empty() {
+					return None;
+				}
+				let preserves_origin = matches!(
+					utility_call,
+					pallet_utility::Call::batch { .. } |
+						pallet_utility::Call::batch_all { .. } |
+						pallet_utility::Call::force_batch { .. }
+				);
+				Some((inner, preserves_origin))
+			},
+			RuntimeCall::Sudo(sudo_call) => {
+				let inner = sudo_inner_calls(sudo_call);
+				if inner.is_empty() {
+					return None;
+				}
+				// sudo dispatches with Root, sudo_as with target's origin
+				Some((inner, false))
+			},
+			_ => None,
+		}
+	}
 }
 
 /// The main business of the Bulletin chain.

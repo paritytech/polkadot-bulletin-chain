@@ -84,7 +84,10 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		bulletin_westend_runtime::ValidateSigned,
+		pallet_transaction_storage::extension::ValidateStorageCalls::<
+			Runtime,
+			bulletin_westend_runtime::storage::RuntimeCallInspector,
+		>::default(),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
 	let tx_ext: TxExtension =
@@ -779,30 +782,75 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 }
 
 #[test]
-fn wrapped_call_respects_validate_inner_calls_allowlist() {
+fn authorized_wrapped_store_succeeds() {
 	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
 		.execute_with(|| {
 			advance_block();
 			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![42u8; 100];
 
-			// Give Alice balance so fee check passes before ValidateSigned.
+			// Fund Alice so she can pay the wrapper overhead fees (batch itself isn't feeless).
 			use frame_support::traits::fungible::Mutate;
-			Balances::mint_into(&account.to_account_id(), 1_000_000_000_000).unwrap();
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
 
-			// PolkadotXcm::send is a standard user-facing call but is NOT in the
-			// validate_inner_calls allowlist, so wrapping it in utility::batch
-			// must be rejected.
-			let blocked_call = RuntimeCall::PolkadotXcm(pallet_xcm::Call::send {
-				dest: Box::new(Location::parent().into()),
-				message: Box::new(xcm::VersionedXcm::from(Xcm::<()>(vec![]))),
+			// batch, batch_all, force_batch (not as_derivative — it changes origin internally)
+			let batch_variants = |call: RuntimeCall| -> Vec<(RuntimeCall, &'static str)> {
+				vec![
+					(
+						RuntimeCall::Utility(pallet_utility::Call::batch {
+							calls: vec![call.clone()],
+						}),
+						"batch",
+					),
+					(
+						RuntimeCall::Utility(pallet_utility::Call::batch_all {
+							calls: vec![call.clone()],
+						}),
+						"batch_all",
+					),
+					(
+						RuntimeCall::Utility(pallet_utility::Call::force_batch {
+							calls: vec![call],
+						}),
+						"force_batch",
+					),
+				]
+			};
+
+			// Authorize enough for direct + 3 batch variants
+			let num_calls = 4u32;
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				num_calls,
+				num_calls as u64 * data.len() as u64,
+			));
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
 			});
 
-			for (wrapped, name) in wrap_call_utility_variants(blocked_call.clone()) {
-				assert_eq!(
-					construct_and_apply_extrinsic(Some(account.pair()), wrapped),
-					Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
-					"PolkadotXcm::transfer_assets via {name} should be rejected",
-				);
+			// Direct store should succeed.
+			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), store_call.clone()));
+
+			// Batch-wrapped store should also succeed.
+			for (wrapped, name) in batch_variants(store_call) {
+				let res = construct_and_apply_extrinsic(Some(account.pair()), wrapped);
+				assert!(res.is_ok(), "{name}: apply_extrinsic failed with {res:?}");
+				assert!(res.unwrap().is_ok(), "{name}: dispatch failed");
 			}
+
+			// All authorization should be consumed.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
 		});
 }
+
+// NOTE: No `wrapped_call_respects_validate_inner_calls_allowlist` test on Westend.
+// Unlike the feeless Polkadot solochain, Westend is a parachain with transaction fees,
+// so there is no call allowlist — fees provide the spam gate for non-storage calls.
+// TransactionStorage calls inside wrappers are validated for authorization by the pallet's
+// `ValidateStorageCalls` extension to prevent DoS via large unauthorized data.

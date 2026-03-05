@@ -61,6 +61,8 @@ pub trait WeightInfo {
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
+	fn validate_store() -> Weight;
+	fn validate_renew() -> Weight;
 }
 
 /// Weights for pallet_transaction_storage using the Substrate node and recommended hardware.
@@ -138,6 +140,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
+	fn validate_store() -> Weight {
+		T::DbWeight::get().reads_writes(6, 2)
+	}
+	fn validate_renew() -> Weight {
+		T::DbWeight::get().reads_writes(8, 2)
+	}
 }
 
 // For backwards compatibility and tests
@@ -213,5 +221,11 @@ impl WeightInfo for () {
 	}
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
+	}
+	fn validate_store() -> Weight {
+		RocksDbWeight::get().reads_writes(6, 2)
+	}
+	fn validate_renew() -> Weight {
+		RocksDbWeight::get().reads_writes(8, 2)
 	}
 }
