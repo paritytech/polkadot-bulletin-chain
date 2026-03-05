@@ -324,14 +324,9 @@ mod benchmarks {
 		// extrinsic itself (the closure substitutes for the actual dispatch).
 		#[block]
 		{
-			ext.test_run(
-				RawOrigin::Signed(caller.clone()).into(),
-				&call,
-				&info,
-				len,
-				0,
-				|_| Ok(().into()),
-			)
+			ext.test_run(RawOrigin::Signed(caller.clone()).into(), &call, &info, len, 0, |_| {
+				Ok(().into())
+			})
 			.unwrap()
 			.unwrap();
 		}
@@ -371,14 +366,9 @@ mod benchmarks {
 		// extrinsic itself (the closure substitutes for the actual dispatch).
 		#[block]
 		{
-			ext.test_run(
-				RawOrigin::Signed(caller.clone()).into(),
-				&call,
-				&info,
-				len,
-				0,
-				|_| Ok(().into()),
-			)
+			ext.test_run(RawOrigin::Signed(caller.clone()).into(), &call, &info, len, 0, |_| {
+				Ok(().into())
+			})
 			.unwrap()
 			.unwrap();
 		}

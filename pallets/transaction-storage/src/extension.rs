@@ -28,14 +28,14 @@ use polkadot_sdk_frame::{
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-/// Transaction extension that authorizes signed TransactionStorage calls.
+/// Transaction extension that validates signed TransactionStorage calls.
 ///
 /// This extension handles **signed TransactionStorage transactions** via
 /// [`Pallet::validate_signed`]:
 /// - **Store/renew calls**: Validates authorization and transforms the origin to
 ///   [`Origin::Authorized`] to carry authorization info.
-/// - **Authorizer calls** (authorize_*, refresh_*): Validates that the signer satisfies the
-///   [`Config::Authorizer`] origin requirement.
+/// - **Authorization management calls** (authorize_*, refresh_*, remove_expired_*): Validates that
+///   the signer satisfies the [`Config::Authorizer`] origin requirement.
 ///
 /// All other calls and unsigned transactions are passed through unchanged.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
