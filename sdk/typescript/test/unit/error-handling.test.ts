@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 import { describe, expect, it } from "vitest"
-import { BulletinClient } from "../../src/client"
+import { BulletinOps } from "../../src/ops"
 import { BulletinError, type HashAlgorithm } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
@@ -92,26 +92,26 @@ describe("Error Handling", () => {
 
   describe("Client Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStore", async () => {
-      const client = new BulletinClient()
+      const ops = new BulletinOps()
 
-      await expect(client.prepareStore(new Uint8Array(0))).rejects.toThrow(
+      await expect(ops.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
       )
       await expect(
-        client.prepareStore(new Uint8Array(0)),
+        ops.prepareStore(new Uint8Array(0)),
       ).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
     })
 
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
-      const client = new BulletinClient()
+      const ops = new BulletinOps()
 
       await expect(
-        client.prepareStoreChunked(new Uint8Array(0)),
+        ops.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toThrow(BulletinError)
       await expect(
-        client.prepareStoreChunked(new Uint8Array(0)),
+        ops.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
@@ -149,10 +149,10 @@ describe("Error Handling", () => {
 
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
-      const client = new BulletinClient()
+      const ops = new BulletinOps()
 
       try {
-        await client.prepareStore(new Uint8Array(0))
+        await ops.prepareStore(new Uint8Array(0))
         expect.fail("Should have thrown")
       } catch (error) {
         expect(error).toBeInstanceOf(BulletinError)

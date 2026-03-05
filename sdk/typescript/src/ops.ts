@@ -30,7 +30,7 @@ import { calculateCid, estimateAuthorization } from "./utils.js"
  * For full blockchain integration, use PAPI (@polkadot-api) to submit
  * transactions to the TransactionStorage pallet.
  */
-export class BulletinClient {
+export class BulletinOps {
   private config: Required<ClientConfig>
 
   constructor(config?: ClientConfig) {

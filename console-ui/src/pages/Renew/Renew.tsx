@@ -174,7 +174,7 @@ export function Renew() {
       const result = await bulletinClient.renew(
         renewalTarget.blockNumber,
         renewalTarget.index,
-        handleProgress,
+        { onProgress: handleProgress },
       );
 
       // Calculate new expiration (retentionPeriod guaranteed non-null at this point)

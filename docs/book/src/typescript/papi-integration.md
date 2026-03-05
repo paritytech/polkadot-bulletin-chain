@@ -299,12 +299,10 @@ try {
 Customize client behavior:
 
 ```typescript
-const client = new AsyncBulletinClient(api, signer, {
+const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
     defaultChunkSize: 1024 * 1024, // 1 MiB chunks
-    maxParallel: 8, // Upload 8 chunks in parallel
     createManifest: true, // Create DAG-PB manifest
     chunkingThreshold: 2 * 1024 * 1024, // Auto-chunk files > 2 MiB
-    checkAuthorizationBeforeUpload: true, // Validate auth before upload
 });
 ```
 

@@ -425,7 +425,7 @@ function FaucetAuthorizePreimagePanel() {
       await bulletinClient.authorizePreimage(
         contentHashBytes,
         sizeValue > 0n ? sizeValue : 1024n * 1024n,
-        handleProgress
+        { onProgress: handleProgress }
       );
 
       setSubmitSuccess("Successfully authorized preimage");
@@ -717,7 +717,7 @@ function FaucetAuthorizeAccountPanel() {
         forWho,
         txCount,
         bytesValue,
-        handleProgress
+        { onProgress: handleProgress }
       );
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);

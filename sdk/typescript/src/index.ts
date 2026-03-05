@@ -45,7 +45,7 @@
 export { CID } from "multiformats/cid"
 export * from "./async-client.js"
 export * from "./chunker.js"
-export * from "./client.js"
+export * from "./ops.js"
 export * from "./dag.js"
 export * from "./mock-client.js"
 export * from "./types.js"

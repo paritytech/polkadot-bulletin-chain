@@ -13,14 +13,16 @@
 
 import type { Binary } from "polkadot-api"
 import {
-  type AsyncClientConfig,
+  type AuthCallOptions,
   type BulletinClientInterface,
+  type CallOptions,
   StoreBuilder,
   type TransactionReceipt,
 } from "./async-client.js"
 import {
   BulletinError,
   CidCodec,
+  type ClientConfig,
   DEFAULT_STORE_OPTIONS,
   type ProgressCallback,
   type StoreOptions,
@@ -31,7 +33,7 @@ import { calculateCid, estimateAuthorization } from "./utils.js"
 /**
  * Configuration for the mock Bulletin client
  */
-export interface MockClientConfig extends AsyncClientConfig {
+export interface MockClientConfig extends ClientConfig {
   /** Simulate authorization failures (for testing error paths) */
   simulateAuthFailure?: boolean
   /** Simulate storage failures (for testing error paths) */
@@ -97,9 +99,7 @@ function mockReceipt(): TransactionReceipt {
  */
 export class MockBulletinClient implements BulletinClientInterface {
   /** Client configuration */
-  public config: Required<
-    Omit<MockClientConfig, "simulateAuthFailure" | "simulateStorageFailure">
-  > & {
+  public config: Required<ClientConfig> & {
     simulateAuthFailure: boolean
     simulateStorageFailure: boolean
   }
@@ -116,7 +116,6 @@ export class MockBulletinClient implements BulletinClientInterface {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      useSudo: config?.useSudo ?? false,
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
     }
@@ -212,9 +211,6 @@ export class MockBulletinClient implements BulletinClientInterface {
     }
   }
 
-  /**
-   * Authorize an account to store data
-   */
   private throwIfAuthFailure(): void {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
@@ -228,6 +224,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     who: string,
     transactions: number,
     bytes: bigint,
+    options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({
@@ -242,13 +239,17 @@ export class MockBulletinClient implements BulletinClientInterface {
   async authorizePreimage(
     contentHash: Uint8Array,
     maxSize: bigint,
+    options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({ type: "authorize_preimage", contentHash, maxSize })
     return mockReceipt()
   }
 
-  async refreshAccountAuthorization(who: string): Promise<TransactionReceipt> {
+  async refreshAccountAuthorization(
+    who: string,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({ type: "refresh_account_authorization", who })
     return mockReceipt()
@@ -256,6 +257,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async refreshPreimageAuthorization(
     contentHash: Uint8Array,
+    options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({
@@ -267,6 +269,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async removeExpiredAccountAuthorization(
     who: string,
+    options?: CallOptions,
   ): Promise<TransactionReceipt> {
     this.operations.push({ type: "remove_expired_account_authorization", who })
     return mockReceipt()
@@ -274,6 +277,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async removeExpiredPreimageAuthorization(
     contentHash: Uint8Array,
+    options?: CallOptions,
   ): Promise<TransactionReceipt> {
     this.operations.push({
       type: "remove_expired_preimage_authorization",
@@ -282,7 +286,11 @@ export class MockBulletinClient implements BulletinClientInterface {
     return mockReceipt()
   }
 
-  async renew(block: number, index: number): Promise<TransactionReceipt> {
+  async renew(
+    block: number,
+    index: number,
+    options?: CallOptions,
+  ): Promise<TransactionReceipt> {
     this.operations.push({ type: "renew", block, index })
     return mockReceipt()
   }
