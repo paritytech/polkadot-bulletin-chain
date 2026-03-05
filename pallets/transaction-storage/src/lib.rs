@@ -348,7 +348,7 @@ pub mod pallet {
 			let period = Self::retention_period();
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
 			if obsolete > Zero::zero() {
-				weight.saturating_accrue(db_weight.writes(2));
+				weight.saturating_accrue(db_weight.writes(1));
 				<Transactions<T>>::remove(obsolete);
 			}
 
@@ -361,9 +361,8 @@ pub mod pallet {
 		fn on_finalize(n: BlockNumberFor<T>) {
 			let proof_ok = <ProofChecked<T>>::take() || {
 				// Proof is not required for early or empty blocks.
-				let number = <frame_system::Pallet<T>>::block_number();
 				let period = Self::retention_period();
-				let target_number = number.saturating_sub(period);
+				let target_number = n.saturating_sub(period);
 
 				target_number.is_zero() || {
 					// An empty block means no transactions were stored, relying on the fact
@@ -400,7 +399,7 @@ pub mod pallet {
 		fn integrity_test() {
 			assert!(
 				!T::MaxBlockTransactions::get().is_zero(),
-				"MaxTransactionSize must be greater than zero"
+				"MaxBlockTransactions must be greater than zero"
 			);
 			assert!(
 				!T::MaxTransactionSize::get().is_zero(),
@@ -572,6 +571,7 @@ pub mod pallet {
 			bytes: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
+			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
 			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
@@ -601,6 +601,7 @@ pub mod pallet {
 			max_size: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
+			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
@@ -999,12 +1000,10 @@ pub mod pallet {
 
 		/// Remove an expired authorization.
 		fn remove_expired_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
-			// In the case of a regular unsigned transaction, pre_dispatch should have checked that
-			// the authorization exists and has expired
-			let Some(authorization) = Authorizations::<T>::take(&scope) else {
-				return Err(Error::<T>::AuthorizationNotFound.into());
-			};
+			let authorization =
+				Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(Self::expired(authorization.expiration), Error::<T>::AuthorizationNotExpired);
+			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
 		}
