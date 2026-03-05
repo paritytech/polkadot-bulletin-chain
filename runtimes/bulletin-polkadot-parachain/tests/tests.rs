@@ -26,7 +26,6 @@ use bulletin_polkadot_parachain_runtime::{
 };
 use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
 use pallet_transaction_storage::{
-	cids::{calculate_cid, CidConfig, HashingAlgorithm},
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
 };
 use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
@@ -38,6 +37,7 @@ use sp_runtime::{
 	BuildStorage, Either,
 };
 use std::collections::HashMap;
+use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -54,7 +54,7 @@ fn advance_block() {
 	System::set_block_number(next);
 
 	frame_system::BlockWeight::<Runtime>::kill();
-	frame_system::AllExtrinsicsLen::<Runtime>::kill();
+	frame_system::BlockSize::<Runtime>::kill();
 
 	<System as Hooks<_>>::on_initialize(next);
 	<TransactionStorage as Hooks<_>>::on_initialize(next);

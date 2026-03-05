@@ -2147,6 +2147,7 @@ dependencies = [
  "staging-xcm-executor",
  "substrate-wasm-builder",
  "tracing",
+ "transaction-storage-primitives",
  "xcm-runtime-apis",
 ]
 
