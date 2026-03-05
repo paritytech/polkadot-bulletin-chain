@@ -163,7 +163,7 @@ export function Renew() {
           setTxStatus("Transaction signed...");
         } else if (event.type === "broadcasted") {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "best_block") {
+        } else if (event.type === "in_best_block") {
           setTxStatus(`Included in block #${event.blockNumber}...`);
         } else if (event.type === "finalized") {
           setTxStatus("Finalized!");

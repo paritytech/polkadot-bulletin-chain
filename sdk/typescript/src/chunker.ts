@@ -10,6 +10,7 @@ import {
   type Chunk,
   type ChunkerConfig,
   DEFAULT_CHUNKER_CONFIG,
+  ErrorCode,
 } from "./types.js"
 
 /** Maximum chunk size allowed (2 MiB, Bitswap compatibility limit) */
@@ -31,13 +32,13 @@ export class FixedSizeChunker {
     if (this.config.chunkSize <= 0) {
       throw new BulletinError(
         "Chunk size must be greater than 0",
-        "INVALID_CONFIG",
+        ErrorCode.INVALID_CONFIG,
       )
     }
     if (this.config.chunkSize > MAX_CHUNK_SIZE) {
       throw new BulletinError(
         `Chunk size ${this.config.chunkSize} exceeds maximum allowed size of ${MAX_CHUNK_SIZE}`,
-        "CHUNK_TOO_LARGE",
+        ErrorCode.CHUNK_TOO_LARGE,
       )
     }
   }
@@ -47,12 +48,12 @@ export class FixedSizeChunker {
    */
   chunk(data: Uint8Array): Chunk[] {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
     if (data.length > MAX_FILE_SIZE) {
       throw new BulletinError(
         `Data size ${data.length} exceeds maximum allowed size of ${MAX_FILE_SIZE} (64 MiB)`,
-        "FILE_TOO_LARGE",
+        ErrorCode.FILE_TOO_LARGE,
       )
     }
 

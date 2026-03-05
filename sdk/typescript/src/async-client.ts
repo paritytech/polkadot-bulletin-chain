@@ -16,6 +16,7 @@ import {
   CidCodec,
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,
@@ -372,47 +373,62 @@ export class AsyncBulletinClient {
             }
           }
 
+          // Handle validated event
+          if (ev.type === "validated" && progressCallback) {
+            progressCallback({ type: "validated" })
+          }
+
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted" })
+            progressCallback({
+              type: "broadcasted",
+              numPeers: (ev as any).nPeers,
+            })
           }
 
           // Handle best block state
-          if (ev.type === "txBestBlocksState" && ev.found && ev.block) {
-            if (progressCallback) {
-              progressCallback({
-                type: "best_block",
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-                txIndex: ev.block.index,
-              })
-            }
-
-            // If waiting for best_block, resolve here
-            if (waitFor === "best_block" && !resolved) {
-              resolved = true
-              subscription.unsubscribe()
-
-              // Extract tx index from Stored event if available
-              let storedIndex: number | undefined
-              if (ev.events) {
-                const storedEvent = ev.events.find(
-                  (e: RuntimeEvent) =>
-                    e.type === "TransactionStorage" &&
-                    e.value?.type === "Stored",
-                )
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  storedIndex = storedEvent.value.value.index
-                }
+          if (ev.type === "txBestBlocksState") {
+            if (ev.found && ev.block) {
+              if (progressCallback) {
+                progressCallback({
+                  type: "in_best_block",
+                  blockHash: ev.block.hash,
+                  blockNumber: ev.block.number,
+                  txIndex: ev.block.index,
+                })
               }
 
-              resolve({
-                blockHash: ev.block.hash,
-                txHash: txHash || "",
-                blockNumber: ev.block.number,
-                txIndex: storedIndex,
-                events: ev.events,
-              })
+              // If waiting for best_block, resolve here
+              if (waitFor === "best_block" && !resolved) {
+                resolved = true
+                subscription.unsubscribe()
+
+                // Extract tx index from Stored event if available
+                let storedIndex: number | undefined
+                if (ev.events) {
+                  const storedEvent = ev.events.find(
+                    (e: RuntimeEvent) =>
+                      e.type === "TransactionStorage" &&
+                      e.value?.type === "Stored",
+                  )
+                  if (storedEvent?.value?.value?.index !== undefined) {
+                    storedIndex = storedEvent.value.value.index
+                  }
+                }
+
+                resolve({
+                  blockHash: ev.block.hash,
+                  txHash: txHash || "",
+                  blockNumber: ev.block.number,
+                  txIndex: storedIndex,
+                  events: ev.events,
+                })
+              }
+            } else {
+              // Transaction no longer in best block (reorg)
+              if (progressCallback) {
+                progressCallback({ type: "no_longer_in_best_block" })
+              }
             }
           }
 
@@ -467,7 +483,7 @@ export class AsyncBulletinClient {
         if (!resolved) {
           resolved = true
           subscription.unsubscribe()
-          reject(new BulletinError("Transaction timed out", "TIMEOUT"))
+          reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
         }
       }, 120000)
     })
@@ -520,7 +536,7 @@ export class AsyncBulletinClient {
     // Convert Binary to Uint8Array if needed
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     // Decide whether to chunk based on threshold
@@ -547,7 +563,7 @@ export class AsyncBulletinClient {
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
@@ -584,7 +600,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to store data: ${error}`,
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         error,
       )
     }
@@ -734,7 +750,7 @@ export class AsyncBulletinClient {
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const chunkerConfig: ChunkerConfig = {
@@ -803,7 +819,7 @@ export class AsyncBulletinClient {
         }
         throw new BulletinError(
           `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
-          "CHUNK_FAILED",
+          ErrorCode.CHUNK_FAILED,
           error,
         )
       }
@@ -887,7 +903,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to authorize account: ${error}`,
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
         error,
       )
     }
@@ -928,7 +944,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to authorize preimage: ${error}`,
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
         error,
       )
     }
@@ -962,7 +978,7 @@ export class AsyncBulletinClient {
     } catch (error) {
       throw new BulletinError(
         `Failed to renew: ${error}`,
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         error,
       )
     }
@@ -999,13 +1015,13 @@ export class AsyncBulletinClient {
   ): Promise<StoreResult> {
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     if (dataBytes.length > this.config.chunkingThreshold) {
       throw new BulletinError(
         "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
-        "UNSUPPORTED_OPERATION",
+        ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
 
@@ -1049,7 +1065,7 @@ export class AsyncBulletinClient {
       if (error instanceof BulletinError) throw error
       throw new BulletinError(
         `Failed to store with preimage auth: ${error}`,
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         error,
       )
     }

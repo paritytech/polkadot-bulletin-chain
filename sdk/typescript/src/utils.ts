@@ -9,7 +9,7 @@ import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
-import { BulletinError, HashAlgorithm } from "./types.js"
+import { BulletinError, ErrorCode, HashAlgorithm } from "./types.js"
 
 /**
  * Calculate content hash using the specified algorithm
@@ -34,7 +34,7 @@ export async function getContentHash(
     default:
       throw new BulletinError(
         `Unsupported hash algorithm: ${hashAlgorithm}`,
-        "INVALID_HASH_ALGORITHM",
+        ErrorCode.INVALID_HASH_ALGORITHM,
       )
   }
 }
@@ -61,7 +61,7 @@ export async function calculateCid(
   } catch (error) {
     throw new BulletinError(
       `Failed to calculate CID: ${error}`,
-      "CID_CALCULATION_FAILED",
+      ErrorCode.CID_CALCULATION_FAILED,
       error,
     )
   }
@@ -83,7 +83,7 @@ export function parseCid(cidString: string): CID {
   } catch (error) {
     throw new BulletinError(
       `Failed to parse CID: ${error}`,
-      "INVALID_CID",
+      ErrorCode.INVALID_CID,
       error,
     )
   }
@@ -98,7 +98,7 @@ export function cidFromBytes(bytes: Uint8Array): CID {
   } catch (error) {
     throw new BulletinError(
       `Failed to decode CID from bytes: ${error}`,
-      "INVALID_CID",
+      ErrorCode.INVALID_CID,
       error,
     )
   }
@@ -118,13 +118,16 @@ export function cidToBytes(cid: CID): Uint8Array {
  */
 export function validateChunkSize(size: number): void {
   if (size <= 0) {
-    throw new BulletinError("Chunk size must be positive", "INVALID_CHUNK_SIZE")
+    throw new BulletinError(
+      "Chunk size must be positive",
+      ErrorCode.INVALID_CHUNK_SIZE,
+    )
   }
 
   if (size > MAX_CHUNK_SIZE) {
     throw new BulletinError(
       `Chunk size ${size} bytes exceeds maximum ${MAX_CHUNK_SIZE} bytes`,
-      "CHUNK_TOO_LARGE",
+      ErrorCode.CHUNK_TOO_LARGE,
     )
   }
 }

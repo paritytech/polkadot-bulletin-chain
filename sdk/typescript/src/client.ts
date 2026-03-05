@@ -16,6 +16,7 @@ import {
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type ProgressCallback,
   type StoreOptions,
 } from "./types.js"
@@ -55,7 +56,7 @@ export class BulletinClient {
     options?: StoreOptions,
   ): Promise<{ data: Uint8Array; cid: CID }> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
@@ -86,7 +87,7 @@ export class BulletinClient {
     manifest?: { data: Uint8Array; cid: CID }
   }> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const chunkerConfig: ChunkerConfig = {
@@ -143,7 +144,7 @@ export class BulletinClient {
         }
         throw new BulletinError(
           `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
-          "CHUNK_FAILED",
+          ErrorCode.CHUNK_FAILED,
           error,
         )
       }

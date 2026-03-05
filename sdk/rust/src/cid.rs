@@ -60,14 +60,14 @@ pub fn calculate_cid_with_config(
 ) -> Result<CidData> {
 	let config = CidConfig { codec: codec.code(), hashing: hash_algo };
 	calculate_cid(data, config)
-		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to calculate CID: {e:?}")))
+		.map_err(|e| Error::CidCalculationFailed(alloc::format!("Failed to calculate CID: {e:?}")))
 }
 
 /// Calculate CID with default configuration (raw codec, blake2b-256).
 pub fn calculate_cid_default(data: &[u8]) -> Result<CidData> {
 	let config = CidConfig { codec: CidCodec::Raw.code(), hashing: HashingAlgorithm::Blake2b256 };
 	calculate_cid(data, config)
-		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to calculate CID: {e:?}")))
+		.map_err(|e| Error::CidCalculationFailed(alloc::format!("Failed to calculate CID: {e:?}")))
 }
 
 /// Convert CidData to bytes (CIDv1 format).

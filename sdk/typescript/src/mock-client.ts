@@ -17,6 +17,7 @@ import {
   BulletinError,
   CidCodec,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,
@@ -202,7 +203,7 @@ export class MockBulletinClient {
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     // Simulate authorization check failure
@@ -212,14 +213,17 @@ export class MockBulletinClient {
     ) {
       throw new BulletinError(
         "Insufficient authorization: need 100 bytes, have 0 bytes",
-        "INSUFFICIENT_AUTHORIZATION",
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
         { need: 100, available: 0 },
       )
     }
 
     // Simulate storage failure
     if (this.config.simulateStorageFailure) {
-      throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+      throw new BulletinError(
+        "Simulated storage failure",
+        ErrorCode.TRANSACTION_FAILED,
+      )
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
@@ -257,7 +261,7 @@ export class MockBulletinClient {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
 
@@ -287,7 +291,7 @@ export class MockBulletinClient {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
 

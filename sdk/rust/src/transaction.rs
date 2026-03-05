@@ -136,7 +136,7 @@ impl TransactionClient {
 
 							// Check for success
 							in_block.wait_for_success().await.map_err(|e| {
-								Error::StorageFailed(format!("Transaction failed: {e:?}"))
+								Error::TransactionFailed(format!("Transaction failed: {e:?}"))
 							})?;
 
 							break;
@@ -156,7 +156,7 @@ impl TransactionClient {
 									},
 								));
 							}
-							return Err(Error::StorageFailed(format!(
+							return Err(Error::TransactionFailed(format!(
 								"Transaction invalid: {message}"
 							)));
 						},
@@ -168,19 +168,19 @@ impl TransactionClient {
 									},
 								));
 							}
-							return Err(Error::StorageFailed(format!(
+							return Err(Error::TransactionFailed(format!(
 								"Transaction dropped: {message}"
 							)));
 						},
 						TxStatus::Error { message } => {
-							return Err(Error::StorageFailed(format!(
+							return Err(Error::TransactionFailed(format!(
 								"Transaction error: {message}"
 							)));
 						},
 					}
 				},
 				Err(e) => {
-					return Err(Error::StorageFailed(format!("Status error: {e:?}")));
+					return Err(Error::TransactionFailed(format!("Status error: {e:?}")));
 				},
 			}
 		}
