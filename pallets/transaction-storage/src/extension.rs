@@ -32,8 +32,12 @@ type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 ///
 /// This extension handles **signed TransactionStorage transactions** via
 /// [`Pallet::validate_signed`]:
-/// - **Store/renew calls**: Validates authorization and transforms the origin to
-///   [`Origin::Authorized`] to carry authorization info.
+/// - **Store/renew calls**: Validates authorization in `validate()` and transforms the origin to
+///   [`Origin::Authorized`] to carry authorization info. Then in `prepare()`, it consumes the
+///   authorization extent (decrements remaining transactions/bytes) before the extrinsic executes.
+///   This early consumption prevents large invalid store transactions from propagating through
+///   mempools and the network — authorization is checked and spent at the extension level rather
+///   than during dispatch.
 /// - **Authorization management calls** (authorize_*, refresh_*, remove_expired_*): Validates that
 ///   the signer satisfies the [`Config::Authorizer`] origin requirement.
 ///
