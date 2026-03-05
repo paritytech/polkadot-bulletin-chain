@@ -141,7 +141,7 @@ impl Error {
 	/// Returns an actionable recovery suggestion for this error.
 	pub fn recovery_hint(&self) -> &'static str {
 		match self {
-			Error::ChunkTooLarge(_) => "Reduce chunk size to 8 MiB or less",
+			Error::ChunkTooLarge(_) => "Reduce chunk size to 2 MiB or less",
 			Error::FileTooLarge(_) => "Reduce file size or use chunked upload",
 			Error::EmptyData => "Provide non-empty data",
 			Error::InvalidCid(_) => "Verify CID format",
