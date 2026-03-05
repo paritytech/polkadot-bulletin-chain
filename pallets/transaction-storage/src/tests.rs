@@ -1171,7 +1171,7 @@ fn authorize_storage_extension_transforms_origin() {
 		assert_eq!(valid_tx.priority, StoreRenewPriority::get());
 
 		// Verify val contains the authorization scope
-		assert_eq!(val, Some(AuthorizationScope::Account(caller)));
+		assert_eq!(val, Some((caller, AuthorizationScope::Account(caller))));
 
 		// Verify the origin was transformed and can be extracted with ensure_authorized
 		let origin_for_prepare = transformed_origin.clone();
@@ -1232,7 +1232,7 @@ fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
 		let (_, val, transformed_origin) = result.unwrap();
 
 		// Verify preimage authorization was used
-		assert_eq!(val, Some(AuthorizationScope::Preimage(content_hash)));
+		assert_eq!(val, Some((caller, AuthorizationScope::Preimage(content_hash))));
 
 		// Verify the origin carries preimage authorization
 		assert_eq!(

@@ -77,8 +77,8 @@ where
 		Ok(())
 	}
 
-	/// `Some(AuthorizationScope)` for store/renew calls, `None` for passthrough.
-	type Val = Option<AuthorizationScopeFor<T>>;
+	/// `Some((AccountId, AuthorizationScope))` for store/renew calls, `None` for passthrough.
+	type Val = Option<(T::AccountId, AuthorizationScopeFor<T>)>;
 	type Pre = ();
 
 	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
@@ -118,11 +118,15 @@ where
 		let (valid_tx, maybe_scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
 
 		// Transform origin only for store/renew calls (when scope is Some)
-		if let Some(ref scope) = maybe_scope {
-			origin.set_caller_from(Origin::<T>::Authorized { who, scope: scope.clone() });
-		}
+		let val = maybe_scope.map(|scope| {
+			origin.set_caller_from(Origin::<T>::Authorized {
+				who: who.clone(),
+				scope: scope.clone(),
+			});
+			(who, scope)
+		});
 
-		Ok((valid_tx, maybe_scope, origin))
+		Ok((valid_tx, val, origin))
 	}
 
 	fn prepare(
@@ -137,13 +141,8 @@ where
 			return Ok(());
 		};
 
-		// For store/renew calls (val is Some), the origin was transformed in validate()
-		// to Origin::Authorized. Extract the account from the transformed origin.
-		if val.is_some() {
-			let who = match origin.clone().into_caller().try_into() {
-				Ok(Origin::<T>::Authorized { who, .. }) => who,
-				Err(_) => return Err(InvalidTransaction::BadSigner.into()),
-			};
+		// For store/renew calls, use the account from Val (passed from validate()).
+		if let Some((who, _scope)) = val {
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)?;
 			return Ok(());
 		}
