@@ -434,9 +434,10 @@ fn renew_content_hash_works() {
 		// Map should now point to the new block
 		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
 
-		System::assert_has_event(RuntimeEvent::TransactionStorage(
-			Event::Renewed { index: 0, content_hash },
-		));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::Renewed {
+			index: 0,
+			content_hash,
+		}));
 	});
 }
 
@@ -632,7 +633,7 @@ fn content_hash_map_not_cleaned_if_renewed() {
 		// Block 6 data expires at block 17
 		run_to_block(17, proof_provider);
 		assert!(TransactionByContentHash::get(content_hash).is_none());
-    });
+	});
 }
 
 #[test]
@@ -1072,6 +1073,12 @@ fn try_state_passes_through_retention_lifecycle() {
 		let proof_provider = || {
 			let block_num = System::block_number();
 			if block_num == 11 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
 		// Run past retention period; block 1 transactions get cleaned up at block 12
 		run_to_block(12, proof_provider);
 		assert!(Transactions::get(1).is_none());
