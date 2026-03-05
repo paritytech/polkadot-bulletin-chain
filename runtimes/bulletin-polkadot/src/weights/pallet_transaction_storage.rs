@@ -167,10 +167,34 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
+	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:0)
+	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(41474), added: 41969, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::Authorizations` (r:2 w:2)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
 	fn validate_store() -> Weight {
-		T::DbWeight::get().reads_writes(6, 2)
+		// Proof Size summary in bytes:
+		//  Measured:  `186`
+		//  Estimated: `42959`
+		// Minimum execution time: 18_087_443_000 picoseconds.
+		Weight::from_parts(18_118_824_000, 0)
+			.saturating_add(Weight::from_parts(0, 42959))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
+	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(41494), added: 43969, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:0)
+	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(41474), added: 41969, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::Authorizations` (r:2 w:2)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
 	fn validate_renew() -> Weight {
-		T::DbWeight::get().reads_writes(8, 2)
+		// Proof Size summary in bytes:
+		//  Measured:  `312`
+		//  Estimated: `44959`
+		// Minimum execution time: 31_380_000 picoseconds.
+		Weight::from_parts(33_030_000, 0)
+			.saturating_add(Weight::from_parts(0, 44959))
+			.saturating_add(T::DbWeight::get().reads(4))
+			.saturating_add(T::DbWeight::get().writes(2))
 	}
 }
