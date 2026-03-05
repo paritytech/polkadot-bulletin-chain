@@ -607,6 +607,8 @@ construct_runtime!(
 		// Storage
 		TransactionStorage: pallet_transaction_storage = 40,
 		StorageProvider: pallet_storage_provider = 50,
+		DriveRegistry: pallet_drive_registry = 51,
+		S3Registry: pallet_s3_registry = 52,
 
 		// Collator support. The order of these 5 are important and shall not change.
 		Authorship: pallet_authorship = 20,

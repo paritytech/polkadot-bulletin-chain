@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Storage Provider pallet configuration.
+//! Web3 Storage pallet configurations: Storage Provider, File System, and S3.
 
 use super::*;
 use frame_support::{parameter_types, PalletId};
@@ -55,4 +55,15 @@ impl pallet_storage_provider::Config for Runtime {
 	type CheckpointReward = CheckpointReward;
 	type CheckpointMissPenalty = CheckpointMissPenalty;
 	type WeightInfo = pallet_storage_provider::weights::SubstrateWeight<Runtime>;
+}
+
+impl pallet_drive_registry::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type MaxDrivesPerUser = ConstU32<100>;
+	type MaxDriveNameLength = ConstU32<128>;
+}
+
+impl pallet_s3_registry::Config for Runtime {
+	type MaxBucketsPerUser = ConstU32<100>;
+	type MaxObjectsPerBucket = ConstU32<100_000>;
 }
