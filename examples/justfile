@@ -572,6 +572,19 @@ test-ts-sdk test_dir ws_url="ws://localhost:10000" seed="//Alice":
     node typescript/authorize_and_store.js "{{ ws_url }}" "{{ seed }}"
     echo "✅ TypeScript SDK authorize-and-store test passed!"
 
+# Run TypeScript SDK vitest integration tests (services must already be running)
+# Parameters:
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+test-ts-sdk-vitest ws_url="ws://localhost:10000":
+    #!/usr/bin/env bash
+    set -e
+    echo "🧪 Running TypeScript SDK vitest integration tests..."
+    cd ../sdk/typescript
+    npm install
+    npm run build
+    BULLETIN_RPC_URL="{{ ws_url }}" npx vitest run test/integration
+    echo "✅ TypeScript SDK vitest integration tests passed!"
+
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
 # ============================================================================

@@ -241,6 +241,10 @@ jobs:
         working-directory: examples
         run: just test-ts-sdk "${{ env.TEST_DIR }}"
 
+      - name: Test TypeScript SDK (vitest integration)
+        working-directory: examples
+        run: just test-ts-sdk-vitest
+
       - name: Stop services
         if: always()
         working-directory: examples

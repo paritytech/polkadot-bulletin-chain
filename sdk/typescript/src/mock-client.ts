@@ -224,7 +224,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     who: string,
     transactions: number,
     bytes: bigint,
-    options?: AuthCallOptions,
+    _options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({
@@ -239,7 +239,7 @@ export class MockBulletinClient implements BulletinClientInterface {
   async authorizePreimage(
     contentHash: Uint8Array,
     maxSize: bigint,
-    options?: AuthCallOptions,
+    _options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({ type: "authorize_preimage", contentHash, maxSize })
@@ -248,7 +248,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async refreshAccountAuthorization(
     who: string,
-    options?: AuthCallOptions,
+    _options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({ type: "refresh_account_authorization", who })
@@ -257,7 +257,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async refreshPreimageAuthorization(
     contentHash: Uint8Array,
-    options?: AuthCallOptions,
+    _options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
     this.throwIfAuthFailure()
     this.operations.push({
@@ -269,7 +269,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async removeExpiredAccountAuthorization(
     who: string,
-    options?: CallOptions,
+    _options?: CallOptions,
   ): Promise<TransactionReceipt> {
     this.operations.push({ type: "remove_expired_account_authorization", who })
     return mockReceipt()
@@ -277,7 +277,7 @@ export class MockBulletinClient implements BulletinClientInterface {
 
   async removeExpiredPreimageAuthorization(
     contentHash: Uint8Array,
-    options?: CallOptions,
+    _options?: CallOptions,
   ): Promise<TransactionReceipt> {
     this.operations.push({
       type: "remove_expired_preimage_authorization",
@@ -289,7 +289,7 @@ export class MockBulletinClient implements BulletinClientInterface {
   async renew(
     block: number,
     index: number,
-    options?: CallOptions,
+    _options?: CallOptions,
   ): Promise<TransactionReceipt> {
     this.operations.push({ type: "renew", block, index })
     return mockReceipt()
