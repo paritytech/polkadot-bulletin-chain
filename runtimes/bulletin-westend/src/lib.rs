@@ -200,11 +200,20 @@ pub fn native_version() -> NativeVersion {
 /// We allow for 90% of the block to be consumed by normal transactions.
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
 
+/// Block length.
+const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
+
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
 	// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
-		BlockLength::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+		BlockLength::builder()
+		.max_length(MAX_BLOCK_LENGTH)
+		.modify_max_length_for_class(
+			DispatchClass::Normal,
+			|m| *m = NORMAL_DISPATCH_RATIO * MAX_BLOCK_LENGTH,
+		)
+		.build();
 	pub RuntimeBlockWeights: BlockWeights = BlockWeights::builder()
 		.base_block(BlockExecutionWeight::get())
 		.for_class(DispatchClass::all(), |weights| {
@@ -619,11 +628,13 @@ construct_runtime!(
 mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_system, SystemBench::<Runtime>]
+		[frame_system_extensions, SystemExtensionsBench::<Runtime>]
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
+		[pallet_transaction_storage, TransactionStorage]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -897,7 +908,9 @@ impl_runtime_apis! {
 		) {
 			use frame_benchmarking::BenchmarkList;
 			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{
+				Pallet as SystemBench, extensions::Pallet as SystemExtensionsBench,
+			};
 			use cumulus_pallet_session_benchmarking::Pallet as SessionBench;
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 
@@ -922,7 +935,9 @@ impl_runtime_apis! {
 			use sp_storage::TrackedStorageKey;
 			use codec::Encode;
 
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{
+				Pallet as SystemBench, extensions::Pallet as SystemExtensionsBench,
+			};
 			impl frame_system_benchmarking::Config for Runtime {
 				fn setup_set_code_requirements(code: &alloc::vec::Vec<u8>) -> Result<(), BenchmarkError> {
 					ParachainSystem::initialize_for_set_code_benchmark(code.len() as u32);
@@ -942,8 +957,10 @@ impl_runtime_apis! {
 				}
 			}
 
+			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
 			use xcm_config::TokenRelayLocation;
+			use xcm_executor::AssetsInHolding;
 
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 			impl pallet_xcm::benchmarking::Config for Runtime {
@@ -1020,15 +1037,13 @@ impl_runtime_apis! {
 				fn valid_destination() -> Result<Location, BenchmarkError> {
 					Ok(TokenRelayLocation::get())
 				}
-				fn worst_case_holding(_depositable_count: u32) -> Assets {
+				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
+					use pallet_xcm_benchmarks::MockCredit;
 					// just concrete assets according to relay chain.
-					let assets: Vec<Asset> = vec![
-						Asset {
-							id: AssetId(TokenRelayLocation::get()),
-							fun: Fungible(1_000_000 * UNITS),
-						}
-					];
-					assets.into()
+					AssetsInHolding::new_from_fungible_credit(
+						AssetId(TokenRelayLocation::get()),
+						Box::new(MockCredit(1_000_000 * UNITS)),
+					)
 				}
 			}
 

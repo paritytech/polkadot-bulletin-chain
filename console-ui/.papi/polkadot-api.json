@@ -14,12 +14,6 @@
       "genesis": "0x744960c32e3a3df5440e1ecd4d34096f1ce2230d7016a5ada8a765d5a622b4ea",
       "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
     },
-    "bulletin_dotspark": {
-      "wsUrl": "wss://bulletin.dotspark.app",
-      "metadata": ".papi/metadata/bulletin_dotspark.scale",
-      "genesis": "0x606cb02fba39492c072b8f5ad291539775b0c5b1798320661756e6150f40b91c",
-      "codeHash": "0x2a4beab1e9e43fff013377749e1cbf3abc625ca39d6696cb5a3ff41354f96010"
-    },
     "web3_storage": {
       "wsUrl": "ws://localhost:2222",
       "metadata": ".papi/metadata/web3_storage.scale",

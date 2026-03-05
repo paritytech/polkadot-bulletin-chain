@@ -76,7 +76,7 @@ impl WeightTrader for NoopTrader {
 		_weight: Weight,
 		_payment: AssetsInHolding,
 		_context: &XcmContext,
-	) -> Result<AssetsInHolding, XcmError> {
+	) -> Result<AssetsInHolding, (AssetsInHolding, XcmError)> {
 		Ok(AssetsInHolding::new())
 	}
 }
@@ -118,7 +118,6 @@ impl xcm_executor::Config for XcmConfig {
 	type AssetTrap = ();
 	type AssetLocker = ();
 	type AssetExchanger = ();
-	type AssetClaims = ();
 	type SubscriptionService = ();
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = ConstU32<0>;
