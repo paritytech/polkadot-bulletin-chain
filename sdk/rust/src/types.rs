@@ -160,7 +160,7 @@ impl Error {
 			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
 			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
-			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 8 MiB",
+			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 2 MiB",
 		}
 	}
 }
