@@ -271,7 +271,7 @@ const RECOVERY_HINTS: Record<string, string> = {
   [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
   [ErrorCode.FILE_TOO_LARGE]: "Reduce file size or use chunked upload",
   [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
-  [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 8 MiB",
+  [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 2 MiB",
   [ErrorCode.INVALID_CONFIG]: "Check configuration parameters",
   [ErrorCode.INVALID_CID]: "Verify CID format",
   [ErrorCode.UNSUPPORTED_HASH_ALGORITHM]:
