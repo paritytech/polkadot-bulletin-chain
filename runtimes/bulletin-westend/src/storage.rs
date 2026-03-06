@@ -24,7 +24,7 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
-use pallets_common::{sudo_inner_calls, utility_inner_calls, NoCurrency};
+use pallets_common::{inspect_sudo_wrapper, inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
@@ -56,27 +56,8 @@ pub struct RuntimeCallInspector;
 impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
 		match call {
-			RuntimeCall::Utility(utility_call) => {
-				let inner = utility_inner_calls(utility_call);
-				if inner.is_empty() {
-					return None;
-				}
-				let preserves_origin = matches!(
-					utility_call,
-					pallet_utility::Call::batch { .. } |
-						pallet_utility::Call::batch_all { .. } |
-						pallet_utility::Call::force_batch { .. }
-				);
-				Some((inner, preserves_origin))
-			},
-			RuntimeCall::Sudo(sudo_call) => {
-				let inner = sudo_inner_calls(sudo_call);
-				if inner.is_empty() {
-					return None;
-				}
-				// sudo dispatches with Root, sudo_as with target's origin
-				Some((inner, false))
-			},
+			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
+			RuntimeCall::Sudo(c) => inspect_sudo_wrapper(c),
 			_ => None,
 		}
 	}

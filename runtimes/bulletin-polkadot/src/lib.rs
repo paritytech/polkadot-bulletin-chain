@@ -375,35 +375,9 @@ pub struct RuntimeCallInspector;
 impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<(alloc::vec::Vec<&RuntimeCall>, bool)> {
 		match call {
-			RuntimeCall::Utility(utility_call) => {
-				let inner = utility_inner_calls(utility_call);
-				if inner.is_empty() {
-					return None;
-				}
-				let preserves_origin = matches!(
-					utility_call,
-					pallet_utility::Call::batch { .. } |
-						pallet_utility::Call::batch_all { .. } |
-						pallet_utility::Call::force_batch { .. }
-				);
-				Some((inner, preserves_origin))
-			},
-			RuntimeCall::Proxy(proxy_call) => {
-				let inner = proxy_inner_calls(proxy_call);
-				if inner.is_empty() {
-					return None;
-				}
-				// Proxy dispatches with delegator's origin
-				Some((inner, false))
-			},
-			RuntimeCall::Sudo(sudo_call) => {
-				let inner = sudo_inner_calls(sudo_call);
-				if inner.is_empty() {
-					return None;
-				}
-				// sudo dispatches with Root, sudo_as with target's origin
-				Some((inner, false))
-			},
+			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
+			RuntimeCall::Proxy(c) => inspect_proxy_wrapper(c),
+			RuntimeCall::Sudo(c) => inspect_sudo_wrapper(c),
 			_ => None,
 		}
 	}
@@ -568,8 +542,24 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 }
 
 use pallets_common::{
-	proxy_inner_calls, sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH,
+	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, proxy_inner_calls,
+	utility_inner_calls, MAX_INNER_CALL_DEPTH,
 };
+
+/// Extract the signer from an origin that may be either `Signed` or `Authorized`.
+///
+/// `ValidateStorageCalls` transforms the origin to `Authorized` for wrapper calls containing
+/// storage operations, so downstream extensions must handle both origin types.
+fn extract_signer(origin: &RuntimeOrigin) -> Option<AccountId> {
+	if let Some(who) = origin.as_system_origin_signer() {
+		return Some(who.clone());
+	}
+	match origin.clone().into_caller().try_into() {
+		Ok(pallet_transaction_storage::pallet::Origin::<Runtime>::Authorized { who, .. }) =>
+			Some(who),
+		_ => None,
+	}
+}
 
 /// Recursively check that inner calls are in the allowed set.
 /// Storage auth is handled by the pallet's `ValidateStorageCalls` extension.
@@ -653,17 +643,8 @@ impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		// ValidateStorageCalls may have transformed origin to Authorized for wrapper calls
-		// containing storage operations. Extract signer from either Signed or Authorized.
-		let who = match origin.as_system_origin_signer() {
-			Some(who) => who.clone(),
-			None => match origin.clone().into_caller().try_into() {
-				Ok(pallet_transaction_storage::pallet::Origin::<Runtime>::Authorized {
-					who,
-					..
-				}) => who,
-				_ => return Ok((ValidTransaction::default(), None, origin)),
-			},
+		let Some(who) = extract_signer(&origin) else {
+			return Ok((ValidTransaction::default(), None, origin));
 		};
 
 		let validity = match call {

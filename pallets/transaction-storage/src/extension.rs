@@ -106,15 +106,15 @@ impl<T: Config + Send + Sync, I: CallInspector<RuntimeCallOf<T>>> ValidateStorag
 where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,
 {
-	/// Recursively validate storage authorization in a call tree.
-	/// Returns `true` if any storage calls were found and validated.
-	fn validate_storage_in_call(
-		who: &T::AccountId,
+	/// Recursively traverse a call tree, applying `visitor` to each storage call found.
+	/// Returns `true` if any storage calls were visited.
+	fn traverse_storage_calls(
 		call: &RuntimeCallOf<T>,
 		depth: u32,
+		visitor: &mut impl FnMut(&Call<T>) -> Result<(), TransactionValidityError>,
 	) -> Result<bool, TransactionValidityError> {
 		if let Some(inner_call) = call.is_sub_type() {
-			Pallet::<T>::validate_signed(who, inner_call)?;
+			visitor(inner_call)?;
 			return Ok(true);
 		}
 		if let Some((inner_calls, _)) = I::inspect_wrapper(call) {
@@ -123,33 +123,13 @@ where
 			}
 			let mut found = false;
 			for inner in inner_calls {
-				if Self::validate_storage_in_call(who, inner, depth + 1)? {
+				if Self::traverse_storage_calls(inner, depth + 1, visitor)? {
 					found = true;
 				}
 			}
 			return Ok(found);
 		}
 		Ok(false)
-	}
-
-	/// Recursively consume storage authorization in a call tree.
-	fn consume_storage_in_call(
-		who: &T::AccountId,
-		call: &RuntimeCallOf<T>,
-		depth: u32,
-	) -> Result<(), TransactionValidityError> {
-		if let Some(inner_call) = call.is_sub_type() {
-			return Pallet::<T>::pre_dispatch_signed(who, inner_call);
-		}
-		if let Some((inner_calls, _)) = I::inspect_wrapper(call) {
-			if depth >= MAX_WRAPPER_DEPTH {
-				return Err(InvalidTransaction::ExhaustsResources.into());
-			}
-			for inner in inner_calls {
-				Self::consume_storage_in_call(who, inner, depth + 1)?;
-			}
-		}
-		Ok(())
 	}
 }
 
@@ -213,13 +193,10 @@ where
 		}
 
 		// Wrapper call — validate storage authorization for inner calls
-		if let Some((ref inner_calls, preserves_origin)) = I::inspect_wrapper(call) {
-			let mut has_storage = false;
-			for inner in inner_calls {
-				if Self::validate_storage_in_call(&who, inner, 0)? {
-					has_storage = true;
-				}
-			}
+		if let Some((_, preserves_origin)) = I::inspect_wrapper(call) {
+			let has_storage = Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+				Pallet::<T>::validate_signed(&who, inner_call).map(|_| ())
+			})?;
 			if has_storage {
 				if preserves_origin {
 					// Transform origin so inner storage dispatches see Authorized.
@@ -253,11 +230,9 @@ where
 		}
 
 		// Wrapper call — consume authorization for inner storage calls
-		if let Some((inner_calls, _)) = I::inspect_wrapper(call) {
-			for inner in inner_calls {
-				Self::consume_storage_in_call(&who, inner, 0)?;
-			}
-		}
+		Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
+		})?;
 
 		Ok(())
 	}

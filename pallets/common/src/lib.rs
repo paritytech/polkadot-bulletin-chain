@@ -332,6 +332,48 @@ impl<AccountId, HoldReason> ReservableCurrency<AccountId> for NoCurrency<Account
 /// from adversarially deep nesting.
 pub const MAX_INNER_CALL_DEPTH: u32 = 8;
 
+/// Inspect a utility call for wrapper semantics: returns the inner calls and whether
+/// the wrapper preserves the caller's origin (batch variants do, others don't).
+pub fn inspect_utility_wrapper<T: pallet_utility::Config>(
+	call: &pallet_utility::Call<T>,
+) -> Option<(Vec<&<T as pallet_utility::Config>::RuntimeCall>, bool)> {
+	let inner = utility_inner_calls(call);
+	if inner.is_empty() {
+		return None;
+	}
+	let preserves_origin = matches!(
+		call,
+		pallet_utility::Call::batch { .. } |
+			pallet_utility::Call::batch_all { .. } |
+			pallet_utility::Call::force_batch { .. }
+	);
+	Some((inner, preserves_origin))
+}
+
+/// Inspect a sudo call for wrapper semantics: returns inner calls.
+/// Sudo always changes the origin (to Root or target), so `preserves_origin` is `false`.
+pub fn inspect_sudo_wrapper<T: pallet_sudo::Config>(
+	call: &pallet_sudo::Call<T>,
+) -> Option<(Vec<&<T as pallet_sudo::Config>::RuntimeCall>, bool)> {
+	let inner = sudo_inner_calls(call);
+	if inner.is_empty() {
+		return None;
+	}
+	Some((inner, false))
+}
+
+/// Inspect a proxy call for wrapper semantics: returns inner calls.
+/// Proxy dispatches with the delegator's origin, so `preserves_origin` is `false`.
+pub fn inspect_proxy_wrapper<T: pallet_proxy::Config>(
+	call: &pallet_proxy::Call<T>,
+) -> Option<(Vec<&<T as pallet_proxy::Config>::RuntimeCall>, bool)> {
+	let inner = proxy_inner_calls(call);
+	if inner.is_empty() {
+		return None;
+	}
+	Some((inner, false))
+}
+
 /// Extract inner calls from a utility call variant.
 pub fn utility_inner_calls<T: pallet_utility::Config>(
 	call: &pallet_utility::Call<T>,
@@ -384,13 +426,4 @@ pub fn sudo_inner_calls<T: pallet_sudo::Config>(
 		pallet_sudo::Call::set_key { .. } | pallet_sudo::Call::remove_key {} => vec![],
 		pallet_sudo::Call::__Ignore(..) => vec![],
 	}
-}
-
-/// Whether to check or consume authorization during call validation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ValidationMode {
-	/// Check that authorization exists without consuming it (used in `validate()`).
-	Check,
-	/// Check and consume authorization (used in `prepare()`).
-	Consume,
 }
