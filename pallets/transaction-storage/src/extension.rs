@@ -17,10 +17,8 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{
-	pallet::Origin, weights::WeightInfo, AuthorizationScope, Call, CallInspector, Config, Pallet,
-	MAX_WRAPPER_DEPTH,
-};
+use crate::{pallet::Origin, weights::WeightInfo, AuthorizationScope, Call, Config, Pallet};
+use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
 use polkadot_sdk_frame::{
@@ -30,6 +28,32 @@ use polkadot_sdk_frame::{
 };
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
+
+/// Maximum recursion depth for inspecting wrapper calls.
+pub const MAX_WRAPPER_DEPTH: u32 = 8;
+
+/// Tells [`ValidateStorageCalls`] how to find storage calls inside wrapper
+/// extrinsics (e.g. `Utility::batch`, `Sudo::sudo_as`).
+///
+/// The runtime implements this for its `RuntimeCall` type, allowing the pallet extension
+/// to recursively validate and consume storage authorization in wrapped calls, and to
+/// transform the origin to [`Origin::Authorized`] for origin-preserving wrappers.
+pub trait CallInspector<Call>: Clone + PartialEq + Eq + Default {
+	/// If `call` is a wrapper, return:
+	/// - The inner calls to inspect for storage authorization
+	/// - `true` if the wrapper passes origin through to inner calls (e.g. batch), `false` if it
+	///   changes the origin (e.g. sudo_as)
+	///
+	/// Returns `None` for non-wrapper calls.
+	fn inspect_wrapper(call: &Call) -> Option<(Vec<&Call>, bool)>;
+}
+
+/// No-op implementation — no wrapper inspection. Direct storage calls still work.
+impl<Call> CallInspector<Call> for () {
+	fn inspect_wrapper(_: &Call) -> Option<(Vec<&Call>, bool)> {
+		None
+	}
+}
 
 /// Transaction extension that validates signed TransactionStorage calls.
 ///
