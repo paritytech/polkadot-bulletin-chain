@@ -200,7 +200,7 @@ const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
 
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
-	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
+	// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
 		BlockLength::builder()
 		.max_length(MAX_BLOCK_LENGTH)
