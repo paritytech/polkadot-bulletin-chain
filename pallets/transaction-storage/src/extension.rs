@@ -17,7 +17,7 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{pallet::Origin, weights::WeightInfo, AuthorizationScopeFor, Call, Config, Pallet};
+use crate::{pallet::Origin, weights::WeightInfo, Call, Config, Pallet};
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
 use polkadot_sdk_frame::{
@@ -77,8 +77,12 @@ where
 		Ok(())
 	}
 
-	/// `Some((AccountId, AuthorizationScope))` for store/renew calls, `None` for passthrough.
-	type Val = Option<(T::AccountId, AuthorizationScopeFor<T>)>;
+	/// The signer for store/renew calls, passed from `validate()` to `prepare()`.
+	///
+	/// For store/renew calls, `validate()` transforms the origin to [`Origin::Authorized`],
+	/// so `origin.as_system_origin_signer()` is no longer available in `prepare()`. The signer
+	/// is preserved here instead. `None` for all other calls.
+	type Val = Option<T::AccountId>;
 	type Pre = ();
 
 	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
@@ -119,11 +123,8 @@ where
 
 		// Transform origin only for store/renew calls (when scope is Some)
 		let val = maybe_scope.map(|scope| {
-			origin.set_caller_from(Origin::<T>::Authorized {
-				who: who.clone(),
-				scope: scope.clone(),
-			});
-			(who, scope)
+			origin.set_caller_from(Origin::<T>::Authorized { who: who.clone(), scope });
+			who
 		});
 
 		Ok((valid_tx, val, origin))
@@ -141,14 +142,10 @@ where
 			return Ok(());
 		};
 
-		// For store/renew calls, use the account from Val (passed from validate()).
-		if let Some((who, _scope)) = val {
-			Pallet::<T>::pre_dispatch_signed(&who, inner_call)?;
-			return Ok(());
-		}
-
-		// For other TransactionStorage calls (authorizer calls), the origin is unchanged.
-		if let Some(who) = origin.as_system_origin_signer() {
+		// For store/renew: origin was transformed to Authorized, so get `who` from val.
+		// For other calls: origin is still the system signer.
+		let who = val.as_ref().or_else(|| origin.as_system_origin_signer());
+		if let Some(who) = who {
 			Pallet::<T>::pre_dispatch_signed(who, inner_call)?;
 		}
 		Ok(())
