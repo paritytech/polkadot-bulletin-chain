@@ -199,15 +199,22 @@ where
 		// Accumulate ValidTransaction metadata (provides tags, priority, longevity) from
 		// each inner storage call so the mempool can deduplicate and prioritize correctly.
 		let mut combined_valid = ValidTransaction::default();
+		let mut needs_authorized_origin = false;
 		let (has_storage, preserves_origin) =
 			Self::traverse_storage_calls(call, 0, &mut |inner_call| {
-				let (valid_tx, _scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
+				let (valid_tx, scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
 				combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
+				// Only store/renew calls return a scope; authorization management calls
+				// (authorize_*, refresh_*, remove_expired_*) return None and need the
+				// original Signed origin at dispatch for T::Authorizer checks.
+				if scope.is_some() {
+					needs_authorized_origin = true;
+				}
 				Ok(())
 			})?;
 		if has_storage {
-			if preserves_origin {
-				// Transform origin so inner storage dispatches see Authorized.
+			if preserves_origin && needs_authorized_origin {
+				// Transform origin so inner store/renew dispatches see Authorized.
 				origin.set_caller_from(Origin::<T>::Authorized {
 					who: who.clone(),
 					scope: AuthorizationScope::Account(who.clone()),

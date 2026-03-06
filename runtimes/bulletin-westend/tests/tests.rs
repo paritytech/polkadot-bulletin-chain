@@ -849,6 +849,54 @@ fn authorized_wrapped_store_succeeds() {
 		});
 }
 
+/// Wrapping `authorize_account` in `batch_all` must not break the authorization.
+/// The origin must remain `Signed` (not transformed to `Authorized`) so that
+/// `T::Authorizer::ensure_origin()` succeeds at dispatch time.
+#[test]
+fn wrapped_authorize_account_succeeds() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let target: AccountId = Sr25519Keyring::Bob.to_account_id();
+
+			// Fund Alice for batch fee overhead.
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			// Wrap authorize_account inside batch_all — this is what the JS integration
+			// test does. The origin must stay Signed(Alice) so the Authorizer check passes.
+			let authorize_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.clone(),
+					transactions: 10,
+					bytes: 10 * 1024,
+				});
+			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch_all {
+				calls: vec![authorize_call],
+			});
+
+			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), batch_call));
+
+			// Authorization must have been created.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(target.clone()),
+				AuthorizationExtent { transactions: 10, bytes: 10 * 1024 },
+			);
+
+			// Now verify that the authorized target can actually store data.
+			let data = vec![42u8; 100];
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+			assert_ok_ok(construct_and_apply_extrinsic(
+				Some(Sr25519Keyring::Bob.pair()),
+				store_call,
+			));
+		});
+}
+
 // NOTE: No `wrapped_call_respects_validate_inner_calls_allowlist` test on Westend.
 // Unlike the feeless Polkadot solochain, Westend is a parachain with transaction fees,
 // so there is no call allowlist — fees provide the spam gate for non-storage calls.
