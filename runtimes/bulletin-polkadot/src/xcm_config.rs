@@ -105,10 +105,9 @@ pub type Barrier = TrailingSetTopicAsId<
 pub struct XcmSafeCallFilter;
 impl XcmSafeCallFilter {
 	fn contains_blocked_storage_call(call: &RuntimeCall, depth: u32) -> bool {
-		use pallets_common::{
-			proxy_inner_calls, sudo_inner_calls, utility_inner_calls, MAX_INNER_CALL_DEPTH,
-		};
-		if depth >= MAX_INNER_CALL_DEPTH {
+		use pallet_transaction_storage::MAX_WRAPPER_DEPTH;
+		use pallets_common::{proxy_inner_calls, sudo_inner_calls, utility_inner_calls};
+		if depth >= MAX_WRAPPER_DEPTH {
 			return true;
 		}
 		match call {

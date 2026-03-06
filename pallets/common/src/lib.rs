@@ -328,10 +328,6 @@ impl<AccountId, HoldReason> ReservableCurrency<AccountId> for NoCurrency<Account
 	}
 }
 
-/// Maximum nesting depth for utility wrapper validation. Prevents stack overflow
-/// from adversarially deep nesting.
-pub const MAX_INNER_CALL_DEPTH: u32 = 8;
-
 /// Inspect a utility call for wrapper semantics: returns the inner calls and whether
 /// the wrapper preserves the caller's origin (batch variants do, others don't).
 pub fn inspect_utility_wrapper<T: pallet_utility::Config>(

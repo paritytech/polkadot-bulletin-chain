@@ -541,9 +541,10 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
+use pallet_transaction_storage::MAX_WRAPPER_DEPTH;
 use pallets_common::{
 	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, proxy_inner_calls,
-	utility_inner_calls, MAX_INNER_CALL_DEPTH,
+	utility_inner_calls,
 };
 
 /// Extract the signer from an origin that may be either `Signed` or `Authorized`.
@@ -571,7 +572,7 @@ fn validate_inner_calls_allowlist(
 	call: &RuntimeCall,
 	depth: u32,
 ) -> Result<(), TransactionValidityError> {
-	if depth >= MAX_INNER_CALL_DEPTH {
+	if depth >= MAX_WRAPPER_DEPTH {
 		return Err(InvalidTransaction::ExhaustsResources.into());
 	}
 	match call {

@@ -107,29 +107,32 @@ where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,
 {
 	/// Recursively traverse a call tree, applying `visitor` to each storage call found.
-	/// Returns `true` if any storage calls were visited.
+	/// Returns `(found_storage, preserves_origin)`:
+	/// - `found_storage`: whether any storage calls were visited
+	/// - `preserves_origin`: whether the outermost wrapper preserves the caller's origin
 	fn traverse_storage_calls(
 		call: &RuntimeCallOf<T>,
 		depth: u32,
 		visitor: &mut impl FnMut(&Call<T>) -> Result<(), TransactionValidityError>,
-	) -> Result<bool, TransactionValidityError> {
+	) -> Result<(bool, bool), TransactionValidityError> {
 		if let Some(inner_call) = call.is_sub_type() {
 			visitor(inner_call)?;
-			return Ok(true);
+			return Ok((true, false));
 		}
-		if let Some((inner_calls, _)) = I::inspect_wrapper(call) {
+		if let Some((inner_calls, preserves_origin)) = I::inspect_wrapper(call) {
 			if depth >= MAX_WRAPPER_DEPTH {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
 			let mut found = false;
 			for inner in inner_calls {
-				if Self::traverse_storage_calls(inner, depth + 1, visitor)? {
+				let (inner_found, _) = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
+				if inner_found {
 					found = true;
 				}
 			}
-			return Ok(found);
+			return Ok((found, preserves_origin));
 		}
-		Ok(false)
+		Ok((false, false))
 	}
 }
 
@@ -193,20 +196,19 @@ where
 		}
 
 		// Wrapper call — validate storage authorization for inner calls
-		if let Some((_, preserves_origin)) = I::inspect_wrapper(call) {
-			let has_storage = Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+		let (has_storage, preserves_origin) =
+			Self::traverse_storage_calls(call, 0, &mut |inner_call| {
 				Pallet::<T>::validate_signed(&who, inner_call).map(|_| ())
 			})?;
-			if has_storage {
-				if preserves_origin {
-					// Transform origin so inner storage dispatches see Authorized.
-					origin.set_caller_from(Origin::<T>::Authorized {
-						who: who.clone(),
-						scope: AuthorizationScope::Account(who.clone()),
-					});
-				}
-				return Ok((ValidTransaction::default(), Some(who), origin));
+		if has_storage {
+			if preserves_origin {
+				// Transform origin so inner storage dispatches see Authorized.
+				origin.set_caller_from(Origin::<T>::Authorized {
+					who: who.clone(),
+					scope: AuthorizationScope::Account(who.clone()),
+				});
 			}
+			return Ok((ValidTransaction::default(), Some(who), origin));
 		}
 
 		// Not a storage-related call
@@ -232,7 +234,8 @@ where
 		// Wrapper call — consume authorization for inner storage calls
 		Self::traverse_storage_calls(call, 0, &mut |inner_call| {
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
-		})?;
+		})
+		.map(|_| ())?;
 
 		Ok(())
 	}
