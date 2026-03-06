@@ -97,7 +97,9 @@ describe("Error Handling", () => {
       await expect(preparer.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
       )
-      await expect(preparer.prepareStore(new Uint8Array(0))).rejects.toMatchObject({
+      await expect(
+        preparer.prepareStore(new Uint8Array(0)),
+      ).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
     })
@@ -105,9 +107,9 @@ describe("Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
       const preparer = new BulletinPreparer()
 
-      await expect(preparer.prepareStoreChunked(new Uint8Array(0))).rejects.toThrow(
-        BulletinError,
-      )
+      await expect(
+        preparer.prepareStoreChunked(new Uint8Array(0)),
+      ).rejects.toThrow(BulletinError)
       await expect(
         preparer.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toMatchObject({
