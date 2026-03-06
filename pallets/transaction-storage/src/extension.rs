@@ -153,8 +153,8 @@ where
 			return Weight::zero();
 		};
 		match inner_call {
-			Call::store { .. } | Call::store_with_cid_config { .. } =>
-				T::WeightInfo::validate_store(),
+			Call::store { data, .. } | Call::store_with_cid_config { data, .. } =>
+				T::WeightInfo::validate_store(data.len() as u32),
 			Call::renew { .. } => T::WeightInfo::validate_renew(),
 			_ => Weight::zero(),
 		}

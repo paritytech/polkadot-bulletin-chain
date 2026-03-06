@@ -171,13 +171,16 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(41474), added: 41969, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Authorizations` (r:2 w:2)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
-	fn validate_store() -> Weight {
+	/// The range of component `l` is `[1, 8388608]`.
+	fn validate_store(l: u32, ) -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `223`
 		//  Estimated: `42959`
-		// Minimum execution time: 18_038_211_000 picoseconds.
-		Weight::from_parts(18_080_501_000, 0)
+		// Minimum execution time: 23_000_000 picoseconds.
+		Weight::from_parts(23_260_000, 0)
 			.saturating_add(Weight::from_parts(0, 42959))
+			// Standard Error: 2
+			.saturating_add(Weight::from_parts(2_170, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}

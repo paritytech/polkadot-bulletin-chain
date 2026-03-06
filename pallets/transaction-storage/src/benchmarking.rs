@@ -300,13 +300,15 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn validate_store() -> Result<(), BenchmarkError> {
+	fn validate_store(
+		l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>,
+	) -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
-		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let data = vec![0u8; l as usize];
 		let transactions = 10;
-		let bytes = T::MaxTransactionSize::get() as u64 * 10;
+		let bytes = l as u64 * 10;
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),

@@ -61,7 +61,7 @@ pub trait WeightInfo {
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
-	fn validate_store() -> Weight;
+	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
 }
 
@@ -140,8 +140,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
-	fn validate_store() -> Weight {
+	fn validate_store(l: u32) -> Weight {
 		T::DbWeight::get().reads_writes(6, 2)
+			.saturating_add(Weight::from_parts(6_912, 0).saturating_mul(l.into()))
 	}
 	fn validate_renew() -> Weight {
 		T::DbWeight::get().reads_writes(8, 2)
@@ -222,8 +223,9 @@ impl WeightInfo for () {
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
-	fn validate_store() -> Weight {
+	fn validate_store(l: u32) -> Weight {
 		RocksDbWeight::get().reads_writes(6, 2)
+			.saturating_add(Weight::from_parts(6_912, 0).saturating_mul(l.into()))
 	}
 	fn validate_renew() -> Weight {
 		RocksDbWeight::get().reads_writes(8, 2)
