@@ -357,8 +357,10 @@ impl_runtime_apis! {
 				}
 			}
 
+			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
 			use xcm_config::TokenRelayLocation;
+			use xcm_executor::AssetsInHolding;
 
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 			impl pallet_xcm::benchmarking::Config for Runtime {
@@ -433,15 +435,13 @@ impl_runtime_apis! {
 				fn valid_destination() -> Result<Location, BenchmarkError> {
 					Ok(TokenRelayLocation::get())
 				}
-				fn worst_case_holding(_depositable_count: u32) -> Assets {
+				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
+					use pallet_xcm_benchmarks::MockCredit;
 					// just concrete assets according to relay chain.
-					let assets: Vec<Asset> = vec![
-						Asset {
-							id: AssetId(TokenRelayLocation::get()),
-							fun: Fungible(1_000_000 * UNITS),
-						}
-					];
-					assets.into()
+					AssetsInHolding::new_from_fungible_credit(
+						AssetId(TokenRelayLocation::get()),
+						Box::new(MockCredit(1_000_000 * UNITS)),
+					)
 				}
 			}
 
