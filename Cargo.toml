@@ -36,16 +36,16 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 # Local workspace members
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
-file-system-primitives = { git = "https://github.com/paritytech/web3-storage.git", rev = "b5a622028ee92bf87bf00cc61afbcdb57365ecc3", default-features = false }
-pallet-drive-registry = { git = "https://github.com/paritytech/web3-storage.git", rev = "b5a622028ee92bf87bf00cc61afbcdb57365ecc3", default-features = false }
+file-system-primitives = { git = "https://github.com/paritytech/web3-storage.git", rev = "19c92b7847ae6339e0b90ef58d9dd804c17edf3a", default-features = false }
+pallet-drive-registry = { git = "https://github.com/paritytech/web3-storage.git", rev = "19c92b7847ae6339e0b90ef58d9dd804c17edf3a", default-features = false }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
-pallet-s3-registry = { git = "https://github.com/paritytech/web3-storage.git", rev = "b5a622028ee92bf87bf00cc61afbcdb57365ecc3", default-features = false }
-pallet-storage-provider = { git = "https://github.com/paritytech/web3-storage.git", rev = "b5a622028ee92bf87bf00cc61afbcdb57365ecc3", default-features = false }
+pallet-s3-registry = { git = "https://github.com/paritytech/web3-storage.git", rev = "19c92b7847ae6339e0b90ef58d9dd804c17edf3a", default-features = false }
+pallet-storage-provider = { git = "https://github.com/paritytech/web3-storage.git", rev = "19c92b7847ae6339e0b90ef58d9dd804c17edf3a", default-features = false }
 pallet-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
 pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 pallets-common = { path = "pallets/common", default-features = false }
-s3-primitives = { git = "https://github.com/paritytech/web3-storage.git", rev = "b5a622028ee92bf87bf00cc61afbcdb57365ecc3", default-features = false }
-storage-primitives = { git = "https://github.com/paritytech/web3-storage.git", rev = "b5a622028ee92bf87bf00cc61afbcdb57365ecc3", default-features = false }
+s3-primitives = { git = "https://github.com/paritytech/web3-storage.git", rev = "19c92b7847ae6339e0b90ef58d9dd804c17edf3a", default-features = false }
+storage-primitives = { git = "https://github.com/paritytech/web3-storage.git", rev = "19c92b7847ae6339e0b90ef58d9dd804c17edf3a", default-features = false }
 transaction-storage-primitives = { path = "pallets/transaction-storage/primitives", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
