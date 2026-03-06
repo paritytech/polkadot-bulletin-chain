@@ -130,6 +130,7 @@ pub fn bulletin_genesis() -> sp_runtime::Storage {
 		sudo: Default::default(),
 		transaction_payment: Default::default(),
 		transaction_storage: Default::default(),
+		storage_provider: Default::default(),
 	};
 
 	genesis_config.build_storage().unwrap()
