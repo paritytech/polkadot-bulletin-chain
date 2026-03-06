@@ -37,7 +37,6 @@ use emulated_integration_tests_common::{
 	impl_accounts_helpers_for_parachain, impl_assert_events_helpers_for_parachain,
 	impl_xcm_helpers_for_parachain,
 	xcm_emulator::decl_test_parachains,
-	AuraDigestProvider,
 };
 use frame_support::traits::OnInitialize;
 use parachains_common::{AuraId, Balance};
@@ -67,7 +66,6 @@ decl_test_parachains! {
 			LocationToAccountId: bulletin_polkadot_parachain_runtime::xcm_config::LocationToAccountId,
 			ParachainInfo: bulletin_polkadot_parachain_runtime::ParachainInfo,
 			MessageOrigin: cumulus_primitives_core::AggregateMessageOrigin,
-			DigestProvider: AuraDigestProvider,
 			AdditionalInherentCode: (),
 		},
 		pallets = {
