@@ -125,7 +125,8 @@ where
 			}
 			let mut found = false;
 			for inner in inner_calls {
-				let (inner_found, _) = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
+				let (inner_found, _) =
+					Self::traverse_storage_calls(inner, depth + 1, visitor)?;
 				if inner_found {
 					found = true;
 				}
