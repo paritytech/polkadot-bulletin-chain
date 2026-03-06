@@ -230,7 +230,7 @@ export function Upload() {
 
         if (useUnsigned) {
           // Unsigned submission via bareTx
-          tx.getBareTx().then((bareTx) => {
+          tx.getBareTx().then((bareTx: any) => {
             subscription = client.submitAndWatch(bareTx).subscribe({
               next: handleEvent,
               error: handleError,
