@@ -32,8 +32,9 @@ use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
-	transaction_validity, transaction_validity::InvalidTransaction, ApplyExtrinsicResult,
-	BuildStorage, Either,
+	transaction_validity,
+	transaction_validity::{InvalidTransaction, TransactionValidityError},
+	ApplyExtrinsicResult, BuildStorage, Either,
 };
 use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
@@ -83,7 +84,10 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		pallet_transaction_storage::extension::ValidateStorageCalls::<Runtime>::default(),
+		pallet_transaction_storage::extension::ValidateStorageCalls::<
+			Runtime,
+			bulletin_westend_runtime::storage::RuntimeCallInspector,
+		>::default(),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
 	let tx_ext: TxExtension =
@@ -656,3 +660,245 @@ fn transaction_storage_weight_sanity() {
 		Some(85),
 	);
 }
+
+// ============================================================================
+// Ensure calls wrapped in dispatch wrappers are subject to the same validation
+// as direct submissions. Covers utility (batch, batch_all, force_batch,
+// as_derivative) and sudo.
+// ============================================================================
+
+/// Wrap a call in utility dispatcher variants.
+fn wrap_call_utility_variants(call: RuntimeCall) -> Vec<(RuntimeCall, &'static str)> {
+	vec![
+		(
+			RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call.clone()] }),
+			"utility::batch",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: vec![call.clone()] }),
+			"utility::batch_all",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::force_batch { calls: vec![call.clone()] }),
+			"utility::force_batch",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::as_derivative {
+				index: 0,
+				call: Box::new(call),
+			}),
+			"utility::as_derivative",
+		),
+	]
+}
+
+/// Assert that direct and utility-wrapper variants are rejected at validation time.
+fn assert_rejected_at_validation(
+	signer: Sr25519Keyring,
+	call: RuntimeCall,
+	expected: TransactionValidityError,
+	label: &str,
+) {
+	assert_eq!(
+		construct_and_apply_extrinsic(Some(signer.pair()), call.clone()),
+		Err(expected),
+		"{label}: direct",
+	);
+	for (wrapped, name) in wrap_call_utility_variants(call) {
+		assert_eq!(
+			construct_and_apply_extrinsic(Some(signer.pair()), wrapped),
+			Err(expected),
+			"{label}: via {name}",
+		);
+	}
+}
+
+#[test]
+fn wrapped_store_requires_authorization() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: vec![42u8; 100],
+			});
+
+			// Direct + utility wrappers: rejected at validation time.
+			assert_rejected_at_validation(
+				account,
+				store_call.clone(),
+				TransactionValidityError::Invalid(InvalidTransaction::Payment),
+				"store",
+			);
+
+			// sudo_as: inner store is checked for TransactionStorage auth at validation.
+			assert_eq!(
+				construct_and_apply_extrinsic(
+					Some(account.pair()),
+					RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+						who: sp_runtime::MultiAddress::Id(account.to_account_id()),
+						call: Box::new(store_call),
+					}),
+				),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			);
+		});
+}
+
+#[test]
+fn wrapped_store_with_cid_config_requires_authorization() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+
+			let store_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+					cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+					data: vec![42u8; 100],
+				});
+
+			// Direct + utility wrappers: rejected at validation time.
+			assert_rejected_at_validation(
+				account,
+				store_call.clone(),
+				TransactionValidityError::Invalid(InvalidTransaction::Payment),
+				"store_with_cid_config",
+			);
+
+			// sudo_as: inner store_with_cid_config is checked at validation.
+			assert_eq!(
+				construct_and_apply_extrinsic(
+					Some(account.pair()),
+					RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+						who: sp_runtime::MultiAddress::Id(account.to_account_id()),
+						call: Box::new(store_call),
+					}),
+				),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			);
+		});
+}
+
+#[test]
+fn authorized_wrapped_store_succeeds() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![42u8; 100];
+
+			// Fund Alice so she can pay the wrapper overhead fees (batch itself isn't feeless).
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			// batch, batch_all, force_batch (not as_derivative — it changes origin internally)
+			let batch_variants = |call: RuntimeCall| -> Vec<(RuntimeCall, &'static str)> {
+				vec![
+					(
+						RuntimeCall::Utility(pallet_utility::Call::batch {
+							calls: vec![call.clone()],
+						}),
+						"batch",
+					),
+					(
+						RuntimeCall::Utility(pallet_utility::Call::batch_all {
+							calls: vec![call.clone()],
+						}),
+						"batch_all",
+					),
+					(
+						RuntimeCall::Utility(pallet_utility::Call::force_batch {
+							calls: vec![call],
+						}),
+						"force_batch",
+					),
+				]
+			};
+
+			// Authorize enough for direct + 3 batch variants
+			let num_calls = 4u32;
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				num_calls,
+				num_calls as u64 * data.len() as u64,
+			));
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			// Direct store should succeed.
+			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), store_call.clone()));
+
+			// Batch-wrapped store should also succeed.
+			for (wrapped, name) in batch_variants(store_call) {
+				let res = construct_and_apply_extrinsic(Some(account.pair()), wrapped);
+				assert!(res.is_ok(), "{name}: apply_extrinsic failed with {res:?}");
+				assert!(res.unwrap().is_ok(), "{name}: dispatch failed");
+			}
+
+			// All authorization should be consumed.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+		});
+}
+
+/// Wrapping `authorize_account` in `batch_all` must not break the authorization.
+/// The origin must remain `Signed` (not transformed to `Authorized`) so that
+/// `T::Authorizer::ensure_origin()` succeeds at dispatch time.
+#[test]
+fn wrapped_authorize_account_succeeds() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let target: AccountId = Sr25519Keyring::Bob.to_account_id();
+
+			// Fund Alice for batch fee overhead.
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			// Wrap authorize_account inside batch_all — this is what the JS integration
+			// test does. The origin must stay Signed(Alice) so the Authorizer check passes.
+			let authorize_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.clone(),
+					transactions: 10,
+					bytes: 10 * 1024,
+				});
+			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch_all {
+				calls: vec![authorize_call],
+			});
+
+			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), batch_call));
+
+			// Authorization must have been created.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(target.clone()),
+				AuthorizationExtent { transactions: 10, bytes: 10 * 1024 },
+			);
+
+			// Now verify that the authorized target can actually store data.
+			let data = vec![42u8; 100];
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+			assert_ok_ok(construct_and_apply_extrinsic(
+				Some(Sr25519Keyring::Bob.pair()),
+				store_call,
+			));
+		});
+}
+
+// NOTE: No `wrapped_call_respects_validate_inner_calls_allowlist` test on Westend.
+// Unlike the feeless Polkadot solochain, Westend is a parachain with transaction fees,
+// so there is no call allowlist — fees provide the spam gate for non-storage calls.
+// TransactionStorage calls inside wrappers are validated for authorization by the pallet's
+// `ValidateStorageCalls` extension to prevent DoS via large unauthorized data.

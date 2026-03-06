@@ -689,6 +689,10 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 
 		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
 		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 
 		// Preimage authorization for sha2 hash should be consumed.
@@ -1170,7 +1174,7 @@ fn authorize_storage_extension_transforms_origin() {
 		// Verify the transaction is valid with correct priority
 		assert_eq!(valid_tx.priority, StoreRenewPriority::get());
 
-		// Verify val contains the authorization scope
+		// Verify val contains the signer
 		assert_eq!(val, Some(caller));
 
 		// Verify the origin was transformed and can be extracted with ensure_authorized
@@ -1231,7 +1235,7 @@ fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
 		assert!(result.is_ok());
 		let (_, val, transformed_origin) = result.unwrap();
 
-		// Verify preimage authorization was used
+		// Verify val contains the signer
 		assert_eq!(val, Some(caller));
 
 		// Verify the origin carries preimage authorization

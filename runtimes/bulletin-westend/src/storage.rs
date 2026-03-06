@@ -24,7 +24,7 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
-use pallets_common::NoCurrency;
+use pallets_common::{inspect_sudo_wrapper, inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
@@ -42,11 +42,25 @@ parameter_types! {
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const SetPurgeKeysLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+}
+
+/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
+/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct RuntimeCallInspector;
+
+impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
+	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
+		match call {
+			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
+			RuntimeCall::Sudo(c) => inspect_sudo_wrapper(c),
+			_ => None,
+		}
+	}
 }
 
 /// The main business of the Bulletin chain.
