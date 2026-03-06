@@ -92,24 +92,24 @@ describe("Error Handling", () => {
 
   describe("Client Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStore", async () => {
-      const ops = new BulletinPreparer()
+      const preparer = new BulletinPreparer()
 
-      await expect(ops.prepareStore(new Uint8Array(0))).rejects.toThrow(
+      await expect(preparer.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
       )
-      await expect(ops.prepareStore(new Uint8Array(0))).rejects.toMatchObject({
+      await expect(preparer.prepareStore(new Uint8Array(0))).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
     })
 
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
-      const ops = new BulletinPreparer()
+      const preparer = new BulletinPreparer()
 
-      await expect(ops.prepareStoreChunked(new Uint8Array(0))).rejects.toThrow(
+      await expect(preparer.prepareStoreChunked(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
       )
       await expect(
-        ops.prepareStoreChunked(new Uint8Array(0)),
+        preparer.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
@@ -147,10 +147,10 @@ describe("Error Handling", () => {
 
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
-      const ops = new BulletinPreparer()
+      const preparer = new BulletinPreparer()
 
       try {
-        await ops.prepareStore(new Uint8Array(0))
+        await preparer.prepareStore(new Uint8Array(0))
         expect.fail("Should have thrown")
       } catch (error) {
         expect(error).toBeInstanceOf(BulletinError)

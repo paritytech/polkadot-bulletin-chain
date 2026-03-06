@@ -370,7 +370,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   /** Client configuration */
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
-  private ops: BulletinPreparer
+  private preparer: BulletinPreparer
   /** Account for authorization checks (optional) */
   private account?: string
 
@@ -399,7 +399,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
     }
-    this.ops = new BulletinPreparer({
+    this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
       chunkingThreshold: this.config.chunkingThreshold,
@@ -698,7 +698,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
-    const { cid } = await this.ops.prepareStore(data, options)
+    const { cid } = await this.preparer.prepareStore(data, options)
 
     try {
       const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
@@ -754,7 +754,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
 
     // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
-    const prepared = await this.ops.prepareStoreChunked(
+    const prepared = await this.preparer.prepareStoreChunked(
       dataBytes,
       config,
       options,
@@ -1039,7 +1039,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
-    const { cid } = await this.ops.prepareStore(dataBytes, options)
+    const { cid } = await this.preparer.prepareStore(dataBytes, options)
 
     try {
       const tx = this.createStoreTx(dataBytes, cidCodec, hashAlgorithm)
@@ -1088,6 +1088,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     transactions: number
     bytes: number
   } {
-    return this.ops.estimateAuthorization(dataSize)
+    return this.preparer.estimateAuthorization(dataSize)
   }
 }
