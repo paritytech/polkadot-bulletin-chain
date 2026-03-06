@@ -37,12 +37,10 @@ if (result.chunks) {
 You can configure the threshold and chunk size via the client constructor:
 
 ```typescript
-const client = new AsyncBulletinClient(api, signer, {
+const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
     chunkingThreshold: 5 * 1024 * 1024,  // Chunk files > 5 MiB
     defaultChunkSize: 2 * 1024 * 1024,   // 2 MiB chunks
-    maxParallel: 8,                       // Upload 8 chunks in parallel
     createManifest: true,                 // Create DAG-PB manifest
-    checkAuthorizationBeforeUpload: true, // Check auth before upload
 });
 ```
 
@@ -60,7 +58,6 @@ const largeFile = new Uint8Array(100 * 1024 * 1024); // 100 MB
 // Configure chunking explicitly
 const config = {
     chunkSize: 1024 * 1024,  // 1 MiB chunks
-    maxParallel: 8,           // Upload 8 chunks in parallel
     createManifest: true,     // Create DAG-PB manifest
 };
 
@@ -151,7 +148,6 @@ Bulletin Chain has a **6 second block time**. Each chunk requires one transactio
 ```typescript
 const config = {
     chunkSize: 8 * 1024 * 1024,  // 8 MiB chunks (MAX_CHUNK_SIZE)
-    maxParallel: 4,
     createManifest: true,
 };
 ```
@@ -167,7 +163,6 @@ const config = {
 ```typescript
 const config = {
     chunkSize: 1024 * 1024,
-    maxParallel: 8,  // Upload up to 8 chunks simultaneously
     createManifest: true,
 };
 ```
@@ -180,14 +175,12 @@ const config = {
 // With manifest (recommended for large files)
 const config = {
     chunkSize: 1024 * 1024,
-    maxParallel: 8,
     createManifest: true,  // Creates DAG-PB manifest
 };
 
 // Without manifest (just upload chunks)
 const config = {
     chunkSize: 1024 * 1024,
-    maxParallel: 8,
     createManifest: false,  // No manifest, just chunks
 };
 ```

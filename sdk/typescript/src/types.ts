@@ -40,8 +40,6 @@ export enum HashAlgorithm {
 export interface ChunkerConfig {
   /** Size of each chunk in bytes (default: 1 MiB) */
   chunkSize: number
-  /** Maximum number of parallel uploads (default: 8) */
-  maxParallel: number
   /** Whether to create a DAG-PB manifest (default: true) */
   createManifest: boolean
 }
@@ -54,7 +52,6 @@ export interface ChunkerConfig {
  */
 export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
   chunkSize: 1024 * 1024, // 1 MiB (default)
-  maxParallel: 8,
   createManifest: true,
 }
 
@@ -152,27 +149,13 @@ export interface ChunkedStoreResult {
 }
 
 /**
- * Authorization scope types
+ * Authorization scope types (mirrors the pallet's AuthorizationScope enum)
  */
 export enum AuthorizationScope {
-  /** Account-based authorization (more flexible) */
+  /** Account-based authorization */
   Account = "Account",
   /** Preimage-based authorization (content-addressed) */
   Preimage = "Preimage",
-}
-
-/**
- * Authorization information
- */
-export interface Authorization {
-  /** The authorization scope */
-  scope: AuthorizationScope
-  /** Number of transactions authorized */
-  transactions: number
-  /** Maximum total size in bytes */
-  maxSize: bigint
-  /** Block number when authorization expires (if known) */
-  expiresAt?: number
 }
 
 /**
@@ -233,18 +216,11 @@ export class BulletinError extends Error {
  * Client configuration
  */
 export interface ClientConfig {
-  /** RPC endpoint URL */
-  endpoint: string
   /** Default chunk size for large files (default: 1 MiB) */
   defaultChunkSize?: number
-  /** Maximum parallel uploads (default: 8) */
-  maxParallel?: number
   /** Whether to create manifests for chunked uploads (default: true) */
   createManifest?: boolean
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
-  /** Check authorization before uploading to fail fast (default: true).
-   * Queries blockchain for current authorization and validates before submission. */
-  checkAuthorizationBeforeUpload?: boolean
 }

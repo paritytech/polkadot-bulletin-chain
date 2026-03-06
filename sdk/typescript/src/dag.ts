@@ -9,7 +9,7 @@
 import * as dagPB from "@ipld/dag-pb"
 import { UnixFS } from "ipfs-unixfs"
 import type { CID } from "multiformats/cid"
-import { BulletinError, type Chunk, HashAlgorithm } from "./types.js"
+import { BulletinError, type Chunk, CidCodec, HashAlgorithm } from "./types.js"
 import { calculateCid } from "./utils.js"
 
 /**
@@ -79,7 +79,7 @@ export class UnixFsDagBuilder {
     const dagBytes = dagPB.encode(dagNode)
 
     // Calculate root CID using DAG-PB codec
-    const rootCid = await calculateCid(dagBytes, 0x70, hashAlgorithm)
+    const rootCid = await calculateCid(dagBytes, CidCodec.DagPb, hashAlgorithm)
 
     return {
       rootCid,

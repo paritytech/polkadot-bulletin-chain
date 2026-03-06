@@ -572,9 +572,49 @@ test-ts-sdk test_dir ws_url="ws://localhost:10000" seed="//Alice":
     node typescript/authorize_and_store.js "{{ ws_url }}" "{{ seed }}"
     echo "✅ TypeScript SDK authorize-and-store test passed!"
 
+# Run TypeScript SDK vitest integration tests (services must already be running)
+# Parameters:
+#   ws_url - WebSocket URL (default: ws://localhost:10000)
+test-ts-sdk-vitest ws_url="ws://localhost:10000":
+    #!/usr/bin/env bash
+    set -e
+    echo "🧪 Running TypeScript SDK vitest integration tests..."
+    cd ../sdk/typescript
+    npm install
+    npm run build
+    BULLETIN_RPC_URL="{{ ws_url }}" npx vitest run test/integration
+    echo "✅ TypeScript SDK vitest integration tests passed!"
+
 # ============================================================================
 # Standalone recipes (with full setup/teardown) - kept for local dev convenience
 # ============================================================================
+
+# Run TypeScript SDK vitest integration tests with full setup/teardown
+# Parameters:
+#   runtime - Runtime name (default: bulletin-polkadot-runtime)
+run-ts-sdk-vitest runtime: npm-install
+    #!/usr/bin/env bash
+    set -e
+
+    echo "🧪 Starting TypeScript SDK vitest integration tests (runtime: {{ runtime }})..."
+
+    TEST_DIR="$(just compute-test-dir)"
+    just setup-services "$TEST_DIR" "{{ runtime }}"
+
+    set +e
+    just test-ts-sdk-vitest
+    TEST_EXIT=$?
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [ $TEST_EXIT -eq 0 ]; then
+        echo "✅ TypeScript SDK vitest integration tests passed!"
+    else
+        echo "❌ TypeScript SDK vitest integration tests failed with exit code $TEST_EXIT"
+    fi
+
+    just teardown-services "$TEST_DIR"
+    exit $TEST_EXIT
 
 # Run authorize and store example with Docker IPFS
 # Parameters:

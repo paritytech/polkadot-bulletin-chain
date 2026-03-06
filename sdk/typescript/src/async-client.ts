@@ -7,14 +7,13 @@
 
 import type { CID } from "multiformats/cid"
 import { Binary, type PolkadotSigner } from "polkadot-api"
-import { FixedSizeChunker } from "./chunker.js"
-import { UnixFsDagBuilder } from "./dag.js"
+import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
   type ChunkedStoreResult,
   type ChunkerConfig,
   CidCodec,
-  DEFAULT_CHUNKER_CONFIG,
+  type ClientConfig,
   DEFAULT_STORE_OPTIONS,
   HashAlgorithm,
   type ProgressCallback,
@@ -22,7 +21,11 @@ import {
   type StoreResult,
   type WaitFor,
 } from "./types.js"
-import { calculateCid } from "./utils.js"
+import {
+  hashAlgorithmToScale,
+  isNonDefaultCidConfig,
+  type ScaleHashingAlgorithm,
+} from "./utils.js"
 
 /**
  * Minimal interface for a decoded PAPI runtime event.
@@ -82,6 +85,10 @@ export interface BulletinTypedApi {
   tx: {
     TransactionStorage: {
       store(args: { data: Binary | Uint8Array }): PapiTransaction
+      store_with_cid_config(args: {
+        cid: { codec: bigint; hashing: ScaleHashingAlgorithm }
+        data: Binary | Uint8Array
+      }): PapiTransaction
       authorize_account(args: {
         who: string
         transactions: number
@@ -92,8 +99,18 @@ export interface BulletinTypedApi {
         max_size: bigint
       }): PapiTransaction
       renew(args: { block: number; index: number }): PapiTransaction
+      remove_expired_account_authorization(args: {
+        who: string
+      }): PapiTransaction
+      remove_expired_preimage_authorization(args: {
+        content_hash: Binary | Uint8Array
+      }): PapiTransaction
+      refresh_account_authorization(args: { who: string }): PapiTransaction
+      refresh_preimage_authorization(args: {
+        content_hash: Binary | Uint8Array
+      }): PapiTransaction
     }
-    Sudo: {
+    Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
     }
   }
@@ -128,20 +145,74 @@ export interface TransactionReceipt {
   blockNumber?: number
 }
 
+/** Options for transaction submission */
+export interface CallOptions {
+  /** Callback to receive transaction status events */
+  onProgress?: ProgressCallback
+}
+
+/** Options for authorization calls that may require sudo */
+export interface AuthCallOptions extends CallOptions {
+  /** Wrap the call in Sudo (for chains where Authorizer origin requires it) */
+  sudo?: boolean
+}
+
 /**
- * Configuration for the async Bulletin client
+ * Shared interface for Bulletin clients (real and mock).
+ *
+ * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
  */
-export interface AsyncClientConfig {
-  /** Default chunk size for large files (default: 1 MiB) */
-  defaultChunkSize?: number
-  /** Maximum parallel uploads (default: 8) */
-  maxParallel?: number
-  /** Whether to create manifests for chunked uploads (default: true) */
-  createManifest?: boolean
-  /** Threshold for automatic chunking (default: 2 MiB) */
-  chunkingThreshold?: number
-  /** Check authorization before uploading to fail fast (default: true) */
-  checkAuthorizationBeforeUpload?: boolean
+export interface BulletinClientInterface {
+  /** Store data with options (used internally by StoreBuilder) */
+  storeWithOptions(
+    data: Binary | Uint8Array,
+    options?: StoreOptions,
+    progressCallback?: ProgressCallback,
+  ): Promise<StoreResult>
+  /** Store preimage-authorized content as unsigned transaction */
+  storeWithPreimageAuth?(
+    data: Binary | Uint8Array,
+    options?: StoreOptions,
+  ): Promise<StoreResult>
+  store(data: Binary | Uint8Array): StoreBuilder
+  authorizeAccount(
+    who: string,
+    transactions: number,
+    bytes: bigint,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt>
+  authorizePreimage(
+    contentHash: Uint8Array,
+    maxSize: bigint,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt>
+  renew(
+    block: number,
+    index: number,
+    options?: CallOptions,
+  ): Promise<TransactionReceipt>
+  refreshAccountAuthorization(
+    who: string,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt>
+  refreshPreimageAuthorization(
+    contentHash: Uint8Array,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt>
+  removeExpiredAccountAuthorization(
+    who: string,
+    options?: CallOptions,
+  ): Promise<TransactionReceipt>
+  removeExpiredPreimageAuthorization(
+    contentHash: Uint8Array,
+    options?: CallOptions,
+  ): Promise<TransactionReceipt>
+  estimateAuthorization(dataSize: number): {
+    transactions: number
+    bytes: number
+  }
+  withAccount(account: string): this
+  getAccount(): string | undefined
 }
 
 /**
@@ -165,11 +236,10 @@ export class StoreBuilder {
   private callback?: ProgressCallback
 
   constructor(
-    private client: AsyncBulletinClient,
+    private executor: BulletinClientInterface,
     data: Binary | Uint8Array,
   ) {
-    // Convert Binary to Uint8Array if needed
-    this.data = data instanceof Uint8Array ? data : data.asBytes()
+    this.data = toBytes(data)
   }
 
   /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
@@ -204,7 +274,11 @@ export class StoreBuilder {
 
   /** Execute the store operation (signed transaction, uses account authorization) */
   async send(): Promise<StoreResult> {
-    return this.client.storeWithOptions(this.data, this.options, this.callback)
+    return this.executor.storeWithOptions(
+      this.data,
+      this.options,
+      this.callback,
+    )
   }
 
   /**
@@ -224,12 +298,42 @@ export class StoreBuilder {
    * ```
    */
   async sendUnsigned(): Promise<StoreResult> {
-    return this.client.storeWithPreimageAuth(
-      this.data,
-      this.options,
-      this.callback,
-    )
+    if (!this.executor.storeWithPreimageAuth) {
+      throw new BulletinError(
+        "Unsigned transactions not supported by this client",
+        "UNSUPPORTED_OPERATION",
+      )
+    }
+    return this.executor.storeWithPreimageAuth(this.data, this.options)
   }
+}
+
+/** Convert Binary or Uint8Array to Uint8Array */
+function toBytes(data: Binary | Uint8Array): Uint8Array {
+  return data instanceof Uint8Array ? data : data.asBytes()
+}
+
+/** Resolve store options with defaults */
+function resolveStoreOptions(options?: StoreOptions): {
+  cidCodec: CidCodec | number
+  hashAlgorithm: HashAlgorithm
+  waitFor: WaitFor
+} {
+  const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
+  return {
+    cidCodec: opts.cidCodec ?? CidCodec.Raw,
+    hashAlgorithm: opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
+    waitFor: opts.waitFor ?? "best_block",
+  }
+}
+
+/** Extract the transaction index from a Stored event in a list of runtime events */
+function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
+  if (!events) return undefined
+  const storedEvent = events.find(
+    (e) => e.type === "TransactionStorage" && e.value?.type === "Stored",
+  )
+  return storedEvent?.value?.value?.index
 }
 
 /**
@@ -256,7 +360,7 @@ export class StoreBuilder {
  * const result = await bulletinClient.store(data).send();
  * ```
  */
-export class AsyncBulletinClient {
+export class AsyncBulletinClient implements BulletinClientInterface {
   /** PAPI client for blockchain interaction */
   public api: BulletinTypedApi
   /** Signer for transaction signing */
@@ -264,7 +368,9 @@ export class AsyncBulletinClient {
   /** Submit function for broadcasting raw transactions (from PolkadotClient.submit) */
   public submit: SubmitFn
   /** Client configuration */
-  public config: Required<AsyncClientConfig>
+  public config: Required<ClientConfig>
+  /** Offline operations (chunking, CID calculation, estimation) */
+  private preparer: BulletinPreparer
   /** Account for authorization checks (optional) */
   private account?: string
 
@@ -283,26 +389,25 @@ export class AsyncBulletinClient {
     api: BulletinTypedApi,
     signer: PolkadotSigner,
     submit: SubmitFn,
-    config?: Partial<AsyncClientConfig>,
+    config?: Partial<ClientConfig>,
   ) {
     this.api = api
     this.signer = signer
     this.submit = submit
     this.config = {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
-      maxParallel: config?.maxParallel ?? 8,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      checkAuthorizationBeforeUpload:
-        config?.checkAuthorizationBeforeUpload ?? true,
     }
+    this.preparer = new BulletinPreparer({
+      defaultChunkSize: this.config.defaultChunkSize,
+      createManifest: this.config.createManifest,
+      chunkingThreshold: this.config.chunkingThreshold,
+    })
   }
 
   /**
    * Set the account for authorization checks
-   *
-   * If set and `checkAuthorizationBeforeUpload` is enabled, the client will
-   * query authorization state before uploading and fail fast if insufficient.
    */
   withAccount(account: string): this {
     this.account = account
@@ -314,6 +419,25 @@ export class AsyncBulletinClient {
    */
   getAccount(): string | undefined {
     return this.account
+  }
+
+  /**
+   * Create a store transaction, using store_with_cid_config when non-default CID settings are used.
+   */
+  private createStoreTx(
+    data: Uint8Array,
+    cidCodec: CidCodec | number,
+    hashAlgorithm: HashAlgorithm,
+  ): PapiTransaction {
+    return isNonDefaultCidConfig(cidCodec, hashAlgorithm)
+      ? this.api.tx.TransactionStorage.store_with_cid_config({
+          cid: {
+            codec: BigInt(cidCodec),
+            hashing: hashAlgorithmToScale(hashAlgorithm),
+          },
+          data: new Binary(data),
+        })
+      : this.api.tx.TransactionStorage.store({ data: new Binary(data) })
   }
 
   /**
@@ -362,6 +486,23 @@ export class AsyncBulletinClient {
       let resolved = false
       let txHash: string | undefined
 
+      const finish = (
+        block: { hash: string; number: number },
+        events?: RuntimeEvent[],
+      ) => {
+        if (resolved) return
+        resolved = true
+        clearTimeout(timerId)
+        subscription.unsubscribe()
+        resolve({
+          blockHash: block.hash,
+          txHash: txHash || "",
+          blockNumber: block.number,
+          txIndex: extractStoredIndex(events),
+          events,
+        })
+      }
+
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
         next: (ev: TxStatusEvent) => {
           // Emit signed event when we first get a tx hash
@@ -388,31 +529,8 @@ export class AsyncBulletinClient {
               })
             }
 
-            // If waiting for best_block, resolve here
-            if (waitFor === "best_block" && !resolved) {
-              resolved = true
-              subscription.unsubscribe()
-
-              // Extract tx index from Stored event if available
-              let storedIndex: number | undefined
-              if (ev.events) {
-                const storedEvent = ev.events.find(
-                  (e: RuntimeEvent) =>
-                    e.type === "TransactionStorage" &&
-                    e.value?.type === "Stored",
-                )
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  storedIndex = storedEvent.value.value.index
-                }
-              }
-
-              resolve({
-                blockHash: ev.block.hash,
-                txHash: txHash || "",
-                blockNumber: ev.block.number,
-                txIndex: storedIndex,
-                events: ev.events,
-              })
+            if (waitFor === "best_block") {
+              finish(ev.block, ev.events)
             }
           }
 
@@ -427,43 +545,20 @@ export class AsyncBulletinClient {
               })
             }
 
-            if (!resolved) {
-              resolved = true
-              subscription.unsubscribe()
-
-              // Extract tx index from Stored event if available
-              let storedIndex: number | undefined
-              if (ev.events) {
-                const storedEvent = ev.events.find(
-                  (e: RuntimeEvent) =>
-                    e.type === "TransactionStorage" &&
-                    e.value?.type === "Stored",
-                )
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  storedIndex = storedEvent.value.value.index
-                }
-              }
-
-              resolve({
-                blockHash: ev.block.hash,
-                txHash: txHash || "",
-                blockNumber: ev.block.number,
-                txIndex: storedIndex,
-                events: ev.events,
-              })
-            }
+            finish(ev.block, ev.events)
           }
         },
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
+            clearTimeout(timerId)
             reject(err)
           }
         },
       })
 
       // Timeout after 2 minutes
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
         if (!resolved) {
           resolved = true
           subscription.unsubscribe()
@@ -471,6 +566,44 @@ export class AsyncBulletinClient {
         }
       }, 120000)
     })
+  }
+
+  /**
+   * Wrap a call in Sudo if requested, otherwise return it as-is
+   */
+  private maybeSudo(tx: PapiTransaction, sudo?: boolean): PapiTransaction {
+    if (!sudo) return tx
+    if (!this.api.tx.Sudo) {
+      throw new BulletinError(
+        "sudo requested but Sudo pallet is not available on this chain",
+        "INVALID_CONFIG",
+      )
+    }
+    return this.api.tx.Sudo.sudo({ call: tx.decodedCall })
+  }
+
+  /**
+   * Submit a transaction, returning a receipt on success or throwing a BulletinError on failure.
+   */
+  private async submitTx(
+    tx: PapiTransaction,
+    errorMessage: string,
+    errorCode: string,
+    progressCallback?: ProgressCallback,
+  ): Promise<TransactionReceipt> {
+    try {
+      const result = progressCallback
+        ? await this.signAndSubmitWithProgress(tx, progressCallback)
+        : await this.signAndSubmitFinalized(tx)
+
+      return {
+        blockHash: result.blockHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+      }
+    } catch (error) {
+      throw new BulletinError(`${errorMessage}: ${error}`, errorCode, error)
+    }
   }
 
   /**
@@ -517,23 +650,37 @@ export class AsyncBulletinClient {
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
-    // Convert Binary to Uint8Array if needed
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
+    const dataBytes = toBytes(data)
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
     // Decide whether to chunk based on threshold
     if (dataBytes.length > this.config.chunkingThreshold) {
-      // Large data - use chunking
-      return this.storeInternalChunked(
+      const chunked = await this.storeChunked(
         dataBytes,
         undefined,
         options,
         progressCallback,
       )
+      const primaryCid = chunked.manifestCid ?? chunked.chunkCids[0]
+      if (!primaryCid) {
+        throw new BulletinError(
+          "No CID produced from chunked upload",
+          "CID_CALCULATION_FAILED",
+        )
+      }
+      return {
+        cid: primaryCid,
+        size: dataBytes.length,
+        blockNumber: undefined,
+        extrinsicIndex: undefined,
+        chunks: {
+          chunkCids: chunked.chunkCids,
+          numChunks: chunked.numChunks,
+        },
+      }
     } else {
-      // Small data - single transaction
       return this.storeInternalSingle(dataBytes, options, progressCallback)
     }
   }
@@ -550,21 +697,11 @@ export class AsyncBulletinClient {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-
-    // Calculate CID using defaults if not specified
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw
-    const hashAlgorithm =
-      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
-
-    const waitFor: WaitFor = opts.waitFor ?? "best_block"
-
-    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
+    const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
+    const { cid } = await this.preparer.prepareStore(data, options)
 
     try {
-      const tx = this.api.tx.TransactionStorage.store({
-        data: new Binary(data),
-      })
+      const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
 
       // Use progress-aware submission if callback provided, otherwise use simple submission
       const result = progressCallback
@@ -591,128 +728,6 @@ export class AsyncBulletinClient {
   }
 
   /**
-   * Internal: Store data with chunking
-   */
-  private async storeInternalChunked(
-    data: Uint8Array,
-    config?: Partial<ChunkerConfig>,
-    options?: StoreOptions,
-    progressCallback?: ProgressCallback,
-  ): Promise<StoreResult> {
-    const chunkerConfig: ChunkerConfig = {
-      ...DEFAULT_CHUNKER_CONFIG,
-      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
-      maxParallel: config?.maxParallel ?? this.config.maxParallel,
-      createManifest: config?.createManifest ?? this.config.createManifest,
-    }
-
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-
-    // Chunk the data
-    const chunker = new FixedSizeChunker(chunkerConfig)
-    const chunks = chunker.chunk(data)
-
-    const chunkCids: CID[] = []
-
-    // Submit each chunk sequentially
-    for (const chunk of chunks) {
-      if (progressCallback) {
-        progressCallback({
-          type: "chunk_started",
-          index: chunk.index,
-          total: chunks.length,
-        })
-      }
-
-      try {
-        const cid = await calculateCid(
-          chunk.data,
-          opts.cidCodec ?? CidCodec.Raw,
-          opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
-        )
-        chunk.cid = cid
-
-        const tx = this.api.tx.TransactionStorage.store({
-          data: new Binary(chunk.data),
-        })
-        await this.signAndSubmitFinalized(tx)
-
-        chunkCids.push(cid)
-
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_completed",
-            index: chunk.index,
-            total: chunks.length,
-            cid,
-          })
-        }
-      } catch (error) {
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_failed",
-            index: chunk.index,
-            total: chunks.length,
-            error: error as Error,
-          })
-        }
-        throw error
-      }
-    }
-
-    // Optionally create and submit manifest
-    let manifestCid: CID | undefined
-    if (chunkerConfig.createManifest) {
-      if (progressCallback) {
-        progressCallback({ type: "manifest_started" })
-      }
-
-      const builder = new UnixFsDagBuilder()
-      const manifest = await builder.build(
-        chunks,
-        opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
-      )
-
-      const manifestTx = this.api.tx.TransactionStorage.store({
-        data: new Binary(manifest.dagBytes),
-      })
-      await this.signAndSubmitFinalized(manifestTx)
-
-      manifestCid = manifest.rootCid
-
-      if (progressCallback) {
-        progressCallback({
-          type: "manifest_created",
-          cid: manifest.rootCid,
-        })
-      }
-    }
-
-    if (progressCallback) {
-      progressCallback({ type: "completed", manifestCid })
-    }
-
-    const primaryCid = manifestCid ?? chunkCids[0]
-    if (!primaryCid) {
-      throw new BulletinError(
-        "No CID produced from chunked upload",
-        "CID_CALCULATION_FAILED",
-      )
-    }
-
-    return {
-      cid: primaryCid,
-      size: data.length,
-      blockNumber: undefined,
-      extrinsicIndex: undefined,
-      chunks: {
-        chunkCids,
-        numChunks: chunks.length,
-      },
-    }
-  }
-
-  /**
    * Store large data with automatic chunking and manifest creation
    *
    * Handles the complete workflow:
@@ -730,61 +745,45 @@ export class AsyncBulletinClient {
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<ChunkedStoreResult> {
-    // Convert Binary to Uint8Array if needed
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
+    const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    const chunkerConfig: ChunkerConfig = {
-      ...DEFAULT_CHUNKER_CONFIG,
-      chunkSize: config?.chunkSize ?? this.config.defaultChunkSize,
-      maxParallel: config?.maxParallel ?? this.config.maxParallel,
-      createManifest: config?.createManifest ?? this.config.createManifest,
-    }
+    const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-
-    // Extract options with defaults
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw
-    const hashAlgorithm =
-      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
-
-    // Chunk the data
-    const chunker = new FixedSizeChunker(chunkerConfig)
-    const chunks = chunker.chunk(dataBytes)
+    // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
+    const prepared = await this.preparer.prepareStoreChunked(
+      dataBytes,
+      config,
+      options,
+    )
 
     const chunkCids: CID[] = []
+    const totalChunks = prepared.chunks.length
 
-    // Submit each chunk
-    for (const chunk of chunks) {
+    // Submit each chunk transaction
+    for (const chunk of prepared.chunks) {
       if (progressCallback) {
         progressCallback({
           type: "chunk_started",
           index: chunk.index,
-          total: chunks.length,
+          total: totalChunks,
         })
       }
 
       try {
-        // Calculate CID for this chunk
-        const cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm)
-
-        chunk.cid = cid
-
-        const tx = this.api.tx.TransactionStorage.store({
-          data: new Binary(chunk.data),
-        })
+        const tx = this.createStoreTx(chunk.data, cidCodec, hashAlgorithm)
         await this.signAndSubmitFinalized(tx)
+        const cid = chunk.cid
+        if (cid) chunkCids.push(cid)
 
-        chunkCids.push(cid)
-
-        if (progressCallback) {
+        if (progressCallback && cid) {
           progressCallback({
             type: "chunk_completed",
             index: chunk.index,
-            total: chunks.length,
+            total: totalChunks,
             cid,
           })
         }
@@ -793,145 +792,95 @@ export class AsyncBulletinClient {
           progressCallback({
             type: "chunk_failed",
             index: chunk.index,
-            total: chunks.length,
+            total: totalChunks,
             error: error as Error,
           })
         }
-        // Wrap raw errors in BulletinError for consistent error handling
-        if (error instanceof BulletinError) {
-          throw error
-        }
-        throw new BulletinError(
-          `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
-          "CHUNK_FAILED",
-          error,
-        )
+        throw error
       }
     }
 
-    // Optionally create and submit manifest
+    // Submit manifest transaction if present
     let manifestCid: CID | undefined
-    if (chunkerConfig.createManifest) {
+    if (prepared.manifest) {
       if (progressCallback) {
         progressCallback({ type: "manifest_started" })
       }
 
-      const builder = new UnixFsDagBuilder()
-      const manifest = await builder.build(chunks, hashAlgorithm)
-
-      const manifestTx = this.api.tx.TransactionStorage.store({
-        data: new Binary(manifest.dagBytes),
-      })
+      const manifestTx = this.createStoreTx(
+        prepared.manifest.data,
+        cidCodec,
+        hashAlgorithm,
+      )
       await this.signAndSubmitFinalized(manifestTx)
-
-      manifestCid = manifest.rootCid
+      manifestCid = prepared.manifest.cid
 
       if (progressCallback) {
-        progressCallback({
-          type: "manifest_created",
-          cid: manifest.rootCid,
-        })
+        progressCallback({ type: "manifest_created", cid: manifestCid })
       }
     }
 
     if (progressCallback) {
-      progressCallback({
-        type: "completed",
-        manifestCid,
-      })
+      progressCallback({ type: "completed", manifestCid })
     }
 
     return {
       chunkCids,
       manifestCid,
       totalSize: dataBytes.length,
-      numChunks: chunks.length,
+      numChunks: prepared.chunks.length,
     }
   }
 
   /**
    * Authorize an account to store data
    *
-   * Requires sudo/authorizer privileges
-   *
    * @param who - Account address to authorize
    * @param transactions - Number of transactions to authorize
    * @param bytes - Maximum bytes to authorize
-   * @param progressCallback - Optional callback to receive transaction status events
+   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
    */
   async authorizeAccount(
     who: string,
     transactions: number,
     bytes: bigint,
-    progressCallback?: ProgressCallback,
+    options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
-    try {
-      const authCall = this.api.tx.TransactionStorage.authorize_account({
-        who,
-        transactions,
-        bytes,
-      }).decodedCall
-
-      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall })
-
-      // Use progress-aware submission if callback provided
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(sudoTx, progressCallback)
-        : await this.signAndSubmitFinalized(sudoTx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to authorize account: ${error}`,
-        "AUTHORIZATION_FAILED",
-        error,
-      )
-    }
+    const authTx = this.api.tx.TransactionStorage.authorize_account({
+      who,
+      transactions,
+      bytes,
+    })
+    return this.submitTx(
+      this.maybeSudo(authTx, options?.sudo),
+      "Failed to authorize account",
+      "AUTHORIZATION_FAILED",
+      options?.onProgress,
+    )
   }
 
   /**
    * Authorize a preimage (by content hash) to be stored
    *
-   * Requires sudo/authorizer privileges
-   *
    * @param contentHash - Blake2b-256 hash of the content to authorize
    * @param maxSize - Maximum size in bytes for the content
-   * @param progressCallback - Optional callback to receive transaction status events
+   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
    */
   async authorizePreimage(
     contentHash: Uint8Array,
     maxSize: bigint,
-    progressCallback?: ProgressCallback,
+    options?: AuthCallOptions,
   ): Promise<TransactionReceipt> {
-    try {
-      const authCall = this.api.tx.TransactionStorage.authorize_preimage({
-        content_hash: new Binary(contentHash),
-        max_size: maxSize,
-      }).decodedCall
-
-      const sudoTx = this.api.tx.Sudo.sudo({ call: authCall })
-
-      // Use progress-aware submission if callback provided
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(sudoTx, progressCallback)
-        : await this.signAndSubmitFinalized(sudoTx)
-
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to authorize preimage: ${error}`,
-        "AUTHORIZATION_FAILED",
-        error,
-      )
-    }
+    const authTx = this.api.tx.TransactionStorage.authorize_preimage({
+      content_hash: new Binary(contentHash),
+      max_size: maxSize,
+    })
+    return this.submitTx(
+      this.maybeSudo(authTx, options?.sudo),
+      "Failed to authorize preimage",
+      "AUTHORIZATION_FAILED",
+      options?.onProgress,
+    )
   }
 
   /**
@@ -939,33 +888,115 @@ export class AsyncBulletinClient {
    *
    * @param block - Block number where the original storage transaction was included
    * @param index - Extrinsic index within the block
-   * @param progressCallback - Optional callback to receive transaction status events
+   * @param options - Optional call options
    */
   async renew(
     block: number,
     index: number,
-    progressCallback?: ProgressCallback,
+    options?: CallOptions,
   ): Promise<TransactionReceipt> {
-    try {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index })
+    const tx = this.api.tx.TransactionStorage.renew({ block, index })
+    return this.submitTx(
+      tx,
+      "Failed to renew",
+      "TRANSACTION_FAILED",
+      options?.onProgress,
+    )
+  }
 
-      // Use progress-aware submission if callback provided
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
+  /**
+   * Refresh an account authorization (extends expiry)
+   *
+   * Requires Authorizer origin on-chain.
+   *
+   * @param who - Account address to refresh authorization for
+   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
+   */
+  async refreshAccountAuthorization(
+    who: string,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt> {
+    const authTx = this.api.tx.TransactionStorage.refresh_account_authorization(
+      { who },
+    )
+    return this.submitTx(
+      this.maybeSudo(authTx, options?.sudo),
+      "Failed to refresh account authorization",
+      "AUTHORIZATION_FAILED",
+      options?.onProgress,
+    )
+  }
 
-      return {
-        blockHash: result.blockHash,
-        txHash: result.txHash,
-        blockNumber: result.blockNumber,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to renew: ${error}`,
-        "TRANSACTION_FAILED",
-        error,
-      )
-    }
+  /**
+   * Refresh a preimage authorization (extends expiry)
+   *
+   * Requires Authorizer origin on-chain.
+   *
+   * @param contentHash - Blake2b-256 hash of the authorized content
+   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
+   */
+  async refreshPreimageAuthorization(
+    contentHash: Uint8Array,
+    options?: AuthCallOptions,
+  ): Promise<TransactionReceipt> {
+    const authTx =
+      this.api.tx.TransactionStorage.refresh_preimage_authorization({
+        content_hash: new Binary(contentHash),
+      })
+    return this.submitTx(
+      this.maybeSudo(authTx, options?.sudo),
+      "Failed to refresh preimage authorization",
+      "AUTHORIZATION_FAILED",
+      options?.onProgress,
+    )
+  }
+
+  /**
+   * Remove an expired account authorization
+   *
+   * Can be called by anyone (no special origin required).
+   *
+   * @param who - Account address with expired authorization
+   * @param options - Optional call options
+   */
+  async removeExpiredAccountAuthorization(
+    who: string,
+    options?: CallOptions,
+  ): Promise<TransactionReceipt> {
+    const tx =
+      this.api.tx.TransactionStorage.remove_expired_account_authorization({
+        who,
+      })
+    return this.submitTx(
+      tx,
+      "Failed to remove expired account authorization",
+      "TRANSACTION_FAILED",
+      options?.onProgress,
+    )
+  }
+
+  /**
+   * Remove an expired preimage authorization
+   *
+   * Can be called by anyone (no special origin required).
+   *
+   * @param contentHash - Blake2b-256 hash of the expired authorization
+   * @param options - Optional call options
+   */
+  async removeExpiredPreimageAuthorization(
+    contentHash: Uint8Array,
+    options?: CallOptions,
+  ): Promise<TransactionReceipt> {
+    const tx =
+      this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
+        content_hash: new Binary(contentHash),
+      })
+    return this.submitTx(
+      tx,
+      "Failed to remove expired preimage authorization",
+      "TRANSACTION_FAILED",
+      options?.onProgress,
+    )
   }
 
   /**
@@ -977,7 +1008,6 @@ export class AsyncBulletinClient {
    *
    * @param data - The preauthorized content to store
    * @param options - Store options (codec, hashing algorithm, etc.)
-   * @param _progressCallback - Optional progress callback for chunked uploads
    *
    * @example
    * ```typescript
@@ -995,9 +1025,8 @@ export class AsyncBulletinClient {
   async storeWithPreimageAuth(
     data: Binary | Uint8Array,
     options?: StoreOptions,
-    _progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
+    const dataBytes = toBytes(data)
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
@@ -1009,14 +1038,11 @@ export class AsyncBulletinClient {
       )
     }
 
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw
-    const hashAlgorithm =
-      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
-    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
+    const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
+    const { cid } = await this.preparer.prepareStore(dataBytes, options)
 
     try {
-      const tx = this.api.tx.TransactionStorage.store({ data: dataBytes })
+      const tx = this.createStoreTx(dataBytes, cidCodec, hashAlgorithm)
       const bareTxHex = await tx.getBareTx()
       const finalized = await this.submit(bareTxHex)
 
@@ -1062,15 +1088,6 @@ export class AsyncBulletinClient {
     transactions: number
     bytes: number
   } {
-    const numChunks = Math.ceil(dataSize / this.config.defaultChunkSize)
-    let transactions = numChunks
-    let bytes = dataSize
-
-    if (this.config.createManifest) {
-      transactions += 1
-      bytes += numChunks * 10 + 1000
-    }
-
-    return { transactions, bytes }
+    return this.preparer.estimateAuthorization(dataSize)
   }
 }

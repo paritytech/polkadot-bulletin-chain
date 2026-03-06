@@ -125,48 +125,7 @@ if (result.chunks) {
 }
 ```
 
-## Authorization Checking (Fail Fast)
-
-By default, the SDK checks authorization **before** uploading to fail fast and avoid wasted transaction fees.
-
-### How It Works
-
-```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
-import { Binary } from 'polkadot-api';
-
-// 1. Create client with your account
-const account = 'your-account-address';
-
-const client = new AsyncBulletinClient(api, signer)
-    .withAccount(account);  // Set the account for auth checking
-
-// 2. Upload - authorization is checked automatically
-const data = Binary.fromText('Hello, Bulletin!');
-const result = await client.store(data).send();
-//                       ⬆️ Queries blockchain first, fails fast if insufficient auth
-```
-
-### What Gets Checked
-
-Before submitting the transaction, the SDK:
-1. **Queries** the blockchain for your current authorization
-2. **Validates** you have enough transactions and bytes authorized
-3. **Checks expiration** - fails if authorization has expired
-4. **Fails immediately** if insufficient (no transaction fees wasted!)
-5. **Proceeds** only if authorization is sufficient
-
-### Disable Authorization Checking
-
-If you want to skip the check (e.g., you know authorization exists):
-
-```typescript
-const client = new AsyncBulletinClient(api, signer, {
-    checkAuthorizationBeforeUpload: false,  // Disable checking
-}).withAccount(account);
-```
-
-### Error Example
+## Error Handling
 
 ```typescript
 import { BulletinError } from '@bulletin/sdk';

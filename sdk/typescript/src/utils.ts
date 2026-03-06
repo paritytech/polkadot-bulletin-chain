@@ -9,7 +9,7 @@ import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
-import { BulletinError, HashAlgorithm } from "./types.js"
+import { BulletinError, CidCodec, HashAlgorithm } from "./types.js"
 
 /**
  * Calculate content hash using the specified algorithm
@@ -112,10 +112,73 @@ export function cidToBytes(cid: CID): Uint8Array {
 }
 
 /**
- * Validate chunk size
+ * Estimate authorization needed for storing data
  *
- * @throws BulletinError if chunk size is invalid
+ * @param dataSize - Total data size in bytes
+ * @param chunkSize - Size of each chunk in bytes
+ * @param createManifest - Whether a DAG-PB manifest will be created
  */
+export function estimateAuthorization(
+  dataSize: number,
+  chunkSize: number,
+  createManifest: boolean,
+): { transactions: number; bytes: number } {
+  const numChunks = Math.ceil(dataSize / chunkSize)
+  let transactions = numChunks
+  let bytes = dataSize
+
+  if (createManifest) {
+    transactions += 1
+    // Estimate manifest size (~10 bytes per chunk link + 1KB overhead)
+    bytes += numChunks * 10 + 1000
+  }
+
+  return { transactions, bytes }
+}
+
+/**
+ * SCALE variant type for the on-chain HashingAlgorithm enum
+ */
+export type ScaleHashingAlgorithm =
+  | { type: "Blake2b256" }
+  | { type: "Sha2_256" }
+  | { type: "Keccak256" }
+
+/**
+ * Convert SDK HashAlgorithm (multicodec value) to the SCALE enum variant
+ * expected by PAPI for the on-chain `HashingAlgorithm` type.
+ */
+export function hashAlgorithmToScale(
+  alg: HashAlgorithm,
+): ScaleHashingAlgorithm {
+  switch (alg) {
+    case HashAlgorithm.Blake2b256:
+      return { type: "Blake2b256" }
+    case HashAlgorithm.Sha2_256:
+      return { type: "Sha2_256" }
+    case HashAlgorithm.Keccak256:
+      return { type: "Keccak256" }
+    default:
+      throw new BulletinError(
+        `Unsupported hash algorithm for SCALE encoding: ${alg}`,
+        "INVALID_HASH_ALGORITHM",
+      )
+  }
+}
+
+/**
+ * Check whether store options use non-default CID configuration.
+ *
+ * When true, the SDK should use `store_with_cid_config` instead of `store`
+ * to ensure the on-chain CID matches the client-side CID.
+ */
+export function isNonDefaultCidConfig(
+  cidCodec: CidCodec | number,
+  hashAlgorithm: HashAlgorithm,
+): boolean {
+  return cidCodec !== CidCodec.Raw || hashAlgorithm !== HashAlgorithm.Blake2b256
+}
+
 export function validateChunkSize(size: number): void {
   if (size <= 0) {
     throw new BulletinError("Chunk size must be positive", "INVALID_CHUNK_SIZE")

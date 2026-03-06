@@ -127,8 +127,8 @@ export function Renew() {
         return;
       }
 
-      // Calculate expiration block
-      const expiresAtBlock = retentionPeriod ? blockNum + retentionPeriod : blockNum;
+      // retentionPeriod is guaranteed non-null here (lookup button is disabled until loaded)
+      const expiresAtBlock = blockNum + retentionPeriod!;
 
       setRenewalTarget({
         blockNumber: blockNum,
@@ -174,12 +174,12 @@ export function Renew() {
       const result = await bulletinClient.renew(
         renewalTarget.blockNumber,
         renewalTarget.index,
-        handleProgress,
+        { onProgress: handleProgress },
       );
 
-      // Calculate new expiration
+      // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
-      const newExpiresAt = retentionPeriod ? renewedAtBlock + retentionPeriod : renewedAtBlock;
+      const newExpiresAt = renewedAtBlock + retentionPeriod!;
 
       setRenewalSuccess({
         blockNumber: result.blockNumber,
@@ -301,7 +301,7 @@ export function Renew() {
 
               <Button
                 onClick={handleLookup}
-                disabled={!api || isLookingUp || !blockInput || !indexInput}
+                disabled={!api || isLookingUp || !blockInput || !indexInput || retentionPeriod === null}
                 className="w-full"
               >
                 {isLookingUp ? (
