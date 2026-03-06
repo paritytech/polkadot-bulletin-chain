@@ -21,12 +21,7 @@ import { DEV_PHRASE } from "@polkadot-labs/hdkd-helpers"
 import { Binary, createClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws-provider/node"
-import {
-  AsyncBulletinClient,
-  CidCodec,
-  HashAlgorithm,
-  StoreOptions,
-} from "../dist/index.js"
+import { AsyncBulletinClient } from "../dist/index.js"
 
 async function main() {
   console.log("🚀 Bulletin SDK - Simple Store Example\n")

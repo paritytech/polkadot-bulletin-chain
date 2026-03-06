@@ -23,7 +23,7 @@ import { DEV_PHRASE } from "@polkadot-labs/hdkd-helpers"
 import { Binary, createClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws-provider/node"
-import { AsyncBulletinClient, StoreOptions } from "../dist/index.js"
+import { AsyncBulletinClient } from "../dist/index.js"
 
 async function main() {
   console.log("🚀 Bulletin SDK - Complete Workflow Example\n")
@@ -108,7 +108,7 @@ async function main() {
   console.log("   Data:", specificMessage)
   console.log(
     "   Hash:",
-    Buffer.from(contentHash).toString("hex").substring(0, 16) + "...",
+    `${Buffer.from(contentHash).toString("hex").substring(0, 16)}...`,
     "\n",
   )
 
@@ -191,7 +191,7 @@ async function main() {
       await aliceClient.removeExpiredAccountAuthorization(bobAddress)
     console.log("✅ Expired authorization removed!")
     console.log("   Block:", removeReceipt.blockHash)
-  } catch (error) {
+  } catch (_error) {
     console.log("ℹ️  No expired authorization found (this is normal)")
   }
 
@@ -204,7 +204,7 @@ async function main() {
       await aliceClient.removeExpiredPreimageAuthorization(contentHash)
     console.log("✅ Expired preimage authorization removed!")
     console.log("   Block:", removeReceipt.blockHash)
-  } catch (error) {
+  } catch (_error) {
     console.log("ℹ️  No expired preimage authorization found (this is normal)")
   }
 

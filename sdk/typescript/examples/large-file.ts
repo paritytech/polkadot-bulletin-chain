@@ -17,13 +17,13 @@
  *   node examples/large-file.js large_video.mp4
  */
 
+import { readFile } from "node:fs/promises"
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
 import { DEV_PHRASE } from "@polkadot-labs/hdkd-helpers"
-import { readFile } from "fs/promises"
 import { Binary, createClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws-provider/node"
-import { AsyncBulletinClient, StoreOptions } from "../dist/index.js"
+import { AsyncBulletinClient } from "../dist/index.js"
 
 async function main() {
   console.log("🚀 Bulletin SDK - Large File Example\n")
@@ -138,7 +138,7 @@ async function main() {
     console.log("\n💡 You can retrieve this file via IPFS using:")
     console.log("   ipfs cat", result.manifestCid.toString())
     console.log("   Or via HTTP gateway:")
-    console.log("   https://ipfs.io/ipfs/" + result.manifestCid.toString())
+    console.log(`   https://ipfs.io/ipfs/${result.manifestCid.toString()}`)
   }
 
   console.log("\n🎉 Chunked upload completed successfully!")

@@ -7,7 +7,7 @@
 
 import type { CID } from "multiformats/cid"
 import { Binary, type PolkadotSigner } from "polkadot-api"
-import { BulletinOps } from "./ops.js"
+import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
   type ChunkedStoreResult,
@@ -370,7 +370,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   /** Client configuration */
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
-  private ops: BulletinOps
+  private ops: BulletinPreparer
   /** Account for authorization checks (optional) */
   private account?: string
 
@@ -399,7 +399,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
     }
-    this.ops = new BulletinOps({
+    this.ops = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
       chunkingThreshold: this.config.chunkingThreshold,
@@ -758,21 +758,55 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       dataBytes,
       config,
       options,
-      progressCallback,
     )
 
     const chunkCids: CID[] = []
+    const totalChunks = prepared.chunks.length
 
     // Submit each chunk transaction
     for (const chunk of prepared.chunks) {
-      const tx = this.createStoreTx(chunk.data, cidCodec, hashAlgorithm)
-      await this.signAndSubmitFinalized(tx)
-      if (chunk.cid) chunkCids.push(chunk.cid)
+      if (progressCallback) {
+        progressCallback({
+          type: "chunk_started",
+          index: chunk.index,
+          total: totalChunks,
+        })
+      }
+
+      try {
+        const tx = this.createStoreTx(chunk.data, cidCodec, hashAlgorithm)
+        await this.signAndSubmitFinalized(tx)
+        const cid = chunk.cid
+        if (cid) chunkCids.push(cid)
+
+        if (progressCallback && cid) {
+          progressCallback({
+            type: "chunk_completed",
+            index: chunk.index,
+            total: totalChunks,
+            cid,
+          })
+        }
+      } catch (error) {
+        if (progressCallback) {
+          progressCallback({
+            type: "chunk_failed",
+            index: chunk.index,
+            total: totalChunks,
+            error: error as Error,
+          })
+        }
+        throw error
+      }
     }
 
     // Submit manifest transaction if present
     let manifestCid: CID | undefined
     if (prepared.manifest) {
+      if (progressCallback) {
+        progressCallback({ type: "manifest_started" })
+      }
+
       const manifestTx = this.createStoreTx(
         prepared.manifest.data,
         cidCodec,
@@ -780,6 +814,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       )
       await this.signAndSubmitFinalized(manifestTx)
       manifestCid = prepared.manifest.cid
+
+      if (progressCallback) {
+        progressCallback({ type: "manifest_created", cid: manifestCid })
+      }
+    }
+
+    if (progressCallback) {
+      progressCallback({ type: "completed", manifestCid })
     }
 
     return {

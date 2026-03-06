@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 import { describe, expect, it } from "vitest"
-import { BulletinOps } from "../../src/ops"
+import { BulletinPreparer } from "../../src/preparer"
 import { BulletinError, type HashAlgorithm } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
@@ -92,7 +92,7 @@ describe("Error Handling", () => {
 
   describe("Client Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStore", async () => {
-      const ops = new BulletinOps()
+      const ops = new BulletinPreparer()
 
       await expect(ops.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
@@ -103,7 +103,7 @@ describe("Error Handling", () => {
     })
 
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
-      const ops = new BulletinOps()
+      const ops = new BulletinPreparer()
 
       await expect(ops.prepareStoreChunked(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
@@ -147,7 +147,7 @@ describe("Error Handling", () => {
 
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
-      const ops = new BulletinOps()
+      const ops = new BulletinPreparer()
 
       try {
         await ops.prepareStore(new Uint8Array(0))

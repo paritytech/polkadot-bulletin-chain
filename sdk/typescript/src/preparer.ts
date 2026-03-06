@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 /**
- * High-level client for interacting with Bulletin Chain
+ * Offline data preparation for Bulletin Chain (CID calculation, chunking, DAG building)
  */
 
 import type { CID } from "multiformats/cid"
@@ -16,21 +16,18 @@ import {
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
-  type ProgressCallback,
   type StoreOptions,
 } from "./types.js"
 import { calculateCid, estimateAuthorization } from "./utils.js"
 
 /**
- * High-level client for Bulletin Chain operations
+ * Offline data preparer for Bulletin Chain
  *
- * This provides a simplified API for common operations like storing
- * and retrieving data, with automatic chunking and manifest creation.
- *
- * For full blockchain integration, use PAPI (@polkadot-api) to submit
- * transactions to the TransactionStorage pallet.
+ * Handles CID calculation, chunking, DAG-PB manifest creation, and
+ * authorization estimation without any chain interaction.
+ * Used internally by AsyncBulletinClient and MockBulletinClient.
  */
-export class BulletinOps {
+export class BulletinPreparer {
   private config: Required<ClientConfig>
 
   constructor(config?: ClientConfig) {
@@ -75,7 +72,6 @@ export class BulletinOps {
     data: Uint8Array,
     config?: Partial<ChunkerConfig>,
     options?: StoreOptions,
-    progressCallback?: ProgressCallback,
   ): Promise<{
     chunks: Chunk[]
     manifest?: { data: Uint8Array; cid: CID }
@@ -102,34 +98,9 @@ export class BulletinOps {
 
     // Calculate CIDs for each chunk
     for (const chunk of chunks) {
-      if (progressCallback) {
-        progressCallback({
-          type: "chunk_started",
-          index: chunk.index,
-          total: chunks.length,
-        })
-      }
-
       try {
         chunk.cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm)
-
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_completed",
-            index: chunk.index,
-            total: chunks.length,
-            cid: chunk.cid,
-          })
-        }
       } catch (error) {
-        if (progressCallback) {
-          progressCallback({
-            type: "chunk_failed",
-            index: chunk.index,
-            total: chunks.length,
-            error: error as Error,
-          })
-        }
         if (error instanceof BulletinError) {
           throw error
         }
@@ -144,10 +115,6 @@ export class BulletinOps {
     // Optionally create manifest
     let manifest: { data: Uint8Array; cid: CID } | undefined
     if (chunkerConfig.createManifest) {
-      if (progressCallback) {
-        progressCallback({ type: "manifest_started" })
-      }
-
       const builder = new UnixFsDagBuilder()
       const dagManifest = await builder.build(chunks, hashAlgorithm)
 
@@ -155,20 +122,6 @@ export class BulletinOps {
         data: dagManifest.dagBytes,
         cid: dagManifest.rootCid,
       }
-
-      if (progressCallback) {
-        progressCallback({
-          type: "manifest_created",
-          cid: dagManifest.rootCid,
-        })
-      }
-    }
-
-    if (progressCallback) {
-      progressCallback({
-        type: "completed",
-        manifestCid: manifest?.cid,
-      })
     }
 
     return { chunks, manifest }

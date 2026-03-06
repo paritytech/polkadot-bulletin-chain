@@ -47,7 +47,7 @@ export * from "./async-client.js"
 export * from "./chunker.js"
 export * from "./dag.js"
 export * from "./mock-client.js"
-export * from "./ops.js"
+export * from "./preparer.js"
 export * from "./types.js"
 export * from "./utils.js"
 
