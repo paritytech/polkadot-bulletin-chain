@@ -195,10 +195,15 @@ where
 			return Ok((valid_tx, Some(who), origin));
 		}
 
-		// Wrapper call — validate storage authorization for inner calls
+		// Wrapper call — validate storage authorization for inner calls.
+		// Accumulate ValidTransaction metadata (provides tags, priority, longevity) from
+		// each inner storage call so the mempool can deduplicate and prioritize correctly.
+		let mut combined_valid = ValidTransaction::default();
 		let (has_storage, preserves_origin) =
 			Self::traverse_storage_calls(call, 0, &mut |inner_call| {
-				Pallet::<T>::validate_signed(&who, inner_call).map(|_| ())
+				let (valid_tx, _scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
+				combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
+				Ok(())
 			})?;
 		if has_storage {
 			if preserves_origin {
@@ -208,7 +213,7 @@ where
 					scope: AuthorizationScope::Account(who.clone()),
 				});
 			}
-			return Ok((ValidTransaction::default(), Some(who), origin));
+			return Ok((combined_valid, Some(who), origin));
 		}
 
 		// Not a storage-related call
