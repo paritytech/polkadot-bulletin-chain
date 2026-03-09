@@ -6,15 +6,12 @@ The `@bulletin/sdk` package provides a modern, type-safe client for Node.js and 
 
 ### Core Storage
 - **Unified API**: Single `store()` method handles both small and large files (up to 64 MiB)
-- **Automatic Chunking**: Files are automatically chunked (up to 8 MiB per chunk)
+- **Automatic Chunking**: Files are automatically chunked (up to 2 MiB per chunk)
 - **Progress Tracking**: Real-time callbacks for upload progress
 - **DAG-PB Manifests**: Standard manifest generation for chunked data
 - **CID Support**: Multiple codecs (Raw, DAG-PB, DAG-CBOR) and hash algorithms
 
 ### Authorization Management
-- **Pre-flight Checking**: Queries blockchain before upload to fail fast
-- **Expiration Validation**: Automatically checks if authorization has expired
-- **Fail Fast**: Saves transaction fees by validating before submission
 - **Complete Operations**: Authorize, refresh, and manage authorizations
 
 ### Developer Experience
@@ -36,9 +33,8 @@ const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
 const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
-// Create SDK client with PAPI client and signer
-const client = new AsyncBulletinClient(api, signer)
-    .withAccount(account);  // Enable authorization checking
+// Create SDK client with PAPI client, signer, and submit function
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 // Store any size file using builder pattern
 const data = new Uint8Array(50_000_000); // 50 MB

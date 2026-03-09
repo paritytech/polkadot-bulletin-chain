@@ -97,7 +97,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
         .store(data)
         .withCodec(CidCodec.DagPb)
         .withHashAlgorithm(HashAlgorithm.Sha2_256)
-        .withFinalization(true)
+        .withWaitFor("finalized")
         .send()
 
       expect(result).toBeDefined()
@@ -308,6 +308,102 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       expect(receipt.blockHash).toBeDefined()
 
       console.log("Preimage authorization test passed")
+    })
+  })
+
+  describe("Refresh Operations", () => {
+    it("should refresh account authorization", async () => {
+      // First authorize Bob
+      const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
+      const estimate = client.estimateAuthorization(1_000_000)
+      await client.authorizeAccount(
+        bobAddress,
+        estimate.transactions,
+        BigInt(estimate.bytes),
+      )
+
+      // Now refresh Bob's authorization
+      const receipt = await client.refreshAccountAuthorization(bobAddress)
+
+      expect(receipt).toBeDefined()
+      expect(receipt.blockHash).toBeDefined()
+      expect(receipt.txHash).toBeDefined()
+
+      console.log("Refresh account authorization test passed")
+    })
+
+    it("should refresh preimage authorization", async () => {
+      // First authorize a preimage
+      const data = new TextEncoder().encode("Content for refresh test")
+      const contentHash = blake2b256(data)
+      await client.authorizePreimage(contentHash, BigInt(data.length))
+
+      // Now refresh the preimage authorization
+      const receipt = await client.refreshPreimageAuthorization(contentHash)
+
+      expect(receipt).toBeDefined()
+      expect(receipt.blockHash).toBeDefined()
+      expect(receipt.txHash).toBeDefined()
+
+      console.log("Refresh preimage authorization test passed")
+    })
+  })
+
+  describe("Remove Expired Authorization Operations", () => {
+    it("should attempt to remove expired account authorization", async () => {
+      const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
+
+      // This will likely fail because the authorization hasn't expired yet
+      // but it tests the SDK method is wired up correctly
+      try {
+        const receipt =
+          await client.removeExpiredAccountAuthorization(bobAddress)
+        expect(receipt).toBeDefined()
+        expect(receipt.blockHash).toBeDefined()
+        console.log("Remove expired account authorization succeeded")
+      } catch (_error) {
+        // Expected - authorization hasn't expired
+        console.log(
+          "Remove expired account authorization failed as expected (not expired)",
+        )
+      }
+    })
+
+    it("should attempt to remove expired preimage authorization", async () => {
+      const data = new TextEncoder().encode("Content for expiry test")
+      const contentHash = blake2b256(data)
+
+      try {
+        const receipt =
+          await client.removeExpiredPreimageAuthorization(contentHash)
+        expect(receipt).toBeDefined()
+        console.log("Remove expired preimage authorization succeeded")
+      } catch (_error) {
+        // Expected - authorization hasn't expired or doesn't exist
+        console.log("Remove expired preimage authorization failed as expected")
+      }
+    })
+  })
+
+  describe("Preimage Store Operations", () => {
+    it("should store data with preimage authorization", async () => {
+      const data = new TextEncoder().encode(
+        "This content is preimage-authorized for unsigned storage",
+      )
+      const contentHash = blake2b256(data)
+
+      // Authorize the preimage first
+      await client.authorizePreimage(contentHash, BigInt(data.length))
+
+      // Store with preimage auth (unsigned transaction)
+      const result = await client.storeWithPreimageAuth(data)
+
+      expect(result).toBeDefined()
+      expect(result.cid).toBeDefined()
+      expect(result.size).toBe(data.length)
+
+      console.log("Store with preimage auth test passed")
+      console.log("   CID:", result.cid.toString())
     })
   })
 

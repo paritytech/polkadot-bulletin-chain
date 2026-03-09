@@ -72,7 +72,7 @@ export interface Chunk {
 /**
  * Transaction confirmation level
  */
-export type WaitFor = "best_block" | "finalized"
+export type WaitFor = "in_block" | "finalized"
 
 /**
  * Options for storing data
@@ -83,8 +83,8 @@ export interface StoreOptions {
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm
   /**
-   * What to wait for before returning (default: "best_block")
-   * - "best_block": Return when tx is in a best block (faster, may reorg)
+   * What to wait for before returning (default: "in_block")
+   * - "in_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    */
   waitFor?: WaitFor
@@ -96,7 +96,7 @@ export interface StoreOptions {
 export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
-  waitFor: "best_block",
+  waitFor: "in_block",
 }
 
 /**
@@ -176,7 +176,7 @@ export type TransactionStatusEvent =
   | { type: "signed"; txHash: string }
   | { type: "broadcasted" }
   | {
-      type: "best_block"
+      type: "in_block"
       blockHash: string
       blockNumber: number
       txIndex?: number

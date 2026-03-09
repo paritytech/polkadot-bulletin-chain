@@ -59,16 +59,22 @@ if (auth) {
 Use the SDK to estimate how much authorization you need:
 
 ```typescript
-import { BulletinClient } from "@bulletin/sdk";
+import { BulletinPreparer } from "@bulletin/sdk";
 
-const client = new BulletinClient();
+const preparer = new BulletinPreparer();
 
 // For a known file size
 const fileSize = 10 * 1024 * 1024; // 10 MiB
-const estimate = client.estimateAuthorization(fileSize);
+const estimate = preparer.estimateAuthorization(fileSize);
 
 console.log("Transactions needed:", estimate.transactions);
 console.log("Bytes needed:", estimate.bytes);
+```
+
+Or using `AsyncBulletinClient`:
+
+```typescript
+const estimate = client.estimateAuthorization(fileSize);
 ```
 
 The estimation accounts for:
@@ -131,37 +137,20 @@ On testnets, the easiest way to get authorization is via the Faucet in the Conso
 
 The faucet grants a default authorization (typically 10 transactions, 1 MiB).
 
-## Pre-flight Authorization Checking
+## Manual Authorization Check
 
-The SDK can automatically check authorization before uploading:
-
-```typescript
-import { AsyncBulletinClient } from "@bulletin/sdk";
-
-const client = new AsyncBulletinClient(api, signer);
-
-// Enable pre-flight checking
-const result = await client
-  .store(data)
-  .withAccount(myAddress)  // Enable authorization checking
-  .send();
-
-// If authorization is insufficient, throws InsufficientAuthorization error
-// BEFORE submitting to the chain (saves transaction fees!)
-```
-
-### Manual Pre-flight Check
+You can query the chain directly via PAPI before uploading to avoid wasted fees:
 
 ```typescript
-import { BulletinClient } from "@bulletin/sdk";
+import { BulletinPreparer } from "@bulletin/sdk";
 
-const client = new BulletinClient();
+const preparer = new BulletinPreparer();
 const fileSize = myFile.length;
 
 // Get estimate
-const { transactions, bytes } = client.estimateAuthorization(fileSize);
+const { transactions, bytes } = preparer.estimateAuthorization(fileSize);
 
-// Query current authorization
+// Query current authorization via PAPI
 const auth = await api.query.TransactionStorage.Authorizations.getValue({
   type: "Account",
   value: myAddress
@@ -210,19 +199,19 @@ if (auth?.expiration) {
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors";
-import { BulletinClient, calculateCid, CidCodec, HashAlgorithm } from "@bulletin/sdk";
+import { AsyncBulletinClient, BulletinPreparer } from "@bulletin/sdk";
 
 async function storeWithAuthCheck() {
   // Setup
-  const client = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
-  const api = client.getTypedApi(bulletin);
-  const sdkClient = new BulletinClient();
+  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+  const api = papiClient.getTypedApi(bulletin);
+  const preparer = new BulletinPreparer();
 
   // Data to store
   const data = new TextEncoder().encode("Hello, Bulletin Chain!");
 
   // 1. Estimate authorization needs
-  const estimate = sdkClient.estimateAuthorization(data.length);
+  const estimate = preparer.estimateAuthorization(data.length);
   console.log("Need:", estimate.transactions, "txs,", estimate.bytes, "bytes");
 
   // 2. Check current authorization
@@ -236,18 +225,10 @@ async function storeWithAuthCheck() {
     return;
   }
 
-  // 3. Calculate CID
-  const cid = await calculateCid(data, CidCodec.Raw, HashAlgorithm.Blake2b256);
-  console.log("CID will be:", cid.toString());
-
-  // 4. Submit transaction
-  const tx = api.tx.TransactionStorage.store({
-    data: Binary.fromBytes(data),
-    cid_config: { codec: 0x55, hashing: "Blake2b256" }
-  });
-
-  const result = await tx.signAndSubmit(signer);
-  console.log("Stored in block:", result.block.number);
+  // 3. Store via SDK
+  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+  const result = await client.store(data).send();
+  console.log("Stored with CID:", result.cid.toString());
 }
 ```
 

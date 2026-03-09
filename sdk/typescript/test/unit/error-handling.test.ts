@@ -104,6 +104,18 @@ describe("Error Handling", () => {
       })
     })
 
+    it("should throw DATA_TOO_LARGE for data exceeding chunkingThreshold in prepareStore", async () => {
+      const preparer = new BulletinPreparer({ chunkingThreshold: 1024 })
+      const oversized = new Uint8Array(1025)
+
+      await expect(preparer.prepareStore(oversized)).rejects.toThrow(
+        BulletinError,
+      )
+      await expect(preparer.prepareStore(oversized)).rejects.toMatchObject({
+        code: "DATA_TOO_LARGE",
+      })
+    })
+
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
       const preparer = new BulletinPreparer()
 

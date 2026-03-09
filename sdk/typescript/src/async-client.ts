@@ -149,6 +149,8 @@ export interface TransactionReceipt {
 export interface CallOptions {
   /** Callback to receive transaction status events */
   onProgress?: ProgressCallback
+  /** What to wait for before returning (default: "in_block") */
+  waitFor?: WaitFor
 }
 
 /** Options for authorization calls that may require sudo */
@@ -211,8 +213,6 @@ export interface BulletinClientInterface {
     transactions: number
     bytes: number
   }
-  withAccount(account: string): this
-  getAccount(): string | undefined
 }
 
 /**
@@ -255,7 +255,7 @@ export class StoreBuilder {
   }
 
   /** Set what to wait for before returning */
-  withFinalization(waitFor: WaitFor): this {
+  withWaitFor(waitFor: WaitFor): this {
     this.options.waitFor = waitFor
     return this
   }
@@ -323,7 +323,7 @@ function resolveStoreOptions(options?: StoreOptions): {
   return {
     cidCodec: opts.cidCodec ?? CidCodec.Raw,
     hashAlgorithm: opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
-    waitFor: opts.waitFor ?? "best_block",
+    waitFor: opts.waitFor ?? "in_block",
   }
 }
 
@@ -371,8 +371,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
-  /** Account for authorization checks (optional) */
-  private account?: string
 
   /**
    * Create a new async client with PAPI client and signer
@@ -407,21 +405,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Set the account for authorization checks
-   */
-  withAccount(account: string): this {
-    this.account = account
-    return this
-  }
-
-  /**
-   * Get the account set for authorization checks
-   */
-  getAccount(): string | undefined {
-    return this.account
-  }
-
-  /**
    * Create a store transaction, using store_with_cid_config when non-default CID settings are used.
    */
   private createStoreTx(
@@ -441,27 +424,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Sign, submit, and wait for a transaction to be finalized.
-   *
-   * Uses PAPI's signAndSubmit which returns a promise resolving to the
-   * finalized result directly.
-   */
-  private async signAndSubmitFinalized(tx: PapiTransaction): Promise<{
-    blockHash: string
-    txHash: string
-    blockNumber?: number
-    events?: RuntimeEvent[]
-  }> {
-    const result = await tx.signAndSubmit(this.signer)
-    return {
-      blockHash: result.block?.hash ?? "",
-      txHash: result.txHash,
-      blockNumber: result.block?.number,
-      events: result.events,
-    }
-  }
-
-  /**
    * Sign, submit, and watch a transaction with progress callbacks.
    *
    * Uses PAPI's signSubmitAndWatch which provides real-time status updates
@@ -469,12 +431,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * @param tx - The transaction to submit
    * @param progressCallback - Optional callback to receive transaction status events
-   * @param waitFor - What to wait for: "best_block" (faster) or "finalized" (safer, default)
+   * @param waitFor - What to wait for: "in_block" (faster) or "finalized" (safer, default)
    */
   private async signAndSubmitWithProgress(
     tx: PapiTransaction,
     progressCallback?: ProgressCallback,
-    waitFor: "best_block" | "finalized" = "finalized",
+    waitFor: "in_block" | "finalized" = "finalized",
   ): Promise<{
     blockHash: string
     txHash: string
@@ -522,14 +484,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.type === "txBestBlocksState" && ev.found && ev.block) {
             if (progressCallback) {
               progressCallback({
-                type: "best_block",
+                type: "in_block",
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
               })
             }
 
-            if (waitFor === "best_block") {
+            if (waitFor === "in_block") {
               finish(ev.block, ev.events)
             }
           }
@@ -589,12 +551,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     tx: PapiTransaction,
     errorMessage: string,
     errorCode: string,
-    progressCallback?: ProgressCallback,
+    options?: CallOptions,
   ): Promise<TransactionReceipt> {
     try {
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback)
-        : await this.signAndSubmitFinalized(tx)
+      const waitFor = options?.waitFor ?? "in_block"
+      const result = await this.signAndSubmitWithProgress(
+        tx,
+        options?.onProgress,
+        waitFor,
+      )
 
       return {
         blockHash: result.blockHash,
@@ -703,10 +668,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     try {
       const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
 
-      // Use progress-aware submission if callback provided, otherwise use simple submission
-      const result = progressCallback
-        ? await this.signAndSubmitWithProgress(tx, progressCallback, waitFor)
-        : await this.signAndSubmitFinalized(tx)
+      const result = await this.signAndSubmitWithProgress(
+        tx,
+        progressCallback,
+        waitFor,
+      )
 
       return {
         cid,
@@ -751,7 +717,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
+    const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
 
     // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
     const prepared = await this.preparer.prepareStoreChunked(
@@ -775,7 +741,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       try {
         const tx = this.createStoreTx(chunk.data, cidCodec, hashAlgorithm)
-        await this.signAndSubmitFinalized(tx)
+        await this.signAndSubmitWithProgress(tx, progressCallback, waitFor)
         const cid = chunk.cid
         if (cid) chunkCids.push(cid)
 
@@ -812,7 +778,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         cidCodec,
         hashAlgorithm,
       )
-      await this.signAndSubmitFinalized(manifestTx)
+      await this.signAndSubmitWithProgress(
+        manifestTx,
+        progressCallback,
+        waitFor,
+      )
       manifestCid = prepared.manifest.cid
 
       if (progressCallback) {
@@ -855,7 +825,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       this.maybeSudo(authTx, options?.sudo),
       "Failed to authorize account",
       "AUTHORIZATION_FAILED",
-      options?.onProgress,
+      options,
     )
   }
 
@@ -879,7 +849,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       this.maybeSudo(authTx, options?.sudo),
       "Failed to authorize preimage",
       "AUTHORIZATION_FAILED",
-      options?.onProgress,
+      options,
     )
   }
 
@@ -896,12 +866,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     options?: CallOptions,
   ): Promise<TransactionReceipt> {
     const tx = this.api.tx.TransactionStorage.renew({ block, index })
-    return this.submitTx(
-      tx,
-      "Failed to renew",
-      "TRANSACTION_FAILED",
-      options?.onProgress,
-    )
+    return this.submitTx(tx, "Failed to renew", "TRANSACTION_FAILED", options)
   }
 
   /**
@@ -923,7 +888,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       this.maybeSudo(authTx, options?.sudo),
       "Failed to refresh account authorization",
       "AUTHORIZATION_FAILED",
-      options?.onProgress,
+      options,
     )
   }
 
@@ -947,7 +912,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       this.maybeSudo(authTx, options?.sudo),
       "Failed to refresh preimage authorization",
       "AUTHORIZATION_FAILED",
-      options?.onProgress,
+      options,
     )
   }
 
@@ -971,7 +936,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       tx,
       "Failed to remove expired account authorization",
       "TRANSACTION_FAILED",
-      options?.onProgress,
+      options,
     )
   }
 
@@ -995,7 +960,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       tx,
       "Failed to remove expired preimage authorization",
       "TRANSACTION_FAILED",
-      options?.onProgress,
+      options,
     )
   }
 

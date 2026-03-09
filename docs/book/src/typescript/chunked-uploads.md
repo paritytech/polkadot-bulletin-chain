@@ -1,6 +1,6 @@
 # Chunked Uploads
 
-The Bulletin SDK automatically handles chunking for large files up to **64 MiB**. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks of up to **8 MiB** each (matching the chain's MaxTransactionSize).
+The Bulletin SDK automatically handles chunking for large files up to **64 MiB**. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks of up to **2 MiB** each (matching the Bitswap block size limit for IPFS compatibility).
 
 ## Automatic Chunking (Recommended)
 
@@ -9,9 +9,9 @@ For most use cases, simply use `store()` - it automatically chunks large files:
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
 
-const client = new AsyncBulletinClient(api, signer);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
-// Load file of any size
+// Load file of any size (up to 64 MiB)
 const data = new Uint8Array(50 * 1024 * 1024); // 50 MB
 
 // Automatically chunks if > 2 MiB
@@ -38,9 +38,9 @@ You can configure the threshold and chunk size via the client constructor:
 
 ```typescript
 const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
-    chunkingThreshold: 5 * 1024 * 1024,  // Chunk files > 5 MiB
-    defaultChunkSize: 2 * 1024 * 1024,   // 2 MiB chunks
-    createManifest: true,                 // Create DAG-PB manifest
+    chunkingThreshold: 5 * 1024 * 1024,   // Chunk files > 5 MiB
+    defaultChunkSize: 1024 * 1024,         // 1 MiB chunks (max: 2 MiB)
+    createManifest: true,                  // Create DAG-PB manifest
 });
 ```
 
@@ -51,9 +51,9 @@ For advanced use cases where you need explicit control over chunking parameters,
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
 
-const client = new AsyncBulletinClient(api, signer);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
-const largeFile = new Uint8Array(100 * 1024 * 1024); // 100 MB
+const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB
 
 // Configure chunking explicitly
 const config = {
@@ -114,15 +114,16 @@ The `storeChunked()` method:
 
 ### Upload Timing
 
-Bulletin Chain has a **6 second block time**. Each chunk requires one transaction, so:
+Bulletin Chain has a **6 second block time**. Multiple chunks can fit into a single block. Sequential upload timing depends on how quickly transactions are included:
 
-| File Size | Chunk Size | Chunks | Transactions | Min Time (sequential) |
-|-----------|------------|--------|--------------|----------------------|
-| 8 MiB | 8 MiB | 1 | 2 (data + manifest) | ~12 seconds |
-| 32 MiB | 8 MiB | 4 | 5 | ~30 seconds |
-| 64 MiB | 8 MiB | 8 | 9 | ~54 seconds |
+| File Size | Chunk Size | Chunks | Transactions |
+|-----------|------------|--------|--------------|
+| 2 MiB | 1 MiB | 2 | 3 (2 data + manifest) |
+| 10 MiB | 1 MiB | 10 | 11 |
+| 50 MiB | 2 MiB | 25 | 26 |
+| 64 MiB | 2 MiB | 32 | 33 |
 
-**Note**: Times shown are for sequential uploads waiting for each transaction to be included in a block. Actual times may vary based on network conditions and finalization requirements.
+**Note**: Actual times depend on network conditions and the `waitFor` setting (`"in_block"` vs `"finalized"`).
 
 ### When to Use `storeChunked()` vs `store()`
 
@@ -147,14 +148,14 @@ Bulletin Chain has a **6 second block time**. Each chunk requires one transactio
 
 ```typescript
 const config = {
-    chunkSize: 8 * 1024 * 1024,  // 8 MiB chunks (MAX_CHUNK_SIZE)
+    chunkSize: 2 * 1024 * 1024,  // 2 MiB chunks (MAX_CHUNK_SIZE)
     createManifest: true,
 };
 ```
 
 **Guidelines:**
-- Minimum: 1 MiB (1,048,576 bytes)
-- Maximum: 8 MiB (8,388,608 bytes) - matches chain's MaxTransactionSize
+- Minimum: 1 byte (practical minimum: 1 KiB)
+- Maximum: 2 MiB (2,097,152 bytes) - matches Bitswap block size limit for IPFS compatibility
 - Default: 1 MiB - good balance of efficiency and compatibility
 - Maximum file size: 64 MiB (MAX_FILE_SIZE)
 
@@ -221,26 +222,14 @@ const result = await client
     .send();
 ```
 
-## Authorization Checking (Fail Fast)
+## Authorization Estimation
 
-By default, the SDK checks authorization **before** uploading chunked data to avoid wasted time and fees.
-
-### How It Works
+Before uploading, estimate the authorization you'll need:
 
 ```typescript
-// 1. Create client with account
-const client = new AsyncBulletinClient(api, signer)
-    .withAccount(account);  // Enable automatic authorization checking
-
-// 2. Upload large file - authorization checked automatically
-const largeData = new Uint8Array(50 * 1024 * 1024);
-const result = await client.store(largeData).send();
-//   Internally:
-//   - Queries authorization (if account set)
-//   - Checks expiration (if expires_at present)
-//   - Validates sufficient bytes and transactions
-//   - Fails with AuthorizationExpired or InsufficientAuthorization
-//   - Only proceeds if all checks pass
+const largeData = new Uint8Array(50 * 1024 * 1024); // 50 MB
+const estimate = client.estimateAuthorization(largeData.length);
+console.log('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
 ```
 
 ### Error Handling
@@ -253,15 +242,7 @@ try {
     console.log('Success!');
 } catch (error) {
     if (error instanceof BulletinError) {
-        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-            console.error('Need more authorization for', largeData.length, 'bytes');
-
-            // Estimate what's needed
-            const estimate = client.estimateAuthorization(largeData.length);
-            console.error('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
-        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-            console.error('Authorization expired - please refresh');
-        }
+        console.error('Error:', error.code, error.message);
     }
 }
 ```
@@ -271,12 +252,10 @@ try {
 ```typescript
 import { AsyncBulletinClient, BulletinError } from '@bulletin/sdk';
 
-const account = 'your-account-address';
-const client = new AsyncBulletinClient(api, signer)
-    .withAccount(account);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
-// Large file
-const largeFile = new Uint8Array(100 * 1024 * 1024); // 100 MB
+// Large file (up to 64 MiB)
+const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB
 
 // Estimate authorization needed
 const estimate = client.estimateAuthorization(largeFile.length);
@@ -285,7 +264,8 @@ console.log('   Transactions:', estimate.transactions);
 console.log('   Bytes:', estimate.bytes);
 
 // Authorize (if needed - requires sudo)
-// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes));
+const account = 'your-account-address';
+// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes), { sudo: true });
 
 try {
     // Upload with progress tracking
@@ -305,11 +285,7 @@ try {
     }
 } catch (error) {
     if (error instanceof BulletinError) {
-        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-            console.error('Insufficient authorization');
-        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-            console.error('Authorization expired');
-        }
+        console.error('Error:', error.code, error.message);
     } else {
         console.error('Error:', error);
     }

@@ -105,8 +105,6 @@ export class MockBulletinClient implements BulletinClientInterface {
   }
   /** Operations performed (for testing verification) */
   private operations: MockOperation[] = []
-  /** Account for authorization checks (optional) */
-  private account?: string
 
   /**
    * Create a new mock client with optional configuration
@@ -119,21 +117,6 @@ export class MockBulletinClient implements BulletinClientInterface {
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
     }
-  }
-
-  /**
-   * Set the account for authorization checks
-   */
-  withAccount(account: string): this {
-    this.account = account
-    return this
-  }
-
-  /**
-   * Get the account set for authorization checks
-   */
-  getAccount(): string | undefined {
-    return this.account
   }
 
   /**

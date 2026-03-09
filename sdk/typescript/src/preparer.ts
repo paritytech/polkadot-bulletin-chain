@@ -51,6 +51,13 @@ export class BulletinPreparer {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
+    if (data.length > this.config.chunkingThreshold) {
+      throw new BulletinError(
+        `Data size ${data.length} exceeds single-transaction limit of ${this.config.chunkingThreshold} bytes. Use prepareStoreChunked() for large data.`,
+        "DATA_TOO_LARGE",
+      )
+    }
+
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
     const cidCodec = opts.cidCodec ?? CidCodec.Raw
