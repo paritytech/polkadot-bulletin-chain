@@ -685,7 +685,7 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
         elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
             RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/polkadot-local.json"
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/polkadot-local-1006.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-polkadot-collator-2/cfg/polkadot-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
         else
             CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
