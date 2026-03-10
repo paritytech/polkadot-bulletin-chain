@@ -18,12 +18,15 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
+	extension::ValidateStorageCalls,
 	mock::{
-		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
-		TransactionStorage,
+		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, StoreRenewPriority,
+		System, Test, TransactionStorage,
 	},
-	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
-	BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	pallet::Origin,
+	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
+	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use crate::migrations::v1::OldTransactionInfo;
 use codec::Encode;
@@ -33,7 +36,8 @@ use polkadot_sdk_frame::{
 		traits::{GetStorageVersion, OnRuntimeUpgrade},
 		BoundedVec,
 	},
-	prelude::{frame_system::RawOrigin, *},
+	hashing::blake2_256,
+	prelude::*,
 	testing_prelude::*,
 	traits::StorageVersion,
 };
@@ -188,9 +192,8 @@ fn verify_chunk_proof_works() {
 
 		// Store a couple of transactions in one block.
 		run_to_block(1, || None);
-		let caller = 1;
 		for transaction in transactions.clone() {
-			assert_ok!(TransactionStorage::store(RawOrigin::Signed(caller).into(), transaction));
+			assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), transaction));
 		}
 		run_to_block(2, || None);
 
@@ -743,12 +746,12 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			AuthorizationExtent { transactions: 1, bytes: 2000 },
 		);
 
-		let vt = TransactionStorage::validate_signed(&who, &call).unwrap();
+		let (vt, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
 		assert!(!vt.provides.is_empty(), "validate_signed must emit a `provides` tag");
 
 		// Two calls with the same signer + content produce identical tags, confirming
 		// that the mempool will deduplicate them.
-		let vt2 = TransactionStorage::validate_signed(&who, &call).unwrap();
+		let (vt2, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
 		assert_eq!(vt.provides, vt2.provides);
 
 		// pre_dispatch still enforces the authorization: only the first succeeds.
@@ -770,7 +773,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 		// Re-authorize account so validate_signed can fall through if needed.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
 
-		let signed_vt = TransactionStorage::validate_signed(&who, &call).unwrap();
+		let (signed_vt, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
 		let unsigned_vt = <TransactionStorage as ValidateUnsigned>::validate_unsigned(
 			TransactionSource::External,
 			&call,
@@ -784,7 +787,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 		// A different signer submitting the same pre-authorized content must get the same
 		// tag, proving dedup is content-based, not signer-based.
 		let other_who = 2u64;
-		let other_vt = TransactionStorage::validate_signed(&other_who, &call).unwrap();
+		let (other_vt, _) = TransactionStorage::validate_signed(&other_who, &call).unwrap();
 		assert_eq!(
 			signed_vt.provides, other_vt.provides,
 			"different signers with same preimage-authorized content must share the same tag"
@@ -1076,5 +1079,208 @@ fn try_state_passes_with_preimage_authorization() {
 		let hash = blake2_256(&[1u8; 32]);
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 5000));
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+// ---- ValidateStorageCalls extension tests ----
+
+#[test]
+fn ensure_authorized_extracts_custom_origin() {
+	new_test_ext().execute_with(|| {
+		let who: u64 = 42;
+
+		// 1. Authorized origin with Account scope
+		let authorized_origin: RuntimeOrigin =
+			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(authorized_origin),
+			Ok(AuthorizedCaller::Signed { who, scope: AuthorizationScope::Account(who) }),
+		);
+
+		// 2. Authorized origin with Preimage scope
+		let content_hash = [0u8; 32];
+		let preimage_origin: RuntimeOrigin = Origin::<Test>::Authorized {
+			who: 99,
+			scope: AuthorizationScope::Preimage(content_hash),
+		}
+		.into();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(preimage_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: 99,
+				scope: AuthorizationScope::Preimage(content_hash)
+			}),
+		);
+
+		// 3. Root origin → Root
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::root()),
+			Ok(AuthorizedCaller::Root),
+		);
+
+		// 4. None origin → Unsigned
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::none()),
+			Ok(AuthorizedCaller::Unsigned),
+		);
+
+		// 5. Plain signed origin → BadOrigin
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::signed(123)),
+			Err(DispatchError::BadOrigin),
+		);
+	});
+}
+
+#[test]
+fn authorize_storage_extension_transforms_origin() {
+	use polkadot_sdk_frame::{
+		prelude::TransactionSource,
+		traits::{DispatchInfoOf, TransactionExtension, TxBaseImplication},
+	};
+
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let caller = 1u64;
+		let data = vec![0u8; 16];
+
+		// Give caller account authorization
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), caller, 1, 16));
+
+		// Create the store call
+		let call: RuntimeCall = Call::store { data }.into();
+		let info: DispatchInfoOf<RuntimeCall> = Default::default();
+		let origin = RuntimeOrigin::signed(caller);
+
+		// Run ValidateStorageCalls::validate - this should transform the origin
+		let ext = ValidateStorageCalls::<Test>::default();
+		let result = ext.validate(
+			origin,
+			&call,
+			&info,
+			0,
+			(),
+			&TxBaseImplication(&call),
+			TransactionSource::External,
+		);
+
+		assert!(result.is_ok());
+		let (valid_tx, val, transformed_origin) = result.unwrap();
+
+		// Verify the transaction is valid with correct priority
+		assert_eq!(valid_tx.priority, StoreRenewPriority::get());
+
+		// Verify val contains the authorization scope
+		assert_eq!(val, Some(caller));
+
+		// Verify the origin was transformed and can be extracted with ensure_authorized
+		let origin_for_prepare = transformed_origin.clone();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(transformed_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: caller,
+				scope: AuthorizationScope::Account(caller)
+			}),
+		);
+
+		// Run prepare — this should call pre_dispatch_signed and consume the authorization
+		let ext2 = ValidateStorageCalls::<Test>::default();
+		assert_ok!(ext2.prepare(val, &origin_for_prepare, &call, &info, 0));
+
+		// Authorization (1 transaction, 16 bytes) should now be fully consumed
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(caller),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+#[test]
+fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
+	use polkadot_sdk_frame::{
+		prelude::TransactionSource,
+		traits::{DispatchInfoOf, TransactionExtension, TxBaseImplication},
+	};
+
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let caller = 1u64;
+		let data = vec![0u8; 16];
+		let content_hash = blake2_256(&data);
+
+		// Give preimage authorization (not account authorization)
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), content_hash, 16));
+
+		// Create the store call
+		let call: RuntimeCall = Call::store { data }.into();
+		let info: DispatchInfoOf<RuntimeCall> = Default::default();
+		let origin = RuntimeOrigin::signed(caller);
+
+		// Run ValidateStorageCalls::validate
+		let ext = ValidateStorageCalls::<Test>::default();
+		let result = ext.validate(
+			origin,
+			&call,
+			&info,
+			0,
+			(),
+			&TxBaseImplication(&call),
+			TransactionSource::External,
+		);
+
+		assert!(result.is_ok());
+		let (_, val, transformed_origin) = result.unwrap();
+
+		// Verify preimage authorization was used
+		assert_eq!(val, Some(caller));
+
+		// Verify the origin carries preimage authorization
+		assert_eq!(
+			TransactionStorage::ensure_authorized(transformed_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: caller,
+				scope: AuthorizationScope::Preimage(content_hash)
+			}),
+		);
+	});
+}
+
+#[test]
+fn authorize_storage_extension_passes_through_non_storage_calls() {
+	use polkadot_sdk_frame::{
+		prelude::{TransactionSource, ValidTransaction},
+		traits::{AsSystemOriginSigner, DispatchInfoOf, TransactionExtension, TxBaseImplication},
+	};
+
+	new_test_ext().execute_with(|| {
+		let caller = 1u64;
+
+		// Create a non-TransactionStorage call (using System::remark as example)
+		let call: RuntimeCall = frame_system::Call::remark { remark: vec![] }.into();
+		let info: DispatchInfoOf<RuntimeCall> = Default::default();
+		let origin = RuntimeOrigin::signed(caller);
+
+		// Run ValidateStorageCalls::validate - should pass through unchanged
+		let ext = ValidateStorageCalls::<Test>::default();
+		let result = ext.validate(
+			origin.clone(),
+			&call,
+			&info,
+			0,
+			(),
+			&TxBaseImplication(&call),
+			TransactionSource::External,
+		);
+
+		assert!(result.is_ok());
+		let (valid_tx, val, returned_origin) = result.unwrap();
+
+		// Verify passthrough behavior
+		assert_eq!(valid_tx, ValidTransaction::default());
+		assert_eq!(val, None);
+
+		// Origin should still be a signed origin (not transformed)
+		assert!(returned_origin.as_system_origin_signer().is_some());
+		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
 }
