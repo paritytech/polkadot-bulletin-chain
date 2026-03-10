@@ -48,7 +48,7 @@ use xcm_emulator::{
 };
 
 /// Bulletin Polkadot parachain ID.
-pub const BULLETIN_PARA_ID: u32 = 1006;
+pub const BULLETIN_PARA_ID: u32 = 2487;
 
 /// Initial balance for test accounts.
 pub const INITIAL_BALANCE: Balance = 100_000_000_000_000; // 100 DOT
