@@ -40,7 +40,6 @@
   },
   {
     "name": "bulletin-paseo",
-    "package": "bulletin-westend-runtime",
     "package": "bulletin-polkadot-parachain-runtime",
     "path": "runtimes/bulletin-polkadot-parachain",
     "uris": [
