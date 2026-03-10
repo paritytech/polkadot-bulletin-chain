@@ -16,26 +16,15 @@
 
 //! Storage-specific configurations.
 
-use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use super::{Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
 use crate::xcm_config::PeopleLocation;
-use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, Equals, SortedMembers},
+	traits::{EitherOfDiverse, Equals},
 };
-use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
 use pallets_common::NoCurrency;
-use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-
-/// Provides test accounts for use with `EnsureSignedBy`.
-pub struct TestAccounts;
-impl SortedMembers<AccountId> for TestAccounts {
-	fn sorted_members() -> Vec<AccountId> {
-		alloc::vec![Sr25519Keyring::Alice.to_account_id()]
-	}
-}
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
@@ -61,15 +50,8 @@ impl pallet_transaction_storage::Config for Runtime {
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
-	type Authorizer = EitherOfDiverse<
-		EitherOfDiverse<
-			// Root can do whatever.
-			crate::EnsureRoot<Self::AccountId>,
-			// People chain can also handle authorizations.
-			EnsureXcm<Equals<PeopleLocation>>,
-		>,
-		// Test accounts can also authorize for testing purposes.
-	>;
+	type Authorizer =
+		EitherOfDiverse<crate::EnsureRoot<Self::AccountId>, EnsureXcm<Equals<PeopleLocation>>>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
