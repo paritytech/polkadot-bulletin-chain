@@ -786,7 +786,7 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
         elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
             # Polkadot parachain: relay chain (polkadot-local) + parachain spec
             RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/polkadot-local.json"
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/polkadot-local-1006.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-polkadot-collator-2/cfg/polkadot-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
         else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
