@@ -555,41 +555,6 @@ ipfs-start test_dir runtime: _check-docker
     # Store container name in PID directory for cleanup
     echo "ipfs-node" > {{ test_dir }}/ipfs-docker.container
 
-# Connect to IPFS nodes using Docker
-ipfs-connect runtime:
-    #!/usr/bin/env bash
-    set -e
-
-    echo "🔗 Connecting IPFS nodes (Docker, runtime: {{ runtime }})..."
-
-    # Detect the correct host and protocol for Docker
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS - use dns4/host.docker.internal (bridge network)
-        PROTOCOL="dns4"
-        DOCKER_HOST="host.docker.internal"
-    else
-        # Linux - use ip4/127.0.0.1 (host network mode)
-        PROTOCOL="ip4"
-        DOCKER_HOST="127.0.0.1"
-    fi
-
-    echo "   Using Docker host: /$PROTOCOL/$DOCKER_HOST"
-
-    # Different peer IDs and ports for different runtimes
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
-        # Parachain peer IDs (WebSocket ports: 10002, 12348)
-        # Both westend and polkadot parachain use the same collator names, so same peer IDs
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ || true
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ || true
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        # Polkadot solo chain peer IDs (WebSocket ports: 10002, 12348)
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/10002/ws/p2p/12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm || true
-        docker exec ipfs-node ipfs swarm connect /$PROTOCOL/$DOCKER_HOST/tcp/12348/ws/p2p/12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby || true
-    else
-        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
-        exit 1
-    fi
-
 # Shutdown IPFS Docker container
 ipfs-shutdown test_dir:
     #!/usr/bin/env bash
