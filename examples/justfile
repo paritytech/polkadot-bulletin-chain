@@ -602,32 +602,6 @@ ipfs-shutdown test_dir:
     # Clean up container file if it exists
     [ -f "{{ test_dir }}/ipfs-docker.container" ] && rm "{{ test_dir }}/ipfs-docker.container" && echo "   ✓ Cleaned up container file" || true
 
-# Start IPFS reconnect script in background (Docker mode)
-ipfs-reconnect-start test_dir runtime:
-    #!/usr/bin/env bash
-    set -e
-    echo "🔄 Starting IPFS reconnect script (Docker mode, runtime: {{ runtime }})..."
-    
-    # Use different reconnect script per runtime
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    cd "$ROOT_DIR"
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
-        # Both westend and polkadot parachain use the same collator names, so same peer IDs
-        ./scripts/ipfs-reconnect-westend.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        ./scripts/ipfs-reconnect-solo.sh docker 10 > {{ test_dir }}/ipfs-reconnect.log 2>&1 &
-    else
-        echo "🐳 Unhandled runtime: {{ runtime }} specified!"
-        exit 1
-    fi
-    cd -
-    
-    RECONNECT_PID=$!
-    echo $RECONNECT_PID > {{ test_dir }}/ipfs-reconnect-docker.pid
-    echo "   Reconnect PID: $RECONNECT_PID"
-    echo "   Log: {{ test_dir }}/ipfs-reconnect.log"
-    sleep 2
-
 # Generate PAPI descriptors
 # Generate PAPI descriptors from a running node
 # Parameters:
