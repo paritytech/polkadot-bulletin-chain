@@ -69,7 +69,6 @@ impl pallet_transaction_storage::Config for Runtime {
 			EnsureXcm<Equals<PeopleLocation>>,
 		>,
 		// Test accounts can also authorize for testing purposes.
-		EnsureSignedBy<TestAccounts, Self::AccountId>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
