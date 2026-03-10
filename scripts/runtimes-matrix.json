@@ -41,7 +41,8 @@
   {
     "name": "bulletin-paseo",
     "package": "bulletin-westend-runtime",
-    "path": "runtimes/bulletin-westend",
+    "package": "bulletin-polkadot-parachain-runtime",
+    "path": "runtimes/bulletin-polkadot-parachain",
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],
