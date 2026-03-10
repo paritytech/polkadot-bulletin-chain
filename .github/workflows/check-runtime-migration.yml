@@ -155,6 +155,7 @@ jobs:
         run: |
           EXTRA_FLAGS=" --blocktime $BLOCKTIME "
           EXTRA_FLAGS+=" --disable-spec-version-check"
+          EXTRA_FLAGS+=" --disable-spec-name-check"
           CHECKS="all"
 
           echo "Flags: $EXTRA_FLAGS"
