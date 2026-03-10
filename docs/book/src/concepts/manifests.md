@@ -65,18 +65,19 @@ The root manifest contains links to all chunks with their sizes, allowing client
 ### TypeScript
 
 ```typescript
-import { BulletinClient } from "@bulletin/sdk";
+import { AsyncBulletinClient } from "@bulletin/sdk";
 
-const client = new BulletinClient();
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 const largeFile = new Uint8Array(10_000_000); // 10 MB
 
-const { operations, manifest } = client.prepareStoreChunked(largeFile, {
-  chunkSize: 1024 * 1024, // 1 MiB chunks
-  createManifest: true,
-});
+// Automatically chunks and creates a DAG-PB manifest
+const result = await client
+  .store(largeFile)
+  .withChunkSize(1024 * 1024) // 1 MiB chunks
+  .send();
 
-// operations contains the individual chunk store operations
-// manifest contains the DAG-PB root node to submit last
+// result.cid is the manifest CID
+// result.chunks contains individual chunk CIDs
 ```
 
 ### Rust

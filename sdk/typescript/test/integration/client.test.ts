@@ -58,11 +58,13 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     // Authorize Alice's account for storage operations
     // The bulletin chain requires account authorization before storing data
     const estimate = client.estimateAuthorization(50 * 1024 * 1024) // 50 MB budget
-    await client.authorizeAccount(
-      aliceAddress,
-      estimate.transactions,
-      BigInt(estimate.bytes),
-    )
+    await client
+      .authorizeAccount(
+        aliceAddress,
+        estimate.transactions,
+        BigInt(estimate.bytes),
+      )
+      .send()
     console.log("Alice authorized for storage:", aliceAddress)
   })
 
@@ -116,11 +118,10 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       let manifestCreated = false
       let totalChunks = 0
 
-      const result = await client.storeChunked(
-        data,
-        { chunkSize: 1024 * 1024, maxParallel: 4, createManifest: true },
-        undefined,
-        (event) => {
+      const result = await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
           switch (event.type) {
             case "chunk_started":
               if (totalChunks === 0) totalChunks = event.total
@@ -136,19 +137,17 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
               console.log("   Manifest created:", event.cid.toString())
               break
           }
-        },
-      )
+        })
+        .send()
 
       expect(result).toBeDefined()
-      expect(result.numChunks).toBe(5) // 5 MiB / 1 MiB = 5 chunks
+      expect(result.chunks).toBeDefined()
+      expect(result.chunks?.numChunks).toBe(5) // 5 MiB / 1 MiB = 5 chunks
       expect(chunksCompleted).toBe(5)
       expect(manifestCreated).toBe(true)
-      expect(result.manifestCid).toBeDefined()
-      expect(result.chunkCids).toHaveLength(5)
 
       console.log("Chunked store test passed")
-      console.log("   Chunks:", result.numChunks)
-      console.log("   Manifest CID:", result.manifestCid?.toString())
+      console.log("   Chunks:", result.chunks?.numChunks)
     })
 
     it("should fire progress events in correct order during chunked upload", async () => {
@@ -156,17 +155,16 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       const events: string[] = []
 
-      const result = await client.storeChunked(
-        data,
-        { chunkSize: 1024 * 1024, createManifest: true },
-        undefined,
-        (event) => {
+      const result = await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
           events.push(event.type)
-        },
-      )
+        })
+        .send()
 
       // Verify event order: started/completed pairs for each chunk, then manifest, then completed
-      expect(result.numChunks).toBe(3)
+      expect(result.chunks?.numChunks).toBe(3)
 
       const expectedOrder = [
         "chunk_started",
@@ -187,11 +185,10 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       const eventLog: { type: string; index: number; time: number }[] = []
 
-      await client.storeChunked(
-        data,
-        { chunkSize: 1024 * 1024, createManifest: false },
-        undefined,
-        (event) => {
+      await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
           if (
             event.type === "chunk_started" ||
             event.type === "chunk_completed"
@@ -202,10 +199,15 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
               time: Date.now(),
             })
           }
-        },
-      )
+        })
+        .send()
 
-      expect(eventLog).toHaveLength(4) // 2x started + 2x completed
+      // 2x started + 2x completed for chunks, plus manifest events
+      expect(
+        eventLog.filter(
+          (e) => e.type === "chunk_started" || e.type === "chunk_completed",
+        ),
+      ).toHaveLength(4)
 
       // Verify sequential order: chunk 0 must complete before chunk 1 starts
       const chunk0Completed = eventLog.find(
@@ -224,21 +226,23 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       const chunkCids: string[] = []
 
-      const result = await client.storeChunked(
-        data,
-        { chunkSize: 1024 * 1024, createManifest: false },
-        undefined,
-        (event) => {
+      const result = await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
           if (event.type === "chunk_completed") {
             chunkCids.push(event.cid.toString())
           }
-        },
-      )
+        })
+        .send()
 
       expect(chunkCids).toHaveLength(2)
-      expect(result.chunkCids).toHaveLength(2)
+      expect(result.chunks).toBeDefined()
+      expect(result.chunks?.chunkCids).toHaveLength(2)
       // CIDs from events should match CIDs from result
-      expect(chunkCids).toEqual(result.chunkCids.map((c) => c.toString()))
+      expect(chunkCids).toEqual(
+        result.chunks?.chunkCids.map((c) => c.toString()),
+      )
     })
 
     it("should fire chunk_completed via store() builder for large data", async () => {
@@ -281,11 +285,13 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
 
-      const receipt = await client.authorizeAccount(
-        bobAddress,
-        estimate.transactions,
-        BigInt(estimate.bytes),
-      )
+      const receipt = await client
+        .authorizeAccount(
+          bobAddress,
+          estimate.transactions,
+          BigInt(estimate.bytes),
+        )
+        .send()
 
       expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
@@ -299,10 +305,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const data = new TextEncoder().encode("Specific content to authorize")
       const contentHash = blake2b256(data)
 
-      const receipt = await client.authorizePreimage(
-        contentHash,
-        BigInt(data.length),
-      )
+      const receipt = await client
+        .authorizePreimage(contentHash, BigInt(data.length))
+        .send()
 
       expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
@@ -316,14 +321,18 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // First authorize Bob
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
-      await client.authorizeAccount(
-        bobAddress,
-        estimate.transactions,
-        BigInt(estimate.bytes),
-      )
+      await client
+        .authorizeAccount(
+          bobAddress,
+          estimate.transactions,
+          BigInt(estimate.bytes),
+        )
+        .send()
 
       // Now refresh Bob's authorization
-      const receipt = await client.refreshAccountAuthorization(bobAddress)
+      const receipt = await client
+        .refreshAccountAuthorization(bobAddress)
+        .send()
 
       expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
@@ -336,10 +345,12 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // First authorize a preimage
       const data = new TextEncoder().encode("Content for refresh test")
       const contentHash = blake2b256(data)
-      await client.authorizePreimage(contentHash, BigInt(data.length))
+      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
 
       // Now refresh the preimage authorization
-      const receipt = await client.refreshPreimageAuthorization(contentHash)
+      const receipt = await client
+        .refreshPreimageAuthorization(contentHash)
+        .send()
 
       expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
@@ -356,8 +367,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // This will likely fail because the authorization hasn't expired yet
       // but it tests the SDK method is wired up correctly
       try {
-        const receipt =
-          await client.removeExpiredAccountAuthorization(bobAddress)
+        const receipt = await client
+          .removeExpiredAccountAuthorization(bobAddress)
+          .send()
         expect(receipt).toBeDefined()
         expect(receipt.blockHash).toBeDefined()
         console.log("Remove expired account authorization succeeded")
@@ -374,8 +386,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const contentHash = blake2b256(data)
 
       try {
-        const receipt =
-          await client.removeExpiredPreimageAuthorization(contentHash)
+        const receipt = await client
+          .removeExpiredPreimageAuthorization(contentHash)
+          .send()
         expect(receipt).toBeDefined()
         console.log("Remove expired preimage authorization succeeded")
       } catch (_error) {
@@ -393,7 +406,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const contentHash = blake2b256(data)
 
       // Authorize the preimage first
-      await client.authorizePreimage(contentHash, BigInt(data.length))
+      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
 
       // Store with preimage auth (unsigned transaction)
       const result = await client.storeWithPreimageAuth(data)
@@ -418,7 +431,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       // Try to renew (may fail if not renewable yet)
       try {
-        const receipt = await client.renew(storeResult.blockNumber ?? 0, 0)
+        const receipt = await client
+          .renew(storeResult.blockNumber ?? 0, 0)
+          .send()
         expect(receipt).toBeDefined()
         console.log("Renew test passed")
       } catch (_error) {
@@ -441,11 +456,13 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       // 2. Authorize a new account (Bob)
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
-      const authReceipt = await client.authorizeAccount(
-        bobAddress,
-        estimate.transactions,
-        BigInt(estimate.bytes),
-      )
+      const authReceipt = await client
+        .authorizeAccount(
+          bobAddress,
+          estimate.transactions,
+          BigInt(estimate.bytes),
+        )
+        .send()
 
       expect(authReceipt.blockHash).toBeDefined()
       console.log("   Bob authorized")

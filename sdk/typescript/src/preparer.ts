@@ -95,7 +95,6 @@ export class BulletinPreparer {
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
 
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
@@ -103,10 +102,10 @@ export class BulletinPreparer {
     const chunker = new FixedSizeChunker(chunkerConfig)
     const chunks = chunker.chunk(data)
 
-    // Calculate CIDs for each chunk
+    // Calculate CIDs for each chunk (always Raw codec for chunks)
     for (const chunk of chunks) {
       try {
-        chunk.cid = await calculateCid(chunk.data, cidCodec, hashAlgorithm)
+        chunk.cid = await calculateCid(chunk.data, CidCodec.Raw, hashAlgorithm)
       } catch (error) {
         if (error instanceof BulletinError) {
           throw error

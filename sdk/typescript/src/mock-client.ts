@@ -13,9 +13,9 @@
 
 import type { Binary } from "polkadot-api"
 import {
-  type AuthCallOptions,
+  AuthCallBuilder,
   type BulletinClientInterface,
-  type CallOptions,
+  CallBuilder,
   StoreBuilder,
   type TransactionReceipt,
 } from "./async-client.js"
@@ -149,6 +149,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     data: Binary | Uint8Array,
     options?: StoreOptions,
     _progressCallback?: ProgressCallback,
+    _chunkerConfig?: Partial<import("./types.js").ChunkerConfig>,
   ): Promise<StoreResult> {
     // Convert Binary to Uint8Array if needed
     const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
@@ -203,79 +204,79 @@ export class MockBulletinClient implements BulletinClientInterface {
     }
   }
 
-  async authorizeAccount(
+  authorizeAccount(
     who: string,
     transactions: number,
     bytes: bigint,
-    _options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    this.throwIfAuthFailure()
-    this.operations.push({
-      type: "authorize_account",
-      who,
-      transactions,
-      bytes,
+  ): AuthCallBuilder {
+    return new AuthCallBuilder(async () => {
+      this.throwIfAuthFailure()
+      this.operations.push({
+        type: "authorize_account",
+        who,
+        transactions,
+        bytes,
+      })
+      return mockReceipt()
     })
-    return mockReceipt()
   }
 
-  async authorizePreimage(
-    contentHash: Uint8Array,
-    maxSize: bigint,
-    _options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    this.throwIfAuthFailure()
-    this.operations.push({ type: "authorize_preimage", contentHash, maxSize })
-    return mockReceipt()
-  }
-
-  async refreshAccountAuthorization(
-    who: string,
-    _options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    this.throwIfAuthFailure()
-    this.operations.push({ type: "refresh_account_authorization", who })
-    return mockReceipt()
-  }
-
-  async refreshPreimageAuthorization(
-    contentHash: Uint8Array,
-    _options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    this.throwIfAuthFailure()
-    this.operations.push({
-      type: "refresh_preimage_authorization",
-      contentHash,
+  authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder {
+    return new AuthCallBuilder(async () => {
+      this.throwIfAuthFailure()
+      this.operations.push({
+        type: "authorize_preimage",
+        contentHash,
+        maxSize,
+      })
+      return mockReceipt()
     })
-    return mockReceipt()
   }
 
-  async removeExpiredAccountAuthorization(
-    who: string,
-    _options?: CallOptions,
-  ): Promise<TransactionReceipt> {
-    this.operations.push({ type: "remove_expired_account_authorization", who })
-    return mockReceipt()
-  }
-
-  async removeExpiredPreimageAuthorization(
-    contentHash: Uint8Array,
-    _options?: CallOptions,
-  ): Promise<TransactionReceipt> {
-    this.operations.push({
-      type: "remove_expired_preimage_authorization",
-      contentHash,
+  refreshAccountAuthorization(who: string): AuthCallBuilder {
+    return new AuthCallBuilder(async () => {
+      this.throwIfAuthFailure()
+      this.operations.push({ type: "refresh_account_authorization", who })
+      return mockReceipt()
     })
-    return mockReceipt()
   }
 
-  async renew(
-    block: number,
-    index: number,
-    _options?: CallOptions,
-  ): Promise<TransactionReceipt> {
-    this.operations.push({ type: "renew", block, index })
-    return mockReceipt()
+  refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder {
+    return new AuthCallBuilder(async () => {
+      this.throwIfAuthFailure()
+      this.operations.push({
+        type: "refresh_preimage_authorization",
+        contentHash,
+      })
+      return mockReceipt()
+    })
+  }
+
+  removeExpiredAccountAuthorization(who: string): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({
+        type: "remove_expired_account_authorization",
+        who,
+      })
+      return mockReceipt()
+    })
+  }
+
+  removeExpiredPreimageAuthorization(contentHash: Uint8Array): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({
+        type: "remove_expired_preimage_authorization",
+        contentHash,
+      })
+      return mockReceipt()
+    })
+  }
+
+  renew(block: number, index: number): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({ type: "renew", block, index })
+      return mockReceipt()
+    })
   }
 
   /**

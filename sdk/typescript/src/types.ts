@@ -115,13 +115,17 @@ export interface ChunkDetails {
  * This result type works for both single-transaction uploads and chunked uploads.
  * For chunked uploads, the `cid` field contains the manifest CID, and `chunks`
  * contains details about the individual chunks.
+ *
+ * When chunked without a manifest (`withManifest(false)`), `cid` is undefined
+ * and the individual chunk CIDs are in `chunks.chunkCids`.
  */
 export interface StoreResult {
   /** The primary CID of the stored data
    * - For single uploads: CID of the data
-   * - For chunked uploads: CID of the manifest
+   * - For chunked uploads with manifest: CID of the manifest
+   * - For chunked uploads without manifest: undefined
    */
-  cid: CID
+  cid?: CID
   /** Size of the stored data in bytes */
   size: number
   /** Block number where data was stored (if known) */

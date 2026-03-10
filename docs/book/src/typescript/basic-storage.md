@@ -167,7 +167,7 @@ console.log('Need authorization for', estimate.transactions, 'txs and', estimate
 
 // Authorize (if needed - requires sudo)
 const account = 'your-account-address';
-// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes), { sudo: true });
+// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes)).withSudo().send();
 
 try {
     const result = await client.store(data).send();

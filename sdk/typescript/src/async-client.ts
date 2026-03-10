@@ -22,7 +22,7 @@ import {
   type WaitFor,
 } from "./types.js"
 import {
-  hashAlgorithmToScale,
+  hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
 } from "./utils.js"
@@ -170,6 +170,7 @@ export interface BulletinClientInterface {
     data: Binary | Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
+    chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult>
   /** Store preimage-authorized content as unsigned transaction */
   storeWithPreimageAuth?(
@@ -181,34 +182,13 @@ export interface BulletinClientInterface {
     who: string,
     transactions: number,
     bytes: bigint,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt>
-  authorizePreimage(
-    contentHash: Uint8Array,
-    maxSize: bigint,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt>
-  renew(
-    block: number,
-    index: number,
-    options?: CallOptions,
-  ): Promise<TransactionReceipt>
-  refreshAccountAuthorization(
-    who: string,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt>
-  refreshPreimageAuthorization(
-    contentHash: Uint8Array,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt>
-  removeExpiredAccountAuthorization(
-    who: string,
-    options?: CallOptions,
-  ): Promise<TransactionReceipt>
-  removeExpiredPreimageAuthorization(
-    contentHash: Uint8Array,
-    options?: CallOptions,
-  ): Promise<TransactionReceipt>
+  ): AuthCallBuilder
+  authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
+  renew(block: number, index: number): CallBuilder
+  refreshAccountAuthorization(who: string): AuthCallBuilder
+  refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
+  removeExpiredAccountAuthorization(who: string): CallBuilder
+  removeExpiredPreimageAuthorization(contentHash: Uint8Array): CallBuilder
   estimateAuthorization(dataSize: number): {
     transactions: number
     bytes: number
@@ -234,6 +214,7 @@ export class StoreBuilder {
   private data: Uint8Array
   private options: StoreOptions = { ...DEFAULT_STORE_OPTIONS }
   private callback?: ProgressCallback
+  private chunkerConfig?: Partial<ChunkerConfig>
 
   constructor(
     private executor: BulletinClientInterface,
@@ -272,12 +253,25 @@ export class StoreBuilder {
     return this
   }
 
+  /** Set chunk size (forces chunked upload path) */
+  withChunkSize(chunkSize: number): this {
+    this.chunkerConfig = { ...this.chunkerConfig, chunkSize }
+    return this
+  }
+
+  /** Enable or disable DAG-PB manifest creation for chunked uploads (default: true) */
+  withManifest(enabled: boolean): this {
+    this.chunkerConfig = { ...this.chunkerConfig, createManifest: enabled }
+    return this
+  }
+
   /** Execute the store operation (signed transaction, uses account authorization) */
   async send(): Promise<StoreResult> {
     return this.executor.storeWithOptions(
       this.data,
       this.options,
       this.callback,
+      this.chunkerConfig,
     )
   }
 
@@ -305,6 +299,81 @@ export class StoreBuilder {
       )
     }
     return this.executor.storeWithPreimageAuth(this.data, this.options)
+  }
+}
+
+/**
+ * Builder for calls with `CallOptions` (waitFor + callback)
+ *
+ * Used by: `renew`, `removeExpiredAccountAuthorization`, `removeExpiredPreimageAuthorization`
+ *
+ * @example
+ * ```typescript
+ * const receipt = await client
+ *   .renew(blockNumber, index)
+ *   .withWaitFor('finalized')
+ *   .withCallback((event) => console.log(event))
+ *   .send();
+ * ```
+ */
+export class CallBuilder {
+  private options: CallOptions = {}
+  constructor(
+    private executor: (options: CallOptions) => Promise<TransactionReceipt>,
+  ) {}
+  /** Set what to wait for before returning */
+  withWaitFor(waitFor: WaitFor): this {
+    this.options.waitFor = waitFor
+    return this
+  }
+  /** Set progress callback */
+  withCallback(callback: ProgressCallback): this {
+    this.options.onProgress = callback
+    return this
+  }
+  /** Submit the transaction */
+  async send(): Promise<TransactionReceipt> {
+    return this.executor(this.options)
+  }
+}
+
+/**
+ * Builder for authorization calls that may require sudo
+ *
+ * Used by: `authorizeAccount`, `authorizePreimage`, `refreshAccountAuthorization`, `refreshPreimageAuthorization`
+ *
+ * @example
+ * ```typescript
+ * const receipt = await client
+ *   .authorizeAccount(who, transactions, bytes)
+ *   .withSudo()
+ *   .withCallback((event) => console.log(event))
+ *   .send();
+ * ```
+ */
+export class AuthCallBuilder {
+  private options: AuthCallOptions = {}
+  constructor(
+    private executor: (options: AuthCallOptions) => Promise<TransactionReceipt>,
+  ) {}
+  /** Set what to wait for before returning */
+  withWaitFor(waitFor: WaitFor): this {
+    this.options.waitFor = waitFor
+    return this
+  }
+  /** Set progress callback */
+  withCallback(callback: ProgressCallback): this {
+    this.options.onProgress = callback
+    return this
+  }
+  /** Wrap the call in Sudo */
+  withSudo(): this {
+    this.options.sudo = true
+    return this
+  }
+  /** Submit the transaction */
+  async send(): Promise<TransactionReceipt> {
+    return this.executor(this.options)
   }
 }
 
@@ -416,7 +485,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ? this.api.tx.TransactionStorage.store_with_cid_config({
           cid: {
             codec: BigInt(cidCodec),
-            hashing: hashAlgorithmToScale(hashAlgorithm),
+            hashing: hashAlgorithmCodecToEnum(hashAlgorithm),
           },
           data: new Binary(data),
         })
@@ -614,29 +683,34 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     data: Binary | Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
+    chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
     const dataBytes = toBytes(data)
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    // Decide whether to chunk based on threshold
-    if (dataBytes.length > this.config.chunkingThreshold) {
+    // Decide whether to chunk based on threshold or explicit chunkerConfig
+    if (chunkerConfig || dataBytes.length > this.config.chunkingThreshold) {
+      // Chunked uploads use structurally fixed codecs (Raw for chunks, DagPb for manifest).
+      // Reject if the user explicitly set a non-default codec — it would be silently ignored.
+      const userCodec = options?.cidCodec
+      if (userCodec !== undefined && userCodec !== CidCodec.Raw) {
+        throw new BulletinError(
+          "withCodec() cannot be used with chunked uploads. " +
+            "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
+          "INVALID_CONFIG",
+        )
+      }
+
       const chunked = await this.storeChunked(
         dataBytes,
-        undefined,
+        chunkerConfig,
         options,
         progressCallback,
       )
-      const primaryCid = chunked.manifestCid ?? chunked.chunkCids[0]
-      if (!primaryCid) {
-        throw new BulletinError(
-          "No CID produced from chunked upload",
-          "CID_CALCULATION_FAILED",
-        )
-      }
       return {
-        cid: primaryCid,
+        cid: chunked.manifestCid,
         size: dataBytes.length,
         blockNumber: undefined,
         extrinsicIndex: undefined,
@@ -705,7 +779,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * @param data - Data to store (PAPI Binary or Uint8Array)
    */
-  async storeChunked(
+  private async storeChunked(
     data: Binary | Uint8Array,
     config?: Partial<ChunkerConfig>,
     options?: StoreOptions,
@@ -717,7 +791,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
     }
 
-    const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
+    const { hashAlgorithm, waitFor } = resolveStoreOptions(options)
 
     // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
     const prepared = await this.preparer.prepareStoreChunked(
@@ -740,7 +814,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       }
 
       try {
-        const tx = this.createStoreTx(chunk.data, cidCodec, hashAlgorithm)
+        // Chunks are always Raw codec
+        const tx = this.createStoreTx(chunk.data, CidCodec.Raw, hashAlgorithm)
         await this.signAndSubmitWithProgress(tx, progressCallback, waitFor)
         const cid = chunk.cid
         if (cid) chunkCids.push(cid)
@@ -773,9 +848,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         progressCallback({ type: "manifest_started" })
       }
 
+      // Manifest is always DagPb codec
       const manifestTx = this.createStoreTx(
         prepared.manifest.data,
-        cidCodec,
+        CidCodec.DagPb,
         hashAlgorithm,
       )
       await this.signAndSubmitWithProgress(
@@ -808,25 +884,25 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param who - Account address to authorize
    * @param transactions - Number of transactions to authorize
    * @param bytes - Maximum bytes to authorize
-   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
    */
-  async authorizeAccount(
+  authorizeAccount(
     who: string,
     transactions: number,
     bytes: bigint,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    const authTx = this.api.tx.TransactionStorage.authorize_account({
-      who,
-      transactions,
-      bytes,
+  ): AuthCallBuilder {
+    return new AuthCallBuilder((options) => {
+      const authTx = this.api.tx.TransactionStorage.authorize_account({
+        who,
+        transactions,
+        bytes,
+      })
+      return this.submitTx(
+        this.maybeSudo(authTx, options?.sudo),
+        "Failed to authorize account",
+        "AUTHORIZATION_FAILED",
+        options,
+      )
     })
-    return this.submitTx(
-      this.maybeSudo(authTx, options?.sudo),
-      "Failed to authorize account",
-      "AUTHORIZATION_FAILED",
-      options,
-    )
   }
 
   /**
@@ -834,23 +910,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * @param contentHash - Blake2b-256 hash of the content to authorize
    * @param maxSize - Maximum size in bytes for the content
-   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
    */
-  async authorizePreimage(
-    contentHash: Uint8Array,
-    maxSize: bigint,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    const authTx = this.api.tx.TransactionStorage.authorize_preimage({
-      content_hash: new Binary(contentHash),
-      max_size: maxSize,
+  authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder {
+    return new AuthCallBuilder((options) => {
+      const authTx = this.api.tx.TransactionStorage.authorize_preimage({
+        content_hash: new Binary(contentHash),
+        max_size: maxSize,
+      })
+      return this.submitTx(
+        this.maybeSudo(authTx, options?.sudo),
+        "Failed to authorize preimage",
+        "AUTHORIZATION_FAILED",
+        options,
+      )
     })
-    return this.submitTx(
-      this.maybeSudo(authTx, options?.sudo),
-      "Failed to authorize preimage",
-      "AUTHORIZATION_FAILED",
-      options,
-    )
   }
 
   /**
@@ -858,15 +931,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * @param block - Block number where the original storage transaction was included
    * @param index - Extrinsic index within the block
-   * @param options - Optional call options
    */
-  async renew(
-    block: number,
-    index: number,
-    options?: CallOptions,
-  ): Promise<TransactionReceipt> {
-    const tx = this.api.tx.TransactionStorage.renew({ block, index })
-    return this.submitTx(tx, "Failed to renew", "TRANSACTION_FAILED", options)
+  renew(block: number, index: number): CallBuilder {
+    return new CallBuilder((options) => {
+      const tx = this.api.tx.TransactionStorage.renew({ block, index })
+      return this.submitTx(tx, "Failed to renew", "TRANSACTION_FAILED", options)
+    })
   }
 
   /**
@@ -875,21 +945,18 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Requires Authorizer origin on-chain.
    *
    * @param who - Account address to refresh authorization for
-   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
    */
-  async refreshAccountAuthorization(
-    who: string,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    const authTx = this.api.tx.TransactionStorage.refresh_account_authorization(
-      { who },
-    )
-    return this.submitTx(
-      this.maybeSudo(authTx, options?.sudo),
-      "Failed to refresh account authorization",
-      "AUTHORIZATION_FAILED",
-      options,
-    )
+  refreshAccountAuthorization(who: string): AuthCallBuilder {
+    return new AuthCallBuilder((options) => {
+      const authTx =
+        this.api.tx.TransactionStorage.refresh_account_authorization({ who })
+      return this.submitTx(
+        this.maybeSudo(authTx, options?.sudo),
+        "Failed to refresh account authorization",
+        "AUTHORIZATION_FAILED",
+        options,
+      )
+    })
   }
 
   /**
@@ -898,22 +965,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Requires Authorizer origin on-chain.
    *
    * @param contentHash - Blake2b-256 hash of the authorized content
-   * @param options - Optional; pass `{ sudo: true }` to wrap in Sudo
    */
-  async refreshPreimageAuthorization(
-    contentHash: Uint8Array,
-    options?: AuthCallOptions,
-  ): Promise<TransactionReceipt> {
-    const authTx =
-      this.api.tx.TransactionStorage.refresh_preimage_authorization({
-        content_hash: new Binary(contentHash),
-      })
-    return this.submitTx(
-      this.maybeSudo(authTx, options?.sudo),
-      "Failed to refresh preimage authorization",
-      "AUTHORIZATION_FAILED",
-      options,
-    )
+  refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder {
+    return new AuthCallBuilder((options) => {
+      const authTx =
+        this.api.tx.TransactionStorage.refresh_preimage_authorization({
+          content_hash: new Binary(contentHash),
+        })
+      return this.submitTx(
+        this.maybeSudo(authTx, options?.sudo),
+        "Failed to refresh preimage authorization",
+        "AUTHORIZATION_FAILED",
+        options,
+      )
+    })
   }
 
   /**
@@ -922,22 +987,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Can be called by anyone (no special origin required).
    *
    * @param who - Account address with expired authorization
-   * @param options - Optional call options
    */
-  async removeExpiredAccountAuthorization(
-    who: string,
-    options?: CallOptions,
-  ): Promise<TransactionReceipt> {
-    const tx =
-      this.api.tx.TransactionStorage.remove_expired_account_authorization({
-        who,
-      })
-    return this.submitTx(
-      tx,
-      "Failed to remove expired account authorization",
-      "TRANSACTION_FAILED",
-      options,
-    )
+  removeExpiredAccountAuthorization(who: string): CallBuilder {
+    return new CallBuilder((options) => {
+      const tx =
+        this.api.tx.TransactionStorage.remove_expired_account_authorization({
+          who,
+        })
+      return this.submitTx(
+        tx,
+        "Failed to remove expired account authorization",
+        "TRANSACTION_FAILED",
+        options,
+      )
+    })
   }
 
   /**
@@ -946,22 +1009,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Can be called by anyone (no special origin required).
    *
    * @param contentHash - Blake2b-256 hash of the expired authorization
-   * @param options - Optional call options
    */
-  async removeExpiredPreimageAuthorization(
-    contentHash: Uint8Array,
-    options?: CallOptions,
-  ): Promise<TransactionReceipt> {
-    const tx =
-      this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
-        content_hash: new Binary(contentHash),
-      })
-    return this.submitTx(
-      tx,
-      "Failed to remove expired preimage authorization",
-      "TRANSACTION_FAILED",
-      options,
-    )
+  removeExpiredPreimageAuthorization(contentHash: Uint8Array): CallBuilder {
+    return new CallBuilder((options) => {
+      const tx =
+        this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
+          content_hash: new Binary(contentHash),
+        })
+      return this.submitTx(
+        tx,
+        "Failed to remove expired preimage authorization",
+        "TRANSACTION_FAILED",
+        options,
+      )
+    })
   }
 
   /**

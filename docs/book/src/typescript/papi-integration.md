@@ -248,7 +248,7 @@ const bobClient = new AsyncBulletinClient(api, bobSigner, papiClient.submit);
 
 // Alice authorizes Bob
 const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
-await aliceClient.authorizeAccount(bobAddress, 100, BigInt(10_000_000));
+await aliceClient.authorizeAccount(bobAddress, 100, BigInt(10_000_000)).send();
 
 // Bob stores data
 const result = await bobClient.store(data).send();

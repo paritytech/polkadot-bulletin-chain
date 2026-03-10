@@ -145,10 +145,10 @@ export type ScaleHashingAlgorithm =
   | { type: "Keccak256" }
 
 /**
- * Convert SDK HashAlgorithm (multicodec value) to the SCALE enum variant
- * expected by PAPI for the on-chain `HashingAlgorithm` type.
+ * Convert SDK HashAlgorithm (multicodec value) to the PAPI enum variant
+ * expected for the on-chain `HashingAlgorithm` type.
  */
-export function hashAlgorithmToScale(
+export function hashAlgorithmCodecToEnum(
   alg: HashAlgorithm,
 ): ScaleHashingAlgorithm {
   switch (alg) {

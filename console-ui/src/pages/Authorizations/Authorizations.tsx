@@ -414,7 +414,7 @@ function FaucetAuthorizePreimagePanel() {
           setTxStatus("Transaction signed...");
         } else if (event.type === "broadcasted") {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "best_block") {
+        } else if (event.type === "in_block") {
           setTxStatus(`Included in block #${event.blockNumber}...`);
         } else if (event.type === "finalized") {
           setTxStatus("Finalized!");
@@ -422,11 +422,11 @@ function FaucetAuthorizePreimagePanel() {
       };
 
       // Use SDK to authorize preimage with progress callback
-      await bulletinClient.authorizePreimage(
-        contentHashBytes,
-        sizeValue > 0n ? sizeValue : 1024n * 1024n,
-        { onProgress: handleProgress }
-      );
+      await bulletinClient
+        .authorizePreimage(contentHashBytes, sizeValue > 0n ? sizeValue : 1024n * 1024n)
+        .withCallback(handleProgress)
+        .withWaitFor("finalized")
+        .send();
 
       setSubmitSuccess("Successfully authorized preimage");
       fetchPreimageAuthorizations(api);
@@ -705,7 +705,7 @@ function FaucetAuthorizeAccountPanel() {
           setTxStatus("Transaction signed...");
         } else if (event.type === "broadcasted") {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "best_block") {
+        } else if (event.type === "in_block") {
           setTxStatus(`Included in block #${event.blockNumber}...`);
         } else if (event.type === "finalized") {
           setTxStatus("Finalized!");
@@ -713,12 +713,11 @@ function FaucetAuthorizeAccountPanel() {
       };
 
       // Use SDK to authorize account with progress callback
-      await bulletinClient.authorizeAccount(
-        forWho,
-        txCount,
-        bytesValue,
-        { onProgress: handleProgress }
-      );
+      await bulletinClient
+        .authorizeAccount(forWho, txCount, bytesValue)
+        .withCallback(handleProgress)
+        .withWaitFor("finalized")
+        .send();
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 

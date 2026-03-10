@@ -163,7 +163,7 @@ export function Renew() {
           setTxStatus("Transaction signed...");
         } else if (event.type === "broadcasted") {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "best_block") {
+        } else if (event.type === "in_block") {
           setTxStatus(`Included in block #${event.blockNumber}...`);
         } else if (event.type === "finalized") {
           setTxStatus("Finalized!");
@@ -171,11 +171,11 @@ export function Renew() {
       };
 
       // Use SDK to renew with progress callback
-      const result = await bulletinClient.renew(
-        renewalTarget.blockNumber,
-        renewalTarget.index,
-        { onProgress: handleProgress },
-      );
+      const result = await bulletinClient
+        .renew(renewalTarget.blockNumber, renewalTarget.index)
+        .withCallback(handleProgress)
+        .withWaitFor("finalized")
+        .send();
 
       // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);

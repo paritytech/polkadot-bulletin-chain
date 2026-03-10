@@ -44,9 +44,9 @@ const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
 });
 ```
 
-## Advanced: Manual Chunking
+## Custom Chunk Size
 
-For advanced use cases where you need explicit control over chunking parameters, use `storeChunked()`:
+Use `withChunkSize()` when you want explicit control over the chunk size:
 
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
@@ -55,60 +55,50 @@ const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB
 
-// Configure chunking explicitly
-const config = {
-    chunkSize: 1024 * 1024,  // 1 MiB chunks
-    createManifest: true,     // Create DAG-PB manifest
-};
+// Upload with custom chunk size and progress tracking
+const result = await client
+    .store(largeFile)
+    .withChunkSize(1024 * 1024) // 1 MiB chunks
+    .withCallback((event) => {
+        switch (event.type) {
+            case 'chunk_started':
+                console.log(`Uploading chunk ${event.index + 1}/${event.total}`);
+                break;
+            case 'chunk_completed':
+                console.log(`Chunk ${event.index + 1}/${event.total} complete:`, event.cid.toString());
+                break;
+            case 'chunk_failed':
+                console.error(`Chunk ${event.index + 1}/${event.total} failed:`, event.error);
+                break;
+            case 'manifest_created':
+                console.log('Manifest created:', event.cid.toString());
+                break;
+            case 'completed':
+                if (event.manifestCid) {
+                    console.log('All done! Manifest CID:', event.manifestCid.toString());
+                }
+                break;
+        }
+    })
+    .send();
 
-// Progress tracking
-const progressCallback = (event) => {
-    switch (event.type) {
-        case 'chunk_started':
-            console.log(`Uploading chunk ${event.index + 1}/${event.total}`);
-            break;
-        case 'chunk_completed':
-            console.log(`✓ Chunk ${event.index + 1}/${event.total} complete:`, event.cid.toString());
-            break;
-        case 'chunk_failed':
-            console.error(`✗ Chunk ${event.index + 1}/${event.total} failed:`, event.error);
-            break;
-        case 'manifest_created':
-            console.log('📦 Manifest created:', event.cid.toString());
-            break;
-        case 'completed':
-            if (event.manifestCid) {
-                console.log('✅ All done! Manifest CID:', event.manifestCid.toString());
-            }
-            break;
-    }
-};
-
-// Upload with manual chunking configuration and progress tracking
-const result = await client.storeChunked(
-    largeFile,
-    config,
-    undefined, // default store options
-    progressCallback
-);
-
-console.log('\n📊 Upload Summary:');
-console.log('   Total size:', result.totalSize, 'bytes');
-console.log('   Chunks:', result.numChunks);
-console.log('   Chunk CIDs:', result.chunkCids.length, 'items');
-if (result.manifestCid) {
-    console.log('   Manifest CID:', result.manifestCid.toString());
+console.log('Upload Summary:');
+console.log('   CID:', result.cid.toString());
+console.log('   Size:', result.size, 'bytes');
+if (result.chunks) {
+    console.log('   Chunks:', result.chunks.numChunks);
+    console.log('   Chunk CIDs:', result.chunks.chunkCids.length, 'items');
 }
 ```
 
 ## How It Works
 
-The `storeChunked()` method:
+When data exceeds the chunking threshold (or `withChunkSize()` is used), the SDK:
 
 1. **Splits data** into chunks (default 1 MiB)
-2. **Calculates CIDs** for each chunk
-3. **Submits chunks** sequentially or in parallel
-4. **Creates DAG-PB manifest** linking all chunks
+2. **Calculates CIDs** for each chunk (using Raw codec)
+3. **Submits chunks** sequentially
+4. **Creates DAG-PB manifest** linking all chunks (using DagPb codec)
 5. **Submits manifest** as final transaction
 6. **Returns result** with all CIDs
 
@@ -125,22 +115,15 @@ Bulletin Chain has a **6 second block time**. Multiple chunks can fit into a sin
 
 **Note**: Actual times depend on network conditions and the `waitFor` setting (`"in_block"` vs `"finalized"`).
 
-### When to Use `storeChunked()` vs `store()`
+### When to Use `withChunkSize()`
 
-**Use `store()` (recommended):**
-- For most use cases - it automatically handles everything
-- When you don't need detailed chunk information
+**Use `store().send()` (default):**
+- For most use cases - automatically chunks files above the threshold
 - For both small and large files
 
-**Use `storeChunked()` (advanced):**
-- When you need detailed control over chunking parameters
-- When you need the full `ChunkedStoreResult` with all chunk CIDs
-- When you want to force chunking on small files
-- For testing or debugging chunking behavior
-
-**Key Difference:**
-- `store()` returns `StoreResult` with optional chunk info
-- `storeChunked()` returns `ChunkedStoreResult` with detailed chunk information
+**Use `store().withChunkSize().send()`:**
+- When you want a specific chunk size different from the default
+- When you want to force chunking on small files (e.g. for testing)
 
 ## Configuration Options
 
@@ -170,21 +153,9 @@ const config = {
 
 **Note**: Current implementation uploads sequentially. Parallel support is planned for a future release.
 
-### Manifest Creation
+### Manifests
 
-```typescript
-// With manifest (recommended for large files)
-const config = {
-    chunkSize: 1024 * 1024,
-    createManifest: true,  // Creates DAG-PB manifest
-};
-
-// Without manifest (just upload chunks)
-const config = {
-    chunkSize: 1024 * 1024,
-    createManifest: false,  // No manifest, just chunks
-};
-```
+A DAG-PB manifest is always created for chunked uploads. The manifest links all chunks together and its CID becomes the primary identifier for the stored data.
 
 ## Progress Tracking
 
@@ -265,7 +236,7 @@ console.log('   Bytes:', estimate.bytes);
 
 // Authorize (if needed - requires sudo)
 const account = 'your-account-address';
-// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes), { sudo: true });
+// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes)).withSudo().send();
 
 try {
     // Upload with progress tracking

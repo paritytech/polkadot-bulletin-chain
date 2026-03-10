@@ -25,11 +25,13 @@ describe("Complete workflow (MockBulletinClient)", () => {
     expect(estimate.transactions).toBeGreaterThan(0)
     expect(estimate.bytes).toBeGreaterThanOrEqual(10 * 1024 * 1024)
 
-    const authReceipt = await client.authorizeAccount(
-      bobAddress,
-      estimate.transactions,
-      BigInt(estimate.bytes),
-    )
+    const authReceipt = await client
+      .authorizeAccount(
+        bobAddress,
+        estimate.transactions,
+        BigInt(estimate.bytes),
+      )
+      .send()
     expect(authReceipt.blockHash).toBeDefined()
     expect(authReceipt.txHash).toBeDefined()
 
@@ -44,30 +46,33 @@ describe("Complete workflow (MockBulletinClient)", () => {
     const specificData = Binary.fromText("Preimage-authorized content")
     const contentHash = blake2AsU8a(specificData.asBytes())
 
-    const preimageReceipt = await client.authorizePreimage(
-      contentHash,
-      BigInt(specificData.asBytes().length),
-    )
+    const preimageReceipt = await client
+      .authorizePreimage(contentHash, BigInt(specificData.asBytes().length))
+      .send()
     expect(preimageReceipt.blockHash).toBeDefined()
 
     // 4. Refresh account authorization
-    const refreshAcctReceipt =
-      await client.refreshAccountAuthorization(bobAddress)
+    const refreshAcctReceipt = await client
+      .refreshAccountAuthorization(bobAddress)
+      .send()
     expect(refreshAcctReceipt.blockHash).toBeDefined()
 
     // 5. Refresh preimage authorization
-    const refreshPreimageReceipt =
-      await client.refreshPreimageAuthorization(contentHash)
+    const refreshPreimageReceipt = await client
+      .refreshPreimageAuthorization(contentHash)
+      .send()
     expect(refreshPreimageReceipt.blockHash).toBeDefined()
 
     // 6. Remove expired account authorization
-    const removeAcctReceipt =
-      await client.removeExpiredAccountAuthorization(bobAddress)
+    const removeAcctReceipt = await client
+      .removeExpiredAccountAuthorization(bobAddress)
+      .send()
     expect(removeAcctReceipt.blockHash).toBeDefined()
 
     // 7. Remove expired preimage authorization
-    const removePreimageReceipt =
-      await client.removeExpiredPreimageAuthorization(contentHash)
+    const removePreimageReceipt = await client
+      .removeExpiredPreimageAuthorization(contentHash)
+      .send()
     expect(removePreimageReceipt.blockHash).toBeDefined()
 
     // Verify all operations were recorded
@@ -130,11 +135,11 @@ describe("Complete workflow (MockBulletinClient)", () => {
     const client = new MockBulletinClient({ simulateAuthFailure: true })
 
     await expect(
-      client.refreshAccountAuthorization(bobAddress),
+      client.refreshAccountAuthorization(bobAddress).send(),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
 
     await expect(
-      client.refreshPreimageAuthorization(new Uint8Array(32)),
+      client.refreshPreimageAuthorization(new Uint8Array(32)).send(),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
   })
 
@@ -142,12 +147,14 @@ describe("Complete workflow (MockBulletinClient)", () => {
     const client = new MockBulletinClient({ simulateAuthFailure: true })
 
     // remove_expired methods don't require auth — they should succeed
-    const receipt = await client.removeExpiredAccountAuthorization(bobAddress)
+    const receipt = await client
+      .removeExpiredAccountAuthorization(bobAddress)
+      .send()
     expect(receipt.blockHash).toBeDefined()
 
-    const receipt2 = await client.removeExpiredPreimageAuthorization(
-      new Uint8Array(32),
-    )
+    const receipt2 = await client
+      .removeExpiredPreimageAuthorization(new Uint8Array(32))
+      .send()
     expect(receipt2.blockHash).toBeDefined()
   })
 })
