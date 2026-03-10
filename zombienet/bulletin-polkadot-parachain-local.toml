@@ -59,7 +59,7 @@ args = [
 ]
 
 [[parachains.collators]]
-name = "bulletin-westend-collator-2"
+name = "bulletin-polkadot-collator-2"
 command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
 validator = true
 p2p_port = 12347
