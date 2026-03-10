@@ -157,4 +157,32 @@ describe("Complete workflow (MockBulletinClient)", () => {
       .send()
     expect(receipt2.blockHash).toBeDefined()
   })
+
+  it("should reject withCodec on chunked uploads", async () => {
+    // Use a small chunkingThreshold so we don't need a huge buffer
+    const client = new MockBulletinClient({ chunkingThreshold: 1024 })
+    const data = new Uint8Array(2048) // exceeds 1024 threshold
+
+    await expect(
+      client.store(data).withCodec(CidCodec.DagPb).send(),
+    ).rejects.toMatchObject({ code: "INVALID_CONFIG" })
+  })
+
+  it("should store chunked without manifest when withManifest(false)", async () => {
+    const client = new MockBulletinClient({ chunkingThreshold: 1024 })
+    const data = new Uint8Array(2048).fill(0xab)
+
+    const result = await client
+      .store(data)
+      .withChunkSize(1024)
+      .withManifest(false)
+      .send()
+
+    // Without manifest, cid should be undefined
+    expect(result.cid).toBeUndefined()
+    // Chunks should be present
+    expect(result.chunks).toBeDefined()
+    expect(result.chunks?.numChunks).toBe(2)
+    expect(result.chunks?.chunkCids).toHaveLength(2)
+  })
 })

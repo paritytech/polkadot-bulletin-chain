@@ -177,19 +177,21 @@ export type ChunkProgressEvent =
  * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
  */
 export type TransactionStatusEvent =
-  | { type: "signed"; txHash: string }
-  | { type: "broadcasted" }
+  | { type: "signed"; txHash: string; chunkIndex?: number }
+  | { type: "broadcasted"; chunkIndex?: number }
   | {
       type: "in_block"
       blockHash: string
       blockNumber: number
       txIndex?: number
+      chunkIndex?: number
     }
   | {
       type: "finalized"
       blockHash: string
       blockNumber: number
       txIndex?: number
+      chunkIndex?: number
     }
 
 /**

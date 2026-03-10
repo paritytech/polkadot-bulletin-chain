@@ -19,8 +19,10 @@ import {
   StoreBuilder,
   type TransactionReceipt,
 } from "./async-client.js"
+import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
+  type ChunkerConfig,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
@@ -28,7 +30,7 @@ import {
   type StoreOptions,
   type StoreResult,
 } from "./types.js"
-import { calculateCid, estimateAuthorization } from "./utils.js"
+import { calculateCid, estimateAuthorization, toBytes } from "./utils.js"
 
 /**
  * Configuration for the mock Bulletin client
@@ -149,10 +151,9 @@ export class MockBulletinClient implements BulletinClientInterface {
     data: Binary | Uint8Array,
     options?: StoreOptions,
     _progressCallback?: ProgressCallback,
-    _chunkerConfig?: Partial<import("./types.js").ChunkerConfig>,
+    chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
-    // Convert Binary to Uint8Array if needed
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
+    const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
@@ -170,6 +171,45 @@ export class MockBulletinClient implements BulletinClientInterface {
     // Simulate storage failure
     if (this.config.simulateStorageFailure) {
       throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+    }
+
+    // Handle chunked uploads (mirrors AsyncBulletinClient logic)
+    if (chunkerConfig || dataBytes.length > this.config.chunkingThreshold) {
+      const userCodec = options?.cidCodec
+      if (userCodec !== undefined && userCodec !== CidCodec.Raw) {
+        throw new BulletinError(
+          "withCodec() cannot be used with chunked uploads. " +
+            "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
+          "INVALID_CONFIG",
+        )
+      }
+
+      const preparer = new BulletinPreparer(this.config)
+      const prepared = await preparer.prepareStoreChunked(
+        dataBytes,
+        chunkerConfig,
+        options,
+      )
+
+      this.operations.push({
+        type: "store",
+        dataSize: dataBytes.length,
+        cid: prepared.manifest?.cid.toString() ?? "",
+      })
+
+      return {
+        cid: prepared.manifest?.cid,
+        size: dataBytes.length,
+        blockNumber: 1,
+        chunks: {
+          chunkCids: prepared.chunks
+            .map((c) => c.cid)
+            .filter(
+              (c): c is import("multiformats/cid").CID => c !== undefined,
+            ),
+          numChunks: prepared.chunks.length,
+        },
+      }
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
@@ -286,7 +326,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     data: Binary | Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult> {
-    const dataBytes = data instanceof Uint8Array ? data : data.asBytes()
+    const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", "EMPTY_DATA")

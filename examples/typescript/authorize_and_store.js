@@ -63,7 +63,7 @@ async function main() {
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        );
+        ).withSudo().send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK

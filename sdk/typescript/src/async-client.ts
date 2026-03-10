@@ -25,6 +25,7 @@ import {
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
+  toBytes,
 } from "./utils.js"
 
 /**
@@ -241,12 +242,6 @@ export class StoreBuilder {
     return this
   }
 
-  /** Set custom store options */
-  withOptions(options: StoreOptions): this {
-    this.options = options
-    return this
-  }
-
   /** Set progress callback for chunked uploads */
   withCallback(callback: ProgressCallback): this {
     this.callback = callback
@@ -377,11 +372,6 @@ export class AuthCallBuilder {
   }
 }
 
-/** Convert Binary or Uint8Array to Uint8Array */
-function toBytes(data: Binary | Uint8Array): Uint8Array {
-  return data instanceof Uint8Array ? data : data.asBytes()
-}
-
 /** Resolve store options with defaults */
 function resolveStoreOptions(options?: StoreOptions): {
   cidCodec: CidCodec | number
@@ -474,7 +464,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Create a store transaction, using store_with_cid_config when non-default CID settings are used.
+   * Create a store transaction.
+   *
+   * The chain defaults to Raw (0x55) codec + Blake2b-256 hashing, so the plain
+   * `store()` extrinsic is sufficient for the common case. We only use the heavier
+   * `store_with_cid_config()` extrinsic when the user requests non-default settings.
    */
   private createStoreTx(
     data: Uint8Array,
@@ -506,6 +500,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     tx: PapiTransaction,
     progressCallback?: ProgressCallback,
     waitFor: "in_block" | "finalized" = "finalized",
+    chunkIndex?: number,
   ): Promise<{
     blockHash: string
     txHash: string
@@ -540,13 +535,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.txHash && !txHash) {
             txHash = ev.txHash as string
             if (progressCallback) {
-              progressCallback({ type: "signed", txHash: txHash })
+              progressCallback({ type: "signed", txHash: txHash, chunkIndex })
             }
           }
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted" })
+            progressCallback({ type: "broadcasted", chunkIndex })
           }
 
           // Handle best block state
@@ -557,6 +552,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
+                chunkIndex,
               })
             }
 
@@ -573,6 +569,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
+                chunkIndex,
               })
             }
 
@@ -777,6 +774,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * 4. Create and submit DAG-PB manifest (if enabled)
    * 5. Return all CIDs and receipt information
    *
+   * Note: Chunk submissions are not atomic. If chunk N fails, chunks 0..N-1
+   * are already stored on-chain and cannot be rolled back. The caller should
+   * check the error and `chunkCids` in the thrown error's context to understand
+   * what was partially uploaded.
+   *
    * @param data - Data to store (PAPI Binary or Uint8Array)
    */
   private async storeChunked(
@@ -816,7 +818,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       try {
         // Chunks are always Raw codec
         const tx = this.createStoreTx(chunk.data, CidCodec.Raw, hashAlgorithm)
-        await this.signAndSubmitWithProgress(tx, progressCallback, waitFor)
+        await this.signAndSubmitWithProgress(tx, progressCallback, waitFor, chunk.index)
         const cid = chunk.cid
         if (cid) chunkCids.push(cid)
 

@@ -173,6 +173,15 @@ const progress = (event) => {
         case 'chunk_failed':
             console.error(`[${event.index + 1}/${event.total}] ✗ Failed:`, event.error.message);
             break;
+        case 'signed':
+        case 'broadcasted':
+        case 'in_block':
+            // Transaction status events carry chunkIndex to identify which chunk they belong to.
+            // chunkIndex is undefined for manifest and single-store transactions.
+            if (event.chunkIndex !== undefined) {
+                console.log(`  Chunk ${event.chunkIndex + 1}: ${event.type}`);
+            }
+            break;
         case 'manifest_started':
             console.log('Creating manifest...');
             break;
@@ -204,6 +213,8 @@ console.log('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
 ```
 
 ### Error Handling
+
+Chunked uploads are **not atomic**. If a chunk fails mid-upload, previously submitted chunks remain on-chain and cannot be rolled back. The error will contain details about which chunk failed.
 
 ```typescript
 import { BulletinError } from '@bulletin/sdk';

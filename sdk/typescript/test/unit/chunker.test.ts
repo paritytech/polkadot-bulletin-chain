@@ -127,4 +127,12 @@ describe("Chunker", () => {
     const reassembled = reassembleChunks(chunks)
     expect(reassembled).toEqual(data)
   })
+
+  it("should throw on missing chunk index during reassembly", () => {
+    const chunks = [
+      { data: new Uint8Array([1]), index: 0, totalChunks: 3 },
+      { data: new Uint8Array([3]), index: 2, totalChunks: 3 },
+    ]
+    expect(() => reassembleChunks(chunks)).toThrow("Missing chunk at index 1")
+  })
 })

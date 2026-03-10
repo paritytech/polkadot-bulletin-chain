@@ -153,19 +153,31 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     it("should fire progress events in correct order during chunked upload", async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
-      const events: string[] = []
+      const events: { type: string; chunkIndex?: number }[] = []
+      const highLevelTypes = new Set([
+        "chunk_started",
+        "chunk_completed",
+        "manifest_started",
+        "manifest_created",
+        "completed",
+      ])
 
       const result = await client
         .store(data)
         .withChunkSize(1024 * 1024)
         .withCallback((event) => {
-          events.push(event.type)
+          events.push({
+            type: event.type,
+            chunkIndex: "chunkIndex" in event ? event.chunkIndex : undefined,
+          })
         })
         .send()
 
       // Verify event order: started/completed pairs for each chunk, then manifest, then completed
       expect(result.chunks?.numChunks).toBe(3)
 
+      // Filter to high-level events (ignore intermediate tx status: signed, broadcasted, in_block)
+      const highLevelEvents = events.filter((e) => highLevelTypes.has(e.type))
       const expectedOrder = [
         "chunk_started",
         "chunk_completed",
@@ -177,7 +189,36 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
         "manifest_created",
         "completed",
       ]
-      expect(events).toEqual(expectedOrder)
+      expect(highLevelEvents.map((e) => e.type)).toEqual(expectedOrder)
+
+      // Verify chunkIndex is set on tx status events for chunk submissions
+      const chunkTxEvents = events.filter(
+        (e) =>
+          (e.type === "signed" ||
+            e.type === "broadcasted" ||
+            e.type === "in_block") &&
+          e.chunkIndex !== undefined,
+      )
+      expect(chunkTxEvents.length).toBeGreaterThan(0)
+
+      // Each chunk tx event should reference a valid chunk index (0, 1, or 2)
+      for (const e of chunkTxEvents) {
+        expect(e.chunkIndex).toBeGreaterThanOrEqual(0)
+        expect(e.chunkIndex).toBeLessThan(3)
+      }
+
+      // Manifest tx events should NOT have chunkIndex
+      // Find events between manifest_started and manifest_created
+      const manifestStartIdx = events.findIndex(
+        (e) => e.type === "manifest_started",
+      )
+      const manifestEndIdx = events.findIndex(
+        (e) => e.type === "manifest_created",
+      )
+      const manifestTxEvents = events.slice(manifestStartIdx + 1, manifestEndIdx)
+      for (const e of manifestTxEvents) {
+        expect(e.chunkIndex).toBeUndefined()
+      }
     })
 
     it("should fire chunk events sequentially (each chunk submitted before next starts)", async () => {
