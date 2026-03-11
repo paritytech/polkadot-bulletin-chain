@@ -818,7 +818,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       try {
         // Chunks are always Raw codec
         const tx = this.createStoreTx(chunk.data, CidCodec.Raw, hashAlgorithm)
-        await this.signAndSubmitWithProgress(tx, progressCallback, waitFor, chunk.index)
+        await this.signAndSubmitWithProgress(
+          tx,
+          progressCallback,
+          waitFor,
+          chunk.index,
+        )
         const cid = chunk.cid
         if (cid) chunkCids.push(cid)
 

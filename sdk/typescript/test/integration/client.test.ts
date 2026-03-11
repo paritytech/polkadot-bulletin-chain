@@ -215,7 +215,10 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const manifestEndIdx = events.findIndex(
         (e) => e.type === "manifest_created",
       )
-      const manifestTxEvents = events.slice(manifestStartIdx + 1, manifestEndIdx)
+      const manifestTxEvents = events.slice(
+        manifestStartIdx + 1,
+        manifestEndIdx,
+      )
       for (const e of manifestTxEvents) {
         expect(e.chunkIndex).toBeUndefined()
       }
