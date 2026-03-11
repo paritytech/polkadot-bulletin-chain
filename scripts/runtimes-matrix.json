@@ -40,7 +40,8 @@
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],
-    "try_runtime_extra_flags": "--blocktime 6000 --disable-spec-version-check --disable-spec-name-check",
+    "try_runtime_spec_name_check": "--disable-spec-name-check",
+    "try_runtime_extra_flags": "--blocktime 6000 --disable-spec-version-check",
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
