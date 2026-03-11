@@ -34,7 +34,7 @@ use sp_keyring::{Sr25519Keyring, Sr25519Keyring as AccountKeyring};
 use sp_runtime::{
 	generic::Era,
 	traits::{Header as _, SaturatedConversion},
-	transaction_validity::{InvalidTransaction, TransactionValidityError},
+	transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidityError},
 	ApplyExtrinsicResult,
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
@@ -280,7 +280,8 @@ fn construct_extrinsic(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
-		runtime::ValidateSigned,
+		pallet_transaction_storage::extension::ValidateStorageCalls::<Runtime>::default(),
+		runtime::AllowedSignedCalls,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
 	);
 	let payload = SignedPayload::new(call.clone(), tx_ext.clone())?;
@@ -979,7 +980,7 @@ fn sudo_kill_works() {
 #[test]
 fn alice_can_sign_authorize_account_extrinsic() {
 	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
-	// from Alice must pass ValidateSigned and succeed at dispatch.
+	// from Alice must pass AllowedSignedCalls and succeed at dispatch.
 	run_test(|| {
 		let alice = sudo_relayer_signer(); // Alice
 		let target = non_relay_signer();
@@ -1022,6 +1023,38 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 			construct_and_apply_extrinsic(signer.pair(), call),
 			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
 		);
+	});
+}
+
+/// Verify that `AllowedSignedCalls` does not override the `ValidTransaction` produced by
+/// `ValidateStorageCalls` for TransactionStorage calls. Both extensions return
+/// `ValidTransaction::default()` (priority=0, longevity=MAX) as a pass-through, but
+/// `ValidateStorageCalls` sets real priority/longevity via `validate_signed`. Since
+/// `ValidTransaction::combine` adds priorities and takes min longevity, the default acts
+/// as an identity and the final result must preserve the values from `ValidateStorageCalls`.
+#[test]
+fn allowed_signed_calls_preserves_storage_priority() {
+	run_test(|| {
+		advance_block();
+
+		let alice = sudo_relayer_signer(); // Alice is a TestAccount / Authorizer
+		let target = non_relay_signer();
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		let xt = construct_extrinsic(alice.pair(), call).unwrap();
+		let validity =
+			Executive::validate_transaction(TransactionSource::External, xt, Hash::default())
+				.unwrap();
+
+		// ValidateStorageCalls sets StoreRenewPriority for authorizer calls.
+		// AllowedSignedCalls returns ValidTransaction::default() (priority 0) for
+		// TransactionStorage calls. Combined priority must equal StoreRenewPriority.
+		assert_eq!(validity.priority, runtime::StoreRenewPriority::get());
 	});
 }
 

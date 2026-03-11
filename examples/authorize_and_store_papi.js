@@ -3,7 +3,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { setupKeyringAndSigners, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
@@ -25,6 +25,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
+        await waitForBlockProduction(bulletinAPI);
 
         // Signers.
         const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Papisigner');

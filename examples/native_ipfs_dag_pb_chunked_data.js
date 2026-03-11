@@ -2,7 +2,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
-import { generateTextImage, fileToDisk, filesAreEqual, newSigner, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
@@ -37,6 +37,7 @@ async function main() {
         client = createClient(withPolkadotSdkCompat(getWsProvider(NODE_WS)));
         // Get typed API with generated descriptors
         const typedApi = client.getTypedApi(bulletin);
+        await waitForBlockProduction(typedApi);
 
         // Create signers
         const { signer: authorizationSigner } = newSigner(SEED);

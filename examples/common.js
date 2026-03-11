@@ -173,10 +173,6 @@ function randomColor() {
   return `rgb(${rand255()}, ${rand255()}, ${rand255()})`;
 }
 
-function rand(intensity) {
-    return (Math.random() * intensity - intensity / 2) | 0;
-}
-
 function rand255() {
   return Math.floor(Math.random() * 256);
 }
@@ -184,11 +180,8 @@ function rand255() {
 export function filesAreEqual(path1, path2) {
   const data1 = fs.readFileSync(path1);
   const data2 = fs.readFileSync(path2);
-  assert.deepStrictEqual(data1.length, data2.length)
-
-  for (let i = 0; i < data1.length; i++) {
-    assert.deepStrictEqual(data1[i], data2[i])
-  }
+  assert.strictEqual(data1.length, data2.length, `File sizes differ: ${data1.length} vs ${data2.length}`);
+  assert.ok(data1.equals(data2), 'File contents differ');
 }
 
 export async function fileToDisk(outputPath, fullBuffer) {
@@ -212,6 +205,32 @@ export class NonceManager {
     this.nonce += 1n;
     return current;
   }
+}
+
+/**
+ * Wait until the chain has produced at least one block (block number > 0).
+ * Useful after zombienet startup to ensure the chain is actually producing blocks
+ * before submitting transactions.
+ */
+export async function waitForBlockProduction(typedApi, timeoutSec = 300) {
+    const pollIntervalMs = 2000;
+    const deadline = Date.now() + timeoutSec * 1000;
+
+    console.log(`⏳ Waiting for block production (timeout: ${timeoutSec}s)...`);
+    while (Date.now() < deadline) {
+        try {
+            const blockNumber = await typedApi.query.System.Number.getValue();
+            if (blockNumber > 0) {
+                console.log(`✅ Chain is producing blocks (current block: #${blockNumber})`);
+                return;
+            }
+            console.log(`⏳ Block number is ${blockNumber}, waiting...`);
+        } catch (error) {
+            console.log(`⏳ Cannot query block number yet: ${error.message}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+    throw new Error(`Chain did not produce any blocks within ${timeoutSec}s`);
 }
 
 /**
