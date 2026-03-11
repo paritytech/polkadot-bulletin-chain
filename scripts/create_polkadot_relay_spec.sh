@@ -8,8 +8,8 @@ set -e
 # polkadot-fellows/runtimes with fast-runtime feature) to generate the spec.
 #
 # Prerequisites:
-#   - The WASM must exist at examples/production-runtimes/ (checked into the repo,
-#     or rebuilt via ./scripts/build_polkadot_relay_runtime.sh)
+#   - The WASM must exist at examples/production-runtimes/
+#     (built via ./scripts/build_polkadot_relay_runtime.sh, cached in CI)
 #   - chain-spec-builder must be in PATH (cargo install staging-chain-spec-builder)
 #
 # Output:
