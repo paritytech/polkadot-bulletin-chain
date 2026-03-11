@@ -98,6 +98,17 @@ jobs:
             "https://github.com/paritytech/zombienet/releases/download/${ZOMBIENET_VERSION}/zombienet-linux-x64"
           chmod +x zombienet-linux-x64
 
+      # Cache the Polkadot relay runtime WASM (fast-runtime, from polkadot-fellows/runtimes)
+      - name: Cache Polkadot relay runtime WASM
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        id: relay-runtime-cache
+        with:
+          path: examples/production-runtimes
+          key: polkadot-relay-runtime-${{ env.FELLOWS_VERSION }}
+      - name: Build Polkadot relay runtime WASM
+        if: steps.relay-runtime-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build_polkadot_relay_runtime.sh
+
   runtime-matrix:
     if: needs.changes.outputs.should-run == 'true'
     needs: [changes]
@@ -166,6 +177,12 @@ jobs:
         with:
           path: ${{ env.ZOMBIENET_BIN_DIR }}
           key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      - name: Cache Polkadot relay runtime WASM
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        id: relay-runtime-cache
+        with:
+          path: examples/production-runtimes
+          key: polkadot-relay-runtime-${{ env.FELLOWS_VERSION }}
       - name: Add binaries to PATH
         run: |
           chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
