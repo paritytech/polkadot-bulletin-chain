@@ -26,6 +26,9 @@
     "package": "bulletin-polkadot-parachain-runtime",
     "path": "runtimes/bulletin-polkadot-parachain",
     "integration_tests": true,
+    "try_runtime": {
+        "extra_flags": "--blocktime 6000 --disable-spec-version-check"
+    },
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
