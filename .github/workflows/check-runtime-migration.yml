@@ -149,21 +149,6 @@ jobs:
           git remote add upstream "https://github.com/${BASE_REPO}.git"
           git fetch upstream --tags
 
-      - name: Build EXTRA_FLAGS
-        env:
-          BLOCKTIME: ${{ matrix.runtime.blocktime }}
-        run: |
-          EXTRA_FLAGS=" --blocktime $BLOCKTIME "
-          EXTRA_FLAGS+=" --disable-spec-version-check"
-          EXTRA_FLAGS+=" --disable-spec-name-check"
-          CHECKS="all"
-
-          echo "Flags: $EXTRA_FLAGS"
-          echo "Checks: $CHECKS"
-
-          echo "EXTRA_FLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
-          echo "CHECKS=$CHECKS" >> $GITHUB_ENV
-
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
@@ -191,6 +176,8 @@ jobs:
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
+          TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
@@ -204,8 +191,9 @@ jobs:
 
           (set -x; try-runtime \
             --runtime "$RUNTIME_BLOB_PATH" \
-            on-runtime-upgrade --checks="$CHECKS" \
-            $EXTRA_FLAGS \
+            $TRY_RUNTIME_SPEC_NAME_CHECK \
+            on-runtime-upgrade --checks="all" \
+            $TRY_RUNTIME_EXTRA_FLAGS \
             snap --path snapshot.raw)
 
   # This will only run if all the tests in its "needs" array passed.
