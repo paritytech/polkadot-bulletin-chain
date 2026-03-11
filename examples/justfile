@@ -146,91 +146,12 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     echo "   Log: {{ test_dir }}/zombienet.log"
     just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
-# Start polkadot parachain with zombienet in background
+# Start a parachain with zombienet in background.
+# Handles both bulletin-polkadot-parachain and bulletin-westend parachains.
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-parachain-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-polkadot-parachain-zombienet-start test_dir runtime="bulletin-polkadot-parachain-runtime":
-    #!/usr/bin/env bash
-    set -e
-
-    # Find zombienet binary (use env var if set, otherwise search)
-    if [ -n "$ZOMBIENET_BINARY" ]; then
-        ZOMBIENET_BIN="$ZOMBIENET_BINARY"
-    else
-        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
-    fi
-
-    if ! command -v "$ZOMBIENET_BIN" >/dev/null 2>&1; then
-        echo "❌ Error: Zombienet binary not found"
-        echo "   Tried: $ZOMBIENET_BIN"
-        echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory"
-        exit 1
-    fi
-
-    # Run prerequisites setup first
-    just setup-parachain-prerequisites
-
-    # Set paths to binaries
-    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
-        # Expect in the PATH
-        POLKADOT_BINARY_PATH=polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
-    else
-        POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
-    fi
-
-    # Verify binaries exist after setup
-    if ! command -v "$POLKADOT_BINARY_PATH"; then
-        echo "❌ Error: Prerequisites setup completed but binaries still not found"
-        echo "   Expected POLKADOT_BINARY_PATH: $POLKADOT_BINARY_PATH"
-        exit 1
-    fi
-    if ! command -v "$POLKADOT_PARACHAIN_BINARY_PATH"; then
-        echo "❌ Error: Prerequisites setup completed but binaries still not found"
-        echo "   Expected POLKADOT_PARACHAIN_BINARY_PATH: $POLKADOT_PARACHAIN_BINARY_PATH"
-        exit 1
-    fi
-
-    # Generate chain specs (the relay runtime WASM is checked into
-    # examples/production-runtimes/, so no build step needed)
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    cd "$ROOT_DIR"
-
-    echo "   Creating Polkadot relay chain spec..."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_polkadot_relay_spec.sh
-
-    echo "   Creating Polkadot parachain chain spec..."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_polkadot_parachain_spec.sh
-    cd -
-
-    # Run zombienet from root directory so relative paths in config work correctly
-    cat <<EOF
-    ⚡ Starting Bulletin chain with zombienet
-        runtime   : {{ runtime }}
-        test_dir  : {{ test_dir }}
-        zombienet : $ZOMBIENET_BIN
-        POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
-        POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
-    EOF
-    cd "$ROOT_DIR"
-    (yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
-        POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-parachain-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
-    cd -
-
-    ZOMBIENET_PID=$!
-    echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
-    echo "   Zombienet PID: $ZOMBIENET_PID"
-    echo "   Log: {{ test_dir }}/zombienet.log"
-    # TODO: replace with better check for produced/finalized block 1 with timeout 180s
-    echo "   Waiting for chain to start (180 seconds)..."
-    sleep 180
-
-# Start westend parachain with zombienet in background
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
+#   test_dir - Directory for zombienet output
+#   runtime  - Runtime name, taken from ../scripts/runtimes-matrix.json
+parachain-zombienet-start test_dir runtime:
     #!/usr/bin/env bash
     set -e
 
@@ -261,10 +182,24 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
         exit 1
     fi
 
-    # Create chain spec
-    echo "   Creating Westend chain spec..."
+    # Create chain specs (runtime-specific)
     ROOT_DIR="{{ justfile_directory() }}/.."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/create_bulletin_westend_spec.sh"
+    if [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+        cd "$ROOT_DIR"
+        echo "   Creating Polkadot relay chain spec..."
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_polkadot_relay_spec.sh
+        echo "   Creating Polkadot parachain chain spec..."
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_polkadot_parachain_spec.sh
+        cd -
+        ZOMBIENET_TOML="$ROOT_DIR/zombienet/bulletin-polkadot-parachain-local.toml"
+    elif [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        echo "   Creating Westend chain spec..."
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/create_bulletin_westend_spec.sh"
+        ZOMBIENET_TOML="$ROOT_DIR/zombienet/bulletin-westend-local.toml"
+    else
+        echo "❌ Unhandled parachain runtime: {{ runtime }}"
+        exit 1
+    fi
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
@@ -277,13 +212,15 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
     (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
 
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
+
+    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log" 10000 180
+
 
 # Check if Docker is available and running
 _check-docker:
@@ -595,10 +532,8 @@ setup-services test_dir runtime ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
-    elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
-        just bulletin-polkadot-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+        just parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         just bulletin-solo-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     else
