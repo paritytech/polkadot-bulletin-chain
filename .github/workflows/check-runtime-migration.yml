@@ -176,8 +176,8 @@ jobs:
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
-          TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime_spec_name_check}}
-          TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime_extra_flags }}
+          TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
+          TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
