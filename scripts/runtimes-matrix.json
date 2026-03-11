@@ -29,7 +29,9 @@
       "wss://westend-bulletin-rpc.polkadot.io"
     ],
     "integration_tests": true,
-    "try_runtime_extra_flags": "--blocktime 6000 --disable-spec-version-check",
+    "try_runtime": {
+        "extra_flags": "--blocktime 6000 --disable-spec-version-check"
+    },
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
