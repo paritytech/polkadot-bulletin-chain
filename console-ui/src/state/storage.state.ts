@@ -2,8 +2,7 @@ import { BehaviorSubject, combineLatest, switchMap, of, from, catchError } from 
 import { bind } from "@react-rxjs/core";
 import { api$ } from "./chain.state";
 import { selectedAccount$ } from "./wallet.state";
-import { SS58String, TypedApi, Enum, Binary } from "polkadot-api";
-import { bulletin_westend } from "@polkadot-api/descriptors";
+import { SS58String, Enum, Binary } from "polkadot-api";
 
 export interface Authorization {
   transactions: bigint;
@@ -29,7 +28,7 @@ const authorizationLoadingSubject = new BehaviorSubject<boolean>(false);
 const authorizationErrorSubject = new BehaviorSubject<string | undefined>(undefined);
 
 export async function fetchAccountAuthorization(
-  api: TypedApi<typeof bulletin_westend>,
+  api: any,
   address: SS58String
 ): Promise<Authorization | null> {
   authorizationLoadingSubject.next(true);
@@ -68,7 +67,7 @@ const preimageAuthSubject = new BehaviorSubject<Authorization | null>(null);
 const preimageAuthLoadingSubject = new BehaviorSubject<boolean>(false);
 
 export async function checkPreimageAuthorization(
-  api: TypedApi<typeof bulletin_westend>,
+  api: any,
   contentHash: Uint8Array
 ): Promise<Authorization | null> {
   preimageAuthLoadingSubject.next(true);
@@ -109,7 +108,7 @@ const preimageAuthsSubject = new BehaviorSubject<PreimageAuthorization[]>([]);
 const preimageAuthsLoadingSubject = new BehaviorSubject<boolean>(false);
 
 export async function fetchPreimageAuthorizations(
-  api: TypedApi<typeof bulletin_westend>
+  api: any
 ): Promise<PreimageAuthorization[]> {
   preimageAuthsLoadingSubject.next(true);
 
@@ -149,7 +148,7 @@ export async function fetchPreimageAuthorizations(
 
 // Transaction info by block/index
 export async function fetchTransactionInfo(
-  api: TypedApi<typeof bulletin_westend>,
+  api: any,
   blockNumber: number,
   index: number
 ): Promise<TransactionInfo | null> {
