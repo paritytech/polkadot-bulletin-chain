@@ -21,8 +21,8 @@ use bulletin_polkadot_parachain_runtime::{
 	xcm_config::{
 		polkadot_system_parachain, GovernanceLocation, LocationToAccountId, PeopleLocation,
 	},
-	AllPalletsWithoutSystem, Balances, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin,
-	SessionKeys, System, TransactionStorage, TxExtension, UncheckedExtrinsic,
+	AllPalletsWithoutSystem, Block, Runtime, RuntimeCall, RuntimeEvent, RuntimeOrigin, SessionKeys,
+	System, TransactionStorage, TxExtension, UncheckedExtrinsic,
 };
 use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
 use pallet_transaction_storage::{
