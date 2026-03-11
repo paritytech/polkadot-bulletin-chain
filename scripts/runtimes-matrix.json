@@ -3,14 +3,20 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "path": "runtimes/bulletin-polkadot",
-    "blocktime": 6000,
     "integration_tests": true,
+    "try_runtime_extra_flags": "--blocktime 6000 --disable-spec-version-check",
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
     },
     "benchmarks_exclude_extrinsics": {
-      "pallet_proxy": ["announce", "proxy_announced", "reject_announcement", "remove_announcement", "poke_deposit"]
+      "pallet_proxy": [
+        "announce",
+        "proxy_announced",
+        "reject_announcement",
+        "remove_announcement",
+        "poke_deposit"
+      ]
     }
   },
   {
@@ -20,8 +26,8 @@
     "uris": [
       "wss://westend-bulletin-rpc.polkadot.io"
     ],
-    "blocktime": 6000,
     "integration_tests": true,
+    "try_runtime_extra_flags": "--blocktime 6000 --disable-spec-version-check",
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
@@ -34,7 +40,7 @@
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],
-    "blocktime": 6000,
+    "try_runtime_extra_flags": "--blocktime 6000 --disable-spec-version-check --disable-spec-name-check",
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
