@@ -134,7 +134,7 @@ pub struct TransactionInfo {
 	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
-	size: u32,
+	pub size: u32,
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
 	///

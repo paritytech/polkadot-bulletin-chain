@@ -224,6 +224,16 @@ pub fn new_full<
 	let enable_grandpa = !config.disable_grandpa;
 	let prometheus_registry = config.prometheus_registry().cloned();
 
+	let bulletin_metrics: Option<crate::metrics::BulletinMetrics> = prometheus_registry
+		.as_ref()
+		.map(crate::metrics::BulletinMetrics::register)
+		.transpose()
+		.map_err(ServiceError::Prometheus)?;
+
+	if let Some(ref bm) = bulletin_metrics {
+		crate::metrics::spawn_metrics_task(&task_manager, client.clone(), bm.clone());
+	}
+
 	let shared_voter_state = SharedVoterState::empty();
 
 	let rpc_extensions_builder = {
@@ -291,6 +301,7 @@ pub fn new_full<
 
 		let client_clone = client.clone();
 		let slot_duration = babe_link.config().slot_duration();
+		let proof_failure_metrics = bulletin_metrics.clone();
 		let babe_config = sc_consensus_babe::BabeParams {
 			keystore: keystore_container.keystore(),
 			client: client.clone(),
@@ -301,6 +312,7 @@ pub fn new_full<
 			justification_sync_link: sync_service.clone(),
 			create_inherent_data_providers: move |parent, ()| {
 				let client_clone = client_clone.clone();
+				let proof_failure_metrics = proof_failure_metrics.clone();
 				async move {
 					let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
 
@@ -331,7 +343,13 @@ pub fn new_full<
 							&*client_clone,
 							&parent,
 							retention_period,
-						)?;
+						)
+						.map_err(|e| {
+							if let Some(ref metrics) = proof_failure_metrics {
+								metrics.proof_generation_failures.inc();
+							}
+							e
+						})?;
 
 					Ok((slot, timestamp, storage_proof))
 				}
