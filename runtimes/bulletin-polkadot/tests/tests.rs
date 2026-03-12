@@ -1396,7 +1396,6 @@ fn wrapped_authorize_account_succeeds() {
 	run_test(|| {
 		advance_block();
 		let signer = sudo_relayer_signer();
-		let who: AccountId = signer.to_account_id();
 		let target: AccountId = non_relay_signer().to_account_id();
 
 		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
