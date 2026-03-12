@@ -17,7 +17,9 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{pallet::Origin, weights::WeightInfo, AuthorizationScope, Call, Config, Pallet};
+use crate::{
+	pallet::Origin, weights::WeightInfo, AuthorizationScope, Call, Config, Pallet, LOG_TARGET,
+};
 use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
@@ -307,15 +309,28 @@ where
 
 		// Direct storage call
 		if let Some(inner_call) = call.is_sub_type() {
-			Pallet::<T>::pre_dispatch_signed(&who, inner_call)?;
+			if let Err(e) = Pallet::<T>::pre_dispatch_signed(&who, inner_call) {
+				tracing::debug!(
+					target: LOG_TARGET,
+					"pre_dispatch_signed failed for direct storage call: {:?}",
+					e,
+				);
+				return Err(e);
+			}
 			return Ok(());
 		}
 
 		// Wrapper call — consume authorization for inner storage calls
-		Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+		if let Err(e) = Self::traverse_storage_calls(call, 0, &mut |inner_call| {
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
-		})
-		.map(|_| ())?;
+		}) {
+			tracing::debug!(
+				target: LOG_TARGET,
+				"pre_dispatch_signed failed for wrapped storage call: {:?}",
+				e,
+			);
+			return Err(e);
+		}
 
 		Ok(())
 	}
