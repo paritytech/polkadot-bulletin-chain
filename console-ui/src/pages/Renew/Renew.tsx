@@ -19,7 +19,7 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { ProgressEvent } from "@bulletin/sdk";
+import { ProgressEvent, WaitFor } from "@bulletin/sdk";
 import { bytesToHex } from "@/utils/format";
 
 interface RenewalTarget {
@@ -174,7 +174,7 @@ export function Renew() {
       const result = await bulletinClient
         .renew(renewalTarget.blockNumber, renewalTarget.index)
         .withCallback(handleProgress)
-        .withWaitFor("finalized")
+        .withWaitFor(WaitFor.Finalized)
         .send();
 
       // Calculate new expiration (retentionPeriod guaranteed non-null at this point)

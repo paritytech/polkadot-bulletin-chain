@@ -22,7 +22,7 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, CidCodec, HashAlgorithm, ProgressEvent, WaitFor } from "@bulletin/sdk";
 import { bytesToHex } from "@/utils/format";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
@@ -130,7 +130,7 @@ export function Upload() {
         .withCodec(cidCodec)
         .withHashAlgorithm(hashAlgorithm)
         .withCallback(handleProgress)
-        .withWaitFor("finalized")
+        .withWaitFor(WaitFor.Finalized)
         .send();
 
       const cidStr = result.cid?.toString() ?? "";

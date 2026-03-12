@@ -71,8 +71,14 @@ export interface Chunk {
 
 /**
  * Transaction confirmation level
+ *
+ * Can be used as a value (`WaitFor.InBlock`) or as a type (`WaitFor`).
  */
 export type WaitFor = "in_block" | "finalized"
+export const WaitFor = {
+  InBlock: "in_block" as const,
+  Finalized: "finalized" as const,
+}
 
 /**
  * Options for storing data

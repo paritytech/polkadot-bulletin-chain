@@ -19,7 +19,7 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, HashAlgorithm, ProgressEvent, WaitFor } from "@bulletin/sdk";
 import { bytesToHex, hexToBytes } from "@/utils/format";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
 import { SS58String, Enum } from "polkadot-api";
@@ -425,7 +425,7 @@ function FaucetAuthorizePreimagePanel() {
       await bulletinClient
         .authorizePreimage(contentHashBytes, sizeValue > 0n ? sizeValue : 1024n * 1024n)
         .withCallback(handleProgress)
-        .withWaitFor("finalized")
+        .withWaitFor(WaitFor.Finalized)
         .send();
 
       setSubmitSuccess("Successfully authorized preimage");
@@ -716,7 +716,7 @@ function FaucetAuthorizeAccountPanel() {
       await bulletinClient
         .authorizeAccount(forWho, txCount, bytesValue)
         .withCallback(handleProgress)
-        .withWaitFor("finalized")
+        .withWaitFor(WaitFor.Finalized)
         .send();
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
