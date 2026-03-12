@@ -2178,6 +2178,7 @@ dependencies = [
  "pallet-balances",
  "pallet-collator-selection",
  "pallet-message-queue",
+ "pallet-proxy",
  "pallet-session",
  "pallet-skip-feeless-payment",
  "pallet-sudo",

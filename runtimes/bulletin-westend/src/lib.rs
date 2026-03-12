@@ -44,7 +44,9 @@ use frame_support::{
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin},
+	traits::{
+		ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, InstanceFilter, TransformOrigin,
+	},
 	weights::{ConstantMultiplier, Weight},
 	PalletId,
 };
@@ -493,6 +495,77 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
+/// Proxy types for the bulletin chain.
+///
+/// - `Any`: Full permissions. Required as the `Default` by pallet-proxy internals.
+/// - `Admin`: Can only manage proxies (add/remove). Is a superset of `Sudo`, so it can
+///   add and remove `Sudo`-type proxies.
+/// - `Sudo`: Can only execute sudo calls. Cannot manage proxies.
+#[derive(
+	Copy,
+	Clone,
+	Eq,
+	PartialEq,
+	Ord,
+	PartialOrd,
+	codec::Encode,
+	codec::Decode,
+	codec::DecodeWithMemTracking,
+	Debug,
+	codec::MaxEncodedLen,
+	scale_info::TypeInfo,
+)]
+pub enum ProxyType {
+	Any,
+	Admin,
+	Sudo,
+}
+
+impl Default for ProxyType {
+	fn default() -> Self {
+		Self::Any
+	}
+}
+
+impl InstanceFilter<RuntimeCall> for ProxyType {
+	fn filter(&self, runtime_call: &RuntimeCall) -> bool {
+		match self {
+			ProxyType::Any => true,
+			ProxyType::Admin => matches!(
+				runtime_call,
+				RuntimeCall::Proxy(pallet_proxy::Call::add_proxy { .. })
+					| RuntimeCall::Proxy(pallet_proxy::Call::remove_proxy { .. })
+			),
+			ProxyType::Sudo => matches!(runtime_call, RuntimeCall::Sudo(..)),
+		}
+	}
+
+	fn is_superset(&self, o: &Self) -> bool {
+		match (self, o) {
+			(x, y) if x == y => true,
+			(ProxyType::Any, _) => true,
+			(ProxyType::Admin, ProxyType::Sudo) => true,
+			_ => false,
+		}
+	}
+}
+
+impl pallet_proxy::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type Currency = pallets_common::NoCurrency<AccountId>;
+	type ProxyType = ProxyType;
+	type ProxyDepositBase = ();
+	type ProxyDepositFactor = ();
+	type MaxProxies = ConstU32<16>;
+	type WeightInfo = pallet_proxy::weights::SubstrateWeight<Runtime>;
+	type MaxPending = ConstU32<0>;
+	type CallHasher = sp_runtime::traits::BlakeTwo256;
+	type AnnouncementDepositBase = ();
+	type AnnouncementDepositFactor = ();
+	type BlockNumberProvider = frame_system::Pallet<Runtime>;
+}
+
 impl pallet_utility::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -533,8 +606,9 @@ construct_runtime!(
 		CumulusXcm: cumulus_pallet_xcm = 32,
 		MessageQueue: pallet_message_queue = 34,
 
-		// Sudo
+		// Sudo & Proxy
 		Sudo: pallet_sudo = 100,
+		Proxy: pallet_proxy = 101,
 	}
 );
 
