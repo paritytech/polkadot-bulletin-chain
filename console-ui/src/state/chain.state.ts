@@ -76,6 +76,8 @@ class NullWebSocket {
 
 // Track the current provider's kill switch so we can silence its reconnection loop
 let killCurrentProvider: (() => void) | null = null;
+// Track the bestBlocks$ subscription so we can clean it up on disconnect/reconnect
+let blockSubscription: { unsubscribe(): void } | null = null;
 
 function createKillableWsProvider(endpoint: string) {
   let killed = false;
@@ -234,8 +236,9 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
       sudoKeySubject.next(undefined);
     }
 
-    // Subscribe to best block
-    client.bestBlocks$.subscribe({
+    // Subscribe to best block (clean up previous subscription first)
+    blockSubscription?.unsubscribe();
+    blockSubscription = client.bestBlocks$.subscribe({
       next: (blocks) => {
         if (blocks.length > 0) {
           blockNumberSubject.next(blocks[0]!.number);
@@ -255,6 +258,8 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
 }
 
 export function disconnect(): void {
+  blockSubscription?.unsubscribe();
+  blockSubscription = null;
   if (killCurrentProvider) {
     killCurrentProvider();
     killCurrentProvider = null;

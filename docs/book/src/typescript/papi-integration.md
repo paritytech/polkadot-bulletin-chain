@@ -25,7 +25,7 @@ import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { AsyncBulletinClient } from '@bulletin/sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
-import { DEV_PHRASE } from '@polkadot-labs/hdkd-helpers';
+import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
 
 // 1. Setup WebSocket connection
 const wsProvider = getWsProvider('ws://localhost:9944');
@@ -35,15 +35,16 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
 // 3. Create signer
-const keyring = sr25519CreateDerive(DEV_PHRASE);
+const derive = sr25519CreateDerive(DEV_MINI_SECRET);
+const aliceKeyPair = derive("//Alice");
 const signer = getPolkadotSigner(
-    keyring.derive("//Alice"),
-    "Alice",
-    42 // Bulletin chain ID
+    aliceKeyPair.publicKey,
+    "Sr25519",
+    aliceKeyPair.sign,
 );
 
-// 4. Create SDK client with PAPI client and signer
-const client = new AsyncBulletinClient(api, signer);
+// 4. Create SDK client with PAPI client, signer, and submit function
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 // 5. Use the client
 const data = new TextEncoder().encode('Hello, Bulletin!');
@@ -76,7 +77,7 @@ const papiClient = createClient(smProvider);
 
 // 4. Get typed API and create SDK client
 const api = papiClient.getTypedApi(bulletinDescriptor);
-const client = new AsyncBulletinClient(api, signer);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 // Use normally - SDK doesn't know or care about the transport!
 const result = await client.store(data).send();
@@ -115,7 +116,7 @@ const bulletinChain = await smoldot.addChain({
 // Create client
 const papiClient = createClient(getSmProvider(bulletinChain));
 const api = papiClient.getTypedApi(bulletinDescriptor);
-const client = new AsyncBulletinClient(api, signer);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 ```
 
 ## Connection Reuse
@@ -133,7 +134,7 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
 // SDK uses the shared client
-const bulletinClient = new AsyncBulletinClient(api, signer);
+const bulletinClient = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 // Your other code also uses the same client
 const blockNumber = await api.query.System.Number.getValue();
@@ -174,22 +175,24 @@ For testing, use dev accounts:
 ```typescript
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
-import { DEV_PHRASE } from '@polkadot-labs/hdkd-helpers';
+import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
 
-const keyring = sr25519CreateDerive(DEV_PHRASE);
+const derive = sr25519CreateDerive(DEV_MINI_SECRET);
 
 // Alice
+const aliceKeyPair = derive("//Alice");
 const aliceSigner = getPolkadotSigner(
-    keyring.derive("//Alice"),
-    "Alice",
-    42
+    aliceKeyPair.publicKey,
+    "Sr25519",
+    aliceKeyPair.sign,
 );
 
 // Bob
+const bobKeyPair = derive("//Bob");
 const bobSigner = getPolkadotSigner(
-    keyring.derive("//Bob"),
-    "Bob",
-    42
+    bobKeyPair.publicKey,
+    "Sr25519",
+    bobKeyPair.sign,
 );
 ```
 
@@ -229,7 +232,7 @@ const extension = await connectInjectedExtension('polkadot-js');
 const accounts = extension.getAccounts();
 
 // Create client with first account
-const client = new AsyncBulletinClient(api, accounts[0].polkadotSigner);
+const client = new AsyncBulletinClient(api, accounts[0].polkadotSigner, papiClient.submit);
 ```
 
 ## Multiple Accounts
@@ -238,40 +241,61 @@ When you need to use different accounts (e.g., Alice for authorization, Bob for 
 
 ```typescript
 // Client for Alice (sudo account)
-const aliceClient = new AsyncBulletinClient(api, aliceSigner);
+const aliceClient = new AsyncBulletinClient(api, aliceSigner, papiClient.submit);
 
 // Client for Bob (regular user)
-const bobClient = new AsyncBulletinClient(api, bobSigner);
+const bobClient = new AsyncBulletinClient(api, bobSigner, papiClient.submit);
 
 // Alice authorizes Bob
 const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
-await aliceClient.authorizeAccount(bobAddress, 100, BigInt(10_000_000));
+await aliceClient.authorizeAccount(bobAddress, 100, BigInt(10_000_000)).send();
 
 // Bob stores data
 const result = await bobClient.store(data).send();
 ```
 
-## Direct Transaction Submission
+## Direct Transaction Preparation
 
-The SDK handles transaction submission internally. However, if you need to submit transactions manually (e.g., for custom batching), you can use PAPI directly:
+For advanced use cases, use `BulletinPreparer` for offline CID calculation without chain interaction.
+
+**Small data** (< 2 MiB) — single transaction:
 
 ```typescript
-// Prepare data with core SDK (BulletinClient)
-import { BulletinClient } from '@bulletin/sdk';
+import { BulletinPreparer } from '@bulletin/sdk';
 
-const prepClient = new BulletinClient({ endpoint: 'ws://localhost:9944' });
-const operation = await prepClient.prepareStore(data);
+const preparer = new BulletinPreparer();
+const prepared = await preparer.prepareStore(smallData);
 
-// Submit via PAPI
+console.log('CID:', prepared.cid.toString());
+
 const tx = api.tx.TransactionStorage.store({
-    data: operation.data
+    data: Binary.fromBytes(prepared.data)
 });
-
-const result = await tx.signAndSubmit(signer);
-const finalized = await result.waitFor('finalized');
-
-console.log('Block hash:', finalized.blockHash);
+await tx.signAndSubmit(signer);
 ```
+
+**Large data** — use `prepareStoreChunked` and submit each chunk separately:
+
+```typescript
+const prepared = await preparer.prepareStoreChunked(largeData);
+
+for (const chunk of prepared.chunks) {
+    const tx = api.tx.TransactionStorage.store({
+        data: Binary.fromBytes(chunk.data)
+    });
+    await tx.signAndSubmit(signer);
+}
+
+if (prepared.manifest) {
+    const tx = api.tx.TransactionStorage.store({
+        data: Binary.fromBytes(prepared.manifest.data)
+    });
+    await tx.signAndSubmit(signer);
+    console.log('Manifest CID:', prepared.manifest.cid.toString());
+}
+```
+
+> For most use cases, prefer `AsyncBulletinClient.store()` which handles chunking, submission, and progress tracking automatically.
 
 ## Error Handling
 
@@ -299,12 +323,10 @@ try {
 Customize client behavior:
 
 ```typescript
-const client = new AsyncBulletinClient(api, signer, {
+const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
     defaultChunkSize: 1024 * 1024, // 1 MiB chunks
-    maxParallel: 8, // Upload 8 chunks in parallel
     createManifest: true, // Create DAG-PB manifest
     chunkingThreshold: 2 * 1024 * 1024, // Auto-chunk files > 2 MiB
-    checkAuthorizationBeforeUpload: true, // Validate auth before upload
 });
 ```
 

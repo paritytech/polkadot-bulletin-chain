@@ -19,7 +19,7 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { ProgressEvent } from "@bulletin/sdk";
+import { ProgressEvent, WaitFor } from "@bulletin/sdk";
 import { bytesToHex } from "@/utils/format";
 
 interface RenewalTarget {
@@ -127,8 +127,8 @@ export function Renew() {
         return;
       }
 
-      // Calculate expiration block
-      const expiresAtBlock = retentionPeriod ? blockNum + retentionPeriod : blockNum;
+      // retentionPeriod is guaranteed non-null here (lookup button is disabled until loaded)
+      const expiresAtBlock = blockNum + retentionPeriod!;
 
       setRenewalTarget({
         blockNumber: blockNum,
@@ -163,7 +163,7 @@ export function Renew() {
           setTxStatus("Transaction signed...");
         } else if (event.type === "broadcasted") {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "best_block") {
+        } else if (event.type === "in_block") {
           setTxStatus(`Included in block #${event.blockNumber}...`);
         } else if (event.type === "finalized") {
           setTxStatus("Finalized!");
@@ -171,15 +171,15 @@ export function Renew() {
       };
 
       // Use SDK to renew with progress callback
-      const result = await bulletinClient.renew(
-        renewalTarget.blockNumber,
-        renewalTarget.index,
-        handleProgress,
-      );
+      const result = await bulletinClient
+        .renew(renewalTarget.blockNumber, renewalTarget.index)
+        .withCallback(handleProgress)
+        .withWaitFor(WaitFor.Finalized)
+        .send();
 
-      // Calculate new expiration
+      // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
-      const newExpiresAt = retentionPeriod ? renewedAtBlock + retentionPeriod : renewedAtBlock;
+      const newExpiresAt = renewedAtBlock + retentionPeriod!;
 
       setRenewalSuccess({
         blockNumber: result.blockNumber,
@@ -301,7 +301,7 @@ export function Renew() {
 
               <Button
                 onClick={handleLookup}
-                disabled={!api || isLookingUp || !blockInput || !indexInput}
+                disabled={!api || isLookingUp || !blockInput || !indexInput || retentionPeriod === null}
                 className="w-full"
               >
                 {isLookingUp ? (

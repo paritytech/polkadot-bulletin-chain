@@ -40,8 +40,6 @@ export enum HashAlgorithm {
 export interface ChunkerConfig {
   /** Size of each chunk in bytes (default: 1 MiB) */
   chunkSize: number
-  /** Maximum number of parallel uploads (default: 8) */
-  maxParallel: number
   /** Whether to create a DAG-PB manifest (default: true) */
   createManifest: boolean
 }
@@ -54,7 +52,6 @@ export interface ChunkerConfig {
  */
 export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
   chunkSize: 1024 * 1024, // 1 MiB (default)
-  maxParallel: 8,
   createManifest: true,
 }
 
@@ -74,8 +71,14 @@ export interface Chunk {
 
 /**
  * Transaction confirmation level
+ *
+ * Can be used as a value (`WaitFor.InBlock`) or as a type (`WaitFor`).
  */
-export type WaitFor = "best_block" | "finalized"
+export type WaitFor = "in_block" | "finalized"
+export const WaitFor = {
+  InBlock: "in_block" as const,
+  Finalized: "finalized" as const,
+}
 
 /**
  * Options for storing data
@@ -86,8 +89,8 @@ export interface StoreOptions {
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm
   /**
-   * What to wait for before returning (default: "best_block")
-   * - "best_block": Return when tx is in a best block (faster, may reorg)
+   * What to wait for before returning (default: "in_block")
+   * - "in_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    */
   waitFor?: WaitFor
@@ -99,7 +102,7 @@ export interface StoreOptions {
 export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
-  waitFor: "best_block",
+  waitFor: "in_block",
 }
 
 /**
@@ -118,13 +121,17 @@ export interface ChunkDetails {
  * This result type works for both single-transaction uploads and chunked uploads.
  * For chunked uploads, the `cid` field contains the manifest CID, and `chunks`
  * contains details about the individual chunks.
+ *
+ * When chunked without a manifest (`withManifest(false)`), `cid` is undefined
+ * and the individual chunk CIDs are in `chunks.chunkCids`.
  */
 export interface StoreResult {
   /** The primary CID of the stored data
    * - For single uploads: CID of the data
-   * - For chunked uploads: CID of the manifest
+   * - For chunked uploads with manifest: CID of the manifest
+   * - For chunked uploads without manifest: undefined
    */
-  cid: CID
+  cid?: CID
   /** Size of the stored data in bytes */
   size: number
   /** Block number where data was stored (if known) */
@@ -152,27 +159,13 @@ export interface ChunkedStoreResult {
 }
 
 /**
- * Authorization scope types
+ * Authorization scope types (mirrors the pallet's AuthorizationScope enum)
  */
 export enum AuthorizationScope {
-  /** Account-based authorization (more flexible) */
+  /** Account-based authorization */
   Account = "Account",
   /** Preimage-based authorization (content-addressed) */
   Preimage = "Preimage",
-}
-
-/**
- * Authorization information
- */
-export interface Authorization {
-  /** The authorization scope */
-  scope: AuthorizationScope
-  /** Number of transactions authorized */
-  transactions: number
-  /** Maximum total size in bytes */
-  maxSize: bigint
-  /** Block number when authorization expires (if known) */
-  expiresAt?: number
 }
 
 /**
@@ -190,19 +183,21 @@ export type ChunkProgressEvent =
  * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
  */
 export type TransactionStatusEvent =
-  | { type: "signed"; txHash: string }
-  | { type: "broadcasted" }
+  | { type: "signed"; txHash: string; chunkIndex?: number }
+  | { type: "broadcasted"; chunkIndex?: number }
   | {
-      type: "best_block"
+      type: "in_block"
       blockHash: string
       blockNumber: number
       txIndex?: number
+      chunkIndex?: number
     }
   | {
       type: "finalized"
       blockHash: string
       blockNumber: number
       txIndex?: number
+      chunkIndex?: number
     }
 
 /**
@@ -233,18 +228,11 @@ export class BulletinError extends Error {
  * Client configuration
  */
 export interface ClientConfig {
-  /** RPC endpoint URL */
-  endpoint: string
   /** Default chunk size for large files (default: 1 MiB) */
   defaultChunkSize?: number
-  /** Maximum parallel uploads (default: 8) */
-  maxParallel?: number
   /** Whether to create manifests for chunked uploads (default: true) */
   createManifest?: boolean
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
-  /** Check authorization before uploading to fail fast (default: true).
-   * Queries blockchain for current authorization and validates before submission. */
-  checkAuthorizationBeforeUpload?: boolean
 }

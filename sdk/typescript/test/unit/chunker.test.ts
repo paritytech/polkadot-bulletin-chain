@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 import { describe, expect, it } from "vitest"
-import { type ChunkerConfig, FixedSizeChunker } from "../../src/chunker"
+import { FixedSizeChunker, reassembleChunks } from "../../src/chunker"
 
 describe("Chunker", () => {
   it("should chunk data correctly with default config", () => {
     const data = new Uint8Array(5 * 1024 * 1024).fill(0xaa) // 5 MiB
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 1024 * 1024, // 1 MiB
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -27,9 +27,9 @@ describe("Chunker", () => {
 
   it("should handle data smaller than chunk size", () => {
     const data = new Uint8Array(512 * 1024).fill(0xbb) // 512 KiB
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 1024 * 1024, // 1 MiB
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -44,9 +44,9 @@ describe("Chunker", () => {
 
   it("should handle data with partial last chunk", () => {
     const data = new Uint8Array(2.5 * 1024 * 1024).fill(0xcc) // 2.5 MiB
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 1024 * 1024, // 1 MiB
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -60,9 +60,9 @@ describe("Chunker", () => {
   })
 
   it("should calculate total chunks correctly", () => {
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 1024 * 1024, // 1 MiB
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -75,9 +75,9 @@ describe("Chunker", () => {
   })
 
   it("should throw error for chunk size exceeding maximum", () => {
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 10 * 1024 * 1024, // 10 MiB > MAX (2 MiB)
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -85,9 +85,9 @@ describe("Chunker", () => {
   })
 
   it("should calculate chunks correctly for 64 MiB file", () => {
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 2 * 1024 * 1024, // 2 MiB (MAX_CHUNK_SIZE)
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -100,9 +100,9 @@ describe("Chunker", () => {
   })
 
   it("should throw error for zero chunk size", () => {
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 0,
-      maxParallel: 8,
+
       createManifest: true,
     }
 
@@ -115,23 +115,24 @@ describe("Chunker", () => {
       data[i] = i % 256
     }
 
-    const config: ChunkerConfig = {
+    const config = {
       chunkSize: 1024 * 1024,
-      maxParallel: 8,
+
       createManifest: true,
     }
 
     const chunker = new FixedSizeChunker(config)
     const chunks = chunker.chunk(data)
 
-    // Reassemble and verify
-    const reassembled = new Uint8Array(data.length)
-    let offset = 0
-    for (const chunk of chunks) {
-      reassembled.set(chunk.data, offset)
-      offset += chunk.data.length
-    }
-
+    const reassembled = reassembleChunks(chunks)
     expect(reassembled).toEqual(data)
+  })
+
+  it("should throw on missing chunk index during reassembly", () => {
+    const chunks = [
+      { data: new Uint8Array([1]), index: 0, totalChunks: 3 },
+      { data: new Uint8Array([3]), index: 2, totalChunks: 3 },
+    ]
+    expect(() => reassembleChunks(chunks)).toThrow("Missing chunk at index 1")
   })
 })

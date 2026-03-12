@@ -16,10 +16,10 @@ const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
-// 2. Create client with PAPI client and signer
-const client = new AsyncBulletinClient(api, signer);
+// 2. Create client with PAPI client, signer, and submit function
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
-// 3. Store data using builder pattern (automatically chunks if > 8 MiB, max 64 MiB)
+// 3. Store data using builder pattern (automatically chunks if > 2 MiB, max 64 MiB)
 const data = Binary.fromText('Hello, Bulletin Chain!');
 const result = await client.store(data).send();
 
@@ -48,12 +48,12 @@ const api = papiClient.getTypedApi(bulletinDescriptor);
 
 ### 2. Create Client
 
-Create the SDK client with PAPI client and signer:
+Create the SDK client with PAPI client, signer, and submit function:
 
 ```typescript
 import { AsyncBulletinClient } from '@bulletin/sdk';
 
-const client = new AsyncBulletinClient(api, signer);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 ```
 
 ### 3. Prepare Data
@@ -80,11 +80,10 @@ const data = Binary.fromBytes(Buffer.from('Hello'));
 
 The `store()` method with builder pattern handles everything:
 - Validates data size (max 64 MiB)
-- Checks authorization (if configured)
-- Automatically chunks large files into 8 MiB chunks
+- Automatically chunks large files (default threshold: 2 MiB, max chunk size: 2 MiB)
 - Calculates CID(s)
 - Submits transaction(s)
-- Waits for finalization
+- Waits for block inclusion
 
 ```typescript
 // Basic store
@@ -95,7 +94,7 @@ const result = await client
     .store(data)
     .withCodec(CidCodec.Raw)
     .withHashAlgorithm(HashAlgorithm.Blake2b256)
-    .withFinalization(true)
+    .withWaitFor("finalized")
     .send();
 
 // With progress tracking for large files
@@ -125,48 +124,7 @@ if (result.chunks) {
 }
 ```
 
-## Authorization Checking (Fail Fast)
-
-By default, the SDK checks authorization **before** uploading to fail fast and avoid wasted transaction fees.
-
-### How It Works
-
-```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
-import { Binary } from 'polkadot-api';
-
-// 1. Create client with your account
-const account = 'your-account-address';
-
-const client = new AsyncBulletinClient(api, signer)
-    .withAccount(account);  // Set the account for auth checking
-
-// 2. Upload - authorization is checked automatically
-const data = Binary.fromText('Hello, Bulletin!');
-const result = await client.store(data).send();
-//                       ⬆️ Queries blockchain first, fails fast if insufficient auth
-```
-
-### What Gets Checked
-
-Before submitting the transaction, the SDK:
-1. **Queries** the blockchain for your current authorization
-2. **Validates** you have enough transactions and bytes authorized
-3. **Checks expiration** - fails if authorization has expired
-4. **Fails immediately** if insufficient (no transaction fees wasted!)
-5. **Proceeds** only if authorization is sufficient
-
-### Disable Authorization Checking
-
-If you want to skip the check (e.g., you know authorization exists):
-
-```typescript
-const client = new AsyncBulletinClient(api, signer, {
-    checkAuthorizationBeforeUpload: false,  // Disable checking
-}).withAccount(account);
-```
-
-### Error Example
+## Error Handling
 
 ```typescript
 import { BulletinError } from '@bulletin/sdk';
@@ -192,7 +150,7 @@ try {
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient, BulletinError } from '@bulletin/sdk';
 import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -200,10 +158,7 @@ const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
-// Create client with account for authorization checking
-const account = 'your-account-address';
-const client = new AsyncBulletinClient(api, signer)
-    .withAccount(account);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 // Estimate what's needed
 const data = Binary.fromBytes(new Uint8Array(5_000_000)); // 5 MB
@@ -211,23 +166,17 @@ const estimate = client.estimateAuthorization(data.asBytes().length);
 console.log('Need authorization for', estimate.transactions, 'txs and', estimate.bytes, 'bytes');
 
 // Authorize (if needed - requires sudo)
-// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes));
+const account = 'your-account-address';
+// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes)).withSudo().send();
 
 try {
-    // Store - will check authorization automatically
     const result = await client.store(data).send();
-    console.log('✅ Stored:', result.cid.toString());
+    console.log('Stored:', result.cid.toString());
 } catch (error) {
     if (error instanceof BulletinError) {
-        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
-            console.error('❌ Insufficient authorization');
-            console.error('   Please authorize your account first');
-        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-            console.error('❌ Authorization expired');
-            console.error('   Please refresh your authorization');
-        }
+        console.error('Error:', error.code, error.message);
     } else {
-        console.error('❌ Error:', error);
+        console.error('Error:', error);
     }
 }
 ```

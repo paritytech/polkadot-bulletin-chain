@@ -22,7 +22,7 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, CidCodec, HashAlgorithm, ProgressEvent } from "@bulletin/sdk";
+import { getContentHash, CidCodec, HashAlgorithm, ProgressEvent, WaitFor } from "@bulletin/sdk";
 import { bytesToHex } from "@/utils/format";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
@@ -117,7 +117,7 @@ export function Upload() {
           setTxStatus("Transaction signed...");
         } else if (event.type === "broadcasted") {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "best_block") {
+        } else if (event.type === "in_block") {
           setTxStatus(`Included in block #${event.blockNumber}...`);
         } else if (event.type === "finalized") {
           setTxStatus("Finalized!");
@@ -130,10 +130,12 @@ export function Upload() {
         .withCodec(cidCodec)
         .withHashAlgorithm(hashAlgorithm)
         .withCallback(handleProgress)
+        .withWaitFor(WaitFor.Finalized)
         .send();
 
+      const cidStr = result.cid?.toString() ?? "";
       const uploadResultData: UploadResult = {
-        cid: result.cid.toString(),
+        cid: cidStr,
         contentHash: contentHashHex,
         blockHash: undefined, // SDK doesn't expose this currently
         blockNumber: result.blockNumber,
@@ -148,7 +150,7 @@ export function Upload() {
         addStorageEntry({
           blockNumber: result.blockNumber,
           index: result.extrinsicIndex,
-          cid: result.cid.toString(),
+          cid: cidStr,
           contentHash: contentHashHex,
           size: result.size,
           account: selectedAccount.address,

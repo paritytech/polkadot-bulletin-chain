@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 import { describe, expect, it } from "vitest"
-import { BulletinClient } from "../../src/client"
-import { BulletinError, HashAlgorithm } from "../../src/types"
+import { BulletinPreparer } from "../../src/preparer"
+import { BulletinError, type HashAlgorithm } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
 describe("Error Handling", () => {
@@ -92,26 +92,38 @@ describe("Error Handling", () => {
 
   describe("Client Error Handling", () => {
     it("should throw BulletinError for empty data in prepareStore", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
+      const preparer = new BulletinPreparer()
 
-      await expect(client.prepareStore(new Uint8Array(0))).rejects.toThrow(
+      await expect(preparer.prepareStore(new Uint8Array(0))).rejects.toThrow(
         BulletinError,
       )
       await expect(
-        client.prepareStore(new Uint8Array(0)),
+        preparer.prepareStore(new Uint8Array(0)),
       ).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
     })
 
+    it("should throw DATA_TOO_LARGE for data exceeding chunkingThreshold in prepareStore", async () => {
+      const preparer = new BulletinPreparer({ chunkingThreshold: 1024 })
+      const oversized = new Uint8Array(1025)
+
+      await expect(preparer.prepareStore(oversized)).rejects.toThrow(
+        BulletinError,
+      )
+      await expect(preparer.prepareStore(oversized)).rejects.toMatchObject({
+        code: "DATA_TOO_LARGE",
+      })
+    })
+
     it("should throw BulletinError for empty data in prepareStoreChunked", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
+      const preparer = new BulletinPreparer()
 
       await expect(
-        client.prepareStoreChunked(new Uint8Array(0)),
+        preparer.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toThrow(BulletinError)
       await expect(
-        client.prepareStoreChunked(new Uint8Array(0)),
+        preparer.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toMatchObject({
         code: "EMPTY_DATA",
       })
@@ -149,10 +161,10 @@ describe("Error Handling", () => {
 
   describe("Error Message Quality", () => {
     it("should include useful context in error messages", async () => {
-      const client = new BulletinClient({ endpoint: "ws://localhost:9944" })
+      const preparer = new BulletinPreparer()
 
       try {
-        await client.prepareStore(new Uint8Array(0))
+        await preparer.prepareStore(new Uint8Array(0))
         expect.fail("Should have thrown")
       } catch (error) {
         expect(error).toBeInstanceOf(BulletinError)
