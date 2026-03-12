@@ -7,7 +7,7 @@ use futures::StreamExt;
 use sc_client_api::{BlockchainEvents, StorageProvider};
 use sp_core::storage::StorageKey;
 use sp_runtime::traits::Header;
-use substrate_prometheus_endpoint::{register, Counter, Gauge, PrometheusError, Registry, U64};
+use substrate_prometheus_endpoint::{register, Gauge, PrometheusError, Registry, U64};
 
 use crate::{node_primitives::Block, service::FullClient};
 
@@ -18,8 +18,8 @@ pub struct BulletinMetrics {
 	pub block_store_transactions: Gauge<U64>,
 	/// Bytes stored in the latest block.
 	pub block_store_bytes: Gauge<U64>,
-	/// Number of storage proof generation failures on this validator.
-	pub proof_generation_failures: Counter<U64>,
+	/// Whether proof generation failed on the last attempt (0 = ok, 1 = failed).
+	pub proof_generation_failed: Gauge<U64>,
 }
 
 impl BulletinMetrics {
@@ -39,10 +39,10 @@ impl BulletinMetrics {
 				)?,
 				registry,
 			)?,
-			proof_generation_failures: register(
-				Counter::new(
-					"bulletin_proof_generation_failures_total",
-					"Number of storage proof generation failures on this validator",
+			proof_generation_failed: register(
+				Gauge::new(
+					"bulletin_proof_generation_failed",
+					"Whether proof generation failed on the last attempt (0 = ok, 1 = failed)",
 				)?,
 				registry,
 			)?,

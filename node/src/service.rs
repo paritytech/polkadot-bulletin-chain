@@ -346,10 +346,14 @@ pub fn new_full<
 						)
 						.map_err(|e| {
 							if let Some(ref metrics) = proof_failure_metrics {
-								metrics.proof_generation_failures.inc();
+								metrics.proof_generation_failed.set(1);
 							}
 							e
 						})?;
+
+					if let Some(ref metrics) = proof_failure_metrics {
+						metrics.proof_generation_failed.set(0);
+					}
 
 					Ok((slot, timestamp, storage_proof))
 				}
