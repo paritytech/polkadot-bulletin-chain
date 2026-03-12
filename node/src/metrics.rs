@@ -18,6 +18,12 @@ pub struct BulletinMetrics {
 	pub block_store_transactions: Gauge<U64>,
 	/// Bytes stored in the latest block.
 	pub block_store_bytes: Gauge<U64>,
+	/// Number of renew transactions in the latest block.
+	pub block_renew_transactions: Gauge<U64>,
+	/// Bytes renewed in the latest block.
+	pub block_renew_bytes: Gauge<U64>,
+	/// Number of registered validators.
+	pub registered_validators: Gauge<U64>,
 	/// Whether proof generation failed on the last attempt (0 = ok, 1 = failed).
 	pub proof_generation_failed: Gauge<U64>,
 }
@@ -36,6 +42,27 @@ impl BulletinMetrics {
 				Gauge::new(
 					"bulletin_block_store_bytes",
 					"Bytes of data stored in the latest block",
+				)?,
+				registry,
+			)?,
+			block_renew_transactions: register(
+				Gauge::new(
+					"bulletin_block_renew_transactions",
+					"Number of data renew transactions in the latest block",
+				)?,
+				registry,
+			)?,
+			block_renew_bytes: register(
+				Gauge::new(
+					"bulletin_block_renew_bytes",
+					"Bytes of data renewed in the latest block",
+				)?,
+				registry,
+			)?,
+			registered_validators: register(
+				Gauge::new(
+					"bulletin_registered_validators",
+					"Number of registered validators in the validator set",
 				)?,
 				registry,
 			)?,
@@ -62,6 +89,14 @@ fn transactions_storage_key(block_number: u32) -> StorageKey {
 	StorageKey(key)
 }
 
+/// Compute the raw storage key for a simple StorageValue (pallet_prefix, storage_name).
+fn storage_value_key(pallet: &[u8], name: &[u8]) -> StorageKey {
+	let mut key = Vec::with_capacity(32);
+	key.extend_from_slice(&sp_core::hashing::twox_128(pallet));
+	key.extend_from_slice(&sp_core::hashing::twox_128(name));
+	StorageKey(key)
+}
+
 /// Read the stored transaction count and total bytes for a block from on-chain storage.
 fn read_block_transactions(
 	client: &FullClient,
@@ -77,12 +112,36 @@ fn read_block_transactions(
 	Some((count, bytes))
 }
 
+/// Read a SCALE-encoded u32 StorageValue.
+fn read_u32_storage(
+	client: &FullClient,
+	block_hash: <Block as sp_runtime::traits::Block>::Hash,
+	key: &StorageKey,
+) -> Option<u32> {
+	let data = client.storage(block_hash, key).ok()??;
+	u32::decode(&mut &data.0[..]).ok()
+}
+
+/// Read a SCALE-encoded u64 StorageValue.
+fn read_u64_storage(
+	client: &FullClient,
+	block_hash: <Block as sp_runtime::traits::Block>::Hash,
+	key: &StorageKey,
+) -> Option<u64> {
+	let data = client.storage(block_hash, key).ok()??;
+	u64::decode(&mut &data.0[..]).ok()
+}
+
 /// Spawn a background task that updates Bulletin metrics on each imported block.
 pub fn spawn_metrics_task(
 	task_manager: &sc_service::TaskManager,
 	client: Arc<FullClient>,
 	metrics: BulletinMetrics,
 ) {
+	let num_validators_key = storage_value_key(b"ValidatorSet", b"NumValidators");
+	let renew_count_key = storage_value_key(b"TransactionStorage", b"BlockRenewCount");
+	let renew_bytes_key = storage_value_key(b"TransactionStorage", b"BlockRenewBytes");
+
 	let task = async move {
 		let mut stream = client.import_notification_stream();
 		while let Some(notification) = stream.next().await {
@@ -92,6 +151,7 @@ pub fn spawn_metrics_task(
 			let block_hash = notification.hash;
 			let block_number = *notification.header.number();
 
+			// Store transactions and bytes (combined store + renew from Transactions map).
 			match read_block_transactions(&client, block_hash, block_number) {
 				Some((count, bytes)) => {
 					metrics.block_store_transactions.set(count);
@@ -102,6 +162,19 @@ pub fn spawn_metrics_task(
 					metrics.block_store_bytes.set(0);
 				},
 			}
+
+			// Renew transactions and bytes.
+			metrics
+				.block_renew_transactions
+				.set(read_u32_storage(&client, block_hash, &renew_count_key).unwrap_or(0) as u64);
+			metrics
+				.block_renew_bytes
+				.set(read_u64_storage(&client, block_hash, &renew_bytes_key).unwrap_or(0));
+
+			// Registered validators.
+			metrics
+				.registered_validators
+				.set(read_u32_storage(&client, block_hash, &num_validators_key).unwrap_or(0) as u64);
 		}
 	};
 
