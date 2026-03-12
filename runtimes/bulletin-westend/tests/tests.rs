@@ -849,6 +849,258 @@ fn authorized_wrapped_store_succeeds() {
 		});
 }
 
+/// Batch containing two store calls where one uses preimage authorization and the other
+/// uses account authorization. Both authorizations should be properly consumed.
+#[test]
+fn batch_store_with_mixed_preimage_and_account_auth() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+
+			// Fund Alice for batch fee overhead.
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			let data_a = vec![42u8; 100];
+			let data_b = vec![99u8; 200];
+			let content_hash_a = sp_io::hashing::blake2_256(&data_a);
+
+			// Authorize preimage for data_a only.
+			assert_ok!(TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash_a,
+				data_a.len() as u64,
+			));
+
+			// Authorize account for data_b (1 transaction, enough bytes).
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1,
+				data_b.len() as u64,
+			));
+
+			let store_a =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data_a });
+			let store_b =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data_b });
+
+			let batch =
+				RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_a, store_b] });
+
+			// Batch should succeed — store_a uses preimage auth, store_b uses account auth.
+			let res = construct_and_apply_extrinsic(Some(account.pair()), batch);
+			assert!(res.is_ok(), "apply_extrinsic failed: {res:?}");
+			assert!(res.unwrap().is_ok(), "dispatch failed");
+
+			// Both authorizations should be consumed.
+			assert_eq!(
+				TransactionStorage::preimage_authorization_extent(content_hash_a),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Preimage authorization for data_a should be consumed",
+			);
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Account authorization for data_b should be consumed",
+			);
+		});
+}
+
+// NOTE: The following preimage/renew/authorize tests mirror those in
+// bulletin-polkadot/tests/tests.rs. Keep in sync when modifying.
+
+/// Preimage authorization allows anyone to store pre-authorized content.
+#[test]
+fn preimage_authorized_storage_transactions_work() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+
+			// Fund Alice for transaction fees (westend has fees unlike polkadot).
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			let data = vec![0u8; 24];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			// Not authorized (no account or preimage auth) should fail to store.
+			assert_eq!(
+				construct_and_apply_extrinsic(Some(account.pair()), call.clone()),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Payment))
+			);
+
+			// Authorize preimage (not account).
+			assert_ok!(TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash,
+				data.len() as u64,
+			));
+
+			// Now should work via preimage authorization.
+			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
+
+			// Verify preimage authorization was consumed.
+			assert_eq!(
+				TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+		});
+}
+
+/// When both preimage and account authorizations exist, preimage takes priority.
+#[test]
+fn signed_store_prefers_preimage_authorization_over_account() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![0u8; 100];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			// Setup: authorize both account and preimage
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				5,
+				500,
+			));
+			assert_ok!(TransactionStorage::authorize_preimage(
+				RuntimeOrigin::root(),
+				content_hash,
+				data.len() as u64,
+			));
+
+			// Store data
+			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
+
+			// Verify: preimage authorization was consumed, account authorization unchanged
+			assert_eq!(
+				TransactionStorage::preimage_authorization_extent(content_hash),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Preimage authorization should be consumed"
+			);
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 5, bytes: 500 },
+				"Account authorization should remain unchanged when preimage auth is used"
+			);
+		});
+}
+
+/// Renew calls wrapped in utility/sudo require authorization, same as store.
+#[test]
+fn wrapped_renew_requires_authorization() {
+	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
+	pallet_transaction_storage::GenesisConfig::<Runtime> {
+		retention_period: 100,
+		byte_fee: 0,
+		entry_fee: 0,
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![42u8; 100];
+
+		// Fund for fees and authorize a store.
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
+		));
+		let stored_block = System::block_number();
+
+		advance_block();
+
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+			block: stored_block,
+			index: 0,
+		});
+
+		// Direct + utility wrappers: rejected at validation time (no authorization for renew).
+		assert_rejected_at_validation(
+			account,
+			renew_call.clone(),
+			TransactionValidityError::Invalid(InvalidTransaction::Payment),
+			"renew",
+		);
+
+		// sudo_as: inner renew is checked for TransactionStorage auth at validation.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(who),
+					call: Box::new(renew_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+		);
+	});
+}
+
+/// Non-authorizers cannot authorize_account even via batch.
+#[test]
+fn wrapped_authorize_account_requires_authorizer_origin() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			// Bob is not an Authorizer (only Alice is in TestAccounts).
+			let attacker = Sr25519Keyring::Bob;
+			let who: AccountId = attacker.to_account_id();
+
+			// Fund for fees.
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: who.clone(),
+					transactions: 5,
+					bytes: 1024,
+				});
+
+			// Direct: rejected at validation (BadSigner).
+			assert_eq!(
+				construct_and_apply_extrinsic(Some(attacker.pair()), call.clone()),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
+			);
+
+			// Via batch: batch itself is valid, but the inner authorize_account must
+			// fail at dispatch (origin is not Authorizer). Verify via storage state.
+			let batch_call =
+				RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
+			let _ = construct_and_apply_extrinsic(Some(attacker.pair()), batch_call);
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"authorize_account via batch must not succeed for non-Authorizer",
+			);
+		});
+}
+
 /// Wrapping `authorize_account` in `batch_all` must not break the authorization.
 /// The origin must remain `Signed` (not transformed to `Authorized`) so that
 /// `T::Authorizer::ensure_origin()` succeeds at dispatch time.

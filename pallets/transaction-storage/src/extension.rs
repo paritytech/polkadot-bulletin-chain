@@ -254,12 +254,12 @@ where
 			combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
 			match scope {
 				// Store/renew calls return a scope and need the Authorized origin.
+				// Keep the first scope — different calls in a batch may resolve to
+				// different scopes (Preimage vs Account), but the scope value is only
+				// used to satisfy `ensure_authorized` at dispatch, which checks the
+				// origin type, not the scope variant.
 				Some(s) => {
-					debug_assert!(
-						authorized_scope.is_none() || authorized_scope.as_ref() == Some(&s),
-						"Multiple store/renew calls in a batch returned different scopes"
-					);
-					authorized_scope = Some(s);
+					authorized_scope.get_or_insert(s);
 				},
 				// Authorization management calls (authorize_*, refresh_*,
 				// remove_expired_*) return None and need the original Signed origin.

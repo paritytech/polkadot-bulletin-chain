@@ -1388,6 +1388,37 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 	});
 }
 
+/// Wrapping `authorize_account` in `batch_all` must not break the authorization.
+/// The origin must remain `Signed` (not transformed to `Authorized`) so that
+/// `T::Authorizer::ensure_origin()` succeeds at dispatch time.
+#[test]
+fn wrapped_authorize_account_succeeds() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let target: AccountId = non_relay_signer().to_account_id();
+
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+			who: target.clone(),
+			transactions: 5,
+			bytes: 1024,
+		});
+
+		let batch_call =
+			RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: vec![call] });
+		let res = construct_and_apply_extrinsic(signer.pair(), batch_call);
+		assert!(res.is_ok(), "apply_extrinsic failed: {res:?}");
+		assert!(res.unwrap().is_ok(), "dispatch failed");
+
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(target),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+			"authorize_account via batch_all must create authorization",
+		);
+	});
+}
+
 #[test]
 fn authorized_wrapped_store_succeeds() {
 	run_test(|| {
@@ -1442,6 +1473,61 @@ fn authorized_wrapped_store_succeeds() {
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+/// Batch containing two store calls where one uses preimage authorization and the other
+/// uses account authorization. Both authorizations should be properly consumed.
+#[test]
+fn batch_store_with_mixed_preimage_and_account_auth() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+
+		let data_a = vec![42u8; 100];
+		let data_b = vec![99u8; 200];
+		let content_hash_a = sp_io::hashing::blake2_256(&data_a);
+
+		// Authorize preimage for data_a only.
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash_a,
+			data_a.len() as u64,
+		));
+
+		// Authorize account for data_b (1 transaction, enough bytes).
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data_b.len() as u64,
+		));
+
+		let store_a =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data_a });
+		let store_b =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data_b });
+
+		let batch =
+			RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_a, store_b] });
+
+		// Batch should succeed — store_a uses preimage auth, store_b uses account auth.
+		let res = construct_and_apply_extrinsic(signer.pair(), batch);
+		assert!(res.is_ok(), "apply_extrinsic failed: {res:?}");
+		assert!(res.unwrap().is_ok(), "dispatch failed");
+
+		// Both authorizations should be consumed.
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash_a),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Preimage authorization for data_a should be consumed",
+		);
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"Account authorization for data_b should be consumed",
 		);
 	});
 }
