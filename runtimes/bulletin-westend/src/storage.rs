@@ -20,7 +20,7 @@ use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
 use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, Equals, SortedMembers},
+	traits::{Contains, EitherOfDiverse, Equals, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
 use pallet_xcm::EnsureXcm;
@@ -50,6 +50,10 @@ parameter_types! {
 
 /// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
 /// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+///
+/// Also implements [`Contains<RuntimeCall>`] for use as the XCM `SafeCallFilter`, blocking
+/// storage-mutating TransactionStorage calls (store, store_with_cid_config, renew) from XCM
+/// dispatch — those require on-chain authorization that XCM cannot provide.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct RuntimeCallInspector;
 
@@ -60,6 +64,14 @@ impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspe
 			RuntimeCall::Sudo(c) => inspect_sudo_wrapper(c),
 			_ => None,
 		}
+	}
+}
+
+/// XCM `SafeCallFilter`: allows all calls except storage-mutating TransactionStorage calls.
+/// Recursively inspects wrapper calls (Utility, Sudo) to prevent bypass via nesting.
+impl Contains<RuntimeCall> for RuntimeCallInspector {
+	fn contains(call: &RuntimeCall) -> bool {
+		!pallet_transaction_storage::is_storage_mutating_call::<Runtime, Self>(call, 0)
 	}
 }
 

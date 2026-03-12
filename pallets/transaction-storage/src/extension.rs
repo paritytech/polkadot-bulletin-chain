@@ -29,8 +29,49 @@ use polkadot_sdk_frame::{
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
+/// Result of [`ValidateStorageCalls::traverse_storage_calls`].
+#[derive(Default)]
+struct TraverseResult {
+	/// Whether any TransactionStorage pallet calls were visited.
+	found_storage: bool,
+	/// Whether the outermost wrapper preserves the caller's origin (e.g. batch).
+	preserves_origin: bool,
+	/// Whether any non-storage, non-wrapper calls were found in the call tree.
+	has_non_storage: bool,
+}
+
 /// Maximum recursion depth for inspecting wrapper calls.
 pub const MAX_WRAPPER_DEPTH: u32 = 8;
+
+/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
+/// store_with_cid_config, renew) — either directly or nested inside wrappers.
+///
+/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
+/// [`CallInspector`] provides the wrapper-recursion logic, so this function
+/// works for any runtime without duplicating the blocked-call list.
+pub fn is_storage_mutating_call<T: Config, I: CallInspector<RuntimeCallOf<T>>>(
+	call: &RuntimeCallOf<T>,
+	depth: u32,
+) -> bool
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+{
+	if depth >= MAX_WRAPPER_DEPTH {
+		return true;
+	}
+	if let Some(inner_call) = call.is_sub_type() {
+		return matches!(
+			inner_call,
+			Call::store { .. } | Call::store_with_cid_config { .. } | Call::renew { .. }
+		);
+	}
+	if let Some((inner_calls, _)) = I::inspect_wrapper(call) {
+		return inner_calls
+			.into_iter()
+			.any(|inner| is_storage_mutating_call::<T, I>(inner, depth + 1));
+	}
+	false
+}
 
 /// Tells [`ValidateStorageCalls`] how to find storage calls inside wrapper
 /// extrinsics (e.g. `Utility::batch`, `Sudo::sudo_as`).
@@ -107,32 +148,37 @@ where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,
 {
 	/// Recursively traverse a call tree, applying `visitor` to each storage call found.
-	/// Returns `(found_storage, preserves_origin)`:
+	///
+	/// Returns [`TraverseResult`] with:
 	/// - `found_storage`: whether any storage calls were visited
 	/// - `preserves_origin`: whether the outermost wrapper preserves the caller's origin
+	/// - `has_non_storage`: whether any non-storage, non-wrapper calls were found
 	fn traverse_storage_calls(
 		call: &RuntimeCallOf<T>,
 		depth: u32,
 		visitor: &mut impl FnMut(&Call<T>) -> Result<(), TransactionValidityError>,
-	) -> Result<(bool, bool), TransactionValidityError> {
+	) -> Result<TraverseResult, TransactionValidityError> {
 		if let Some(inner_call) = call.is_sub_type() {
 			visitor(inner_call)?;
-			return Ok((true, false));
+			// Direct storage call — `preserves_origin` doesn't matter here because
+			// `validate()` already handles origin transformation for direct calls
+			// before calling `traverse_storage_calls`.
+			return Ok(TraverseResult { found_storage: true, ..Default::default() });
 		}
 		if let Some((inner_calls, preserves_origin)) = I::inspect_wrapper(call) {
 			if depth >= MAX_WRAPPER_DEPTH {
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
-			let mut found = false;
+			let mut result = TraverseResult { preserves_origin, ..Default::default() };
 			for inner in inner_calls {
-				let (inner_found, _) = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
-				if inner_found {
-					found = true;
-				}
+				let inner_result = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
+				result.found_storage |= inner_result.found_storage;
+				result.has_non_storage |= inner_result.has_non_storage;
 			}
-			return Ok((found, preserves_origin));
+			return Ok(result);
 		}
-		Ok((false, false))
+		// Not a storage call and not a wrapper — a non-storage call.
+		Ok(TraverseResult { has_non_storage: true, ..Default::default() })
 	}
 }
 
@@ -199,26 +245,48 @@ where
 		// Accumulate ValidTransaction metadata (provides tags, priority, longevity) from
 		// each inner storage call so the mempool can deduplicate and prioritize correctly.
 		let mut combined_valid = ValidTransaction::default();
-		let mut needs_authorized_origin = false;
-		let (has_storage, preserves_origin) =
-			Self::traverse_storage_calls(call, 0, &mut |inner_call| {
-				let (valid_tx, scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
-				combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
-				// Only store/renew calls return a scope; authorization management calls
-				// (authorize_*, refresh_*, remove_expired_*) return None and need the
-				// original Signed origin at dispatch for T::Authorizer checks.
-				if scope.is_some() {
-					needs_authorized_origin = true;
+		let mut authorized_scope: Option<AuthorizationScope<T::AccountId>> = None;
+		let mut has_management_call = false;
+		let result = Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+			let (valid_tx, scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
+			combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
+			match scope {
+				// Store/renew calls return a scope and need the Authorized origin.
+				Some(s) => {
+					debug_assert!(
+						authorized_scope.is_none() || authorized_scope.as_ref() == Some(&s),
+						"Multiple store/renew calls in a batch returned different scopes"
+					);
+					authorized_scope = Some(s);
+				},
+				// Authorization management calls (authorize_*, refresh_*,
+				// remove_expired_*) return None and need the original Signed origin.
+				None => {
+					has_management_call = true;
+				},
+			}
+			Ok(())
+		})?;
+		if result.found_storage {
+			if authorized_scope.is_some() &&
+				(result.has_non_storage || has_management_call) &&
+				result.preserves_origin
+			{
+				// Reject batches that mix store/renew with other calls.
+				// Store/renew needs the origin transformed to Authorized, but other
+				// calls (both non-storage and authorization management) need the
+				// original Signed origin. Allowing both in an origin-preserving
+				// wrapper would cause:
+				// - silent dispatch failure of the non-storage calls (with `batch`), or
+				// - authorization leak where `prepare` consumes the allowance but `batch_all`
+				//   reverts the store's writes after a later call fails.
+				return Err(InvalidTransaction::Call.into());
+			}
+			if result.preserves_origin {
+				if let Some(scope) = authorized_scope {
+					// Transform origin so inner store/renew dispatches see Authorized.
+					origin.set_caller_from(Origin::<T>::Authorized { who: who.clone(), scope });
 				}
-				Ok(())
-			})?;
-		if has_storage {
-			if preserves_origin && needs_authorized_origin {
-				// Transform origin so inner store/renew dispatches see Authorized.
-				origin.set_caller_from(Origin::<T>::Authorized {
-					who: who.clone(),
-					scope: AuthorizationScope::Account(who.clone()),
-				});
 			}
 			return Ok((combined_valid, Some(who), origin));
 		}

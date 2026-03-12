@@ -139,7 +139,7 @@ pub enum AuthorizedCaller<AccountId> {
 /// Convenience alias for [`AuthorizedCaller`] bound to a runtime's `AccountId`.
 pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::AccountId>;
 
-pub use extension::{CallInspector, MAX_WRAPPER_DEPTH};
+pub use extension::{is_storage_mutating_call, CallInspector, MAX_WRAPPER_DEPTH};
 
 /// An authorization to store data.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]

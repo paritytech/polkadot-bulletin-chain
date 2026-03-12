@@ -1467,3 +1467,127 @@ fn wrapped_call_respects_validate_signed_allowlist() {
 		// protect against unauthorized operations through those paths.
 	});
 }
+
+/// Batch mixing store (needs Authorized origin) with authorize_account (needs Signed origin)
+/// is rejected at validation time to prevent silent dispatch failures or authorization leaks
+/// with `batch_all`.
+#[test]
+fn mixed_batch_store_and_authorize_rejected() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let target: AccountId = non_relay_signer().to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize one store.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		let authorize_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+				who: target.clone(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		// Mixing store + authorize_account in a batch is rejected at validation.
+		for batch_variant in [
+			RuntimeCall::Utility(pallet_utility::Call::batch {
+				calls: vec![store_call.clone(), authorize_call.clone()],
+			}),
+			RuntimeCall::Utility(pallet_utility::Call::batch_all {
+				calls: vec![store_call.clone(), authorize_call.clone()],
+			}),
+			RuntimeCall::Utility(pallet_utility::Call::force_batch {
+				calls: vec![store_call.clone(), authorize_call.clone()],
+			}),
+		] {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), batch_variant),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			);
+		}
+
+		// Authorization was NOT consumed (rejected before prepare).
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+	});
+}
+
+/// Batch mixing store with a non-storage call is rejected at validation.
+#[test]
+fn mixed_batch_store_and_non_storage_call_rejected() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		let session_call = RuntimeCall::Session(pallet_session::Call::purge_keys {});
+
+		let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch {
+			calls: vec![store_call, session_call],
+		});
+
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), batch_call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+
+		// Authorization was NOT consumed.
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+	});
+}
+
+/// Deeply nested wrapper calls exceeding MAX_WRAPPER_DEPTH must be rejected.
+#[test]
+fn max_recursion_depth_is_enforced() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
+		let mut call: RuntimeCall =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
+		}
+
+		// Should fail with ExhaustsResources due to depth limit.
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)),
+		);
+	});
+}

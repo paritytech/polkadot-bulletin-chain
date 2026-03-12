@@ -99,42 +99,6 @@ pub type Barrier = TrailingSetTopicAsId<
 	>,
 >;
 
-/// Calls that are safe to dispatch from XCM. Blocks storage-mutating
-/// TransactionStorage calls — those require on-chain authorization that XCM cannot provide.
-/// Recursively inspects wrapper calls (Utility, Proxy, Sudo) to prevent bypass via nesting.
-pub struct XcmSafeCallFilter;
-impl XcmSafeCallFilter {
-	fn contains_blocked_storage_call(call: &RuntimeCall, depth: u32) -> bool {
-		use pallet_transaction_storage::MAX_WRAPPER_DEPTH;
-		use pallets_common::{proxy_inner_calls, sudo_inner_calls, utility_inner_calls};
-		if depth >= MAX_WRAPPER_DEPTH {
-			return true;
-		}
-		match call {
-			RuntimeCall::TransactionStorage(
-				pallet_transaction_storage::Call::store { .. } |
-				pallet_transaction_storage::Call::store_with_cid_config { .. } |
-				pallet_transaction_storage::Call::renew { .. },
-			) => true,
-			RuntimeCall::Utility(utility_call) => utility_inner_calls(utility_call)
-				.into_iter()
-				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
-			RuntimeCall::Proxy(proxy_call) => proxy_inner_calls(proxy_call)
-				.into_iter()
-				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
-			RuntimeCall::Sudo(sudo_call) => sudo_inner_calls(sudo_call)
-				.into_iter()
-				.any(|inner| Self::contains_blocked_storage_call(inner, depth + 1)),
-			_ => false,
-		}
-	}
-}
-impl Contains<RuntimeCall> for XcmSafeCallFilter {
-	fn contains(call: &RuntimeCall) -> bool {
-		!Self::contains_blocked_storage_call(call, 0)
-	}
-}
-
 /// XCM executor configuration.
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
@@ -162,7 +126,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
-	type SafeCallFilter = XcmSafeCallFilter;
+	type SafeCallFilter = crate::RuntimeCallInspector;
 	type Aliasers = Nothing;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
@@ -474,7 +438,7 @@ pub(crate) mod tests {
 				},
 			});
 
-			// XcmSafeCallFilter blocks store/store_with_cid_config/renew
+			// RuntimeCallInspector blocks store/store_with_cid_config/renew
 			// unconditionally — authorization does not matter for XCM.
 			assert_ne!(
 				result.dispatch_level_result,
@@ -492,7 +456,7 @@ pub(crate) mod tests {
 	}
 
 	/// XCM Transact with `store` wrapped in `utility::batch` must also be blocked.
-	/// The `XcmSafeCallFilter` recursively inspects inner calls.
+	/// The `RuntimeCallInspector` recursively inspects inner calls.
 	#[test]
 	fn xcm_transact_wrapped_store_is_blocked() {
 		run_test(|| {
@@ -542,6 +506,83 @@ pub(crate) mod tests {
 				crate::TransactionStorage::preimage_authorization_extent(content_hash),
 				AuthorizationExtent { transactions: 0, bytes: 0 },
 				"Authorization should remain unconsumed since XCM was blocked",
+			);
+		});
+	}
+
+	/// XCM Transact with `renew` must be blocked — same as `store`.
+	/// This documents the deliberate decision to block renew over XCM.
+	#[test]
+	fn xcm_transact_renew_is_blocked() {
+		run_test(|| {
+			use pallet_transaction_storage::Call as TxStorageCall;
+
+			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				block: 1,
+				index: 0,
+			});
+
+			let result = Dispatcher::dispatch(DispatchMessage {
+				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+				data: DispatchMessageData {
+					payload: Ok(encoded_xcm_transact_from_people_polkadot(
+						OriginKind::Superuser,
+						renew_call,
+					)),
+				},
+			});
+
+			assert_ne!(
+				result.dispatch_level_result,
+				XcmBlobMessageDispatchResult::Dispatched,
+				"XCM Transact renew must be blocked by SafeCallFilter",
+			);
+		});
+	}
+
+	/// People Polkadot can authorize storage accounts via XCM Transact.
+	/// The origin is converted to Root via `LocationAsSuperuser`, which satisfies
+	/// the `EnsureRoot` path in `Config::Authorizer`.
+	#[test]
+	fn xcm_transact_authorize_account_works() {
+		run_test(|| {
+			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+
+			let who = AccountKeyring::Ferdie.to_account_id();
+
+			// Verify no authorization exists yet.
+			assert_eq!(
+				crate::TransactionStorage::account_authorization_extent(who.clone()),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let authorize_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: who.clone(),
+					transactions: 10,
+					bytes: 1024,
+				});
+
+			let result = Dispatcher::dispatch(DispatchMessage {
+				key: MessageKey { lane_id: XCM_LANE, nonce: 1 },
+				data: DispatchMessageData {
+					payload: Ok(encoded_xcm_transact_from_people_polkadot(
+						OriginKind::Superuser,
+						authorize_call,
+					)),
+				},
+			});
+
+			assert_eq!(
+				result.dispatch_level_result,
+				XcmBlobMessageDispatchResult::Dispatched,
+				"XCM Transact authorize_account from People Polkadot must succeed",
+			);
+
+			// Authorization must have been created.
+			assert_eq!(
+				crate::TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 10, bytes: 1024 },
 			);
 		});
 	}

@@ -897,6 +897,148 @@ fn wrapped_authorize_account_succeeds() {
 		});
 }
 
+/// Batch mixing store (needs Authorized origin) with authorize_account (needs Signed origin)
+/// is rejected at validation time to prevent silent dispatch failures or authorization leaks
+/// with `batch_all`.
+#[test]
+fn mixed_batch_store_and_authorize_rejected() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let target: AccountId = Sr25519Keyring::Bob.to_account_id();
+			let data = vec![42u8; 100];
+
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			// Authorize Alice for one store.
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1,
+				data.len() as u64,
+			));
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+			let authorize_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.clone(),
+					transactions: 5,
+					bytes: 1024,
+				});
+
+			// Mixing store + authorize_account in a batch is rejected at validation.
+			for batch_variant in [
+				RuntimeCall::Utility(pallet_utility::Call::batch {
+					calls: vec![store_call.clone(), authorize_call.clone()],
+				}),
+				RuntimeCall::Utility(pallet_utility::Call::batch_all {
+					calls: vec![store_call.clone(), authorize_call.clone()],
+				}),
+				RuntimeCall::Utility(pallet_utility::Call::force_batch {
+					calls: vec![store_call.clone(), authorize_call.clone()],
+				}),
+			] {
+				assert_err!(
+					construct_and_apply_extrinsic(Some(account.pair()), batch_variant),
+					TransactionValidityError::Invalid(InvalidTransaction::Call),
+				);
+			}
+
+			// Authorization was NOT consumed (rejected before prepare).
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+			);
+		});
+}
+
+/// Batch mixing store with a non-storage call (e.g. System::remark) is rejected at
+/// validation to prevent authorization leaks.
+#[test]
+fn mixed_batch_store_and_non_storage_call_rejected() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![42u8; 100];
+
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1,
+				data.len() as u64,
+			));
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+			let remark_call =
+				RuntimeCall::System(frame_system::Call::remark { remark: vec![1, 2, 3] });
+
+			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch {
+				calls: vec![store_call, remark_call],
+			});
+
+			assert_err!(
+				construct_and_apply_extrinsic(Some(account.pair()), batch_call),
+				TransactionValidityError::Invalid(InvalidTransaction::Call),
+			);
+
+			// Authorization was NOT consumed.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+			);
+		});
+}
+
+/// Deeply nested wrapper calls exceeding MAX_WRAPPER_DEPTH must be rejected.
+#[test]
+fn max_recursion_depth_is_enforced() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![42u8; 100];
+
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			// Authorize Alice.
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1,
+				data.len() as u64,
+			));
+
+			// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
+			let mut call: RuntimeCall =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: data.clone(),
+				});
+			for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+				call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
+			}
+
+			// Should fail with ExhaustsResources due to depth limit.
+			assert_err!(
+				construct_and_apply_extrinsic(Some(account.pair()), call),
+				TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)
+			);
+		});
+}
+
 // NOTE: No `wrapped_call_respects_validate_inner_calls_allowlist` test on Westend.
 // Unlike the feeless Polkadot solochain, Westend is a parachain with transaction fees,
 // so there is no call allowlist — fees provide the spam gate for non-storage calls.
