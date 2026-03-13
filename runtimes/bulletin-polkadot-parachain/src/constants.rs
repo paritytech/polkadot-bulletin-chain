@@ -38,6 +38,7 @@ pub mod polkadot_constants {
 		);
 	}
 
+	// TODO: check fees this and align with some System parachain (not AH)
 	/// Currency-related constants for Polkadot (DOT).
 	pub mod currency {
 		use super::Balance;
