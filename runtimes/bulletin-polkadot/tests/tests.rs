@@ -282,7 +282,7 @@ fn construct_extrinsic(
 		frame_system::CheckWeight::<Runtime>::new(),
 		pallet_transaction_storage::extension::ValidateStorageCalls::<
 			Runtime,
-			runtime::RuntimeCallInspector,
+			runtime::StorageCallInspector,
 		>::default(),
 		runtime::AllowedSignedCalls,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,

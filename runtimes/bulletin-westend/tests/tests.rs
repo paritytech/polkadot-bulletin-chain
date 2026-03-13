@@ -86,7 +86,7 @@ fn construct_extrinsic(
 		),
 		pallet_transaction_storage::extension::ValidateStorageCalls::<
 			Runtime,
-			bulletin_westend_runtime::storage::RuntimeCallInspector,
+			bulletin_westend_runtime::storage::StorageCallInspector,
 		>::default(),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);

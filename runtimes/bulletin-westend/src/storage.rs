@@ -51,13 +51,14 @@ parameter_types! {
 /// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
 /// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
 ///
-/// Also implements [`Contains<RuntimeCall>`] for use as the XCM `SafeCallFilter`, blocking
-/// storage-mutating TransactionStorage calls (store, store_with_cid_config, renew) from XCM
-/// dispatch — those require on-chain authorization that XCM cannot provide.
+/// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
+/// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM
+/// `SafeCallFilter` to block these calls from XCM dispatch — they require on-chain
+/// authorization that XCM cannot provide.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct StorageCallInspector;
 
-impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
+impl pallet_transaction_storage::CallInspector<RuntimeCall> for StorageCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
@@ -67,11 +68,12 @@ impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspe
 	}
 }
 
-/// XCM `SafeCallFilter`: allows all calls except storage-mutating TransactionStorage calls.
-/// Recursively inspects wrapper calls (Utility, Sudo) to prevent bypass via nesting.
-impl Contains<RuntimeCall> for RuntimeCallInspector {
+/// Returns `true` for storage-mutating TransactionStorage calls (store, store_with_cid_config,
+/// renew). Recursively inspects wrapper calls (Utility, Sudo) to prevent bypass via nesting.
+/// Used with `EverythingBut` as the XCM `SafeCallFilter`.
+impl Contains<RuntimeCall> for StorageCallInspector {
 	fn contains(call: &RuntimeCall) -> bool {
-		!pallet_transaction_storage::is_storage_mutating_call::<Runtime, Self>(call, 0)
+		pallet_transaction_storage::is_storage_mutating_call::<Runtime, Self>(call, 0)
 	}
 }
 

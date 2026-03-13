@@ -24,7 +24,7 @@ use crate::{
 use codec::Encode;
 use frame_support::{
 	parameter_types,
-	traits::{Contains, Equals, Everything, Nothing},
+	traits::{Contains, Equals, Everything, EverythingBut, Nothing},
 	weights::Weight,
 };
 use sp_core::ConstU32;
@@ -126,7 +126,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ToBridgeHaulBlobExporter;
 	type UniversalAliases = UniversalAliases;
 	type CallDispatcher = WithOriginFilter<Everything>;
-	type SafeCallFilter = crate::RuntimeCallInspector;
+	type SafeCallFilter = EverythingBut<crate::StorageCallInspector>;
 	type Aliasers = Nothing;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
@@ -438,7 +438,7 @@ pub(crate) mod tests {
 				},
 			});
 
-			// RuntimeCallInspector blocks store/store_with_cid_config/renew
+			// StorageCallInspector blocks store/store_with_cid_config/renew
 			// unconditionally — authorization does not matter for XCM.
 			assert_ne!(
 				result.dispatch_level_result,
@@ -456,7 +456,7 @@ pub(crate) mod tests {
 	}
 
 	/// XCM Transact with `store` wrapped in `utility::batch` must also be blocked.
-	/// The `RuntimeCallInspector` recursively inspects inner calls.
+	/// The `StorageCallInspector` recursively inspects inner calls.
 	#[test]
 	fn xcm_transact_wrapped_store_is_blocked() {
 		run_test(|| {
