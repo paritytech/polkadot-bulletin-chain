@@ -24,6 +24,8 @@ pub struct BulletinMetrics {
 	pub block_renew_bytes: Gauge<U64>,
 	/// Number of registered validators.
 	pub registered_validators: Gauge<U64>,
+	/// Total bytes of data currently stored on-chain.
+	pub total_stored_bytes: Gauge<U64>,
 	/// Whether proof generation failed on the last attempt (0 = ok, 1 = failed).
 	pub proof_generation_failed: Gauge<U64>,
 }
@@ -63,6 +65,13 @@ impl BulletinMetrics {
 				Gauge::new(
 					"bulletin_registered_validators",
 					"Number of registered validators in the validator set",
+				)?,
+				registry,
+			)?,
+			total_stored_bytes: register(
+				Gauge::new(
+					"bulletin_total_stored_bytes",
+					"Total bytes of data currently stored on-chain",
 				)?,
 				registry,
 			)?,
@@ -141,6 +150,7 @@ pub fn spawn_metrics_task(
 	let num_validators_key = storage_value_key(b"ValidatorSet", b"NumValidators");
 	let renew_count_key = storage_value_key(b"TransactionStorage", b"BlockRenewCount");
 	let renew_bytes_key = storage_value_key(b"TransactionStorage", b"BlockRenewBytes");
+	let total_stored_bytes_key = storage_value_key(b"TransactionStorage", b"TotalStoredBytes");
 
 	let task = async move {
 		let mut stream = client.import_notification_stream();
@@ -170,6 +180,11 @@ pub fn spawn_metrics_task(
 			metrics
 				.block_renew_bytes
 				.set(read_u64_storage(&client, block_hash, &renew_bytes_key).unwrap_or(0));
+
+			// Total stored bytes.
+			metrics
+				.total_stored_bytes
+				.set(read_u64_storage(&client, block_hash, &total_stored_bytes_key).unwrap_or(0));
 
 			// Registered validators.
 			metrics
