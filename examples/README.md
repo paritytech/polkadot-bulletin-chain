@@ -90,7 +90,7 @@ chmod +x "${zb_bin}"
 #### Execute Locally
 
 ```shell
-wget https://dist.ipfs.tech/kubo/v0.38.1/kubo_v0.38.1_darwin-arm64.tar.gz
+wget https://dist.ipfs.tech/kubo/v0.40.1/kubo_v0.40.1_linux-amd64.tar.gz
 tar -xvzf kubo_v0.38.1_darwin-arm64.tar.gz
 ./kubo/ipfs version
 ./kubo/ipfs init
