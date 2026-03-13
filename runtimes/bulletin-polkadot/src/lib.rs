@@ -377,7 +377,7 @@ impl SortedMembers<AccountId> for TestAccounts {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct StorageCallInspector;
 
-impl pallet_transaction_storage::CallInspector<RuntimeCall> for StorageCallInspector {
+impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<(alloc::vec::Vec<&RuntimeCall>, bool)> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
@@ -393,7 +393,7 @@ impl pallet_transaction_storage::CallInspector<RuntimeCall> for StorageCallInspe
 /// nesting. Used with `EverythingBut` as the XCM `SafeCallFilter`.
 impl frame_support::traits::Contains<RuntimeCall> for StorageCallInspector {
 	fn contains(call: &RuntimeCall) -> bool {
-		pallet_transaction_storage::is_storage_mutating_call::<Runtime, Self>(call, 0)
+		Self::is_storage_mutating_call(call, 0)
 	}
 }
 
@@ -555,7 +555,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
-use pallet_transaction_storage::MAX_WRAPPER_DEPTH;
+use pallet_transaction_storage::{CallInspector, MAX_WRAPPER_DEPTH};
 use pallets_common::{
 	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, proxy_inner_calls,
 	utility_inner_calls,

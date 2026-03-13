@@ -45,55 +45,51 @@ struct TraverseResult {
 /// Maximum recursion depth for inspecting wrapper calls.
 pub const MAX_WRAPPER_DEPTH: u32 = 8;
 
-/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
-/// store_with_cid_config, renew) — either directly or nested inside wrappers.
-///
-/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
-/// [`CallInspector`] provides the wrapper-recursion logic, so this function
-/// works for any runtime without duplicating the blocked-call list.
-pub fn is_storage_mutating_call<T: Config, I: CallInspector<RuntimeCallOf<T>>>(
-	call: &RuntimeCallOf<T>,
-	depth: u32,
-) -> bool
-where
-	RuntimeCallOf<T>: IsSubType<Call<T>>,
-{
-	if depth >= MAX_WRAPPER_DEPTH {
-		return true;
-	}
-	if let Some(inner_call) = call.is_sub_type() {
-		return matches!(
-			inner_call,
-			Call::store { .. } | Call::store_with_cid_config { .. } | Call::renew { .. }
-		);
-	}
-	if let Some((inner_calls, _)) = I::inspect_wrapper(call) {
-		return inner_calls
-			.into_iter()
-			.any(|inner| is_storage_mutating_call::<T, I>(inner, depth + 1));
-	}
-	false
-}
-
 /// Tells [`ValidateStorageCalls`] how to find storage calls inside wrapper
 /// extrinsics (e.g. `Utility::batch`, `Sudo::sudo_as`).
 ///
 /// The runtime implements this for its `RuntimeCall` type, allowing the pallet extension
 /// to recursively validate and consume storage authorization in wrapped calls, and to
 /// transform the origin to [`Origin::Authorized`] for origin-preserving wrappers.
-pub trait CallInspector<Call>: Clone + PartialEq + Eq + Default {
+pub trait CallInspector<T: Config>: Clone + PartialEq + Eq + Default
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+{
 	/// If `call` is a wrapper, return:
 	/// - The inner calls to inspect for storage authorization
 	/// - `true` if the wrapper passes origin through to inner calls (e.g. batch), `false` if it
 	///   changes the origin (e.g. sudo_as)
 	///
 	/// Returns `None` for non-wrapper calls.
-	fn inspect_wrapper(call: &Call) -> Option<(Vec<&Call>, bool)>;
+	fn inspect_wrapper(call: &RuntimeCallOf<T>) -> Option<(Vec<&RuntimeCallOf<T>>, bool)>;
+
+	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
+	/// store_with_cid_config, renew) — either directly or nested inside wrappers.
+	fn is_storage_mutating_call(call: &RuntimeCallOf<T>, depth: u32) -> bool {
+		if depth >= MAX_WRAPPER_DEPTH {
+			return true;
+		}
+		if let Some(inner_call) = call.is_sub_type() {
+			return matches!(
+				inner_call,
+				Call::store { .. } | Call::store_with_cid_config { .. } | Call::renew { .. }
+			);
+		}
+		if let Some((inner_calls, _)) = Self::inspect_wrapper(call) {
+			return inner_calls
+				.into_iter()
+				.any(|inner| Self::is_storage_mutating_call(inner, depth + 1));
+		}
+		false
+	}
 }
 
 /// No-op implementation — no wrapper inspection. Direct storage calls still work.
-impl<Call> CallInspector<Call> for () {
-	fn inspect_wrapper(_: &Call) -> Option<(Vec<&Call>, bool)> {
+impl<T: Config> CallInspector<T> for ()
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+{
+	fn inspect_wrapper(_: &RuntimeCallOf<T>) -> Option<(Vec<&RuntimeCallOf<T>>, bool)> {
 		None
 	}
 }
@@ -145,7 +141,7 @@ impl<T: Config + Send + Sync, I> fmt::Debug for ValidateStorageCalls<T, I> {
 	}
 }
 
-impl<T: Config + Send + Sync, I: CallInspector<RuntimeCallOf<T>>> ValidateStorageCalls<T, I>
+impl<T: Config + Send + Sync, I: CallInspector<T>> ValidateStorageCalls<T, I>
 where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,
 {
@@ -184,7 +180,7 @@ where
 	}
 }
 
-impl<T: Config + Send + Sync, I: CallInspector<RuntimeCallOf<T>> + Send + Sync + 'static>
+impl<T: Config + Send + Sync, I: CallInspector<T> + Send + Sync + 'static>
 	TransactionExtension<RuntimeCallOf<T>> for ValidateStorageCalls<T, I>
 where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,

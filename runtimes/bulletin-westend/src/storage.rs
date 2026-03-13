@@ -23,6 +23,7 @@ use frame_support::{
 	traits::{Contains, EitherOfDiverse, Equals, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
+use pallet_transaction_storage::CallInspector;
 use pallet_xcm::EnsureXcm;
 use pallets_common::{inspect_sudo_wrapper, inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
@@ -58,7 +59,7 @@ parameter_types! {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct StorageCallInspector;
 
-impl pallet_transaction_storage::CallInspector<RuntimeCall> for StorageCallInspector {
+impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
@@ -73,7 +74,7 @@ impl pallet_transaction_storage::CallInspector<RuntimeCall> for StorageCallInspe
 /// Used with `EverythingBut` as the XCM `SafeCallFilter`.
 impl Contains<RuntimeCall> for StorageCallInspector {
 	fn contains(call: &RuntimeCall) -> bool {
-		pallet_transaction_storage::is_storage_mutating_call::<Runtime, Self>(call, 0)
+		Self::is_storage_mutating_call(call, 0)
 	}
 }
 
