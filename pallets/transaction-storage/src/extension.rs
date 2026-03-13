@@ -31,7 +31,7 @@ use polkadot_sdk_frame::{
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-/// Result of [`ValidateStorageCalls::traverse_storage_calls`].
+/// Result of [`CallInspector::traverse_storage_calls`].
 #[derive(Default)]
 struct TraverseResult {
 	/// Whether any TransactionStorage pallet calls were visited.
@@ -65,8 +65,18 @@ where
 
 	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
 	/// store_with_cid_config, renew) — either directly or nested inside wrappers.
+	///
+	/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
+	/// [`CallInspector`] provides the wrapper-recursion logic, so this function
+	/// works for any runtime without duplicating the blocked-call list.
 	fn is_storage_mutating_call(call: &RuntimeCallOf<T>, depth: u32) -> bool {
 		if depth >= MAX_WRAPPER_DEPTH {
+			// Fail-safe: treat excessively nested calls as storage-mutating rather than
+			// risk letting a hidden storage call bypass the filter.
+			tracing::debug!(
+				target: LOG_TARGET,
+				"Wrapper recursion limit exceeded (depth: {depth}), treating as storage-mutating",
+			);
 			return true;
 		}
 		if let Some(inner_call) = call.is_sub_type() {
@@ -81,6 +91,44 @@ where
 				.any(|inner| Self::is_storage_mutating_call(inner, depth + 1));
 		}
 		false
+	}
+
+	/// Recursively traverse a call tree, applying `visitor` to each storage call found.
+	///
+	/// Returns [`TraverseResult`] with:
+	/// - `found_storage`: whether any storage calls were visited
+	/// - `preserves_origin`: whether the outermost wrapper preserves the caller's origin
+	/// - `has_non_storage`: whether any non-storage, non-wrapper calls were found
+	fn traverse_storage_calls(
+		call: &RuntimeCallOf<T>,
+		depth: u32,
+		visitor: &mut impl FnMut(&Call<T>) -> Result<(), TransactionValidityError>,
+	) -> Result<TraverseResult, TransactionValidityError> {
+		if let Some(inner_call) = call.is_sub_type() {
+			visitor(inner_call)?;
+			// Direct storage call — `preserves_origin` doesn't matter here because
+			// `validate()` already handles origin transformation for direct calls
+			// before calling `traverse_storage_calls`.
+			return Ok(TraverseResult { found_storage: true, ..Default::default() });
+		}
+		if let Some((inner_calls, preserves_origin)) = Self::inspect_wrapper(call) {
+			if depth >= MAX_WRAPPER_DEPTH {
+				tracing::debug!(
+					target: LOG_TARGET,
+					"Wrapper recursion limit exceeded (depth: {depth}), rejecting call",
+				);
+				return Err(InvalidTransaction::ExhaustsResources.into());
+			}
+			let mut result = TraverseResult { preserves_origin, ..Default::default() };
+			for inner in inner_calls {
+				let inner_result = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
+				result.found_storage |= inner_result.found_storage;
+				result.has_non_storage |= inner_result.has_non_storage;
+			}
+			return Ok(result);
+		}
+		// Not a storage call and not a wrapper — a non-storage call.
+		Ok(TraverseResult { has_non_storage: true, ..Default::default() })
 	}
 }
 
@@ -138,45 +186,6 @@ impl<T: Config + Send + Sync, I> fmt::Debug for ValidateStorageCalls<T, I> {
 	#[cfg(not(feature = "std"))]
 	fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
 		Ok(())
-	}
-}
-
-impl<T: Config + Send + Sync, I: CallInspector<T>> ValidateStorageCalls<T, I>
-where
-	RuntimeCallOf<T>: IsSubType<Call<T>>,
-{
-	/// Recursively traverse a call tree, applying `visitor` to each storage call found.
-	///
-	/// Returns [`TraverseResult`] with:
-	/// - `found_storage`: whether any storage calls were visited
-	/// - `preserves_origin`: whether the outermost wrapper preserves the caller's origin
-	/// - `has_non_storage`: whether any non-storage, non-wrapper calls were found
-	fn traverse_storage_calls(
-		call: &RuntimeCallOf<T>,
-		depth: u32,
-		visitor: &mut impl FnMut(&Call<T>) -> Result<(), TransactionValidityError>,
-	) -> Result<TraverseResult, TransactionValidityError> {
-		if let Some(inner_call) = call.is_sub_type() {
-			visitor(inner_call)?;
-			// Direct storage call — `preserves_origin` doesn't matter here because
-			// `validate()` already handles origin transformation for direct calls
-			// before calling `traverse_storage_calls`.
-			return Ok(TraverseResult { found_storage: true, ..Default::default() });
-		}
-		if let Some((inner_calls, preserves_origin)) = I::inspect_wrapper(call) {
-			if depth >= MAX_WRAPPER_DEPTH {
-				return Err(InvalidTransaction::ExhaustsResources.into());
-			}
-			let mut result = TraverseResult { preserves_origin, ..Default::default() };
-			for inner in inner_calls {
-				let inner_result = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
-				result.found_storage |= inner_result.found_storage;
-				result.has_non_storage |= inner_result.has_non_storage;
-			}
-			return Ok(result);
-		}
-		// Not a storage call and not a wrapper — a non-storage call.
-		Ok(TraverseResult { has_non_storage: true, ..Default::default() })
 	}
 }
 
@@ -245,7 +254,7 @@ where
 		let mut combined_valid = ValidTransaction::default();
 		let mut authorized_scope: Option<AuthorizationScope<T::AccountId>> = None;
 		let mut has_management_call = false;
-		let result = Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+		let result = I::traverse_storage_calls(call, 0, &mut |inner_call| {
 			let (valid_tx, scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
 			combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
 			match scope {
@@ -317,7 +326,7 @@ where
 		}
 
 		// Wrapper call — consume authorization for inner storage calls
-		if let Err(e) = Self::traverse_storage_calls(call, 0, &mut |inner_call| {
+		if let Err(e) = I::traverse_storage_calls(call, 0, &mut |inner_call| {
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
 		}) {
 			tracing::debug!(
