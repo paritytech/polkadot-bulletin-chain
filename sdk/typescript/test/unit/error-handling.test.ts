@@ -287,6 +287,25 @@ describe("Error Handling", () => {
   })
 
   describe("TransactionStatusEvent variants", () => {
+    it("should support signed event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Signed,
+        txHash: "0xabc123",
+      }
+      expect(event.type).toBe(TxStatus.Signed)
+      expect(event.txHash).toBe("0xabc123")
+    })
+
+    it("should support signed event with chunkIndex", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Signed,
+        txHash: "0xdef456",
+        chunkIndex: 2,
+      }
+      expect(event.type).toBe(TxStatus.Signed)
+      expect(event.chunkIndex).toBe(2)
+    })
+
     it("should support validated event", () => {
       const event: TransactionStatusEvent = { type: TxStatus.Validated }
       expect(event.type).toBe(TxStatus.Validated)
@@ -308,6 +327,30 @@ describe("Error Handling", () => {
       expect(event.blockHash).toBe("0xabc")
       expect(event.blockNumber).toBe(42)
       expect(event.txIndex).toBe(1)
+    })
+
+    it("should support finalized event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Finalized,
+        blockHash: "0xfin",
+        blockNumber: 100,
+        txIndex: 3,
+      }
+      expect(event.type).toBe(TxStatus.Finalized)
+      expect(event.blockHash).toBe("0xfin")
+      expect(event.blockNumber).toBe(100)
+      expect(event.txIndex).toBe(3)
+    })
+
+    it("should support finalized event with chunkIndex", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Finalized,
+        blockHash: "0xfin2",
+        blockNumber: 200,
+        chunkIndex: 5,
+      }
+      expect(event.type).toBe(TxStatus.Finalized)
+      expect(event.chunkIndex).toBe(5)
     })
 
     it("should support no_longer_in_block event", () => {

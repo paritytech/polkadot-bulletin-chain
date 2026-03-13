@@ -606,11 +606,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (!resolved) {
             resolved = true
             clearTimeout(timerId)
-            // Emit dropped event for observable errors (invalid tx, pool full, etc.)
             if (progressCallback) {
+              const errorMsg = err instanceof Error ? err.message : String(err)
+              // Distinguish pool-related drops from other transaction errors
+              const isDropped =
+                errorMsg.includes("dropped") || errorMsg.includes("pool")
               progressCallback({
-                type: TxStatus.Dropped,
-                error: err instanceof Error ? err.message : String(err),
+                type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
+                error: errorMsg,
                 chunkIndex,
               })
             }
@@ -667,6 +670,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         blockNumber: result.blockNumber,
       }
     } catch (error) {
+      if (error instanceof BulletinError) throw error
       throw new BulletinError(`${errorMessage}: ${error}`, errorCode, error)
     }
   }

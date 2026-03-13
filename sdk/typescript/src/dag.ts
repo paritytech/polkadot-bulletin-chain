@@ -124,7 +124,7 @@ export class UnixFsDagBuilder {
       }
     } catch (error) {
       throw new BulletinError(
-        `Failed to parse DAG-PB manifest: ${error}`,
+        `Failed to decode DAG-PB manifest: ${error}`,
         ErrorCode.DAG_ENCODING_FAILED,
         error,
       )
