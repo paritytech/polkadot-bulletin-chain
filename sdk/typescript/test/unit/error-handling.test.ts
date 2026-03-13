@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest"
 import { BulletinPreparer } from "../../src/preparer"
-import { BulletinError, type HashAlgorithm } from "../../src/types"
+import type { TransactionStatusEvent } from "../../src/types"
+import { BulletinError, ErrorCode, type HashAlgorithm } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
 describe("Error Handling", () => {
@@ -189,6 +190,142 @@ describe("Error Handling", () => {
 
       expect(wrappedError.cause).toBe(originalError)
       expect((wrappedError.cause as Error).message).toContain("undefined")
+    })
+  })
+
+  describe("ErrorCode enum", () => {
+    it("should have all expected codes as string values", () => {
+      // ErrorCode values equal their key names (string enum)
+      expect(ErrorCode.EMPTY_DATA).toBe("EMPTY_DATA")
+      expect(ErrorCode.FILE_TOO_LARGE).toBe("FILE_TOO_LARGE")
+      expect(ErrorCode.CHUNK_TOO_LARGE).toBe("CHUNK_TOO_LARGE")
+      expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
+      expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
+      expect(ErrorCode.INVALID_CID).toBe("INVALID_CID")
+      expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM")
+      expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED")
+      expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED")
+      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe(
+        "INSUFFICIENT_AUTHORIZATION",
+      )
+      expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED")
+      expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED")
+      expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED")
+      expect(ErrorCode.TIMEOUT).toBe("TIMEOUT")
+      expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION")
+    })
+
+    it("should be usable with BulletinError", () => {
+      const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
+      expect(error.code).toBe("EMPTY_DATA")
+    })
+
+    it("should remain backward compatible with string comparisons", () => {
+      const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
+      expect(error.code === "EMPTY_DATA").toBe(true)
+    })
+  })
+
+  describe("BulletinError retryable getter", () => {
+    it("should return true for retryable error codes", () => {
+      const retryableCodes = [ErrorCode.TRANSACTION_FAILED, ErrorCode.TIMEOUT]
+
+      for (const code of retryableCodes) {
+        const error = new BulletinError("test", code)
+        expect(error.retryable).toBe(true)
+      }
+    })
+
+    it("should return false for non-retryable error codes", () => {
+      const nonRetryableCodes = [
+        ErrorCode.EMPTY_DATA,
+        ErrorCode.FILE_TOO_LARGE,
+        ErrorCode.CHUNK_TOO_LARGE,
+        ErrorCode.INVALID_CHUNK_SIZE,
+        ErrorCode.INVALID_CONFIG,
+        ErrorCode.INVALID_CID,
+        ErrorCode.CID_CALCULATION_FAILED,
+        ErrorCode.DAG_ENCODING_FAILED,
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.CHUNK_FAILED,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      ]
+
+      for (const code of nonRetryableCodes) {
+        const error = new BulletinError("test", code)
+        expect(error.retryable).toBe(false)
+      }
+    })
+
+    it("should return false for unknown codes", () => {
+      const error = new BulletinError("test", "UNKNOWN_CODE")
+      expect(error.retryable).toBe(false)
+    })
+  })
+
+  describe("BulletinError recoveryHint getter", () => {
+    it("should return actionable hints for all ErrorCode values", () => {
+      for (const code of Object.values(ErrorCode)) {
+        const error = new BulletinError("test", code)
+        expect(error.recoveryHint).toBeDefined()
+        expect(error.recoveryHint.length).toBeGreaterThan(0)
+        expect(error.recoveryHint).not.toBe("No recovery hint available")
+      }
+    })
+
+    it("should return fallback for unknown codes", () => {
+      const error = new BulletinError("test", "UNKNOWN_CODE")
+      expect(error.recoveryHint).toBe("No recovery hint available")
+    })
+  })
+
+  describe("TransactionStatusEvent variants", () => {
+    it("should support validated event", () => {
+      const event: TransactionStatusEvent = { type: "validated" }
+      expect(event.type).toBe("validated")
+    })
+
+    it("should support broadcasted event with numPeers", () => {
+      const event: TransactionStatusEvent = { type: "broadcasted", numPeers: 5 }
+      expect(event.type).toBe("broadcasted")
+      expect(event.numPeers).toBe(5)
+    })
+
+    it("should support in_best_block event", () => {
+      const event: TransactionStatusEvent = {
+        type: "in_best_block",
+        blockHash: "0xabc",
+        blockNumber: 42,
+        txIndex: 1,
+      }
+      expect(event.type).toBe("in_best_block")
+      expect(event.blockHash).toBe("0xabc")
+      expect(event.blockNumber).toBe(42)
+      expect(event.txIndex).toBe(1)
+    })
+
+    it("should support no_longer_in_best_block event", () => {
+      const event: TransactionStatusEvent = { type: "no_longer_in_best_block" }
+      expect(event.type).toBe("no_longer_in_best_block")
+    })
+
+    it("should support invalid event", () => {
+      const event: TransactionStatusEvent = {
+        type: "invalid",
+        error: "nonce too low",
+      }
+      expect(event.type).toBe("invalid")
+      expect(event.error).toBe("nonce too low")
+    })
+
+    it("should support dropped event", () => {
+      const event: TransactionStatusEvent = {
+        type: "dropped",
+        error: "pool full",
+      }
+      expect(event.type).toBe("dropped")
+      expect(event.error).toBe("pool full")
     })
   })
 })

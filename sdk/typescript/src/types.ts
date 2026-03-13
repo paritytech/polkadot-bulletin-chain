@@ -184,9 +184,10 @@ export type ChunkProgressEvent =
  */
 export type TransactionStatusEvent =
   | { type: "signed"; txHash: string; chunkIndex?: number }
-  | { type: "broadcasted"; chunkIndex?: number }
+  | { type: "validated" }
+  | { type: "broadcasted"; numPeers?: number; chunkIndex?: number }
   | {
-      type: "in_block"
+      type: "in_best_block"
       blockHash: string
       blockNumber: number
       txIndex?: number
@@ -199,6 +200,9 @@ export type TransactionStatusEvent =
       txIndex?: number
       chunkIndex?: number
     }
+  | { type: "no_longer_in_best_block" }
+  | { type: "invalid"; error: string }
+  | { type: "dropped"; error: string }
 
 /**
  * Combined progress event types
@@ -211,16 +215,81 @@ export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent
 export type ProgressCallback = (event: ProgressEvent) => void
 
 /**
+ * Error codes for the Bulletin SDK.
+ *
+ * These codes are consistent with the Rust SDK's `Error::code()` method.
+ */
+export enum ErrorCode {
+  EMPTY_DATA = "EMPTY_DATA",
+  FILE_TOO_LARGE = "FILE_TOO_LARGE",
+  CHUNK_TOO_LARGE = "CHUNK_TOO_LARGE",
+  INVALID_CHUNK_SIZE = "INVALID_CHUNK_SIZE",
+  INVALID_CONFIG = "INVALID_CONFIG",
+  INVALID_CID = "INVALID_CID",
+  INVALID_HASH_ALGORITHM = "INVALID_HASH_ALGORITHM",
+  CID_CALCULATION_FAILED = "CID_CALCULATION_FAILED",
+  DAG_ENCODING_FAILED = "DAG_ENCODING_FAILED",
+  INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
+  AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
+  TRANSACTION_FAILED = "TRANSACTION_FAILED",
+  CHUNK_FAILED = "CHUNK_FAILED",
+  TIMEOUT = "TIMEOUT",
+  UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
+}
+
+/** Error codes that are retryable */
+const RETRYABLE_CODES = new Set<string>([
+  ErrorCode.TRANSACTION_FAILED,
+  ErrorCode.TIMEOUT,
+])
+
+/** Recovery hints per error code */
+const RECOVERY_HINTS: Record<string, string> = {
+  [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
+  [ErrorCode.FILE_TOO_LARGE]: "Reduce file size or use chunked upload",
+  [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
+  [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 2 MiB",
+  [ErrorCode.INVALID_CONFIG]: "Check configuration parameters",
+  [ErrorCode.INVALID_CID]: "Verify CID format",
+  [ErrorCode.INVALID_HASH_ALGORITHM]:
+    "Use blake2b-256, sha2-256, or keccak-256",
+  [ErrorCode.CID_CALCULATION_FAILED]: "Verify data and hash algorithm",
+  [ErrorCode.DAG_ENCODING_FAILED]: "Check chunk CIDs and data integrity",
+  [ErrorCode.INSUFFICIENT_AUTHORIZATION]: "Request additional authorization",
+  [ErrorCode.AUTHORIZATION_FAILED]:
+    "Check that the account has authorizer privileges",
+  [ErrorCode.TRANSACTION_FAILED]:
+    "Verify transaction parameters and account nonce",
+  [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
+  [ErrorCode.TIMEOUT]: "Increase timeout or retry",
+  [ErrorCode.UNSUPPORTED_OPERATION]:
+    "This operation is not supported in this context",
+}
+
+/**
  * SDK error class
  */
 export class BulletinError extends Error {
+  override readonly cause?: unknown
+
   constructor(
     message: string,
-    public readonly code: string,
-    override readonly cause?: unknown,
+    public readonly code: ErrorCode | string,
+    cause?: unknown,
   ) {
     super(message, { cause })
+    this.cause = cause
     this.name = "BulletinError"
+  }
+
+  /** Whether this error is likely transient and retrying may succeed. */
+  get retryable(): boolean {
+    return RETRYABLE_CODES.has(this.code)
+  }
+
+  /** An actionable recovery suggestion for this error. */
+  get recoveryHint(): string {
+    return RECOVERY_HINTS[this.code] ?? "No recovery hint available"
   }
 }
 
