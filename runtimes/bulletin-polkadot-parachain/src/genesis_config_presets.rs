@@ -32,7 +32,6 @@ fn bulletin_polkadot_genesis(
 	endowed_accounts: Vec<AccountId>,
 	endowment: Balance,
 	id: ParaId,
-	sudo_account: Option<AccountId>,
 ) -> serde_json::Value {
 	build_struct_json_patch!(RuntimeGenesisConfig {
 		balances: BalancesConfig {
@@ -56,7 +55,6 @@ fn bulletin_polkadot_genesis(
 				.collect(),
 		},
 		polkadot_xcm: PolkadotXcmConfig { safe_xcm_version: Some(SAFE_XCM_VERSION) },
-		sudo: SudoConfig { key: sudo_account },
 	})
 }
 
@@ -72,8 +70,6 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			Sr25519Keyring::well_known().map(|k| k.to_account_id()).collect(),
 			DOT * 1_000_000,
 			BULLETIN_PARA_ID,
-			// Sudo
-			Some(Sr25519Keyring::Alice.to_account_id()),
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_polkadot_genesis(
 			// initial collators.
@@ -86,8 +82,6 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			],
 			DOT * 1_000_000,
 			BULLETIN_PARA_ID,
-			// Sudo
-			Some(Sr25519Keyring::Alice.to_account_id()),
 		),
 		_ => return None,
 	};

@@ -2106,7 +2106,6 @@ dependencies = [
  "pallet-message-queue",
  "pallet-session",
  "pallet-skip-feeless-payment",
- "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",

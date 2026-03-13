@@ -472,12 +472,6 @@ parameter_types! {
 	pub const DepositFactor: Balance = deposit(0, 32);
 }
 
-impl pallet_sudo::Config for Runtime {
-	type RuntimeCall = RuntimeCall;
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
-}
-
 impl pallet_utility::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -550,9 +544,6 @@ mod runtime {
 	#[runtime::pallet_index(34)]
 	pub type MessageQueue = pallet_message_queue;
 
-	// Sudo
-	#[runtime::pallet_index(100)]
-	pub type Sudo = pallet_sudo;
 }
 
 cumulus_pallet_parachain_system::register_validate_block! {

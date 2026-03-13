@@ -29,8 +29,7 @@ use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
-	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
+	pub const SetPurgeKeysPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;

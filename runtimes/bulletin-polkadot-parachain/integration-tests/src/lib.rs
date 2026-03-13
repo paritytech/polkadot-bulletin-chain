@@ -135,7 +135,6 @@ pub fn bulletin_genesis() -> sp_runtime::Storage {
 			safe_xcm_version: Some(xcm::latest::VERSION),
 			..Default::default()
 		},
-		sudo: Default::default(),
 		transaction_payment: Default::default(),
 		transaction_storage: Default::default(),
 	};
