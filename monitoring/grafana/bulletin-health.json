@@ -14,6 +14,23 @@
   "timezone": "utc",
   "refresh": "10s",
   "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": "${DS_PROMETHEUS}",
+        "query": "label_values(substrate_block_height, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
   "panels": [
     {
       "title": "Block Height (best vs finalized)",
@@ -24,11 +41,11 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "substrate_block_height{status=\"best\"}",
+          "expr": "substrate_block_height{status=\"best\", instance=~\"$instance\"}",
           "legendFormat": "best"
         },
         {
-          "expr": "substrate_block_height{status=\"finalized\"}",
+          "expr": "substrate_block_height{status=\"finalized\", instance=~\"$instance\"}",
           "legendFormat": "finalized"
         }
       ]
@@ -42,7 +59,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "substrate_block_height{status=\"best\"} - substrate_block_height{status=\"finalized\"}"
+          "expr": "substrate_block_height{status=\"best\", instance=~\"$instance\"} - substrate_block_height{status=\"finalized\", instance=~\"$instance\"}"
         }
       ],
       "fieldConfig": {
@@ -66,7 +83,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "substrate_sub_libp2p_peers_count"
+          "expr": "substrate_sub_libp2p_peers_count{instance=~\"$instance\"}"
         }
       ],
       "fieldConfig": {
@@ -90,7 +107,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "bulletin_proof_generation_failed"
+          "expr": "bulletin_proof_generation_failed{instance=~\"$instance\"}"
         }
       ],
       "fieldConfig": {
@@ -116,7 +133,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "bulletin_registered_validators"
+          "expr": "bulletin_registered_validators{instance=~\"$instance\"}"
         }
       ],
       "fieldConfig": {
@@ -140,7 +157,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "100 * node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}"
+          "expr": "100 * node_filesystem_avail_bytes{mountpoint=\"/\", instance=~\"$instance\"} / node_filesystem_size_bytes{mountpoint=\"/\", instance=~\"$instance\"}"
         }
       ],
       "fieldConfig": {
@@ -167,11 +184,11 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "bulletin_block_store_transactions",
+          "expr": "bulletin_block_store_transactions{instance=~\"$instance\"}",
           "legendFormat": "total (store+renew)"
         },
         {
-          "expr": "bulletin_block_renew_transactions",
+          "expr": "bulletin_block_renew_transactions{instance=~\"$instance\"}",
           "legendFormat": "renewals"
         }
       ]
@@ -185,11 +202,11 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "bulletin_block_store_bytes",
+          "expr": "bulletin_block_store_bytes{instance=~\"$instance\"}",
           "legendFormat": "total bytes"
         },
         {
-          "expr": "bulletin_block_renew_bytes",
+          "expr": "bulletin_block_renew_bytes{instance=~\"$instance\"}",
           "legendFormat": "renewed bytes"
         }
       ],
@@ -208,7 +225,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "rate(substrate_block_height{status=\"best\"}[1m]) * 60",
+          "expr": "rate(substrate_block_height{status=\"best\", instance=~\"$instance\"}[1m]) * 60",
           "legendFormat": "blocks/min"
         }
       ]
@@ -222,11 +239,11 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "rate(substrate_bitswap_requests_received_total[1m])",
+          "expr": "rate(substrate_bitswap_requests_received_total{instance=~\"$instance\"}[1m])",
           "legendFormat": "requests/s"
         },
         {
-          "expr": "rate(substrate_bitswap_cids_requested_total[1m])",
+          "expr": "rate(substrate_bitswap_cids_requested_total{instance=~\"$instance\"}[1m])",
           "legendFormat": "CIDs/s"
         }
       ]
@@ -240,11 +257,11 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "rate(substrate_bitswap_blocks_sent_total[1m])",
+          "expr": "rate(substrate_bitswap_blocks_sent_total{instance=~\"$instance\"}[1m])",
           "legendFormat": "blocks found/s"
         },
         {
-          "expr": "rate(substrate_bitswap_blocks_not_found_total[1m])",
+          "expr": "rate(substrate_bitswap_blocks_not_found_total{instance=~\"$instance\"}[1m])",
           "legendFormat": "not found/s"
         }
       ]
@@ -258,7 +275,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "rate(substrate_bitswap_blocks_sent_bytes_total[1m])",
+          "expr": "rate(substrate_bitswap_blocks_sent_bytes_total{instance=~\"$instance\"}[1m])",
           "legendFormat": "bytes/s"
         }
       ],
@@ -277,7 +294,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "process_resident_memory_bytes",
+          "expr": "process_resident_memory_bytes{instance=~\"$instance\"}",
           "legendFormat": "RSS"
         }
       ],
@@ -296,7 +313,7 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "bulletin_proof_generation_failed",
+          "expr": "bulletin_proof_generation_failed{instance=~\"$instance\"}",
           "legendFormat": "status"
         }
       ]
@@ -310,12 +327,12 @@
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "substrate_sub_libp2p_peers_count",
+          "expr": "substrate_sub_libp2p_peers_count{instance=~\"$instance\"}",
           "legendFormat": "peers"
         }
       ]
     }
   ],
   "schemaVersion": 39,
-  "version": 3
+  "version": 4
 }
