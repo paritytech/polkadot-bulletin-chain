@@ -69,6 +69,19 @@ pub mod pallet {
 	pub(super) type Relayers<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, Relayer<BlockNumberFor<T>>, OptionQuery>;
 
+	/// Number of relayer set changes in the current block.
+	/// Cleared in on_initialize of the next block.
+	#[pallet::storage]
+	pub type BlockRelayerChanges<T: Config> = StorageValue<_, u32, ValueQuery>;
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn on_initialize(_n: BlockNumberFor<T>) -> Weight {
+			BlockRelayerChanges::<T>::kill();
+			T::DbWeight::get().writes(1)
+		}
+	}
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -113,6 +126,7 @@ pub mod pallet {
 		pub fn add_relayer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
 			T::AddRemoveOrigin::ensure_origin(origin)?;
 			Self::do_add_relayer(&who)?;
+			BlockRelayerChanges::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::RelayerAdded(who));
 			Ok(())
 		}
@@ -126,6 +140,7 @@ pub mod pallet {
 		pub fn remove_relayer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
 			T::AddRemoveOrigin::ensure_origin(origin)?;
 			ensure!(Self::do_remove_relayer(&who), Error::<T>::NotARelayer);
+			BlockRelayerChanges::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::RelayerRemoved(who));
 			Ok(())
 		}
