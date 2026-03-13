@@ -21,8 +21,19 @@ use cumulus_primitives_core::ParaId;
 use frame_support::build_struct_json_patch;
 use parachains_common::{AccountId, AuraId};
 use polkadot_constants::{currency::UNITS as DOT, SAFE_XCM_VERSION};
+use sp_core::{sr25519, Pair};
 use sp_genesis_builder::PresetId;
 use sp_keyring::Sr25519Keyring;
+use sp_runtime::traits::{IdentifyAccount, Verify};
+
+/// Generate an account ID from a seed string (e.g. `"//Chunkedsigner"`).
+fn account_id_from_seed(seed: &str) -> AccountId {
+	type AccountPublic = <Signature as Verify>::Signer;
+	let public = sr25519::Pair::from_string(seed, None)
+		.expect("static values are valid; qed")
+		.public();
+	AccountPublic::from(public).into_account()
+}
 
 const BULLETIN_POLKADOT_ED: Balance = ExistentialDeposit::get();
 pub const BULLETIN_PARA_ID: ParaId = ParaId::new(2487);
@@ -55,6 +66,16 @@ fn bulletin_polkadot_genesis(
 				.collect(),
 		},
 		polkadot_xcm: PolkadotXcmConfig { safe_xcm_version: Some(SAFE_XCM_VERSION) },
+		transaction_storage: pallet_transaction_storage::GenesisConfig {
+			account_authorizations: vec![
+				(account_id_from_seed("//Chunkedsigner"), u32::MAX, u64::MAX),
+				(account_id_from_seed("//Papisigner"), u32::MAX, u64::MAX),
+				(account_id_from_seed("//Papismoldosigner"), u32::MAX, u64::MAX),
+				(account_id_from_seed("//Preimagesigner"), u32::MAX, u64::MAX),
+				(account_id_from_seed("//Nativeipfsdagsigner"), u32::MAX, u64::MAX),
+				(account_id_from_seed("//Bigdatasigner"), u32::MAX, u64::MAX),
+			],
+		},
 	})
 }
 
