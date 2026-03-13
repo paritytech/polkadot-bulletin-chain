@@ -88,6 +88,15 @@ use xcm_runtime_apis::{
 	fees::Error as XcmPaymentApiError,
 };
 
+/// Generates a deterministic keyless account to be used as the sudo key.
+///
+/// This account has no known private key. It can only be controlled through the proxy
+/// pallet by accounts registered as its proxies (e.g., `Admin` or `Sudo` type proxies).
+pub fn keyless_sudo_account() -> AccountId {
+	let entropy = sp_core::blake2_256(b"bulletin-westend-sudo-keyless");
+	AccountId::from(entropy)
+}
+
 /// The address format for describing accounts.
 pub type Address = MultiAddress<AccountId, ()>;
 
@@ -514,17 +523,13 @@ impl pallet_sudo::Config for Runtime {
 	Debug,
 	codec::MaxEncodedLen,
 	scale_info::TypeInfo,
+	Default,
 )]
 pub enum ProxyType {
+	#[default]
 	Any,
 	Admin,
 	Sudo,
-}
-
-impl Default for ProxyType {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 
 impl InstanceFilter<RuntimeCall> for ProxyType {
@@ -1129,7 +1134,19 @@ impl_runtime_apis! {
 
 	impl sp_genesis_builder::GenesisBuilder<Block> for Runtime {
 		fn build_state(config: Vec<u8>) -> sp_genesis_builder::Result {
-			build_state::<RuntimeGenesisConfig>(config)
+			build_state::<RuntimeGenesisConfig>(config)?;
+
+			// pallet-proxy has no GenesisConfig, so we initialize proxy entries for the
+			// keyless sudo account here, after the standard genesis build.
+			// The sudo key from genesis config should be the keyless account; register
+			// the well-known admin proxies for it.
+			if pallet_sudo::Key::<Runtime>::get() == Some(keyless_sudo_account()) {
+				genesis_config_presets::initialize_sudo_proxy_genesis(
+					vec![sp_keyring::Sr25519Keyring::Alice.to_account_id()],
+				);
+			}
+
+			Ok(())
 		}
 
 		fn get_preset(id: &Option<sp_genesis_builder::PresetId>) -> Option<Vec<u8>> {

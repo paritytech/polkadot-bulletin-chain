@@ -34,8 +34,9 @@ fn bulletin_westend_genesis(
 	endowed_accounts: Vec<AccountId>,
 	endowment: Balance,
 	id: ParaId,
-	sudo_account: Option<AccountId>,
 ) -> serde_json::Value {
+	let sudo_account = crate::keyless_sudo_account();
+
 	build_struct_json_patch!(RuntimeGenesisConfig {
 		balances: BalancesConfig {
 			balances: endowed_accounts.iter().cloned().map(|k| (k, endowment)).collect(),
@@ -58,8 +59,37 @@ fn bulletin_westend_genesis(
 				.collect(),
 		},
 		polkadot_xcm: PolkadotXcmConfig { safe_xcm_version: Some(SAFE_XCM_VERSION) },
-		sudo: SudoConfig { key: sudo_account },
+		sudo: SudoConfig { key: Some(sudo_account) },
 	})
+}
+
+/// Initialize proxy entries for the keyless sudo account at genesis.
+///
+/// pallet-proxy has no `GenesisConfig`, so we write directly to storage after the
+/// standard genesis build. This registers the given accounts as `Admin`-type proxies
+/// of the keyless sudo account.
+pub fn initialize_sudo_proxy_genesis(admin_proxies: Vec<AccountId>) {
+	let sudo_account = crate::keyless_sudo_account();
+
+	let proxy_entries: frame_support::BoundedVec<
+		pallet_proxy::ProxyDefinition<AccountId, ProxyType, BlockNumber>,
+		crate::ConstU32<16>,
+	> = admin_proxies
+		.into_iter()
+		.map(|delegate| pallet_proxy::ProxyDefinition {
+			delegate,
+			proxy_type: ProxyType::Admin,
+			delay: 0,
+		})
+		.collect::<Vec<_>>()
+		.try_into()
+		.expect("too many admin proxies for genesis");
+
+	// Deposit is 0 with NoCurrency.
+	let deposit: Balance = 0;
+	let value = (proxy_entries, deposit);
+
+	pallet_proxy::Proxies::<Runtime>::insert(&sudo_account, value);
 }
 
 /// Provides the JSON representation of predefined genesis config for given `id`.
@@ -74,8 +104,6 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			Sr25519Keyring::well_known().map(|k| k.to_account_id()).collect(),
 			WND * 1_000_000,
 			BULLETIN_PARA_ID,
-			// Sudo
-			Some(Sr25519Keyring::Alice.to_account_id()),
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
@@ -88,8 +116,6 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			],
 			WND * 1_000_000,
 			BULLETIN_PARA_ID,
-			// Sudo
-			Some(Sr25519Keyring::Alice.to_account_id()),
 		),
 		_ => return None,
 	};
