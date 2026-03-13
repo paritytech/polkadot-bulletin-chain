@@ -792,10 +792,7 @@ pub mod pallet {
 				Authorizations::<T>::insert(
 					&scope,
 					Authorization {
-						extent: AuthorizationExtent {
-							transactions: *transactions,
-							bytes: *bytes,
-						},
+						extent: AuthorizationExtent { transactions: *transactions, bytes: *bytes },
 						expiration,
 					},
 				);
