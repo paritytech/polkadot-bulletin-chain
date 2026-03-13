@@ -262,34 +262,21 @@ export enum ErrorCode {
   DAG_ENCODING_FAILED = "DAG_ENCODING_FAILED",
   INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
   AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
-  AUTHORIZATION_EXPIRED = "AUTHORIZATION_EXPIRED",
   TRANSACTION_FAILED = "TRANSACTION_FAILED",
-  SUBMISSION_FAILED = "SUBMISSION_FAILED",
-  NETWORK_ERROR = "NETWORK_ERROR",
-  STORAGE_FAILED = "STORAGE_FAILED",
   CHUNK_FAILED = "CHUNK_FAILED",
   MISSING_CHUNK = "MISSING_CHUNK",
-  RETRIEVAL_FAILED = "RETRIEVAL_FAILED",
-  RENEWAL_NOT_FOUND = "RENEWAL_NOT_FOUND",
-  RENEWAL_FAILED = "RENEWAL_FAILED",
   TIMEOUT = "TIMEOUT",
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
 }
 
 /** Error codes that are retryable */
 const RETRYABLE_CODES = new Set<ErrorCode>([
-  ErrorCode.AUTHORIZATION_EXPIRED,
-  ErrorCode.NETWORK_ERROR,
-  ErrorCode.STORAGE_FAILED,
-  ErrorCode.SUBMISSION_FAILED,
   ErrorCode.TRANSACTION_FAILED,
-  ErrorCode.RETRIEVAL_FAILED,
-  ErrorCode.RENEWAL_FAILED,
   ErrorCode.TIMEOUT,
 ])
 
 /** Recovery hints per error code */
-const RECOVERY_HINTS: Record<string, string> = {
+const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
   [ErrorCode.FILE_TOO_LARGE]: "Reduce file size or use chunked upload",
   [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
@@ -303,20 +290,11 @@ const RECOVERY_HINTS: Record<string, string> = {
   [ErrorCode.INSUFFICIENT_AUTHORIZATION]: "Request additional authorization",
   [ErrorCode.AUTHORIZATION_FAILED]:
     "Check that the account has authorizer privileges",
-  [ErrorCode.AUTHORIZATION_EXPIRED]:
-    "Request new authorization; the previous one has expired",
   [ErrorCode.TRANSACTION_FAILED]:
     "Verify transaction parameters and account nonce",
-  [ErrorCode.SUBMISSION_FAILED]:
-    "Check connectivity and retry submitting the transaction",
-  [ErrorCode.NETWORK_ERROR]: "Check network connectivity and try again",
-  [ErrorCode.STORAGE_FAILED]: "Check storage backend and try again",
   [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",
-  [ErrorCode.RETRIEVAL_FAILED]: "The data may not be available yet; try again",
-  [ErrorCode.RENEWAL_NOT_FOUND]: "Verify the block number and extrinsic index",
-  [ErrorCode.RENEWAL_FAILED]: "Check that storage hasn't expired, then retry",
   [ErrorCode.TIMEOUT]: "Increase timeout or retry",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",

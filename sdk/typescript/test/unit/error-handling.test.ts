@@ -27,12 +27,12 @@ describe("Error Handling", () => {
       const cause = new Error("Original error")
       const error = new BulletinError(
         "Wrapped error",
-        ErrorCode.NETWORK_ERROR,
+        ErrorCode.TRANSACTION_FAILED,
         cause,
       )
 
       expect(error.message).toBe("Wrapped error")
-      expect(error.code).toBe(ErrorCode.NETWORK_ERROR)
+      expect(error.code).toBe(ErrorCode.TRANSACTION_FAILED)
       expect(error.cause).toBe(cause)
     })
 
@@ -54,12 +54,12 @@ describe("Error Handling", () => {
   describe("Async Error Propagation", () => {
     it("should propagate BulletinError through async chain", async () => {
       const asyncFunction = async () => {
-        throw new BulletinError("Async error", ErrorCode.SUBMISSION_FAILED)
+        throw new BulletinError("Async error", ErrorCode.TRANSACTION_FAILED)
       }
 
       await expect(asyncFunction()).rejects.toThrow(BulletinError)
       await expect(asyncFunction()).rejects.toMatchObject({
-        code: ErrorCode.SUBMISSION_FAILED,
+        code: ErrorCode.TRANSACTION_FAILED,
         message: "Async error",
       })
     })
@@ -85,7 +85,7 @@ describe("Error Handling", () => {
     it("should preserve error type through Promise.allSettled", async () => {
       const promises = [
         Promise.resolve(1),
-        Promise.reject(new BulletinError("Error", ErrorCode.STORAGE_FAILED)),
+        Promise.reject(new BulletinError("Error", ErrorCode.CHUNK_FAILED)),
         Promise.resolve(3),
       ]
 
@@ -98,7 +98,7 @@ describe("Error Handling", () => {
       if (results[1].status === "rejected") {
         expect(results[1].reason).toBeInstanceOf(BulletinError)
         expect((results[1].reason as BulletinError).code).toBe(
-          ErrorCode.STORAGE_FAILED,
+          ErrorCode.CHUNK_FAILED,
         )
       }
     })
@@ -225,9 +225,6 @@ describe("Error Handling", () => {
       expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED")
       expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED")
       expect(ErrorCode.MISSING_CHUNK).toBe("MISSING_CHUNK")
-      expect(ErrorCode.RETRIEVAL_FAILED).toBe("RETRIEVAL_FAILED")
-      expect(ErrorCode.RENEWAL_NOT_FOUND).toBe("RENEWAL_NOT_FOUND")
-      expect(ErrorCode.RENEWAL_FAILED).toBe("RENEWAL_FAILED")
       expect(ErrorCode.TIMEOUT).toBe("TIMEOUT")
       expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION")
     })
@@ -268,7 +265,6 @@ describe("Error Handling", () => {
         ErrorCode.AUTHORIZATION_FAILED,
         ErrorCode.CHUNK_FAILED,
         ErrorCode.MISSING_CHUNK,
-        ErrorCode.RENEWAL_NOT_FOUND,
         ErrorCode.UNSUPPORTED_OPERATION,
       ]
 
