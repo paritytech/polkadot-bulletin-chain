@@ -117,8 +117,6 @@ impl Error {
 			Error::InvalidConfig(_) => "INVALID_CONFIG",
 			Error::ChunkingFailed(_) => "CHUNKING_FAILED",
 			Error::RetrievalFailed(_) => "RETRIEVAL_FAILED",
-			Error::SubmissionFailed(_) => "SUBMISSION_FAILED",
-			Error::UnsupportedHashAlgorithm(_) => "UNSUPPORTED_HASH_ALGORITHM",
 			Error::RenewalNotFound { .. } => "RENEWAL_NOT_FOUND",
 			Error::RenewalFailed(_) => "RENEWAL_FAILED",
 			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
@@ -134,7 +132,6 @@ impl Error {
 			Error::AuthorizationExpired { .. } |
 				Error::NetworkError(_) |
 				Error::StorageFailed(_) |
-				Error::SubmissionFailed(_) |
 				Error::TransactionFailed(_) |
 				Error::RetrievalFailed(_) |
 				Error::RenewalFailed(_)
@@ -144,7 +141,7 @@ impl Error {
 	/// Returns an actionable recovery suggestion for this error.
 	pub fn recovery_hint(&self) -> &'static str {
 		match self {
-			Error::ChunkTooLarge(_) => "Reduce chunk size to 8 MiB or less",
+			Error::ChunkTooLarge(_) => "Reduce chunk size to 2 MiB or less",
 			Error::FileTooLarge(_) => "Reduce file size or use chunked upload",
 			Error::EmptyData => "Provide non-empty data",
 			Error::InvalidCid(_) => "Verify CID format",
@@ -159,13 +156,11 @@ impl Error {
 			Error::InvalidConfig(_) => "Check configuration parameters",
 			Error::ChunkingFailed(_) => "Verify data integrity and chunker configuration",
 			Error::RetrievalFailed(_) => "The data may not be available yet; try again",
-			Error::SubmissionFailed(_) => "Check node connectivity and try again",
-			Error::UnsupportedHashAlgorithm(_) => "Use blake2b-256, sha2-256, or keccak-256",
 			Error::RenewalNotFound { .. } => "Verify the block number and extrinsic index",
 			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
 			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
-			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 8 MiB",
+			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 2 MiB",
 		}
 	}
 }
@@ -356,8 +351,7 @@ impl TransactionStatusEvent {
 		match self {
 			TransactionStatusEvent::Validated =>
 				"Transaction validated and added to the pool".into(),
-			TransactionStatusEvent::Broadcasted { num_peers } =>
-				alloc::format!("Transaction broadcast to {num_peers} peers"),
+			TransactionStatusEvent::Broadcasted => "Transaction broadcast to peers".into(),
 			TransactionStatusEvent::InBestBlock { block_hash, block_number, .. } =>
 				match block_number {
 					Some(n) => alloc::format!("Transaction in best block #{n} ({block_hash})"),
@@ -495,8 +489,6 @@ mod tests {
 			Error::InvalidConfig("bad config".into()),
 			Error::ChunkingFailed("chunk err".into()),
 			Error::RetrievalFailed("not found".into()),
-			Error::SubmissionFailed("sub fail".into()),
-			Error::UnsupportedHashAlgorithm("sha3".into()),
 			Error::RenewalNotFound { block: 1, index: 0 },
 			Error::RenewalFailed("renew err".into()),
 			Error::CidCalculationFailed("calc fail".into()),
@@ -521,8 +513,6 @@ mod tests {
 			"INVALID_CONFIG",
 			"CHUNKING_FAILED",
 			"RETRIEVAL_FAILED",
-			"SUBMISSION_FAILED",
-			"UNSUPPORTED_HASH_ALGORITHM",
 			"RENEWAL_NOT_FOUND",
 			"RENEWAL_FAILED",
 			"CID_CALCULATION_FAILED",
@@ -541,7 +531,6 @@ mod tests {
 			"AUTHORIZATION_EXPIRED",
 			"NETWORK_ERROR",
 			"STORAGE_FAILED",
-			"SUBMISSION_FAILED",
 			"TRANSACTION_FAILED",
 			"RETRIEVAL_FAILED",
 			"RENEWAL_FAILED",
@@ -571,7 +560,7 @@ mod tests {
 	fn test_transaction_status_event_description() {
 		let events = vec![
 			(TransactionStatusEvent::Validated, "validated"),
-			(TransactionStatusEvent::Broadcasted { num_peers: 5 }, "5 peers"),
+			(TransactionStatusEvent::Broadcasted, "broadcast"),
 			(
 				TransactionStatusEvent::InBestBlock {
 					block_hash: "0xabc".into(),

@@ -202,31 +202,17 @@ describe("Error Handling", () => {
       expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
       expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
       expect(ErrorCode.INVALID_CID).toBe("INVALID_CID")
-      expect(ErrorCode.UNSUPPORTED_HASH_ALGORITHM).toBe(
-        "UNSUPPORTED_HASH_ALGORITHM",
-      )
       expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM")
       expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED")
       expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED")
-      expect(ErrorCode.DAG_DECODING_FAILED).toBe("DAG_DECODING_FAILED")
-      expect(ErrorCode.AUTHORIZATION_NOT_FOUND).toBe("AUTHORIZATION_NOT_FOUND")
       expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe(
         "INSUFFICIENT_AUTHORIZATION",
       )
-      expect(ErrorCode.AUTHORIZATION_EXPIRED).toBe("AUTHORIZATION_EXPIRED")
       expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED")
-      expect(ErrorCode.SUBMISSION_FAILED).toBe("SUBMISSION_FAILED")
       expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED")
-      expect(ErrorCode.STORAGE_FAILED).toBe("STORAGE_FAILED")
-      expect(ErrorCode.NETWORK_ERROR).toBe("NETWORK_ERROR")
-      expect(ErrorCode.CHUNKING_FAILED).toBe("CHUNKING_FAILED")
       expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED")
-      expect(ErrorCode.RETRIEVAL_FAILED).toBe("RETRIEVAL_FAILED")
-      expect(ErrorCode.RENEWAL_NOT_FOUND).toBe("RENEWAL_NOT_FOUND")
-      expect(ErrorCode.RENEWAL_FAILED).toBe("RENEWAL_FAILED")
       expect(ErrorCode.TIMEOUT).toBe("TIMEOUT")
       expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION")
-      expect(ErrorCode.RETRY_EXHAUSTED).toBe("RETRY_EXHAUSTED")
     })
 
     it("should be usable with BulletinError", () => {
@@ -242,16 +228,7 @@ describe("Error Handling", () => {
 
   describe("BulletinError retryable getter", () => {
     it("should return true for retryable error codes", () => {
-      const retryableCodes = [
-        ErrorCode.AUTHORIZATION_EXPIRED,
-        ErrorCode.NETWORK_ERROR,
-        ErrorCode.STORAGE_FAILED,
-        ErrorCode.SUBMISSION_FAILED,
-        ErrorCode.TRANSACTION_FAILED,
-        ErrorCode.RETRIEVAL_FAILED,
-        ErrorCode.RENEWAL_FAILED,
-        ErrorCode.TIMEOUT,
-      ]
+      const retryableCodes = [ErrorCode.TRANSACTION_FAILED, ErrorCode.TIMEOUT]
 
       for (const code of retryableCodes) {
         const error = new BulletinError("test", code)
@@ -267,18 +244,12 @@ describe("Error Handling", () => {
         ErrorCode.INVALID_CHUNK_SIZE,
         ErrorCode.INVALID_CONFIG,
         ErrorCode.INVALID_CID,
-        ErrorCode.UNSUPPORTED_HASH_ALGORITHM,
         ErrorCode.CID_CALCULATION_FAILED,
         ErrorCode.DAG_ENCODING_FAILED,
-        ErrorCode.DAG_DECODING_FAILED,
-        ErrorCode.AUTHORIZATION_NOT_FOUND,
         ErrorCode.INSUFFICIENT_AUTHORIZATION,
         ErrorCode.AUTHORIZATION_FAILED,
-        ErrorCode.CHUNKING_FAILED,
         ErrorCode.CHUNK_FAILED,
-        ErrorCode.RENEWAL_NOT_FOUND,
         ErrorCode.UNSUPPORTED_OPERATION,
-        ErrorCode.RETRY_EXHAUSTED,
       ]
 
       for (const code of nonRetryableCodes) {

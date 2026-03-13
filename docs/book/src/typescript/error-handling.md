@@ -40,8 +40,8 @@ try {
       case ErrorCode.INSUFFICIENT_AUTHORIZATION:
         console.error('Need more authorization')
         break
-      case ErrorCode.AUTHORIZATION_EXPIRED:
-        console.error('Authorization has expired')
+      case ErrorCode.TRANSACTION_FAILED:
+        console.error('Transaction failed, may retry')
         break
       default:
         console.error('Error:', error.message)
@@ -80,13 +80,7 @@ try {
 
 | Error Code | Description |
 |---|---|
-| `AUTHORIZATION_EXPIRED` | Authorization has expired; refresh it |
-| `NETWORK_ERROR` | Network connectivity issue |
-| `STORAGE_FAILED` | Storage operation failed on-chain |
-| `SUBMISSION_FAILED` | Transaction submission failed |
 | `TRANSACTION_FAILED` | On-chain transaction failed |
-| `RETRIEVAL_FAILED` | Data retrieval failed |
-| `RENEWAL_FAILED` | Renewal operation failed |
 | `TIMEOUT` | Operation timed out |
 
 ### Non-Retryable Error Codes
@@ -99,19 +93,13 @@ try {
 | `INVALID_CHUNK_SIZE` | Chunk size is invalid |
 | `INVALID_CONFIG` | Configuration is invalid |
 | `INVALID_CID` | CID format is invalid |
-| `UNSUPPORTED_HASH_ALGORITHM` | Hash algorithm not supported |
 | `INVALID_HASH_ALGORITHM` | Hash algorithm code is invalid |
 | `CID_CALCULATION_FAILED` | CID calculation failed |
 | `DAG_ENCODING_FAILED` | DAG-PB encoding failed |
-| `DAG_DECODING_FAILED` | DAG-PB decoding failed |
-| `AUTHORIZATION_NOT_FOUND` | No authorization found |
 | `INSUFFICIENT_AUTHORIZATION` | Authorized quota insufficient |
 | `AUTHORIZATION_FAILED` | Authorization call failed |
-| `CHUNKING_FAILED` | Chunking operation failed |
 | `CHUNK_FAILED` | Individual chunk upload failed |
-| `RENEWAL_NOT_FOUND` | Renewal target not found |
 | `UNSUPPORTED_OPERATION` | Operation not supported |
-| `RETRY_EXHAUSTED` | All retry attempts failed |
 
 ## Recovery Hints
 
@@ -193,17 +181,13 @@ try {
   if (!(error instanceof BulletinError)) throw error
 
   switch (error.code) {
-    case ErrorCode.AUTHORIZATION_NOT_FOUND:
-      // Account has no authorization at all
-      console.error('Please authorize your account first')
-      break
     case ErrorCode.INSUFFICIENT_AUTHORIZATION:
       // Not enough quota remaining
       console.error('Need more authorization:', error.message)
       break
-    case ErrorCode.AUTHORIZATION_EXPIRED:
-      // Authorization expired, refresh it
-      console.error('Authorization expired, refreshing...')
+    case ErrorCode.AUTHORIZATION_FAILED:
+      // Authorization call failed
+      console.error('Authorization failed:', error.message)
       break
     default:
       console.error(error.message)
@@ -234,7 +218,7 @@ try {
 } catch (cause) {
   throw new BulletinError(
     'Failed to process data',
-    ErrorCode.STORAGE_FAILED,
+    ErrorCode.TRANSACTION_FAILED,
     cause  // Preserved as error.cause
   )
 }

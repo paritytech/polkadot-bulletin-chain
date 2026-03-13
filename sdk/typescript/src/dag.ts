@@ -8,8 +8,14 @@
 
 import * as dagPB from "@ipld/dag-pb"
 import { UnixFS } from "ipfs-unixfs"
-import { CID } from "multiformats/cid"
-import { BulletinError, ErrorCode, type Chunk, CidCodec, HashAlgorithm } from "./types.js"
+import type { CID } from "multiformats/cid"
+import {
+  BulletinError,
+  type Chunk,
+  CidCodec,
+  ErrorCode,
+  HashAlgorithm,
+} from "./types.js"
 import { calculateCid } from "./utils.js"
 
 /**
@@ -119,7 +125,7 @@ export class UnixFsDagBuilder {
     } catch (error) {
       throw new BulletinError(
         `Failed to parse DAG-PB manifest: ${error}`,
-        ErrorCode.DAG_DECODING_FAILED,
+        ErrorCode.DAG_ENCODING_FAILED,
         error,
       )
     }

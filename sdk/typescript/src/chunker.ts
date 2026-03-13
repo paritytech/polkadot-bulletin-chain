@@ -112,7 +112,7 @@ export function reassembleChunks(chunks: Chunk[]): Uint8Array {
     if (sorted[i]?.index !== i) {
       throw new BulletinError(
         `Missing chunk at index ${i}`,
-        ErrorCode.CHUNKING_FAILED,
+        ErrorCode.CHUNK_FAILED,
       )
     }
   }
