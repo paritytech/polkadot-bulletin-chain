@@ -543,7 +543,6 @@ mod runtime {
 	pub type CumulusXcm = cumulus_pallet_xcm;
 	#[runtime::pallet_index(34)]
 	pub type MessageQueue = pallet_message_queue;
-
 }
 
 cumulus_pallet_parachain_system::register_validate_block! {
