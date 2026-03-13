@@ -26,6 +26,12 @@ pub struct BulletinMetrics {
 	pub registered_validators: Gauge<U64>,
 	/// Whether proof generation failed on the last attempt (0 = ok, 1 = failed).
 	pub proof_generation_failed: Gauge<U64>,
+	/// Outbound bridge messages pending relay.
+	pub bridge_outbound_pending: Gauge<U64>,
+	/// Latest generated outbound nonce.
+	pub bridge_outbound_generated_nonce: Gauge<U64>,
+	/// Latest received (confirmed) outbound nonce.
+	pub bridge_outbound_received_nonce: Gauge<U64>,
 }
 
 impl BulletinMetrics {
@@ -70,6 +76,27 @@ impl BulletinMetrics {
 				Gauge::new(
 					"bulletin_proof_generation_failed",
 					"Whether proof generation failed on the last attempt (0 = ok, 1 = failed)",
+				)?,
+				registry,
+			)?,
+			bridge_outbound_pending: register(
+				Gauge::new(
+					"bulletin_bridge_outbound_pending",
+					"Number of outbound bridge messages waiting to be relayed",
+				)?,
+				registry,
+			)?,
+			bridge_outbound_generated_nonce: register(
+				Gauge::new(
+					"bulletin_bridge_outbound_latest_generated_nonce",
+					"Latest generated outbound bridge message nonce",
+				)?,
+				registry,
+			)?,
+			bridge_outbound_received_nonce: register(
+				Gauge::new(
+					"bulletin_bridge_outbound_latest_received_nonce",
+					"Latest received (confirmed delivered) outbound bridge message nonce",
 				)?,
 				registry,
 			)?,
@@ -122,6 +149,38 @@ fn read_u32_storage(
 	u32::decode(&mut &data.0[..]).ok()
 }
 
+/// Compute the raw storage key for `BridgePolkadotMessages::OutboundLanes` with lane ID
+/// `[0,0,0,0]`.
+fn outbound_lane_data_key() -> StorageKey {
+	let mut key = Vec::with_capacity(32 + 16 + 4);
+	key.extend_from_slice(&sp_core::hashing::twox_128(b"BridgePolkadotMessages"));
+	key.extend_from_slice(&sp_core::hashing::twox_128(b"OutboundLanes"));
+	// Blake2_128Concat hasher: blake2_128(encode(lane_id)) ++ encode(lane_id)
+	let lane_id: [u8; 4] = [0, 0, 0, 0];
+	let encoded = lane_id.encode();
+	key.extend_from_slice(&sp_core::hashing::blake2_128(&encoded));
+	key.extend_from_slice(&encoded);
+	StorageKey(key)
+}
+
+/// Read the OutboundLaneData from raw storage bytes.
+/// Returns (oldest_unpruned_nonce, latest_received_nonce, latest_generated_nonce).
+fn read_outbound_lane_data(
+	client: &FullClient,
+	block_hash: <Block as sp_runtime::traits::Block>::Hash,
+	key: &StorageKey,
+) -> Option<(u64, u64, u64)> {
+	let data = client.storage(block_hash, key).ok()??;
+	// OutboundLaneData SCALE encoding: 3 × u64 (little-endian) + 1 byte LaneState
+	if data.0.len() < 24 {
+		return None;
+	}
+	let oldest_unpruned = u64::from_le_bytes(data.0[0..8].try_into().ok()?);
+	let latest_received = u64::from_le_bytes(data.0[8..16].try_into().ok()?);
+	let latest_generated = u64::from_le_bytes(data.0[16..24].try_into().ok()?);
+	Some((oldest_unpruned, latest_received, latest_generated))
+}
+
 /// Read a SCALE-encoded u64 StorageValue.
 fn read_u64_storage(
 	client: &FullClient,
@@ -141,6 +200,7 @@ pub fn spawn_metrics_task(
 	let num_validators_key = storage_value_key(b"ValidatorSet", b"NumValidators");
 	let renew_count_key = storage_value_key(b"TransactionStorage", b"BlockRenewCount");
 	let renew_bytes_key = storage_value_key(b"TransactionStorage", b"BlockRenewBytes");
+	let outbound_lane_key = outbound_lane_data_key();
 
 	let task = async move {
 		let mut stream = client.import_notification_stream();
@@ -175,6 +235,17 @@ pub fn spawn_metrics_task(
 			metrics
 				.registered_validators
 				.set(read_u32_storage(&client, block_hash, &num_validators_key).unwrap_or(0) as u64);
+
+			// Bridge outbound lane metrics (may not exist on Westend parachain runtime).
+			if let Some((_, latest_received, latest_generated)) =
+				read_outbound_lane_data(&client, block_hash, &outbound_lane_key)
+			{
+				metrics.bridge_outbound_generated_nonce.set(latest_generated);
+				metrics.bridge_outbound_received_nonce.set(latest_received);
+				metrics
+					.bridge_outbound_pending
+					.set(latest_generated.saturating_sub(latest_received));
+			}
 		}
 	};
 
