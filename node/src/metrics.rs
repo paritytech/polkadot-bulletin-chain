@@ -26,6 +26,9 @@ pub struct BulletinMetrics {
 	pub registered_validators: Gauge<U64>,
 	/// Whether proof generation failed on the last attempt (0 = ok, 1 = failed).
 	pub proof_generation_failed: Gauge<U64>,
+	/// Total admin operations in the latest block (validator changes + relayer changes + auth
+	/// ops).
+	pub block_admin_ops: Gauge<U64>,
 }
 
 impl BulletinMetrics {
@@ -70,6 +73,13 @@ impl BulletinMetrics {
 				Gauge::new(
 					"bulletin_proof_generation_failed",
 					"Whether proof generation failed on the last attempt (0 = ok, 1 = failed)",
+				)?,
+				registry,
+			)?,
+			block_admin_ops: register(
+				Gauge::new(
+					"bulletin_block_admin_ops",
+					"Total admin operations in the latest block (validator changes + relayer changes + authorization ops)",
 				)?,
 				registry,
 			)?,
@@ -141,6 +151,9 @@ pub fn spawn_metrics_task(
 	let num_validators_key = storage_value_key(b"ValidatorSet", b"NumValidators");
 	let renew_count_key = storage_value_key(b"TransactionStorage", b"BlockRenewCount");
 	let renew_bytes_key = storage_value_key(b"TransactionStorage", b"BlockRenewBytes");
+	let validator_changes_key = storage_value_key(b"ValidatorSet", b"BlockValidatorChanges");
+	let relayer_changes_key = storage_value_key(b"RelayerSet", b"BlockRelayerChanges");
+	let auth_ops_key = storage_value_key(b"TransactionStorage", b"BlockAuthorizationOps");
 
 	let task = async move {
 		let mut stream = client.import_notification_stream();
@@ -175,6 +188,13 @@ pub fn spawn_metrics_task(
 			metrics
 				.registered_validators
 				.set(read_u32_storage(&client, block_hash, &num_validators_key).unwrap_or(0) as u64);
+
+			// Admin operations (sum of validator changes + relayer changes + authorization ops).
+			let admin_ops = read_u32_storage(&client, block_hash, &validator_changes_key)
+				.unwrap_or(0) as u64 +
+				read_u32_storage(&client, block_hash, &relayer_changes_key).unwrap_or(0) as u64 +
+				read_u32_storage(&client, block_hash, &auth_ops_key).unwrap_or(0) as u64;
+			metrics.block_admin_ops.set(admin_ops);
 		}
 	};
 

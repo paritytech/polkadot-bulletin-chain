@@ -285,10 +285,11 @@ pub mod pallet {
 			// this is just a redundant storage read per block.
 			weight.saturating_accrue(migrations::v1::maybe_migrate_v0_to_v1::<T>());
 
-			// Clear per-block renew counters from the previous block.
+			// Clear per-block counters from the previous block.
 			BlockRenewCount::<T>::kill();
 			BlockRenewBytes::<T>::kill();
-			weight.saturating_accrue(db_weight.writes(2));
+			BlockAuthorizationOps::<T>::kill();
+			weight.saturating_accrue(db_weight.writes(3));
 
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
@@ -520,6 +521,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
+			BlockAuthorizationOps::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -549,6 +551,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
+			BlockAuthorizationOps::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -568,6 +571,7 @@ pub mod pallet {
 			who: T::AccountId,
 		) -> DispatchResult {
 			Self::remove_expired_authorization(AuthorizationScope::Account(who.clone()))?;
+			BlockAuthorizationOps::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::ExpiredAccountAuthorizationRemoved { who });
 			Ok(())
 		}
@@ -588,6 +592,7 @@ pub mod pallet {
 			content_hash: ContentHash,
 		) -> DispatchResult {
 			Self::remove_expired_authorization(AuthorizationScope::Preimage(content_hash))?;
+			BlockAuthorizationOps::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::ExpiredPreimageAuthorizationRemoved { content_hash });
 			Ok(())
 		}
@@ -610,6 +615,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			Self::refresh_authorization(AuthorizationScope::Account(who.clone()))?;
+			BlockAuthorizationOps::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::AccountAuthorizationRefreshed { who });
 			Ok(())
 		}
@@ -633,6 +639,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			Self::refresh_authorization(AuthorizationScope::Preimage(content_hash))?;
+			BlockAuthorizationOps::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
@@ -708,6 +715,11 @@ pub mod pallet {
 	/// Set during block execution, cleared in `on_initialize` of the next block.
 	#[pallet::storage]
 	pub type BlockRenewBytes<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+	/// Number of authorization-related admin operations in the current block.
+	/// Set during block execution, cleared in `on_initialize` of the next block.
+	#[pallet::storage]
+	pub type BlockAuthorizationOps<T: Config> = StorageValue<_, u32, ValueQuery>;
 
 	/// Was the proof checked in this block?
 	#[pallet::storage]

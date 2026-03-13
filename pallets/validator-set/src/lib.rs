@@ -112,6 +112,11 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type NumValidators<T: Config> = StorageValue<_, u32, ValueQuery>;
 
+	/// Number of validator set changes in the current block.
+	/// Cleared in on_initialize of the next block.
+	#[pallet::storage]
+	pub type BlockValidatorChanges<T: Config> = StorageValue<_, u32, ValueQuery>;
+
 	/// Validators that should be disabled in the next session.
 	///
 	/// Validator removal takes effect in the session after next. Validator disabling takes effect
@@ -159,6 +164,14 @@ pub mod pallet {
 		}
 	}
 
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn on_initialize(_n: BlockNumberFor<T>) -> Weight {
+			BlockValidatorChanges::<T>::kill();
+			T::DbWeight::get().writes(1)
+		}
+	}
+
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// Add a new validator.
@@ -176,6 +189,7 @@ pub mod pallet {
 		pub fn add_validator(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
 			T::AddRemoveOrigin::ensure_origin(origin)?;
 			Self::do_add_validator(&who)?;
+			BlockValidatorChanges::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::ValidatorAdded(who));
 			Ok(())
 		}
@@ -194,6 +208,7 @@ pub mod pallet {
 		pub fn remove_validator(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
 			T::AddRemoveOrigin::ensure_origin(origin)?;
 			ensure!(Self::do_remove_validator(&who), Error::<T>::NotAValidator);
+			BlockValidatorChanges::<T>::mutate(|c| *c = c.saturating_add(1));
 			Self::deposit_event(Event::ValidatorRemoved(who));
 			Ok(())
 		}
