@@ -8,7 +8,7 @@
     }
   ],
   "title": "Bulletin Chain Health",
-  "description": "Bulletin Chain node health: block production, storage operations, proof generation, and system resources.",
+  "description": "Bulletin Chain node health: block production, storage operations, proof generation, IPFS serving, and system resources.",
   "uid": "bulletin-health",
   "tags": ["bulletin", "substrate"],
   "timezone": "utc",
@@ -108,24 +108,24 @@
       }
     },
     {
-      "title": "Tx Pool Pending",
-      "description": "Pending transaction pool validations. > 500 = overwhelmed.",
+      "title": "Validators",
+      "description": "Registered validators. Drop = validators removed. 0 = chain halted.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 3, "x": 15, "y": 0 },
       "id": 5,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
-          "expr": "substrate_sub_txpool_validations_scheduled - substrate_sub_txpool_validations_finished"
+          "expr": "bulletin_registered_validators"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "thresholds": {
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 100 },
-              { "color": "red", "value": 500 }
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 3 }
             ]
           }
         }
@@ -159,30 +159,38 @@
       }
     },
     {
-      "title": "Store Transactions (per block)",
-      "description": "Number of data store transactions in the latest imported block. Max 512 per block.",
+      "title": "Store + Renew Transactions (per block)",
+      "description": "Data operations per block: stores (new data) and renewals (extending retention).",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 4 },
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 4 },
       "id": 10,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
           "expr": "bulletin_block_store_transactions",
-          "legendFormat": "txs/block"
+          "legendFormat": "total (store+renew)"
+        },
+        {
+          "expr": "bulletin_block_renew_transactions",
+          "legendFormat": "renewals"
         }
       ]
     },
     {
-      "title": "Store Bytes (per block)",
-      "description": "Bytes of data stored in the latest imported block. Max 10 MB per block.",
+      "title": "Store + Renew Bytes (per block)",
+      "description": "Bytes of data stored and renewed per block.",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 4 },
+      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 4 },
       "id": 11,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
         {
           "expr": "bulletin_block_store_bytes",
-          "legendFormat": "bytes/block"
+          "legendFormat": "total bytes"
+        },
+        {
+          "expr": "bulletin_block_renew_bytes",
+          "legendFormat": "renewed bytes"
         }
       ],
       "fieldConfig": {
@@ -195,7 +203,7 @@
       "title": "Block Production Rate",
       "description": "Blocks produced per minute. Expected ~10 (one every 6s).",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 5, "x": 16, "y": 4 },
+      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 4 },
       "id": 12,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
@@ -206,10 +214,65 @@
       ]
     },
     {
+      "title": "Bitswap Requests/sec",
+      "description": "IPFS Bitswap incoming request rate. Shows how actively peers are fetching stored data.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 10 },
+      "id": 30,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_bitswap_requests_received_total[1m])",
+          "legendFormat": "requests/s"
+        },
+        {
+          "expr": "rate(substrate_bitswap_cids_requested_total[1m])",
+          "legendFormat": "CIDs/s"
+        }
+      ]
+    },
+    {
+      "title": "Bitswap Hit/Miss",
+      "description": "Blocks found vs not found in Bitswap responses. High miss rate = data may have expired or storage issue.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 10 },
+      "id": 31,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_bitswap_blocks_sent_total[1m])",
+          "legendFormat": "blocks found/s"
+        },
+        {
+          "expr": "rate(substrate_bitswap_blocks_not_found_total[1m])",
+          "legendFormat": "not found/s"
+        }
+      ]
+    },
+    {
+      "title": "Bitswap Throughput",
+      "description": "Bytes of block data served over Bitswap per second.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 10 },
+      "id": 32,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_bitswap_blocks_sent_bytes_total[1m])",
+          "legendFormat": "bytes/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
+    },
+    {
       "title": "Memory RSS",
       "description": "Resident memory. Gradual increase over days = possible leak.",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 10 },
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 16 },
       "id": 20,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
@@ -228,7 +291,7 @@
       "title": "Proof Generation Status Over Time",
       "description": "Proof generation status over time. 1 = failed, 0 = ok.",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 10 },
+      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 16 },
       "id": 21,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
@@ -242,7 +305,7 @@
       "title": "Network Peers Over Time",
       "description": "Connected peer count over time.",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 10 },
+      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 16 },
       "id": 22,
       "datasource": "${DS_PROMETHEUS}",
       "targets": [
@@ -254,5 +317,5 @@
     }
   ],
   "schemaVersion": 39,
-  "version": 2
+  "version": 3
 }
