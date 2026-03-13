@@ -10,7 +10,7 @@ import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
 import type { Binary } from "polkadot-api"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
-import { BulletinError, ErrorCode, CidCodec, HashAlgorithm } from "./types.js"
+import { BulletinError, CidCodec, ErrorCode, HashAlgorithm } from "./types.js"
 
 /**
  * Calculate content hash using the specified algorithm

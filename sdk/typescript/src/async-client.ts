@@ -12,6 +12,7 @@ import {
   BulletinError,
   type ChunkedStoreResult,
   type ChunkerConfig,
+  ChunkStatus,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
@@ -20,6 +21,7 @@ import {
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
+  TxStatus,
   type WaitFor,
 } from "./types.js"
 import {
@@ -537,18 +539,25 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.txHash && !txHash) {
             txHash = ev.txHash as string
             if (progressCallback) {
-              progressCallback({ type: "signed", txHash: txHash, chunkIndex })
+              progressCallback({
+                type: TxStatus.Signed,
+                txHash: txHash,
+                chunkIndex,
+              })
             }
           }
 
           // Handle validated event
           if (ev.type === "validated" && progressCallback) {
-            progressCallback({ type: "validated" })
+            progressCallback({ type: TxStatus.Validated, chunkIndex })
           }
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted", numPeers: ev.nPeers, chunkIndex })
+            progressCallback({
+              type: TxStatus.Broadcasted,
+              chunkIndex,
+            })
           }
 
           // Handle best block state
@@ -556,7 +565,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             if (ev.found && ev.block) {
               if (progressCallback) {
                 progressCallback({
-                  type: "in_best_block",
+                  type: TxStatus.InBlock,
                   blockHash: ev.block.hash,
                   blockNumber: ev.block.number,
                   txIndex: ev.block.index,
@@ -570,7 +579,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             } else {
               // Transaction no longer in best block (reorg)
               if (progressCallback) {
-                progressCallback({ type: "no_longer_in_best_block" })
+                progressCallback({
+                  type: TxStatus.NoLongerInBlock,
+                  chunkIndex,
+                })
               }
             }
           }
@@ -579,7 +591,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.type === "finalized" && ev.block) {
             if (progressCallback) {
               progressCallback({
-                type: "finalized",
+                type: TxStatus.Finalized,
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
@@ -594,6 +606,17 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (!resolved) {
             resolved = true
             clearTimeout(timerId)
+            if (progressCallback) {
+              const errorMsg = err instanceof Error ? err.message : String(err)
+              // Distinguish pool-related drops from other transaction errors
+              const isDropped =
+                errorMsg.includes("dropped") || errorMsg.includes("pool")
+              progressCallback({
+                type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
+                error: errorMsg,
+                chunkIndex,
+              })
+            }
             reject(err)
           }
         },
@@ -630,7 +653,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   private async submitTx(
     tx: PapiTransaction,
     errorMessage: string,
-    errorCode: string,
+    errorCode: ErrorCode,
     options?: CallOptions,
   ): Promise<TransactionReceipt> {
     try {
@@ -647,6 +670,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         blockNumber: result.blockNumber,
       }
     } catch (error) {
+      if (error instanceof BulletinError) throw error
       throw new BulletinError(`${errorMessage}: ${error}`, errorCode, error)
     }
   }
@@ -823,7 +847,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     for (const chunk of prepared.chunks) {
       if (progressCallback) {
         progressCallback({
-          type: "chunk_started",
+          type: ChunkStatus.ChunkStarted,
           index: chunk.index,
           total: totalChunks,
         })
@@ -843,7 +867,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
         if (progressCallback && cid) {
           progressCallback({
-            type: "chunk_completed",
+            type: ChunkStatus.ChunkCompleted,
             index: chunk.index,
             total: totalChunks,
             cid,
@@ -852,7 +876,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       } catch (error) {
         if (progressCallback) {
           progressCallback({
-            type: "chunk_failed",
+            type: ChunkStatus.ChunkFailed,
             index: chunk.index,
             total: totalChunks,
             error: error as Error,
@@ -874,7 +898,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     let manifestCid: CID | undefined
     if (prepared.manifest) {
       if (progressCallback) {
-        progressCallback({ type: "manifest_started" })
+        progressCallback({ type: ChunkStatus.ManifestStarted })
       }
 
       // Manifest is always DagPb codec
@@ -891,12 +915,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       manifestCid = prepared.manifest.cid
 
       if (progressCallback) {
-        progressCallback({ type: "manifest_created", cid: manifestCid })
+        progressCallback({
+          type: ChunkStatus.ManifestCreated,
+          cid: manifestCid,
+        })
       }
     }
 
     if (progressCallback) {
-      progressCallback({ type: "completed", manifestCid })
+      progressCallback({ type: ChunkStatus.Completed, manifestCid })
     }
 
     return {
@@ -964,7 +991,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
       const tx = this.api.tx.TransactionStorage.renew({ block, index })
-      return this.submitTx(tx, "Failed to renew", ErrorCode.TRANSACTION_FAILED, options)
+      return this.submitTx(
+        tx,
+        "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
     })
   }
 

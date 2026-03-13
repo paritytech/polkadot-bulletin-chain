@@ -137,8 +137,8 @@ try {
         if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
             console.error('Need more authorization!');
             console.error('Details:', error.cause);
-        } else if (error.code === ErrorCode.AUTHORIZATION_EXPIRED) {
-            console.error('Authorization expired!');
+        } else if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
+            console.error('Authorization call failed!');
             console.error('Hint:', error.recoveryHint);
         } else if (error.retryable) {
             console.error('Transient error, consider retrying:', error.message);
@@ -181,8 +181,8 @@ try {
         if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
             console.error('Insufficient authorization');
             console.error('Please authorize your account first');
-        } else if (error.code === ErrorCode.AUTHORIZATION_EXPIRED) {
-            console.error('Authorization expired');
+        } else if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
+            console.error('Authorization call failed');
             console.error('Hint:', error.recoveryHint);
         } else {
             console.error('Error:', error.code, error.message);

@@ -180,15 +180,15 @@ assert_eq!(event.description(), "Transaction finalized in block #42 (0xabc)");
 
 ## Cross-SDK Consistency
 
-Error codes are consistent between the Rust and TypeScript SDKs. The Rust `Error::code()` method returns the same string as the TypeScript `ErrorCode` enum value:
+Error codes overlap between the Rust and TypeScript SDKs where applicable. The Rust `Error::code()` method returns the same `SCREAMING_SNAKE_CASE` string as the TypeScript `ErrorCode` enum value for shared codes:
 
 | Rust | TypeScript | Code String |
 |---|---|---|
 | `Error::EmptyData` | `ErrorCode.EMPTY_DATA` | `"EMPTY_DATA"` |
-| `Error::StorageFailed(_)` | `ErrorCode.STORAGE_FAILED` | `"STORAGE_FAILED"` |
 | `Error::TransactionFailed(_)` | `ErrorCode.TRANSACTION_FAILED` | `"TRANSACTION_FAILED"` |
+| `Error::InsufficientAuthorization { .. }` | `ErrorCode.INSUFFICIENT_AUTHORIZATION` | `"INSUFFICIENT_AUTHORIZATION"` |
 
-This makes it easy to handle errors consistently across polyglot systems or when translating between SDKs.
+Some codes exist only in one SDK (e.g. `NETWORK_ERROR`, `STORAGE_FAILED`, `RENEWAL_NOT_FOUND` are Rust-only; `MISSING_CHUNK` is TypeScript-only). The `is_retryable()` / `retryable` sets also differ: Rust includes more network-related codes while TypeScript covers `TRANSACTION_FAILED` and `TIMEOUT`.
 
 ## Common Error Patterns
 

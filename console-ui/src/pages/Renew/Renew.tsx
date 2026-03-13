@@ -19,7 +19,8 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { ProgressEvent, WaitFor } from "@bulletin/sdk";
+import { WaitFor } from "@bulletin/sdk";
+import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex } from "@/utils/format";
 
 interface RenewalTarget {
@@ -58,6 +59,7 @@ export function Renew() {
     newExpiresAt: number;
   } | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   // Retention period from chain
   const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
@@ -155,20 +157,6 @@ export function Renew() {
     try {
       // Create SDK client with user's signer
       const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
-
-      // Progress callback for transaction status updates
-      const handleProgress = (event: ProgressEvent) => {
-        console.log("SDK progress:", event);
-        if (event.type === "signed") {
-          setTxStatus("Transaction signed...");
-        } else if (event.type === "broadcasted") {
-          setTxStatus("Broadcasting to network...");
-        } else if (event.type === "in_best_block") {
-          setTxStatus(`Included in block #${event.blockNumber}...`);
-        } else if (event.type === "finalized") {
-          setTxStatus("Finalized!");
-        }
-      };
 
       // Use SDK to renew with progress callback
       const result = await bulletinClient
