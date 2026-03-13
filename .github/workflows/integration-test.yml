@@ -202,7 +202,7 @@ jobs:
           TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
           echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
-          just start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
+          just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
       - name: Test authorize-and-store ws
         working-directory: examples
@@ -235,7 +235,7 @@ jobs:
       - name: Stop services
         if: always()
         working-directory: examples
-        run: just stop-services "$TEST_DIR" "kubo-native"
+        run: just KUBO_VERSION="${KUBO_VERSION}" stop-services "$TEST_DIR" "kubo-native"
 
       # Collects logs from the last failed zombienet run.
       - name: Upload Zombienet logs (on failure)
