@@ -55,7 +55,7 @@ parameter_types! {
 /// storage-mutating TransactionStorage calls (store, store_with_cid_config, renew) from XCM
 /// dispatch — those require on-chain authorization that XCM cannot provide.
 #[derive(Clone, PartialEq, Eq, Default)]
-pub struct RuntimeCallInspector;
+pub struct StorageCallInspector;
 
 impl pallet_transaction_storage::CallInspector<RuntimeCall> for RuntimeCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
