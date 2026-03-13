@@ -1,0 +1,321 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "title": "Bulletin Chain Health",
+  "description": "Bulletin Chain node health: block production, storage operations, proof generation, IPFS serving, and system resources.",
+  "uid": "bulletin-health",
+  "tags": ["bulletin", "substrate"],
+  "timezone": "utc",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Block Height (best vs finalized)",
+      "description": "Best and finalized block numbers. Gap > 20 = GRANDPA problem.",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "substrate_block_height{status=\"best\"}",
+          "legendFormat": "best"
+        },
+        {
+          "expr": "substrate_block_height{status=\"finalized\"}",
+          "legendFormat": "finalized"
+        }
+      ]
+    },
+    {
+      "title": "Finality Lag",
+      "description": "Blocks between best and finalized. > 20 = warning, > 50 = critical.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 0 },
+      "id": 2,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "substrate_block_height{status=\"best\"} - substrate_block_height{status=\"finalized\"}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Peers",
+      "description": "Connected peers. 0 = isolated, < 3 = degraded.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 0 },
+      "id": 3,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "substrate_sub_libp2p_peers_count"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Proof Generation",
+      "description": "Proof generation status. 0 = ok, 1 = failed.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 0 },
+      "id": 4,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "bulletin_proof_generation_failed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OK" }, "1": { "text": "FAILED" } } }
+          ],
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Validators",
+      "description": "Registered validators. Drop = validators removed. 0 = chain halted.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 0 },
+      "id": 5,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "bulletin_registered_validators"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Disk Free %",
+      "description": "Available disk space. Bulletin needs 1.5-2 TB. < 5% = critical.",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 3, "x": 18, "y": 0 },
+      "id": 6,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "100 * node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "green", "value": 15 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Store + Renew Transactions (per block)",
+      "description": "Data operations per block: stores (new data) and renewals (extending retention).",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 4 },
+      "id": 10,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "bulletin_block_store_transactions",
+          "legendFormat": "total (store+renew)"
+        },
+        {
+          "expr": "bulletin_block_renew_transactions",
+          "legendFormat": "renewals"
+        }
+      ]
+    },
+    {
+      "title": "Store + Renew Bytes (per block)",
+      "description": "Bytes of data stored and renewed per block.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 4 },
+      "id": 11,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "bulletin_block_store_bytes",
+          "legendFormat": "total bytes"
+        },
+        {
+          "expr": "bulletin_block_renew_bytes",
+          "legendFormat": "renewed bytes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "title": "Block Production Rate",
+      "description": "Blocks produced per minute. Expected ~10 (one every 6s).",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 4 },
+      "id": 12,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_block_height{status=\"best\"}[1m]) * 60",
+          "legendFormat": "blocks/min"
+        }
+      ]
+    },
+    {
+      "title": "Bitswap Requests/sec",
+      "description": "IPFS Bitswap incoming request rate. Shows how actively peers are fetching stored data.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 10 },
+      "id": 30,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_bitswap_requests_received_total[1m])",
+          "legendFormat": "requests/s"
+        },
+        {
+          "expr": "rate(substrate_bitswap_cids_requested_total[1m])",
+          "legendFormat": "CIDs/s"
+        }
+      ]
+    },
+    {
+      "title": "Bitswap Hit/Miss",
+      "description": "Blocks found vs not found in Bitswap responses. High miss rate = data may have expired or storage issue.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 10 },
+      "id": 31,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_bitswap_blocks_sent_total[1m])",
+          "legendFormat": "blocks found/s"
+        },
+        {
+          "expr": "rate(substrate_bitswap_blocks_not_found_total[1m])",
+          "legendFormat": "not found/s"
+        }
+      ]
+    },
+    {
+      "title": "Bitswap Throughput",
+      "description": "Bytes of block data served over Bitswap per second.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 10 },
+      "id": 32,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(substrate_bitswap_blocks_sent_bytes_total[1m])",
+          "legendFormat": "bytes/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
+    },
+    {
+      "title": "Memory RSS",
+      "description": "Resident memory. Gradual increase over days = possible leak.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 16 },
+      "id": 20,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes",
+          "legendFormat": "RSS"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "title": "Proof Generation Status Over Time",
+      "description": "Proof generation status over time. 1 = failed, 0 = ok.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 7, "y": 16 },
+      "id": 21,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "bulletin_proof_generation_failed",
+          "legendFormat": "status"
+        }
+      ]
+    },
+    {
+      "title": "Network Peers Over Time",
+      "description": "Connected peer count over time.",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 7, "x": 14, "y": 16 },
+      "id": 22,
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "substrate_sub_libp2p_peers_count",
+          "legendFormat": "peers"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 3
+}

@@ -70,7 +70,47 @@ These are Counters (monotonically increasing, unlike the Gauges above). Use `rat
 
 These are available to any chain running `--ipfs-server` with the litep2p backend, not just Bulletin. See [polkadot-sdk#11370](https://github.com/paritytech/polkadot-sdk/pull/11370).
 
+## Planned metrics
+
+Four metrics are planned, each as a separate PR. They follow the same patterns established above — Gauges read from on-chain storage after block import.
+
+### `bulletin_total_stored_bytes`
+
+**Gauge: total bytes of data currently held on-chain**
+
+A global running total. Implementation: add a `TotalStoredBytes` StorageValue to `pallet-transaction-storage`. Increment by `data.len()` in `do_store()`. Decrement when blocks expire past `RetentionPeriod` in `on_initialize()` — before removing `Transactions` for the obsolete block, sum their sizes and subtract. The node reads it like any other StorageValue.
+
+This replaces the rough `sum_over_time(bulletin_block_store_bytes[7d])` approximation with an exact value. Combined with disk metrics, it tells operators exactly how much of their 1.5–2 TB is occupied.
+
+Per-account breakdown is not planned — `TransactionInfo` doesn't include an owner field, and attributing data to accounts would require tracking the signer through `do_store()` plus a `TransactionOwner` double-map for pruning. That's a significant pallet refactor for minimal monitoring value.
+
+### `bulletin_block_admin_ops`
+
+**Gauge: number of admin operations in the latest block**
+
+Per-block counter using the `BlockRenewCount` pattern. Implementation: add `BlockAdminOps` StorageValue to `pallet-transaction-storage` (or a shared common pallet). Increment in:
+- `pallet-validator-set`: `add_validator`, `remove_validator`
+- `pallet-relayer-set`: `add_relayer`, `remove_relayer`
+- `pallet-transaction-storage`: `authorize_account`, `authorize_preimage`, `remove_expired_account_authorization`, `remove_expired_preimage_authorization`, `refresh_account_authorization`, `refresh_preimage_authorization`
+
+Clear in `on_initialize()`. The node reads it the same way it reads `BlockRenewCount`.
+
+This avoids the event-decoding problem — the node doesn't need to parse runtime events, it just reads a u32 from storage.
+
+### `bulletin_bridge_outbound_pending`
+
+**Gauge: messages waiting to be relayed to People Chain**
+
+Read `OutboundLanes` storage from `pallet_bridge_messages` for lane `[0,0,0,0]`. The `OutboundLaneData` struct contains `latest_generated_nonce` (sent) and `latest_received_nonce` (confirmed delivered). Pending = generated − received. The node reads the raw storage key using the same `storage_value_key` / Blake2_128Concat pattern.
+
+Additional gauges: `bulletin_bridge_outbound_latest_generated_nonce` and `bulletin_bridge_outbound_latest_received_nonce` for the raw nonce values.
+
+Only available in the Polkadot runtime (solochain mode). The Westend runtime is a parachain and doesn't include bridge pallets.
+
+### Cross-node comparison (dashboard only)
+
+No new metric. The dashboard gets a `$instance` template variable added to all queries as `{instance=~"$instance"}`. Requires Prometheus scraping multiple nodes with distinct `instance` labels. This is a dashboard-level change — no pallet or node code needed.
+
 ## What's not here yet
 
-- **Total data stored by accounts** — would require iterating the `Authorizations` storage map or maintaining a running aggregate in the pallet. Can be approximated in Grafana with `sum_over_time(bulletin_block_store_bytes[7d])`.
-- **Admin operations per block period** — authorization, validator, and relayer changes emit runtime events but can't be decoded from the node side (uses fake runtime API). Would need per-block counters added to each pallet.
+- **Per-account storage breakdown** — would need `TransactionOwner(BlockNumber, Index → AccountId)` double-map plus refactoring `do_store()` to accept an account parameter. Significant pallet change for marginal monitoring value. Can be explored if there's a product need.
