@@ -8,6 +8,7 @@ import {
   ErrorCode,
   type HashAlgorithm,
   type TransactionStatusEvent,
+  TxStatus,
 } from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
@@ -291,49 +292,59 @@ describe("Error Handling", () => {
 
   describe("TransactionStatusEvent variants", () => {
     it("should support validated event", () => {
-      const event: TransactionStatusEvent = { type: "validated" }
-      expect(event.type).toBe("validated")
+      const event: TransactionStatusEvent = { type: TxStatus.Validated }
+      expect(event.type).toBe(TxStatus.Validated)
     })
 
     it("should support broadcasted event", () => {
-      const event: TransactionStatusEvent = { type: "broadcasted" }
-      expect(event.type).toBe("broadcasted")
+      const event: TransactionStatusEvent = { type: TxStatus.Broadcasted }
+      expect(event.type).toBe(TxStatus.Broadcasted)
     })
 
     it("should support in_block event", () => {
       const event: TransactionStatusEvent = {
-        type: "in_block",
+        type: TxStatus.InBlock,
         blockHash: "0xabc",
         blockNumber: 42,
         txIndex: 1,
       }
-      expect(event.type).toBe("in_block")
+      expect(event.type).toBe(TxStatus.InBlock)
       expect(event.blockHash).toBe("0xabc")
       expect(event.blockNumber).toBe(42)
       expect(event.txIndex).toBe(1)
     })
 
     it("should support no_longer_in_block event", () => {
-      const event: TransactionStatusEvent = { type: "no_longer_in_block" }
-      expect(event.type).toBe("no_longer_in_block")
+      const event: TransactionStatusEvent = { type: TxStatus.NoLongerInBlock }
+      expect(event.type).toBe(TxStatus.NoLongerInBlock)
     })
 
     it("should support invalid event", () => {
       const event: TransactionStatusEvent = {
-        type: "invalid",
+        type: TxStatus.Invalid,
         error: "nonce too low",
       }
-      expect(event.type).toBe("invalid")
+      expect(event.type).toBe(TxStatus.Invalid)
       expect(event.error).toBe("nonce too low")
     })
 
     it("should support dropped event", () => {
       const event: TransactionStatusEvent = {
-        type: "dropped",
+        type: TxStatus.Dropped,
         error: "pool full",
       }
-      expect(event.type).toBe("dropped")
+      expect(event.type).toBe(TxStatus.Dropped)
       expect(event.error).toBe("pool full")
+    })
+
+    it("should remain backward compatible with string comparisons", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.InBlock,
+        blockHash: "0x1",
+        blockNumber: 1,
+      }
+      // biome-ignore lint/suspicious/noExplicitAny: testing backward compat with string comparison
+      expect(event.type === ("in_block" as any)).toBe(true)
     })
   })
 })

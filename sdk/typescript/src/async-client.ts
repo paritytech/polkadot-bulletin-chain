@@ -12,6 +12,7 @@ import {
   BulletinError,
   type ChunkedStoreResult,
   type ChunkerConfig,
+  ChunkStatus,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
@@ -20,6 +21,7 @@ import {
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
+  TxStatus,
   type WaitFor,
 } from "./types.js"
 import {
@@ -537,19 +539,23 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.txHash && !txHash) {
             txHash = ev.txHash as string
             if (progressCallback) {
-              progressCallback({ type: "signed", txHash: txHash, chunkIndex })
+              progressCallback({
+                type: TxStatus.Signed,
+                txHash: txHash,
+                chunkIndex,
+              })
             }
           }
 
           // Handle validated event
           if (ev.type === "validated" && progressCallback) {
-            progressCallback({ type: "validated", chunkIndex })
+            progressCallback({ type: TxStatus.Validated, chunkIndex })
           }
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
             progressCallback({
-              type: "broadcasted",
+              type: TxStatus.Broadcasted,
               chunkIndex,
             })
           }
@@ -559,7 +565,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             if (ev.found && ev.block) {
               if (progressCallback) {
                 progressCallback({
-                  type: "in_block",
+                  type: TxStatus.InBlock,
                   blockHash: ev.block.hash,
                   blockNumber: ev.block.number,
                   txIndex: ev.block.index,
@@ -574,7 +580,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
               // Transaction no longer in best block (reorg)
               if (progressCallback) {
                 progressCallback({
-                  type: "no_longer_in_block",
+                  type: TxStatus.NoLongerInBlock,
                   chunkIndex,
                 })
               }
@@ -585,7 +591,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.type === "finalized" && ev.block) {
             if (progressCallback) {
               progressCallback({
-                type: "finalized",
+                type: TxStatus.Finalized,
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
@@ -603,7 +609,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             // Emit dropped event for observable errors (invalid tx, pool full, etc.)
             if (progressCallback) {
               progressCallback({
-                type: "dropped",
+                type: TxStatus.Dropped,
                 error: err instanceof Error ? err.message : String(err),
                 chunkIndex,
               })
@@ -837,7 +843,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     for (const chunk of prepared.chunks) {
       if (progressCallback) {
         progressCallback({
-          type: "chunk_started",
+          type: ChunkStatus.ChunkStarted,
           index: chunk.index,
           total: totalChunks,
         })
@@ -857,7 +863,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
         if (progressCallback && cid) {
           progressCallback({
-            type: "chunk_completed",
+            type: ChunkStatus.ChunkCompleted,
             index: chunk.index,
             total: totalChunks,
             cid,
@@ -866,7 +872,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       } catch (error) {
         if (progressCallback) {
           progressCallback({
-            type: "chunk_failed",
+            type: ChunkStatus.ChunkFailed,
             index: chunk.index,
             total: totalChunks,
             error: error as Error,
@@ -888,7 +894,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     let manifestCid: CID | undefined
     if (prepared.manifest) {
       if (progressCallback) {
-        progressCallback({ type: "manifest_started" })
+        progressCallback({ type: ChunkStatus.ManifestStarted })
       }
 
       // Manifest is always DagPb codec
@@ -905,12 +911,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       manifestCid = prepared.manifest.cid
 
       if (progressCallback) {
-        progressCallback({ type: "manifest_created", cid: manifestCid })
+        progressCallback({
+          type: ChunkStatus.ManifestCreated,
+          cid: manifestCid,
+        })
       }
     }
 
     if (progressCallback) {
-      progressCallback({ type: "completed", manifestCid })
+      progressCallback({ type: ChunkStatus.Completed, manifestCid })
     }
 
     return {

@@ -169,40 +169,71 @@ export enum AuthorizationScope {
 }
 
 /**
+ * Chunk progress event types
+ */
+export enum ChunkStatus {
+  ChunkStarted = "chunk_started",
+  ChunkCompleted = "chunk_completed",
+  ChunkFailed = "chunk_failed",
+  ManifestStarted = "manifest_started",
+  ManifestCreated = "manifest_created",
+  Completed = "completed",
+}
+
+/**
  * Progress event types for chunked uploads
  */
 export type ChunkProgressEvent =
-  | { type: "chunk_started"; index: number; total: number }
-  | { type: "chunk_completed"; index: number; total: number; cid: CID }
-  | { type: "chunk_failed"; index: number; total: number; error: Error }
-  | { type: "manifest_started" }
-  | { type: "manifest_created"; cid: CID }
-  | { type: "completed"; manifestCid?: CID }
+  | { type: ChunkStatus.ChunkStarted; index: number; total: number }
+  | { type: ChunkStatus.ChunkCompleted; index: number; total: number; cid: CID }
+  | {
+      type: ChunkStatus.ChunkFailed
+      index: number
+      total: number
+      error: Error
+    }
+  | { type: ChunkStatus.ManifestStarted }
+  | { type: ChunkStatus.ManifestCreated; cid: CID }
+  | { type: ChunkStatus.Completed; manifestCid?: CID }
+
+/**
+ * Transaction status event types
+ */
+export enum TxStatus {
+  Signed = "signed",
+  Validated = "validated",
+  Broadcasted = "broadcasted",
+  InBlock = "in_block",
+  Finalized = "finalized",
+  NoLongerInBlock = "no_longer_in_block",
+  Invalid = "invalid",
+  Dropped = "dropped",
+}
 
 /**
  * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
  */
 export type TransactionStatusEvent =
-  | { type: "signed"; txHash: string; chunkIndex?: number }
-  | { type: "validated"; chunkIndex?: number }
-  | { type: "broadcasted"; chunkIndex?: number }
+  | { type: TxStatus.Signed; txHash: string; chunkIndex?: number }
+  | { type: TxStatus.Validated; chunkIndex?: number }
+  | { type: TxStatus.Broadcasted; chunkIndex?: number }
   | {
-      type: "in_block"
+      type: TxStatus.InBlock
       blockHash: string
       blockNumber: number
       txIndex?: number
       chunkIndex?: number
     }
   | {
-      type: "finalized"
+      type: TxStatus.Finalized
       blockHash: string
       blockNumber: number
       txIndex?: number
       chunkIndex?: number
     }
-  | { type: "no_longer_in_block"; chunkIndex?: number }
-  | { type: "invalid"; error: string; chunkIndex?: number }
-  | { type: "dropped"; error: string; chunkIndex?: number }
+  | { type: TxStatus.NoLongerInBlock; chunkIndex?: number }
+  | { type: TxStatus.Invalid; error: string; chunkIndex?: number }
+  | { type: TxStatus.Dropped; error: string; chunkIndex?: number }
 
 /**
  * Combined progress event types

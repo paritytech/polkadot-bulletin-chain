@@ -19,7 +19,7 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash, HashAlgorithm, ProgressEvent, WaitFor } from "@bulletin/sdk";
+import { getContentHash, HashAlgorithm, ProgressEvent, TxStatus, WaitFor } from "@bulletin/sdk";
 import { bytesToHex, hexToBytes } from "@/utils/format";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
 import { SS58String, Enum } from "polkadot-api";
@@ -410,13 +410,13 @@ function FaucetAuthorizePreimagePanel() {
       // Progress callback for transaction status updates
       const handleProgress = (event: ProgressEvent) => {
         console.log("SDK progress:", event);
-        if (event.type === "signed") {
+        if (event.type === TxStatus.Signed) {
           setTxStatus("Transaction signed...");
-        } else if (event.type === "broadcasted") {
+        } else if (event.type === TxStatus.Broadcasted) {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "in_block") {
+        } else if (event.type === TxStatus.InBlock) {
           setTxStatus(`Included in block #${event.blockNumber}...`);
-        } else if (event.type === "finalized") {
+        } else if (event.type === TxStatus.Finalized) {
           setTxStatus("Finalized!");
         }
       };
@@ -701,13 +701,13 @@ function FaucetAuthorizeAccountPanel() {
       // Progress callback for transaction status updates
       const handleProgress = (event: ProgressEvent) => {
         console.log("SDK progress:", event);
-        if (event.type === "signed") {
+        if (event.type === TxStatus.Signed) {
           setTxStatus("Transaction signed...");
-        } else if (event.type === "broadcasted") {
+        } else if (event.type === TxStatus.Broadcasted) {
           setTxStatus("Broadcasting to network...");
-        } else if (event.type === "in_block") {
+        } else if (event.type === TxStatus.InBlock) {
           setTxStatus(`Included in block #${event.blockNumber}...`);
-        } else if (event.type === "finalized") {
+        } else if (event.type === TxStatus.Finalized) {
           setTxStatus("Finalized!");
         }
       };
