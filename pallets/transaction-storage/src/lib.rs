@@ -296,6 +296,15 @@ pub mod pallet {
 			let period = Self::retention_period();
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
 			if obsolete > Zero::zero() {
+				// Subtract expired data from total before removing
+				weight.saturating_accrue(db_weight.reads(1));
+				if let Some(expired_txs) = <Transactions<T>>::get(obsolete) {
+					let expired_bytes: u64 = expired_txs.iter().map(|t| t.size as u64).sum();
+					TotalStoredBytes::<T>::mutate(|total| {
+						*total = total.saturating_sub(expired_bytes)
+					});
+					weight.saturating_accrue(db_weight.reads_writes(1, 1));
+				}
 				weight.saturating_accrue(db_weight.writes(2));
 				<Transactions<T>>::remove(obsolete);
 			}
@@ -709,6 +718,11 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type BlockRenewBytes<T: Config> = StorageValue<_, u64, ValueQuery>;
 
+	/// Total bytes of data currently stored on-chain across all blocks.
+	/// Incremented when data is stored, decremented when blocks expire past RetentionPeriod.
+	#[pallet::storage]
+	pub type TotalStoredBytes<T: Config> = StorageValue<_, u64, ValueQuery>;
+
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
@@ -823,6 +837,7 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
+			TotalStoredBytes::<T>::mutate(|total| *total = total.saturating_add(data.len() as u64));
 			Self::deposit_event(Event::Stored {
 				index,
 				content_hash: cid.content_hash,
