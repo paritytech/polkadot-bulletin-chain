@@ -184,10 +184,10 @@ export type ChunkProgressEvent =
  */
 export type TransactionStatusEvent =
   | { type: "signed"; txHash: string; chunkIndex?: number }
-  | { type: "validated" }
-  | { type: "broadcasted"; numPeers?: number; chunkIndex?: number }
+  | { type: "validated"; chunkIndex?: number }
+  | { type: "broadcasted"; chunkIndex?: number }
   | {
-      type: "in_best_block"
+      type: "in_block"
       blockHash: string
       blockNumber: number
       txIndex?: number
@@ -200,9 +200,9 @@ export type TransactionStatusEvent =
       txIndex?: number
       chunkIndex?: number
     }
-  | { type: "no_longer_in_best_block" }
-  | { type: "invalid"; error: string }
-  | { type: "dropped"; error: string }
+  | { type: "no_longer_in_block"; chunkIndex?: number }
+  | { type: "invalid"; error: string; chunkIndex?: number }
+  | { type: "dropped"; error: string; chunkIndex?: number }
 
 /**
  * Combined progress event types
@@ -233,13 +233,23 @@ export enum ErrorCode {
   AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
   TRANSACTION_FAILED = "TRANSACTION_FAILED",
   CHUNK_FAILED = "CHUNK_FAILED",
+  MISSING_CHUNK = "MISSING_CHUNK",
+  RETRIEVAL_FAILED = "RETRIEVAL_FAILED",
+  RENEWAL_NOT_FOUND = "RENEWAL_NOT_FOUND",
+  RENEWAL_FAILED = "RENEWAL_FAILED",
   TIMEOUT = "TIMEOUT",
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
 }
 
 /** Error codes that are retryable */
-const RETRYABLE_CODES = new Set<string>([
+const RETRYABLE_CODES = new Set<ErrorCode>([
+  ErrorCode.AUTHORIZATION_EXPIRED,
+  ErrorCode.NETWORK_ERROR,
+  ErrorCode.STORAGE_FAILED,
+  ErrorCode.SUBMISSION_FAILED,
   ErrorCode.TRANSACTION_FAILED,
+  ErrorCode.RETRIEVAL_FAILED,
+  ErrorCode.RENEWAL_FAILED,
   ErrorCode.TIMEOUT,
 ])
 
@@ -261,6 +271,11 @@ const RECOVERY_HINTS: Record<string, string> = {
   [ErrorCode.TRANSACTION_FAILED]:
     "Verify transaction parameters and account nonce",
   [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
+  [ErrorCode.MISSING_CHUNK]:
+    "Ensure all chunks are present with contiguous indices starting from 0",
+  [ErrorCode.RETRIEVAL_FAILED]: "The data may not be available yet; try again",
+  [ErrorCode.RENEWAL_NOT_FOUND]: "Verify the block number and extrinsic index",
+  [ErrorCode.RENEWAL_FAILED]: "Check that storage hasn't expired, then retry",
   [ErrorCode.TIMEOUT]: "Increase timeout or retry",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",
@@ -270,15 +285,12 @@ const RECOVERY_HINTS: Record<string, string> = {
  * SDK error class
  */
 export class BulletinError extends Error {
-  override readonly cause?: unknown
-
   constructor(
     message: string,
-    public readonly code: ErrorCode | string,
-    cause?: unknown,
+    public readonly code: ErrorCode,
+    override readonly cause?: unknown,
   ) {
     super(message, { cause })
-    this.cause = cause
     this.name = "BulletinError"
   }
 

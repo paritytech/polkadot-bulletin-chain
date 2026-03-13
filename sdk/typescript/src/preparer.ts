@@ -54,7 +54,7 @@ export class BulletinPreparer {
     if (data.length > this.config.chunkingThreshold) {
       throw new BulletinError(
         `Data size ${data.length} exceeds single-transaction limit of ${this.config.chunkingThreshold} bytes. Use prepareStoreChunked() for large data.`,
-        "DATA_TOO_LARGE",
+        ErrorCode.FILE_TOO_LARGE,
       )
     }
 

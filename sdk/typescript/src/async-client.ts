@@ -543,12 +543,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
           // Handle validated event
           if (ev.type === "validated" && progressCallback) {
-            progressCallback({ type: "validated" })
+            progressCallback({ type: "validated", chunkIndex })
           }
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted", numPeers: ev.nPeers, chunkIndex })
+            progressCallback({
+              type: "broadcasted",
+              chunkIndex,
+            })
           }
 
           // Handle best block state
@@ -556,7 +559,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             if (ev.found && ev.block) {
               if (progressCallback) {
                 progressCallback({
-                  type: "in_best_block",
+                  type: "in_block",
                   blockHash: ev.block.hash,
                   blockNumber: ev.block.number,
                   txIndex: ev.block.index,
@@ -570,7 +573,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             } else {
               // Transaction no longer in best block (reorg)
               if (progressCallback) {
-                progressCallback({ type: "no_longer_in_best_block" })
+                progressCallback({
+                  type: "no_longer_in_block",
+                  chunkIndex,
+                })
               }
             }
           }
@@ -589,11 +595,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
             finish(ev.block, ev.events)
           }
+
         },
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
             clearTimeout(timerId)
+            // Emit dropped event for observable errors (invalid tx, pool full, etc.)
+            if (progressCallback) {
+              progressCallback({
+                type: "dropped",
+                error: err instanceof Error ? err.message : String(err),
+                chunkIndex,
+              })
+            }
             reject(err)
           }
         },
@@ -630,7 +645,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   private async submitTx(
     tx: PapiTransaction,
     errorMessage: string,
-    errorCode: string,
+    errorCode: ErrorCode,
     options?: CallOptions,
   ): Promise<TransactionReceipt> {
     try {

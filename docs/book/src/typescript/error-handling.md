@@ -99,6 +99,8 @@ try {
 | `INSUFFICIENT_AUTHORIZATION` | Authorized quota insufficient |
 | `AUTHORIZATION_FAILED` | Authorization call failed |
 | `CHUNK_FAILED` | Individual chunk upload failed |
+| `MISSING_CHUNK` | Chunk missing during reassembly |
+| `RENEWAL_NOT_FOUND` | Renewal target not found |
 | `UNSUPPORTED_OPERATION` | Operation not supported |
 
 ## Recovery Hints
@@ -133,13 +135,13 @@ const result = await client
       case 'broadcasted':
         console.log('Transaction broadcast to peers')
         break
-      case 'in_best_block':
+      case 'in_block':
         console.log(`In best block #${event.blockNumber} (${event.blockHash})`)
         break
       case 'finalized':
         console.log(`Finalized in block #${event.blockNumber}`)
         break
-      case 'no_longer_in_best_block':
+      case 'no_longer_in_block':
         console.log('Block reorganization occurred')
         break
       case 'invalid':
@@ -158,14 +160,14 @@ const result = await client
 | Event | Fields | Description |
 |---|---|---|
 | `validated` | -- | Transaction validated by the node |
-| `broadcasted` | `numPeers?` | Broadcast to network peers |
-| `in_best_block` | `blockHash`, `blockNumber`, `txIndex?` | Included in a best block |
+| `broadcasted` | -- | Broadcast to network peers |
+| `in_block` | `blockHash`, `blockNumber`, `txIndex?` | Included in a best block |
 | `finalized` | `blockHash`, `blockNumber`, `txIndex?` | Finalized (irreversible) |
-| `no_longer_in_best_block` | -- | Removed from best block (reorg) |
+| `no_longer_in_block` | -- | Removed from best block (reorg) |
 | `invalid` | `error` | Transaction is invalid |
 | `dropped` | `error` | Dropped from the transaction pool |
 
-> **Note**: The `best_block` event type is deprecated. Use `in_best_block` instead.
+> **Note**: All events support an optional `chunkIndex` field to identify which chunk the event relates to during chunked uploads.
 
 ## Common Error Patterns
 
