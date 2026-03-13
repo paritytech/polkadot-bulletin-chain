@@ -110,7 +110,10 @@ export function reassembleChunks(chunks: Chunk[]): Uint8Array {
   // Validate indices are contiguous starting from 0
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i]?.index !== i) {
-      throw new BulletinError(`Missing chunk at index ${i}`, ErrorCode.MISSING_CHUNK)
+      throw new BulletinError(
+        `Missing chunk at index ${i}`,
+        ErrorCode.MISSING_CHUNK,
+      )
     }
   }
 

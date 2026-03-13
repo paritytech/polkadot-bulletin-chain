@@ -22,11 +22,11 @@ import {
 import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
-  ErrorCode,
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,

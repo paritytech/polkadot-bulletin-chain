@@ -77,18 +77,14 @@ describe("Error Handling", () => {
         expect.fail("Should have thrown")
       } catch (error) {
         expect(error).toBeInstanceOf(BulletinError)
-        expect((error as BulletinError).code).toBe(
-          ErrorCode.TRANSACTION_FAILED,
-        )
+        expect((error as BulletinError).code).toBe(ErrorCode.TRANSACTION_FAILED)
       }
     })
 
     it("should preserve error type through Promise.allSettled", async () => {
       const promises = [
         Promise.resolve(1),
-        Promise.reject(
-          new BulletinError("Error", ErrorCode.STORAGE_FAILED),
-        ),
+        Promise.reject(new BulletinError("Error", ErrorCode.STORAGE_FAILED)),
         Promise.resolve(3),
       ]
 
@@ -242,7 +238,7 @@ describe("Error Handling", () => {
 
     it("should remain backward compatible with string comparisons", () => {
       const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // biome-ignore lint/suspicious/noExplicitAny: testing backward compat with string comparison
       expect(error.code === ("EMPTY_DATA" as any)).toBe(true)
     })
   })

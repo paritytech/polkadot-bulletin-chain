@@ -231,7 +231,11 @@ export enum ErrorCode {
   DAG_ENCODING_FAILED = "DAG_ENCODING_FAILED",
   INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
   AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
+  AUTHORIZATION_EXPIRED = "AUTHORIZATION_EXPIRED",
   TRANSACTION_FAILED = "TRANSACTION_FAILED",
+  SUBMISSION_FAILED = "SUBMISSION_FAILED",
+  NETWORK_ERROR = "NETWORK_ERROR",
+  STORAGE_FAILED = "STORAGE_FAILED",
   CHUNK_FAILED = "CHUNK_FAILED",
   MISSING_CHUNK = "MISSING_CHUNK",
   RETRIEVAL_FAILED = "RETRIEVAL_FAILED",
@@ -268,8 +272,14 @@ const RECOVERY_HINTS: Record<string, string> = {
   [ErrorCode.INSUFFICIENT_AUTHORIZATION]: "Request additional authorization",
   [ErrorCode.AUTHORIZATION_FAILED]:
     "Check that the account has authorizer privileges",
+  [ErrorCode.AUTHORIZATION_EXPIRED]:
+    "Request new authorization; the previous one has expired",
   [ErrorCode.TRANSACTION_FAILED]:
     "Verify transaction parameters and account nonce",
+  [ErrorCode.SUBMISSION_FAILED]:
+    "Check connectivity and retry submitting the transaction",
+  [ErrorCode.NETWORK_ERROR]: "Check network connectivity and try again",
+  [ErrorCode.STORAGE_FAILED]: "Check storage backend and try again",
   [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",

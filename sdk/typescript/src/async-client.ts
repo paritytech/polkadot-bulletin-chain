@@ -595,7 +595,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
             finish(ev.block, ev.events)
           }
-
         },
         error: (err: unknown) => {
           if (!resolved) {
@@ -979,7 +978,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
       const tx = this.api.tx.TransactionStorage.renew({ block, index })
-      return this.submitTx(tx, "Failed to renew", ErrorCode.TRANSACTION_FAILED, options)
+      return this.submitTx(
+        tx,
+        "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
     })
   }
 
