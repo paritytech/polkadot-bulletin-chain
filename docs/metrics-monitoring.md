@@ -56,8 +56,21 @@ How many validators are registered in the validator set. This is the chain's cap
 
 A sudden drop means validators were removed. Zero means the chain cannot produce blocks.
 
+## Bitswap / IPFS serving metrics (upstream)
+
+Bulletin serves stored data over IPFS via litep2p's Bitswap protocol. The metrics for this live in polkadot-sdk, not in litep2p or the Bulletin node — because the actual request handling (looking up stored data, deciding "have" vs "don't have") happens in `sc-network`'s `BitswapServer` shim, not in the litep2p networking library itself. litep2p is a transport layer; it doesn't know what the data means. The substrate layer is where CIDs are resolved to indexed transactions, so that's where the counters belong.
+
+These are Counters (monotonically increasing, unlike the Gauges above). Use `rate()` in Grafana to see per-second values.
+
+- `substrate_bitswap_requests_received_total` — incoming Bitswap requests
+- `substrate_bitswap_cids_requested_total` — total CIDs requested across all requests
+- `substrate_bitswap_blocks_sent_total` — blocks found and sent
+- `substrate_bitswap_blocks_sent_bytes_total` — bytes of block data sent
+- `substrate_bitswap_blocks_not_found_total` — CIDs not found (DontHave responses)
+
+These are available to any chain running `--ipfs-server` with the litep2p backend, not just Bulletin. See [polkadot-sdk#11370](https://github.com/paritytech/polkadot-sdk/pull/11370).
+
 ## What's not here yet
 
-Bulletin serves stored data over IPFS via litep2p's Bitswap protocol, but there's no way to monitor that today. The bitswap handler in litep2p has no metrics instrumentation — no request counts, no "not found" tracking, no Prometheus integration. It just processes requests silently.
-
-To get visibility into IPFS serving, someone would need to add counters to `litep2p/src/protocol/libp2p/bitswap/mod.rs` in the [litep2p crate](https://github.com/paritytech/litep2p). That would give us metrics like requests received and blocks not found, which we could then expose from the Bulletin node.
+- **Total data stored by accounts** — would require iterating the `Authorizations` storage map or maintaining a running aggregate in the pallet. Can be approximated in Grafana with `sum_over_time(bulletin_block_store_bytes[7d])`.
+- **Admin operations per block period** — authorization, validator, and relayer changes emit runtime events but can't be decoded from the node side (uses fake runtime API). Would need per-block counters added to each pallet.
