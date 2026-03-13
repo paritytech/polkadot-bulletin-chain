@@ -252,7 +252,7 @@ export type ProgressCallback = (event: ProgressEvent) => void
  */
 export enum ErrorCode {
   EMPTY_DATA = "EMPTY_DATA",
-  FILE_TOO_LARGE = "FILE_TOO_LARGE",
+  DATA_TOO_LARGE = "DATA_TOO_LARGE",
   CHUNK_TOO_LARGE = "CHUNK_TOO_LARGE",
   INVALID_CHUNK_SIZE = "INVALID_CHUNK_SIZE",
   INVALID_CONFIG = "INVALID_CONFIG",
@@ -278,7 +278,7 @@ const RETRYABLE_CODES = new Set<ErrorCode>([
 /** Recovery hints per error code */
 const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
-  [ErrorCode.FILE_TOO_LARGE]: "Reduce file size or use chunked upload",
+  [ErrorCode.DATA_TOO_LARGE]: "Reduce data size or use chunked upload",
   [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
   [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 2 MiB",
   [ErrorCode.INVALID_CONFIG]: "Check configuration parameters",

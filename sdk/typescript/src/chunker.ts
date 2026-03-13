@@ -53,7 +53,7 @@ export class FixedSizeChunker {
     if (data.length > MAX_FILE_SIZE) {
       throw new BulletinError(
         `Data size ${data.length} exceeds maximum allowed size of ${MAX_FILE_SIZE} (64 MiB)`,
-        ErrorCode.FILE_TOO_LARGE,
+        ErrorCode.DATA_TOO_LARGE,
       )
     }
 

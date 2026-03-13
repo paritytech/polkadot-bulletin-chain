@@ -118,7 +118,7 @@ describe("Error Handling", () => {
       })
     })
 
-    it("should throw FILE_TOO_LARGE for data exceeding chunkingThreshold in prepareStore", async () => {
+    it("should throw DATA_TOO_LARGE for data exceeding chunkingThreshold in prepareStore", async () => {
       const preparer = new BulletinPreparer({ chunkingThreshold: 1024 })
       const oversized = new Uint8Array(1025)
 
@@ -126,7 +126,7 @@ describe("Error Handling", () => {
         BulletinError,
       )
       await expect(preparer.prepareStore(oversized)).rejects.toMatchObject({
-        code: ErrorCode.FILE_TOO_LARGE,
+        code: ErrorCode.DATA_TOO_LARGE,
       })
     })
 
@@ -210,7 +210,7 @@ describe("Error Handling", () => {
     it("should have all expected codes as string values", () => {
       // ErrorCode values equal their key names (string enum)
       expect(ErrorCode.EMPTY_DATA).toBe("EMPTY_DATA")
-      expect(ErrorCode.FILE_TOO_LARGE).toBe("FILE_TOO_LARGE")
+      expect(ErrorCode.DATA_TOO_LARGE).toBe("DATA_TOO_LARGE")
       expect(ErrorCode.CHUNK_TOO_LARGE).toBe("CHUNK_TOO_LARGE")
       expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
       expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
@@ -254,7 +254,7 @@ describe("Error Handling", () => {
     it("should return false for non-retryable error codes", () => {
       const nonRetryableCodes = [
         ErrorCode.EMPTY_DATA,
-        ErrorCode.FILE_TOO_LARGE,
+        ErrorCode.DATA_TOO_LARGE,
         ErrorCode.CHUNK_TOO_LARGE,
         ErrorCode.INVALID_CHUNK_SIZE,
         ErrorCode.INVALID_CONFIG,
