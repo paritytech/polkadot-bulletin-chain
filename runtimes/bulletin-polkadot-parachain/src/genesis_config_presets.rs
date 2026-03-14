@@ -74,6 +74,8 @@ fn bulletin_polkadot_genesis(
 				(account_id_from_seed("//Preimagesigner"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Nativeipfsdagsigner"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Bigdatasigner"), u32::MAX, u64::MAX),
+				// TODO: replace with Sr25519Keyring::Alice
+				(account_id_from_seed("//Alice"), u32::MAX, u64::MAX),
 			],
 		},
 	})
