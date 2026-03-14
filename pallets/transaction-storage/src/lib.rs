@@ -762,6 +762,10 @@ pub mod pallet {
 		pub byte_fee: BalanceOf<T>,
 		pub entry_fee: BalanceOf<T>,
 		pub retention_period: BlockNumberFor<T>,
+		/// Initial account authorizations as (account, transactions, bytes) tuples.
+		pub account_authorizations: Vec<(T::AccountId, u32, u64)>,
+		/// Initial preimage authorizations as (content_hash, max_size) tuples.
+		pub preimage_authorizations: Vec<(ContentHash, u64)>,
 	}
 
 	impl<T: Config> Default for GenesisConfig<T> {
@@ -770,6 +774,8 @@ pub mod pallet {
 				byte_fee: 10u32.into(),
 				entry_fee: 1000u32.into(),
 				retention_period: DEFAULT_RETENTION_PERIOD.into(),
+				account_authorizations: Vec::new(),
+				preimage_authorizations: Vec::new(),
 			}
 		}
 	}
@@ -780,6 +786,28 @@ pub mod pallet {
 			ByteFee::<T>::put(self.byte_fee);
 			EntryFee::<T>::put(self.entry_fee);
 			RetentionPeriod::<T>::put(self.retention_period);
+			let expiration = T::AuthorizationPeriod::get();
+			for (who, transactions, bytes) in &self.account_authorizations {
+				let scope = AuthorizationScope::Account(who.clone());
+				Authorizations::<T>::insert(
+					&scope,
+					Authorization {
+						extent: AuthorizationExtent { transactions: *transactions, bytes: *bytes },
+						expiration,
+					},
+				);
+				Pallet::<T>::authorization_added(&scope);
+			}
+			for (content_hash, max_size) in &self.preimage_authorizations {
+				let scope = AuthorizationScope::Preimage(*content_hash);
+				Authorizations::<T>::insert(
+					&scope,
+					Authorization {
+						extent: AuthorizationExtent { transactions: 1, bytes: *max_size },
+						expiration,
+					},
+				);
+			}
 		}
 	}
 
