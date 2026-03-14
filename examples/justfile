@@ -146,10 +146,12 @@ bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
     echo "   Log: {{ test_dir }}/zombienet.log"
     just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
-# Start westend parachain with zombienet in background
+# Start a parachain with zombienet in background.
+# Handles both bulletin-polkadot-parachain and bulletin-westend parachains.
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-parachain-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
+#   test_dir - Directory for zombienet output
+#   runtime  - Runtime name, taken from ../scripts/runtimes-matrix.json
+parachain-zombienet-start test_dir runtime:
     #!/usr/bin/env bash
     set -e
 
@@ -180,10 +182,24 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
         exit 1
     fi
 
-    # Create chain spec
-    echo "   Creating Westend chain spec..."
+    # Create chain specs (runtime-specific)
     ROOT_DIR="{{ justfile_directory() }}/.."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/create_bulletin_westend_spec.sh"
+    if [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+        cd "$ROOT_DIR"
+        echo "   Creating Polkadot relay chain spec..."
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_polkadot_relay_spec.sh
+        echo "   Creating Polkadot parachain chain spec..."
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" ./scripts/create_bulletin_polkadot_parachain_spec.sh
+        cd -
+        ZOMBIENET_TOML="$ROOT_DIR/zombienet/bulletin-polkadot-parachain-local.toml"
+    elif [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        echo "   Creating Westend chain spec..."
+        PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/create_bulletin_westend_spec.sh"
+        ZOMBIENET_TOML="$ROOT_DIR/zombienet/bulletin-westend-local.toml"
+    else
+        echo "❌ Unhandled parachain runtime: {{ runtime }}"
+        exit 1
+    fi
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
@@ -196,13 +212,15 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
     # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
     (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
 
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
     echo "   Zombienet PID: $ZOMBIENET_PID"
     echo "   Log: {{ test_dir }}/zombienet.log"
-    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
+
+    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log" 10000 180
+
 
 # Check if Docker is available and running
 _check-docker:
@@ -237,6 +255,12 @@ WESTEND_PEER1_ID := "12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
 WESTEND_PEER1_PORT := "10001"
 WESTEND_PEER2_ID := "12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 WESTEND_PEER2_PORT := "12347"
+
+# Polkadot parachain peer IDs and p2p ports (zombienet binds WS on p2p_port)
+POLKADOT_PARACHAIN_PEER1_ID := "12D3KooWGgRm1jr8y5qKQYBAvjwfufdSVTLUnzeJacFdUmR8Sqvt"
+POLKADOT_PARACHAIN_PEER1_PORT := "10001"
+POLKADOT_PARACHAIN_PEER2_ID := "12D3KooWMbdwf9fEURv6BAAEBXM3raYDdcWCZYfiZA4eZHaFjYPd"
+POLKADOT_PARACHAIN_PEER2_PORT := "12347"
 
 # Polkadot solo chain peer IDs and p2p ports (zombienet binds WS on p2p_port)
 POLKADOT_PEER1_ID := "12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
@@ -307,6 +331,8 @@ ipfs-kubo-start test_dir runtime: ipfs-kubo-install
     echo "   Configuring Peering.Peers for {{ runtime }}..."
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
+    elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+        PEERS='[{"ID":"{{ POLKADOT_PARACHAIN_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PARACHAIN_PEER1_PORT }}/ws"]},{"ID":"{{ POLKADOT_PARACHAIN_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PARACHAIN_PEER2_PORT }}/ws"]}]'
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         PEERS='[{"ID":"{{ POLKADOT_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PEER1_PORT }}/ws"]},{"ID":"{{ POLKADOT_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PEER2_PORT }}/ws"]}]'
     else
@@ -438,6 +464,8 @@ ipfs-start test_dir runtime: _check-docker
     echo "   Configuring Peering.Peers for {{ runtime }}..."
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         PEERS="[{\"ID\":\"{{ WESTEND_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ WESTEND_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER2_PORT }}/ws\"]}]"
+    elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+        PEERS="[{\"ID\":\"{{ POLKADOT_PARACHAIN_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PARACHAIN_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ POLKADOT_PARACHAIN_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PARACHAIN_PEER2_PORT }}/ws\"]}]"
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         PEERS="[{\"ID\":\"{{ POLKADOT_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ POLKADOT_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PEER2_PORT }}/ws\"]}]"
     else
@@ -504,9 +532,8 @@ setup-services test_dir runtime ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    # TODO: improve this for multiple runtimes
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+        just parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
         just bulletin-solo-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     else
@@ -600,6 +627,10 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
             RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
             PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
+        elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/polkadot-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-polkadot-collator-2/cfg/polkadot-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
         else
             CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
@@ -696,6 +727,11 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
             # Parachain: relay chain (required) + parachain spec (optional)
             RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
             PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
+        elif [ "{{ runtime }}" = "bulletin-polkadot-parachain-runtime" ]; then
+            # Polkadot parachain: relay chain (polkadot-local) + parachain spec
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/polkadot-local.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-polkadot-collator-2/cfg/polkadot-local-2487.json"
             node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
         else # bulletin-polkadot-runtime (solochain)
             CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"

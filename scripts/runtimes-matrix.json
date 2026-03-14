@@ -22,6 +22,19 @@
     }
   },
   {
+    "name": "bulletin-polkadot-parachain",
+    "package": "bulletin-polkadot-parachain-runtime",
+    "path": "runtimes/bulletin-polkadot-parachain",
+    "integration_tests": true,
+    "try_runtime": {
+        "extra_flags": "--blocktime 6000 --disable-spec-version-check"
+    },
+    "benchmarks_templates": {
+      "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
+      "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
+    }
+  },
+  {
     "name": "bulletin-westend",
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
@@ -39,8 +52,8 @@
   },
   {
     "name": "bulletin-paseo",
-    "package": "bulletin-westend-runtime",
-    "path": "runtimes/bulletin-westend",
+    "package": "bulletin-polkadot-parachain-runtime",
+    "path": "runtimes/bulletin-polkadot-parachain",
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],

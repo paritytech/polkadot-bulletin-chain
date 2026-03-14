@@ -22,6 +22,9 @@ tsconfig.tsbuildinfo
 kubo/
 zombienet-*
 
+# Built relay runtime WASM (cached in CI, built via scripts/build_polkadot_relay_runtime.sh)
+examples/production-runtimes/*.wasm
+
 # Build outputs
 **/dist/
 console-ui/.vite/
