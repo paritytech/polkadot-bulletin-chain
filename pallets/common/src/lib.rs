@@ -328,46 +328,38 @@ impl<AccountId, HoldReason> ReservableCurrency<AccountId> for NoCurrency<Account
 	}
 }
 
-/// Inspect a utility call for wrapper semantics: returns the inner calls and whether
-/// the wrapper preserves the caller's origin (batch variants do, others don't).
+/// Inspect a utility call for wrapper semantics: returns the inner calls if the call
+/// is a wrapper variant, `None` otherwise.
 pub fn inspect_utility_wrapper<T: pallet_utility::Config>(
 	call: &pallet_utility::Call<T>,
-) -> Option<(Vec<&<T as pallet_utility::Config>::RuntimeCall>, bool)> {
+) -> Option<Vec<&<T as pallet_utility::Config>::RuntimeCall>> {
 	let inner = utility_inner_calls(call);
 	if inner.is_empty() {
 		return None;
 	}
-	let preserves_origin = matches!(
-		call,
-		pallet_utility::Call::batch { .. } |
-			pallet_utility::Call::batch_all { .. } |
-			pallet_utility::Call::force_batch { .. }
-	);
-	Some((inner, preserves_origin))
+	Some(inner)
 }
 
 /// Inspect a sudo call for wrapper semantics: returns inner calls.
-/// Sudo always changes the origin (to Root or target), so `preserves_origin` is `false`.
 pub fn inspect_sudo_wrapper<T: pallet_sudo::Config>(
 	call: &pallet_sudo::Call<T>,
-) -> Option<(Vec<&<T as pallet_sudo::Config>::RuntimeCall>, bool)> {
+) -> Option<Vec<&<T as pallet_sudo::Config>::RuntimeCall>> {
 	let inner = sudo_inner_calls(call);
 	if inner.is_empty() {
 		return None;
 	}
-	Some((inner, false))
+	Some(inner)
 }
 
 /// Inspect a proxy call for wrapper semantics: returns inner calls.
-/// Proxy dispatches with the delegator's origin, so `preserves_origin` is `false`.
 pub fn inspect_proxy_wrapper<T: pallet_proxy::Config>(
 	call: &pallet_proxy::Call<T>,
-) -> Option<(Vec<&<T as pallet_proxy::Config>::RuntimeCall>, bool)> {
+) -> Option<Vec<&<T as pallet_proxy::Config>::RuntimeCall>> {
 	let inner = proxy_inner_calls(call);
 	if inner.is_empty() {
 		return None;
 	}
-	Some((inner, false))
+	Some(inner)
 }
 
 /// Extract inner calls from a utility call variant.
