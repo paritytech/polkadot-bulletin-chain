@@ -33,7 +33,7 @@ type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
 /// Result of [`CallInspector::traverse_storage_calls`].
 #[derive(Default)]
-struct TraverseResult {
+pub struct TraverseResult {
 	/// Whether any TransactionStorage pallet calls were visited.
 	found_storage: bool,
 	/// Whether the outermost wrapper preserves the caller's origin (e.g. batch).
