@@ -74,6 +74,7 @@ fn bulletin_polkadot_genesis(
 				(account_id_from_seed("//Preimagesigner"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Nativeipfsdagsigner"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Bigdatasigner"), u32::MAX, u64::MAX),
+				(account_id_from_seed("//Preimagesigner"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Signer1"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Signer2"), u32::MAX, u64::MAX),
 				(account_id_from_seed("//Signer3"), u32::MAX, u64::MAX),
