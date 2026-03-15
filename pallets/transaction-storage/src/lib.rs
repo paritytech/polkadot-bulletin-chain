@@ -164,7 +164,7 @@ pub struct TransactionInfo {
 	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
-	size: u32,
+	pub size: u32,
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
 	///
@@ -342,6 +342,11 @@ pub mod pallet {
 			// this is just a redundant storage read per block.
 			weight.saturating_accrue(migrations::v1::maybe_migrate_v0_to_v1::<T>());
 
+			// Clear per-block renew counters from the previous block.
+			BlockRenewCount::<T>::kill();
+			BlockRenewBytes::<T>::kill();
+			weight.saturating_accrue(db_weight.writes(2));
+
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
 			weight.saturating_accrue(db_weight.reads(1));
@@ -511,6 +516,8 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
+			BlockRenewCount::<T>::mutate(|c| *c = c.saturating_add(1));
+			BlockRenewBytes::<T>::mutate(|b| *b = b.saturating_add(info.size as u64));
 			Self::deposit_event(Event::Renewed { index, content_hash });
 			Ok(().into())
 		}
@@ -752,6 +759,16 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type BlockTransactions<T: Config> =
 		StorageValue<_, BoundedVec<TransactionInfo, T::MaxBlockTransactions>, ValueQuery>;
+
+	/// Number of renew transactions in the latest finalized block.
+	/// Set during block execution, cleared in `on_initialize` of the next block.
+	#[pallet::storage]
+	pub type BlockRenewCount<T: Config> = StorageValue<_, u32, ValueQuery>;
+
+	/// Total bytes of renewed data in the latest finalized block.
+	/// Set during block execution, cleared in `on_initialize` of the next block.
+	#[pallet::storage]
+	pub type BlockRenewBytes<T: Config> = StorageValue<_, u64, ValueQuery>;
 
 	/// Was the proof checked in this block?
 	#[pallet::storage]
