@@ -548,7 +548,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted", numPeers: ev.nPeers, chunkIndex })
+            progressCallback({
+              type: "broadcasted",
+              numPeers: ev.nPeers,
+              chunkIndex,
+            })
           }
 
           // Handle best block state
@@ -964,7 +968,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
       const tx = this.api.tx.TransactionStorage.renew({ block, index })
-      return this.submitTx(tx, "Failed to renew", ErrorCode.TRANSACTION_FAILED, options)
+      return this.submitTx(
+        tx,
+        "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
     })
   }
 
