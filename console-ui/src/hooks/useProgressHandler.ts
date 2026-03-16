@@ -12,14 +12,22 @@ export function useProgressHandler(
   return useCallback(
     (event: ProgressEvent) => {
       console.log("SDK progress:", event);
-      if (event.type === TxStatus.Signed) {
-        setTxStatus("Transaction signed...");
-      } else if (event.type === TxStatus.Broadcasted) {
-        setTxStatus("Broadcasting to network...");
-      } else if (event.type === TxStatus.InBlock) {
-        setTxStatus(`Included in block #${event.blockNumber}...`);
-      } else if (event.type === TxStatus.Finalized) {
-        setTxStatus("Finalized!");
+      switch (event.type) {
+        case TxStatus.Signed:
+          setTxStatus("Transaction signed...");
+          break;
+        case TxStatus.Broadcasted:
+          setTxStatus("Broadcasting to network...");
+          break;
+        case TxStatus.InBlock:
+          setTxStatus(`Included in block #${event.blockNumber}...`);
+          break;
+        case TxStatus.Finalized:
+          setTxStatus("Finalized!");
+          break;
+        default:
+          console.log("Unhandled progress event:", event.type);
+          break;
       }
     },
     [setTxStatus],
