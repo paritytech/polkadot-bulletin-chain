@@ -1312,6 +1312,8 @@ fn wrapped_renew_requires_authorization() {
 		retention_period: 100,
 		byte_fee: 0,
 		entry_fee: 0,
+		account_authorizations: vec![],
+		preimage_authorizations: vec![],
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
