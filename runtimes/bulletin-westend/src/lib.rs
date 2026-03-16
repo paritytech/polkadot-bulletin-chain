@@ -66,13 +66,8 @@ use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 pub use sp_runtime::BuildStorage;
 use sp_runtime::{
 	generic, impl_opaque_keys,
-	traits::{
-		AsSystemOriginSigner, Block as BlockT, DispatchInfoOf, Implication, NumberFor,
-		PostDispatchInfoOf,
-	},
-	transaction_validity::{
-		TransactionSource, TransactionValidity, TransactionValidityError, ValidTransaction,
-	},
+	traits::{Block as BlockT, NumberFor},
+	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult, MultiAddress, Perbill,
 };
 #[cfg(feature = "std")]
@@ -119,7 +114,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		ValidateSigned,
+		pallet_transaction_storage::extension::ValidateStorageCalls<Runtime>,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
@@ -184,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_003,
+	spec_version: 1_000_006,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -200,11 +195,20 @@ pub fn native_version() -> NativeVersion {
 /// We allow for 90% of the block to be consumed by normal transactions.
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
 
+/// Block length.
+const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
+
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
 	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
-		BlockLength::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+		BlockLength::builder()
+		.max_length(MAX_BLOCK_LENGTH)
+		.modify_max_length_for_class(
+			DispatchClass::Normal,
+			|m| *m = NORMAL_DISPATCH_RATIO * MAX_BLOCK_LENGTH,
+		)
+		.build();
 	pub RuntimeBlockWeights: BlockWeights = BlockWeights::builder()
 		.base_block(BlockExecutionWeight::get())
 		.for_class(DispatchClass::all(), |weights| {
@@ -272,87 +276,6 @@ impl pallet_timestamp::Config for Runtime {
 	type OnTimestampSet = Aura;
 	type MinimumPeriod = ConstU64<0>;
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
-}
-
-#[derive(
-	Clone,
-	PartialEq,
-	Eq,
-	Debug,
-	codec::Encode,
-	codec::Decode,
-	codec::DecodeWithMemTracking,
-	scale_info::TypeInfo,
-)]
-pub struct ValidateSigned;
-
-impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
-	const IDENTIFIER: &'static str = "ValidateSigned";
-
-	type Implicit = ();
-	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
-		Ok(())
-	}
-
-	type Val = ();
-	type Pre = ();
-
-	fn weight(&self, _call: &RuntimeCall) -> Weight {
-		Weight::zero()
-	}
-
-	fn validate(
-		&self,
-		origin: RuntimeOrigin,
-		call: &RuntimeCall,
-		_info: &DispatchInfoOf<RuntimeCall>,
-		_len: usize,
-		_self_implicit: Self::Implicit,
-		_inherited_implication: &impl Implication,
-		_source: TransactionSource,
-	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		// Only enforce special validation for transaction storage calls; pass through others.
-		let who = match origin.as_system_origin_signer() {
-			Some(who) => who,
-			None => return Ok((ValidTransaction::default(), (), origin)),
-		};
-
-		let validity = match call {
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
-
-			_ => Ok(ValidTransaction::default()),
-		}?;
-
-		Ok((validity, (), origin))
-	}
-
-	fn prepare(
-		self,
-		_val: Self::Val,
-		origin: &RuntimeOrigin,
-		call: &RuntimeCall,
-		_info: &DispatchInfoOf<RuntimeCall>,
-		_len: usize,
-	) -> Result<Self::Pre, TransactionValidityError> {
-		// Only enforce pre-dispatch for transaction storage calls; pass through others.
-		if let Some(who) = origin.as_system_origin_signer() {
-			if let RuntimeCall::TransactionStorage(inner_call) = call {
-				TransactionStorage::pre_dispatch_signed(who, inner_call)?;
-			}
-		}
-		Ok(())
-	}
-
-	fn post_dispatch_details(
-		_pre: Self::Pre,
-		_info: &DispatchInfoOf<RuntimeCall>,
-		_post_info: &PostDispatchInfoOf<RuntimeCall>,
-		_len: usize,
-		_result: &sp_runtime::DispatchResult,
-	) -> Result<Weight, TransactionValidityError> {
-		Ok(Weight::zero())
-	}
 }
 
 impl pallet_authorship::Config for Runtime {
@@ -619,11 +542,13 @@ construct_runtime!(
 mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_system, SystemBench::<Runtime>]
+		[frame_system_extensions, SystemExtensionsBench::<Runtime>]
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
+		[pallet_transaction_storage, TransactionStorage]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -897,7 +822,9 @@ impl_runtime_apis! {
 		) {
 			use frame_benchmarking::BenchmarkList;
 			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{
+				Pallet as SystemBench, extensions::Pallet as SystemExtensionsBench,
+			};
 			use cumulus_pallet_session_benchmarking::Pallet as SessionBench;
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 
@@ -922,7 +849,9 @@ impl_runtime_apis! {
 			use sp_storage::TrackedStorageKey;
 			use codec::Encode;
 
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{
+				Pallet as SystemBench, extensions::Pallet as SystemExtensionsBench,
+			};
 			impl frame_system_benchmarking::Config for Runtime {
 				fn setup_set_code_requirements(code: &alloc::vec::Vec<u8>) -> Result<(), BenchmarkError> {
 					ParachainSystem::initialize_for_set_code_benchmark(code.len() as u32);
@@ -942,8 +871,10 @@ impl_runtime_apis! {
 				}
 			}
 
+			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
 			use xcm_config::TokenRelayLocation;
+			use xcm_executor::AssetsInHolding;
 
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 			impl pallet_xcm::benchmarking::Config for Runtime {
@@ -1020,15 +951,13 @@ impl_runtime_apis! {
 				fn valid_destination() -> Result<Location, BenchmarkError> {
 					Ok(TokenRelayLocation::get())
 				}
-				fn worst_case_holding(_depositable_count: u32) -> Assets {
+				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
+					use pallet_xcm_benchmarks::MockCredit;
 					// just concrete assets according to relay chain.
-					let assets: Vec<Asset> = vec![
-						Asset {
-							id: AssetId(TokenRelayLocation::get()),
-							fun: Fungible(1_000_000 * UNITS),
-						}
-					];
-					assets.into()
+					AssetsInHolding::new_from_fungible_credit(
+						AssetId(TokenRelayLocation::get()),
+						Box::new(MockCredit(1_000_000 * UNITS)),
+					)
 				}
 			}
 

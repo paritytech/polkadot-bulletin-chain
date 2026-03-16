@@ -5,7 +5,7 @@ name: Check Runtime Migrations
 
 on:
   push:
-    branches: ["release-*"]
+    branches: [main, "release-*"]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -21,7 +21,15 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   runtime-matrix:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
@@ -141,20 +149,6 @@ jobs:
           git remote add upstream "https://github.com/${BASE_REPO}.git"
           git fetch upstream --tags
 
-      - name: Build EXTRA_FLAGS
-        env:
-          BLOCKTIME: ${{ matrix.runtime.blocktime }}
-        run: |
-          EXTRA_FLAGS=" --blocktime $BLOCKTIME "
-          EXTRA_FLAGS+=" --disable-spec-version-check"
-          CHECKS="all"
-
-          echo "Flags: $EXTRA_FLAGS"
-          echo "Checks: $CHECKS"
-
-          echo "EXTRA_FLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
-          echo "CHECKS=$CHECKS" >> $GITHUB_ENV
-
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
@@ -182,6 +176,8 @@ jobs:
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
+          TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
@@ -195,8 +191,9 @@ jobs:
 
           (set -x; try-runtime \
             --runtime "$RUNTIME_BLOB_PATH" \
-            on-runtime-upgrade --checks="$CHECKS" \
-            $EXTRA_FLAGS \
+            $TRY_RUNTIME_SPEC_NAME_CHECK \
+            on-runtime-upgrade --checks="all" \
+            $TRY_RUNTIME_EXTRA_FLAGS \
             snap --path snapshot.raw)
 
   # This will only run if all the tests in its "needs" array passed.
@@ -206,7 +203,10 @@ jobs:
   confirmMigrationsPassed:
     runs-on: ubuntu-latest
     name: All migrations passed
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [check-migrations]
+    if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    needs: [changes, check-migrations]
     steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
       - run: echo '### Good job! All the migrations passed 🚀' >> $GITHUB_STEP_SUMMARY

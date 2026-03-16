@@ -74,6 +74,8 @@ pub fn new_test_ext() -> TestExternalities {
 			retention_period: 10,
 			byte_fee: 2,
 			entry_fee: 200,
+			account_authorizations: vec![],
+			preimage_authorizations: vec![],
 		},
 	}
 	.build_storage()

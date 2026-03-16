@@ -17,6 +17,7 @@
 //! Storage-specific configurations.
 
 use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use crate::xcm_config::PeopleNextLocation;
 use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
@@ -65,8 +66,11 @@ impl pallet_transaction_storage::Config for Runtime {
 		EitherOfDiverse<
 			// Root can do whatever.
 			crate::EnsureRoot<Self::AccountId>,
-			// People chain can also handle authorizations.
-			EnsureXcm<Equals<PeopleLocation>>,
+			// People chains can also handle authorizations.
+			EitherOfDiverse<
+				EnsureXcm<Equals<PeopleLocation>>,
+				EnsureXcm<Equals<PeopleNextLocation>>,
+			>,
 		>,
 		// Test accounts can also authorize for testing purposes.
 		EnsureSignedBy<TestAccounts, Self::AccountId>,

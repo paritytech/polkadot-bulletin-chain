@@ -2,9 +2,15 @@
 
 set -e
 
+# Resolve repo root relative to this script's location
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 cargo build --release -p bulletin-westend-runtime
 
 # cargo install staging-chain-spec-builder
+cd "$ROOT_DIR"
+
 chain-spec-builder create \
         -p 2487 \
         -c westend \
