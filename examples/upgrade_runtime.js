@@ -7,7 +7,7 @@
  *   node upgrade_runtime.js --verify-only [--network <name>]
  *
  * Options:
- *   --network <name>   Network: westend, paseo, polkadot (default: westend)
+ *   --network <name>   Network: westend, paseo (default: westend)
  *   --rpc <url>        Custom RPC endpoint (overrides network default)
  *   --method <type>    Upgrade method: setCode, authorize (default: based on network)
  *   --verify-only      Only verify current runtime version, don't upgrade
@@ -32,10 +32,6 @@ const NETWORKS = {
     paseo: {
         rpc: 'wss://paseo-bulletin-rpc.polkadot.io',
         method: 'sudo',
-    },
-    polkadot: {
-        rpc: 'wss://polkadot-bulletin-rpc.polkadot.io',
-        method: 'authorize',
     }
 };
 
