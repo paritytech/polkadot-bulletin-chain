@@ -1101,27 +1101,6 @@ fn wrap_call_utility_variants(call: RuntimeCall) -> Vec<(RuntimeCall, &'static s
 	]
 }
 
-/// Assert that direct and utility-wrapper variants are rejected at validation time.
-fn assert_rejected_at_validation(
-	signer: AccountKeyring,
-	call: RuntimeCall,
-	expected: TransactionValidityError,
-	label: &str,
-) {
-	assert_eq!(
-		construct_and_apply_extrinsic(signer.pair(), call.clone()),
-		Err(expected),
-		"{label}: direct",
-	);
-	for (wrapped, name) in wrap_call_utility_variants(call) {
-		assert_eq!(
-			construct_and_apply_extrinsic(signer.pair(), wrapped),
-			Err(expected),
-			"{label}: via {name}",
-		);
-	}
-}
-
 fn provision_account(who: AccountKeyring) {
 	frame_system::Pallet::<Runtime>::inc_providers(&who.to_account_id());
 }
@@ -1551,19 +1530,23 @@ fn wrapped_call_respects_validate_signed_allowlist() {
 		advance_block();
 		let signer = sudo_relayer_signer();
 
-		// System::remark is not in the ValidateSigned allowlist.
-		// Direct + utility wrappers: rejected at validation time.
-		assert_rejected_at_validation(
-			signer,
-			RuntimeCall::System(frame_system::Call::remark { remark: vec![1, 2, 3] }),
-			TransactionValidityError::Invalid(InvalidTransaction::Call),
-			"System::remark",
+		let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![1, 2, 3] });
+
+		// System::remark is not in the ValidateSigned allowlist — rejected direct.
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), remark.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			"System::remark: direct",
 		);
 
-		// Note: sudo_as and proxy are NOT tested here because they have their own
-		// authorization mechanisms (sudo key, proxy delegation) and are intentionally
-		// permitted at the validation level. The pallet-side defense-in-depth checks
-		// protect against unauthorized operations through those paths.
+		// Also rejected inside utility wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(remark) {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"System::remark: via {name}",
+			);
+		}
 	});
 }
 
@@ -1682,10 +1665,11 @@ fn max_recursion_depth_is_enforced() {
 			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 		}
 
-		// Should fail with ExhaustsResources due to depth limit.
+		// Should fail with Call — store inside wrapper is rejected (the depth limit
+		// in is_storage_mutating_call treats excessively nested calls as storage-mutating).
 		assert_eq!(
 			construct_and_apply_extrinsic(signer.pair(), call),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 	});
 }

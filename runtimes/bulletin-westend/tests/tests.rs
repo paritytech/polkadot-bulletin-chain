@@ -1319,10 +1319,11 @@ fn max_recursion_depth_is_enforced() {
 				call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 			}
 
-			// Should fail with ExhaustsResources due to depth limit.
+			// Should fail with Call — store inside wrapper is rejected (the depth limit
+			// in is_storage_mutating_call treats excessively nested calls as storage-mutating).
 			assert_err!(
 				construct_and_apply_extrinsic(Some(account.pair()), call),
-				TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)
+				TransactionValidityError::Invalid(InvalidTransaction::Call)
 			);
 		});
 }

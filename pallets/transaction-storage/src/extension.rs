@@ -29,13 +29,11 @@ use polkadot_sdk_frame::{
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-/// Result of [`CallInspector::traverse_storage_calls`].
+/// Result of [`CallInspector::traverse_storage_calls`]: whether any TransactionStorage
+/// pallet calls (management calls like authorize_*, refresh_*, remove_expired_*) were found.
 #[derive(Default)]
 pub struct TraverseResult {
-	/// Whether any TransactionStorage pallet calls were visited.
-	found_storage: bool,
-	/// Whether any storage-mutating calls (store/renew) were found in the call tree.
-	has_storage_mutating: bool,
+	pub found_storage: bool,
 }
 
 /// Maximum recursion depth for inspecting wrapper calls.
@@ -86,11 +84,12 @@ where
 		false
 	}
 
-	/// Recursively traverse a call tree, applying `visitor` to each storage call found.
+	/// Recursively traverse a call tree, applying `visitor` to each
+	/// TransactionStorage pallet call found.
 	///
-	/// Returns [`TraverseResult`] with:
-	/// - `found_storage`: whether any storage calls were visited
-	/// - `has_storage_mutating`: whether any store/renew calls were found
+	/// Returns [`TraverseResult`] with `found_storage` set if any pallet calls were visited.
+	/// Callers should use [`Self::is_storage_mutating_call`] first to reject wrappers
+	/// containing store/renew before calling this.
 	fn traverse_storage_calls(
 		call: &RuntimeCallOf<T>,
 		depth: u32,
@@ -98,11 +97,7 @@ where
 	) -> Result<TraverseResult, TransactionValidityError> {
 		if let Some(inner_call) = call.is_sub_type() {
 			visitor(inner_call)?;
-			let has_storage_mutating = matches!(
-				inner_call,
-				Call::store { .. } | Call::store_with_cid_config { .. } | Call::renew { .. }
-			);
-			return Ok(TraverseResult { found_storage: true, has_storage_mutating });
+			return Ok(TraverseResult { found_storage: true });
 		}
 		if let Some(inner_calls) = Self::inspect_wrapper(call) {
 			if depth >= MAX_WRAPPER_DEPTH {
@@ -112,13 +107,12 @@ where
 				);
 				return Err(InvalidTransaction::ExhaustsResources.into());
 			}
-			let mut result = TraverseResult::default();
+			let mut found_storage = false;
 			for inner in inner_calls {
-				let inner_result = Self::traverse_storage_calls(inner, depth + 1, visitor)?;
-				result.found_storage |= inner_result.found_storage;
-				result.has_storage_mutating |= inner_result.has_storage_mutating;
+				found_storage |=
+					Self::traverse_storage_calls(inner, depth + 1, visitor)?.found_storage;
 			}
-			return Ok(result);
+			return Ok(TraverseResult { found_storage });
 		}
 		// Not a storage call and not a wrapper — ignore.
 		Ok(TraverseResult::default())
@@ -241,29 +235,18 @@ where
 			return Ok((valid_tx, Some(who), origin));
 		}
 
-		// Wrapper call — validate inner storage calls, reject if any are store/renew.
-		// Storage-mutating calls (store/store_with_cid_config/renew) must be submitted
-		// as direct extrinsics, not inside wrappers. Management calls (authorize_*,
-		// refresh_*, remove_expired_*) are allowed in wrappers.
+		// Wrapper call — reject if it contains store/renew (must be direct extrinsics),
+		// then validate any management calls (authorize_*, refresh_*, remove_expired_*).
+		if I::is_storage_mutating_call(call, 0) {
+			return Err(InvalidTransaction::Call.into());
+		}
 		let mut combined_valid = ValidTransaction::default();
 		let result = I::traverse_storage_calls(call, 0, &mut |inner_call| {
-			// Skip validation for storage-mutating calls — they'll be rejected below.
-			if matches!(
-				inner_call,
-				Call::store { .. } | Call::store_with_cid_config { .. } | Call::renew { .. }
-			) {
-				return Ok(());
-			}
 			let (valid_tx, _scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
 			combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
 			Ok(())
 		})?;
-		if result.has_storage_mutating {
-			// store/renew must be submitted directly, not inside wrappers.
-			return Err(InvalidTransaction::Call.into());
-		}
 		if result.found_storage {
-			// Management calls found — return accumulated validity.
 			return Ok((combined_valid, Some(who), origin));
 		}
 
