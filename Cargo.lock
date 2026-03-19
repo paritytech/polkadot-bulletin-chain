@@ -9766,6 +9766,7 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-transaction-storage",
+ "parity-scale-codec",
  "polkadot-primitives",
  "sc-basic-authorship",
  "sc-chain-spec",
@@ -9807,6 +9808,7 @@ dependencies = [
  "sp-weights",
  "substrate-build-script-utils",
  "substrate-frame-rpc-system",
+ "substrate-prometheus-endpoint",
  "tracing",
 ]
 
