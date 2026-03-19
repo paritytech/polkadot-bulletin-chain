@@ -13,12 +13,12 @@
     "@chainsafe/libp2p-noise": "^17.0.0",
     "@chainsafe/libp2p-yamux": "^8.0.1",
     "@helia/unixfs": "^7.0.4",
-    "@libp2p/websockets": "^10.1.5",
+    "@libp2p/websockets": "^10.1.6",
     "@multiformats/blake2": "^2.0.2",
     "@multiformats/multiaddr": "^13.0.1",
     "@noble/hashes": "^2.0.1",
     "@polkadot-api/descriptors": "file:.papi/descriptors",
-    "@polkadot/keyring": "^14.0.1",
+    "@polkadot/keyring": "^14.0.2",
     "@polkadot/util-crypto": "^14.0.1",
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-select": "^2.1.4",
@@ -44,10 +44,10 @@
     "@tailwindcss/vite": "^4.2.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^5.1.4",
+    "@vitejs/plugin-react": "^6.0.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-lsp": "^0.0.7",
-    "vite": "^7.3.1"
+    "vite": "^8.0.0"
   }
 }
