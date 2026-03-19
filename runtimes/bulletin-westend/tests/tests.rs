@@ -1085,17 +1085,17 @@ fn wrapped_renew_requires_authorization() {
 			);
 		}
 
-		// sudo_as: passes validation (sudo not inspected) but fails at dispatch
-		// because no sudo key is configured.
-		let sudo_as_result = construct_and_apply_extrinsic(
-			Some(account.pair()),
-			RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
-				who: sp_runtime::MultiAddress::Id(who),
-				call: Box::new(renew_call),
-			}),
+		// sudo_as: renew inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(who),
+					call: Box::new(renew_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
-		assert!(sudo_as_result.is_ok(), "sudo_as should pass validation");
-		assert!(sudo_as_result.unwrap().is_err(), "sudo_as should fail at dispatch");
 	});
 }
 
