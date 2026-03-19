@@ -378,7 +378,7 @@ impl SortedMembers<AccountId> for TestAccounts {
 pub struct StorageCallInspector;
 
 impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
-	fn inspect_wrapper(call: &RuntimeCall) -> Option<(alloc::vec::Vec<&RuntimeCall>, bool)> {
+	fn inspect_wrapper(call: &RuntimeCall) -> Option<alloc::vec::Vec<&RuntimeCall>> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
 			RuntimeCall::Proxy(c) => inspect_proxy_wrapper(c),

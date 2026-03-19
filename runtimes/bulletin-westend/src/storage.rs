@@ -61,7 +61,7 @@ parameter_types! {
 pub struct StorageCallInspector;
 
 impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
-	fn inspect_wrapper(call: &RuntimeCall) -> Option<(Vec<&RuntimeCall>, bool)> {
+	fn inspect_wrapper(call: &RuntimeCall) -> Option<Vec<&RuntimeCall>> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
 			RuntimeCall::Sudo(c) => inspect_sudo_wrapper(c),

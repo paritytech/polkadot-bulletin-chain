@@ -1101,27 +1101,6 @@ fn wrap_call_utility_variants(call: RuntimeCall) -> Vec<(RuntimeCall, &'static s
 	]
 }
 
-/// Assert that direct and utility-wrapper variants are rejected at validation time.
-fn assert_rejected_at_validation(
-	signer: AccountKeyring,
-	call: RuntimeCall,
-	expected: TransactionValidityError,
-	label: &str,
-) {
-	assert_eq!(
-		construct_and_apply_extrinsic(signer.pair(), call.clone()),
-		Err(expected),
-		"{label}: direct",
-	);
-	for (wrapped, name) in wrap_call_utility_variants(call) {
-		assert_eq!(
-			construct_and_apply_extrinsic(signer.pair(), wrapped),
-			Err(expected),
-			"{label}: via {name}",
-		);
-	}
-}
-
 fn provision_account(who: AccountKeyring) {
 	frame_system::Pallet::<Runtime>::inc_providers(&who.to_account_id());
 }
@@ -1148,16 +1127,23 @@ fn wrapped_store_requires_authorization() {
 			data: vec![42u8; 100],
 		});
 
-		// Direct + utility wrappers: rejected at validation time.
-		assert_rejected_at_validation(
-			attacker,
-			store_call.clone(),
-			TransactionValidityError::Invalid(InvalidTransaction::Payment),
-			"store",
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), store_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"store: direct",
 		);
 
-		// sudo_as: attacker is NOT the sudo key, but sudo_as inner store call
-		// is checked for TransactionStorage auth at validation time.
+		// Utility wrappers: rejected because store is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(store_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(attacker.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"store: via {name}",
+			);
+		}
+
+		// sudo_as: store inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
@@ -1166,10 +1152,10 @@ fn wrapped_store_requires_authorization() {
 					call: Box::new(store_call.clone()),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 
-		// proxy: inner store is checked for TransactionStorage auth at validation time.
+		// proxy: store inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
@@ -1179,7 +1165,7 @@ fn wrapped_store_requires_authorization() {
 					call: Box::new(store_call),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 	});
 }
@@ -1199,16 +1185,23 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 				data: vec![42u8; 100],
 			});
 
-		// Direct + utility wrappers: rejected at validation time.
-		assert_rejected_at_validation(
-			attacker,
-			store_call.clone(),
-			TransactionValidityError::Invalid(InvalidTransaction::Payment),
-			"store_with_cid_config",
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), store_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"store_with_cid_config: direct",
 		);
 
-		// sudo_as: inner store_with_cid_config is checked for TransactionStorage auth at
-		// validation.
+		// Utility wrappers: rejected because store is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(store_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(attacker.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"store_with_cid_config: via {name}",
+			);
+		}
+
+		// sudo_as: store inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
@@ -1217,10 +1210,10 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 					call: Box::new(store_call.clone()),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 
-		// proxy: inner store_with_cid_config is checked for TransactionStorage auth at validation.
+		// proxy: store inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
@@ -1230,7 +1223,7 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 					call: Box::new(store_call),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 	});
 }
@@ -1250,16 +1243,23 @@ fn wrapped_store_requires_authorization_even_for_relayer() {
 			data: vec![99u8; 200],
 		});
 
-		// Direct + utility wrappers: rejected at validation time.
-		assert_rejected_at_validation(
-			relayer,
-			store_call.clone(),
-			TransactionValidityError::Invalid(InvalidTransaction::Payment),
-			"relayer store without auth",
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(relayer.pair(), store_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"relayer store without auth: direct",
 		);
 
-		// sudo_as: relayer IS the sudo key, but inner store is checked for
-		// TransactionStorage auth at validation time.
+		// Utility wrappers: rejected because store is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(store_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(relayer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"relayer store without auth: via {name}",
+			);
+		}
+
+		// sudo_as: store inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				relayer.pair(),
@@ -1268,7 +1268,7 @@ fn wrapped_store_requires_authorization_even_for_relayer() {
 					call: Box::new(store_call),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 	});
 }
@@ -1324,15 +1324,23 @@ fn wrapped_renew_requires_authorization() {
 			index: 0,
 		});
 
-		// Direct + utility wrappers: rejected at validation time.
-		assert_rejected_at_validation(
-			attacker,
-			renew_call.clone(),
-			TransactionValidityError::Invalid(InvalidTransaction::Payment),
-			"renew",
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), renew_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"renew: direct",
 		);
 
-		// sudo_as: inner renew is checked for TransactionStorage auth at validation.
+		// Utility wrappers: rejected because renew is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(renew_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(attacker.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"renew: via {name}",
+			);
+		}
+
+		// sudo_as: renew inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
@@ -1341,10 +1349,10 @@ fn wrapped_renew_requires_authorization() {
 					call: Box::new(renew_call.clone()),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 
-		// proxy: inner renew is checked for TransactionStorage auth at validation.
+		// proxy: renew inside wrapper is rejected.
 		assert_eq!(
 			construct_and_apply_extrinsic(
 				attacker.pair(),
@@ -1354,7 +1362,7 @@ fn wrapped_renew_requires_authorization() {
 					call: Box::new(renew_call),
 				}),
 			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 	});
 }
@@ -1420,41 +1428,22 @@ fn wrapped_authorize_account_succeeds() {
 	});
 }
 
+/// Store calls inside wrappers (batch, batch_all, force_batch) are rejected even when
+/// authorized. Store/renew must be submitted as direct extrinsics.
 #[test]
-fn authorized_wrapped_store_succeeds() {
+fn authorized_wrapped_store_rejected() {
 	run_test(|| {
 		advance_block();
 		let signer = sudo_relayer_signer();
 		let who: AccountId = signer.to_account_id();
 		let data = vec![42u8; 100];
 
-		// batch, batch_all, force_batch (not as_derivative — it changes origin internally)
-		let batch_variants = |call: RuntimeCall| -> Vec<(RuntimeCall, &'static str)> {
-			vec![
-				(
-					RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call.clone()] }),
-					"batch",
-				),
-				(
-					RuntimeCall::Utility(pallet_utility::Call::batch_all {
-						calls: vec![call.clone()],
-					}),
-					"batch_all",
-				),
-				(
-					RuntimeCall::Utility(pallet_utility::Call::force_batch { calls: vec![call] }),
-					"force_batch",
-				),
-			]
-		};
-
-		// Authorize enough for direct + 3 batch variants
-		let num_calls = 4u32;
+		// Authorize enough for several calls.
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
-			num_calls,
-			num_calls as u64 * data.len() as u64,
+			4,
+			4 * data.len() as u64,
 		));
 
 		let store_call =
@@ -1463,25 +1452,26 @@ fn authorized_wrapped_store_succeeds() {
 		// Direct store should succeed.
 		assert_ok_ok(construct_and_apply_extrinsic(signer.pair(), store_call.clone()));
 
-		// Batch-wrapped store should also succeed.
-		for (wrapped, name) in batch_variants(store_call) {
-			let res = construct_and_apply_extrinsic(signer.pair(), wrapped);
-			assert!(res.is_ok(), "{name}: apply_extrinsic failed with {res:?}");
-			assert!(res.unwrap().is_ok(), "{name}: dispatch failed");
+		// Batch-wrapped store must be rejected.
+		for (wrapped, name) in wrap_call_utility_variants(store_call) {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"{name}: wrapped store must be rejected",
+			);
 		}
 
-		// All authorization should be consumed.
+		// Only the direct store consumed authorization (1 tx, data.len() bytes).
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
+			AuthorizationExtent { transactions: 3, bytes: 3 * data.len() as u64 },
 		);
 	});
 }
 
-/// Batch containing two store calls where one uses preimage authorization and the other
-/// uses account authorization. Both authorizations should be properly consumed.
+/// Batch containing store calls is rejected — store must be submitted as direct extrinsics.
 #[test]
-fn batch_store_with_mixed_preimage_and_account_auth() {
+fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 	run_test(|| {
 		advance_block();
 		let signer = sudo_relayer_signer();
@@ -1514,21 +1504,22 @@ fn batch_store_with_mixed_preimage_and_account_auth() {
 		let batch =
 			RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_a, store_b] });
 
-		// Batch should succeed — store_a uses preimage auth, store_b uses account auth.
-		let res = construct_and_apply_extrinsic(signer.pair(), batch);
-		assert!(res.is_ok(), "apply_extrinsic failed: {res:?}");
-		assert!(res.unwrap().is_ok(), "dispatch failed");
+		// Batch containing store calls is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), batch),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
 
-		// Both authorizations should be consumed.
+		// Authorizations were NOT consumed (rejected before prepare).
 		assert_eq!(
 			runtime::TransactionStorage::preimage_authorization_extent(content_hash_a),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
-			"Preimage authorization for data_a should be consumed",
+			AuthorizationExtent { transactions: 1, bytes: 100 },
+			"Preimage authorization should not be consumed",
 		);
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
-			"Account authorization for data_b should be consumed",
+			AuthorizationExtent { transactions: 1, bytes: 200 },
+			"Account authorization should not be consumed",
 		);
 	});
 }
@@ -1539,25 +1530,28 @@ fn wrapped_call_respects_validate_signed_allowlist() {
 		advance_block();
 		let signer = sudo_relayer_signer();
 
-		// System::remark is not in the ValidateSigned allowlist.
-		// Direct + utility wrappers: rejected at validation time.
-		assert_rejected_at_validation(
-			signer,
-			RuntimeCall::System(frame_system::Call::remark { remark: vec![1, 2, 3] }),
-			TransactionValidityError::Invalid(InvalidTransaction::Call),
-			"System::remark",
+		let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![1, 2, 3] });
+
+		// System::remark is not in the ValidateSigned allowlist — rejected direct.
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), remark.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			"System::remark: direct",
 		);
 
-		// Note: sudo_as and proxy are NOT tested here because they have their own
-		// authorization mechanisms (sudo key, proxy delegation) and are intentionally
-		// permitted at the validation level. The pallet-side defense-in-depth checks
-		// protect against unauthorized operations through those paths.
+		// Also rejected inside utility wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(remark) {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"System::remark: via {name}",
+			);
+		}
 	});
 }
 
-/// Batch mixing store (needs Authorized origin) with authorize_account (needs Signed origin)
-/// is rejected at validation time to prevent silent dispatch failures or authorization leaks
-/// with `batch_all`.
+/// Batch containing store is rejected — store must be submitted as direct extrinsics,
+/// regardless of what else is in the batch.
 #[test]
 fn mixed_batch_store_and_authorize_rejected() {
 	run_test(|| {
@@ -1610,7 +1604,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 	});
 }
 
-/// Batch mixing store with a non-storage call is rejected at validation.
+/// Batch containing store with a non-storage call is rejected — store must be direct.
 #[test]
 fn mixed_batch_store_and_non_storage_call_rejected() {
 	run_test(|| {
@@ -1671,10 +1665,11 @@ fn max_recursion_depth_is_enforced() {
 			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 		}
 
-		// Should fail with ExhaustsResources due to depth limit.
+		// Should fail with Call — store inside wrapper is rejected (the depth limit
+		// in is_storage_mutating_call treats excessively nested calls as storage-mutating).
 		assert_eq!(
 			construct_and_apply_extrinsic(signer.pair(), call),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
 	});
 }
