@@ -227,10 +227,7 @@ where
 		if let Some(inner_call) = call.is_sub_type() {
 			let (valid_tx, maybe_scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
 			if let Some(scope) = maybe_scope {
-				origin.set_caller_from(Origin::<T>::Authorized {
-					who: who.clone(),
-					scope,
-				});
+				origin.set_caller_from(Origin::<T>::Authorized { who: who.clone(), scope });
 			}
 			return Ok((valid_tx, Some(who), origin));
 		}

@@ -768,17 +768,17 @@ fn wrapped_store_requires_authorization() {
 				);
 			}
 
-			// sudo_as: store inside wrapper is rejected.
-			assert_eq!(
-				construct_and_apply_extrinsic(
-					Some(account.pair()),
-					RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
-						who: sp_runtime::MultiAddress::Id(account.to_account_id()),
-						call: Box::new(store_call),
-					}),
-				),
-				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			// sudo_as: passes validation (sudo not inspected) but fails at dispatch
+			// because no sudo key is configured in default genesis.
+			let sudo_as_result = construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(account.to_account_id()),
+					call: Box::new(store_call),
+				}),
 			);
+			assert!(sudo_as_result.is_ok(), "sudo_as should pass validation");
+			assert!(sudo_as_result.unwrap().is_err(), "sudo_as should fail at dispatch");
 		});
 }
 
@@ -816,17 +816,17 @@ fn wrapped_store_with_cid_config_requires_authorization() {
 				);
 			}
 
-			// sudo_as: store inside wrapper is rejected.
-			assert_eq!(
-				construct_and_apply_extrinsic(
-					Some(account.pair()),
-					RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
-						who: sp_runtime::MultiAddress::Id(account.to_account_id()),
-						call: Box::new(store_call),
-					}),
-				),
-				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			// sudo_as: passes validation (sudo not inspected) but fails at dispatch
+			// because no sudo key is configured in default genesis.
+			let sudo_as_result = construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(account.to_account_id()),
+					call: Box::new(store_call),
+				}),
 			);
+			assert!(sudo_as_result.is_ok(), "sudo_as should pass validation");
+			assert!(sudo_as_result.unwrap().is_err(), "sudo_as should fail at dispatch");
 		});
 }
 
@@ -1085,17 +1085,17 @@ fn wrapped_renew_requires_authorization() {
 			);
 		}
 
-		// sudo_as: renew inside wrapper is rejected.
-		assert_eq!(
-			construct_and_apply_extrinsic(
-				Some(account.pair()),
-				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
-					who: sp_runtime::MultiAddress::Id(who),
-					call: Box::new(renew_call),
-				}),
-			),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		// sudo_as: passes validation (sudo not inspected) but fails at dispatch
+		// because no sudo key is configured.
+		let sudo_as_result = construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+				who: sp_runtime::MultiAddress::Id(who),
+				call: Box::new(renew_call),
+			}),
 		);
+		assert!(sudo_as_result.is_ok(), "sudo_as should pass validation");
+		assert!(sudo_as_result.unwrap().is_err(), "sudo_as should fail at dispatch");
 	});
 }
 
@@ -1326,6 +1326,39 @@ fn max_recursion_depth_is_enforced() {
 				TransactionValidityError::Invalid(InvalidTransaction::Call)
 			);
 		});
+}
+
+/// The sudo key holder can store data via `sudo(store)` without authorization.
+/// Sudo dispatches with Root origin, and `ensure_authorized` accepts Root.
+#[test]
+fn sudo_store_works_for_sudo_key_holder() {
+	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
+	let sudo_account = Sr25519Keyring::Alice;
+	pallet_sudo::GenesisConfig::<Runtime> { key: Some(sudo_account.to_account_id()) }
+		.assimilate_storage(&mut t)
+		.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+		let who: AccountId = sudo_account.to_account_id();
+
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+		let data = vec![42u8; 100];
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+
+		// sudo(store) should work — Root origin is accepted by ensure_authorized.
+		let sudo_call = RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(store_call) });
+		assert_ok_ok(construct_and_apply_extrinsic(Some(sudo_account.pair()), sudo_call));
+
+		// No account authorization was needed or consumed.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
 }
 
 // NOTE: No `wrapped_call_respects_validate_inner_calls_allowlist` test on Westend.
