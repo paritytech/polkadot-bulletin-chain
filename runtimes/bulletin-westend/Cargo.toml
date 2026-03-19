@@ -39,6 +39,12 @@ pallet-utility = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-transaction-storage = { workspace = true }
+pallet-drive-registry = { workspace = true }
+pallet-s3-registry = { workspace = true }
+pallet-storage-provider = { workspace = true }
+file-system-primitives = { workspace = true }
+s3-primitives = { workspace = true }
+storage-primitives = { workspace = true }
 pallets-common = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
@@ -103,6 +109,7 @@ std = [
 	"cumulus-primitives-aura/std",
 	"cumulus-primitives-core/std",
 	"cumulus-primitives-utility/std",
+	"file-system-primitives/std",
 	"frame-benchmarking?/std",
 	"frame-executive/std",
 	"frame-metadata-hash-extension/std",
@@ -115,9 +122,12 @@ std = [
 	"pallet-authorship/std",
 	"pallet-balances/std",
 	"pallet-collator-selection/std",
+	"pallet-drive-registry/std",
 	"pallet-message-queue/std",
+	"pallet-s3-registry/std",
 	"pallet-session/std",
 	"pallet-skip-feeless-payment/std",
+	"pallet-storage-provider/std",
 	"pallet-sudo/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
@@ -131,6 +141,7 @@ std = [
 	"parachains-common/std",
 	"polkadot-parachain-primitives/std",
 	"polkadot-runtime-common/std",
+	"s3-primitives/std",
 	"scale-info/std",
 	"serde",
 	"serde_json/std",
@@ -149,6 +160,7 @@ std = [
 	"sp-transaction-pool/std",
 	"sp-transaction-storage-proof/std",
 	"sp-version/std",
+	"storage-primitives/std",
 	"substrate-wasm-builder",
 	"testnet-parachains-constants/std",
 	"tracing/std",
@@ -173,8 +185,10 @@ runtime-benchmarks = [
 	"pallet-balances/runtime-benchmarks",
 	"pallet-collator-selection/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
+	"pallet-s3-registry/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
 	"pallet-skip-feeless-payment/runtime-benchmarks",
+	"pallet-storage-provider/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
@@ -208,8 +222,10 @@ try-runtime = [
 	"pallet-balances/try-runtime",
 	"pallet-collator-selection/try-runtime",
 	"pallet-message-queue/try-runtime",
+	"pallet-s3-registry/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-skip-feeless-payment/try-runtime",
+	"pallet-storage-provider/try-runtime",
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
