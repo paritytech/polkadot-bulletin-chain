@@ -263,30 +263,11 @@ where
 	) -> Result<Self::Pre, TransactionValidityError> {
 		let Some(who) = val else { return Ok(()) };
 
-		// Direct storage call
-		if let Some(inner_call) = call.is_sub_type() {
-			if let Err(e) = Pallet::<T>::pre_dispatch_signed(&who, inner_call) {
-				tracing::debug!(
-					target: LOG_TARGET,
-					"pre_dispatch_signed failed for direct storage call: {:?}",
-					e,
-				);
-				return Err(e);
-			}
-			return Ok(());
-		}
-
-		// Wrapper call — consume authorization for inner storage calls
-		if let Err(e) = I::traverse_storage_calls(call, 0, &mut |inner_call| {
+		// traverse_storage_calls handles both direct pallet calls (via is_sub_type)
+		// and wrapper calls (via inspect_wrapper), consuming authorization for each.
+		I::traverse_storage_calls(call, 0, &mut |inner_call| {
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
-		}) {
-			tracing::debug!(
-				target: LOG_TARGET,
-				"pre_dispatch_signed failed for wrapped storage call: {:?}",
-				e,
-			);
-			return Err(e);
-		}
+		})?;
 
 		Ok(())
 	}
