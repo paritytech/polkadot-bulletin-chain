@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bulletin Helia - IPFS JSON Viewer</title>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>IPFS Data Viewer</h1>
+        <p>Download and display data from IPFS by CID (JSON or raw bytes)</p>
+      </header>
+
+      <main>
+        <section class="controls">
+          <div class="form-group">
+            <label for="peer-multiaddrs">Peer Multiaddrs (one per line):</label>
+            <textarea
+              id="peer-multiaddrs"
+              rows="4"
+              placeholder="/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooW..."
+            ></textarea>
+            <span class="help-text"
+              >⚠️ Security: Only connections to the specified peers are allowed. Must use WebSocket
+              (/ws or /wss) transport.</span
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="cid-input">CID to fetch:</label>
+            <input type="text" id="cid-input" placeholder="bafyreifhj6h..." />
+          </div>
+
+          <div class="button-group">
+            <button id="fetch-btn" class="primary">Fetch Data</button>
+            <button id="clear-logs-btn">Clear Logs</button>
+          </div>
+
+          <div id="status" class="status"></div>
+        </section>
+
+        <div class="panels">
+          <section class="panel logs-panel">
+            <h2>Logs & Network Activity</h2>
+            <div id="logs" class="logs-container"></div>
+          </section>
+
+          <section class="panel content-panel">
+            <h2>Content</h2>
+            <div id="content" class="content-container">
+              <p class="placeholder">Content will appear here after fetching...</p>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
