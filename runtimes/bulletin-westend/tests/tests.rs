@@ -1361,8 +1361,3 @@ fn sudo_store_works_for_sudo_key_holder() {
 	});
 }
 
-// NOTE: No `wrapped_call_respects_validate_inner_calls_allowlist` test on Westend.
-// Unlike the feeless Polkadot solochain, Westend is a parachain with transaction fees,
-// so there is no call allowlist — fees provide the spam gate for non-storage calls.
-// TransactionStorage calls inside wrappers are validated for authorization by the pallet's
-// `ValidateStorageCalls` extension to prevent DoS via large unauthorized data.
