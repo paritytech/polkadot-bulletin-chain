@@ -1361,3 +1361,166 @@ fn sudo_store_works_for_sudo_key_holder() {
 	});
 }
 
+// ============================================================================
+// XCM SafeCallFilter tests — verify that storage-mutating calls are blocked
+// when dispatched via XCM Transact, even with valid authorization.
+// ============================================================================
+
+/// XCM Transact with `store` must be blocked by the SafeCallFilter
+/// (`EverythingBut<StorageCallInspector>`). Storage operations must go through
+/// signed extrinsics, never through XCM.
+#[test]
+fn xcm_transact_store_is_blocked() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![42u8; 100];
+
+			// Authorize the account so we can verify the filter blocks the call
+			// regardless of authorization state.
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1,
+				data.len() as u64,
+			));
+			assert_ne!(
+				TransactionStorage::account_authorization_extent(who.clone()),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+
+			// Build an XCM message: UnpaidExecution + Transact(Superuser, store).
+			// GovernanceLocation (relay chain) has LocationAsSuperuser in the
+			// OriginConverter, so origin conversion would succeed — but SafeCallFilter
+			// must block the call before that matters.
+			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
+				.unpaid_execution(Unlimited, None)
+				.transact(OriginKind::Superuser, None, store_call.encode())
+				.build();
+
+			let mut id = [0u8; 32];
+			let outcome = xcm_executor::XcmExecutor::<
+				bulletin_westend_runtime::xcm_config::XcmConfig,
+			>::prepare_and_execute(
+				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+			);
+
+			// SafeCallFilter returns false for store → XcmError::NoPermission
+			assert!(
+				outcome.clone().ensure_complete().is_err(),
+				"XCM Transact store must be blocked by SafeCallFilter, got: {outcome:?}",
+			);
+
+			// Authorization must not have been consumed.
+			assert_ne!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+				"Authorization should remain unconsumed since XCM was blocked",
+			);
+		});
+}
+
+/// XCM Transact with `store` wrapped in `utility::batch` must also be blocked.
+/// The `StorageCallInspector` recursively inspects inner calls.
+#[test]
+fn xcm_transact_wrapped_store_is_blocked() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = vec![42u8; 100];
+
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1,
+				data.len() as u64,
+			));
+
+			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: data.clone(),
+			});
+			let batch_call =
+				RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_call] });
+
+			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
+				.unpaid_execution(Unlimited, None)
+				.transact(OriginKind::Superuser, None, batch_call.encode())
+				.build();
+
+			let mut id = [0u8; 32];
+			let outcome = xcm_executor::XcmExecutor::<
+				bulletin_westend_runtime::xcm_config::XcmConfig,
+			>::prepare_and_execute(
+				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+			);
+
+			assert!(
+				outcome.clone().ensure_complete().is_err(),
+				"XCM Transact batch(store) must be blocked by recursive SafeCallFilter, got: {outcome:?}",
+			);
+
+			// Authorization must not have been consumed.
+			assert_ne!(
+				TransactionStorage::account_authorization_extent(who),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+		});
+}
+
+/// XCM Transact with `authorize_account` must succeed — management calls are
+/// allowed through XCM (they are not storage-mutating).
+#[test]
+fn xcm_transact_authorize_account_works() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+
+			let target: AccountId = Sr25519Keyring::Ferdie.to_account_id();
+
+			// Verify no authorization exists yet.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(target.clone()),
+				AuthorizationExtent { transactions: 0, bytes: 0 },
+			);
+
+			let authorize_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.clone(),
+					transactions: 10,
+					bytes: 1024,
+				});
+
+			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
+				.unpaid_execution(Unlimited, None)
+				.transact(OriginKind::Superuser, None, authorize_call.encode())
+				.build();
+
+			let mut id = [0u8; 32];
+			let outcome = xcm_executor::XcmExecutor::<
+				bulletin_westend_runtime::xcm_config::XcmConfig,
+			>::prepare_and_execute(
+				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+			);
+
+			assert!(
+				outcome.clone().ensure_complete().is_ok(),
+				"XCM Transact authorize_account must succeed, got: {outcome:?}",
+			);
+
+			// Authorization must have been created.
+			assert_eq!(
+				TransactionStorage::account_authorization_extent(target),
+				AuthorizationExtent { transactions: 10, bytes: 1024 },
+			);
+		});
+}

@@ -1673,3 +1673,61 @@ fn max_recursion_depth_is_enforced() {
 		);
 	});
 }
+
+// ============================================================================
+// Priority and longevity assertions — ensure the declared priority hierarchy
+// is correctly enforced end-to-end through `Executive::validate_transaction`.
+//
+// Expected priority order (highest to lowest):
+//   Sudo > SetPurgeKeys = Proxy = Utility > RemoveExpiredAuthorization > StoreRenew > BridgeTx
+// ============================================================================
+
+/// Verify that a `store` extrinsic gets `StoreRenewPriority` and `StoreRenewLongevity`
+/// from the ValidateStorageCalls extension.
+#[test]
+fn store_extrinsic_has_expected_priority_and_longevity() {
+	run_test(|| {
+		advance_block();
+
+		let signer = sudo_relayer_signer(); // Alice is a TestAccount / Authorizer
+		let who: runtime::AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize so the store call passes validation.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::store {
+			data: data.clone(),
+		});
+		let xt = construct_extrinsic(signer.pair(), call).unwrap();
+		let validity =
+			Executive::validate_transaction(TransactionSource::External, xt, Hash::default())
+				.unwrap();
+
+		assert_eq!(validity.priority, runtime::StoreRenewPriority::get());
+		assert_eq!(validity.longevity, runtime::StoreRenewLongevity::get());
+	});
+}
+
+/// Verify the declared priority hierarchy:
+///   Sudo > SetPurgeKeys > Proxy = Utility = RemoveExpired > StoreRenew > Bridge
+#[test]
+fn priority_hierarchy_is_correct() {
+	assert!(runtime::SudoPriority::get() > runtime::SetPurgeKeysPriority::get());
+	assert!(
+		runtime::SetPurgeKeysPriority::get() > runtime::RemoveExpiredAuthorizationPriority::get()
+	);
+	assert!(
+		runtime::RemoveExpiredAuthorizationPriority::get() > runtime::StoreRenewPriority::get()
+	);
+	assert!(runtime::StoreRenewPriority::get() > runtime::BridgeTxPriority::get());
+
+	// Proxy, Utility, and RemoveExpiredAuthorization all sit one level below SetPurgeKeys.
+	assert_eq!(runtime::ProxyPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
+	assert_eq!(runtime::UtilityPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
+}
