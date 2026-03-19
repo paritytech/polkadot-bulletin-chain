@@ -280,7 +280,10 @@ fn construct_extrinsic(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_transaction_storage::extension::ValidateStorageCalls::<Runtime>::default(),
+		pallet_transaction_storage::extension::ValidateStorageCalls::<
+			Runtime,
+			runtime::StorageCallInspector,
+		>::default(),
 		runtime::AllowedSignedCalls,
 		runtime::BridgeRejectObsoleteHeadersAndMessages,
 	);
@@ -1062,4 +1065,669 @@ fn allowed_signed_calls_preserves_storage_priority() {
 #[test]
 fn transaction_storage_weight_sanity() {
 	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
+}
+
+// ============================================================================
+// Ensure calls wrapped in dispatch wrappers are subject to the same validation
+// as direct submissions. Covers utility (batch, batch_all, force_batch,
+// as_derivative), proxy, and sudo_as.
+//
+// XCM Transact wrapping is tested in xcm_config::tests.
+// ============================================================================
+
+/// Wrap a call in utility dispatcher variants (batch, batch_all, force_batch, as_derivative).
+/// These are caught at validation time by `validate_inner_calls`.
+fn wrap_call_utility_variants(call: RuntimeCall) -> Vec<(RuntimeCall, &'static str)> {
+	vec![
+		(
+			RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call.clone()] }),
+			"utility::batch",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: vec![call.clone()] }),
+			"utility::batch_all",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::force_batch { calls: vec![call.clone()] }),
+			"utility::force_batch",
+		),
+		(
+			RuntimeCall::Utility(pallet_utility::Call::as_derivative {
+				index: 0,
+				call: Box::new(call),
+			}),
+			"utility::as_derivative",
+		),
+	]
+}
+
+fn provision_account(who: AccountKeyring) {
+	frame_system::Pallet::<Runtime>::inc_providers(&who.to_account_id());
+}
+
+fn add_proxy(real: AccountKeyring, delegate: AccountKeyring) {
+	let call = RuntimeCall::Proxy(pallet_proxy::Call::add_proxy {
+		delegate: sp_runtime::MultiAddress::Id(delegate.to_account_id()),
+		proxy_type: Default::default(),
+		delay: 0,
+	});
+	assert_ok_ok(construct_and_apply_extrinsic(real.pair(), call));
+}
+
+#[test]
+fn wrapped_store_requires_authorization() {
+	run_test(|| {
+		advance_block();
+		let attacker = non_relay_signer();
+		provision_account(attacker);
+		let real = sudo_relayer_signer();
+		add_proxy(real, attacker);
+
+		let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+			data: vec![42u8; 100],
+		});
+
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), store_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"store: direct",
+		);
+
+		// Utility wrappers: rejected because store is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(store_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(attacker.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"store: via {name}",
+			);
+		}
+
+		// sudo_as: store inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(attacker.to_account_id()),
+					call: Box::new(store_call.clone()),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+
+		// proxy: store inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+					real: sp_runtime::MultiAddress::Id(real.to_account_id()),
+					force_proxy_type: None,
+					call: Box::new(store_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+#[test]
+fn wrapped_store_with_cid_config_requires_authorization() {
+	run_test(|| {
+		advance_block();
+		let attacker = non_relay_signer();
+		provision_account(attacker);
+		let real = sudo_relayer_signer();
+		add_proxy(real, attacker);
+
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
+				cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
+				data: vec![42u8; 100],
+			});
+
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), store_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"store_with_cid_config: direct",
+		);
+
+		// Utility wrappers: rejected because store is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(store_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(attacker.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"store_with_cid_config: via {name}",
+			);
+		}
+
+		// sudo_as: store inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(attacker.to_account_id()),
+					call: Box::new(store_call.clone()),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+
+		// proxy: store inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+					real: sp_runtime::MultiAddress::Id(real.to_account_id()),
+					force_proxy_type: None,
+					call: Box::new(store_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+#[test]
+fn wrapped_store_requires_authorization_even_for_relayer() {
+	run_test(|| {
+		advance_block();
+		let relayer = sudo_relayer_signer();
+
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(relayer.to_account_id()),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+
+		let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+			data: vec![99u8; 200],
+		});
+
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(relayer.pair(), store_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"relayer store without auth: direct",
+		);
+
+		// Utility wrappers: rejected because store is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(store_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(relayer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"relayer store without auth: via {name}",
+			);
+		}
+
+		// sudo_as: store inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				relayer.pair(),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(relayer.to_account_id()),
+					call: Box::new(store_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+#[test]
+fn wrapped_renew_requires_authorization() {
+	// Use standalone externalities with a non-zero RetentionPeriod so that
+	// stored transactions survive into the next block.
+	sp_tracing::try_init_simple();
+	let mut t = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
+	pallet_relayer_set::GenesisConfig::<Runtime> {
+		initial_relayers: vec![relayer_signer().into(), sudo_relayer_signer().into()],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+	pallet_sudo::GenesisConfig::<Runtime> { key: Some(sudo_relayer_signer().into()) }
+		.assimilate_storage(&mut t)
+		.unwrap();
+	pallet_transaction_storage::GenesisConfig::<Runtime> {
+		retention_period: 100,
+		byte_fee: 0,
+		entry_fee: 0,
+		account_authorizations: vec![],
+		preimage_authorizations: vec![],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+
+		let authorized = sudo_relayer_signer();
+		let data = vec![42u8; 100];
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			authorized.to_account_id(),
+			1,
+			data.len() as u64,
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(
+			authorized.pair(),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
+		));
+		let stored_block = System::block_number();
+
+		advance_block();
+		let attacker = non_relay_signer();
+		provision_account(attacker);
+		add_proxy(authorized, attacker);
+
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+			block: stored_block,
+			index: 0,
+		});
+
+		// Direct: rejected for missing authorization.
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), renew_call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+			"renew: direct",
+		);
+
+		// Utility wrappers: rejected because renew is not allowed inside wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(renew_call.clone()) {
+			assert_eq!(
+				construct_and_apply_extrinsic(attacker.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"renew: via {name}",
+			);
+		}
+
+		// sudo_as: renew inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+					who: sp_runtime::MultiAddress::Id(attacker.to_account_id()),
+					call: Box::new(renew_call.clone()),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+
+		// proxy: renew inside wrapper is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				attacker.pair(),
+				RuntimeCall::Proxy(pallet_proxy::Call::proxy {
+					real: sp_runtime::MultiAddress::Id(authorized.to_account_id()),
+					force_proxy_type: None,
+					call: Box::new(renew_call),
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+#[test]
+fn wrapped_authorize_account_requires_authorizer_origin() {
+	run_test(|| {
+		advance_block();
+		let attacker = non_relay_signer();
+		provision_account(attacker);
+
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+			who: attacker.to_account_id(),
+			transactions: 5,
+			bytes: 1024,
+		});
+
+		// Direct: rejected at validation (BadSigner).
+		assert_eq!(
+			construct_and_apply_extrinsic(attacker.pair(), call.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
+		);
+
+		// Via batch: batch itself is valid, but the inner authorize_account must
+		// fail at dispatch (origin is not Authorizer). Verify via storage state.
+		let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
+		let _ = construct_and_apply_extrinsic(attacker.pair(), batch_call);
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(attacker.to_account_id()),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+			"authorize_account via batch must not succeed for non-Authorizer",
+		);
+	});
+}
+
+/// Wrapping `authorize_account` in `batch_all` must not break the authorization.
+/// The origin must remain `Signed` (not transformed to `Authorized`) so that
+/// `T::Authorizer::ensure_origin()` succeeds at dispatch time.
+#[test]
+fn wrapped_authorize_account_succeeds() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let target: AccountId = non_relay_signer().to_account_id();
+
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+			who: target.clone(),
+			transactions: 5,
+			bytes: 1024,
+		});
+
+		let batch_call =
+			RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: vec![call] });
+		let res = construct_and_apply_extrinsic(signer.pair(), batch_call);
+		assert!(res.is_ok(), "apply_extrinsic failed: {res:?}");
+		assert!(res.unwrap().is_ok(), "dispatch failed");
+
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(target),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+			"authorize_account via batch_all must create authorization",
+		);
+	});
+}
+
+/// Store calls inside wrappers (batch, batch_all, force_batch) are rejected even when
+/// authorized. Store/renew must be submitted as direct extrinsics.
+#[test]
+fn authorized_wrapped_store_rejected() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize enough for several calls.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			4,
+			4 * data.len() as u64,
+		));
+
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+
+		// Direct store should succeed.
+		assert_ok_ok(construct_and_apply_extrinsic(signer.pair(), store_call.clone()));
+
+		// Batch-wrapped store must be rejected.
+		for (wrapped, name) in wrap_call_utility_variants(store_call) {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"{name}: wrapped store must be rejected",
+			);
+		}
+
+		// Only the direct store consumed authorization (1 tx, data.len() bytes).
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 3, bytes: 3 * data.len() as u64 },
+		);
+	});
+}
+
+/// Batch containing store calls is rejected — store must be submitted as direct extrinsics.
+#[test]
+fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+
+		let data_a = vec![42u8; 100];
+		let data_b = vec![99u8; 200];
+		let content_hash_a = sp_io::hashing::blake2_256(&data_a);
+
+		// Authorize preimage for data_a only.
+		assert_ok!(runtime::TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash_a,
+			data_a.len() as u64,
+		));
+
+		// Authorize account for data_b (1 transaction, enough bytes).
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data_b.len() as u64,
+		));
+
+		let store_a =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data_a });
+		let store_b =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data_b });
+
+		let batch =
+			RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![store_a, store_b] });
+
+		// Batch containing store calls is rejected.
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), batch),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+
+		// Authorizations were NOT consumed (rejected before prepare).
+		assert_eq!(
+			runtime::TransactionStorage::preimage_authorization_extent(content_hash_a),
+			AuthorizationExtent { transactions: 1, bytes: 100 },
+			"Preimage authorization should not be consumed",
+		);
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 200 },
+			"Account authorization should not be consumed",
+		);
+	});
+}
+
+#[test]
+fn wrapped_call_respects_validate_signed_allowlist() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+
+		let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![1, 2, 3] });
+
+		// System::remark is not in the ValidateSigned allowlist — rejected direct.
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), remark.clone()),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			"System::remark: direct",
+		);
+
+		// Also rejected inside utility wrappers.
+		for (wrapped, name) in wrap_call_utility_variants(remark) {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), wrapped),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+				"System::remark: via {name}",
+			);
+		}
+	});
+}
+
+/// Batch containing store is rejected — store must be submitted as direct extrinsics,
+/// regardless of what else is in the batch.
+#[test]
+fn mixed_batch_store_and_authorize_rejected() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let target: AccountId = non_relay_signer().to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize one store.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		let authorize_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+				who: target.clone(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		// Mixing store + authorize_account in a batch is rejected at validation.
+		for batch_variant in [
+			RuntimeCall::Utility(pallet_utility::Call::batch {
+				calls: vec![store_call.clone(), authorize_call.clone()],
+			}),
+			RuntimeCall::Utility(pallet_utility::Call::batch_all {
+				calls: vec![store_call.clone(), authorize_call.clone()],
+			}),
+			RuntimeCall::Utility(pallet_utility::Call::force_batch {
+				calls: vec![store_call.clone(), authorize_call.clone()],
+			}),
+		] {
+			assert_eq!(
+				construct_and_apply_extrinsic(signer.pair(), batch_variant),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			);
+		}
+
+		// Authorization was NOT consumed (rejected before prepare).
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+	});
+}
+
+/// Batch containing store with a non-storage call is rejected — store must be direct.
+#[test]
+fn mixed_batch_store_and_non_storage_call_rejected() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		let session_call = RuntimeCall::Session(pallet_session::Call::purge_keys {});
+
+		let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch {
+			calls: vec![store_call, session_call],
+		});
+
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), batch_call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+
+		// Authorization was NOT consumed.
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+		);
+	});
+}
+
+/// Deeply nested wrapper calls exceeding MAX_WRAPPER_DEPTH must be rejected.
+#[test]
+fn max_recursion_depth_is_enforced() {
+	run_test(|| {
+		advance_block();
+		let signer = sudo_relayer_signer();
+		let who: AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
+		let mut call: RuntimeCall =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
+		}
+
+		// Should fail with Call — store inside wrapper is rejected (the depth limit
+		// in is_storage_mutating_call treats excessively nested calls as storage-mutating).
+		assert_eq!(
+			construct_and_apply_extrinsic(signer.pair(), call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+// ============================================================================
+// Priority and longevity assertions — ensure the declared priority hierarchy
+// is correctly enforced end-to-end through `Executive::validate_transaction`.
+//
+// Expected priority order (highest to lowest):
+//   Sudo > SetPurgeKeys = Proxy = Utility > RemoveExpiredAuthorization > StoreRenew > BridgeTx
+// ============================================================================
+
+/// Verify that a `store` extrinsic gets `StoreRenewPriority` and `StoreRenewLongevity`
+/// from the ValidateStorageCalls extension.
+#[test]
+fn store_extrinsic_has_expected_priority_and_longevity() {
+	run_test(|| {
+		advance_block();
+
+		let signer = sudo_relayer_signer(); // Alice is a TestAccount / Authorizer
+		let who: runtime::AccountId = signer.to_account_id();
+		let data = vec![42u8; 100];
+
+		// Authorize so the store call passes validation.
+		assert_ok!(runtime::TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			1,
+			data.len() as u64,
+		));
+
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::store {
+			data: data.clone(),
+		});
+		let xt = construct_extrinsic(signer.pair(), call).unwrap();
+		let validity =
+			Executive::validate_transaction(TransactionSource::External, xt, Hash::default())
+				.unwrap();
+
+		assert_eq!(validity.priority, runtime::StoreRenewPriority::get());
+		assert_eq!(validity.longevity, runtime::StoreRenewLongevity::get());
+	});
+}
+
+/// Verify the declared priority hierarchy:
+///   Sudo > SetPurgeKeys > Proxy = Utility = RemoveExpired > StoreRenew > Bridge
+#[test]
+fn priority_hierarchy_is_correct() {
+	assert!(runtime::SudoPriority::get() > runtime::SetPurgeKeysPriority::get());
+	assert!(
+		runtime::SetPurgeKeysPriority::get() > runtime::RemoveExpiredAuthorizationPriority::get()
+	);
+	assert!(
+		runtime::RemoveExpiredAuthorizationPriority::get() > runtime::StoreRenewPriority::get()
+	);
+	assert!(runtime::StoreRenewPriority::get() > runtime::BridgeTxPriority::get());
+
+	// Proxy, Utility, and RemoveExpiredAuthorization all sit one level below SetPurgeKeys.
+	assert_eq!(runtime::ProxyPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
+	assert_eq!(runtime::UtilityPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
 }
