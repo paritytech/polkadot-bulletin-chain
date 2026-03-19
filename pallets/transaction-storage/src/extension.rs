@@ -61,20 +61,22 @@ where
 	/// [`CallInspector`] provides the wrapper-recursion logic, so this function
 	/// works for any runtime without duplicating the blocked-call list.
 	fn is_storage_mutating_call(call: &RuntimeCallOf<T>, depth: u32) -> bool {
-		if depth >= MAX_WRAPPER_DEPTH {
-			// Fail-safe: treat excessively nested calls as storage-mutating rather than
-			// risk letting a hidden storage call bypass the filter.
-			tracing::debug!(
-				target: LOG_TARGET,
-				"Wrapper recursion limit exceeded (depth: {depth}), treating as storage-mutating",
-			);
-			return true;
-		}
+		// Check direct pallet calls first — these are always identifiable regardless
+		// of depth, matching the ordering in `traverse_storage_calls`.
 		if let Some(inner_call) = call.is_sub_type() {
 			return matches!(
 				inner_call,
 				Call::store { .. } | Call::store_with_cid_config { .. } | Call::renew { .. }
 			);
+		}
+		if depth >= MAX_WRAPPER_DEPTH {
+			// Fail-safe: treat excessively nested wrappers as storage-mutating rather
+			// than risk letting a hidden storage call bypass the filter.
+			tracing::debug!(
+				target: LOG_TARGET,
+				"Wrapper recursion limit exceeded (depth: {depth}), treating as storage-mutating",
+			);
+			return true;
 		}
 		if let Some(inner_calls) = Self::inspect_wrapper(call) {
 			return inner_calls

@@ -563,8 +563,8 @@ use pallets_common::{
 
 /// Extract the signer from an origin that may be either `Signed` or `Authorized`.
 ///
-/// `ValidateStorageCalls` transforms the origin to `Authorized` for wrapper calls containing
-/// storage operations, so downstream extensions must handle both origin types.
+/// `ValidateStorageCalls` transforms the origin to `Authorized` for direct store/renew calls
+/// (not wrappers), so downstream extensions must handle both origin types.
 fn extract_signer(origin: &RuntimeOrigin) -> Option<AccountId> {
 	if let Some(who) = origin.as_system_origin_signer() {
 		return Some(who.clone());
