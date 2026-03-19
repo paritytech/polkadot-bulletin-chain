@@ -569,9 +569,10 @@ fn extract_signer(origin: &RuntimeOrigin) -> Option<AccountId> {
 	if let Some(who) = origin.as_system_origin_signer() {
 		return Some(who.clone());
 	}
-	match origin.clone().into_caller().try_into() {
-		Ok(pallet_transaction_storage::pallet::Origin::<Runtime>::Authorized { who, .. }) =>
-			Some(who),
+	match origin.caller() {
+		OriginCaller::TransactionStorage(
+			pallet_transaction_storage::pallet::Origin::<Runtime>::Authorized { who, .. },
+		) => Some(who.clone()),
 		_ => None,
 	}
 }

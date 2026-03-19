@@ -26,7 +26,7 @@ use frame_support::{
 use frame_system::EnsureSignedBy;
 use pallet_transaction_storage::CallInspector;
 use pallet_xcm::EnsureXcm;
-use pallets_common::{inspect_sudo_wrapper, inspect_utility_wrapper, NoCurrency};
+use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
@@ -64,14 +64,16 @@ impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<Vec<&RuntimeCall>> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
-			RuntimeCall::Sudo(c) => inspect_sudo_wrapper(c),
+			// Sudo is intentionally not inspected: the sudo key holder can store
+			// data via `sudo(store)` without authorization, as Root origin is
+			// accepted by `ensure_authorized`.
 			_ => None,
 		}
 	}
 }
 
 /// Returns `true` for storage-mutating TransactionStorage calls (store, store_with_cid_config,
-/// renew). Recursively inspects wrapper calls (Utility, Sudo) to prevent bypass via nesting.
+/// renew). Recursively inspects wrapper calls (Utility) to prevent bypass via nesting.
 /// Used with `EverythingBut` as the XCM `SafeCallFilter`.
 impl Contains<RuntimeCall> for StorageCallInspector {
 	fn contains(call: &RuntimeCall) -> bool {
