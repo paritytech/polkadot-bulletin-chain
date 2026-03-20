@@ -40,7 +40,12 @@
 //!    - Adds a regular sync node with --sync=full
 //!    - Verifies sync FAILS (peers respond with empty blocks - historical blocks pruned)
 //!
-//! 7. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb
+//! 7. `parachain_full_sync_relay_warp_sync_test` - Full sync parachain + warp sync relay chain
+//!    - Starts 3 relay validators (GRANDPA finality for warp proofs), 1 collator, stores data
+//!    - Adds sync node with --sync=full (parachain) and -- --sync=warp (embedded relay chain)
+//!    - Verifies embedded relay chain warp syncs, parachain full syncs, bitswap returns data
+//!
+//! 8. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb
 //!    tool
 //!    - Verifies col11 state before/after store operations
 //!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after
@@ -759,6 +764,112 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	log::info!(
 		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
 	);
+	network.destroy().await?;
+	Ok(())
+}
+
+/// Parachain full sync with embedded relay chain warp sync.
+///
+/// This test verifies that a parachain sync node can use `--sync=full` for the parachain
+/// while the embedded relay chain uses `--sync=warp`. The relay chain warp syncs first
+/// (requiring GRANDPA finality proofs → 3 relay validators), then the parachain does a
+/// full sync downloading all blocks including indexed body — so bitswap should work.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
+	const TEST: &str = "para_full_sync_relay_warp";
+	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+
+	test_log!(TEST, "=== Parachain Full Sync + Relay Warp Sync Test ===");
+	log::info!("Parachain: --sync=full, Embedded relay chain: --sync=warp");
+	log::info!("Requires 3 relay validators for GRANDPA finality (warp sync proofs)");
+
+	// Early validation of required binaries
+	verify_parachain_binaries()?;
+
+	let para_args = get_para_node_args();
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let mut network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+
+	// Get relay chain validator for session change detection
+	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
+
+	// Wait for first session change - required for parachain block production
+	log::info!("Waiting for relay chain session change...");
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
+		.await
+		.context("Failed to detect session change on relay chain")?;
+
+	// Get collator
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+
+	// Store test data
+	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
+	let (content_hash, cid) = content_hash_and_cid(&test_data);
+	log::info!("Storing {} bytes of test data", test_data.len());
+	log::info!("Content hash: {}, CID: {}", content_hash, cid);
+
+	// Get initial nonce for Alice
+	let nonce = get_alice_nonce(collator1).await?;
+
+	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
+	log::info!("Store completed at block {}", store_block);
+
+	// Verify data can be fetched from collator1 via bitswap
+	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+
+	// Wait for enough blocks and finality before adding sync node
+	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	log::info!("Waiting for block {} and finality", target_block);
+	try_join!(
+		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+	)?;
+
+	// Add a sync node with full sync for parachain + warp sync for embedded relay chain
+	log::info!("Adding sync-node with --sync=full (parachain) + --sync=warp (relay chain)");
+	let para_binary = get_parachain_binary_path();
+	let sync_node_opts = AddCollatorOptions {
+		command: Some(para_binary.as_str().try_into()?),
+		args: vec![
+			"--sync=full".into(),
+			"--ipfs-server".into(),
+			NODE_LOG_CONFIG.into(),
+			// Arguments after "--" are passed to the embedded relay chain client.
+			"--".into(),
+			"--sync=warp".into(),
+			"--network-backend=libp2p".into(),
+		],
+		is_validator: false,
+		..Default::default()
+	};
+
+	network.add_collator("sync-node", sync_node_opts, get_para_id()).await?;
+	let sync_node = network.get_node("sync-node").context("Failed to get sync-node")?;
+
+	// Wait for the node to be up first
+	wait_for_fullnode(sync_node).await?;
+
+	// Wait for the sync node's embedded relay chain to sync via warp sync.
+	// The embedded relay chain must sync before the parachain can determine its sync target.
+	log::info!("Waiting for sync-node's embedded relay chain to warp sync...");
+	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
+		.await
+		.context("Sync node's embedded relay chain did not sync via warp")?;
+
+	log::info!(
+		"Verifying sync-node's parachain full sync progress (target: block {})",
+		target_block
+	);
+	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
+		.await
+		.context("Sync node failed to full-sync parachain blocks")?;
+
+	// Full sync downloads all blocks including indexed body, so bitswap should work
+	verify_node_bitswap(sync_node, &test_data, 30, "sync-node").await?;
+	log::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
+
+	test_log!(TEST, "=== Parachain Full Sync + Relay Warp Sync Test PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }
