@@ -217,14 +217,13 @@ jobs:
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
-      - name: Install console-ui dependencies and run Playwright tests
+      - name: Run console-ui tests
         working-directory: console-ui
         run: |
           npm ci
-          just ensure-browsers
           just test
 
-      - name: Upload Playwright report
+      - name: Upload console-ui tests report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

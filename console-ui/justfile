@@ -3,7 +3,7 @@
 # Local development and E2E testing for the Bulletin Chain console UI.
 #
 # Quick start:
-#   just dev              - Start parachain (zombienet) + vite dev server
+#   just dev              - Start vite dev server
 #   just test             - Run integration Playwright tests (chain must be running)
 #   just test-e2e         - Full E2E: zombienet + Docker IPFS + integration tests
 #
