@@ -224,7 +224,7 @@ _check-docker:
 # Kubo (local) IPFS recipes - alternative to Docker for environments without Docker
 # ============================================================================
 
-KUBO_VERSION := "v0.34.1"
+KUBO_VERSION := "v0.40.1"
 KUBO_DIR := justfile_directory() + "/../kubo"
 
 # IPFS port configuration (non-standard to avoid conflicts)

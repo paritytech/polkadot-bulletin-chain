@@ -114,7 +114,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_transaction_storage::extension::ValidateStorageCalls<Runtime>,
+		pallet_transaction_storage::extension::ValidateStorageCalls<
+			Runtime,
+			storage::StorageCallInspector,
+		>,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
@@ -179,7 +182,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_006,
+	spec_version: 1_000_008,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,

@@ -23,7 +23,7 @@ use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
-		Everything, LinearStoragePrice, Nothing,
+		Everything, EverythingBut, LinearStoragePrice, Nothing,
 	},
 };
 use frame_system::EnsureRoot;
@@ -56,6 +56,10 @@ use xcm_executor::XcmExecutor;
 
 // Re-export
 pub use testnet_parachains_constants::westend::locations::{GovernanceLocation, PeopleLocation};
+
+parameter_types! {
+	pub PeopleNextLocation: Location = Location::new(1, [Parachain(5140)]);
+}
 
 parameter_types! {
 	pub const RootLocation: Location = Location::here();
@@ -158,8 +162,9 @@ pub type Barrier = TrailingSetTopicAsId<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
 				Equals<GovernanceLocation>,
-				// Let's allow a People chain for PoP authorizations.
+				// Let's allow People chains for PoP authorizations.
 				Equals<PeopleLocation>,
+				Equals<PeopleNextLocation>,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
@@ -265,7 +270,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = EverythingBut<crate::storage::StorageCallInspector>;
 	type Aliasers = TrustedAliasers;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
