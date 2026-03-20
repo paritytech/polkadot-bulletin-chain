@@ -19,7 +19,7 @@ subxt-signer = { version = "0.44", features = ["sr25519"] }
 # CLI and utilities
 clap = { version = "4.2", features = ["derive"] }
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "=0.3.19", features = ["env-filter"] }
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
 hex = "0.4"
