@@ -88,7 +88,7 @@ try {
 | Error Code | Description |
 |---|---|
 | `EMPTY_DATA` | Data is empty |
-| `FILE_TOO_LARGE` | File exceeds 64 MiB limit |
+| `DATA_TOO_LARGE` | Data exceeds 64 MiB limit |
 | `CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB limit |
 | `INVALID_CHUNK_SIZE` | Chunk size is invalid |
 | `INVALID_CONFIG` | Configuration is invalid |
@@ -99,6 +99,7 @@ try {
 | `INSUFFICIENT_AUTHORIZATION` | Authorized quota insufficient |
 | `AUTHORIZATION_FAILED` | Authorization call failed |
 | `CHUNK_FAILED` | Individual chunk upload failed |
+| `MISSING_CHUNK` | Chunk missing during reassembly |
 | `UNSUPPORTED_OPERATION` | Operation not supported |
 
 ## Recovery Hints
@@ -113,7 +114,7 @@ try {
     console.error(`Error: ${error.message}`)
     console.error(`Suggestion: ${error.recoveryHint}`)
     // e.g. "Suggestion: Provide non-empty data"
-    // e.g. "Suggestion: Check node connectivity and try again"
+    // e.g. "Suggestion: Verify transaction parameters and account nonce"
   }
 }
 ```
@@ -123,29 +124,31 @@ try {
 When using progress callbacks, you receive `TransactionStatusEvent`s that track the lifecycle of a transaction:
 
 ```typescript
+import { TxStatus } from '@bulletin/sdk'
+
 const result = await client
   .store(data)
   .withCallback((event) => {
     switch (event.type) {
-      case 'validated':
+      case TxStatus.Validated:
         console.log('Transaction validated and added to pool')
         break
-      case 'broadcasted':
+      case TxStatus.Broadcasted:
         console.log('Transaction broadcast to peers')
         break
-      case 'in_best_block':
+      case TxStatus.InBlock:
         console.log(`In best block #${event.blockNumber} (${event.blockHash})`)
         break
-      case 'finalized':
+      case TxStatus.Finalized:
         console.log(`Finalized in block #${event.blockNumber}`)
         break
-      case 'no_longer_in_best_block':
+      case TxStatus.NoLongerInBlock:
         console.log('Block reorganization occurred')
         break
-      case 'invalid':
+      case TxStatus.Invalid:
         console.error(`Transaction invalid: ${event.error}`)
         break
-      case 'dropped':
+      case TxStatus.Dropped:
         console.error(`Transaction dropped: ${event.error}`)
         break
     }
@@ -158,14 +161,14 @@ const result = await client
 | Event | Fields | Description |
 |---|---|---|
 | `validated` | -- | Transaction validated by the node |
-| `broadcasted` | `numPeers?` | Broadcast to network peers |
-| `in_best_block` | `blockHash`, `blockNumber`, `txIndex?` | Included in a best block |
+| `broadcasted` | -- | Broadcast to network peers |
+| `in_block` | `blockHash`, `blockNumber`, `txIndex?` | Included in a best block |
 | `finalized` | `blockHash`, `blockNumber`, `txIndex?` | Finalized (irreversible) |
-| `no_longer_in_best_block` | -- | Removed from best block (reorg) |
+| `no_longer_in_block` | -- | Removed from best block (reorg) |
 | `invalid` | `error` | Transaction is invalid |
 | `dropped` | `error` | Dropped from the transaction pool |
 
-> **Note**: The `best_block` event type is deprecated. Use `in_best_block` instead.
+> **Note**: All events support an optional `chunkIndex` field to identify which chunk the event relates to during chunked uploads.
 
 ## Common Error Patterns
 
@@ -201,7 +204,7 @@ try {
 const result = await client
   .store(largeData)
   .withCallback((event) => {
-    if (event.type === 'chunk_failed') {
+    if (event.type === ChunkStatus.ChunkFailed) {
       console.error(`Chunk ${event.index + 1}/${event.total} failed:`, event.error)
     }
   })

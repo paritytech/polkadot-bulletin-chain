@@ -19,7 +19,8 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash, HashAlgorithm, ProgressEvent, WaitFor } from "@bulletin/sdk";
+import { getContentHash, HashAlgorithm, WaitFor } from "@bulletin/sdk";
+import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex, hexToBytes } from "@/utils/format";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
 import { SS58String, Enum } from "polkadot-api";
@@ -315,6 +316,7 @@ function FaucetAuthorizePreimagePanel() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   const getSizeValue = (): bigint => {
     const value = parseInt(maxSize, 10);
@@ -406,20 +408,6 @@ function FaucetAuthorizePreimagePanel() {
 
       // Create SDK client with Alice signer
       const bulletinClient = createBulletinClient!(aliceSigner);
-
-      // Progress callback for transaction status updates
-      const handleProgress = (event: ProgressEvent) => {
-        console.log("SDK progress:", event);
-        if (event.type === "signed") {
-          setTxStatus("Transaction signed...");
-        } else if (event.type === "broadcasted") {
-          setTxStatus("Broadcasting to network...");
-        } else if (event.type === "in_best_block") {
-          setTxStatus(`Included in block #${event.blockNumber}...`);
-        } else if (event.type === "finalized") {
-          setTxStatus("Finalized!");
-        }
-      };
 
       // Use SDK to authorize preimage with progress callback
       await bulletinClient
@@ -594,6 +582,7 @@ function FaucetAuthorizeAccountPanel() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   // Initialize Alice account
   useEffect(() => {
@@ -697,20 +686,6 @@ function FaucetAuthorizeAccountPanel() {
 
       // Create SDK client with Alice signer
       const bulletinClient = createBulletinClient!(aliceSigner);
-
-      // Progress callback for transaction status updates
-      const handleProgress = (event: ProgressEvent) => {
-        console.log("SDK progress:", event);
-        if (event.type === "signed") {
-          setTxStatus("Transaction signed...");
-        } else if (event.type === "broadcasted") {
-          setTxStatus("Broadcasting to network...");
-        } else if (event.type === "in_best_block") {
-          setTxStatus(`Included in block #${event.blockNumber}...`);
-        } else if (event.type === "finalized") {
-          setTxStatus("Finalized!");
-        }
-      };
 
       // Use SDK to authorize account with progress callback
       await bulletinClient

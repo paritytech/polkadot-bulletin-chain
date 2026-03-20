@@ -53,7 +53,7 @@ export class FixedSizeChunker {
     if (data.length > MAX_FILE_SIZE) {
       throw new BulletinError(
         `Data size ${data.length} exceeds maximum allowed size of ${MAX_FILE_SIZE} (64 MiB)`,
-        ErrorCode.FILE_TOO_LARGE,
+        ErrorCode.DATA_TOO_LARGE,
       )
     }
 
@@ -112,7 +112,7 @@ export function reassembleChunks(chunks: Chunk[]): Uint8Array {
     if (sorted[i]?.index !== i) {
       throw new BulletinError(
         `Missing chunk at index ${i}`,
-        ErrorCode.CHUNK_FAILED,
+        ErrorCode.MISSING_CHUNK,
       )
     }
   }
