@@ -14,10 +14,10 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 array-bytes = { optional = true, workspace = true }
-cid = { features = ["alloc"], workspace = true }
 codec = { workspace = true }
 scale-info = { features = ["derive"], workspace = true }
 tracing = { workspace = true }
+transaction-storage-primitives = { workspace = true }
 
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
@@ -35,13 +35,13 @@ runtime-benchmarks = [
 	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
-	"cid/std",
 	"codec/std",
 	"pallets-common/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-transaction-storage-proof/std",
 	"tracing/std",
+	"transaction-storage-primitives/std",
 ]
 try-runtime = [
 	"pallets-common/try-runtime",

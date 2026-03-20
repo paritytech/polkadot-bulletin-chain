@@ -20,12 +20,20 @@
 #![cfg(feature = "runtime-benchmarks")]
 
 use super::{Pallet as TransactionStorage, *};
+use crate::extension::ValidateStorageCalls;
 use alloc::vec;
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
-	deps::frame_system::{EventRecord, Pallet as System, RawOrigin},
+	deps::{
+		frame_support::dispatch::{DispatchInfo, PostDispatchInfo},
+		frame_system::{EventRecord, Pallet as System, RawOrigin},
+		sp_runtime::traits::{AsTransactionAuthorizedOrigin, DispatchTransaction, Dispatchable},
+	},
+	traits::{AsSystemOriginSigner, IsSubType, OriginTrait},
 };
 use sp_transaction_storage_proof::TransactionStorageProof;
+
+type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
 // Proof generated from max size storage:
 // ```
@@ -118,7 +126,12 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 	}
 }
 
-#[benchmarks]
+#[benchmarks(where
+	T: Send + Sync,
+	RuntimeCallOf<T>: IsSubType<Call<T>> + From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+	T::RuntimeOrigin: OriginTrait + AsSystemOriginSigner<T::AccountId> + AsTransactionAuthorizedOrigin + From<Origin<T>> + Clone,
+	<T::RuntimeOrigin as OriginTrait>::PalletsOrigin: From<Origin<T>> + TryInto<Origin<T>>,
+)]
 mod benchmarks {
 	use super::*;
 
@@ -126,7 +139,12 @@ mod benchmarks {
 	fn store(l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; l as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
-		let cid = calculate_cid(&data, None).unwrap().to_bytes();
+		let cid = calculate_cid(
+			&data,
+			CidConfig { codec: RAW_CODEC, hashing: HashingAlgorithm::Blake2b256 },
+		)
+		.unwrap()
+		.to_bytes();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
@@ -278,6 +296,88 @@ mod benchmarks {
 		_(RawOrigin::None, content_hash);
 
 		assert_last_event::<T>(Event::ExpiredPreimageAuthorizationRemoved { content_hash }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn validate_store(
+		l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>,
+	) -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let caller: T::AccountId = whitelisted_caller();
+		let data = vec![0u8; l as usize];
+		let transactions = 10;
+		let bytes = l as u64 * 10;
+		TransactionStorage::<T>::authorize_account(
+			origin as T::RuntimeOrigin,
+			caller.clone(),
+			transactions,
+			bytes,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		let ext = ValidateStorageCalls::<T>::default();
+		let call: RuntimeCallOf<T> = Call::<T>::store { data }.into();
+		let info = DispatchInfo::default();
+		let len = 0_usize;
+
+		// test_run exercises validate + prepare + post_dispatch without executing the
+		// extrinsic itself (the closure substitutes for the actual dispatch).
+		#[block]
+		{
+			ext.test_run(RawOrigin::Signed(caller.clone()).into(), &call, &info, len, 0, |_| {
+				Ok(().into())
+			})
+			.unwrap()
+			.unwrap();
+		}
+
+		// prepare consumed one transaction worth of authorization
+		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
+		assert_eq!(extent.transactions, transactions - 1);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn validate_renew() -> Result<(), BenchmarkError> {
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		TransactionStorage::<T>::store(RawOrigin::None.into(), data.clone())?;
+		run_to_block::<T>(1u32.into());
+
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let caller: T::AccountId = whitelisted_caller();
+		let transactions = 10;
+		let bytes = T::MaxTransactionSize::get() as u64 * 10;
+		TransactionStorage::<T>::authorize_account(
+			origin as T::RuntimeOrigin,
+			caller.clone(),
+			transactions,
+			bytes,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		let ext = ValidateStorageCalls::<T>::default();
+		let call: RuntimeCallOf<T> =
+			Call::<T>::renew { block: BlockNumberFor::<T>::zero(), index: 0 }.into();
+		let info = DispatchInfo::default();
+		let len = 0_usize;
+
+		// test_run exercises validate + prepare + post_dispatch without executing the
+		// extrinsic itself (the closure substitutes for the actual dispatch).
+		#[block]
+		{
+			ext.test_run(RawOrigin::Signed(caller.clone()).into(), &call, &info, len, 0, |_| {
+				Ok(().into())
+			})
+			.unwrap()
+			.unwrap();
+		}
+
+		// prepare consumed one transaction worth of authorization
+		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
+		assert_eq!(extent.transactions, transactions - 1);
 		Ok(())
 	}
 

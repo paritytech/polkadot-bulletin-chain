@@ -17,14 +17,16 @@
 //! Storage-specific configurations.
 
 use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use crate::xcm_config::PeopleNextLocation;
 use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{EitherOfDiverse, Equals, SortedMembers},
+	traits::{Contains, EitherOfDiverse, Equals, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
+use pallet_transaction_storage::CallInspector;
 use pallet_xcm::EnsureXcm;
-use pallets_common::NoCurrency;
+use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 use testnet_parachains_constants::westend::locations::PeopleLocation;
@@ -42,11 +44,41 @@ parameter_types! {
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const SetPurgeKeysLongevity: TransactionLongevity = crate::HOURS as TransactionLongevity;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+}
+
+/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
+/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+///
+/// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
+/// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM
+/// `SafeCallFilter` to block these calls from XCM dispatch — they require on-chain
+/// authorization that XCM cannot provide.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct StorageCallInspector;
+
+impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
+	fn inspect_wrapper(call: &RuntimeCall) -> Option<Vec<&RuntimeCall>> {
+		match call {
+			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
+			// Sudo is intentionally not inspected: the sudo key holder can store
+			// data via `sudo(store)` without authorization, as Root origin is
+			// accepted by `ensure_authorized`.
+			_ => None,
+		}
+	}
+}
+
+/// Returns `true` for storage-mutating TransactionStorage calls (store, store_with_cid_config,
+/// renew). Recursively inspects wrapper calls (Utility) to prevent bypass via nesting.
+/// Used with `EverythingBut` as the XCM `SafeCallFilter`.
+impl Contains<RuntimeCall> for StorageCallInspector {
+	fn contains(call: &RuntimeCall) -> bool {
+		Self::is_storage_mutating_call(call, 0)
+	}
 }
 
 /// The main business of the Bulletin chain.
@@ -65,8 +97,11 @@ impl pallet_transaction_storage::Config for Runtime {
 		EitherOfDiverse<
 			// Root can do whatever.
 			crate::EnsureRoot<Self::AccountId>,
-			// People chain can also handle authorizations.
-			EnsureXcm<Equals<PeopleLocation>>,
+			// People chains can also handle authorizations.
+			EitherOfDiverse<
+				EnsureXcm<Equals<PeopleLocation>>,
+				EnsureXcm<Equals<PeopleNextLocation>>,
+			>,
 		>,
 		// Test accounts can also authorize for testing purposes.
 		EnsureSignedBy<TestAccounts, Self::AccountId>,

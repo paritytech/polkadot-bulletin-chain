@@ -2,11 +2,17 @@
 
 set -e
 
+# Resolve repo root relative to this script's location
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 PARA_ID="${PARACHAIN_ID:-2487}"
 
 cargo build --release -p bulletin-westend-runtime
 
 # Requires chain-spec-builder from polkadot-sdk (see scripts/setup_parachain_prerequisites.sh)
+cd "$ROOT_DIR"
+
 chain-spec-builder create \
         -p "$PARA_ID" \
         -c westend \
