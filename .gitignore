@@ -21,6 +21,7 @@ tsconfig.tsbuildinfo
 # Local test files
 kubo/
 zombienet-*
+!zombienet-sdk-tests/
 
 # Build outputs
 **/dist/

@@ -3,8 +3,10 @@
 use crate::{fake_runtime_api::RuntimeApi, node_primitives::Block};
 use futures::FutureExt;
 use sc_client_api::{Backend, BlockBackend};
-use sc_consensus_grandpa::SharedVoterState;
-use sc_service::{error::Error as ServiceError, Configuration, TaskManager};
+use sc_consensus_grandpa::{
+	warp_proof::NetworkProvider as GrandpaWarpSyncProvider, SharedVoterState,
+};
+use sc_service::{error::Error as ServiceError, Configuration, TaskManager, WarpSyncConfig};
 use sc_telemetry::{Telemetry, TelemetryWorker};
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
 use sp_api::{ApiExt, ProvideRuntimeApi};
@@ -181,6 +183,13 @@ pub fn new_full<
 		);
 	net_config.add_notification_protocol(grandpa_protocol_config);
 
+	// Create warp sync provider for GRANDPA finality
+	let warp_sync = Arc::new(GrandpaWarpSyncProvider::new(
+		backend.clone(),
+		grandpa_link.shared_authority_set().clone(),
+		Vec::default(),
+	));
+
 	let (network, system_rpc_tx, tx_handler_controller, sync_service) =
 		sc_service::build_network(sc_service::BuildNetworkParams {
 			config: &config,
@@ -191,7 +200,7 @@ pub fn new_full<
 			spawn_essential_handle: task_manager.spawn_essential_handle(),
 			import_queue,
 			block_announce_validator_builder: None,
-			warp_sync_config: None,
+			warp_sync_config: Some(WarpSyncConfig::WithProvider(warp_sync)),
 			block_relay: None,
 			metrics,
 		})?;
