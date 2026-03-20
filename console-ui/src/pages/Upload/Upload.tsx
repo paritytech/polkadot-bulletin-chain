@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X, FileText, Shield } from "lucide-react";
+import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X, FileText, Shield, Archive } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -15,7 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { FileUpload } from "@/components/FileUpload";
+import { FileUpload, type SelectedFile } from "@/components/FileUpload";
+import { createCarArchive, type CarResult } from "@/lib/car";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
 import { useApi, useClient, useChainState } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
@@ -52,6 +53,8 @@ interface UploadResult {
   index?: number;
   size: number;
   unsigned?: boolean;
+  carRootCid?: string;
+  carFiles?: { name: string; cid: string; size: number }[];
 }
 
 export function Upload() {
@@ -66,8 +69,10 @@ export function Upload() {
 
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
   const [textData, setTextData] = useState("");
-  const [fileData, setFileData] = useState<Uint8Array | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
+  const [carData, setCarData] = useState<CarResult | null>(null);
+  const [isBuildingCar, setIsBuildingCar] = useState(false);
+  const [carError, setCarError] = useState<string | null>(null);
 
   const [hashAlgorithm, setHashAlgorithm] = useState<HashAlgorithm>("blake2b256");
   const [cidCodec, setCidCodec] = useState("raw");
@@ -84,10 +89,56 @@ export function Upload() {
       if (!textData.trim()) return null;
       return new TextEncoder().encode(textData);
     }
-    return fileData;
-  }, [inputMode, textData, fileData]);
+    if (selectedFiles.length === 0) return null;
+    if (selectedFiles.length === 1) return selectedFiles[0]!.data;
+    return carData?.carBytes ?? null;
+  }, [inputMode, textData, selectedFiles, carData]);
 
   const dataSize = getData()?.length ?? 0;
+  const rawFilesSize = selectedFiles.reduce((sum, f) => sum + f.data.length, 0);
+  const filesLabel = selectedFiles.length === 1
+    ? selectedFiles[0]!.file.name
+    : selectedFiles.length > 1
+      ? `${selectedFiles.length} files (CAR archive)`
+      : null;
+
+  // Auto-select raw codec for CAR archives (multiple files)
+  const isCarUpload = selectedFiles.length > 1;
+  useEffect(() => {
+    if (isCarUpload) {
+      setCidCodec("raw");
+    }
+  }, [isCarUpload]);
+
+  // Build CAR archive when multiple files are selected
+  useEffect(() => {
+    if (selectedFiles.length <= 1) {
+      setCarData(null);
+      setCarError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsBuildingCar(true);
+    setCarError(null);
+    setCarData(null);
+
+    createCarArchive(selectedFiles.map(f => ({ name: f.file.name, data: f.data })))
+      .then(result => {
+        if (!cancelled) {
+          setCarData(result);
+          setIsBuildingCar(false);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setCarError(err instanceof Error ? err.message : "Failed to build CAR archive");
+          setIsBuildingCar(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [selectedFiles]);
 
   // Check preimage authorization when data or hash algorithm changes
   useEffect(() => {
@@ -118,7 +169,7 @@ export function Upload() {
         clearTimeout(debounceTimer.current);
       }
     };
-  }, [api, inputMode, textData, fileData, hashAlgorithm, getData]);
+  }, [api, inputMode, textData, selectedFiles, carData, hashAlgorithm, getData]);
 
   const hasAccountAuth =
     selectedAccount &&
@@ -135,16 +186,17 @@ export function Upload() {
     api &&
     client &&
     dataSize > 0 &&
+    !isBuildingCar &&
     (hasAccountAuth || hasPreimageAuth);
 
   // Preimage auth is preferred (same as pallet behavior)
   const willUseUnsigned = !!hasPreimageAuth;
 
-  const handleFileSelect = useCallback((file: File | null, data: Uint8Array | null) => {
-    setFileData(data);
-    setFileName(file?.name ?? null);
+  const handleFilesSelect = useCallback((files: SelectedFile[]) => {
+    setSelectedFiles(files);
     setUploadResult(null);
     setUploadError(null);
+    setCarError(null);
   }, []);
 
   const handleUpload = async () => {
@@ -262,6 +314,8 @@ export function Upload() {
         index: result.index,
         size: data.length,
         unsigned: !!useUnsigned,
+        carRootCid: carData?.rootCid.toString(),
+        carFiles: carData?.files,
       };
 
       setUploadResult(uploadResultData);
@@ -276,7 +330,7 @@ export function Upload() {
           size: data.length,
           account: selectedAccount.address,
           networkId: network.id,
-          label: fileName || undefined,
+          label: filesLabel || undefined,
         });
       }
     } catch (err) {
@@ -365,6 +419,37 @@ export function Upload() {
                 </Button>
               </div>
             </div>
+
+            {/* CAR Archive Info */}
+            {uploadResult.carRootCid && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <Archive className="h-4 w-4" />
+                  CAR Archive
+                </label>
+                <div className="rounded-md border bg-muted/50 p-3 space-y-2">
+                  <div>
+                    <span className="text-xs text-muted-foreground">Root CID (UnixFS directory)</span>
+                    <p className="font-mono text-xs break-all">{uploadResult.carRootCid}</p>
+                  </div>
+                  {uploadResult.carFiles && uploadResult.carFiles.length > 0 && (
+                    <div>
+                      <span className="text-xs text-muted-foreground">
+                        {uploadResult.carFiles.length} file{uploadResult.carFiles.length !== 1 ? "s" : ""} in archive
+                      </span>
+                      <div className="mt-1 space-y-1">
+                        {uploadResult.carFiles.map((f, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs">
+                            <span className="font-medium truncate mr-2">{f.name}</span>
+                            <span className="text-muted-foreground shrink-0">{formatBytes(f.size)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Block & Index - Important for renewal */}
             <div className="p-3 rounded-md bg-primary/10 border border-primary/20">
@@ -469,24 +554,41 @@ export function Upload() {
                     disabled={isUploading}
                   />
                 </TabsContent>
-                <TabsContent value="file">
+                <TabsContent value="file" className="space-y-3">
                   <FileUpload
-                    onFileSelect={handleFileSelect}
-                    maxSize={1024 * 1024} // 1MB
-                    disabled={isUploading}
+                    multiple
+                    onFilesSelect={handleFilesSelect}
+                    maxSize={1024 * 1024} // 1MB per file
+                    disabled={isUploading || isBuildingCar}
                   />
-                  {fileName && (
-                    <p className="text-sm text-muted-foreground mt-2">
-                      Selected: {fileName}
-                    </p>
+                  {selectedFiles.length > 1 && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Archive className="h-4 w-4 text-muted-foreground" />
+                      {isBuildingCar ? (
+                        <span className="text-muted-foreground flex items-center gap-2">
+                          <Spinner size="sm" /> Building CAR archive...
+                        </span>
+                      ) : carData ? (
+                        <span className="text-muted-foreground">
+                          CAR archive ready — {formatBytes(carData.carBytes.length)}
+                        </span>
+                      ) : carError ? (
+                        <span className="text-destructive">{carError}</span>
+                      ) : null}
+                    </div>
                   )}
                 </TabsContent>
               </Tabs>
 
-              {dataSize > 0 && (
+              {(dataSize > 0 || rawFilesSize > 0) && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span>Data size:</span>
-                  <Badge variant="secondary">{formatBytes(dataSize)}</Badge>
+                  <Badge variant="secondary">
+                    {dataSize > 0
+                      ? formatBytes(dataSize)
+                      : `~${formatBytes(rawFilesSize)} (building CAR...)`
+                    }
+                  </Badge>
                 </div>
               )}
             </CardContent>
@@ -501,6 +603,19 @@ export function Upload() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {isCarUpload && (
+                <div className="flex items-start gap-2 p-3 rounded-md bg-muted/50 border text-sm mb-4">
+                  <Info className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                  <div>
+                    <p className="font-medium">CAR archive detected</p>
+                    <p className="text-muted-foreground text-xs mt-1">
+                      Multiple files will be packed into a CAR (Content Addressable Archive).
+                      The codec is set to <strong>Raw</strong> because the chain stores the CAR as a binary blob.
+                      The UnixFS directory root CID (DAG-PB) is shown separately after upload.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Hash Algorithm</label>
@@ -519,7 +634,7 @@ export function Upload() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">CID Codec</label>
-                  <Select value={cidCodec} onValueChange={setCidCodec}>
+                  <Select value={cidCodec} onValueChange={setCidCodec} disabled={isCarUpload}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
