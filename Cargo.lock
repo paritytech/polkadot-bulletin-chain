@@ -9109,6 +9109,7 @@ dependencies = [
  "polkadot-sdk-frame",
  "scale-info",
  "sp-transaction-storage-proof",
+ "sp-trie",
  "tracing",
  "transaction-storage-primitives",
 ]
