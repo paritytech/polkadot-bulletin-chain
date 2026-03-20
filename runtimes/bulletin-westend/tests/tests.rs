@@ -54,7 +54,7 @@ fn advance_block() {
 	System::set_block_number(next);
 
 	frame_system::BlockWeight::<Runtime>::kill();
-	frame_system::AllExtrinsicsLen::<Runtime>::kill();
+	frame_system::BlockSize::<Runtime>::kill();
 
 	<System as Hooks<_>>::on_initialize(next);
 	<TransactionStorage as Hooks<_>>::on_initialize(next);
@@ -83,7 +83,7 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		bulletin_westend_runtime::ValidateSigned,
+		pallet_transaction_storage::extension::ValidateStorageCalls::<Runtime>::default(),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
 	let tx_ext: TxExtension =

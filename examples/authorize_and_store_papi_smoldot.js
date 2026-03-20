@@ -5,7 +5,7 @@ import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store } from './api.js';
-import { setupKeyringAndSigners, waitForChainReady, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
@@ -20,9 +20,8 @@ const WS_BOOTNODE_REGEX = /\/tcp\/\d+\/ws\/p2p\//;
 
 /**
  * Converts a TCP bootnode to WebSocket format for smoldot compatibility.
- * Uses convention: WebSocket port = TCP p2p_port + 1
- *
- * Example: /ip4/127.0.0.1/tcp/30333/p2p/PEER_ID -> /ip4/127.0.0.1/tcp/30334/ws/p2p/PEER_ID
+ * If already a WS address (zombienet default), returns it unchanged.
+ * For plain TCP bootnodes, uses convention: WebSocket port = TCP p2p_port + 1.
  */
 function convertBootNodeToWebSocket(addr) {
     // Already a WebSocket address
@@ -131,6 +130,7 @@ async function main() {
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
         await waitForChainReady(bulletinAPI);
+        await waitForBlockProduction(bulletinAPI);
 
         // Signers: Use Bob for the account being authorized to avoid nonce conflicts
         // when running after ws test (which uses Alice) on the same chain.

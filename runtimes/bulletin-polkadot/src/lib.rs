@@ -43,8 +43,8 @@ use sp_version::RuntimeVersion;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
-		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, Randomness,
-		StorageInfo,
+		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, OriginTrait,
+		Randomness, StorageInfo,
 	},
 	weights::{
 		constants::{
@@ -168,6 +168,8 @@ pub fn native_version() -> NativeVersion {
 // There are fewer system operations on this chain (e.g. staking, governance, etc.). Use a higher
 // percentage of the block for data storage.
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
+// Block length.
+const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
 
 parameter_types! {
 	pub const BlockHashCount: BlockNumber = 2400;
@@ -180,8 +182,14 @@ parameter_types! {
 		);
 	// Note: Max transaction size is 8 MB. Set max block size to 10 MB to facilitate data storage.
 	// This is double the "normal" Relay Chain block length limit.
-	pub BlockLength: frame_system::limits::BlockLength = frame_system::limits::BlockLength
-		::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+	pub BlockLength: frame_system::limits::BlockLength =
+		frame_system::limits::BlockLength::builder()
+		.max_length(MAX_BLOCK_LENGTH)
+		.modify_max_length_for_class(
+			frame_support::dispatch::DispatchClass::Normal,
+			|m| *m = NORMAL_DISPATCH_RATIO * MAX_BLOCK_LENGTH,
+		)
+		.build();
 	// Let's use substrate one: https://github.com/paritytech/ss58-registry/blob/main/ss58-registry.json
 	// (Note: Possibly we can add new one.)
 	pub const SS58Prefix: u8 = 42;
@@ -522,10 +530,10 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	codec::DecodeWithMemTracking,
 	scale_info::TypeInfo,
 )]
-pub struct ValidateSigned;
+pub struct AllowedSignedCalls;
 
-impl TransactionExtension<RuntimeCall> for ValidateSigned {
-	const IDENTIFIER: &'static str = "ValidateSigned";
+impl TransactionExtension<RuntimeCall> for AllowedSignedCalls {
+	const IDENTIFIER: &'static str = "AllowedSignedCalls";
 
 	type Implicit = ();
 	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
@@ -550,21 +558,29 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		// TransactionStorage is handled by ValidateStorageCalls extension, which transforms
+		// the origin. If origin is no longer a system signed origin, pass through.
+		let who = match origin.as_system_origin_signer() {
+			Some(who) => who.clone(),
+			None => return Ok((ValidTransaction::default(), (), origin)),
+		};
 
 		let validity = match call {
-			// Transaction storage call
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
+			// TransactionStorage calls are validated by ValidateStorageCalls extension.
+			// Store/renew origins are transformed so they won't reach here.
+			// Authorizer calls still have a signed origin and need to pass through.
+			RuntimeCall::TransactionStorage(_) => ValidTransaction::default(),
 
 			// Session key management
-			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
-				ValidatorSet::validate_set_keys(who).map(|()| ValidTransaction {
+			RuntimeCall::Session(SessionCall::set_keys { .. }) => {
+				ValidatorSet::validate_set_keys(&who)?;
+				ValidTransaction {
 					priority: SetPurgeKeysPriority::get(),
 					longevity: SetPurgeKeysLongevity::get(),
 					..Default::default()
-				}),
-			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(who),
+				}
+			},
+			RuntimeCall::Session(SessionCall::purge_keys {}) => validate_purge_keys(&who)?,
 
 			// Bridge-related calls
 			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::submit_finality_proof {
@@ -584,48 +600,51 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 			}) |
 			RuntimeCall::BridgePolkadotMessages(
 				BridgeMessagesCall::receive_messages_delivery_proof { .. },
-			) => RelayerSet::validate_bridge_tx(who).map(|()| ValidTransaction {
-				priority: BridgeTxPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-
-			// Bridge-privileged calls
-			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) =>
-				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
-					.map_err(|_| InvalidTransaction::BadSigner.into())
-					.map(|()| ValidTransaction {
-						priority: BridgeTxPriority::get(),
-						longevity: BridgeTxLongevity::get(),
-						..Default::default()
-					}),
-
-			// Sudo calls
-			RuntimeCall::Proxy(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::Sudo(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::Utility(_call) => Ok(ValidTransaction {
-				priority: SudoPriority::get(),
-				longevity: BridgeTxLongevity::get(),
-				..Default::default()
-			}),
-			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) =>
-				Ok(ValidTransaction {
-					priority: SudoPriority::get(),
+			) => {
+				RelayerSet::validate_bridge_tx(&who)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
 					longevity: BridgeTxLongevity::get(),
 					..Default::default()
-				}),
+				}
+			},
+
+			// Bridge-privileged calls
+			RuntimeCall::BridgePolkadotGrandpa(BridgeGrandpaCall::initialize { .. }) => {
+				BridgePolkadotGrandpa::ensure_owner_or_root(origin.clone())
+					.map_err(|_| InvalidTransaction::BadSigner)?;
+				ValidTransaction {
+					priority: BridgeTxPriority::get(),
+					longevity: BridgeTxLongevity::get(),
+					..Default::default()
+				}
+			},
+
+			// Sudo calls
+			RuntimeCall::Proxy(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::Sudo(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::Utility(_call) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
+			RuntimeCall::System(SystemCall::apply_authorized_upgrade { .. }) => ValidTransaction {
+				priority: SudoPriority::get(),
+				longevity: BridgeTxLongevity::get(),
+				..Default::default()
+			},
 
 			// All other calls are invalid
-			_ => Err(InvalidTransaction::Call.into()),
-		}?;
+			_ => return Err(InvalidTransaction::Call.into()),
+		};
 
 		Ok((validity, (), origin))
 	}
@@ -638,11 +657,15 @@ impl TransactionExtension<RuntimeCall> for ValidateSigned {
 		_info: &DispatchInfoOf<RuntimeCall>,
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
-		let who = origin.as_system_origin_signer().ok_or(InvalidTransaction::BadSigner)?;
+		// If origin is no longer a system signed origin, pass through.
+		// (Store/renew calls have their origin transformed by ValidateStorageCalls.)
+		let who = match origin.as_system_origin_signer() {
+			Some(who) => who,
+			None => return Ok(None),
+		};
 		match call {
-			// Transaction storage validation
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::pre_dispatch_signed(who, inner_call).map(|()| None),
+			// TransactionStorage is fully handled by ValidateStorageCalls extension.
+			RuntimeCall::TransactionStorage(_) => Ok(None),
 
 			// Session key management
 			RuntimeCall::Session(SessionCall::set_keys { .. }) =>
@@ -717,6 +740,9 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 }
 
 /// The SignedExtension to the basic transaction logic.
+///
+/// NOTE: `ValidateStorageCalls` must come before `AllowedSignedCalls` because it transforms
+/// the origin for signed TransactionStorage calls, and `AllowedSignedCalls` needs to detect this.
 pub type TxExtension = (
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
@@ -725,7 +751,8 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	ValidateSigned,
+	pallet_transaction_storage::extension::ValidateStorageCalls<Runtime>,
+	AllowedSignedCalls,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
 
