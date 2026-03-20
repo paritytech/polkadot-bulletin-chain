@@ -430,14 +430,21 @@ match client.store(data).send().await {
     Err(Error::EmptyData) => {
         tracing::error!("Cannot store empty data");
     }
-    Err(Error::SubmissionFailed(msg)) => {
-        tracing::error!(reason = %msg, "Submission failed");
+    Err(e) if e.is_retryable() => {
+        tracing::warn!(
+            code = e.code(),
+            hint = e.recovery_hint(),
+            "Transient error, consider retrying: {}",
+            e
+        );
     }
     Err(e) => {
-        tracing::error!(?e, "Unexpected error");
+        tracing::error!(code = e.code(), hint = e.recovery_hint(), "Error: {}", e);
     }
 }
 ```
+
+See the [Error Handling](./error-handling.md) guide for the full error reference.
 
 ## Testing Without a Node
 

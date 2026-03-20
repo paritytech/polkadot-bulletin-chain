@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest"
 import { FixedSizeChunker, reassembleChunks } from "../../src/chunker"
+import { BulletinError, ErrorCode } from "../../src/types"
 
 describe("Chunker", () => {
   it("should chunk data correctly with default config", () => {
@@ -134,5 +135,11 @@ describe("Chunker", () => {
       { data: new Uint8Array([3]), index: 2, totalChunks: 3 },
     ]
     expect(() => reassembleChunks(chunks)).toThrow("Missing chunk at index 1")
+    try {
+      reassembleChunks(chunks)
+    } catch (e) {
+      expect(e).toBeInstanceOf(BulletinError)
+      expect((e as BulletinError).code).toBe(ErrorCode.MISSING_CHUNK)
+    }
   })
 })

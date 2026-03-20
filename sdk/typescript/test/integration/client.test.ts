@@ -25,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,
   type BulletinTypedApi,
+  ChunkStatus,
   CidCodec,
   HashAlgorithm,
 } from "../../src"
@@ -234,8 +235,8 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
         .withChunkSize(1024 * 1024)
         .withCallback((event) => {
           if (
-            event.type === "chunk_started" ||
-            event.type === "chunk_completed"
+            event.type === ChunkStatus.ChunkStarted ||
+            event.type === ChunkStatus.ChunkCompleted
           ) {
             eventLog.push({
               type: event.type,
@@ -249,16 +250,18 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // 2x started + 2x completed for chunks, plus manifest events
       expect(
         eventLog.filter(
-          (e) => e.type === "chunk_started" || e.type === "chunk_completed",
+          (e) =>
+            e.type === ChunkStatus.ChunkStarted ||
+            e.type === ChunkStatus.ChunkCompleted,
         ),
       ).toHaveLength(4)
 
       // Verify sequential order: chunk 0 must complete before chunk 1 starts
       const chunk0Completed = eventLog.find(
-        (e) => e.type === "chunk_completed" && e.index === 0,
+        (e) => e.type === ChunkStatus.ChunkCompleted && e.index === 0,
       )
       const chunk1Started = eventLog.find(
-        (e) => e.type === "chunk_started" && e.index === 1,
+        (e) => e.type === ChunkStatus.ChunkStarted && e.index === 1,
       )
       expect(chunk0Completed).toBeDefined()
       expect(chunk1Started).toBeDefined()
@@ -274,7 +277,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
         .store(data)
         .withChunkSize(1024 * 1024)
         .withCallback((event) => {
-          if (event.type === "chunk_completed") {
+          if (event.type === ChunkStatus.ChunkCompleted) {
             chunkCids.push(event.cid.toString())
           }
         })

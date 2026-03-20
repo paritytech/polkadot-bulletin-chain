@@ -26,6 +26,7 @@ import {
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
@@ -156,21 +157,24 @@ export class MockBulletinClient implements BulletinClientInterface {
     const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     // Simulate authorization failure
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Insufficient authorization: need 100 bytes, have 0 bytes",
-        "INSUFFICIENT_AUTHORIZATION",
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
         { need: 100, available: 0 },
       )
     }
 
     // Simulate storage failure
     if (this.config.simulateStorageFailure) {
-      throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+      throw new BulletinError(
+        "Simulated storage failure",
+        ErrorCode.TRANSACTION_FAILED,
+      )
     }
 
     // Handle chunked uploads (mirrors AsyncBulletinClient logic)
@@ -180,7 +184,7 @@ export class MockBulletinClient implements BulletinClientInterface {
         throw new BulletinError(
           "withCodec() cannot be used with chunked uploads. " +
             "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
-          "INVALID_CONFIG",
+          ErrorCode.INVALID_CONFIG,
         )
       }
 
@@ -239,7 +243,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
   }
@@ -329,11 +333,14 @@ export class MockBulletinClient implements BulletinClientInterface {
     const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     if (this.config.simulateStorageFailure) {
-      throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+      throw new BulletinError(
+        "Simulated storage failure",
+        ErrorCode.TRANSACTION_FAILED,
+      )
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }

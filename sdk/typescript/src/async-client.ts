@@ -12,13 +12,16 @@ import {
   BulletinError,
   type ChunkedStoreResult,
   type ChunkerConfig,
+  ChunkStatus,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
+  TxStatus,
   type WaitFor,
 } from "./types.js"
 import {
@@ -47,6 +50,7 @@ interface TxStatusEvent {
   txHash?: string
   type?: string
   found?: boolean
+  nPeers?: number
   block?: { hash: string; number: number; index?: number }
   events?: RuntimeEvent[]
 }
@@ -290,7 +294,7 @@ export class StoreBuilder {
     if (!this.executor.storeWithPreimageAuth) {
       throw new BulletinError(
         "Unsigned transactions not supported by this client",
-        "UNSUPPORTED_OPERATION",
+        ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
     return this.executor.storeWithPreimageAuth(this.data, this.options)
@@ -535,29 +539,51 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.txHash && !txHash) {
             txHash = ev.txHash as string
             if (progressCallback) {
-              progressCallback({ type: "signed", txHash: txHash, chunkIndex })
+              progressCallback({
+                type: TxStatus.Signed,
+                txHash: txHash,
+                chunkIndex,
+              })
             }
+          }
+
+          // Handle validated event
+          if (ev.type === "validated" && progressCallback) {
+            progressCallback({ type: TxStatus.Validated, chunkIndex })
           }
 
           // Handle broadcasted event
           if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({ type: "broadcasted", chunkIndex })
+            progressCallback({
+              type: TxStatus.Broadcasted,
+              chunkIndex,
+            })
           }
 
           // Handle best block state
-          if (ev.type === "txBestBlocksState" && ev.found && ev.block) {
-            if (progressCallback) {
-              progressCallback({
-                type: "in_block",
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-                txIndex: ev.block.index,
-                chunkIndex,
-              })
-            }
+          if (ev.type === "txBestBlocksState") {
+            if (ev.found && ev.block) {
+              if (progressCallback) {
+                progressCallback({
+                  type: TxStatus.InBlock,
+                  blockHash: ev.block.hash,
+                  blockNumber: ev.block.number,
+                  txIndex: ev.block.index,
+                  chunkIndex,
+                })
+              }
 
-            if (waitFor === "in_block") {
-              finish(ev.block, ev.events)
+              if (waitFor === "in_block") {
+                finish(ev.block, ev.events)
+              }
+            } else {
+              // Transaction no longer in best block (reorg)
+              if (progressCallback) {
+                progressCallback({
+                  type: TxStatus.NoLongerInBlock,
+                  chunkIndex,
+                })
+              }
             }
           }
 
@@ -565,7 +591,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (ev.type === "finalized" && ev.block) {
             if (progressCallback) {
               progressCallback({
-                type: "finalized",
+                type: TxStatus.Finalized,
                 blockHash: ev.block.hash,
                 blockNumber: ev.block.number,
                 txIndex: ev.block.index,
@@ -580,6 +606,17 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (!resolved) {
             resolved = true
             clearTimeout(timerId)
+            if (progressCallback) {
+              const errorMsg = err instanceof Error ? err.message : String(err)
+              // Distinguish pool-related drops from other transaction errors
+              const isDropped =
+                errorMsg.includes("dropped") || errorMsg.includes("pool")
+              progressCallback({
+                type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
+                error: errorMsg,
+                chunkIndex,
+              })
+            }
             reject(err)
           }
         },
@@ -590,7 +627,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         if (!resolved) {
           resolved = true
           subscription.unsubscribe()
-          reject(new BulletinError("Transaction timed out", "TIMEOUT"))
+          reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
         }
       }, 120000)
     })
@@ -604,7 +641,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     if (!this.api.tx.Sudo) {
       throw new BulletinError(
         "sudo requested but Sudo pallet is not available on this chain",
-        "INVALID_CONFIG",
+        ErrorCode.INVALID_CONFIG,
       )
     }
     return this.api.tx.Sudo.sudo({ call: tx.decodedCall })
@@ -616,7 +653,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   private async submitTx(
     tx: PapiTransaction,
     errorMessage: string,
-    errorCode: string,
+    errorCode: ErrorCode,
     options?: CallOptions,
   ): Promise<TransactionReceipt> {
     try {
@@ -633,6 +670,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         blockNumber: result.blockNumber,
       }
     } catch (error) {
+      if (error instanceof BulletinError) throw error
       throw new BulletinError(`${errorMessage}: ${error}`, errorCode, error)
     }
   }
@@ -684,7 +722,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   ): Promise<StoreResult> {
     const dataBytes = toBytes(data)
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     // Decide whether to chunk based on threshold or explicit chunkerConfig
@@ -696,7 +734,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         throw new BulletinError(
           "withCodec() cannot be used with chunked uploads. " +
             "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
-          "INVALID_CONFIG",
+          ErrorCode.INVALID_CONFIG,
         )
       }
 
@@ -730,7 +768,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     progressCallback?: ProgressCallback,
   ): Promise<StoreResult> {
     if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
@@ -758,7 +796,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     } catch (error) {
       throw new BulletinError(
         `Failed to store data: ${error}`,
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         error,
       )
     }
@@ -790,7 +828,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     const { hashAlgorithm, waitFor } = resolveStoreOptions(options)
@@ -809,7 +847,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     for (const chunk of prepared.chunks) {
       if (progressCallback) {
         progressCallback({
-          type: "chunk_started",
+          type: ChunkStatus.ChunkStarted,
           index: chunk.index,
           total: totalChunks,
         })
@@ -829,7 +867,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
         if (progressCallback && cid) {
           progressCallback({
-            type: "chunk_completed",
+            type: ChunkStatus.ChunkCompleted,
             index: chunk.index,
             total: totalChunks,
             cid,
@@ -838,13 +876,21 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       } catch (error) {
         if (progressCallback) {
           progressCallback({
-            type: "chunk_failed",
+            type: ChunkStatus.ChunkFailed,
             index: chunk.index,
             total: totalChunks,
             error: error as Error,
           })
         }
-        throw error
+        // Wrap raw errors in BulletinError for consistent error handling
+        if (error instanceof BulletinError) {
+          throw error
+        }
+        throw new BulletinError(
+          `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
+          ErrorCode.CHUNK_FAILED,
+          error,
+        )
       }
     }
 
@@ -852,7 +898,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     let manifestCid: CID | undefined
     if (prepared.manifest) {
       if (progressCallback) {
-        progressCallback({ type: "manifest_started" })
+        progressCallback({ type: ChunkStatus.ManifestStarted })
       }
 
       // Manifest is always DagPb codec
@@ -869,12 +915,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       manifestCid = prepared.manifest.cid
 
       if (progressCallback) {
-        progressCallback({ type: "manifest_created", cid: manifestCid })
+        progressCallback({
+          type: ChunkStatus.ManifestCreated,
+          cid: manifestCid,
+        })
       }
     }
 
     if (progressCallback) {
-      progressCallback({ type: "completed", manifestCid })
+      progressCallback({ type: ChunkStatus.Completed, manifestCid })
     }
 
     return {
@@ -906,7 +955,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to authorize account",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
         options,
       )
     })
@@ -927,7 +976,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to authorize preimage",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
         options,
       )
     })
@@ -942,7 +991,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
       const tx = this.api.tx.TransactionStorage.renew({ block, index })
-      return this.submitTx(tx, "Failed to renew", "TRANSACTION_FAILED", options)
+      return this.submitTx(
+        tx,
+        "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
     })
   }
 
@@ -960,7 +1014,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to refresh account authorization",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
         options,
       )
     })
@@ -982,7 +1036,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to refresh preimage authorization",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
         options,
       )
     })
@@ -1004,7 +1058,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       return this.submitTx(
         tx,
         "Failed to remove expired account authorization",
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         options,
       )
     })
@@ -1026,7 +1080,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       return this.submitTx(
         tx,
         "Failed to remove expired preimage authorization",
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         options,
       )
     })
@@ -1061,13 +1115,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   ): Promise<StoreResult> {
     const dataBytes = toBytes(data)
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     if (dataBytes.length > this.config.chunkingThreshold) {
       throw new BulletinError(
         "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
-        "UNSUPPORTED_OPERATION",
+        ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
 
@@ -1082,7 +1136,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       if (!finalized.ok) {
         throw new BulletinError(
           `Transaction dispatch failed: ${JSON.stringify(finalized.dispatchError)}`,
-          "TRANSACTION_FAILED",
+          ErrorCode.TRANSACTION_FAILED,
         )
       }
 
@@ -1108,7 +1162,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       if (error instanceof BulletinError) throw error
       throw new BulletinError(
         `Failed to store with preimage auth: ${error}`,
-        "TRANSACTION_FAILED",
+        ErrorCode.TRANSACTION_FAILED,
         error,
       )
     }

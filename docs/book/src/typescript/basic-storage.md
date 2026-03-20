@@ -127,25 +127,29 @@ if (result.chunks) {
 ## Error Handling
 
 ```typescript
-import { BulletinError } from '@bulletin/sdk';
+import { BulletinError, ErrorCode } from '@bulletin/sdk';
 
 try {
     const result = await client.store(data).send();
     console.log('Success!');
 } catch (error) {
     if (error instanceof BulletinError) {
-        if (error.code === 'INSUFFICIENT_AUTHORIZATION') {
+        if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
             console.error('Need more authorization!');
             console.error('Details:', error.cause);
-        } else if (error.code === 'AUTHORIZATION_EXPIRED') {
-            console.error('Authorization expired!');
-            console.error('Details:', error.cause);
+        } else if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
+            console.error('Authorization call failed!');
+            console.error('Hint:', error.recoveryHint);
+        } else if (error.retryable) {
+            console.error('Transient error, consider retrying:', error.message);
         }
     } else {
         console.error('Error:', error);
     }
 }
 ```
+
+See the [Error Handling](./error-handling.md) guide for the full error code reference.
 
 ## Complete Example with Authorization
 
@@ -174,7 +178,15 @@ try {
     console.log('Stored:', result.cid.toString());
 } catch (error) {
     if (error instanceof BulletinError) {
-        console.error('Error:', error.code, error.message);
+        if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
+            console.error('Insufficient authorization');
+            console.error('Please authorize your account first');
+        } else if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
+            console.error('Authorization call failed');
+            console.error('Hint:', error.recoveryHint);
+        } else {
+            console.error('Error:', error.code, error.message);
+        }
     } else {
         console.error('Error:', error);
     }

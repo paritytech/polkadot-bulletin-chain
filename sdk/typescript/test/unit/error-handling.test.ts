@@ -3,38 +3,48 @@
 
 import { describe, expect, it } from "vitest"
 import { BulletinPreparer } from "../../src/preparer"
-import { BulletinError, type HashAlgorithm } from "../../src/types"
+import {
+  BulletinError,
+  ErrorCode,
+  type HashAlgorithm,
+  type TransactionStatusEvent,
+  TxStatus,
+} from "../../src/types"
 import { calculateCid, cidFromBytes, parseCid } from "../../src/utils"
 
 describe("Error Handling", () => {
   describe("BulletinError", () => {
     it("should create error with code", () => {
-      const error = new BulletinError("Test error", "TEST_CODE")
+      const error = new BulletinError("Test error", ErrorCode.EMPTY_DATA)
 
       expect(error.message).toBe("Test error")
-      expect(error.code).toBe("TEST_CODE")
+      expect(error.code).toBe(ErrorCode.EMPTY_DATA)
       expect(error.name).toBe("BulletinError")
       expect(error.cause).toBeUndefined()
     })
 
     it("should create error with cause", () => {
       const cause = new Error("Original error")
-      const error = new BulletinError("Wrapped error", "WRAPPED", cause)
+      const error = new BulletinError(
+        "Wrapped error",
+        ErrorCode.TRANSACTION_FAILED,
+        cause,
+      )
 
       expect(error.message).toBe("Wrapped error")
-      expect(error.code).toBe("WRAPPED")
+      expect(error.code).toBe(ErrorCode.TRANSACTION_FAILED)
       expect(error.cause).toBe(cause)
     })
 
     it("should be instanceof Error", () => {
-      const error = new BulletinError("Test", "CODE")
+      const error = new BulletinError("Test", ErrorCode.INVALID_CID)
 
       expect(error).toBeInstanceOf(Error)
       expect(error).toBeInstanceOf(BulletinError)
     })
 
     it("should preserve stack trace", () => {
-      const error = new BulletinError("Test", "CODE")
+      const error = new BulletinError("Test", ErrorCode.INVALID_CID)
 
       expect(error.stack).toBeDefined()
       expect(error.stack).toContain("BulletinError")
@@ -44,12 +54,12 @@ describe("Error Handling", () => {
   describe("Async Error Propagation", () => {
     it("should propagate BulletinError through async chain", async () => {
       const asyncFunction = async () => {
-        throw new BulletinError("Async error", "ASYNC_ERROR")
+        throw new BulletinError("Async error", ErrorCode.TRANSACTION_FAILED)
       }
 
       await expect(asyncFunction()).rejects.toThrow(BulletinError)
       await expect(asyncFunction()).rejects.toMatchObject({
-        code: "ASYNC_ERROR",
+        code: ErrorCode.TRANSACTION_FAILED,
         message: "Async error",
       })
     })
@@ -57,7 +67,9 @@ describe("Error Handling", () => {
     it("should preserve error type through Promise.all", async () => {
       const promises = [
         Promise.resolve(1),
-        Promise.reject(new BulletinError("Error in promise", "PROMISE_ERROR")),
+        Promise.reject(
+          new BulletinError("Error in promise", ErrorCode.TRANSACTION_FAILED),
+        ),
         Promise.resolve(3),
       ]
 
@@ -66,14 +78,14 @@ describe("Error Handling", () => {
         expect.fail("Should have thrown")
       } catch (error) {
         expect(error).toBeInstanceOf(BulletinError)
-        expect((error as BulletinError).code).toBe("PROMISE_ERROR")
+        expect((error as BulletinError).code).toBe(ErrorCode.TRANSACTION_FAILED)
       }
     })
 
     it("should preserve error type through Promise.allSettled", async () => {
       const promises = [
         Promise.resolve(1),
-        Promise.reject(new BulletinError("Error", "SETTLED_ERROR")),
+        Promise.reject(new BulletinError("Error", ErrorCode.CHUNK_FAILED)),
         Promise.resolve(3),
       ]
 
@@ -85,7 +97,9 @@ describe("Error Handling", () => {
 
       if (results[1].status === "rejected") {
         expect(results[1].reason).toBeInstanceOf(BulletinError)
-        expect((results[1].reason as BulletinError).code).toBe("SETTLED_ERROR")
+        expect((results[1].reason as BulletinError).code).toBe(
+          ErrorCode.CHUNK_FAILED,
+        )
       }
     })
   })
@@ -100,7 +114,7 @@ describe("Error Handling", () => {
       await expect(
         preparer.prepareStore(new Uint8Array(0)),
       ).rejects.toMatchObject({
-        code: "EMPTY_DATA",
+        code: ErrorCode.EMPTY_DATA,
       })
     })
 
@@ -112,7 +126,7 @@ describe("Error Handling", () => {
         BulletinError,
       )
       await expect(preparer.prepareStore(oversized)).rejects.toMatchObject({
-        code: "DATA_TOO_LARGE",
+        code: ErrorCode.DATA_TOO_LARGE,
       })
     })
 
@@ -125,7 +139,7 @@ describe("Error Handling", () => {
       await expect(
         preparer.prepareStoreChunked(new Uint8Array(0)),
       ).rejects.toMatchObject({
-        code: "EMPTY_DATA",
+        code: ErrorCode.EMPTY_DATA,
       })
     })
   })
@@ -183,12 +197,193 @@ describe("Error Handling", () => {
       const originalError = new TypeError("Cannot read property of undefined")
       const wrappedError = new BulletinError(
         "Operation failed",
-        "OP_FAILED",
+        ErrorCode.CHUNK_FAILED,
         originalError,
       )
 
       expect(wrappedError.cause).toBe(originalError)
       expect((wrappedError.cause as Error).message).toContain("undefined")
+    })
+  })
+
+  describe("ErrorCode enum", () => {
+    it("should have all expected codes as string values", () => {
+      // ErrorCode values equal their key names (string enum)
+      expect(ErrorCode.EMPTY_DATA).toBe("EMPTY_DATA")
+      expect(ErrorCode.DATA_TOO_LARGE).toBe("DATA_TOO_LARGE")
+      expect(ErrorCode.CHUNK_TOO_LARGE).toBe("CHUNK_TOO_LARGE")
+      expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
+      expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
+      expect(ErrorCode.INVALID_CID).toBe("INVALID_CID")
+      expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM")
+      expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED")
+      expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED")
+      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe(
+        "INSUFFICIENT_AUTHORIZATION",
+      )
+      expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED")
+      expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED")
+      expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED")
+      expect(ErrorCode.MISSING_CHUNK).toBe("MISSING_CHUNK")
+      expect(ErrorCode.TIMEOUT).toBe("TIMEOUT")
+      expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION")
+    })
+
+    it("should be usable with BulletinError", () => {
+      const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
+      expect(error.code).toBe("EMPTY_DATA")
+    })
+
+    it("should remain backward compatible with string comparisons", () => {
+      const error = new BulletinError("test", ErrorCode.EMPTY_DATA)
+      // biome-ignore lint/suspicious/noExplicitAny: testing backward compat with string comparison
+      expect(error.code === ("EMPTY_DATA" as any)).toBe(true)
+    })
+  })
+
+  describe("BulletinError retryable getter", () => {
+    it("should return true for retryable error codes", () => {
+      const retryableCodes = [ErrorCode.TRANSACTION_FAILED, ErrorCode.TIMEOUT]
+
+      for (const code of retryableCodes) {
+        const error = new BulletinError("test", code)
+        expect(error.retryable).toBe(true)
+      }
+    })
+
+    it("should return false for non-retryable error codes", () => {
+      const nonRetryableCodes = [
+        ErrorCode.EMPTY_DATA,
+        ErrorCode.DATA_TOO_LARGE,
+        ErrorCode.CHUNK_TOO_LARGE,
+        ErrorCode.INVALID_CHUNK_SIZE,
+        ErrorCode.INVALID_CONFIG,
+        ErrorCode.INVALID_CID,
+        ErrorCode.CID_CALCULATION_FAILED,
+        ErrorCode.DAG_ENCODING_FAILED,
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.CHUNK_FAILED,
+        ErrorCode.MISSING_CHUNK,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      ]
+
+      for (const code of nonRetryableCodes) {
+        const error = new BulletinError("test", code)
+        expect(error.retryable).toBe(false)
+      }
+    })
+  })
+
+  describe("BulletinError recoveryHint getter", () => {
+    it("should return actionable hints for all ErrorCode values", () => {
+      for (const code of Object.values(ErrorCode)) {
+        const error = new BulletinError("test", code)
+        expect(error.recoveryHint).toBeDefined()
+        expect(error.recoveryHint.length).toBeGreaterThan(0)
+        expect(error.recoveryHint).not.toBe("No recovery hint available")
+      }
+    })
+  })
+
+  describe("TransactionStatusEvent variants", () => {
+    it("should support signed event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Signed,
+        txHash: "0xabc123",
+      }
+      expect(event.type).toBe(TxStatus.Signed)
+      expect(event.txHash).toBe("0xabc123")
+    })
+
+    it("should support signed event with chunkIndex", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Signed,
+        txHash: "0xdef456",
+        chunkIndex: 2,
+      }
+      expect(event.type).toBe(TxStatus.Signed)
+      expect(event.chunkIndex).toBe(2)
+    })
+
+    it("should support validated event", () => {
+      const event: TransactionStatusEvent = { type: TxStatus.Validated }
+      expect(event.type).toBe(TxStatus.Validated)
+    })
+
+    it("should support broadcasted event", () => {
+      const event: TransactionStatusEvent = { type: TxStatus.Broadcasted }
+      expect(event.type).toBe(TxStatus.Broadcasted)
+    })
+
+    it("should support in_block event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.InBlock,
+        blockHash: "0xabc",
+        blockNumber: 42,
+        txIndex: 1,
+      }
+      expect(event.type).toBe(TxStatus.InBlock)
+      expect(event.blockHash).toBe("0xabc")
+      expect(event.blockNumber).toBe(42)
+      expect(event.txIndex).toBe(1)
+    })
+
+    it("should support finalized event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Finalized,
+        blockHash: "0xfin",
+        blockNumber: 100,
+        txIndex: 3,
+      }
+      expect(event.type).toBe(TxStatus.Finalized)
+      expect(event.blockHash).toBe("0xfin")
+      expect(event.blockNumber).toBe(100)
+      expect(event.txIndex).toBe(3)
+    })
+
+    it("should support finalized event with chunkIndex", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Finalized,
+        blockHash: "0xfin2",
+        blockNumber: 200,
+        chunkIndex: 5,
+      }
+      expect(event.type).toBe(TxStatus.Finalized)
+      expect(event.chunkIndex).toBe(5)
+    })
+
+    it("should support no_longer_in_block event", () => {
+      const event: TransactionStatusEvent = { type: TxStatus.NoLongerInBlock }
+      expect(event.type).toBe(TxStatus.NoLongerInBlock)
+    })
+
+    it("should support invalid event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Invalid,
+        error: "nonce too low",
+      }
+      expect(event.type).toBe(TxStatus.Invalid)
+      expect(event.error).toBe("nonce too low")
+    })
+
+    it("should support dropped event", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.Dropped,
+        error: "pool full",
+      }
+      expect(event.type).toBe(TxStatus.Dropped)
+      expect(event.error).toBe("pool full")
+    })
+
+    it("should remain backward compatible with string comparisons", () => {
+      const event: TransactionStatusEvent = {
+        type: TxStatus.InBlock,
+        blockHash: "0x1",
+        blockNumber: 1,
+      }
+      // biome-ignore lint/suspicious/noExplicitAny: testing backward compat with string comparison
+      expect(event.type === ("in_block" as any)).toBe(true)
     })
   })
 })

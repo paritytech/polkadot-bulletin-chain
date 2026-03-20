@@ -14,6 +14,7 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 - **Builder Pattern**: Fluent API for configuring store operations
 - **Mock Testing**: `MockBulletinClient` allows testing without a blockchain node
 - **Runtime Metadata**: Embedded metadata for Bulletin Chain - works out of the box
+- **Structured Errors**: Error codes, retryable detection, and recovery hints consistent with TypeScript SDK
 
 ## Architecture
 
