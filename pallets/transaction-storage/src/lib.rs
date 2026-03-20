@@ -900,7 +900,10 @@ pub mod pallet {
 			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
 			let chunk_count = chunks.len() as u32;
 			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
-			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
+			let root =
+				<sp_trie::LayoutV1<BlakeTwo256> as sp_trie::TrieConfiguration>::ordered_trie_root(
+					chunks,
+				);
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
@@ -1419,16 +1422,15 @@ pub mod pallet {
 			};
 
 			// Verify the tx chunk proof.
-			ensure!(
-				sp_io::trie::blake2_256_verify_proof(
-					tx_info.chunk_root,
-					&proof.proof,
-					&encode_index(tx_chunk_index),
-					&proof.chunk,
-					sp_runtime::StateVersion::V1,
-				),
+			sp_trie::verify_trie_proof::<sp_trie::LayoutV1<BlakeTwo256>, _, _, _>(
+				&tx_info.chunk_root,
+				&proof.proof,
+				&[(encode_index(tx_chunk_index), Some::<&[u8]>(proof.chunk.as_ref()))],
+			)
+			.map_err(|e| {
+				tracing::error!(target: LOG_TARGET, "Proof verification failed: {e:?}");
 				Error::<T>::InvalidProof
-			);
+			})?;
 
 			Ok(())
 		}

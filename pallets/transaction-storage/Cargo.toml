@@ -22,6 +22,7 @@ transaction-storage-primitives = { workspace = true }
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
 ] }
+sp-trie = { workspace = true, default-features = false }
 sp-transaction-storage-proof = { workspace = true, default-features = false }
 
 [dev-dependencies]
@@ -40,6 +41,7 @@ std = [
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-transaction-storage-proof/std",
+	"sp-trie/std",
 	"tracing/std",
 	"transaction-storage-primitives/std",
 ]
