@@ -351,7 +351,24 @@ pub mod pallet {
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
 			if obsolete > Zero::zero() {
 				weight.saturating_accrue(db_weight.writes(1));
-				<Transactions<T>>::remove(obsolete);
+				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
+					for tx_info in transactions.iter() {
+						let hash: ContentHash = tx_info.content_hash.into();
+						// Only remove if this entry still points to the obsolete block
+						if let Some((block, _)) =
+							TransactionByContentHash::<T>::get(hash)
+						{
+							if block == obsolete {
+								TransactionByContentHash::<T>::remove(hash);
+								weight.saturating_accrue(db_weight.reads_writes(1, 1));
+							} else {
+								weight.saturating_accrue(db_weight.reads(1));
+							}
+						} else {
+							weight.saturating_accrue(db_weight.reads(1));
+						}
+					}
+				}
 			}
 
 			// For `on_finalize`
@@ -475,7 +492,7 @@ pub mod pallet {
 		///
 		/// O(1).
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::WeightInfo::renew())]
+		#[pallet::weight((T::WeightInfo::renew(), DispatchClass::Operational))]
 		pub fn renew(
 			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
@@ -513,6 +530,10 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
+			TransactionByContentHash::<T>::insert(content_hash, (
+				frame_system::Pallet::<T>::block_number(),
+				index,
+			));
 			Self::deposit_event(Event::Renewed { index, content_hash });
 			Ok(().into())
 		}
@@ -692,6 +713,56 @@ pub mod pallet {
 			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
+
+		/// Renew previously stored data by content hash. The content hash is the BLAKE2b hash
+		/// of the original data, as emitted in the [`Stored`](Event::Stored) or
+		/// [`Renewed`](Event::Renewed) event.
+		///
+		/// This is a convenience alternative to [`renew`](Self::renew) that does not require
+		/// knowing the exact `(block_number, tx_index)` pair.
+		///
+		/// Emits [`Renewed`](Event::Renewed) when successful.
+		#[pallet::call_index(9)]
+		#[pallet::weight((T::WeightInfo::renew_content_hash(), DispatchClass::Operational))]
+		pub fn renew_content_hash(
+			_origin: OriginFor<T>,
+			content_hash: ContentHash,
+		) -> DispatchResultWithPostInfo {
+			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
+				.ok_or(Error::<T>::RenewedNotFound)?;
+
+			let info = Self::transaction_info(block, index)
+				.ok_or(Error::<T>::RenewedNotFound)?;
+
+			ensure!(Self::data_size_ok(info.size as usize), Error::<T>::BadDataSize);
+
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
+
+			let mut new_index = 0;
+			<BlockTransactions<T>>::mutate(|transactions| {
+				let chunks = num_chunks(info.size);
+				let total_chunks = transactions.last().map_or(0, |t| t.block_chunks) + chunks;
+				new_index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root: info.chunk_root,
+						size: info.size,
+						content_hash: info.content_hash,
+						block_chunks: total_chunks,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)
+			})?;
+
+			TransactionByContentHash::<T>::insert(content_hash, (
+				frame_system::Pallet::<T>::block_number(),
+				new_index,
+			));
+
+			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
+			Ok(().into())
+		}
 	}
 
 	#[pallet::event]
@@ -754,6 +825,16 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type BlockTransactions<T: Config> =
 		StorageValue<_, BoundedVec<TransactionInfo, T::MaxBlockTransactions>, ValueQuery>;
+
+	/// Maps content hash to its most recent (block_number, tx_index) location.
+	#[pallet::storage]
+	pub(super) type TransactionByContentHash<T: Config> = StorageMap<
+		_,
+		Blake2_128Concat,
+		ContentHash,
+		(BlockNumberFor<T>, u32),
+		OptionQuery,
+	>;
 
 	/// Was the proof checked in this block?
 	#[pallet::storage]
@@ -927,6 +1008,10 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
+ 			TransactionByContentHash::<T>::insert(content_hash, (
+				frame_system::Pallet::<T>::block_number(),
+				index,
+			));
 			Self::deposit_event(Event::Stored {
 				index,
 				content_hash: cid.content_hash,
@@ -1252,6 +1337,16 @@ pub mod pallet {
 						context,
 					)
 				},
+				Call::<T>::renew_content_hash { content_hash } => {
+					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
+						.ok_or(RENEWED_NOT_FOUND)?;
+					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
+					Self::check_store_renew_unsigned(
+						info.size as usize,
+						|| info.content_hash.into(),
+						context,
+					)
+				},
 				Call::<T>::remove_expired_account_authorization { who } => {
 					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
 					Ok(context.want_valid_transaction().then(|| {
@@ -1319,6 +1414,12 @@ pub mod pallet {
 						}),
 						None,
 					));
+				},
+				Call::<T>::renew_content_hash { content_hash } => {
+					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
+						.ok_or(RENEWED_NOT_FOUND)?;
+					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
+					info.size as usize
 				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};

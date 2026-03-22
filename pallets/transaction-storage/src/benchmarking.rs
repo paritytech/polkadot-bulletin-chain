@@ -169,6 +169,20 @@ mod benchmarks {
 	}
 
 	#[benchmark]
+	fn renew_content_hash() -> Result<(), BenchmarkError> {
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
+		run_to_block::<T>(1u32.into());
+
+		#[extrinsic_call]
+		_(RawOrigin::None, content_hash);
+
+		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
+		Ok(())
+	}
+
+	#[benchmark]
 	fn check_proof() -> Result<(), BenchmarkError> {
 		run_to_block::<T>(1u32.into());
 		for _ in 0..T::MaxBlockTransactions::get() {

@@ -77,6 +77,14 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
+	// TODO: update weights
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(29_090_000, 0)
+			.saturating_add(Weight::from_parts(0, 40351))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().writes(2))
+	}
 	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
 	/// Proof: `TransactionStorage::ProofChecked` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
