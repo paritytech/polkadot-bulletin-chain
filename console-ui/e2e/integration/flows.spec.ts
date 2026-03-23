@@ -1,14 +1,12 @@
 /**
- * Integration tests for full user flows on a live Bulletin Chain dev node.
+ * User flow tests — serial write tests that submit chain transactions.
  *
- * These tests exercise the UI the same way a real user would:
- * authorize storage, upload data, and download it back.
- *
- * Run with: playwright test
+ * These tests share Alice's signing key and modify on-chain state,
+ * so they must run serially to avoid nonce conflicts.
  *
  * Prerequisites:
- *   ./target/release/polkadot-bulletin-chain --dev --ipfs-server --rpc-port 10000
- *   (node must be running on ws://localhost:10000 with IPFS enabled)
+ *   A local parachain network via `just dev` or `just test-e2e`
+ *   (node running on ws://localhost:10000 with IPFS enabled)
  */
 import { test, expect } from "../fixtures";
 import { waitForConnection, waitForMinBlock, navigateTo } from "../utils";
@@ -16,9 +14,13 @@ import { waitForConnection, waitForMinBlock, navigateTo } from "../utils";
 // Chain transactions take ~6s per block; generous timeout for multi-step flows
 test.setTimeout(180_000);
 
-test.describe("Preimage Authorization Flow", () => {
-  test("authorize preimage and upload data", async ({ localPage: page }) => {
+test.describe("Preimage Round-Trip", () => {
+  test("authorize preimage, upload data, and download to verify content", async ({
+    localPage: page,
+    request,
+  }) => {
     const testData = `Hello Bulletin Chain! Integration test ${Date.now()}`;
+    let uploadedCid: string;
 
     // ── Step 1: Authorize preimage via Faucet ──────────────────────
 
@@ -28,27 +30,21 @@ test.describe("Preimage Authorization Flow", () => {
         page.getByRole("heading", { name: "Storage Faucet" }),
       ).toBeVisible({ timeout: 15_000 });
 
-      // Wait for enough blocks so mortal transactions have a valid era
       await waitForMinBlock(page);
 
-      // Switch to "Authorize Preimage" sub-tab
       await page.getByRole("tab", { name: /Authorize Preimage/i }).click();
 
-      // Enter text – blake2 hash is auto-computed
       await page
         .getByPlaceholder("Enter text to compute blake2 hash...")
         .fill(testData);
 
-      // Wait for the hash field to be populated
       const hashInput = page.getByTestId("preimage-hash-input");
       await expect(hashInput).not.toHaveValue("", { timeout: 5_000 });
 
-      // Submit authorization (Alice signs internally)
       await page
         .getByRole("button", { name: "Authorize Preimage" })
         .click();
 
-      // Wait for on-chain confirmation
       await expect(
         page.getByText("Successfully authorized preimage"),
       ).toBeVisible({ timeout: 30_000 });
@@ -57,104 +53,106 @@ test.describe("Preimage Authorization Flow", () => {
     // ── Step 2: Upload with preimage auth (unsigned) ───────────────
 
     await test.step("upload data using preimage authorization", async () => {
-      // Upload nav link is disabled without wallet auth; navigate directly
       await page.goto("/upload");
       await expect(
         page.getByRole("heading", { name: "Upload Data" }),
       ).toBeVisible();
 
-      // Wait for chain connection after navigation
       await waitForConnection(page);
 
-      // Enter the same text data
       await page.getByPlaceholder("Enter data to store...").fill(testData);
 
-      // Wait for preimage authorization to be detected — the upload button
-      // becomes enabled once the chain confirms the preimage auth.
-      // Allow extra time: 300ms debounce + chain query + possible API re-sync.
       const uploadButton = page.getByRole("button", {
         name: /Upload to Bulletin Chain/i,
       });
       await expect(uploadButton).toBeEnabled({ timeout: 30_000 });
 
-      // Upload
       await uploadButton.click();
 
-      // Wait for on-chain confirmation
       await expect(page.getByText("Upload Successful")).toBeVisible({
         timeout: 30_000,
       });
 
-      // Extract CID from the result card
       const cidDisplay = page.getByTestId("cid-display");
-      const uploadedCid = await cidDisplay.inputValue();
+      uploadedCid = await cidDisplay.inputValue();
       expect(uploadedCid).toBeTruthy();
       expect(uploadedCid.length).toBeGreaterThan(10);
+    });
+
+    // ── Step 3: Download via IPFS gateway and verify content ───────
+
+    await test.step("download and verify content matches", async () => {
+      // Fetch directly from the local IPFS gateway
+      const response = await request.get(
+        `http://127.0.0.1:8283/ipfs/${uploadedCid}`,
+        { timeout: 60_000 },
+      );
+      expect(response.ok()).toBeTruthy();
+
+      const downloadedText = await response.text();
+      expect(downloadedText).toBe(testData);
     });
   });
 });
 
-test.describe("Account Authorization Flow", () => {
+test.describe("Account Round-Trip", () => {
   const ALICE_ADDRESS =
     "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
 
-  test("authorize account via faucet and verify in lookup", async ({
+  test("authorize account, upload data, and download to verify content", async ({
     localPage: page,
+    request,
   }) => {
+    const testData = `Account auth test ${Date.now()}`;
+    let uploadedCid: string;
+
+    // ── Step 1: Authorize account via Faucet ───────────────────────
+
     await test.step("authorize account via faucet", async () => {
       await navigateTo(page, "Faucet");
       await expect(
         page.getByRole("heading", { name: "Storage Faucet" }),
       ).toBeVisible({ timeout: 15_000 });
 
-      // Wait for enough blocks so mortal transactions have a valid era
       await waitForMinBlock(page);
 
-      // "Authorize Account" sub-tab is active by default
       await expect(
         page.getByRole("heading", { name: "Authorize Account" }),
       ).toBeVisible();
 
-      // Enter Alice's address
       await page
         .getByPlaceholder("Enter SS58 address...")
         .fill(ALICE_ADDRESS);
 
-      // Wait for current authorization info to load
       await expect(page.getByText("Current Authorization:")).toBeVisible({
         timeout: 10_000,
       });
 
-      // Set authorization amounts
       const txInput = page.locator(
         "input[type='number'][placeholder='Number of transactions']",
       );
       await txInput.fill("50");
 
-      // Submit (Alice authorizes herself)
       await page
         .getByRole("button", { name: "Authorize Account" })
         .click();
 
-      // Wait for on-chain confirmation
       await expect(
         page.getByText(/Successfully authorized account/),
       ).toBeVisible({ timeout: 30_000 });
     });
 
+    // ── Step 2: Verify authorization in account lookup ─────────────
+
     await test.step("verify authorization in account lookup", async () => {
-      // Switch to the "Accounts" main tab
       await page
         .getByRole("tab", { name: "Accounts", exact: true })
         .click();
 
-      // Wait for the Lookup Account card to be visible
       await expect(page.getByText("Lookup Account")).toBeVisible({
         timeout: 5_000,
       });
 
-      // The active tab panel contains the visible SS58 input;
-      // use the Radix data-state attribute to scope to the active panel
       const activePanel = page.locator(
         '[role="tabpanel"][data-state="active"]',
       );
@@ -166,26 +164,67 @@ test.describe("Account Authorization Flow", () => {
       await expect(searchButton).toBeEnabled({ timeout: 5_000 });
       await searchButton.click();
 
-      // Verify authorization details appear
       await expect(page.getByText("Transactions").first()).toBeVisible({
         timeout: 10_000,
       });
       await expect(page.getByText("Bytes").first()).toBeVisible();
     });
+
+    // ── Step 3: Upload with account auth (signed) ──────────────────
+
+    await test.step("upload data using account authorization", async () => {
+      await page.goto("/upload");
+      await expect(
+        page.getByRole("heading", { name: "Upload Data" }),
+      ).toBeVisible();
+
+      await waitForConnection(page);
+
+      await page.getByPlaceholder("Enter data to store...").fill(testData);
+
+      const uploadButton = page.getByRole("button", {
+        name: /Upload to Bulletin Chain/i,
+      });
+      await expect(uploadButton).toBeEnabled({ timeout: 30_000 });
+
+      await uploadButton.click();
+
+      await expect(page.getByText("Upload Successful")).toBeVisible({
+        timeout: 30_000,
+      });
+
+      const cidDisplay = page.getByTestId("cid-display");
+      uploadedCid = await cidDisplay.inputValue();
+      expect(uploadedCid).toBeTruthy();
+      expect(uploadedCid.length).toBeGreaterThan(10);
+    });
+
+    // ── Step 4: Download via IPFS gateway and verify content ───────
+
+    await test.step("download and verify content matches", async () => {
+      const response = await request.get(
+        `http://127.0.0.1:8283/ipfs/${uploadedCid}`,
+        { timeout: 60_000 },
+      );
+      expect(response.ok()).toBeTruthy();
+
+      const downloadedText = await response.text();
+      expect(downloadedText).toBe(testData);
+    });
   });
 });
 
-test.describe("Preimage Authorization Listing", () => {
-  test("authorized preimage appears in preimage list", async ({ localPage: page }) => {
+test.describe("Preimage Listing", () => {
+  test("authorized preimage appears in preimage list", async ({
+    localPage: page,
+  }) => {
     const testData = `Preimage listing test ${Date.now()}`;
 
-    // Navigate to faucet
     await navigateTo(page, "Faucet");
     await expect(
       page.getByRole("heading", { name: "Storage Faucet" }),
     ).toBeVisible({ timeout: 15_000 });
 
-    // Wait for enough blocks so mortal transactions have a valid era
     await waitForMinBlock(page);
 
     await page.getByRole("tab", { name: /Authorize Preimage/i }).click();
@@ -193,7 +232,6 @@ test.describe("Preimage Authorization Listing", () => {
       .getByPlaceholder("Enter text to compute blake2 hash...")
       .fill(testData);
 
-    // Wait for hash to compute
     const hashInput = page.getByTestId("preimage-hash-input");
     await expect(hashInput).not.toHaveValue("", { timeout: 5_000 });
     const expectedHash = await hashInput.inputValue();
@@ -208,15 +246,11 @@ test.describe("Preimage Authorization Listing", () => {
       .getByRole("tab", { name: "Preimages", exact: true })
       .click();
 
-    // Scope to the active tab panel to avoid matching other RefreshCw icons
     const activePanel = page.locator(
       '[role="tabpanel"][data-state="active"]',
     );
 
-    // Wait for the preimage list to load and show our hash.
-    // Use retry with refresh button in case the list is stale from a prior test.
     await expect(async () => {
-      // Click refresh to re-fetch from chain
       const refreshButton = activePanel.getByTestId("refresh-preimage-list");
       if (await refreshButton.isVisible()) {
         await refreshButton.click();
@@ -225,19 +259,5 @@ test.describe("Preimage Authorization Listing", () => {
         activePanel.getByText(expectedHash.slice(0, 16)),
       ).toBeVisible({ timeout: 5_000 });
     }).toPass({ timeout: 30_000, intervals: [2_000, 5_000, 5_000] });
-  });
-});
-
-test.describe("Dashboard Live Data", () => {
-  test("dashboard shows chain info after connection", async ({ localPage: page }) => {
-    // Dashboard is the landing page
-    await expect(page.getByText("Chain Info")).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // Spec version and other chain info should be populated
-    await expect(page.getByText(/spec.*version/i).first()).toBeVisible({
-      timeout: 15_000,
-    });
   });
 });
