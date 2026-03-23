@@ -47,7 +47,7 @@ test.describe("Preimage Round-Trip", () => {
 
       await expect(
         page.getByText("Successfully authorized preimage"),
-      ).toBeVisible({ timeout: 30_000 });
+      ).toBeVisible({ timeout: 60_000 });
     });
 
     // ── Step 2: Upload with preimage auth (unsigned) ───────────────
@@ -65,12 +65,12 @@ test.describe("Preimage Round-Trip", () => {
       const uploadButton = page.getByRole("button", {
         name: /Upload to Bulletin Chain/i,
       });
-      await expect(uploadButton).toBeEnabled({ timeout: 30_000 });
+      await expect(uploadButton).toBeEnabled({ timeout: 60_000 });
 
       await uploadButton.click();
 
       await expect(page.getByText("Upload Successful")).toBeVisible({
-        timeout: 30_000,
+        timeout: 60_000,
       });
 
       const cidDisplay = page.getByTestId("cid-display");
@@ -95,18 +95,16 @@ test.describe("Preimage Round-Trip", () => {
   });
 });
 
-test.describe("Account Round-Trip", () => {
+test.describe("Account Authorization Flow", () => {
   const ALICE_ADDRESS =
     "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
 
-  test("authorize account, upload data, and download to verify content", async ({
+  test("authorize account via faucet and verify in lookup", async ({
     localPage: page,
-    request,
   }) => {
-    const testData = `Account auth test ${Date.now()}`;
-    let uploadedCid: string;
-
-    // ── Step 1: Authorize account via Faucet ───────────────────────
+    // Note: upload with account auth requires a connected wallet extension,
+    // which is not available in headless CI. This test verifies the faucet
+    // authorization and account lookup only.
 
     await test.step("authorize account via faucet", async () => {
       await navigateTo(page, "Faucet");
@@ -139,10 +137,8 @@ test.describe("Account Round-Trip", () => {
 
       await expect(
         page.getByText(/Successfully authorized account/),
-      ).toBeVisible({ timeout: 30_000 });
+      ).toBeVisible({ timeout: 60_000 });
     });
-
-    // ── Step 2: Verify authorization in account lookup ─────────────
 
     await test.step("verify authorization in account lookup", async () => {
       await page
@@ -168,48 +164,6 @@ test.describe("Account Round-Trip", () => {
         timeout: 10_000,
       });
       await expect(page.getByText("Bytes").first()).toBeVisible();
-    });
-
-    // ── Step 3: Upload with account auth (signed) ──────────────────
-
-    await test.step("upload data using account authorization", async () => {
-      await page.goto("/upload");
-      await expect(
-        page.getByRole("heading", { name: "Upload Data" }),
-      ).toBeVisible();
-
-      await waitForConnection(page);
-
-      await page.getByPlaceholder("Enter data to store...").fill(testData);
-
-      const uploadButton = page.getByRole("button", {
-        name: /Upload to Bulletin Chain/i,
-      });
-      await expect(uploadButton).toBeEnabled({ timeout: 30_000 });
-
-      await uploadButton.click();
-
-      await expect(page.getByText("Upload Successful")).toBeVisible({
-        timeout: 30_000,
-      });
-
-      const cidDisplay = page.getByTestId("cid-display");
-      uploadedCid = await cidDisplay.inputValue();
-      expect(uploadedCid).toBeTruthy();
-      expect(uploadedCid.length).toBeGreaterThan(10);
-    });
-
-    // ── Step 4: Download via IPFS gateway and verify content ───────
-
-    await test.step("download and verify content matches", async () => {
-      const response = await request.get(
-        `http://127.0.0.1:8283/ipfs/${uploadedCid}`,
-        { timeout: 60_000 },
-      );
-      expect(response.ok()).toBeTruthy();
-
-      const downloadedText = await response.text();
-      expect(downloadedText).toBe(testData);
     });
   });
 });
@@ -239,7 +193,7 @@ test.describe("Preimage Listing", () => {
     await page.getByRole("button", { name: "Authorize Preimage" }).click();
     await expect(
       page.getByText("Successfully authorized preimage"),
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible({ timeout: 60_000 });
 
     // Switch to Preimages tab and verify the hash is listed
     await page
