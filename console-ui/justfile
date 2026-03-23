@@ -62,7 +62,7 @@ teardown test_dir:
 
 # Run integration Playwright tests (chain must already be running on ws://localhost:10000)
 test: install ensure-browsers
-    playwright test
+    npx playwright test
 
 # Full E2E lifecycle: setup → install → integration tests → teardown
 test-e2e runtime="bulletin-westend-runtime":
@@ -85,7 +85,7 @@ test-e2e runtime="bulletin-westend-runtime":
     echo ""
     echo "━━━ Running integration tests ━━━"
     set +e
-    playwright test
+    npx playwright test
     TEST_EXIT=$?
     set -e
 
