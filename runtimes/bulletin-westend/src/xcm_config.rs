@@ -58,10 +58,6 @@ use xcm_executor::XcmExecutor;
 pub use testnet_parachains_constants::westend::locations::{GovernanceLocation, PeopleLocation};
 
 parameter_types! {
-	pub PeopleNextLocation: Location = Location::new(1, [Parachain(5140)]);
-}
-
-parameter_types! {
 	pub const RootLocation: Location = Location::here();
 	pub const TokenRelayLocation: Location = Location::parent();
 	pub AssetHubLocation: Location = Location::new(1, [Parachain(ASSET_HUB_ID)]);
@@ -136,6 +132,14 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
+/// Filter that matches any sibling parachain origin.
+pub struct IsSiblingParachain;
+impl Contains<Location> for IsSiblingParachain {
+	fn contains(location: &Location) -> bool {
+		matches!(location.unpack(), (1, [Parachain(_)]))
+	}
+}
+
 pub struct FellowsPlurality;
 impl Contains<Location> for FellowsPlurality {
 	fn contains(location: &Location) -> bool {
@@ -162,9 +166,9 @@ pub type Barrier = TrailingSetTopicAsId<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
 				Equals<GovernanceLocation>,
-				// Let's allow People chains for PoP authorizations.
-				Equals<PeopleLocation>,
-				Equals<PeopleNextLocation>,
+				// Allow any sibling parachain for unpaid execution, since there
+				// are multiple People testnet chains.
+				IsSiblingParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
