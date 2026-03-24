@@ -2069,6 +2069,7 @@ dependencies = [
  "bp-runtime",
  "bp-test-utils",
  "bridge-runtime-common",
+ "bulletin-transaction-storage-primitives",
  "frame-benchmarking",
  "frame-executive",
  "frame-support",
@@ -2084,6 +2085,7 @@ dependencies = [
  "pallet-bridge-messages",
  "pallet-bridge-parachains",
  "pallet-bridge-relayers",
+ "pallet-bulletin-transaction-storage",
  "pallet-grandpa",
  "pallet-offences",
  "pallet-proxy",
@@ -2094,7 +2096,6 @@ dependencies = [
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
  "pallet-utility",
  "pallet-validator-set",
  "pallet-xcm",
@@ -2128,7 +2129,17 @@ dependencies = [
  "staging-xcm-executor",
  "static_assertions",
  "substrate-wasm-builder",
- "transaction-storage-primitives",
+]
+
+[[package]]
+name = "bulletin-transaction-storage-primitives"
+version = "0.1.0"
+dependencies = [
+ "cid",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io",
+ "tracing",
 ]
 
 [[package]]
@@ -2156,6 +2167,7 @@ dependencies = [
 name = "bulletin-westend-runtime"
 version = "0.1.0"
 dependencies = [
+ "bulletin-transaction-storage-primitives",
  "cumulus-pallet-aura-ext",
  "cumulus-pallet-parachain-system",
  "cumulus-pallet-session-benchmarking",
@@ -2176,6 +2188,7 @@ dependencies = [
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
  "pallet-message-queue",
  "pallet-session",
@@ -2184,7 +2197,6 @@ dependencies = [
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
  "pallet-utility",
  "pallet-xcm",
  "pallet-xcm-benchmarks",
@@ -2219,7 +2231,6 @@ dependencies = [
  "substrate-wasm-builder",
  "testnet-parachains-constants",
  "tracing",
- "transaction-storage-primitives",
  "westend-runtime-constants",
  "xcm-runtime-apis",
 ]
@@ -8215,6 +8226,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-bulletin-transaction-storage"
+version = "0.1.0"
+dependencies = [
+ "array-bytes 6.2.3",
+ "bulletin-transaction-storage-primitives",
+ "pallets-common",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+ "sp-transaction-storage-proof",
+ "tracing",
+]
+
+[[package]]
 name = "pallet-collator-selection"
 version = "9.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -9100,20 +9125,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-transaction-storage"
-version = "4.0.0-dev"
-dependencies = [
- "array-bytes 6.2.3",
- "pallets-common",
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
- "sp-transaction-storage-proof",
- "tracing",
- "transaction-storage-primitives",
-]
-
-[[package]]
 name = "pallet-treasury"
 version = "27.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -9766,9 +9777,9 @@ dependencies = [
  "frame-try-runtime",
  "futures",
  "jsonrpsee",
+ "pallet-bulletin-transaction-storage",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
  "polkadot-primitives",
  "sc-basic-authorship",
  "sc-chain-spec",
@@ -15758,17 +15769,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "transaction-storage-primitives"
-version = "0.1.0"
-dependencies = [
- "cid",
- "parity-scale-codec",
- "scale-info",
- "sp-io",
- "tracing",
 ]
 
 [[package]]
