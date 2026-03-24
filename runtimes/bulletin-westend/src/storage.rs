@@ -16,7 +16,10 @@
 
 //! Storage-specific configurations.
 
-use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
+use super::{
+	xcm_config::IsSiblingParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
+	RuntimeHoldReason,
+};
 use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
@@ -28,16 +31,6 @@ use pallet_xcm::EnsureXcm;
 use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-use xcm::latest::prelude::*;
-
-/// Filter that matches any sibling parachain origin.
-pub struct IsSiblingParachain;
-impl Contains<Location> for IsSiblingParachain {
-	fn contains(location: &Location) -> bool {
-		matches!(location.unpack(), (1, [Parachain(_)]))
-	}
-}
-
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
