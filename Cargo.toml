@@ -1,6 +1,7 @@
 [workspace.package]
 authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2021"
+homepage = "https://github.com/paritytech/polkadot-bulletin-chain"
 repository = "https://github.com/paritytech/polkadot-bulletin-chain.git"
 
 [workspace.dependencies]
