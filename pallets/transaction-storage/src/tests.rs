@@ -18,13 +18,15 @@
 //! Tests for transaction-storage pallet.
 
 use super::{
-	cids::HashingAlgorithm,
+	extension::ValidateStorageCalls,
 	mock::{
-		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test,
-		TransactionStorage,
+		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, StoreRenewPriority,
+		System, Test, TransactionStorage,
 	},
-	AuthorizationExtent, AuthorizationScope, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED,
-	BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	pallet::Origin,
+	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
+	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use crate::migrations::v1::OldTransactionInfo;
 use codec::Encode;
@@ -34,17 +36,20 @@ use polkadot_sdk_frame::{
 		traits::{GetStorageVersion, OnRuntimeUpgrade},
 		BoundedVec,
 	},
+	hashing::blake2_256,
 	prelude::{frame_system::RawOrigin, TransactionSource, *},
 	testing_prelude::*,
 	traits::{Authorize, StorageVersion},
 };
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
+use transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;
 
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
+type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -216,9 +221,8 @@ fn verify_chunk_proof_works() {
 
 		// Store a couple of transactions in one block.
 		run_to_block(1, || None);
-		let caller = 1;
 		for transaction in transactions.clone() {
-			assert_ok!(TransactionStorage::store(RawOrigin::Signed(caller).into(), transaction));
+			assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), transaction));
 		}
 		run_to_block(2, || None);
 
@@ -637,6 +641,191 @@ fn signed_renew_prefers_preimage_authorization() {
 	});
 }
 
+#[test]
+fn store_with_cid_config_uses_custom_hashing() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![42u8; 2000];
+
+		// Store with default config (Blake2b256 + raw codec 0x55)
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		let default_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(default_info.hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(default_info.cid_codec, 0x55);
+
+		// Store with explicit SHA2-256 config
+		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		assert_ok!(TransactionStorage::store_with_cid_config(
+			RuntimeOrigin::none(),
+			sha2_config.clone(),
+			data.clone(),
+		));
+		let sha2_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(sha2_info.hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(sha2_info.cid_codec, 0x55);
+		// Content hashes differ because different hashing algorithms are used
+		assert_ne!(default_info.content_hash, sha2_info.content_hash);
+
+		// Store with explicit Blake2b256 config (same as default but explicitly set)
+		let blake2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
+		assert_ok!(TransactionStorage::store_with_cid_config(
+			RuntimeOrigin::none(),
+			blake2_config.clone(),
+			data.clone(),
+		));
+		let blake2_info = BlockTransactions::get().last().unwrap().clone();
+		assert_eq!(blake2_info.hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(blake2_info.cid_codec, 0x55);
+		assert_eq!(default_info.content_hash, blake2_info.content_hash);
+
+		// Finalize block 1 and verify Transactions storage
+		run_to_block(2, || None);
+		let txs = Transactions::get(1).expect("transactions should be stored for block 1");
+		assert_eq!(txs.len(), 3);
+		assert_eq!(txs[0].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(txs[0].cid_codec, 0x55);
+		assert_eq!(txs[1].hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(txs[1].cid_codec, 0x55);
+		assert_eq!(txs[2].hashing, HashingAlgorithm::Blake2b256);
+		assert_eq!(txs[2].cid_codec, 0x55);
+	});
+}
+
+#[test]
+fn preimage_authorize_store_with_cid_config_and_renew() {
+	new_test_ext().execute_with(|| {
+		let data = vec![42u8; 2000];
+		let sha2_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Sha2_256 };
+		let sha2_hash = polkadot_sdk_frame::hashing::sha2_256(&data);
+
+		// check_unsigned / check_store_renew_unsigned use the CID config's hashing
+		// algorithm for preimage authorization lookup.
+		// Authorizing with blake2 hash should NOT work for store_with_cid_config(sha2).
+		let blake2_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			blake2_hash,
+			2000
+		));
+		let store_call =
+			Call::store_with_cid_config { cid: sha2_config.clone(), data: data.clone() };
+		run_to_block(1, || None);
+		assert_noop!(
+			store_call.authorize(TransactionSource::External).unwrap(),
+			InvalidTransaction::Payment,
+		);
+
+		// Authorize preimage with SHA2 hash (matching the CID config's algorithm).
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
+
+		// store_with_cid_config goes through authorize → check_store_renew_unsigned.
+		assert_ok!(store_call.authorize(TransactionSource::External).unwrap());
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RawOrigin::Authorized.into()));
+
+		// Preimage authorization for sha2 hash should be consumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+		// Blake2 authorization should remain unconsumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(blake2_hash),
+			AuthorizationExtent { transactions: 1, bytes: 2000 }
+		);
+
+		// Finalize block so Transactions storage is populated.
+		run_to_block(3, || None);
+
+		// Verify stored entry uses SHA2-256 and content_hash matches.
+		let txs = Transactions::get(1).expect("transactions stored at block 1");
+		assert_eq!(txs.len(), 1);
+		assert_eq!(txs[0].hashing, HashingAlgorithm::Sha2_256);
+		assert_eq!(txs[0].cid_codec, 0x55);
+		assert_eq!(txs[0].content_hash, sha2_hash);
+
+		// Renew without authorization fails.
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_noop!(
+			renew_call.authorize(TransactionSource::External).unwrap(),
+			InvalidTransaction::Payment,
+		);
+
+		// Authorize preimage with SHA2 hash (renew uses stored content_hash).
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), sha2_hash, 2000));
+		assert_ok!(renew_call.authorize(TransactionSource::External).unwrap());
+		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RawOrigin::Authorized.into()));
+
+		// Preimage authorization for sha2 hash should be consumed.
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 }
+		);
+	});
+}
+
+#[test]
+fn validate_signed_account_authorization_has_provides_tag() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1u64;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000,));
+
+		let call = Call::store { data: vec![0u8; 2000] };
+
+		// validate_signed still doesn't consume authorization (correct behaviour).
+		for _ in 0..2 {
+			assert_ok!(TransactionStorage::validate_signed(&who, &call));
+		}
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+		);
+
+		let (vt, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert!(!vt.provides.is_empty(), "validate_signed must emit a `provides` tag");
+
+		// Two calls with the same signer + content produce identical tags, confirming
+		// that the mempool will deduplicate them.
+		let (vt2, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
+		assert_eq!(vt.provides, vt2.provides);
+
+		// pre_dispatch still enforces the authorization: only the first succeeds.
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			InvalidTransaction::Payment,
+		);
+
+		// Now test the preimage-authorized path: signed preimage tags must match unsigned
+		// preimage tags so the pool deduplicates across both submission types.
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			2000,
+		));
+		// Re-authorize account so validate_signed can fall through if needed.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+
+		let (signed_vt, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
+		let unsigned_vt = call.authorize(TransactionSource::External).unwrap().unwrap();
+		assert_eq!(
+			signed_vt.provides, unsigned_vt.0.provides,
+			"signed preimage path must produce the same tag as unsigned preimage path"
+		);
+
+		// A different signer submitting the same pre-authorized content must get the same
+		// tag, proving dedup is content-based, not signer-based.
+		let other_who = 2u64;
+		let (other_vt, _) = TransactionStorage::validate_signed(&other_who, &call).unwrap();
+		assert_eq!(
+			signed_vt.provides, other_vt.provides,
+			"different signers with same preimage-authorized content must share the same tag"
+		);
+	});
+}
+
 // ---- Migration tests ----
 
 /// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`
@@ -681,11 +870,12 @@ fn migration_v1_old_entries_only() {
 		assert!(Transactions::contains_key(2));
 		assert!(Transactions::contains_key(3));
 
-		// Run migration
+		// Run v0→v1 migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 
-		// All entries now decode
-		let txs1 = Transactions::get(1).expect("should decode");
+		// Entries are now directly decodable after v0→v1 (v1 layout matches TransactionInfo)
+		let txs1 = Transactions::get(1).expect("should decode after v1 migration");
 		assert_eq!(txs1.len(), 2);
 		for tx in txs1.iter() {
 			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
@@ -698,8 +888,6 @@ fn migration_v1_old_entries_only() {
 
 		let txs3 = Transactions::get(3).expect("should decode");
 		assert_eq!(txs3.len(), 3);
-
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 	});
 }
 
@@ -743,12 +931,9 @@ fn migration_v1_mixed_entries() {
 		// Run migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
-		// Old entry transformed
-		let migrated = Transactions::get(5).expect("should now decode");
-		assert_eq!(migrated.len(), 2);
-		assert_eq!(migrated[0].hashing, HashingAlgorithm::Blake2b256);
-		assert_eq!(migrated[0].cid_codec, 0x55);
-		assert_eq!(migrated[0].size, 2000);
+		// Old entry transformed to v1 format — now directly decodable
+		let old_entry_after = Transactions::get(5).expect("should decode after v1 migration");
+		assert_eq!(old_entry_after.len(), 2);
 
 		// New entry preserved exactly
 		let new_entry_after = Transactions::get(10).expect("still decodes");
@@ -775,17 +960,19 @@ fn migration_v1_idempotent() {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		insert_old_format_transactions(1, 1);
 
-		// First run: migrates
+		// First run: migrates old entries to v1 format
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let after_first = Transactions::get(1).expect("decodes");
+		// v1 format is not decodable as v2 TransactionInfo, but raw bytes exist
+		let key = Transactions::hashed_key_for(1u64);
+		let raw_after_first = unhashed::get_raw(&key).expect("raw bytes exist");
 
 		// Second run: noop (version already 1)
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let after_second = Transactions::get(1).expect("still decodes");
+		let raw_after_second = unhashed::get_raw(&key).expect("raw bytes still exist");
 
-		assert_eq!(after_first, after_second);
+		assert_eq!(raw_after_first, raw_after_second);
 	});
 }
 
@@ -804,5 +991,327 @@ fn migration_v1_empty_storage() {
 		// Version updated, no entries created
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 		assert_eq!(Transactions::iter().count(), 0);
+	});
+}
+
+// ---- try_state tests ----
+
+#[test]
+fn try_state_passes_on_empty_storage() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_passes_after_store_and_finalize() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![1u8; 500]));
+		run_to_block(2, || None);
+		// After finalization, ephemeral storage is cleared and transactions are persisted
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_passes_through_retention_lifecycle() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+		// Run past retention period; block 1 transactions get cleaned up at block 12
+		run_to_block(12, proof_provider);
+		assert!(Transactions::get(1).is_none());
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_passes_with_active_authorizations() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 10000));
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+
+		// Partially consume authorization
+		let call = Call::store { data: vec![0; 1000] };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+#[test]
+fn try_state_detects_zero_authorization_transactions() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Insert a corrupted authorization with zero transactions using raw storage.
+		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
+		// AuthorizationExtent SCALE layout: transactions(u32), bytes(u64)
+		let corrupted_auth = (0u32, 100u64, 100u64); // transactions=0, bytes=100, expiration=100
+		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
+		unhashed::put_raw(&key, &corrupted_auth.encode());
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"Stored authorization has zero transactions remaining"
+		);
+	});
+}
+
+#[test]
+fn try_state_detects_zero_authorization_bytes() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Insert a corrupted authorization with zero bytes using raw storage.
+		let corrupted_auth = (5u32, 0u64, 100u64); // transactions=5, bytes=0, expiration=100
+		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
+		unhashed::put_raw(&key, &corrupted_auth.encode());
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"Stored authorization has zero bytes remaining"
+		);
+	});
+}
+
+#[test]
+fn try_state_detects_zero_retention_period() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Set RetentionPeriod to zero
+		RetentionPeriod::put(0u64);
+
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"RetentionPeriod must not be zero"
+		);
+	});
+}
+
+#[test]
+fn try_state_passes_with_preimage_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let hash = blake2_256(&[1u8; 32]);
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 5000));
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+// ---- ValidateStorageCalls extension tests ----
+
+#[test]
+fn ensure_authorized_extracts_custom_origin() {
+	new_test_ext().execute_with(|| {
+		let who: u64 = 42;
+
+		// 1. Authorized origin with Account scope
+		let authorized_origin: RuntimeOrigin =
+			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(authorized_origin),
+			Ok(AuthorizedCaller::Signed { who, scope: AuthorizationScope::Account(who) }),
+		);
+
+		// 2. Authorized origin with Preimage scope
+		let content_hash = [0u8; 32];
+		let preimage_origin: RuntimeOrigin = Origin::<Test>::Authorized {
+			who: 99,
+			scope: AuthorizationScope::Preimage(content_hash),
+		}
+		.into();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(preimage_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: 99,
+				scope: AuthorizationScope::Preimage(content_hash)
+			}),
+		);
+
+		// 3. Root origin → Root
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::root()),
+			Ok(AuthorizedCaller::Root),
+		);
+
+		// 4. None origin → Unsigned
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::none()),
+			Ok(AuthorizedCaller::Unsigned),
+		);
+
+		// 5. Plain signed origin → BadOrigin
+		assert_eq!(
+			TransactionStorage::ensure_authorized(RuntimeOrigin::signed(123)),
+			Err(DispatchError::BadOrigin),
+		);
+	});
+}
+
+#[test]
+fn authorize_storage_extension_transforms_origin() {
+	use polkadot_sdk_frame::{
+		prelude::TransactionSource,
+		traits::{DispatchInfoOf, TransactionExtension, TxBaseImplication},
+	};
+
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let caller = 1u64;
+		let data = vec![0u8; 16];
+
+		// Give caller account authorization
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), caller, 1, 16));
+
+		// Create the store call
+		let call: RuntimeCall = Call::store { data }.into();
+		let info: DispatchInfoOf<RuntimeCall> = Default::default();
+		let origin = RuntimeOrigin::signed(caller);
+
+		// Run ValidateStorageCalls::validate - this should transform the origin
+		let ext = ValidateStorageCalls::<Test>::default();
+		let result = ext.validate(
+			origin,
+			&call,
+			&info,
+			0,
+			(),
+			&TxBaseImplication(&call),
+			TransactionSource::External,
+		);
+
+		assert!(result.is_ok());
+		let (valid_tx, val, transformed_origin) = result.unwrap();
+
+		// Verify the transaction is valid with correct priority
+		assert_eq!(valid_tx.priority, StoreRenewPriority::get());
+
+		// Verify val contains the signer
+		assert_eq!(val, Some(caller));
+
+		// Verify the origin was transformed and can be extracted with ensure_authorized
+		let origin_for_prepare = transformed_origin.clone();
+		assert_eq!(
+			TransactionStorage::ensure_authorized(transformed_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: caller,
+				scope: AuthorizationScope::Account(caller)
+			}),
+		);
+
+		// Run prepare — this should call pre_dispatch_signed and consume the authorization
+		let ext2 = ValidateStorageCalls::<Test>::default();
+		assert_ok!(ext2.prepare(val, &origin_for_prepare, &call, &info, 0));
+
+		// Authorization (1 transaction, 16 bytes) should now be fully consumed
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(caller),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+#[test]
+fn authorize_storage_extension_transforms_origin_with_preimage_auth() {
+	use polkadot_sdk_frame::{
+		prelude::TransactionSource,
+		traits::{DispatchInfoOf, TransactionExtension, TxBaseImplication},
+	};
+
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let caller = 1u64;
+		let data = vec![0u8; 16];
+		let content_hash = blake2_256(&data);
+
+		// Give preimage authorization (not account authorization)
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), content_hash, 16));
+
+		// Create the store call
+		let call: RuntimeCall = Call::store { data }.into();
+		let info: DispatchInfoOf<RuntimeCall> = Default::default();
+		let origin = RuntimeOrigin::signed(caller);
+
+		// Run ValidateStorageCalls::validate
+		let ext = ValidateStorageCalls::<Test>::default();
+		let result = ext.validate(
+			origin,
+			&call,
+			&info,
+			0,
+			(),
+			&TxBaseImplication(&call),
+			TransactionSource::External,
+		);
+
+		assert!(result.is_ok());
+		let (_, val, transformed_origin) = result.unwrap();
+
+		// Verify val contains the signer
+		assert_eq!(val, Some(caller));
+
+		// Verify the origin carries preimage authorization
+		assert_eq!(
+			TransactionStorage::ensure_authorized(transformed_origin),
+			Ok(AuthorizedCaller::Signed {
+				who: caller,
+				scope: AuthorizationScope::Preimage(content_hash)
+			}),
+		);
+	});
+}
+
+#[test]
+fn authorize_storage_extension_passes_through_non_storage_calls() {
+	use polkadot_sdk_frame::{
+		prelude::{TransactionSource, ValidTransaction},
+		traits::{AsSystemOriginSigner, DispatchInfoOf, TransactionExtension, TxBaseImplication},
+	};
+
+	new_test_ext().execute_with(|| {
+		let caller = 1u64;
+
+		// Create a non-TransactionStorage call (using System::remark as example)
+		let call: RuntimeCall = frame_system::Call::remark { remark: vec![] }.into();
+		let info: DispatchInfoOf<RuntimeCall> = Default::default();
+		let origin = RuntimeOrigin::signed(caller);
+
+		// Run ValidateStorageCalls::validate - should pass through unchanged
+		let ext = ValidateStorageCalls::<Test>::default();
+		let result = ext.validate(
+			origin.clone(),
+			&call,
+			&info,
+			0,
+			(),
+			&TxBaseImplication(&call),
+			TransactionSource::External,
+		);
+
+		assert!(result.is_ok());
+		let (valid_tx, val, returned_origin) = result.unwrap();
+
+		// Verify passthrough behavior
+		assert_eq!(valid_tx, ValidTransaction::default());
+		assert_eq!(val, None);
+
+		// Origin should still be a signed origin (not transformed)
+		assert!(returned_origin.as_system_origin_signer().is_some());
+		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
 }

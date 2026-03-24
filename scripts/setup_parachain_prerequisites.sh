@@ -25,14 +25,27 @@ fi
 
 cd $POLKADOT_SDK_DIR
 
-# Check out latest master
+# Check out a known-working revision for the relay chain / omni-node binaries.
+# NOTE: this does NOT have to match the Cargo.toml SDK revision — the runtime is
+# compiled separately. This only affects the host binaries (polkadot, omni-node).
+POLKADOT_SDK_REV="81a3af9830ea8b6ff64b066b73b04bb3b675add5"
+
+# Skip rebuild if already at the correct revision with all binaries present
+CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "")
+if [ "$CURRENT_REV" = "$POLKADOT_SDK_REV" ] \
+    && [ -x "$BIN_DIR/polkadot" ] \
+    && [ -x "$BIN_DIR/polkadot-prepare-worker" ] \
+    && [ -x "$BIN_DIR/polkadot-execute-worker" ] \
+    && [ -x "$BIN_DIR/polkadot-omni-node" ] \
+    && [ -x "$BIN_DIR/chain-spec-builder" ]; then
+    echo "   ✅ Already at correct revision ($POLKADOT_SDK_REV) with binaries present. Skipping build."
+    exit 0
+fi
+
 echo "   Fetching latest changes from polkadot-sdk..."
 git fetch origin
-echo "   Checking out latest master..."
-# TODO:
-# git reset --hard origin/master
-# Let's use the same commit as Cargo.toml to avoid moving Polkadot-SDK
-git reset --hard 81a3af9830ea8b6ff64b066b73b04bb3b675add5
+echo "   Checking out polkadot-sdk revision: $POLKADOT_SDK_REV..."
+git checkout "$POLKADOT_SDK_REV"
 
 # Build polkadot binary
 echo "   Building polkadot binary (this may take a while)..."

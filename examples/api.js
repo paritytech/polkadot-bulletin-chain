@@ -20,7 +20,7 @@ function toBinary(data) {
 
 export async function authorizeAccount(
     typedApi,
-    sudoSigner,
+    authorizationSigner,
     whos,
     transactions,
     bytes,
@@ -67,20 +67,17 @@ export async function authorizeAccount(
         }).decodedCall
     );
 
-    // Wrap in Sudo(Utility::batchAll(...))
+    // Wrap in Utility::batchAll(...)
     const batchTx = typedApi.tx.Utility.batch_all({
         calls: authorizeCalls
     });
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: batchTx.decodedCall
-    });
 
-    await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
+    await waitForTransaction(batchTx, authorizationSigner, "BatchAuthorize", txMode);
 }
 
 export async function authorizePreimage(
     typedApi,
-    sudoSigner,
+    authorizationSigner,
     contentHashes,
     maxSize = CHUNK_SIZE,
     txMode = TX_MODE_IN_BLOCK,
@@ -102,40 +99,35 @@ export async function authorizePreimage(
             }).decodedCall
         );
 
-        // Wrap in Sudo(Utility::batchAll(...))
+        // Wrap in Utility::batchAll(...)
         const batchTx = typedApi.tx.Utility.batch_all({
             calls: authorizeCalls
         });
-        const sudoTx = typedApi.tx.Sudo.sudo({
-            call: batchTx.decodedCall
-        });
 
-        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
+        await waitForTransaction(batchTx, authorizationSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
     }
 }
 
 export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null) {
     console.log('⬆️ Storing data with length=', data.length);
 
-    // Add custom `TransactionExtension` for codec, if specified.
-    const txOpts = {};
     let expectedCid;
+    let tx;
     if (cidCodec != null && mhCode != null) {
-        txOpts.customSignedExtensions = {
-            ProvideCidConfig: {
-                value: {
-                    codec: BigInt(cidCodec),
-                    hashing: toHashingEnum(mhCode),
-                }
-            }
-        };
         expectedCid = await cidFromBytes(data, cidCodec, mhCode);
+        tx = typedApi.tx.TransactionStorage.store_with_cid_config({
+            cid: {
+                codec: BigInt(cidCodec),
+                hashing: toHashingEnum(mhCode),
+            },
+            data: toBinary(data),
+        });
     } else {
         expectedCid = await cidFromBytes(data);
+        tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
     }
 
-    const tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
-    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
+    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
     return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
@@ -161,7 +153,7 @@ const TX_MODE_CONFIG = {
     },
 };
 
-async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
+export async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
         throw new Error(`Unhandled txMode: ${txMode}`);
