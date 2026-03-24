@@ -904,7 +904,7 @@ pub mod pallet {
 
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
-		fn do_store(
+		pub fn do_store(
 			data: Vec<u8>,
 			hashing: HashingAlgorithm,
 			cid_codec: CidCodec,

@@ -2172,6 +2172,7 @@ dependencies = [
  "pallet-balances",
  "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
+ "pallet-hop-promotion",
  "pallet-message-queue",
  "pallet-session",
  "pallet-skip-feeless-payment",
@@ -2195,6 +2196,7 @@ dependencies = [
  "sp-consensus-aura",
  "sp-core 40.0.0",
  "sp-genesis-builder",
+ "sp-hop",
  "sp-inherents",
  "sp-io",
  "sp-keyring",
@@ -8151,6 +8153,20 @@ dependencies = [
  "sp-runtime",
  "sp-session",
  "sp-staking",
+]
+
+[[package]]
+name = "pallet-hop-promotion"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-transaction-storage",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io",
+ "sp-runtime",
+ "transaction-storage-primitives",
 ]
 
 [[package]]

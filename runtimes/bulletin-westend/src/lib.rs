@@ -507,6 +507,23 @@ impl pallet_utility::Config for Runtime {
 	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
 }
 
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type RuntimeCall = RuntimeCall;
+}
+
+impl<C> frame_system::offchain::CreateBare<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
+		UncheckedExtrinsic::new_bare(call)
+	}
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime
@@ -799,6 +816,20 @@ impl_runtime_apis! {
 	impl sp_transaction_storage_proof::runtime_api::TransactionStorageApi<Block> for Runtime {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
+		}
+	}
+
+	impl sp_hop::HopPromotionApi<Block> for Runtime {
+		fn create_promotion_extrinsic(data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
+			use frame_system::offchain::CreateBare;
+			<Runtime as CreateBare<pallet_hop_promotion::Call<Runtime>>>::create_bare(
+				pallet_hop_promotion::Call::<Runtime>::promote { data }.into(),
+			)
+		}
+
+		fn max_promotion_size() -> u32 {
+			use frame_support::traits::Get;
+			<Runtime as pallet_transaction_storage::Config>::MaxTransactionSize::get()
 		}
 	}
 

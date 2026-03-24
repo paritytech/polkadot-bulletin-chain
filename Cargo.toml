@@ -121,6 +121,7 @@ members = [
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
 	"runtimes/bulletin-paseo",
+	"primitives/hop",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
