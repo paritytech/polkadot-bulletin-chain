@@ -17,11 +17,10 @@
 //! Storage-specific configurations.
 
 use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
-use crate::xcm_config::PeopleNextLocation;
 use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{Contains, EitherOfDiverse, Equals, SortedMembers},
+	traits::{Contains, EitherOfDiverse, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
 use pallet_transaction_storage::CallInspector;
@@ -29,7 +28,15 @@ use pallet_xcm::EnsureXcm;
 use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-use testnet_parachains_constants::westend::locations::PeopleLocation;
+use xcm::latest::prelude::*;
+
+/// Filter that matches any sibling parachain origin.
+pub struct IsSiblingParachain;
+impl Contains<Location> for IsSiblingParachain {
+	fn contains(location: &Location) -> bool {
+		matches!(location.unpack(), (1, [Parachain(_)]))
+	}
+}
 
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
@@ -40,7 +47,7 @@ impl SortedMembers<AccountId> for TestAccounts {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
+	pub const AuthorizationPeriod: crate::BlockNumber = 90 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
@@ -97,11 +104,8 @@ impl pallet_transaction_storage::Config for Runtime {
 		EitherOfDiverse<
 			// Root can do whatever.
 			crate::EnsureRoot<Self::AccountId>,
-			// People chains can also handle authorizations.
-			EitherOfDiverse<
-				EnsureXcm<Equals<PeopleLocation>>,
-				EnsureXcm<Equals<PeopleNextLocation>>,
-			>,
+			// Any sibling parachain can handle authorizations.
+			EnsureXcm<IsSiblingParachain>,
 		>,
 		// Test accounts can also authorize for testing purposes.
 		EnsureSignedBy<TestAccounts, Self::AccountId>,
