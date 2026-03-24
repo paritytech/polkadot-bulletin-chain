@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/Select";
 import { FileUpload, type SelectedFile } from "@/components/FileUpload";
 import { createCarArchive, type CarResult } from "@/lib/car";
+import { CHUNK_SIZE, CHUNKED_THRESHOLD, chunkData, buildChunkMetadata, buildUnixFSDag } from "@/lib/chunked-upload";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
 import { useApi, useClient, useChainState } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
@@ -55,6 +56,76 @@ interface UploadResult {
   unsigned?: boolean;
   carRootCid?: string;
   carFiles?: { name: string; cid: string; size: number }[];
+  isChunked?: boolean;
+  metadataCid?: string;
+  dagRootCid?: string;
+  chunks?: { cid: string; size: number; blockNumber?: number }[];
+}
+
+interface UploadProgress {
+  phase: string;
+  current: number;
+  total: number;
+}
+
+async function submitTransaction(
+  api: any,
+  polkadotSigner: any,
+  data: Uint8Array,
+  hashCode: number,
+  codec: number,
+): Promise<{ blockHash?: string; blockNumber?: number; index?: number }> {
+  const isCustomCid = hashCode !== 0xb220 || codec !== 0x55;
+
+  const tx = isCustomCid
+    ? api.tx.TransactionStorage.store_with_cid_config({
+        cid: { codec: BigInt(codec), hashing: toHashingEnum(hashCode) },
+        data: Binary.fromBytes(data),
+      })
+    : api.tx.TransactionStorage.store({ data: Binary.fromBytes(data) });
+
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    let subscription: { unsubscribe: () => void };
+
+    const handleEvent = (ev: any) => {
+      console.log("TX event:", ev.type);
+      if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+        resolved = true;
+        subscription.unsubscribe();
+        let index: number | undefined;
+        if (ev.events) {
+          const storedEvent = ev.events.find(
+            (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
+          );
+          if (storedEvent?.value?.value?.index !== undefined) {
+            index = storedEvent.value.value.index;
+          }
+        }
+        resolve({ blockHash: ev.block.hash, blockNumber: ev.block.number, index });
+      }
+    };
+
+    const handleError = (err: any) => {
+      if (!resolved) {
+        resolved = true;
+        reject(err);
+      }
+    };
+
+    subscription = tx.signSubmitAndWatch(polkadotSigner).subscribe({
+      next: handleEvent,
+      error: handleError,
+    });
+
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        subscription?.unsubscribe();
+        reject(new Error("Transaction timed out"));
+      }
+    }, 120000);
+  });
 }
 
 export function Upload() {
@@ -81,6 +152,7 @@ export function Upload() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -104,6 +176,10 @@ export function Upload() {
 
   // Auto-select raw codec for CAR archives (multiple files)
   const isCarUpload = selectedFiles.length > 1;
+  const isChunkedUpload = isCarUpload && dataSize > CHUNKED_THRESHOLD;
+  const estimatedChunks = isChunkedUpload ? Math.ceil(dataSize / CHUNK_SIZE) : 0;
+  const estimatedTransactions = isChunkedUpload ? estimatedChunks + 2 : 1; // +2 for metadata + DAG
+
   useEffect(() => {
     if (isCarUpload) {
       setCidCodec("raw");
@@ -123,7 +199,7 @@ export function Upload() {
     setCarError(null);
     setCarData(null);
 
-    createCarArchive(selectedFiles.map(f => ({ name: f.file.name, data: f.data })))
+    createCarArchive(selectedFiles.map(f => ({ name: f.relativePath, data: f.data })))
       .then(result => {
         if (!cancelled) {
           setCarData(result);
@@ -175,9 +251,11 @@ export function Upload() {
     selectedAccount &&
     authorization &&
     authorization.bytes >= BigInt(dataSize) &&
-    authorization.transactions > 0n;
+    authorization.transactions >= BigInt(estimatedTransactions);
 
+  // Chunked uploads don't support preimage auth (each chunk has a different content hash)
   const hasPreimageAuth =
+    !isChunkedUpload &&
     preimageAuth &&
     preimageAuth.bytes >= BigInt(dataSize) &&
     preimageAuth.transactions > 0n;
@@ -212,6 +290,7 @@ export function Upload() {
     setIsUploading(true);
     setUploadError(null);
     setUploadResult(null);
+    setUploadProgress(null);
 
     try {
       const hashConfig = HASH_ALGORITHMS.find(h => h.value === hashAlgorithm);
@@ -221,123 +300,207 @@ export function Upload() {
         throw new Error("Invalid configuration");
       }
 
-      // Calculate expected CID and content hash
-      const expectedCid = await cidFromBytes(data, codecConfig.codec, hashConfig.mhCode);
-      const contentHash = await getContentHash(data, hashConfig.mhCode);
-      const contentHashHex = "0x" + Array.from(contentHash).map(b => b.toString(16).padStart(2, "0")).join("");
-
-      // Use store_with_cid_config for non-default CID settings, plain store otherwise
-      const isCustomCid = hashAlgorithm !== "blake2b256" || cidCodec !== "raw";
-
-      const tx = isCustomCid
-        ? api.tx.TransactionStorage.store_with_cid_config({
-            cid: {
-              codec: BigInt(codecConfig.codec),
-              hashing: toHashingEnum(hashConfig.mhCode),
-            },
-            data: Binary.fromBytes(data),
-          })
-        : api.tx.TransactionStorage.store({
-            data: Binary.fromBytes(data),
-          });
-
       const useUnsigned = hasPreimageAuth;
 
-      const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
-        let resolved = false;
+      if (isChunkedUpload) {
+        // ── Chunked upload flow ──────────────────────────────────────
+        const signer = selectedAccount!.polkadotSigner;
+        const totalSteps = Math.ceil(data.length / CHUNK_SIZE) + 2; // chunks + metadata + DAG
 
-        const handleEvent = (ev: any) => {
-          console.log("TX event:", ev.type);
-          if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-            resolved = true;
-            subscription.unsubscribe();
+        // 1. Chunk the data
+        setUploadProgress({ phase: "Splitting into chunks...", current: 0, total: totalSteps });
+        const chunks = await chunkData(data, codecConfig.codec, hashConfig.mhCode);
 
-            // Try to find the Stored event to get the index
-            let index: number | undefined;
-            if (ev.events) {
-              const storedEvent = ev.events.find(
-                (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
-              );
-              if (storedEvent?.value?.value?.index !== undefined) {
-                index = storedEvent.value.value.index;
-              }
-            }
-
-            resolve({
-              blockHash: ev.block.hash,
-              blockNumber: ev.block.number,
-              index,
-            });
-          }
-        };
-
-        const handleError = (err: any) => {
-          if (!resolved) {
-            resolved = true;
-            reject(err);
-          }
-        };
-
-        let subscription: { unsubscribe: () => void };
-
-        if (useUnsigned) {
-          // Unsigned submission via bareTx
-          tx.getBareTx().then((bareTx) => {
-            subscription = client.submitAndWatch(bareTx).subscribe({
-              next: handleEvent,
-              error: handleError,
-            });
-          }).catch(handleError);
-        } else {
-          // Signed submission
-          subscription = tx.signSubmitAndWatch(selectedAccount!.polkadotSigner).subscribe({
-            next: handleEvent,
-            error: handleError,
+        // 2. Store each chunk as a separate transaction
+        const storedChunks: { cid: string; size: number; blockNumber?: number }[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          setUploadProgress({
+            phase: `Uploading chunk ${i + 1}/${chunks.length}`,
+            current: i + 1,
+            total: totalSteps,
+          });
+          const result = await submitTransaction(
+            api, signer, chunks[i]!.data, hashConfig.mhCode, codecConfig.codec,
+          );
+          storedChunks.push({
+            cid: chunks[i]!.cid.toString(),
+            size: chunks[i]!.size,
+            blockNumber: result.blockNumber,
           });
         }
 
-        // Timeout after 2 minutes
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription?.unsubscribe();
-            reject(new Error("Transaction timed out"));
+        // 3. Build and store metadata with all chunk CIDs
+        setUploadProgress({
+          phase: "Uploading metadata",
+          current: chunks.length + 1,
+          total: totalSteps,
+        });
+        const metadataBytes = buildChunkMetadata(storedChunks, data.length);
+        const metadataCid = await cidFromBytes(metadataBytes, codecConfig.codec, hashConfig.mhCode);
+        const contentHash = await getContentHash(metadataBytes, hashConfig.mhCode);
+        const contentHashHex = "0x" + Array.from(contentHash).map(b => b.toString(16).padStart(2, "0")).join("");
+
+        const metaResult = await submitTransaction(
+          api, signer, metadataBytes, hashConfig.mhCode, codecConfig.codec,
+        );
+
+        // 4. Build UnixFS DAG-PB node linking all chunks and store it.
+        //    This makes the content accessible via a single IPFS root CID.
+        //    Stored with dag-pb codec (0x70) so IPFS can traverse the links.
+        setUploadProgress({
+          phase: "Building and storing DAG",
+          current: chunks.length + 2,
+          total: totalSteps,
+        });
+        const { rootCid: dagRootCid, dagBytes } = await buildUnixFSDag(storedChunks, hashConfig.mhCode);
+        await submitTransaction(
+          api, signer, dagBytes, hashConfig.mhCode, 0x70, // dag-pb codec
+        );
+
+        setUploadProgress(null);
+
+        const uploadResultData: UploadResult = {
+          cid: metadataCid.toString(),
+          contentHash: contentHashHex,
+          blockHash: metaResult.blockHash,
+          blockNumber: metaResult.blockNumber,
+          index: metaResult.index,
+          size: data.length,
+          unsigned: false,
+          carRootCid: carData?.rootCid.toString(),
+          carFiles: carData?.files,
+          isChunked: true,
+          metadataCid: metadataCid.toString(),
+          dagRootCid: dagRootCid.toString(),
+          chunks: storedChunks,
+        };
+
+        setUploadResult(uploadResultData);
+
+        if (selectedAccount && metaResult.blockNumber !== undefined && metaResult.index !== undefined) {
+          addStorageEntry({
+            blockNumber: metaResult.blockNumber,
+            index: metaResult.index,
+            cid: dagRootCid.toString(),
+            contentHash: contentHashHex,
+            size: data.length,
+            account: selectedAccount.address,
+            networkId: network.id,
+            label: `${selectedFiles.length} files (chunked CAR)`,
+          });
+        }
+      } else {
+        // ── Single transaction flow ──────────────────────────────────
+        const expectedCid = await cidFromBytes(data, codecConfig.codec, hashConfig.mhCode);
+        const contentHash = await getContentHash(data, hashConfig.mhCode);
+        const contentHashHex = "0x" + Array.from(contentHash).map(b => b.toString(16).padStart(2, "0")).join("");
+
+        const isCustomCid = hashAlgorithm !== "blake2b256" || cidCodec !== "raw";
+
+        const tx = isCustomCid
+          ? api.tx.TransactionStorage.store_with_cid_config({
+              cid: {
+                codec: BigInt(codecConfig.codec),
+                hashing: toHashingEnum(hashConfig.mhCode),
+              },
+              data: Binary.fromBytes(data),
+            })
+          : api.tx.TransactionStorage.store({
+              data: Binary.fromBytes(data),
+            });
+
+        const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
+          let resolved = false;
+
+          const handleEvent = (ev: any) => {
+            console.log("TX event:", ev.type);
+            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+
+              let index: number | undefined;
+              if (ev.events) {
+                const storedEvent = ev.events.find(
+                  (e: any) => e.type === "TransactionStorage" && e.value?.type === "Stored"
+                );
+                if (storedEvent?.value?.value?.index !== undefined) {
+                  index = storedEvent.value.value.index;
+                }
+              }
+
+              resolve({
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+                index,
+              });
+            }
+          };
+
+          const handleError = (err: any) => {
+            if (!resolved) {
+              resolved = true;
+              reject(err);
+            }
+          };
+
+          let subscription: { unsubscribe: () => void };
+
+          if (useUnsigned) {
+            tx.getBareTx().then((bareTx) => {
+              subscription = client.submitAndWatch(bareTx).subscribe({
+                next: handleEvent,
+                error: handleError,
+              });
+            }).catch(handleError);
+          } else {
+            subscription = tx.signSubmitAndWatch(selectedAccount!.polkadotSigner).subscribe({
+              next: handleEvent,
+              error: handleError,
+            });
           }
-        }, 120000);
-      });
 
-      const uploadResultData: UploadResult = {
-        cid: expectedCid.toString(),
-        contentHash: contentHashHex,
-        blockHash: result.blockHash,
-        blockNumber: result.blockNumber,
-        index: result.index,
-        size: data.length,
-        unsigned: !!useUnsigned,
-        carRootCid: carData?.rootCid.toString(),
-        carFiles: carData?.files,
-      };
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              subscription?.unsubscribe();
+              reject(new Error("Transaction timed out"));
+            }
+          }, 120000);
+        });
 
-      setUploadResult(uploadResultData);
-
-      // Save to history for easy renewal later (only for signed transactions with account)
-      if (!useUnsigned && selectedAccount && result.blockNumber !== undefined && result.index !== undefined) {
-        addStorageEntry({
-          blockNumber: result.blockNumber,
-          index: result.index,
+        const uploadResultData: UploadResult = {
           cid: expectedCid.toString(),
           contentHash: contentHashHex,
+          blockHash: result.blockHash,
+          blockNumber: result.blockNumber,
+          index: result.index,
           size: data.length,
-          account: selectedAccount.address,
-          networkId: network.id,
-          label: filesLabel || undefined,
-        });
+          unsigned: !!useUnsigned,
+          carRootCid: carData?.rootCid.toString(),
+          carFiles: carData?.files,
+        };
+
+        setUploadResult(uploadResultData);
+
+        if (!useUnsigned && selectedAccount && result.blockNumber !== undefined && result.index !== undefined) {
+          addStorageEntry({
+            blockNumber: result.blockNumber,
+            index: result.index,
+            cid: expectedCid.toString(),
+            contentHash: contentHashHex,
+            size: data.length,
+            account: selectedAccount.address,
+            networkId: network.id,
+            label: filesLabel || undefined,
+          });
+        }
       }
     } catch (err) {
       console.error("Upload failed:", err);
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -393,13 +556,17 @@ export function Upload() {
           <CardHeader className="pr-10">
             <CardTitle className="text-success">Upload Successful</CardTitle>
             <CardDescription>
-              Your data has been stored on the Bulletin Chain
+              {uploadResult.isChunked
+                ? `Your data has been stored in ${uploadResult.chunks?.length ?? 0} chunks on the Bulletin Chain`
+                : "Your data has been stored on the Bulletin Chain"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* CID */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">CID (Content Identifier)</label>
+              <label className="text-sm font-medium">
+                {uploadResult.isChunked ? "Metadata CID" : "CID (Content Identifier)"}
+              </label>
               <div className="flex items-center gap-2">
                 <Input
                   value={uploadResult.cid}
@@ -419,6 +586,34 @@ export function Upload() {
                 </Button>
               </div>
             </div>
+
+            {/* DAG Root CID — the IPFS-accessible CID for chunked uploads */}
+            {uploadResult.dagRootCid && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">IPFS Root CID (DAG)</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={uploadResult.dagRootCid}
+                    readOnly
+                    className="font-mono text-sm"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => copyToClipboard(uploadResult.dagRootCid!)}
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Use this CID to access the reassembled content on IPFS
+                </p>
+              </div>
+            )}
 
             {/* CAR Archive Info */}
             {uploadResult.carRootCid && (
@@ -447,6 +642,34 @@ export function Upload() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Chunked Upload Details */}
+            {uploadResult.isChunked && uploadResult.chunks && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <Archive className="h-4 w-4" />
+                  Chunked Upload
+                </label>
+                <div className="rounded-md border bg-muted/50 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {uploadResult.chunks.length} chunks stored
+                    </span>
+                    <span className="text-muted-foreground">
+                      {formatBytes(uploadResult.size)} total
+                    </span>
+                  </div>
+                  <div className="mt-1 space-y-1 max-h-32 overflow-y-auto">
+                    {uploadResult.chunks.map((c, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs">
+                        <span className="font-mono truncate mr-2">Chunk {i + 1}: {c.cid.slice(0, 24)}...</span>
+                        <span className="text-muted-foreground shrink-0">{formatBytes(c.size)}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -494,15 +717,15 @@ export function Upload() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.open(`https://ipfs.io/ipfs/${uploadResult.cid}`, "_blank")}
+                onClick={() => window.open(`https://${uploadResult.dagRootCid || uploadResult.cid}.app.dot.li`, "_blank")}
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
-                View on IPFS
+                View on Dot.li
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => navigate(`/download?cid=${uploadResult.cid}`)}
+                onClick={() => navigate(`/download?cid=${uploadResult.dagRootCid || uploadResult.cid}`)}
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 Download Page
@@ -558,7 +781,7 @@ export function Upload() {
                   <FileUpload
                     multiple
                     onFilesSelect={handleFilesSelect}
-                    maxSize={1024 * 1024} // 1MB per file
+                    maxSize={5 * 1024 * 1024} // 5MB per file (chunked for totals > 2MB)
                     disabled={isUploading || isBuildingCar}
                   />
                   {selectedFiles.length > 1 && (
@@ -613,6 +836,12 @@ export function Upload() {
                       The codec is set to <strong>Raw</strong> because the chain stores the CAR as a binary blob.
                       The UnixFS directory root CID (DAG-PB) is shown separately after upload.
                     </p>
+                    {isChunkedUpload && (
+                      <p className="text-primary text-xs mt-1 font-medium">
+                        Data exceeds 2 MB — will be uploaded in {estimatedTransactions} transactions
+                        (~{estimatedChunks} chunks + metadata + DAG).
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -661,17 +890,37 @@ export function Upload() {
             {isUploading ? (
               <>
                 <Spinner size="sm" className="mr-2" />
-                {willUseUnsigned ? "Uploading (unsigned)..." : "Uploading..."}
+                {uploadProgress
+                  ? uploadProgress.phase
+                  : willUseUnsigned ? "Uploading (unsigned)..." : "Uploading..."}
               </>
             ) : (
               <>
                 <UploadIcon className="h-5 w-5 mr-2" />
                 {willUseUnsigned
                   ? "Upload to Bulletin Chain (unsigned)"
-                  : "Upload to Bulletin Chain"}
+                  : isChunkedUpload
+                    ? `Upload to Bulletin Chain (${estimatedTransactions} transactions)`
+                    : "Upload to Bulletin Chain"}
               </>
             )}
           </Button>
+
+          {/* Progress bar for chunked uploads */}
+          {uploadProgress && uploadProgress.total > 0 && (
+            <div className="w-full space-y-1">
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>{uploadProgress.phase}</span>
+                <span>{uploadProgress.current}/{uploadProgress.total}</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300 rounded-full"
+                  style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
@@ -708,6 +957,15 @@ export function Upload() {
                     )}
                     <p className="text-xs text-muted-foreground">
                       This data can be uploaded without a wallet connection
+                    </p>
+                  </div>
+                ) : isChunkedUpload && preimageAuth ? (
+                  <div className="space-y-2 py-2">
+                    <p className="text-sm text-amber-600">
+                      Preimage authorization cannot be used for chunked uploads.
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Each chunk has a different content hash. Use account authorization instead.
                     </p>
                   </div>
                 ) : (

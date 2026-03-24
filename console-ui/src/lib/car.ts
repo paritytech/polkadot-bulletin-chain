@@ -1,10 +1,10 @@
 import { createHelia, type Helia } from "helia";
-import { unixfs } from "@helia/unixfs";
+import { unixfs, type UnixFS } from "@helia/unixfs";
 import { car } from "@helia/car";
 import type { CID } from "multiformats/cid";
 
 export interface CarFileEntry {
-  name: string;
+  name: string; // Can be a nested path like "css/style.css"
   data: Uint8Array;
 }
 
@@ -24,10 +24,41 @@ async function getHelia(): Promise<Helia> {
   return heliaInstance;
 }
 
+// ── Directory tree builder ───────────────────────────────────────────
+
+interface TreeNode {
+  files: { name: string; cid: CID }[];
+  dirs: Map<string, TreeNode>;
+}
+
+/**
+ * Recursively build a UnixFS directory from a tree structure.
+ * Each node becomes a UnixFS directory containing its files and subdirectories.
+ */
+async function buildUnixFSTree(fs: UnixFS, node: TreeNode): Promise<CID> {
+  let dirCid = await fs.addDirectory();
+
+  for (const file of node.files) {
+    dirCid = await fs.cp(file.cid, dirCid, file.name);
+  }
+
+  for (const [name, subnode] of node.dirs) {
+    const subdirCid = await buildUnixFSTree(fs, subnode);
+    dirCid = await fs.cp(subdirCid, dirCid, name);
+  }
+
+  return dirCid;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+
 /**
  * Create a CAR archive from multiple files.
- * Builds a UnixFS directory where each file is addressable by name,
+ * Builds a UnixFS directory tree where each file is addressable by its path,
  * then exports all blocks into a CAR archive.
+ *
+ * File names can contain "/" to represent nested directory structures
+ * (e.g., "css/style.css" creates a "css" subdirectory).
  */
 export async function createCarArchive(files: CarFileEntry[]): Promise<CarResult> {
   if (files.length === 0) {
@@ -38,19 +69,35 @@ export async function createCarArchive(files: CarFileEntry[]): Promise<CarResult
   const fs = unixfs(helia);
   const heliaCar = car(helia);
 
-  // Create root directory and add each file
-  let rootCid = await fs.addDirectory();
-  const fileEntries: CarResult["files"] = [];
-
+  // Add all file bytes and collect CIDs
+  const fileCids: { name: string; cid: CID; size: number }[] = [];
   for (const file of files) {
     const fileCid = await fs.addBytes(file.data);
-    rootCid = await fs.cp(fileCid, rootCid, file.name);
-    fileEntries.push({
-      name: file.name,
-      cid: fileCid.toString(),
-      size: file.data.length,
-    });
+    fileCids.push({ name: file.name, cid: fileCid, size: file.data.length });
   }
+
+  // Build a tree structure from file paths
+  const root: TreeNode = { files: [], dirs: new Map() };
+
+  for (const file of fileCids) {
+    const parts = file.name.split("/");
+    let node = root;
+
+    // Navigate/create intermediate directories
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dirName = parts[i]!;
+      if (!node.dirs.has(dirName)) {
+        node.dirs.set(dirName, { files: [], dirs: new Map() });
+      }
+      node = node.dirs.get(dirName)!;
+    }
+
+    // Add file to its parent directory
+    node.files.push({ name: parts[parts.length - 1]!, cid: file.cid });
+  }
+
+  // Build the UnixFS directory tree
+  const rootCid = await buildUnixFSTree(fs, root);
 
   // Export as CAR - returns AsyncIterable<Uint8Array> with CAR header + blocks
   const parts: Uint8Array[] = [];
@@ -67,5 +114,9 @@ export async function createCarArchive(files: CarFileEntry[]): Promise<CarResult
     offset += part.length;
   }
 
-  return { carBytes, rootCid, files: fileEntries };
+  return {
+    carBytes,
+    rootCid,
+    files: fileCids.map(f => ({ name: f.name, cid: f.cid.toString(), size: f.size })),
+  };
 }
