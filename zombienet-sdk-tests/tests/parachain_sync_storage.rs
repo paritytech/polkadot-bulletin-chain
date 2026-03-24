@@ -45,7 +45,14 @@
 //!    - Adds sync node with --sync=full (parachain) and -- --sync=warp (embedded relay chain)
 //!    - Verifies embedded relay chain warp syncs, parachain full syncs, bitswap returns data
 //!
-//! 8. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb
+//! 8. `parachain_rpc_node_bitswap_test` - RPC node (non-collator) serving data via bitswap
+//!    - Starts 1 collator, stores transaction data
+//!    - Adds an RPC node with --sync=full (non-collator, --ipfs-server)
+//!    - Verifies RPC node syncs and can serve historical data via bitswap
+//!    - Submits new store extrinsic through RPC node (gossipped to collator for inclusion)
+//!    - Verifies both collator and RPC node serve the newly produced data via bitswap
+//!
+//! 9. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb
 //!    tool
 //!    - Verifies col11 state before/after store operations
 //!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after
@@ -870,6 +877,137 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	log::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
 
 	test_log!(TEST, "=== Parachain Full Sync + Relay Warp Sync Test PASSED ===");
+	network.destroy().await?;
+	Ok(())
+}
+
+/// Parachain RPC node (non-collator) that syncs via full sync and serves data via bitswap.
+///
+/// This test verifies the "RPC node" deployment pattern: a non-collator node that
+/// full-syncs with collators and can serve historical and live transaction data over
+/// bitswap. This is the expected production setup for nodes that serve data to external
+/// consumers (e.g., IPFS gateways) without participating in block production.
+///
+/// Test flow:
+/// 1. Collator stores data, verify bitswap works on collator
+/// 2. RPC node joins with --sync=full + --ipfs-server (non-collator)
+/// 3. RPC node full-syncs and can serve historical data via bitswap
+/// 4. New store extrinsic submitted through RPC node (gossipped to collator)
+/// 5. Both collator and RPC node serve the new data via bitswap
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_rpc_node_bitswap_test() -> Result<()> {
+	const TEST: &str = "para_rpc_node";
+	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+
+	test_log!(TEST, "=== Parachain RPC Node Bitswap Test ===");
+	log::info!("This test verifies a non-collator RPC node can serve data via bitswap");
+
+	// Early validation of required binaries
+	verify_parachain_binaries()?;
+
+	let para_args = get_para_node_args();
+	let config = build_parachain_network_config_single_collator(para_args)?;
+	let mut network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+
+	// Get relay chain validator for session change detection
+	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
+
+	// Wait for first session change - required for parachain block production
+	log::info!(
+		"Waiting for relay chain session change (required for parachain block production)..."
+	);
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
+		.await
+		.context("Failed to detect session change on relay chain")?;
+
+	// Store historical data on collator before RPC node joins.
+	// Scoped to release the immutable borrow before add_collator.
+	let historical_data = generate_test_data(TEST_DATA_SIZE, b"PARA_RPC_HISTORICAL_");
+	let (hist_hash, hist_cid) = content_hash_and_cid(&historical_data);
+	log::info!("Storing historical data: {} bytes", historical_data.len());
+	log::info!("Historical content hash: {}, CID: {}", hist_hash, hist_cid);
+
+	let (nonce, target_block) = {
+		let collator1 =
+			network.get_node("collator-1").context("Failed to get collator-1 node")?;
+
+		let mut nonce = get_alice_nonce(collator1).await?;
+		let (store_block, _) =
+			authorize_and_store_data(collator1, &historical_data, nonce).await?;
+		nonce += 2; // authorize + store
+		log::info!("Historical data stored at block {}", store_block);
+
+		// Verify data can be fetched from collator1 via bitswap
+		verify_node_bitswap(collator1, &historical_data, 30, "Collator-1 (historical)").await?;
+
+		// Wait for enough blocks and finality before adding RPC node
+		let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+		log::info!("Waiting for block {} and finality", target_block);
+		try_join!(
+			wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+			wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
+		)?;
+
+		(nonce, target_block)
+	};
+
+	// Add RPC node: non-collator with full sync and ipfs-server
+	log::info!("Adding rpc-node with --sync=full --ipfs-server (non-collator)");
+	let para_binary = get_parachain_binary_path();
+	let rpc_node_opts = AddCollatorOptions {
+		command: Some(para_binary.as_str().try_into()?),
+		args: vec![
+			"--sync=full".into(),
+			"--ipfs-server".into(),
+			NODE_LOG_CONFIG.into(),
+			"--".into(),
+			"--network-backend=libp2p".into(),
+		],
+		is_validator: false,
+		..Default::default()
+	};
+
+	network.add_collator("rpc-node", rpc_node_opts, get_para_id()).await?;
+
+	// Re-acquire node references after mutable borrow
+	let rpc_node = network.get_node("rpc-node").context("Failed to get rpc-node")?;
+
+	// Wait for the RPC node to sync
+	wait_for_fullnode(rpc_node).await?;
+	log::info!("Verifying rpc-node's sync progress (target: block {})", target_block);
+	wait_for_block_height(rpc_node, target_block, SYNC_TIMEOUT_SECS).await?;
+
+	// Verify RPC node can serve historical data via bitswap
+	// Full sync downloads all blocks including indexed body, so bitswap should work
+	verify_node_bitswap(rpc_node, &historical_data, 30, "rpc-node (historical)").await?;
+	log::info!("✓ RPC node serves historical data via bitswap after full sync");
+
+	// Now store NEW data by submitting the transaction THROUGH the RPC node.
+	// This is the realistic production pattern: users submit extrinsics to an RPC node,
+	// which gossips them to collators for inclusion in blocks.
+	let live_data = generate_test_data(TEST_DATA_SIZE, b"PARA_RPC_LIVE_DATA_");
+	let (live_hash, live_cid) = content_hash_and_cid(&live_data);
+	log::info!("Storing live data via RPC node: {} bytes", live_data.len());
+	log::info!("Live content hash: {}, CID: {}", live_hash, live_cid);
+
+	let (live_store_block, _) = authorize_and_store_data(rpc_node, &live_data, nonce).await?;
+	log::info!("Live data stored at block {} (submitted via RPC node)", live_store_block);
+
+	// Verify collator has the live data (it was included by collator even though
+	// the transaction was submitted through the RPC node)
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+	verify_node_bitswap(collator1, &live_data, 30, "Collator-1 (live)").await?;
+
+	// Verify RPC node can also serve the data it helped submit
+	let rpc_node = network.get_node("rpc-node").context("Failed to get rpc-node")?;
+	log::info!("Waiting for rpc-node to catch up to block {}", live_store_block);
+	wait_for_block_height(rpc_node, live_store_block, SYNC_TIMEOUT_SECS).await?;
+
+	verify_node_bitswap(rpc_node, &live_data, 30, "rpc-node (live)").await?;
+	log::info!("✓ RPC node serves live data via bitswap (tx submitted through RPC node)");
+
+	test_log!(TEST, "=== Parachain RPC Node Bitswap Test PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }
