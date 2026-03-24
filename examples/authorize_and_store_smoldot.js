@@ -99,7 +99,7 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
 async function fetchCidSmoldot(client, cid) {
     const cidString = cid.toString();
     console.log(`⬇️ Fetching CID via smoldot \`bitswap_block\` RPC: ${cidString}`);
-    const result = await client._request("bitswap_block", [cidString]);
+    const result = await client._request("bitswap_v1_get", [cidString]);
 
     // Make sure to strip the leading "0x" prefix.
     return Buffer.from(result.slice(2), 'hex');
@@ -108,7 +108,7 @@ async function fetchCidSmoldot(client, cid) {
 async function main() {
     await cryptoWaitReady();
 
-    logHeader('AUTHORIZE AND STORE TEST (Smoldot `bitswap_block` RPC)');
+    logHeader('AUTHORIZE AND STORE TEST (Smoldot `bitswap_v1_get` RPC)');
 
     // Get chainspec path from command line argument (required - main chain: relay for para, or solo)
     const chainSpecPath = process.argv[2];
@@ -177,7 +177,7 @@ async function main() {
         );
         logSuccess('Verified content!');
 
-        logTestResult(true, 'Authorize and Store Test (Smoldot `bitswap_block` RPC)');
+        logTestResult(true, 'Authorize and Store Test (Smoldot `bitswap_v1_get` RPC)');
         resultCode = 0;
     } catch (error) {
         logError(`Error: ${error.message}`);
