@@ -23,7 +23,7 @@ use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
-		Everything, LinearStoragePrice, Nothing,
+		Everything, EverythingBut, LinearStoragePrice, Nothing,
 	},
 };
 use frame_system::EnsureRoot;
@@ -132,6 +132,14 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
+/// Filter that matches any sibling parachain origin.
+pub struct IsSiblingParachain;
+impl Contains<Location> for IsSiblingParachain {
+	fn contains(location: &Location) -> bool {
+		matches!(location.unpack(), (1, [Parachain(_)]))
+	}
+}
+
 pub struct FellowsPlurality;
 impl Contains<Location> for FellowsPlurality {
 	fn contains(location: &Location) -> bool {
@@ -158,8 +166,9 @@ pub type Barrier = TrailingSetTopicAsId<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
 				Equals<GovernanceLocation>,
-				// Let's allow a People chain for PoP authorizations.
-				Equals<PeopleLocation>,
+				// Allow any sibling parachain for unpaid execution, since there
+				// are multiple People testnet chains.
+				IsSiblingParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
@@ -265,7 +274,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = EverythingBut<crate::storage::StorageCallInspector>;
 	type Aliasers = TrustedAliasers;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
