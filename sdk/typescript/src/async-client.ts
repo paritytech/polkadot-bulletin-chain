@@ -165,6 +165,89 @@ export interface AuthCallOptions extends CallOptions {
 }
 
 /**
+ * Result of mapping a single PAPI event to SDK progress events.
+ *
+ * `txHash` is set when the event carries a new transaction hash.
+ * `finish` is set when the event signals the transaction has reached
+ * the caller's desired confirmation level (in-block or finalized).
+ */
+interface PapiEventMappingResult {
+  txHash?: string
+  finish?: {
+    block: { hash: string; number: number }
+    events?: RuntimeEvent[]
+  }
+}
+
+/**
+ * Map a raw PAPI transaction status event to SDK progress events.
+ *
+ * Extracted from `signAndSubmitWithProgress` so the event→progress
+ * translation is testable independently.  The caller is responsible for
+ * acting on the returned `finish` signal.
+ */
+function mapPapiEventToProgress(
+  ev: TxStatusEvent,
+  currentTxHash: string | undefined,
+  progressCallback: ProgressCallback | undefined,
+  chunkIndex: number | undefined,
+  waitFor: "in_block" | "finalized" = "finalized",
+): PapiEventMappingResult {
+  const result: PapiEventMappingResult = {}
+
+  // Capture the transaction hash on the first event that carries it
+  if (ev.txHash && !currentTxHash) {
+    result.txHash = ev.txHash as string
+    progressCallback?.({
+      type: TxStatus.Signed,
+      txHash: result.txHash,
+      chunkIndex,
+    })
+  }
+
+  if (ev.type === "validated") {
+    progressCallback?.({ type: TxStatus.Validated, chunkIndex })
+  }
+
+  if (ev.type === "broadcasted") {
+    progressCallback?.({
+      type: TxStatus.Broadcasted,
+      chunkIndex,
+    })
+  }
+
+  if (ev.type === "txBestBlocksState") {
+    if (ev.found && ev.block) {
+      progressCallback?.({
+        type: TxStatus.InBlock,
+        blockHash: ev.block.hash,
+        blockNumber: ev.block.number,
+        txIndex: ev.block.index,
+        chunkIndex,
+      })
+      if (waitFor === "in_block") {
+        result.finish = { block: ev.block, events: ev.events }
+      }
+    } else {
+      progressCallback?.({ type: TxStatus.NoLongerInBlock, chunkIndex })
+    }
+  }
+
+  if (ev.type === "finalized" && ev.block) {
+    progressCallback?.({
+      type: TxStatus.Finalized,
+      blockHash: ev.block.hash,
+      blockNumber: ev.block.number,
+      txIndex: ev.block.index,
+      chunkIndex,
+    })
+    result.finish = { block: ev.block, events: ev.events }
+  }
+
+  return result
+}
+
+/**
  * Shared interface for Bulletin clients (real and mock).
  *
  * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
@@ -535,72 +618,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
         next: (ev: TxStatusEvent) => {
-          // Emit signed event when we first get a tx hash
-          if (ev.txHash && !txHash) {
-            txHash = ev.txHash as string
-            if (progressCallback) {
-              progressCallback({
-                type: TxStatus.Signed,
-                txHash: txHash,
-                chunkIndex,
-              })
-            }
-          }
-
-          // Handle validated event
-          if (ev.type === "validated" && progressCallback) {
-            progressCallback({ type: TxStatus.Validated, chunkIndex })
-          }
-
-          // Handle broadcasted event
-          if (ev.type === "broadcasted" && progressCallback) {
-            progressCallback({
-              type: TxStatus.Broadcasted,
-              chunkIndex,
-            })
-          }
-
-          // Handle best block state
-          if (ev.type === "txBestBlocksState") {
-            if (ev.found && ev.block) {
-              if (progressCallback) {
-                progressCallback({
-                  type: TxStatus.InBlock,
-                  blockHash: ev.block.hash,
-                  blockNumber: ev.block.number,
-                  txIndex: ev.block.index,
-                  chunkIndex,
-                })
-              }
-
-              if (waitFor === "in_block") {
-                finish(ev.block, ev.events)
-              }
-            } else {
-              // Transaction no longer in best block (reorg)
-              if (progressCallback) {
-                progressCallback({
-                  type: TxStatus.NoLongerInBlock,
-                  chunkIndex,
-                })
-              }
-            }
-          }
-
-          // Handle finalized state
-          if (ev.type === "finalized" && ev.block) {
-            if (progressCallback) {
-              progressCallback({
-                type: TxStatus.Finalized,
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-                txIndex: ev.block.index,
-                chunkIndex,
-              })
-            }
-
-            finish(ev.block, ev.events)
-          }
+          const result = mapPapiEventToProgress(
+            ev,
+            txHash,
+            progressCallback,
+            chunkIndex,
+            waitFor,
+          )
+          if (result.txHash) txHash = result.txHash
+          if (result.finish) finish(result.finish.block, result.finish.events)
         },
         error: (err: unknown) => {
           if (!resolved) {
