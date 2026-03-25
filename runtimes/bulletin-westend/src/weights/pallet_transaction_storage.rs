@@ -172,6 +172,27 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 		// Minimum execution time: 19_200_000 picoseconds.
 		Weight::from_parts(20_870_000, 0)
 			.saturating_add(Weight::from_parts(0, 3530))
+		.saturating_add(T::DbWeight::get().reads(1))
+		.saturating_add(T::DbWeight::get().writes(1))
+	}
+	// TODO: update weights
+	fn process_auto_renewals() -> Weight {
+		Weight::from_parts(100_000_000, 0)
+			.saturating_add(Weight::from_parts(0, 40351))
+			.saturating_add(T::DbWeight::get().reads(5))
+			.saturating_add(T::DbWeight::get().writes(3))
+	}
+	// TODO: update weights
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 0)
+			.saturating_add(Weight::from_parts(0, 1000))
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	// TODO: update weights
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 0)
+			.saturating_add(Weight::from_parts(0, 1000))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}

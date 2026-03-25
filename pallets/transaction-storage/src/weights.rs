@@ -62,6 +62,9 @@ pub trait WeightInfo {
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
+	fn process_auto_renewals() -> Weight;
+	fn enable_auto_renew() -> Weight;
+	fn disable_auto_renew() -> Weight;
 }
 
 /// Weights for pallet_transaction_storage using the Substrate node and recommended hardware.
@@ -146,6 +149,26 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
+	// TODO: update weights
+	fn process_auto_renewals() -> Weight {
+		// Per-item: 1 read (AutoRenewals) + 1 read (Authorizations) + 1 write (Authorizations)
+		// + 1 write (BlockTransactions) + 1 write (TransactionByContentHash)
+		Weight::from_parts(100_000_000, 40351)
+			.saturating_add(T::DbWeight::get().reads(5_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+	}
+	// TODO: update weights
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
+	// TODO: update weights
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(1_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
 }
 
 // For backwards compatibility and tests
@@ -227,5 +250,20 @@ impl WeightInfo for () {
 	}
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
+	}
+	fn process_auto_renewals() -> Weight {
+		Weight::from_parts(100_000_000, 40351)
+			.saturating_add(RocksDbWeight::get().reads(5_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+	}
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(1_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
 }
