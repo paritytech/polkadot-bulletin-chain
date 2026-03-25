@@ -310,7 +310,7 @@ pub mod pallet {
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
-  /// Data associated with an auto-renewal registration.
+	/// Data associated with an auto-renewal registration.
 	#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 	pub struct AutoRenewalData<AccountId> {
 		/// Account whose authorization will be consumed each time data is auto-renewed.
