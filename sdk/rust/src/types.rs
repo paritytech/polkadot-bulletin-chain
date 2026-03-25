@@ -86,6 +86,84 @@ pub enum Error {
 	/// Renewal failed.
 	#[cfg_attr(feature = "std", error("Renewal failed: {0}"))]
 	RenewalFailed(String),
+
+	/// CID calculation failed.
+	#[cfg_attr(feature = "std", error("CID calculation failed: {0}"))]
+	CidCalculationFailed(String),
+
+	/// On-chain transaction failed (e.g., invalid, dropped, or error).
+	#[cfg_attr(feature = "std", error("Transaction failed: {0}"))]
+	TransactionFailed(String),
+
+	/// Invalid chunk size.
+	#[cfg_attr(feature = "std", error("Invalid chunk size: {0}"))]
+	InvalidChunkSize(String),
+}
+
+impl Error {
+	/// Returns a `SCREAMING_SNAKE_CASE` error code matching the TypeScript SDK.
+	pub fn code(&self) -> &'static str {
+		match self {
+			Error::ChunkTooLarge(_) => "CHUNK_TOO_LARGE",
+			Error::FileTooLarge(_) => "FILE_TOO_LARGE",
+			Error::EmptyData => "EMPTY_DATA",
+			Error::InvalidCid(_) => "INVALID_CID",
+			Error::AuthorizationNotFound(_) => "AUTHORIZATION_NOT_FOUND",
+			Error::InsufficientAuthorization { .. } => "INSUFFICIENT_AUTHORIZATION",
+			Error::AuthorizationExpired { .. } => "AUTHORIZATION_EXPIRED",
+			Error::StorageFailed(_) => "STORAGE_FAILED",
+			Error::DagEncodingFailed(_) => "DAG_ENCODING_FAILED",
+			Error::NetworkError(_) => "NETWORK_ERROR",
+			Error::InvalidConfig(_) => "INVALID_CONFIG",
+			Error::ChunkingFailed(_) => "CHUNKING_FAILED",
+			Error::RetrievalFailed(_) => "RETRIEVAL_FAILED",
+			Error::RenewalNotFound { .. } => "RENEWAL_NOT_FOUND",
+			Error::RenewalFailed(_) => "RENEWAL_FAILED",
+			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
+			Error::TransactionFailed(_) => "TRANSACTION_FAILED",
+			Error::InvalidChunkSize(_) => "INVALID_CHUNK_SIZE",
+		}
+	}
+
+	/// Returns `true` if this error is likely transient and retrying may succeed.
+	pub fn is_retryable(&self) -> bool {
+		matches!(
+			self,
+			Error::AuthorizationExpired { .. } |
+				Error::NetworkError(_) |
+				Error::StorageFailed(_) |
+				Error::TransactionFailed(_) |
+				Error::RetrievalFailed(_) |
+				Error::RenewalFailed(_)
+		)
+	}
+
+	/// Returns an actionable recovery suggestion for this error.
+	pub fn recovery_hint(&self) -> &'static str {
+		match self {
+			Error::ChunkTooLarge(_) => "Reduce chunk size to 2 MiB or less",
+			Error::FileTooLarge(_) => "Reduce file size or use chunked upload",
+			Error::EmptyData => "Provide non-empty data",
+			Error::InvalidCid(_) => "Verify CID format",
+			Error::AuthorizationNotFound(_) =>
+				"Call authorizeAccount() or authorizePreimage() first",
+			Error::InsufficientAuthorization { .. } =>
+				"Request additional authorization via authorize_account()",
+			Error::AuthorizationExpired { .. } =>
+				"Call refreshAccountAuthorization() to extend expiry",
+			Error::StorageFailed(_) => "Check node connectivity and try again",
+			Error::DagEncodingFailed(_) => "Check chunk CIDs and data integrity",
+			Error::NetworkError(_) => "Check network connectivity to the RPC endpoint",
+			Error::InvalidConfig(_) => "Check configuration parameters",
+			Error::ChunkingFailed(_) => "Verify data integrity and chunker configuration",
+			Error::RetrievalFailed(_) => "The data may not be available yet; try again",
+			Error::RenewalNotFound { .. } => "Verify the block number and extrinsic index",
+			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
+			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
+			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
+			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 2 MiB",
+		}
+	}
 }
 
 /// Configuration for chunking large data.
@@ -268,6 +346,33 @@ pub enum TransactionStatusEvent {
 	Dropped { error: String },
 }
 
+impl TransactionStatusEvent {
+	/// Returns a human-readable description of this transaction status event.
+	pub fn description(&self) -> String {
+		match self {
+			TransactionStatusEvent::Validated =>
+				"Transaction validated and added to the pool".into(),
+			TransactionStatusEvent::Broadcasted => "Transaction broadcast to peers".into(),
+			TransactionStatusEvent::InBestBlock { block_hash, block_number, .. } =>
+				match block_number {
+					Some(n) => alloc::format!("Transaction in best block #{n} ({block_hash})"),
+					None => alloc::format!("Transaction in best block ({block_hash})"),
+				},
+			TransactionStatusEvent::Finalized { block_hash, block_number, .. } =>
+				match block_number {
+					Some(n) => alloc::format!("Transaction finalized in block #{n} ({block_hash})"),
+					None => alloc::format!("Transaction finalized in block ({block_hash})"),
+				},
+			TransactionStatusEvent::NoLongerInBestBlock =>
+				"Transaction no longer in best block (reorg occurred)".into(),
+			TransactionStatusEvent::Invalid { error } =>
+				alloc::format!("Transaction invalid: {error}"),
+			TransactionStatusEvent::Dropped { error } =>
+				alloc::format!("Transaction dropped from pool: {error}"),
+		}
+	}
+}
+
 /// Combined progress event types.
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
@@ -364,3 +469,147 @@ impl ProgressEvent {
 /// });
 /// ```
 pub type ProgressCallback = alloc::sync::Arc<dyn Fn(ProgressEvent) + Send + Sync>;
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// All error variants for exhaustive testing.
+	fn all_errors() -> Vec<Error> {
+		vec![
+			Error::ChunkTooLarge(100),
+			Error::FileTooLarge(200),
+			Error::EmptyData,
+			Error::InvalidCid("bad".into()),
+			Error::AuthorizationNotFound("acct".into()),
+			Error::InsufficientAuthorization { need: 10, available: 5 },
+			Error::AuthorizationExpired { expired_at: 1, current_block: 2 },
+			Error::StorageFailed("fail".into()),
+			Error::DagEncodingFailed("bad dag".into()),
+			Error::NetworkError("timeout".into()),
+			Error::InvalidConfig("bad config".into()),
+			Error::ChunkingFailed("chunk err".into()),
+			Error::RetrievalFailed("not found".into()),
+			Error::RenewalNotFound { block: 1, index: 0 },
+			Error::RenewalFailed("renew err".into()),
+			Error::CidCalculationFailed("calc fail".into()),
+			Error::TransactionFailed("tx fail".into()),
+			Error::InvalidChunkSize("zero".into()),
+		]
+	}
+
+	#[test]
+	fn test_error_code_returns_screaming_snake_case() {
+		let expected = vec![
+			"CHUNK_TOO_LARGE",
+			"FILE_TOO_LARGE",
+			"EMPTY_DATA",
+			"INVALID_CID",
+			"AUTHORIZATION_NOT_FOUND",
+			"INSUFFICIENT_AUTHORIZATION",
+			"AUTHORIZATION_EXPIRED",
+			"STORAGE_FAILED",
+			"DAG_ENCODING_FAILED",
+			"NETWORK_ERROR",
+			"INVALID_CONFIG",
+			"CHUNKING_FAILED",
+			"RETRIEVAL_FAILED",
+			"RENEWAL_NOT_FOUND",
+			"RENEWAL_FAILED",
+			"CID_CALCULATION_FAILED",
+			"TRANSACTION_FAILED",
+			"INVALID_CHUNK_SIZE",
+		];
+
+		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {
+			assert_eq!(error.code(), *expected_code, "Mismatch for {error:?}");
+		}
+	}
+
+	#[test]
+	fn test_is_retryable() {
+		let retryable_codes = [
+			"AUTHORIZATION_EXPIRED",
+			"NETWORK_ERROR",
+			"STORAGE_FAILED",
+			"TRANSACTION_FAILED",
+			"RETRIEVAL_FAILED",
+			"RENEWAL_FAILED",
+		];
+
+		for error in all_errors() {
+			let expected = retryable_codes.contains(&error.code());
+			assert_eq!(
+				error.is_retryable(),
+				expected,
+				"is_retryable mismatch for {} ({:?})",
+				error.code(),
+				error
+			);
+		}
+	}
+
+	#[test]
+	fn test_recovery_hint_non_empty_for_all_variants() {
+		for error in all_errors() {
+			let hint = error.recovery_hint();
+			assert!(!hint.is_empty(), "Empty recovery hint for {} ({:?})", error.code(), error);
+		}
+	}
+
+	#[test]
+	fn test_transaction_status_event_description() {
+		let events = vec![
+			(TransactionStatusEvent::Validated, "validated"),
+			(TransactionStatusEvent::Broadcasted, "broadcast"),
+			(
+				TransactionStatusEvent::InBestBlock {
+					block_hash: "0xabc".into(),
+					block_number: Some(42),
+					extrinsic_index: None,
+				},
+				"#42",
+			),
+			(
+				TransactionStatusEvent::Finalized {
+					block_hash: "0xdef".into(),
+					block_number: Some(100),
+					extrinsic_index: None,
+				},
+				"#100",
+			),
+			(TransactionStatusEvent::NoLongerInBestBlock, "no longer"),
+			(TransactionStatusEvent::Invalid { error: "nonce".into() }, "nonce"),
+			(TransactionStatusEvent::Dropped { error: "pool full".into() }, "pool full"),
+		];
+
+		for (event, expected_substring) in events {
+			let desc = event.description();
+			assert!(
+				desc.contains(expected_substring),
+				"Description {desc:?} should contain {expected_substring:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn test_transaction_status_event_description_without_block_number() {
+		let event = TransactionStatusEvent::InBestBlock {
+			block_hash: "0xabc".into(),
+			block_number: None,
+			extrinsic_index: None,
+		};
+		let desc = event.description();
+		assert!(desc.contains("0xabc"));
+		assert!(!desc.contains('#'));
+
+		let event = TransactionStatusEvent::Finalized {
+			block_hash: "0xdef".into(),
+			block_number: None,
+			extrinsic_index: None,
+		};
+		let desc = event.description();
+		assert!(desc.contains("0xdef"));
+		assert!(!desc.contains('#'));
+	}
+}

@@ -26,6 +26,7 @@ import {
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
+  ErrorCode,
   type ProgressCallback,
   type StoreOptions,
   type StoreResult,
@@ -40,6 +41,8 @@ export interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean
   /** Simulate storage failures (for testing error paths) */
   simulateStorageFailure?: boolean
+  /** Simulate insufficient authorization (for testing pre-check error path) */
+  simulateInsufficientAuth?: boolean
 }
 
 /**
@@ -104,6 +107,7 @@ export class MockBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig> & {
     simulateAuthFailure: boolean
     simulateStorageFailure: boolean
+    simulateInsufficientAuth: boolean
   }
   /** Operations performed (for testing verification) */
   private operations: MockOperation[] = []
@@ -118,6 +122,7 @@ export class MockBulletinClient implements BulletinClientInterface {
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
+      simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,
     }
   }
 
@@ -156,21 +161,32 @@ export class MockBulletinClient implements BulletinClientInterface {
     const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
+    }
+
+    // Simulate insufficient authorization (pre-submission check)
+    if (this.config.simulateInsufficientAuth) {
+      throw new BulletinError(
+        "Insufficient authorization: need 1 transactions, have 0",
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      )
     }
 
     // Simulate authorization failure
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Insufficient authorization: need 100 bytes, have 0 bytes",
-        "INSUFFICIENT_AUTHORIZATION",
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
         { need: 100, available: 0 },
       )
     }
 
     // Simulate storage failure
     if (this.config.simulateStorageFailure) {
-      throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+      throw new BulletinError(
+        "Simulated storage failure",
+        ErrorCode.TRANSACTION_FAILED,
+      )
     }
 
     // Handle chunked uploads (mirrors AsyncBulletinClient logic)
@@ -180,7 +196,7 @@ export class MockBulletinClient implements BulletinClientInterface {
         throw new BulletinError(
           "withCodec() cannot be used with chunked uploads. " +
             "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
-          "INVALID_CONFIG",
+          ErrorCode.INVALID_CONFIG,
         )
       }
 
@@ -239,7 +255,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        "AUTHORIZATION_FAILED",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
   }
@@ -329,11 +345,14 @@ export class MockBulletinClient implements BulletinClientInterface {
     const dataBytes = toBytes(data)
 
     if (dataBytes.length === 0) {
-      throw new BulletinError("Data cannot be empty", "EMPTY_DATA")
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     if (this.config.simulateStorageFailure) {
-      throw new BulletinError("Simulated storage failure", "TRANSACTION_FAILED")
+      throw new BulletinError(
+        "Simulated storage failure",
+        ErrorCode.TRANSACTION_FAILED,
+      )
     }
 
     const opts = { ...DEFAULT_STORE_OPTIONS, ...options }

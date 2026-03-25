@@ -6,8 +6,9 @@
 //! This module provides the actual blockchain interaction layer using subxt.
 
 use crate::{
+	authorization::{Authorization, AuthorizationManager},
 	cid::ContentHash,
-	types::{Error, ProgressCallback, ProgressEvent, Result},
+	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result},
 };
 use subxt::{blocks::BlockRef, utils::AccountId32, OnlineClient, PolkadotConfig};
 use subxt_signer::sr25519::Keypair;
@@ -44,6 +45,72 @@ impl TransactionClient {
 		&self.api
 	}
 
+	/// Query the current authorization for an account.
+	///
+	/// Returns `Some((transactions, bytes))` if authorization exists and is not expired,
+	/// `None` if no authorization exists or it has expired.
+	pub async fn query_account_authorization(
+		&self,
+		who: &AccountId32,
+	) -> Result<Option<(u32, u64)>> {
+		use bulletin::runtime_types::pallet_transaction_storage::AuthorizationScope as OnChainScope;
+
+		let storage_query = bulletin::storage()
+			.transaction_storage()
+			.authorizations(OnChainScope::Account(who.clone()));
+
+		let latest_block = self
+			.api
+			.blocks()
+			.at_latest()
+			.await
+			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?;
+
+		let current_block_number = latest_block.number();
+
+		let maybe_auth =
+			latest_block.storage().fetch(&storage_query).await.map_err(|e| {
+				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
+			})?;
+
+		match maybe_auth {
+			Some(auth) if auth.expiration > current_block_number =>
+				Ok(Some((auth.extent.transactions, auth.extent.bytes))),
+			Some(_) => Ok(None), // expired
+			None => Ok(None),
+		}
+	}
+
+	/// Check that sufficient authorization exists for a store operation.
+	///
+	/// Queries the chain for the account's current authorization and validates
+	/// that it has enough transactions and bytes remaining.
+	///
+	/// This is a best-effort check — if the query fails (e.g., network error),
+	/// the error is returned so the caller can decide whether to proceed.
+	pub async fn check_authorization_for_store(
+		&self,
+		who: &AccountId32,
+		required_transactions: u32,
+		required_bytes: u64,
+	) -> Result<()> {
+		let auth_data = self.query_account_authorization(who).await?;
+
+		match auth_data {
+			Some((transactions, bytes)) => {
+				let auth = Authorization {
+					scope: AuthorizationScope::Account,
+					transactions,
+					max_size: bytes,
+					expires_at: None, // already filtered out expired
+				};
+				let manager = AuthorizationManager::new();
+				manager.check_authorization(&auth, required_bytes, required_transactions)
+			},
+			None => Err(Error::AuthorizationNotFound(format!("{who}"))),
+		}
+	}
+
 	/// Store data on-chain.
 	///
 	/// Submits a `TransactionStorage.store` extrinsic.
@@ -55,6 +122,10 @@ impl TransactionClient {
 	///
 	/// Submits a `TransactionStorage.store` extrinsic and emits progress
 	/// events as the transaction moves through the network.
+	///
+	/// Before submitting, checks the account's on-chain authorization.
+	/// Returns an error immediately if authorization is missing, expired,
+	/// or insufficient (avoiding a wasted transaction submission).
 	///
 	/// Progress events emitted:
 	/// - `TransactionStatusEvent::Validated` - Transaction validated in pool
@@ -68,6 +139,11 @@ impl TransactionClient {
 		progress_callback: Option<ProgressCallback>,
 	) -> Result<StoreReceipt> {
 		let data_size = data.len() as u64;
+
+		// Authorization check before submission
+		let account = AccountId32::from(signer.public_key().0);
+		self.check_authorization_for_store(&account, 1, data_size).await?;
+
 		let tx = bulletin::tx().transaction_storage().store(data);
 
 		let mut progress = self
@@ -136,7 +212,7 @@ impl TransactionClient {
 
 							// Check for success
 							in_block.wait_for_success().await.map_err(|e| {
-								Error::StorageFailed(format!("Transaction failed: {e:?}"))
+								Error::TransactionFailed(format!("Transaction failed: {e:?}"))
 							})?;
 
 							break;
@@ -156,7 +232,7 @@ impl TransactionClient {
 									},
 								));
 							}
-							return Err(Error::StorageFailed(format!(
+							return Err(Error::TransactionFailed(format!(
 								"Transaction invalid: {message}"
 							)));
 						},
@@ -168,19 +244,19 @@ impl TransactionClient {
 									},
 								));
 							}
-							return Err(Error::StorageFailed(format!(
+							return Err(Error::TransactionFailed(format!(
 								"Transaction dropped: {message}"
 							)));
 						},
 						TxStatus::Error { message } => {
-							return Err(Error::StorageFailed(format!(
+							return Err(Error::TransactionFailed(format!(
 								"Transaction error: {message}"
 							)));
 						},
 					}
 				},
 				Err(e) => {
-					return Err(Error::StorageFailed(format!("Status error: {e:?}")));
+					return Err(Error::TransactionFailed(format!("Status error: {e:?}")));
 				},
 			}
 		}
@@ -208,28 +284,33 @@ impl TransactionClient {
 	}
 
 	/// Submit a transaction, wait for finalization, and return the block hash.
+	///
+	/// The `make_error` closure maps a formatted message into the appropriate
+	/// `Error` variant for the calling context (e.g. `Error::StorageFailed`,
+	/// `Error::RenewalFailed`).
 	async fn submit_and_finalize(
 		&self,
 		tx: &impl subxt::tx::Payload,
 		signer: &Keypair,
 		context: &str,
+		make_error: impl Fn(String) -> Error,
 	) -> Result<String> {
 		let in_block = self
 			.api
 			.tx()
 			.sign_and_submit_then_watch_default(tx, signer)
 			.await
-			.map_err(|e| Error::StorageFailed(format!("{context} failed: {e:?}")))?
+			.map_err(|e| make_error(format!("{context} failed: {e:?}")))?
 			.wait_for_finalized()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("{context} failed: {e:?}")))?;
+			.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
 
 		let block_hash = format!("{:?}", in_block.block_hash());
 
 		in_block
 			.wait_for_success()
 			.await
-			.map_err(|e| Error::StorageFailed(format!("{context} failed: {e:?}")))?;
+			.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
 
 		Ok(block_hash)
 	}
@@ -250,7 +331,9 @@ impl TransactionClient {
 			bytes,
 		);
 
-		let block_hash = self.submit_and_finalize(&tx, signer, "Authorization").await?;
+		let block_hash = self
+			.submit_and_finalize(&tx, signer, "Authorization", Error::TransactionFailed)
+			.await?;
 
 		Ok(AuthorizationReceipt { account: who, transactions, bytes, block_hash })
 	}
@@ -266,7 +349,9 @@ impl TransactionClient {
 	) -> Result<PreimageAuthorizationReceipt> {
 		let tx = bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
-		let block_hash = self.submit_and_finalize(&tx, signer, "Authorization").await?;
+		let block_hash = self
+			.submit_and_finalize(&tx, signer, "Authorization", Error::TransactionFailed)
+			.await?;
 
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash })
 	}
@@ -275,7 +360,8 @@ impl TransactionClient {
 	pub async fn renew(&self, block: u32, index: u32, signer: &Keypair) -> Result<RenewReceipt> {
 		let tx = bulletin::tx().transaction_storage().renew(block, index);
 
-		let block_hash = self.submit_and_finalize(&tx, signer, "Renew").await?;
+		let block_hash =
+			self.submit_and_finalize(&tx, signer, "Renew", Error::RenewalFailed).await?;
 
 		Ok(RenewReceipt { original_block: block, transaction_index: index, block_hash })
 	}
@@ -289,7 +375,8 @@ impl TransactionClient {
 		signer: &Keypair,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
-		self.submit_and_finalize(&tx, signer, "Refresh").await?;
+		self.submit_and_finalize(&tx, signer, "Refresh", Error::TransactionFailed)
+			.await?;
 		Ok(())
 	}
 
@@ -304,7 +391,8 @@ impl TransactionClient {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.refresh_preimage_authorization(content_hash);
-		self.submit_and_finalize(&tx, signer, "Refresh").await?;
+		self.submit_and_finalize(&tx, signer, "Refresh", Error::TransactionFailed)
+			.await?;
 		Ok(())
 	}
 
@@ -315,7 +403,8 @@ impl TransactionClient {
 		signer: &Keypair,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
-		self.submit_and_finalize(&tx, signer, "Removal").await?;
+		self.submit_and_finalize(&tx, signer, "Removal", Error::TransactionFailed)
+			.await?;
 		Ok(())
 	}
 
@@ -328,7 +417,8 @@ impl TransactionClient {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.remove_expired_preimage_authorization(content_hash);
-		self.submit_and_finalize(&tx, signer, "Removal").await?;
+		self.submit_and_finalize(&tx, signer, "Removal", Error::TransactionFailed)
+			.await?;
 		Ok(())
 	}
 }

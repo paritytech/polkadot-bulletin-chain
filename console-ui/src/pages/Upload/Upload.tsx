@@ -22,7 +22,8 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, CidCodec, HashAlgorithm, ProgressEvent, WaitFor } from "@bulletin/sdk";
+import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@bulletin/sdk";
+import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex } from "@/utils/format";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
@@ -52,6 +53,7 @@ export function Upload() {
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
   const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
   const [textData, setTextData] = useState("");
@@ -109,20 +111,6 @@ export function Upload() {
 
       // Create SDK client with user's signer
       const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
-
-      // Progress callback for transaction status updates
-      const handleProgress = (event: ProgressEvent) => {
-        console.log("SDK progress:", event);
-        if (event.type === "signed") {
-          setTxStatus("Transaction signed...");
-        } else if (event.type === "broadcasted") {
-          setTxStatus("Broadcasting to network...");
-        } else if (event.type === "in_block") {
-          setTxStatus(`Included in block #${event.blockNumber}...`);
-        } else if (event.type === "finalized") {
-          setTxStatus("Finalized!");
-        }
-      };
 
       // Use SDK to store data with progress callback
       const result = await bulletinClient

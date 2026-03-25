@@ -169,36 +169,71 @@ export enum AuthorizationScope {
 }
 
 /**
+ * Chunk progress event types
+ */
+export enum ChunkStatus {
+  ChunkStarted = "chunk_started",
+  ChunkCompleted = "chunk_completed",
+  ChunkFailed = "chunk_failed",
+  ManifestStarted = "manifest_started",
+  ManifestCreated = "manifest_created",
+  Completed = "completed",
+}
+
+/**
  * Progress event types for chunked uploads
  */
 export type ChunkProgressEvent =
-  | { type: "chunk_started"; index: number; total: number }
-  | { type: "chunk_completed"; index: number; total: number; cid: CID }
-  | { type: "chunk_failed"; index: number; total: number; error: Error }
-  | { type: "manifest_started" }
-  | { type: "manifest_created"; cid: CID }
-  | { type: "completed"; manifestCid?: CID }
+  | { type: ChunkStatus.ChunkStarted; index: number; total: number }
+  | { type: ChunkStatus.ChunkCompleted; index: number; total: number; cid: CID }
+  | {
+      type: ChunkStatus.ChunkFailed
+      index: number
+      total: number
+      error: Error
+    }
+  | { type: ChunkStatus.ManifestStarted }
+  | { type: ChunkStatus.ManifestCreated; cid: CID }
+  | { type: ChunkStatus.Completed; manifestCid?: CID }
+
+/**
+ * Transaction status event types
+ */
+export enum TxStatus {
+  Signed = "signed",
+  Validated = "validated",
+  Broadcasted = "broadcasted",
+  InBlock = "in_block",
+  Finalized = "finalized",
+  NoLongerInBlock = "no_longer_in_block",
+  Invalid = "invalid",
+  Dropped = "dropped",
+}
 
 /**
  * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
  */
 export type TransactionStatusEvent =
-  | { type: "signed"; txHash: string; chunkIndex?: number }
-  | { type: "broadcasted"; chunkIndex?: number }
+  | { type: TxStatus.Signed; txHash: string; chunkIndex?: number }
+  | { type: TxStatus.Validated; chunkIndex?: number }
+  | { type: TxStatus.Broadcasted; chunkIndex?: number }
   | {
-      type: "in_block"
+      type: TxStatus.InBlock
       blockHash: string
       blockNumber: number
       txIndex?: number
       chunkIndex?: number
     }
   | {
-      type: "finalized"
+      type: TxStatus.Finalized
       blockHash: string
       blockNumber: number
       txIndex?: number
       chunkIndex?: number
     }
+  | { type: TxStatus.NoLongerInBlock; chunkIndex?: number }
+  | { type: TxStatus.Invalid; error: string; chunkIndex?: number }
+  | { type: TxStatus.Dropped; error: string; chunkIndex?: number }
 
 /**
  * Combined progress event types
@@ -211,16 +246,82 @@ export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent
 export type ProgressCallback = (event: ProgressEvent) => void
 
 /**
+ * Error codes for the Bulletin SDK.
+ *
+ * These codes are consistent with the Rust SDK's `Error::code()` method.
+ */
+export enum ErrorCode {
+  EMPTY_DATA = "EMPTY_DATA",
+  DATA_TOO_LARGE = "DATA_TOO_LARGE",
+  CHUNK_TOO_LARGE = "CHUNK_TOO_LARGE",
+  INVALID_CHUNK_SIZE = "INVALID_CHUNK_SIZE",
+  INVALID_CONFIG = "INVALID_CONFIG",
+  INVALID_CID = "INVALID_CID",
+  INVALID_HASH_ALGORITHM = "INVALID_HASH_ALGORITHM",
+  CID_CALCULATION_FAILED = "CID_CALCULATION_FAILED",
+  DAG_ENCODING_FAILED = "DAG_ENCODING_FAILED",
+  INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
+  AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
+  TRANSACTION_FAILED = "TRANSACTION_FAILED",
+  CHUNK_FAILED = "CHUNK_FAILED",
+  MISSING_CHUNK = "MISSING_CHUNK",
+  TIMEOUT = "TIMEOUT",
+  UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
+}
+
+/** Error codes that are retryable */
+const RETRYABLE_CODES = new Set<ErrorCode>([
+  ErrorCode.TRANSACTION_FAILED,
+  ErrorCode.TIMEOUT,
+])
+
+/** Recovery hints per error code */
+const RECOVERY_HINTS: Record<ErrorCode, string> = {
+  [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
+  [ErrorCode.DATA_TOO_LARGE]: "Reduce data size or use chunked upload",
+  [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
+  [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 2 MiB",
+  [ErrorCode.INVALID_CONFIG]: "Check configuration parameters",
+  [ErrorCode.INVALID_CID]: "Verify CID format",
+  [ErrorCode.INVALID_HASH_ALGORITHM]:
+    "Use blake2b-256, sha2-256, or keccak-256",
+  [ErrorCode.CID_CALCULATION_FAILED]: "Verify data and hash algorithm",
+  [ErrorCode.DAG_ENCODING_FAILED]: "Check chunk CIDs and data integrity",
+  [ErrorCode.INSUFFICIENT_AUTHORIZATION]:
+    "Request additional authorization via authorizeAccount()",
+  [ErrorCode.AUTHORIZATION_FAILED]:
+    "Check that the account has authorizer privileges",
+  [ErrorCode.TRANSACTION_FAILED]:
+    "Verify transaction parameters and account nonce",
+  [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
+  [ErrorCode.MISSING_CHUNK]:
+    "Ensure all chunks are present with contiguous indices starting from 0",
+  [ErrorCode.TIMEOUT]: "Increase timeout or retry",
+  [ErrorCode.UNSUPPORTED_OPERATION]:
+    "This operation is not supported in this context",
+}
+
+/**
  * SDK error class
  */
 export class BulletinError extends Error {
   constructor(
     message: string,
-    public readonly code: string,
+    public readonly code: ErrorCode,
     override readonly cause?: unknown,
   ) {
     super(message, { cause })
     this.name = "BulletinError"
+  }
+
+  /** Whether this error is likely transient and retrying may succeed. */
+  get retryable(): boolean {
+    return RETRYABLE_CODES.has(this.code)
+  }
+
+  /** An actionable recovery suggestion for this error. */
+  get recoveryHint(): string {
+    return RECOVERY_HINTS[this.code] ?? "No recovery hint available"
   }
 }
 
