@@ -1397,9 +1397,8 @@ pub mod pallet {
 					|| sp_io::hashing::blake2_256(data),
 					context,
 				),
-				Call::<T>::store_with_cid_config { cid, data } => {
-					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context)
-				},
+				Call::<T>::store_with_cid_config { cid, data } =>
+					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
@@ -1466,10 +1465,10 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash)
 				},
-				Call::<T>::authorize_account { .. }
-				| Call::<T>::authorize_preimage { .. }
-				| Call::<T>::refresh_account_authorization { .. }
-				| Call::<T>::refresh_preimage_authorization { .. } => {
+				Call::<T>::authorize_account { .. } |
+				Call::<T>::authorize_preimage { .. } |
+				Call::<T>::refresh_account_authorization { .. } |
+				Call::<T>::refresh_preimage_authorization { .. } => {
 					// Verify that the signer satisfies the Authorizer origin.
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
