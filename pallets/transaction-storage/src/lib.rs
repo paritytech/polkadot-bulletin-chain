@@ -1112,7 +1112,7 @@ pub mod pallet {
 		}
 
 		fn is_inherent(call: &Self::Call) -> bool {
-			matches!(call, Call::check_proof { .. })
+			matches!(call, Call::check_proof { .. } | Call::process_auto_renewals { .. })
 		}
 	}
 
@@ -1121,6 +1121,12 @@ pub mod pallet {
 		type Call = Call<T>;
 
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+			// Inherent-style calls (check_proof, process_auto_renewals) are injected by
+			// the block author, not the transaction pool. Return a valid but empty
+			// transaction if one arrives here.
+			if Self::is_inherent(call) {
+				return Ok(ValidTransaction::default());
+			}
 			Self::check_unsigned(call, CheckContext::Validate)?.ok_or(IMPOSSIBLE.into())
 		}
 
@@ -1573,6 +1579,8 @@ pub mod pallet {
 						.into()
 					}))
 				},
+				// Mandatory inherent-style call — always allowed, no pool validation needed.
+				Call::<T>::process_auto_renewals { .. } => Ok(None),
 				_ => Err(InvalidTransaction::Call.into()),
 			}
 		}
