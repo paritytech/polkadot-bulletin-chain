@@ -65,6 +65,8 @@ pub trait WeightInfo {
 	fn process_auto_renewals() -> Weight;
 	fn enable_auto_renew() -> Weight;
 	fn disable_auto_renew() -> Weight;
+	fn validate_store(l: u32) -> Weight;
+	fn validate_renew() -> Weight;
 }
 
 /// Weights for pallet_transaction_storage using the Substrate node and recommended hardware.
@@ -169,6 +171,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
+	fn validate_store(l: u32) -> Weight {
+		T::DbWeight::get().reads_writes(6, 2)
+			.saturating_add(Weight::from_parts(6_912, 0).saturating_mul(l.into()))
+	}
+	fn validate_renew() -> Weight {
+		T::DbWeight::get().reads_writes(8, 2)
+	}
 }
 
 // For backwards compatibility and tests
@@ -265,5 +274,12 @@ impl WeightInfo for () {
 		Weight::from_parts(10_000_000, 1_000)
 			.saturating_add(RocksDbWeight::get().reads(1_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn validate_store(l: u32) -> Weight {
+		RocksDbWeight::get().reads_writes(6, 2)
+			.saturating_add(Weight::from_parts(6_912, 0).saturating_mul(l.into()))
+	}
+	fn validate_renew() -> Weight {
+		RocksDbWeight::get().reads_writes(8, 2)
 	}
 }

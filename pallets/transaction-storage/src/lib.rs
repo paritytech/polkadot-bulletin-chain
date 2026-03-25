@@ -18,8 +18,9 @@
 //! Transaction storage pallet. Indexes transactions and manages storage proofs.
 //!
 //! This pallet is designed to be used on chains with no transaction fees. It must be used with a
-//! `SignedExtension` implementation that calls the [`validate_signed`](Pallet::validate_signed)
-//! and [`pre_dispatch_signed`](Pallet::pre_dispatch_signed) functions.
+//! `TransactionExtension` implementation that calls the
+//! [`validate_signed`](Pallet::validate_signed) and
+//! [`pre_dispatch_signed`](Pallet::pre_dispatch_signed) functions.
 
 // Ensure we're `no_std` when compiling for Wasm.
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -43,7 +44,7 @@ use polkadot_sdk_frame::{
 	prelude::*,
 	traits::{
 		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
-		parameter_types,
+		parameter_types, OriginTrait,
 	},
 };
 use sp_transaction_storage_proof::{
@@ -66,8 +67,8 @@ pub use weights::WeightInfo;
 
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
-/// Default retention period for data (in blocks).
-pub const DEFAULT_RETENTION_PERIOD: u32 = 100800;
+/// Default retention period for data (in blocks). 14 days at 6s block time.
+pub const DEFAULT_RETENTION_PERIOD: u32 = 2 * 100800;
 parameter_types! {
 	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
 }
@@ -99,8 +100,21 @@ pub struct AuthorizationExtent {
 }
 
 /// The scope of an authorization.
-#[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
-enum AuthorizationScope<AccountId> {
+///
+/// This type is used both for storage keys and to indicate which authorization
+/// was consumed for a store/renew transaction (passed via custom origin).
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	Debug,
+	Encode,
+	Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
+pub enum AuthorizationScope<AccountId> {
 	/// Authorization for the given account to store arbitrary data.
 	Account(AccountId),
 	/// Authorization for anyone to store data with a specific hash.
@@ -108,6 +122,24 @@ enum AuthorizationScope<AccountId> {
 }
 
 type AuthorizationScopeFor<T> = AuthorizationScope<<T as frame_system::Config>::AccountId>;
+
+/// Describes the caller of a store/renew extrinsic after origin validation.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum AuthorizedCaller<AccountId> {
+	/// A signed transaction whose origin was transformed to
+	/// [`pallet::Origin::Authorized`] by [`extension::ValidateStorageCalls`].
+	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
+	/// A root call (e.g. via `sudo`).
+	Root,
+	/// An unsigned transaction validated by [`ValidateUnsigned`].
+	/// TODO: replaced by https://github.com/paritytech/polkadot-bulletin-chain/pull/194
+	Unsigned,
+}
+
+/// Convenience alias for [`AuthorizedCaller`] bound to a runtime's `AccountId`.
+pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::AccountId>;
+
+pub use extension::{CallInspector, MAX_WRAPPER_DEPTH};
 
 /// An authorization to store data.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
@@ -186,7 +218,11 @@ pub mod pallet {
 	}
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config:
+		frame_system::Config<
+		RuntimeOrigin: OriginTrait<PalletsOrigin: From<Origin<Self>> + TryInto<Origin<Self>>>,
+	>
+	{
 		/// The overarching event type.
 		#[allow(deprecated)]
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
@@ -274,11 +310,34 @@ pub mod pallet {
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
-	/// Data associated with an auto-renewal registration.
+  /// Data associated with an auto-renewal registration.
 	#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 	pub struct AutoRenewalData<AccountId> {
 		/// Account whose authorization will be consumed each time data is auto-renewed.
 		pub account: AccountId,
+	}
+
+	/// Custom origin for authorized signed transaction storage operations.
+	///
+	/// This origin is set by the [`extension::ValidateStorageCalls`] transaction extension
+	/// for signed transactions that pass authorization checks. Unsigned transactions
+	/// do not use this origin (they are validated via [`ValidateUnsigned`]).
+	#[pallet::origin]
+	#[derive(
+		Clone,
+		PartialEq,
+		Eq,
+		Debug,
+		codec::Encode,
+		codec::Decode,
+		codec::DecodeWithMemTracking,
+		scale_info::TypeInfo,
+		codec::MaxEncodedLen,
+	)]
+	pub enum Origin<T: Config> {
+		/// A signed transaction that has been authorized to store data.
+		/// Contains the signer and the scope of authorization that was consumed.
+		Authorized { who: T::AccountId, scope: AuthorizationScopeFor<T> },
 	}
 
 	#[pallet::hooks]
@@ -443,7 +502,8 @@ pub mod pallet {
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
-		pub fn store(_origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
+		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
+			let _caller = Self::ensure_authorized(origin)?;
 			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
 		}
 
@@ -457,10 +517,11 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
 		pub fn store_with_cid_config(
-			_origin: OriginFor<T>,
+			origin: OriginFor<T>,
 			cid: CidConfig,
 			data: Vec<u8>,
 		) -> DispatchResult {
+			let _caller = Self::ensure_authorized(origin)?;
 			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
@@ -479,10 +540,11 @@ pub mod pallet {
 		#[pallet::call_index(1)]
 		#[pallet::weight((T::WeightInfo::renew(), DispatchClass::Operational))]
 		pub fn renew(
-			_origin: OriginFor<T>,
+			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
 			index: u32,
 		) -> DispatchResultWithPostInfo {
+			let _caller = Self::ensure_authorized(origin)?;
 			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
 			// In the case of a regular unsigned transaction, this should have been checked by
@@ -983,6 +1045,10 @@ pub mod pallet {
 		pub byte_fee: BalanceOf<T>,
 		pub entry_fee: BalanceOf<T>,
 		pub retention_period: BlockNumberFor<T>,
+		/// Initial account authorizations as (account, transactions, bytes) tuples.
+		pub account_authorizations: Vec<(T::AccountId, u32, u64)>,
+		/// Initial preimage authorizations as (content_hash, max_size) tuples.
+		pub preimage_authorizations: Vec<(ContentHash, u64)>,
 	}
 
 	impl<T: Config> Default for GenesisConfig<T> {
@@ -991,6 +1057,8 @@ pub mod pallet {
 				byte_fee: 10u32.into(),
 				entry_fee: 1000u32.into(),
 				retention_period: DEFAULT_RETENTION_PERIOD.into(),
+				account_authorizations: Vec::new(),
+				preimage_authorizations: Vec::new(),
 			}
 		}
 	}
@@ -1001,6 +1069,28 @@ pub mod pallet {
 			ByteFee::<T>::put(self.byte_fee);
 			EntryFee::<T>::put(self.entry_fee);
 			RetentionPeriod::<T>::put(self.retention_period);
+			let expiration = T::AuthorizationPeriod::get();
+			for (who, transactions, bytes) in &self.account_authorizations {
+				let scope = AuthorizationScope::Account(who.clone());
+				Authorizations::<T>::insert(
+					&scope,
+					Authorization {
+						extent: AuthorizationExtent { transactions: *transactions, bytes: *bytes },
+						expiration,
+					},
+				);
+				Pallet::<T>::authorization_added(&scope);
+			}
+			for (content_hash, max_size) in &self.preimage_authorizations {
+				let scope = AuthorizationScope::Preimage(*content_hash);
+				Authorizations::<T>::insert(
+					&scope,
+					Authorization {
+						extent: AuthorizationExtent { transactions: 1, bytes: *max_size },
+						expiration,
+					},
+				);
+			}
 		}
 	}
 
@@ -1045,6 +1135,36 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// Validate that `origin` is one of the accepted caller types for store/renew
+		/// extrinsics, and return a typed description of the caller.
+		///
+		/// Accepted origins:
+		///
+		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
+		///   [`AuthorizedCaller::Signed`]
+		/// - Root → [`AuthorizedCaller::Root`]
+		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
+		///
+		/// Any other origin (including plain `Signed`) returns
+		/// [`DispatchError::BadOrigin`].
+		pub fn ensure_authorized(
+			origin: OriginFor<T>,
+		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
+			// 1. Try pallet::Origin::Authorized (set by ValidateStorageCalls extension)
+			if let Ok(Origin::Authorized { who, scope }) = origin.clone().into_caller().try_into() {
+				return Ok(AuthorizedCaller::Signed { who, scope });
+			}
+
+			// 2. Try root
+			if ensure_root(origin.clone()).is_ok() {
+				return Ok(AuthorizedCaller::Root);
+			}
+
+			// 3. Try none (unsigned)
+			ensure_none(origin)?;
+			Ok(AuthorizedCaller::Unsigned)
+		}
+
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
 		fn do_store(
@@ -1224,24 +1344,34 @@ pub mod pallet {
 			Self::authorization_extent(AuthorizationScope::Preimage(hash))
 		}
 
-		/// Returns the validity of the given call, signed by the given account.
+		/// Validate a signed TransactionStorage call.
 		///
-		/// This is equivalent to `validate_unsigned` but for signed transactions. It should be
-		/// called from a `SignedExtension` implementation.
-		pub fn validate_signed(who: &T::AccountId, call: &Call<T>) -> TransactionValidity {
-			Self::check_signed(who, call, CheckContext::Validate)?.ok_or(IMPOSSIBLE.into())
+		/// Returns `(ValidTransaction, Some(scope))` for store/renew calls (origin should be
+		/// transformed to carry authorization info).
+		/// Returns `(ValidTransaction, None)` for authorizer calls (origin unchanged).
+		/// Returns `Err(InvalidTransaction::Call)` for other calls.
+		///
+		/// This should be called from a `TransactionExtension` implementation.
+		pub fn validate_signed(
+			who: &T::AccountId,
+			call: &Call<T>,
+		) -> Result<(ValidTransaction, Option<AuthorizationScopeFor<T>>), TransactionValidityError>
+		{
+			let (valid_tx, scope) = Self::check_signed(who, call, CheckContext::Validate)?;
+			Ok((valid_tx.ok_or(IMPOSSIBLE)?, scope))
 		}
 
 		/// Check the validity of the given call, signed by the given account, and consume
 		/// authorization for it.
 		///
 		/// This is equivalent to `pre_dispatch` but for signed transactions. It should be called
-		/// from a `SignedExtension` implementation.
+		/// from a `TransactionExtension` implementation.
 		pub fn pre_dispatch_signed(
 			who: &T::AccountId,
 			call: &Call<T>,
 		) -> Result<(), TransactionValidityError> {
-			Self::check_signed(who, call, CheckContext::PreDispatch).map(|_| ())
+			let _ = Self::check_signed(who, call, CheckContext::PreDispatch)?;
+			Ok(())
 		}
 
 		/// Get ByteFee storage information from the outside of this pallet.
@@ -1452,7 +1582,10 @@ pub mod pallet {
 			who: &T::AccountId,
 			call: &Call<T>,
 			context: CheckContext,
-		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
+		) -> Result<
+			(Option<ValidTransaction>, Option<AuthorizationScopeFor<T>>),
+			TransactionValidityError,
+		> {
 			let (size, content_hash) = match call {
 				Call::<T>::store { data } => {
 					let content_hash = sp_io::hashing::blake2_256(data);
@@ -1474,11 +1607,14 @@ pub mod pallet {
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
-					return Ok(context.want_valid_transaction().then(|| ValidTransaction {
-						priority: T::StoreRenewPriority::get(),
-						longevity: T::StoreRenewLongevity::get(),
-						..Default::default()
-					}));
+					return Ok((
+						context.want_valid_transaction().then(|| ValidTransaction {
+							priority: T::StoreRenewPriority::get(),
+							longevity: T::StoreRenewLongevity::get(),
+							..Default::default()
+						}),
+						None,
+					));
 				},
 				Call::<T>::renew_content_hash { content_hash } => {
 					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
@@ -1501,6 +1637,7 @@ pub mod pallet {
 			// This allows anyone to store/renew pre-authorized content without consuming their
 			// own account authorization.
 			let consume = context.consume_authorization();
+
 			let used_preimage_auth = Self::check_authorization(
 				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
@@ -1516,17 +1653,31 @@ pub mod pallet {
 				)?;
 			}
 
-			Ok(context.want_valid_transaction().then(|| {
-				if used_preimage_auth {
-					Self::preimage_store_renew_valid_transaction(content_hash)
+			// Only build `ValidTransaction` metadata during pool validation, not block
+			// execution. The tx tag/priority differs depending on whether preimage or account
+			// authorization was used.
+			let (valid_tx, scope) = if context.want_valid_transaction() {
+				let (valid_tx, scope) = if used_preimage_auth {
+					(
+						Self::preimage_store_renew_valid_transaction(content_hash),
+						AuthorizationScope::Preimage(content_hash),
+					)
 				} else {
-					ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
-						.and_provides((who, content_hash))
-						.priority(T::StoreRenewPriority::get())
-						.longevity(T::StoreRenewLongevity::get())
-						.into()
-				}
-			}))
+					(
+						ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+							.and_provides((who, content_hash))
+							.priority(T::StoreRenewPriority::get())
+							.longevity(T::StoreRenewLongevity::get())
+							.into(),
+						AuthorizationScope::Account(who.clone()),
+					)
+				};
+				(Some(valid_tx), Some(scope))
+			} else {
+				(None, None)
+			};
+
+			Ok((valid_tx, scope))
 		}
 
 		/// Verifies that the provided proof corresponds to a randomly selected chunk from a list of
@@ -1585,6 +1736,8 @@ pub mod pallet {
 		}
 	}
 }
+
+pub mod extension;
 
 #[cfg(any(test, feature = "try-runtime"))]
 impl<T: Config> Pallet<T> {
