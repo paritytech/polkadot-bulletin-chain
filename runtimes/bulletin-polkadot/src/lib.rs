@@ -837,6 +837,7 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 /// NOTE: `ValidateStorageCalls` must come before `AllowedSignedCalls` because it transforms
 /// the origin for signed TransactionStorage calls, and `AllowedSignedCalls` needs to detect this.
 pub type TxExtension = (
+	frame_system::AuthorizeCall<Runtime>,
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
 	frame_system::CheckTxVersion<Runtime>,
