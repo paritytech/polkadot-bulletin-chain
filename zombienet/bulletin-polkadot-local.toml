@@ -13,8 +13,7 @@ rpc_port = 10000
 validator = true
 args = [
 	"--ipfs-server",
-	# Increase tx pool from 20->40 MiB
-	# "--pool-kbytes 40960",
+	"--pool-kbytes 65536",
 	"-lruntime=debug,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 ]
 
@@ -25,7 +24,6 @@ rpc_port = 12346
 validator = true
 args = [
 	"--ipfs-server",
-	# Increase tx pool from 20->40 MiB
-	# "--pool-kbytes 40960",
+	"--pool-kbytes 65536",
 	"-lruntime=debug,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,litep2p::ipfs::bitswap=debug",
 ]
