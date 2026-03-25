@@ -287,7 +287,8 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "Use blake2b-256, sha2-256, or keccak-256",
   [ErrorCode.CID_CALCULATION_FAILED]: "Verify data and hash algorithm",
   [ErrorCode.DAG_ENCODING_FAILED]: "Check chunk CIDs and data integrity",
-  [ErrorCode.INSUFFICIENT_AUTHORIZATION]: "Request additional authorization",
+  [ErrorCode.INSUFFICIENT_AUTHORIZATION]:
+    "Request additional authorization via authorizeAccount()",
   [ErrorCode.AUTHORIZATION_FAILED]:
     "Check that the account has authorizer privileges",
   [ErrorCode.TRANSACTION_FAILED]:

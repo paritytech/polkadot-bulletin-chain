@@ -147,7 +147,8 @@ impl Error {
 			Error::InvalidCid(_) => "Verify CID format",
 			Error::AuthorizationNotFound(_) =>
 				"Call authorizeAccount() or authorizePreimage() first",
-			Error::InsufficientAuthorization { .. } => "Request additional authorization",
+			Error::InsufficientAuthorization { .. } =>
+				"Request additional authorization via authorize_account()",
 			Error::AuthorizationExpired { .. } =>
 				"Call refreshAccountAuthorization() to extend expiry",
 			Error::StorageFailed(_) => "Check node connectivity and try again",

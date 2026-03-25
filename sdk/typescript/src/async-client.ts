@@ -25,6 +25,7 @@ import {
   type WaitFor,
 } from "./types.js"
 import {
+  estimateAuthorization,
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
@@ -117,6 +118,20 @@ export interface BulletinTypedApi {
     }
     Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
+    }
+  }
+  /** Optional query interface for on-chain storage reads (e.g., authorization checks) */
+  query?: {
+    TransactionStorage: {
+      Authorizations: {
+        getValue(scope: { type: string; value: unknown }): Promise<
+          | {
+              extent: { transactions: number; bytes: bigint }
+              expiration: number
+            }
+          | undefined
+        >
+      }
     }
   }
 }
@@ -551,6 +566,53 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * Authorization check before a store submission.
+   *
+   * If `api.query` is not available (optional interface), this silently returns.
+   * If authorization is missing or insufficient, throws `INSUFFICIENT_AUTHORIZATION`.
+   * Network errors propagate — if we can't query the chain, we can't submit either.
+   */
+  private async checkAccountAuthorization(
+    requiredTransactions: number,
+    requiredBytes: number,
+  ): Promise<void> {
+    if (!this.api.query) return
+
+    const { encodeAddress } = await import("@polkadot/util-crypto")
+    const address = encodeAddress(this.signer.publicKey)
+
+    const auth =
+      await this.api.query.TransactionStorage.Authorizations.getValue({
+        type: "Account",
+        value: address,
+      })
+
+    if (!auth) {
+      throw new BulletinError(
+        `No authorization found for account ${address}`,
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      )
+    }
+
+    const availableTransactions = auth.extent.transactions
+    const availableBytes = Number(auth.extent.bytes)
+
+    if (availableTransactions < requiredTransactions) {
+      throw new BulletinError(
+        `Insufficient authorization: need ${requiredTransactions} transactions, have ${availableTransactions}`,
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      )
+    }
+
+    if (availableBytes < requiredBytes) {
+      throw new BulletinError(
+        `Insufficient authorization: need ${requiredBytes} bytes, have ${availableBytes}`,
+        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      )
+    }
+  }
+
+  /**
    * Create a store transaction.
    *
    * The chain defaults to Raw (0x55) codec + Blake2b-256 hashing, so the plain
@@ -749,6 +811,22 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     const dataBytes = toBytes(data)
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
+    }
+
+    // Best-effort authorization check before submission
+    {
+      const willChunk =
+        !!chunkerConfig || dataBytes.length > this.config.chunkingThreshold
+      const chunkSize = chunkerConfig?.chunkSize ?? this.config.defaultChunkSize
+      const createManifest =
+        chunkerConfig?.createManifest ?? this.config.createManifest
+      const required = willChunk
+        ? estimateAuthorization(dataBytes.length, chunkSize, createManifest)
+        : { transactions: 1, bytes: dataBytes.length }
+      await this.checkAccountAuthorization(
+        required.transactions,
+        required.bytes,
+      )
     }
 
     // Decide whether to chunk based on threshold or explicit chunkerConfig
