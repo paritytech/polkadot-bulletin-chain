@@ -264,11 +264,13 @@ python3 scripts/cmd/cmd.py bench
 - **[TypeScript SDK](./sdk/typescript/)** - Browser and Node.js compatible
 
 Both SDKs provide:
-- ✅ Complete transaction submission (all 8 pallet operations)
-- ✅ Automatic chunking with configurable chunk size
+- ✅ All 8 pallet operations (store, authorize, renew, refresh, remove expired)
 - ✅ DAG-PB manifests (IPFS-compatible)
 - ✅ Authorization management (account and preimage)
 - ✅ Progress tracking via callbacks
+
+The **TypeScript SDK** includes automatic chunking with built-in transaction submission.
+The **Rust SDK** provides transaction submission via `TransactionClient` and offline chunking via `BulletinClient` (prepare-only; users submit chunks via subxt).
 
 **Quick Start**: See [sdk/README.md](./sdk/README.md)
 
