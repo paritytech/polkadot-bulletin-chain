@@ -1006,25 +1006,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
-name = "asset-hub-westend-emulated-chain"
-version = "0.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
-dependencies = [
- "asset-hub-westend-runtime",
- "bp-bridge-hub-westend",
- "cumulus-primitives-core",
- "emulated-integration-tests-common",
- "frame-support",
- "parachains-common",
- "sp-core",
- "sp-keyring",
- "staging-xcm",
- "staging-xcm-builder",
- "testnet-parachains-constants",
- "westend-emulated-chain",
-]
-
-[[package]]
 name = "asset-hub-westend-runtime"
 version = "0.15.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -2146,20 +2127,25 @@ dependencies = [
 name = "bulletin-westend-integration-tests"
 version = "0.1.0"
 dependencies = [
- "asset-hub-westend-emulated-chain",
  "asset-hub-westend-runtime",
  "bulletin-westend-runtime",
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",
  "parachains-common",
+ "polkadot-primitives",
+ "sc-consensus-grandpa",
+ "sp-authority-discovery",
+ "sp-consensus-babe",
+ "sp-consensus-beefy",
  "sp-core",
  "sp-keyring",
  "sp-runtime",
  "staging-xcm",
  "staging-xcm-executor",
- "westend-emulated-chain",
+ "testnet-parachains-constants",
  "westend-runtime",
+ "westend-runtime-constants",
  "xcm-emulator",
 ]
 
@@ -16670,25 +16656,6 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
-
-[[package]]
-name = "westend-emulated-chain"
-version = "0.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
-dependencies = [
- "emulated-integration-tests-common",
- "pallet-staking",
- "parachains-common",
- "polkadot-primitives",
- "sc-consensus-grandpa",
- "sp-authority-discovery",
- "sp-consensus-babe",
- "sp-consensus-beefy",
- "sp-core",
- "sp-runtime",
- "westend-runtime",
- "westend-runtime-constants",
-]
 
 [[package]]
 name = "westend-runtime"
