@@ -21,7 +21,7 @@ use pallet_bridge_messages::{
 	BridgedChainOf, LaneIdOf, ThisChainOf,
 };
 use pallet_bridge_parachains::ParachainHeaders;
-use pallet_transaction_storage::{
+use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
 };
 use runtime::{
@@ -39,7 +39,7 @@ use sp_runtime::{
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
 use std::collections::HashMap;
-use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
+use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 
 fn advance_block() {
 	let current_number = System::block_number();
@@ -280,7 +280,7 @@ fn construct_extrinsic(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_transaction_storage::extension::ValidateStorageCalls::<
+		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
 			Runtime,
 			runtime::StorageCallInspector,
 		>::default(),
@@ -1061,10 +1061,10 @@ fn allowed_signed_calls_preserves_storage_priority() {
 	});
 }
 
-/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+/// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
-	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
+	pallet_bulletin_transaction_storage::ensure_weight_sanity::<Runtime>(None);
 }
 
 // ============================================================================
@@ -1287,7 +1287,7 @@ fn wrapped_renew_requires_authorization() {
 	pallet_sudo::GenesisConfig::<Runtime> { key: Some(sudo_relayer_signer().into()) }
 		.assimilate_storage(&mut t)
 		.unwrap();
-	pallet_transaction_storage::GenesisConfig::<Runtime> {
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
 		byte_fee: 0,
 		entry_fee: 0,
@@ -1661,7 +1661,7 @@ fn max_recursion_depth_is_enforced() {
 		// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
 		let mut call: RuntimeCall =
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
-		for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+		for _ in 0..=pallet_bulletin_transaction_storage::MAX_WRAPPER_DEPTH {
 			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 		}
 

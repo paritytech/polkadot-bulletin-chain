@@ -2038,6 +2038,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletin-pallets-common"
+version = "0.1.0"
+dependencies = [
+ "pallet-proxy",
+ "pallet-sudo",
+ "pallet-utility",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+]
+
+[[package]]
 name = "bulletin-polkadot-runtime"
 version = "1.0.0"
 dependencies = [
@@ -2050,6 +2062,7 @@ dependencies = [
  "bp-runtime",
  "bp-test-utils",
  "bridge-runtime-common",
+ "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
  "frame-benchmarking",
  "frame-executive",
@@ -2081,7 +2094,6 @@ dependencies = [
  "pallet-validator-set",
  "pallet-xcm",
  "pallet-xcm-bridge-hub",
- "pallets-common",
  "parachains-common",
  "parity-scale-codec",
  "scale-info",
@@ -2153,6 +2165,7 @@ dependencies = [
 name = "bulletin-westend-runtime"
 version = "0.1.0"
 dependencies = [
+ "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
  "cumulus-pallet-aura-ext",
  "cumulus-pallet-parachain-system",
@@ -2186,7 +2199,6 @@ dependencies = [
  "pallet-utility",
  "pallet-xcm",
  "pallet-xcm-benchmarks",
- "pallets-common",
  "parachains-common",
  "parachains-runtimes-test-utils",
  "parity-scale-codec",
@@ -8216,8 +8228,8 @@ name = "pallet-bulletin-transaction-storage"
 version = "0.1.0"
 dependencies = [
  "array-bytes 6.2.3",
+ "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
- "pallets-common",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
@@ -9162,9 +9174,9 @@ dependencies = [
 name = "pallet-validator-set"
 version = "1.0.0"
 dependencies = [
+ "bulletin-pallets-common",
  "log",
  "pallet-session",
- "pallets-common",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
@@ -9306,18 +9318,6 @@ dependencies = [
  "staging-xcm",
  "staging-xcm-executor",
  "tracing",
-]
-
-[[package]]
-name = "pallets-common"
-version = "0.1.0"
-dependencies = [
- "pallet-proxy",
- "pallet-sudo",
- "pallet-utility",
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
 ]
 
 [[package]]

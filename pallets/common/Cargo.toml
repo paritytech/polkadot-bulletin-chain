@@ -1,5 +1,5 @@
 [package]
-name = "pallets-common"
+name = "bulletin-pallets-common"
 version = "0.1.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true

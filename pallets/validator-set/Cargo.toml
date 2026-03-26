@@ -21,19 +21,19 @@ pallet-session = { workspace = true, default-features = false, features = [
 
 [dev-dependencies]
 serde = { features = ["derive"], workspace = true }
-pallets-common = { workspace = true, default-features = false }
+bulletin-pallets-common = { workspace = true, default-features = false }
 
 [features]
 default = ['std']
 runtime-benchmarks = [
 	"pallet-session/runtime-benchmarks",
-	"pallets-common/runtime-benchmarks",
+	"bulletin-pallets-common/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-staking/runtime-benchmarks",
 ]
 std = [
 	"log/std",
-	"pallets-common/std",
+	"bulletin-pallets-common/std",
 	"sp-staking/std",
 	'codec/std',
 	'pallet-session/std',
@@ -42,6 +42,6 @@ std = [
 ]
 try-runtime = [
 	"pallet-session/try-runtime",
-	"pallets-common/try-runtime",
+	"bulletin-pallets-common/try-runtime",
 	'polkadot-sdk-frame/try-runtime',
 ]

@@ -51,7 +51,7 @@ use sp_transaction_storage_proof::{
 	encode_index, num_chunks, random_chunk, ChunkIndex, InherentError, TransactionStorageProof,
 	CHUNK_SIZE, INHERENT_IDENTIFIER,
 };
-use transaction_storage_primitives::{
+use bulletin_transaction_storage_primitives::{
 	cids::{calculate_cid, Cid, CidCodec, CidConfig, HashingAlgorithm, RAW_CODEC},
 	ContentHash,
 };

@@ -42,7 +42,7 @@ use polkadot_sdk_frame::{
 	traits::StorageVersion,
 };
 use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
-use transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
+use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;

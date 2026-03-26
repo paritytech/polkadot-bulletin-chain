@@ -87,7 +87,7 @@ pub mod v1 {
 		sp_runtime::traits::{BlakeTwo256, Hash},
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
-	use transaction_storage_primitives::{
+	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm, RAW_CODEC},
 		ContentHash,
 	};

@@ -26,9 +26,9 @@ use frame_support::{
 	traits::{Contains, EitherOfDiverse, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
-use pallet_transaction_storage::CallInspector;
+use pallet_bulletin_transaction_storage::CallInspector;
 use pallet_xcm::EnsureXcm;
-use pallets_common::{inspect_utility_wrapper, NoCurrency};
+use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 /// Provides test accounts for use with `EnsureSignedBy`.
@@ -50,7 +50,7 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
-/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find storage
 /// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
 ///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
@@ -60,7 +60,7 @@ parameter_types! {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct StorageCallInspector;
 
-impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
+impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<Vec<&RuntimeCall>> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
@@ -82,13 +82,13 @@ impl Contains<RuntimeCall> for StorageCallInspector {
 }
 
 /// The main business of the Bulletin chain.
-impl pallet_transaction_storage::Config for Runtime {
+impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
-	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bulletin_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;

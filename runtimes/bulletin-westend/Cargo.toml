@@ -38,8 +38,8 @@ pallet-timestamp = { workspace = true }
 pallet-utility = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
-pallet-transaction-storage = { workspace = true }
-pallets-common = { workspace = true }
+pallet-bulletin-transaction-storage = { workspace = true }
+bulletin-pallets-common = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
 sp-consensus-aura = { workspace = true }
@@ -85,7 +85,7 @@ testnet-parachains-constants = { features = ["westend"], workspace = true }
 [dev-dependencies]
 parachains-runtimes-test-utils = { workspace = true, default-features = true }
 sp-io = { workspace = true }
-transaction-storage-primitives = { workspace = true }
+bulletin-transaction-storage-primitives = { workspace = true }
 
 [build-dependencies]
 substrate-wasm-builder = { optional = true, workspace = true, default-features = true }
@@ -122,11 +122,11 @@ std = [
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
 	"pallet-transaction-payment/std",
-	"pallet-transaction-storage/std",
+	"pallet-bulletin-transaction-storage/std",
 	"pallet-utility/std",
 	"pallet-xcm-benchmarks?/std",
 	"pallet-xcm/std",
-	"pallets-common/std",
+	"bulletin-pallets-common/std",
 	"parachain-info/std",
 	"parachains-common/std",
 	"polkadot-parachain-primitives/std",
@@ -152,7 +152,7 @@ std = [
 	"substrate-wasm-builder",
 	"testnet-parachains-constants/std",
 	"tracing/std",
-	"transaction-storage-primitives/std",
+	"bulletin-transaction-storage-primitives/std",
 	"westend-runtime-constants/std",
 	"xcm-builder/std",
 	"xcm-executor/std",
@@ -178,11 +178,11 @@ runtime-benchmarks = [
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
-	"pallet-transaction-storage/runtime-benchmarks",
+	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-utility/runtime-benchmarks",
 	"pallet-xcm-benchmarks/runtime-benchmarks",
 	"pallet-xcm/runtime-benchmarks",
-	"pallets-common/runtime-benchmarks",
+	"bulletin-pallets-common/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
 	"polkadot-parachain-primitives/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
@@ -213,10 +213,10 @@ try-runtime = [
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
-	"pallet-transaction-storage/try-runtime",
+	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-utility/try-runtime",
 	"pallet-xcm/try-runtime",
-	"pallets-common/try-runtime",
+	"bulletin-pallets-common/try-runtime",
 	"parachain-info/try-runtime",
 	"parachains-common/try-runtime",
 	"polkadot-runtime-common/try-runtime",

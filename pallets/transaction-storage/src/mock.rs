@@ -18,10 +18,10 @@
 //! Test environment for transaction-storage pallet.
 
 use crate::{
-	self as pallet_transaction_storage, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	self as pallet_bulletin_transaction_storage, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use pallets_common::NoCurrency;
+use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
 
 type Block = MockBlock<Test>;
@@ -31,7 +31,7 @@ construct_runtime!(
 	pub enum Test
 	{
 		System: frame_system,
-		TransactionStorage: pallet_transaction_storage,
+		TransactionStorage: pallet_bulletin_transaction_storage,
 	}
 );
 
@@ -50,7 +50,7 @@ parameter_types! {
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
 }
 
-impl pallet_transaction_storage::Config for Test {
+impl pallet_bulletin_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
@@ -70,7 +70,7 @@ impl pallet_transaction_storage::Config for Test {
 pub fn new_test_ext() -> TestExternalities {
 	let t = RuntimeGenesisConfig {
 		system: Default::default(),
-		transaction_storage: pallet_transaction_storage::GenesisConfig::<Test> {
+		transaction_storage: pallet_bulletin_transaction_storage::GenesisConfig::<Test> {
 			retention_period: 10,
 			byte_fee: 2,
 			entry_fee: 200,
