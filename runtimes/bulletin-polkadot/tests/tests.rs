@@ -15,6 +15,7 @@ use bulletin_polkadot_runtime::{
 	},
 	AccountId, BridgePolkadotGrandpa, BridgePolkadotMessages,
 };
+use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use frame_support::{assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get};
 use pallet_bridge_messages::{
 	messages_generation::{encode_all_messages, encode_lane_data, prepare_messages_storage_proof},
@@ -39,7 +40,6 @@ use sp_runtime::{
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
 use std::collections::HashMap;
-use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 
 fn advance_block() {
 	let current_number = System::block_number();

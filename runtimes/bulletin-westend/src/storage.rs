@@ -21,6 +21,7 @@ use super::{
 	RuntimeHoldReason,
 };
 use alloc::vec::Vec;
+use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
 	traits::{Contains, EitherOfDiverse, SortedMembers},
@@ -28,7 +29,6 @@ use frame_support::{
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::CallInspector;
 use pallet_xcm::EnsureXcm;
-use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 /// Provides test accounts for use with `EnsureSignedBy`.
@@ -50,8 +50,9 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
-/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find storage
-/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// storage calls inside wrapper extrinsics so it can recursively validate and consume
+/// authorization.
 ///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
 /// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM

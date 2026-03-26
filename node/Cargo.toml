@@ -89,8 +89,8 @@ runtime-benchmarks = [
 	"frame-benchmarking-cli/runtime-benchmarks",
 	"frame-benchmarking/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
-	"pallet-transaction-payment/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
+	"pallet-transaction-payment/runtime-benchmarks",
 	"polkadot-primitives/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
@@ -101,7 +101,7 @@ try-runtime = [
 	"bulletin-polkadot-runtime/try-runtime",
 	"frame-support/try-runtime",
 	"frame-try-runtime/try-runtime",
-	"pallet-transaction-payment/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
+	"pallet-transaction-payment/try-runtime",
 	"sp-runtime/try-runtime",
 ]

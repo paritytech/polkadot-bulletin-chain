@@ -27,14 +27,14 @@ bulletin-pallets-common = { workspace = true, default-features = false }
 [features]
 default = ['std']
 runtime-benchmarks = [
-	"pallet-session/runtime-benchmarks",
 	"bulletin-pallets-common/runtime-benchmarks",
+	"pallet-session/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-staking/runtime-benchmarks",
 ]
 std = [
-	"log/std",
 	"bulletin-pallets-common/std",
+	"log/std",
 	"sp-staking/std",
 	'codec/std',
 	'pallet-session/std',
@@ -42,7 +42,7 @@ std = [
 	'scale-info/std',
 ]
 try-runtime = [
-	"pallet-session/try-runtime",
 	"bulletin-pallets-common/try-runtime",
+	"pallet-session/try-runtime",
 	'polkadot-sdk-frame/try-runtime',
 ]

@@ -35,13 +35,13 @@ tracing = { version = "0.1.41", default-features = false }
 westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.git", package = "westend-runtime-constants", rev = "f9df32360c6c22747f60b3ff58243890eecafc8e", default-features = false }
 
 # Local workspace members
-bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
-bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
-pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
-pallet-bulletin-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
-pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 bulletin-pallets-common = { path = "pallets/common", default-features = false }
+bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
 bulletin-transaction-storage-primitives = { path = "pallets/transaction-storage/primitives", default-features = false }
+bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
+pallet-bulletin-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
+pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
+pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "f9df32360c6c22747f60b3ff58243890eecafc8e", default-features = false }

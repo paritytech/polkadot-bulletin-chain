@@ -367,8 +367,9 @@ impl SortedMembers<AccountId> for TestAccounts {
 	}
 }
 
-/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find storage
-/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// storage calls inside wrapper extrinsics so it can recursively validate and consume
+/// authorization.
 ///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
 /// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM
@@ -555,11 +556,11 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
-use pallet_bulletin_transaction_storage::{CallInspector, MAX_WRAPPER_DEPTH};
 use bulletin_pallets_common::{
 	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, proxy_inner_calls,
 	utility_inner_calls,
 };
+use pallet_bulletin_transaction_storage::{CallInspector, MAX_WRAPPER_DEPTH};
 
 /// Extract the signer from an origin that may be either `Signed` or `Authorized`.
 ///
@@ -571,7 +572,9 @@ fn extract_signer(origin: &RuntimeOrigin) -> Option<AccountId> {
 	}
 	match origin.caller() {
 		OriginCaller::TransactionStorage(
-			pallet_bulletin_transaction_storage::pallet::Origin::<Runtime>::Authorized { who, .. },
+			pallet_bulletin_transaction_storage::pallet::Origin::<Runtime>::Authorized {
+				who, ..
+			},
 		) => Some(who.clone()),
 		_ => None,
 	}
@@ -847,7 +850,10 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<Runtime, StorageCallInspector>,
+	pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+		Runtime,
+		StorageCallInspector,
+	>,
 	AllowedSignedCalls,
 	BridgeRejectObsoleteHeadersAndMessages,
 );

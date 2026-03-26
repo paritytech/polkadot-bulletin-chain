@@ -16,6 +16,7 @@
 
 #![cfg(test)]
 
+use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
@@ -38,7 +39,6 @@ use sp_runtime::{
 };
 use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
-use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -615,13 +615,13 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 fn people_chain_can_authorize_storage_with_transact() {
 	// Prepare call.
 	let account = Sr25519Keyring::Ferdie;
-	let authorize_call = RuntimeCall::TransactionStorage(pallet_bulletin_transaction_storage::Call::<
-		Runtime,
-	>::authorize_account {
-		who: account.to_account_id(),
-		transactions: 16,
-		bytes: 1024,
-	});
+	let authorize_call = RuntimeCall::TransactionStorage(
+		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
+			who: account.to_account_id(),
+			transactions: 16,
+			bytes: 1024,
+		},
+	);
 
 	// Execute XCM as People chain origin would do with `Transact -> Origin::Xcm`.
 	ExtBuilder::<Runtime>::default()
@@ -659,13 +659,13 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 	let people_next_location = Location::new(1, [Parachain(5140)]);
 
 	let account = Sr25519Keyring::Ferdie;
-	let authorize_call = RuntimeCall::TransactionStorage(pallet_bulletin_transaction_storage::Call::<
-		Runtime,
-	>::authorize_account {
-		who: account.to_account_id(),
-		transactions: 16,
-		bytes: 1024,
-	});
+	let authorize_call = RuntimeCall::TransactionStorage(
+		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
+			who: account.to_account_id(),
+			transactions: 16,
+			bytes: 1024,
+		},
+	);
 
 	ExtBuilder::<Runtime>::default()
 		.with_collators(vec![AccountId::from(ALICE)])

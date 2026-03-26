@@ -35,13 +35,13 @@ runtime-benchmarks = [
 	"polkadot-sdk-frame/runtime-benchmarks",
 ]
 std = [
-	"codec/std",
 	"bulletin-pallets-common/std",
+	"bulletin-transaction-storage-primitives/std",
+	"codec/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-transaction-storage-proof/std",
 	"tracing/std",
-	"bulletin-transaction-storage-primitives/std",
 ]
 try-runtime = [
 	"bulletin-pallets-common/try-runtime",
