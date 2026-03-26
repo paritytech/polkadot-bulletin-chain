@@ -151,9 +151,6 @@
 
 extern crate alloc;
 
-// Re-export codec for users
-pub use codec;
-
 // Core modules (pub(crate) — public API is exposed via re-exports and prelude)
 pub(crate) mod authorization;
 pub(crate) mod chunker;
