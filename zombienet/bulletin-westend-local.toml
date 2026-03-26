@@ -39,8 +39,7 @@ p2p_port = 10001
 rpc_port = 10000
 args = [
 	"--ipfs-server",
-	# Increase tx pool from 20->64 MiB
-	# "--pool-kbytes 65536",
+	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# Embedded relay chain args (after "--"):
 	# Use -:--port to exclude zombienet's auto-generated --port flag,
@@ -59,8 +58,7 @@ p2p_port = 12347
 rpc_port = 12346
 args = [
 	"--ipfs-server",
-	# Increase tx pool from 20->64 MiB
-	# "--pool-kbytes 65536",
+	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# Embedded relay chain args (after "--"):
 	"--",

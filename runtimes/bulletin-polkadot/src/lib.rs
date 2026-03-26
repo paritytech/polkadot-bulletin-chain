@@ -201,7 +201,7 @@ parameter_types! {
 		EquivocationReportPeriodInEpochs::get() * (EPOCH_DURATION_IN_BLOCKS as u64);
 
 
-	pub const AuthorizationPeriod: BlockNumber = 7 * DAYS;
+	pub const AuthorizationPeriod: BlockNumber = 90 * DAYS;
 	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
 	pub const StoreRenewLongevity: TransactionLongevity = DAYS as TransactionLongevity;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
