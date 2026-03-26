@@ -395,5 +395,110 @@ mod benchmarks {
 		Ok(())
 	}
 
+	#[benchmark]
+	fn enable_auto_renew() -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let caller: T::AccountId = whitelisted_caller();
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+
+		// Authorize account and store data
+		TransactionStorage::<T>::authorize_account(
+			origin as T::RuntimeOrigin,
+			caller.clone(),
+			10,
+			T::MaxTransactionSize::get() as u64 * 10,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
+		run_to_block::<T>(1u32.into());
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), content_hash);
+
+		assert_last_event::<T>(
+			Event::AutoRenewEnabled { content_hash, who: caller }.into(),
+		);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn disable_auto_renew() -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let caller: T::AccountId = whitelisted_caller();
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+
+		// Authorize, store, advance, then enable auto-renew
+		TransactionStorage::<T>::authorize_account(
+			origin as T::RuntimeOrigin,
+			caller.clone(),
+			10,
+			T::MaxTransactionSize::get() as u64 * 10,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
+		run_to_block::<T>(1u32.into());
+		TransactionStorage::<T>::enable_auto_renew(
+			RawOrigin::Signed(caller.clone()).into(),
+			content_hash,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), content_hash);
+
+		assert_last_event::<T>(
+			Event::AutoRenewDisabled { content_hash, who: caller }.into(),
+		);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn process_auto_renewals() -> Result<(), BenchmarkError> {
+		let origin = T::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let caller: T::AccountId = whitelisted_caller();
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+
+		// Authorize and store data
+		TransactionStorage::<T>::authorize_account(
+			origin as T::RuntimeOrigin,
+			caller.clone(),
+			10,
+			T::MaxTransactionSize::get() as u64 * 10,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
+
+		// Finalize block 0 to move BlockTransactions → Transactions(0)
+		run_to_block::<T>(1u32.into());
+
+		// Read the stored TransactionInfo to build PendingAutoRenewals manually.
+		// (We can't use run_to_block through expiry because on_finalize would panic
+		// when PendingAutoRenewals is non-empty and process_auto_renewals hasn't run.)
+		let tx_info = Transactions::<T>::get(BlockNumberFor::<T>::zero())
+			.and_then(|txs| txs.into_iter().next())
+			.ok_or(BenchmarkError::Stop("no transactions at block 0"))?;
+
+		let renewal_data = AutoRenewalData { account: caller.clone() };
+
+		// Directly populate PendingAutoRenewals (simulating what on_initialize does)
+		let mut pending = PendingAutoRenewals::<T>::get();
+		pending
+			.try_push((content_hash, tx_info, renewal_data))
+			.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
+		PendingAutoRenewals::<T>::put(&pending);
+
+		#[extrinsic_call]
+		_(RawOrigin::None);
+
+		assert!(PendingAutoRenewals::<T>::get().is_empty());
+		Ok(())
+	}
+
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
 }
