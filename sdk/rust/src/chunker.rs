@@ -12,9 +12,11 @@ use alloc::vec::Vec;
 /// is 8 MiB, but chunks larger than 2 MiB are not well-supported by Bitswap peers.
 pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
-/// Maximum file size allowed (64 MiB).
+/// Maximum file size the SDK will chunk in a single operation (64 MiB).
 ///
-/// Files larger than this must be handled by the application directly.
+/// For files larger than this, the application must split the data into
+/// segments of at most 64 MiB and call the chunker on each segment
+/// independently, managing the relationship between segments itself.
 pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
 
 /// Default chunk size (1 MiB).

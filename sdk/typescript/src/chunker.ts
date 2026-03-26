@@ -16,7 +16,8 @@ import {
 /** Maximum chunk size allowed (2 MiB, Bitswap compatibility limit) */
 export const MAX_CHUNK_SIZE = 2 * 1024 * 1024
 
-/** Maximum file size allowed (64 MiB) */
+/** Maximum file size the SDK will chunk in a single operation (64 MiB).
+ * For larger files, split into segments of at most 64 MiB and chunk each independently. */
 export const MAX_FILE_SIZE = 64 * 1024 * 1024
 
 /**
