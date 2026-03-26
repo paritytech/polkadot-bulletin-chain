@@ -67,7 +67,7 @@
 //! ### Step 1: Prepare the Operation
 //!
 //! ```ignore
-//! use bulletin_sdk_rust::{BulletinClient, types::StoreOptions};
+//! use bulletin_sdk_rust::{BulletinClient, StoreOptions};
 //!
 //! let client = BulletinClient::new();
 //! let data = b"Hello, Bulletin!".to_vec();
@@ -154,20 +154,20 @@ extern crate alloc;
 // Re-export codec for users
 pub use codec;
 
-// Core modules
-pub mod authorization;
-pub mod chunker;
-pub mod cid;
-pub mod client;
-pub mod dag;
-pub mod renewal;
-pub mod storage;
-pub mod types;
-pub mod utils;
+// Core modules (pub(crate) — public API is exposed via re-exports and prelude)
+pub(crate) mod authorization;
+pub(crate) mod chunker;
+pub(crate) mod cid;
+pub(crate) mod client;
+pub(crate) mod dag;
+pub(crate) mod renewal;
+pub(crate) mod storage;
+pub(crate) mod types;
+pub(crate) mod utils;
 
 // Transaction submission client (std-only)
 #[cfg(feature = "std")]
-pub mod transaction;
+pub(crate) mod transaction;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
