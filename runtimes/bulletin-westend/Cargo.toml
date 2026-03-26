@@ -6,6 +6,7 @@ edition.workspace = true
 description = "Westend's Bulletin parachain runtime"
 license = "Apache-2.0"
 repository.workspace = true
+publish = false
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
