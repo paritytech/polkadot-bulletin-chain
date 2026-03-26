@@ -8,7 +8,7 @@
     "/dns/bulletin-polkadot.bootnode.amforc.com/tcp/29999/wss/p2p/12D3KooWRdsUXZMXWV57UsBTe2oMHTekrupVVx9G1uXakFvZGHce",
     "/dns/bulletin-polkadot.bootnode.amforc.com/tcp/30044/p2p/12D3KooWRdsUXZMXWV57UsBTe2oMHTekrupVVx9G1uXakFvZGHce"
   ],
-  "telemetryEndpoints": null,
+  "telemetryEndpoints": [["wss://telemetry.polkadot.io/submit/", 0]],
   "protocolId": "dot-bulletin",
   "properties": null,
   "lightSyncState": null,
