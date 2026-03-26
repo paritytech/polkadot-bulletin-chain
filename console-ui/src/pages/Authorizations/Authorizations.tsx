@@ -19,7 +19,7 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash, HashAlgorithm, WaitFor } from "@bulletin/sdk";
+import { getContentHash, HashAlgorithm, WaitFor, BulletinError } from "@bulletin/sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex, hexToBytes } from "@/utils/format";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
@@ -420,7 +420,14 @@ function FaucetAuthorizePreimagePanel() {
       fetchPreimageAuthorizations(api);
     } catch (err) {
       console.error("Preimage authorization failed:", err);
-      setSubmitError(err instanceof Error ? err.message : "Authorization failed");
+
+      if (err instanceof BulletinError) {
+        setSubmitError(`${err.message} (Hint: ${err.recoveryHint})`);
+      } else if (err instanceof Error) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError(String(err));
+      }
     } finally {
       setIsSubmitting(false);
       setTxStatus(null);
@@ -711,19 +718,13 @@ function FaucetAuthorizeAccountPanel() {
     } catch (err) {
       console.error("Authorization failed:", err);
 
-      let errorMessage = "Authorization failed";
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === "object" && err !== null) {
-        const errObj = err as any;
-        if (errObj.type === "Invalid" && errObj.value?.type === "Payment") {
-          errorMessage = "Payment error: Alice account has insufficient balance to pay transaction fees. Please fund Alice's account or use a local dev chain where Alice has initial funds.";
-        } else {
-          errorMessage = JSON.stringify(err);
-        }
+      if (err instanceof BulletinError) {
+        setSubmitError(`${err.message} (Hint: ${err.recoveryHint})`);
+      } else if (err instanceof Error) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError(String(err));
       }
-
-      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
       setTxStatus(null);

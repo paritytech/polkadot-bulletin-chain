@@ -43,13 +43,79 @@
  */
 
 export { CID } from "multiformats/cid"
-export * from "./async-client.js"
-export * from "./chunker.js"
-export * from "./dag.js"
-export * from "./mock-client.js"
-export * from "./preparer.js"
-export * from "./types.js"
-export * from "./utils.js"
+
+// async-client: core client, builders, and public interfaces
+export {
+  AsyncBulletinClient,
+  AuthCallBuilder,
+  type AuthCallOptions,
+  type BulletinClientInterface,
+  type BulletinTypedApi,
+  CallBuilder,
+  type CallOptions,
+  StoreBuilder,
+  type SubmitFn,
+  type TransactionReceipt,
+} from "./async-client.js"
+
+// chunker: data splitting and reassembly
+export {
+  FixedSizeChunker,
+  MAX_CHUNK_SIZE,
+  MAX_FILE_SIZE,
+  reassembleChunks,
+} from "./chunker.js"
+
+// dag: DAG-PB manifest building
+export { type DagManifest, UnixFsDagBuilder } from "./dag.js"
+
+// mock-client: testing support
+export {
+  MockBulletinClient,
+  type MockClientConfig,
+  type MockOperation,
+} from "./mock-client.js"
+
+// preparer: offline CID calculation and chunking
+export { BulletinPreparer } from "./preparer.js"
+
+// types: enums, interfaces, error class, and constants
+export {
+  AuthorizationScope,
+  BulletinError,
+  type Chunk,
+  type ChunkDetails,
+  type ChunkedStoreResult,
+  type ChunkerConfig,
+  type ChunkProgressEvent,
+  ChunkStatus,
+  CidCodec,
+  type ClientConfig,
+  DEFAULT_CHUNKER_CONFIG,
+  DEFAULT_STORE_OPTIONS,
+  ErrorCode,
+  HashAlgorithm,
+  type ProgressCallback,
+  type ProgressEvent,
+  type StoreOptions,
+  type StoreResult,
+  type TransactionStatusEvent,
+  TxStatus,
+  WaitFor,
+} from "./types.js"
+
+// utils: CID utilities, hashing, and authorization estimation
+export {
+  calculateCid,
+  cidFromBytes,
+  cidToBytes,
+  convertCid,
+  estimateAuthorization,
+  getContentHash,
+  parseCid,
+  toBytes,
+  validateChunkSize,
+} from "./utils.js"
 
 /**
  * SDK version
