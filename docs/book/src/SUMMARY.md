@@ -23,5 +23,5 @@
     - [Chunked Uploads](./rust/chunked-uploads.md)
     - [Renewal](./rust/renewal.md)
     - [Error Handling](./rust/error-handling.md)
-    - [Mock Testing](./rust/mock-testing.md)
+    - [Testing](./rust/mock-testing.md)
     - [no_std Support](./rust/no_std.md)

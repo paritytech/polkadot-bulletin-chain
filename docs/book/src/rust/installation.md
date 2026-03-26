@@ -38,9 +38,9 @@ let client = TransactionClient::new("ws://localhost:10000").await?;
 let receipt = client.store(data, &signer).await?;
 ```
 
-### Option 2: AsyncBulletinClient (BYOC)
+### Option 2: BulletinClient (Prepare Only)
 
-For advanced use cases like connection reuse or light client integration, use `AsyncBulletinClient` with your own subxt client:
+For advanced use cases where you manage your own subxt client (connection reuse, light clients, custom submission):
 
 ```toml
 [dependencies]
@@ -48,4 +48,12 @@ bulletin-sdk-rust = "0.1"
 subxt = "0.44"
 subxt-signer = { version = "0.44", features = ["sr25519"] }
 tokio = { version = "1", features = ["full"] }
+```
+
+```rust
+use bulletin_sdk_rust::prelude::*;
+
+let client = BulletinClient::new();
+let operation = client.prepare_store(data, StoreOptions::default())?;
+// Submit via your own subxt client
 ```

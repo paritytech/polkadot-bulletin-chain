@@ -82,7 +82,7 @@ if let Err(e) = client.store(data).send().await {
 }
 ```
 
-## Error Variants
+## Error Variant Reference
 
 ### Data Validation Errors (Non-Retryable)
 
@@ -101,40 +101,35 @@ if let Err(e) = client.store(data).send().await {
 | `InvalidCid(msg)` | `INVALID_CID` | Verify CID format |
 | `CidCalculationFailed(msg)` | `CID_CALCULATION_FAILED` | Verify data and hash algorithm |
 | `DagEncodingFailed(msg)` | `DAG_ENCODING_FAILED` | Check chunk CIDs and data integrity |
-| `DagDecodingFailed(msg)` | `DAG_DECODING_FAILED` | Verify DAG-PB data format |
 
 ### Authorization Errors
 
 | Variant | Code | Retryable | Recovery Hint |
 |---|---|---|---|
-| `AuthorizationNotFound(msg)` | `AUTHORIZATION_NOT_FOUND` | No | Call `authorize_account()` first |
-| `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | No | Request additional authorization |
-| `AuthorizationExpired { expired_at, current_block }` | `AUTHORIZATION_EXPIRED` | Yes | Refresh authorization |
-| `AuthorizationFailed(msg)` | `AUTHORIZATION_FAILED` | No | Check authorizer privileges |
+| `AuthorizationNotFound(msg)` | `AUTHORIZATION_NOT_FOUND` | No | Call authorizeAccount() or authorizePreimage() first |
+| `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | No | Request additional authorization via authorize_account() |
+| `AuthorizationExpired { expired_at, current_block }` | `AUTHORIZATION_EXPIRED` | Yes | Call refreshAccountAuthorization() to extend expiry |
 
 ### Network & Transaction Errors (Retryable)
 
 | Variant | Code | Recovery Hint |
 |---|---|---|
-| `NetworkError(msg)` | `NETWORK_ERROR` | Check network connectivity |
+| `NetworkError(msg)` | `NETWORK_ERROR` | Check network connectivity to the RPC endpoint |
 | `StorageFailed(msg)` | `STORAGE_FAILED` | Check node connectivity and try again |
-| `TransactionFailed(msg)` | `TRANSACTION_FAILED` | Verify transaction parameters and nonce |
-| `RetrievalFailed(msg)` | `RETRIEVAL_FAILED` | Data may not be available yet; try again |
-| `RenewalFailed(msg)` | `RENEWAL_FAILED` | Check that storage hasn't expired |
-| `Timeout(msg)` | `TIMEOUT` | Increase timeout or retry |
+| `TransactionFailed(msg)` | `TRANSACTION_FAILED` | Verify transaction parameters and account nonce |
+| `RetrievalFailed(msg)` | `RETRIEVAL_FAILED` | The data may not be available yet; try again |
+| `RenewalFailed(msg)` | `RENEWAL_FAILED` | Check that storage hasn't expired, then retry |
 
 ### Other Errors (Non-Retryable)
 
 | Variant | Code | Recovery Hint |
 |---|---|---|
-| `ChunkingFailed(msg)` | `CHUNKING_FAILED` | Verify data integrity and chunker config |
-| `RenewalNotFound { block, index }` | `RENEWAL_NOT_FOUND` | Verify block number and extrinsic index |
-| `UnsupportedOperation(msg)` | `UNSUPPORTED_OPERATION` | Operation not supported in this context |
-| `RetryExhausted(msg)` | `RETRY_EXHAUSTED` | Check underlying cause |
+| `ChunkingFailed(msg)` | `CHUNKING_FAILED` | Verify data integrity and chunker configuration |
+| `RenewalNotFound { block, index }` | `RENEWAL_NOT_FOUND` | Verify the block number and extrinsic index |
 
-## Transaction Status Events
+## Progress Events
 
-When using progress callbacks, you receive `TransactionStatusEvent`s that track the lifecycle of a transaction:
+When using progress callbacks, you receive `ProgressEvent` which wraps either a chunk progress event or a transaction status event:
 
 ```rust
 use std::sync::Arc;
@@ -155,7 +150,9 @@ let receipt = client.store_with_progress(
 ).await?;
 ```
 
-### Event Variants
+### Transaction Status Events (`TransactionStatusEvent`)
+
+Track the lifecycle of a submitted transaction:
 
 | Variant | Description |
 |---|---|
@@ -178,9 +175,41 @@ let event = TransactionStatusEvent::Finalized {
 assert_eq!(event.description(), "Transaction finalized in block #42 (0xabc)");
 ```
 
+### Chunk Progress Events (`ChunkProgressEvent`)
+
+Track progress of chunked uploads:
+
+| Variant | Description |
+|---|---|
+| `ChunkStarted { index, total }` | A chunk upload has started |
+| `ChunkCompleted { index, total, cid }` | A chunk uploaded successfully |
+| `ChunkFailed { index, total, error }` | A chunk upload failed |
+| `ManifestStarted` | Manifest creation started |
+| `ManifestCreated { cid }` | Manifest created and stored |
+| `Completed { manifest_cid }` | All uploads completed |
+
+### Combined `ProgressEvent` Enum
+
+The `ProgressEvent` enum wraps both event types:
+
+```rust
+pub enum ProgressEvent {
+    Chunk(ChunkProgressEvent),
+    Transaction(TransactionStatusEvent),
+}
+```
+
+Convenience constructors are available:
+
+```rust
+let event = ProgressEvent::chunk_started(0, 5);
+let event = ProgressEvent::tx_validated();
+let event = ProgressEvent::tx_finalized("0xabc".into(), Some(42), None);
+```
+
 ## Cross-SDK Consistency
 
-Error codes overlap between the Rust and TypeScript SDKs where applicable. The Rust `Error::code()` method returns the same `SCREAMING_SNAKE_CASE` string as the TypeScript `ErrorCode` enum value for shared codes:
+Error codes are consistent between the Rust and TypeScript SDKs where applicable. The Rust `Error::code()` method returns the same `SCREAMING_SNAKE_CASE` string as the TypeScript `ErrorCode` enum:
 
 | Rust | TypeScript | Code String |
 |---|---|---|
@@ -188,7 +217,11 @@ Error codes overlap between the Rust and TypeScript SDKs where applicable. The R
 | `Error::TransactionFailed(_)` | `ErrorCode.TRANSACTION_FAILED` | `"TRANSACTION_FAILED"` |
 | `Error::InsufficientAuthorization { .. }` | `ErrorCode.INSUFFICIENT_AUTHORIZATION` | `"INSUFFICIENT_AUTHORIZATION"` |
 
-Some codes exist only in one SDK (e.g. `NETWORK_ERROR`, `STORAGE_FAILED`, `RENEWAL_NOT_FOUND` are Rust-only; `MISSING_CHUNK` is TypeScript-only). The `is_retryable()` / `retryable` sets also differ: Rust includes more network-related codes while TypeScript covers `TRANSACTION_FAILED` and `TIMEOUT`.
+Some codes exist only in one SDK:
+- **Rust-only**: `NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `RENEWAL_NOT_FOUND`, `AUTHORIZATION_NOT_FOUND`, `AUTHORIZATION_EXPIRED`, `CHUNKING_FAILED`, `FILE_TOO_LARGE`
+- **TypeScript-only**: `MISSING_CHUNK`, `DATA_TOO_LARGE`, `TIMEOUT`, `UNSUPPORTED_OPERATION`
+
+The `is_retryable()` / `retryable` sets also differ: Rust includes more network-related codes (`NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `AUTHORIZATION_EXPIRED`), while TypeScript covers `TRANSACTION_FAILED` and `TIMEOUT`.
 
 ## Common Error Patterns
 
@@ -203,7 +236,7 @@ match client.store(data).send().await {
         tracing::error!(need, available, "Insufficient authorization");
     }
     Err(Error::AuthorizationExpired { expired_at, current_block }) => {
-        tracing::error!(expired_at, current_block, "Authorization expired");
+        tracing::error!(expired_at, current_block, "Authorization expired, refreshing...");
         // Refresh authorization
     }
     Ok(result) => {
