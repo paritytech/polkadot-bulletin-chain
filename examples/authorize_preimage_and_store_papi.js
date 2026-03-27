@@ -26,7 +26,7 @@ const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
  * @param {number|null} mhCode - Multihash code (null for default)
  * @param {object|null} client - Client for unsigned transactions
  */
-async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, signer, signerAddress, cidCodec, mhCode, client, wsUrl) {
+async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, signer, signerAddress, cidCodec, mhCode, client) {
     logSection(testName);
 
     // Data to store
@@ -61,7 +61,7 @@ async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, 
     }
 
     // Store data
-    const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client, wsUrl);
+    const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
     logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
     // Read back from IPFS
@@ -110,8 +110,7 @@ async function main() {
             null,       // no signer address
             null,       // default codec
             null,       // default hash
-            client,
-            NODE_WS
+            client
         );
 
         // Test 2: Signed store with preimage auth and custom CID config (raw + SHA2-256)
@@ -124,8 +123,7 @@ async function main() {
             whoAddress,     // signer address for account auth
             0x55,           // raw
             0x12,           // sha2-256
-            client,
-            NODE_WS
+            client
         );
 
         logTestResult(true, 'Authorize Preimage and Store Test');

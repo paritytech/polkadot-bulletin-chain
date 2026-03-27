@@ -3,7 +3,7 @@ import assert from 'assert';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 import { CHUNK_SIZE, toHex, toHashingEnum } from './common.js';
-import { bareToGeneralTx, getRuntimeSpecName, getExtensionDefaults } from './general_tx.js';
+import { createGeneralSigner } from './general_tx.js';
 
 // Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
 function toBinary(data) {
@@ -109,7 +109,7 @@ export async function authorizePreimage(
     }
 }
 
-export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null, wsUrl = null) {
+export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null) {
     console.log('⬆️ Storing data with length=', data.length);
 
     let expectedCid;
@@ -128,7 +128,7 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
         tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
     }
 
-    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, {}, wsUrl);
+    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
     return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
@@ -139,22 +139,8 @@ export const TX_MODE_IN_POOL = "in-tx-pool";
 
 const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds or 30 blocks
 
-// Cache for extension defaults (fetched once per WS URL)
-let cachedExtensionDefaults = null;
-
-/**
- * Get the default extension bytes for unsigned general transactions.
- * Queries the runtime version to determine the runtime, then returns the
- * appropriate default extension bytes. Cached after first call.
- */
-async function getExtensionDefaultsForRuntime(wsUrl) {
-    if (cachedExtensionDefaults) return cachedExtensionDefaults;
-
-    const specName = await getRuntimeSpecName(wsUrl);
-    console.log(`📋 Runtime spec: ${specName}`);
-    cachedExtensionDefaults = getExtensionDefaults(specName);
-    return cachedExtensionDefaults;
-}
+// Singleton general signer for unsigned transactions (reusable across calls)
+const generalSigner = createGeneralSigner();
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
@@ -171,7 +157,7 @@ const TX_MODE_CONFIG = {
     },
 };
 
-export async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}, wsUrl = null) {
+export async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
         throw new Error(`Unhandled txMode: ${txMode}`);
@@ -180,18 +166,12 @@ export async function waitForTransaction(tx, signer = null, txName, txMode = TX_
     // Get the observable - either signed or unsigned (general)
     let observable;
     if (signer === null) {
-        console.log(`⬆️ Submitting unsigned ${txName}`);
-        if (Object.keys(txOpts).length > 0) {
-            throw new Error(`txOpts not supported for unsigned transactions`);
-        }
+        console.log(`⬆️ Submitting unsigned ${txName} as general transaction`);
         // With #[pallet::authorize], unsigned transactions must be submitted as "general"
         // extrinsics (with extension pipeline) rather than "bare" extrinsics (which bypass
         // all extensions including AuthorizeCall).
-        const bareTx = await tx.getBareTx();
-        const extensionDefaults = await getExtensionDefaultsForRuntime(wsUrl || 'ws://127.0.0.1:10000');
-        const generalTx = bareToGeneralTx(bareTx, extensionDefaults);
-        console.log(`🔄 Converted bare tx to general tx for AuthorizeCall extension`);
-        observable = client.submitAndWatch(generalTx);
+        // See: https://github.com/polkadot-api/polkadot-api/issues/760
+        observable = tx.signSubmitAndWatch(generalSigner, txOpts);
     } else {
         observable = tx.signSubmitAndWatch(signer, txOpts);
     }
