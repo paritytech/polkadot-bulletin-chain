@@ -23,22 +23,10 @@ default: dev
 
 # ── Local Development ────────────────────────────────────────────────
 
-# Start parachain (zombienet) and vite dev server
-dev runtime="bulletin-westend-runtime":
+# Start vite dev server
+dev 
     #!/usr/bin/env bash
     set -e
-
-    echo "🚀 Starting local dev environment (parachain)..."
-
-    TEST_DIR="$(mktemp -d /tmp/bulletin-dev-XXXXX)/test"
-    mkdir -p "$TEST_DIR"
-    echo "   Test directory: $TEST_DIR"
-
-    # Start parachain via zombienet (reuses examples justfile)
-    just setup "$TEST_DIR" "{{ runtime }}"
-
-    # Cleanup on exit
-    trap "echo ''; echo '🛑 Stopping services...'; just teardown '$TEST_DIR'" EXIT INT TERM
 
     # Run vite dev server in foreground
     echo "   Starting vite dev server..."
