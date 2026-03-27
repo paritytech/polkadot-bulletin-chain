@@ -1,15 +1,10 @@
 # Console UI - Just Commands
 #
-# Local development and E2E testing for the Bulletin Chain console UI.
+# Local development and testing for the Bulletin Console UI.
 #
 # Quick start:
 #   just dev              - Start vite dev server
 #   just test             - Run integration Playwright tests (chain must be running)
-#   just test-e2e         - Full E2E: zombienet + Docker IPFS + integration tests
-#
-# Prerequisites for local dev:
-#   polkadot, polkadot-omni-node, polkadot-prepare-worker, polkadot-execute-worker
-#   must be in PATH. Run `../scripts/setup_parachain_prerequisites.sh` to set up.
 #
 # See `just --list` for all available recipes.
 
