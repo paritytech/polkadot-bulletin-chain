@@ -217,10 +217,13 @@ jobs:
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
-      - name: Run console-ui tests
+      - name: Install console-ui dependencies and run Playwright tests
         working-directory: console-ui
         run: |
-          just test
+          npm ci
+          npx papi generate
+          npx playwright install --with-deps chromium
+          npx playwright test
 
       - name: Upload console-ui tests report
         if: ${{ !cancelled() }}
