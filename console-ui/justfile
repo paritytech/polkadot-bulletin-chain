@@ -29,11 +29,6 @@ dev
     echo "   Starting vite dev server..."
     npm run dev
 
-# ── Testing ──────────────────────────────────────────────────────────
-
-# Run integration Playwright tests (chain must already be running on ws://localhost:10000)
-test: install ensure-browsers
-    npx playwright test
 # ── Helpers ──────────────────────────────────────────────────────────
 
 # Install npm dependencies
@@ -43,3 +38,9 @@ install:
 # Install Playwright browsers (only if missing)
 ensure-browsers:
     npx playwright install --with-deps chromium
+
+# ── Testing ──────────────────────────────────────────────────────────
+
+# Run integration Playwright tests (chain must already be running on ws://localhost:10000)
+test: install ensure-browsers
+    npx playwright test
