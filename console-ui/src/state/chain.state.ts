@@ -1,9 +1,10 @@
-import { createClient, PolkadotClient } from "polkadot-api";
+import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
 import { getWsProvider } from "@polkadot-api/ws-provider";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
+import { bulletin_westend, bulletin_paseo, web3_storage } from "@polkadot-api/descriptors";
 
 export type StorageType = "bulletin" | "web3storage";
 
@@ -83,6 +84,20 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
   },
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const DESCRIPTORS: Record<string, Record<string, any>> = {
+  bulletin: {
+    local: bulletin_westend,
+    westend: bulletin_westend,
+    paseo: bulletin_paseo,
+    previewnet: bulletin_westend,
+  },
+  web3storage: {
+    local: web3_storage,
+    westend: web3_storage,
+  },
+};
+
 // No-op WebSocket that never connects. Used to silence the PAPI provider's
 // internal reconnection loop after we switch away from a network.
 // Without this, getSyncProvider keeps retrying with real WebSocket connections
@@ -131,8 +146,8 @@ export interface ChainState {
   status: "disconnected" | "connecting" | "connected" | "error";
   error?: string;
   client?: PolkadotClient;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  api?: any;
+  // Using bulletin_westend as the base type; all bulletin chains share the same core pallets
+  api?: TypedApi<typeof bulletin_westend>;
   blockNumber?: number;
   chainName?: string;
   specVersion?: number;
@@ -166,8 +181,7 @@ const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
 const errorSubject = new BehaviorSubject<string | undefined>(undefined);
 const clientSubject = new BehaviorSubject<PolkadotClient | undefined>(undefined);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const apiSubject = new BehaviorSubject<any>(undefined);
+const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_westend> | undefined>(undefined);
 const blockNumberSubject = new BehaviorSubject<number | undefined>(undefined);
 const chainInfoSubject = new BehaviorSubject<{
   chainName?: string;
@@ -246,8 +260,8 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     const client = createClient(provider);
     clientSubject.next(client);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const api: any = client.getUnsafeApi();
+    const descriptor = DESCRIPTORS[storageTypeSubject.getValue()]?.[networkId] ?? bulletin_westend;
+    const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
     apiSubject.next(api);
 
     // Get chain info from runtime constants and RPC
