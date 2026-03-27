@@ -94,6 +94,7 @@ function AccountAuthorizationsTab() {
               size="icon"
               onClick={handleRefresh}
               disabled={isLoading || !api || !selectedAccount}
+              data-testid="refresh-account-auth"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -255,6 +256,7 @@ function PreimageAuthorizationsTab() {
               size="icon"
               onClick={handleRefresh}
               disabled={isLoading || !api}
+              data-testid="refresh-preimage-list"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -457,6 +459,7 @@ function FaucetAuthorizePreimagePanel() {
                 onChange={(e) => setPreimageHash(e.target.value)}
                 className="font-mono"
                 disabled={isSubmitting}
+                data-testid="preimage-hash-input"
               />
               {isComputing && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
