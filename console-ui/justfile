@@ -13,9 +13,6 @@
 #
 # See `just --list` for all available recipes.
 
-# Paths
-root_dir       := justfile_directory() / ".."
-examples_dir   := root_dir / "examples"
 
 # ── Defaults ─────────────────────────────────────────────────────────
 
