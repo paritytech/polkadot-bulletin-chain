@@ -49,7 +49,7 @@ npm run preview
 
 ### Local Development
 
-1. Start a local parachain network (zombienet + Docker IPFS):
+1. Start a local console-ui:
    ```bash
    cd console-ui && just dev
    ```
