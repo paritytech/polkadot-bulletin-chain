@@ -220,7 +220,6 @@ jobs:
       - name: Run console-ui tests
         working-directory: console-ui
         run: |
-          npx papi generate
           just test
 
       - name: Upload console-ui tests report
