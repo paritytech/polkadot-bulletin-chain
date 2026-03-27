@@ -100,4 +100,3 @@ install:
 # Install Playwright browsers (only if missing)
 ensure-browsers:
     npx playwright install --with-deps chromium
-
