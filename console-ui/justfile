@@ -31,7 +31,7 @@ ensure-browsers:
 # ── Local Development ────────────────────────────────────────────────
 
 # Start vite dev server
-dev 
+dev: 
     #!/usr/bin/env bash
     set -e
 
