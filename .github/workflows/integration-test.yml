@@ -219,8 +219,7 @@ jobs:
 
       - name: Run console-ui tests
         working-directory: console-ui
-        run: |
-          just test
+        run: just test
 
       - name: Upload console-ui tests report
         if: ${{ !cancelled() }}
