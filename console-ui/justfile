@@ -39,4 +39,5 @@ dev:
 
 # Run integration Playwright tests (chain must already be running on ws://localhost:10000)
 test: install ensure-browsers
+    npx papi generate
     npx playwright test
