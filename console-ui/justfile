@@ -32,6 +32,7 @@ dev:
 
     # Run vite dev server in foreground
     echo "   Starting vite dev server..."
+    npx papi generate
     npm run dev
 
 # ── Testing ──────────────────────────────────────────────────────────
