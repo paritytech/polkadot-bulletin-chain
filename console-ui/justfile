@@ -101,9 +101,3 @@ install:
 ensure-browsers:
     npx playwright install --with-deps chromium
 
-# Generate PAPI descriptors from a running node
-papi-generate ws_url="ws://localhost:10000":
-    #!/usr/bin/env bash
-    set -e
-    echo "🔧 Generating PAPI descriptors from {{ ws_url }}..."
-    npx papi add -w "{{ ws_url }}" bulletin
