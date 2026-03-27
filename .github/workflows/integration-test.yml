@@ -221,7 +221,8 @@ jobs:
         working-directory: console-ui
         run: |
           npm ci
-          just test
+          npx playwright install --with-deps chromium
+          npx playwright test
 
       - name: Upload console-ui tests report
         if: ${{ !cancelled() }}
