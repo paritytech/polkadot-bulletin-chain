@@ -220,7 +220,6 @@ jobs:
       - name: Run console-ui tests
         working-directory: console-ui
         run: |
-          npm ci
           just test
 
       - name: Upload console-ui tests report
