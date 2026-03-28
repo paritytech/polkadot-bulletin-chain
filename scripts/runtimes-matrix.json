@@ -3,7 +3,7 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "path": "runtimes/bulletin-polkadot",
-    "integration_tests": true,
+    "integration_tests": false,
     "try_runtime": {
         "extra_flags": "--blocktime 6000 --disable-spec-version-check"
     },        

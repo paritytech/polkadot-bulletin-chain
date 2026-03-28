@@ -230,7 +230,7 @@ export function Upload() {
 
         if (useUnsigned) {
           // Unsigned submission via bareTx
-          tx.getBareTx().then((bareTx) => {
+          tx.getBareTx().then((bareTx: any) => {
             subscription = client.submitAndWatch(bareTx).subscribe({
               next: handleEvent,
               error: handleError,
@@ -351,6 +351,7 @@ export function Upload() {
                   value={uploadResult.cid}
                   readOnly
                   className="font-mono text-sm"
+                  data-testid="cid-display"
                 />
                 <Button
                   variant="outline"
