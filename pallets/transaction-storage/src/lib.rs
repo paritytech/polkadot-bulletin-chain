@@ -892,7 +892,7 @@ pub mod pallet {
 			cid_codec: CidCodec,
 		) -> DispatchResult {
 			let data_len = data.len() as u32;
-			
+
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
