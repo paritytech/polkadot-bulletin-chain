@@ -47,7 +47,7 @@ function ConnectionStatus() {
     <div className="flex items-center gap-2 text-sm">
       <div className={cn("w-2 h-2 rounded-full", statusColors[status])} />
       {status === "connected" && blockNumber !== undefined && (
-        <Badge variant="secondary" className="font-mono text-xs">
+        <Badge variant="secondary" className="font-mono text-xs" data-testid="block-number">
           {formatBlockNumber(blockNumber)}
         </Badge>
       )}

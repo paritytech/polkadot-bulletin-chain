@@ -433,6 +433,7 @@ export function Download() {
                       value={peerMultiaddrs}
                       onChange={(e) => setPeerMultiaddrs(e.target.value)}
                       placeholder="/ip4/127.0.0.1/tcp/30334/ws/p2p/<peer-id>"
+                      data-testid="peer-multiaddrs"
                       disabled={connectionStatus === "connecting" || isConnected}
                       className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
                       rows={3}
@@ -557,6 +558,7 @@ export function Download() {
                   value={gatewayUrl}
                   onChange={(e) => setGatewayUrl(e.target.value)}
                   placeholder="https://ipfs.example.com"
+                  data-testid="gateway-url-input"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 font-mono"
                 />
                 <p className="text-xs text-muted-foreground">

@@ -31,3 +31,9 @@ console-ui/tsconfig.tsbuildinfo
 console-ui/public/docs/
 console-ui/public/sdk-docs/
 docs/book/book/
+
+# Playwright
+console-ui/test-results/
+console-ui/playwright-report/
+console-ui/blob-report/
+console-ui/playwright/.cache/

@@ -55,9 +55,9 @@ npm run preview
 
 ### Local Development
 
-1. Start a local Bulletin Chain node:
+1. Start a local console-ui:
    ```bash
-   ./target/release/polkadot-bulletin-chain --dev --ipfs-server
+   cd console-ui && just dev
    ```
 
 2. The UI will auto-connect to `ws://localhost:10000`
