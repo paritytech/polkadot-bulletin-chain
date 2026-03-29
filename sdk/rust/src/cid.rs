@@ -13,7 +13,7 @@ use scale_info::TypeInfo;
 
 // Re-export CID types from transaction-storage-primitives
 pub use transaction_storage_primitives::{
-	cids::{calculate_cid, Cid, CidConfig, CidData, CidError, HashingAlgorithm},
+	cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
 	ContentHash,
 };
 
@@ -78,20 +78,20 @@ pub fn cid_to_bytes(cid_data: &CidData) -> Result<Cid> {
 }
 
 /// Parse CID from bytes.
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", test))]
 pub fn cid_from_bytes(bytes: &[u8]) -> Result<cid::Cid> {
 	cid::Cid::try_from(bytes)
 		.map_err(|e| Error::InvalidCid(alloc::format!("Failed to parse CID from bytes: {e:?}")))
 }
 
 /// Convert CID to base32 string representation.
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", test))]
 pub fn cid_to_string(cid: &cid::Cid) -> String {
 	cid.to_string()
 }
 
 /// Parse CID from base32 string.
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", test))]
 pub fn cid_from_string(s: &str) -> Result<cid::Cid> {
 	use core::str::FromStr;
 	cid::Cid::from_str(s)
@@ -99,6 +99,7 @@ pub fn cid_from_string(s: &str) -> Result<cid::Cid> {
 }
 
 /// Helper to convert multihash code to HashingAlgorithm.
+#[cfg(test)]
 pub fn multihash_code_to_algorithm(code: u64) -> Option<HashingAlgorithm> {
 	match code {
 		0xb220 => Some(HashingAlgorithm::Blake2b256),

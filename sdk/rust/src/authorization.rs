@@ -125,31 +125,6 @@ impl AuthorizationManager {
 	}
 }
 
-/// Helper functions for authorization (requires std for subxt integration).
-#[cfg(feature = "std")]
-pub mod helpers {
-	use super::*;
-
-	/// Build authorization request parameters for account-based auth.
-	///
-	/// Returns: (transactions, max_size)
-	pub fn build_account_auth_params(
-		data_size: u64,
-		num_chunks: usize,
-		include_manifest: bool,
-	) -> (u32, u64) {
-		let manager = AuthorizationManager::new();
-		manager.calculate_requirements(data_size, num_chunks, include_manifest)
-	}
-
-	/// Build authorization request parameters for preimage-based auth.
-	///
-	/// Returns: (content_hash, max_size)
-	pub fn build_preimage_auth_params(content_hash: [u8; 32], data_size: u64) -> ([u8; 32], u64) {
-		(content_hash, data_size)
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;

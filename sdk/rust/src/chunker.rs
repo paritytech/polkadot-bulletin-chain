@@ -111,6 +111,7 @@ impl Chunker for FixedSizeChunker {
 /// - All chunks have consistent `total_chunks` values (belong to same file)
 /// - The number of chunks matches the expected `total_chunks`
 /// - Chunk indices are sequential starting from 0
+#[cfg(test)]
 pub fn reassemble_chunks(chunks: &[Chunk]) -> Result<Vec<u8>> {
 	if chunks.is_empty() {
 		return Err(Error::EmptyData);
