@@ -1291,14 +1291,15 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 #[test]
 fn generate_benchmark_proof() {
 	// Generates the PROOF constant for benchmarking.rs.
+	// The benchmark sets parent_hash to Default::default() (all zeros) before verifying,
+	// so we use all zeros as the randomness source here.
+	//
 	// Run with: cargo test -p pallet-transaction-storage generate_benchmark_proof -- --nocapture
-	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE;
-	let mut transactions = Vec::new();
-	for _ in 0..DEFAULT_MAX_BLOCK_TRANSACTIONS {
-		transactions.push(vec![0u8; tx_size as usize]);
-	}
-	let content_hash = vec![0u8; 32];
-	let proof = build_proof(content_hash.as_slice(), transactions).unwrap().unwrap();
+	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
+	let transactions: Vec<Vec<u8>> =
+		(0..DEFAULT_MAX_BLOCK_TRANSACTIONS).map(|_| vec![0u8; tx_size]).collect();
+	let random_hash = [0u8; 32];
+	let proof = build_proof(&random_hash, transactions).unwrap().unwrap();
 	let encoded = proof.encode();
 	println!("PROOF (hex): {}", encoded.iter().map(|b| format!("{b:02x}")).collect::<String>());
 }
