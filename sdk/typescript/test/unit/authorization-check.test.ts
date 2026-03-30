@@ -109,7 +109,7 @@ describe("Authorization Check", () => {
       expect(result.cid).toBeDefined()
     })
 
-    it("should propagate network errors from query", async () => {
+    it("should skip check gracefully when query throws (network error)", async () => {
       const client = await createClientWithQuery({
         TransactionStorage: {
           Authorizations: {
@@ -120,12 +120,15 @@ describe("Authorization Check", () => {
         },
       })
 
-      await expect(
-        client.store(Binary.fromText("hello")).withWaitFor("in_block").send(),
-      ).rejects.toThrow("Network timeout")
+      // Should not throw — check is best-effort, lets the chain validate
+      const result = await client
+        .store(Binary.fromText("hello"))
+        .withWaitFor("in_block")
+        .send()
+      expect(result.cid).toBeDefined()
     })
 
-    it("should throw INSUFFICIENT_AUTHORIZATION when no authorization exists", async () => {
+    it("should skip check gracefully when no authorization exists", async () => {
       const client = await createClientWithQuery({
         TransactionStorage: {
           Authorizations: {
@@ -134,11 +137,13 @@ describe("Authorization Check", () => {
         },
       })
 
-      await expect(
-        client.store(Binary.fromText("hello")).withWaitFor("in_block").send(),
-      ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      })
+      // Should not throw — authorization not found could be a timing issue,
+      // so we proceed and let the chain validate
+      const result = await client
+        .store(Binary.fromText("hello"))
+        .withWaitFor("in_block")
+        .send()
+      expect(result.cid).toBeDefined()
     })
 
     it("should throw INSUFFICIENT_AUTHORIZATION when transactions insufficient", async () => {
@@ -203,11 +208,14 @@ describe("Authorization Check", () => {
       expect(result.cid).toBeDefined()
     })
 
-    it("should verify error is BulletinError instance", async () => {
+    it("should verify insufficient auth error is BulletinError instance", async () => {
       const client = await createClientWithQuery({
         TransactionStorage: {
           Authorizations: {
-            getValue: async () => undefined,
+            getValue: async () => ({
+              extent: { transactions: 0, bytes: BigInt(0) },
+              expiration: 999999,
+            }),
           },
         },
       })

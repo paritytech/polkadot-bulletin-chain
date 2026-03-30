@@ -566,11 +566,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Authorization check before a store submission.
+   * Best-effort authorization check before a store submission.
    *
    * If `api.query` is not available (optional interface), this silently returns.
-   * If authorization is missing or insufficient, throws `INSUFFICIENT_AUTHORIZATION`.
-   * Network errors propagate — if we can't query the chain, we can't submit either.
+   * If authorization is explicitly insufficient (numbers too low), throws
+   * `INSUFFICIENT_AUTHORIZATION`. If the query fails or returns nothing (e.g.,
+   * timing issue after recent authorization), silently proceeds and lets the
+   * chain validate.
    */
   private async checkAccountAuthorization(
     requiredTransactions: number,
@@ -578,21 +580,23 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   ): Promise<void> {
     if (!this.api.query) return
 
-    const { encodeAddress } = await import("@polkadot/util-crypto")
-    const address = encodeAddress(this.signer.publicKey)
+    let auth: { extent: { transactions: number; bytes: bigint } } | undefined
+    try {
+      const { encodeAddress } = await import("@polkadot/util-crypto")
+      const address = encodeAddress(this.signer.publicKey)
 
-    const auth =
-      await this.api.query.TransactionStorage.Authorizations.getValue({
+      auth = await this.api.query.TransactionStorage.Authorizations.getValue({
         type: "Account",
         value: address,
       })
-
-    if (!auth) {
-      throw new BulletinError(
-        `No authorization found for account ${address}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
+    } catch {
+      // Query failed (network error, etc.) — proceed and let the chain validate
+      return
     }
+
+    // Authorization not found — could be a timing issue (just authorized),
+    // so proceed and let the chain validate rather than blocking
+    if (!auth) return
 
     const availableTransactions = auth.extent.transactions
     const availableBytes = Number(auth.extent.bytes)
