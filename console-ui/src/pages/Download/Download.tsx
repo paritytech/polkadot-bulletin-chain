@@ -26,12 +26,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { formatBytes, bytesToHex } from "@/utils/format";
+import { formatBytes, bytesToHex, estimateBlockDate, formatBlockDuration, formatBlockNumber } from "@/utils/format";
 import { CID } from "multiformats/cid";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
-import { useNetwork } from "@/state/chain.state";
+import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
+import { lookupCidOnChain, type CidOnChainInfo } from "@/state/storage.state";
 
 const P2P_MULTIADDRS: Record<string, string> = {
   local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
@@ -66,6 +67,8 @@ function getDefaultMultiaddrs(networkId: string): string {
 export function Download() {
   const [searchParams, setSearchParams] = useSearchParams();
   const network = useNetwork();
+  const blockNumber = useBlockNumber();
+  const api = useApi();
   const storageHistory = useStorageHistory();
 
   // Filter history for current network
@@ -87,6 +90,11 @@ export function Download() {
 
   const [copied, setCopied] = useState(false);
   const [displayMode, setDisplayMode] = useState<"text" | "hex" | "preview">("text");
+
+  // On-chain CID lookup
+  const [cidLookup, setCidLookup] = useState<CidOnChainInfo | null>(null);
+  const [cidLookupLoading, setCidLookupLoading] = useState(false);
+  const [cidLookupDone, setCidLookupDone] = useState(false);
 
   const [gatewayUrl, setGatewayUrl] = useState(
     () => IPFS_GATEWAYS[network.id] ?? ""
@@ -155,6 +163,31 @@ export function Download() {
       });
     }
   }, [cidInput, setSearchParams]);
+
+  // Look up CID on-chain when a valid CID is entered
+  useEffect(() => {
+    if (!parsedCid || !api || !blockNumber) {
+      setCidLookup(null);
+      setCidLookupDone(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCidLookupLoading(true);
+    setCidLookupDone(false);
+    setCidLookup(null);
+
+    const digest = parsedCid.multihash.digest;
+    lookupCidOnChain(api, digest, blockNumber).then((result) => {
+      if (!cancelled) {
+        setCidLookup(result);
+        setCidLookupLoading(false);
+        setCidLookupDone(true);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [parsedCid?.toString(), api, blockNumber]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCidChange = (value: string, isValid: boolean, cid?: CID) => {
     setCidInput(value);
@@ -854,6 +887,85 @@ export function Download() {
               ) : (
                 <p className="text-sm text-muted-foreground">Enter a valid CID to see details</p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* On-chain Status */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                On-chain Status
+              </CardTitle>
+              <CardDescription>Storage and retention info from the chain</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!parsedCid ? (
+                <p className="text-sm text-muted-foreground">Enter a valid CID to check on-chain status</p>
+              ) : cidLookupLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Searching on-chain...
+                </div>
+              ) : cidLookupDone && !cidLookup ? (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 text-sm text-amber-600 bg-amber-500/10 p-3 rounded-md">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>
+                      Not found on-chain. The data may have expired and been removed, or was never stored on this network.
+                    </span>
+                  </div>
+                </div>
+              ) : cidLookup ? (
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Stored at block</span>
+                    <span className="font-mono">{formatBlockNumber(cidLookup.blockNumber)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Upload date</span>
+                    <span>{estimateBlockDate(cidLookup.blockNumber, cidLookup.currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Size</span>
+                    <span>{formatBytes(cidLookup.size)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Expires at block</span>
+                    <span className="font-mono">{formatBlockNumber(cidLookup.expiresAtBlock)}</span>
+                  </div>
+                  {(() => {
+                    const blocksRemaining = cidLookup.expiresAtBlock - cidLookup.currentBlock;
+                    const isExpired = blocksRemaining <= 0;
+                    const isExpiringSoon = !isExpired && blocksRemaining < 14400; // ~1 day
+
+                    return (
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Retention</span>
+                        {isExpired ? (
+                          <Badge variant="destructive">Expired</Badge>
+                        ) : isExpiringSoon ? (
+                          <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+                            {formatBlockDuration(blocksRemaining)} left
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+                            {formatBlockDuration(blocksRemaining)} left
+                          </Badge>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {cidLookup.expiresAtBlock - cidLookup.currentBlock <= 0 && (
+                    <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md mt-2">
+                      <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <span>
+                        This data has expired and may no longer be accessible. Consider re-uploading if needed.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
