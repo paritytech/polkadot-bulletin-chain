@@ -895,23 +895,30 @@ pub mod pallet {
 			hashing: HashingAlgorithm,
 			cid_codec: CidCodec,
 		) -> DispatchResult {
+			let data_len = data.len() as u32;
+
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
-			Self::ensure_data_size_ok(data.len())?;
+			Self::ensure_data_size_ok(data_len as usize)?;
+
+			let cid_config = CidConfig { codec: cid_codec, hashing };
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
 
 			// Chunk data and compute storage root
 			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+
+			// We don't need `data` anymore.
+			core::mem::drop(data);
+
 			let chunk_count = chunks.len() as u32;
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
+			debug_assert_eq!(chunk_count, num_chunks(data_len));
 			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let cid_config = CidConfig { codec: cid_codec, hashing };
-			let cid =
-				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
+			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -923,7 +930,7 @@ pub mod pallet {
 				transactions
 					.try_push(TransactionInfo {
 						chunk_root: root,
-						size: data.len() as u32,
+						size: data_len,
 						content_hash: cid.content_hash,
 						hashing,
 						cid_codec,
@@ -931,11 +938,13 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
+
 			Self::deposit_event(Event::Stored {
 				index,
 				content_hash: cid.content_hash,
 				cid: cid.to_bytes(),
 			});
+
 			Ok(())
 		}
 
