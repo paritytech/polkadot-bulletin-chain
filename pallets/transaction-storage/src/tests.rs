@@ -367,13 +367,12 @@ fn stores_various_sizes_with_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
-		#[allow(clippy::identity_op)]
 		let sizes: [usize; 5] = [
 			2000,            // 2 KB
-			1 * 1024 * 1024, // 1 MB
-			4 * 1024 * 1024, // 4 MB
-			6 * 1024 * 1024, // 6 MB
-			8 * 1024 * 1024, // 8 MB
+			512 * 1024,      // 512 KB
+			1024 * 1024,     // 1 MB
+			1536 * 1024,     // 1.5 MB
+			2 * 1024 * 1024, // 2 MB
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 		assert_ok!(TransactionStorage::authorize_account(
@@ -400,7 +399,7 @@ fn stores_various_sizes_with_account_authorization() {
 
 		// Now assert that an 11 MB payload exceeds the max size and fails, even with fresh
 		// authorization
-		let oversize: usize = 11 * 1024 * 1024; // 11 MB > DEFAULT_MAX_TRANSACTION_SIZE (8 MB)
+		let oversize: usize = 3 * 1024 * 1024; // 3 MB > DEFAULT_MAX_TRANSACTION_SIZE (2 MB)
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who,
@@ -1287,4 +1286,19 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
+}
+
+#[test]
+fn generate_benchmark_proof() {
+	// Generates the PROOF constant for benchmarking.rs.
+	// Run with: cargo test -p pallet-transaction-storage generate_benchmark_proof -- --nocapture
+	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE;
+	let mut transactions = Vec::new();
+	for _ in 0..DEFAULT_MAX_BLOCK_TRANSACTIONS {
+		transactions.push(vec![0u8; tx_size as usize]);
+	}
+	let content_hash = vec![0u8; 32];
+	let proof = build_proof(content_hash.as_slice(), transactions).unwrap().unwrap();
+	let encoded = proof.encode();
+	println!("PROOF (hex): {}", encoded.iter().map(|b| format!("{b:02x}")).collect::<String>());
 }

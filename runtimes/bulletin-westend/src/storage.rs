@@ -26,7 +26,7 @@ use frame_support::{
 	traits::{Contains, EitherOfDiverse, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
-use pallet_transaction_storage::CallInspector;
+use pallet_transaction_storage::{CallInspector, DEFAULT_MAX_TRANSACTION_SIZE};
 use pallet_xcm::EnsureXcm;
 use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
@@ -91,7 +91,7 @@ impl pallet_transaction_storage::Config for Runtime {
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<512>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
-	type MaxTransactionSize = crate::ConstU32<{ 2 * 1024 * 1024 }>;
+	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
