@@ -35,39 +35,8 @@ use sp_transaction_storage_proof::TransactionStorageProof;
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-// Proof generated with `verify_benchmark_proof` test using [0u8; 32] as randomness.
-// The check_proof benchmark sets parent_hash to Default::default() to match.
-const PROOF: &str = "\
-	0104000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000ccd0780ffff0080\
-	f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825\
-	c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83\
-	a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a373\
-	3464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b\
-	5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d305\
-	5c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e31\
-	3ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771\
-	032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc\
-	9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0\
-	f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464\
-	780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2\
-	e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04\
-	a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad9\
-	ad03803333008041038b346937eae08686bc2166a94e8ebcad3aac044655f5e016556efab645\
-	178010fd81bc1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de8041038b\
-	346937eae08686bc2166a94e8ebcad3aac044655f5e016556efab645178010fd81bc1359802f\
-	0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de8041038b346937eae08686bc2166\
-	a94e8ebcad3aac044655f5e016556efab645178010fd81bc1359802f0b871aeb95e4410a8ec9\
-	2b93af10ea767a2027cf4734e8de8041038b346937eae08686bc2166a94e8ebcad3aac044655\
-	f5e016556efab64517084000\
-";
-fn proof() -> Vec<u8> {
-	array_bytes::hex2bytes_unchecked(PROOF)
+fn proof<T: Config>() -> Vec<u8> {
+	T::BenchmarkHelper::check_proof_encoded()
 }
 
 fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
@@ -155,7 +124,7 @@ mod benchmarks {
 				.collect::<alloc::vec::Vec<u8>>(),
 			&T::Hash::default(),
 		);
-		let encoded_proof = proof();
+		let encoded_proof = proof::<T>();
 		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();
 
 		#[extrinsic_call]
@@ -359,26 +328,4 @@ mod benchmarks {
 	}
 
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
-}
-
-/// Verifies the hardcoded PROOF constant matches what `build_proof` generates
-/// from the current `DEFAULT_MAX_TRANSACTION_SIZE` and `DEFAULT_MAX_BLOCK_TRANSACTIONS`.
-/// If this test fails, regenerate the PROOF constant with the hex printed below.
-#[test]
-fn verify_benchmark_proof() {
-	use sp_transaction_storage_proof::registration::build_proof;
-
-	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
-	let transactions: Vec<Vec<u8>> =
-		(0..DEFAULT_MAX_BLOCK_TRANSACTIONS).map(|_| vec![0u8; tx_size]).collect();
-	let random_hash = [0u8; 32];
-	let proof = build_proof(&random_hash, transactions).unwrap().unwrap();
-	let encoded = proof.encode();
-	let generated_hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
-	let expected: String = PROOF.chars().filter(|c| !c.is_whitespace()).collect();
-	assert_eq!(
-		generated_hex, expected,
-		"Generated proof does not match PROOF constant. \
-		 Update PROOF with: {generated_hex}"
-	);
 }

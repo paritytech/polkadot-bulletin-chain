@@ -77,7 +77,6 @@ parameter_types! {
 /// Maximum bytes that can be stored in one transaction.
 // Setting higher limit also requires raising the allocator limit.
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
-pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
 pub const IMPOSSIBLE: InvalidTransaction = InvalidTransaction::Custom(0);
@@ -206,6 +205,16 @@ impl CheckContext {
 	}
 }
 
+/// Helper trait for benchmarking. The runtime must provide a pre-computed storage proof
+/// that matches its `MaxTransactionSize` and `MaxBlockTransactions` configuration.
+#[cfg(feature = "runtime-benchmarks")]
+pub trait BenchmarkHelper {
+	/// Returns an encoded `TransactionStorageProof` for a block full of
+	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
+	/// built with `[0u8; 32]` as randomness.
+	fn check_proof_encoded() -> Vec<u8>;
+}
+
 #[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
@@ -264,6 +273,9 @@ pub mod pallet {
 		/// Longevity of unsigned transactions to remove expired authorizations.
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
+		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
+		#[cfg(feature = "runtime-benchmarks")]
+		type BenchmarkHelper: crate::BenchmarkHelper;
 	}
 
 	#[pallet::error]

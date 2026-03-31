@@ -25,8 +25,7 @@ use super::{
 	},
 	pallet::Origin,
 	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use crate::migrations::v1::OldTransactionInfo;
 use codec::Encode;
@@ -824,7 +823,7 @@ fn insert_old_format_transactions(block_num: u64, count: u32) {
 			block_chunks: (i + 1) * 8,
 		})
 		.collect();
-	let bounded: BoundedVec<OldTransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+	let bounded: BoundedVec<OldTransactionInfo, ConstU32<512>> =
 		old_txs.try_into().expect("within bounds");
 	let key = Transactions::hashed_key_for(block_num);
 	unhashed::put_raw(&key, &bounded.encode());
