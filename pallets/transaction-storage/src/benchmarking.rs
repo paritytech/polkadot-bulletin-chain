@@ -138,7 +138,12 @@ mod benchmarks {
 				vec![0u8; T::MaxTransactionSize::get() as usize],
 			)?;
 		}
-		run_to_block::<T>(crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one());
+		// Jump directly to the target block — no need to iterate since only block 1
+		// has stored transactions and on_initialize cleanup targets block n - period - 1
+		// (i.e. block 0 here), so the block-1 Transactions entry is preserved.
+		System::<T>::set_block_number(
+			crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one(),
+		);
 		// Pin parent_hash to a known value so the pre-computed PROOF selects the right chunk.
 		// The PROOF was generated with [0u8; 32] as randomness (see generate_benchmark_proof test).
 		frame_support::storage::unhashed::put(
@@ -242,7 +247,7 @@ mod benchmarks {
 
 		let period = T::AuthorizationPeriod::get();
 		let now = System::<T>::block_number();
-		run_to_block::<T>(now + period);
+		System::<T>::set_block_number(now + period);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, who.clone());
@@ -261,7 +266,7 @@ mod benchmarks {
 
 		let period = T::AuthorizationPeriod::get();
 		let now = System::<T>::block_number();
-		run_to_block::<T>(now + period);
+		System::<T>::set_block_number(now + period);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, content_hash);

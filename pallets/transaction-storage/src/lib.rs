@@ -68,11 +68,7 @@ pub use weights::WeightInfo;
 const LOG_TARGET: &str = "runtime::transaction-storage";
 
 /// Default retention period for data (in blocks). 14 days at 6s block time.
-/// Reduced to 10 blocks for benchmarks to avoid iterating through hundreds of thousands of blocks.
-#[cfg(not(feature = "runtime-benchmarks"))]
 pub const DEFAULT_RETENTION_PERIOD: u32 = 2 * 100800;
-#[cfg(feature = "runtime-benchmarks")]
-pub const DEFAULT_RETENTION_PERIOD: u32 = 10;
 parameter_types! {
 	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
 }
