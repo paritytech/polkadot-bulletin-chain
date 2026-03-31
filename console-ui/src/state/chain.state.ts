@@ -49,6 +49,12 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
         endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
         lightClient: false,
       },
+      stable: {
+        id: "stable",
+        name: "PoP Testnet (stable)",
+        endpoints: ["wss://pop3-testnet.parity-lab.parity.io/bulletin"],
+        lightClient: false,
+      },
       previewnet: {
         id: "previewnet",
         name: "Bulletin Previewnet",
@@ -90,6 +96,7 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     local: bulletin_westend,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
+    stable: bulletin_westend,
     previewnet: bulletin_westend,
   },
   web3storage: {
