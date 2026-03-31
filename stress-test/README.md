@@ -57,13 +57,30 @@ cargo build --release -p polkadot-parachain-bin
 
 The binaries will be at `target/release/polkadot` and `target/release/polkadot-parachain`.
 
+**Automated setup**: A script is provided that clones polkadot-sdk, builds the required binaries, and installs them to `~/local_bulletin_testing/bin/`:
+
+```bash
+./scripts/setup_parachain_prerequisites.sh
+```
+
+This builds `polkadot`, `polkadot-omni-node`, `polkadot-prepare-worker`, `polkadot-execute-worker`, and `chain-spec-builder`. It skips the build if the binaries are already present at the correct revision. On macOS it automatically sets `DYLD_FALLBACK_LIBRARY_PATH` for libclang.
+
+Then set the env vars:
+
+```bash
+export POLKADOT_RELAY_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
+export POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+```
+
 ### Parachain Chain Spec
 
-A pre-generated chain spec is included at `zombienet/bulletin-westend-spec.json` (Para ID 2487, westend-local relay). If you need to regenerate it:
+The chain spec at `zombienet/bulletin-westend-spec.json` (Para ID 2487, westend-local relay) embeds the runtime WASM blob. **You must regenerate it after any runtime changes**, otherwise zombienet tests will run with a stale runtime:
 
 ```bash
 ./scripts/create_bulletin_westend_spec.sh
 ```
+
+This builds the `bulletin-westend-runtime` and embeds the fresh WASM into the spec. Requires `chain-spec-builder` on PATH (built by `./scripts/setup_parachain_prerequisites.sh`).
 
 ### zombienet-sdk
 
@@ -196,7 +213,7 @@ Before running zombienet tests, ensure you have:
 | Variable | Description |
 |----------|-------------|
 | `ZOMBIE_PROVIDER=native` | Use native process spawning (not Docker). **Required.** |
-| `RUST_LOG=info` | Optional. Shows progress logs during test execution. |
+| `RUST_LOG=info` | Recommended. Required to see CLI subprocess progress logs during test execution. |
 
 **Parachain tests:**
 
@@ -300,11 +317,14 @@ Prints a summary table per scenario with throughput, latency percentiles, and bl
 
 Returns an array of `ScenarioResult` objects. Each contains:
 
-- `name`: Scenario identifier (e.g., `"block-cap: Block Capacity (4500 accounts x 97 txs)"`)
-- `duration`: Wall-clock time
+- `name`: Scenario identifier (e.g., `"block-cap: Block Capacity (1200 accounts)"`)
+- `duration`: Measurement window duration
 - `payload_size`: Bytes per item
 - `throughput_tps`, `throughput_bytes_per_sec`: Write metrics (throughput tests)
 - `avg_tx_per_block`, `peak_tx_per_block`: Block utilization (throughput tests)
+- `avg_block_interval_ms`: Average block interval from on-chain timestamps (throughput tests)
+- `onchain_timing`: Whether throughput was computed from on-chain timestamps
+- `fork_detections`: Number of chain forks detected during the test
 - `total_submitted`, `total_confirmed`, `total_errors`: Transaction counts
 - `total_reads`, `successful_reads`, `failed_reads`: Read counts (bitswap tests)
 - `reads_per_sec`, `read_bytes_per_sec`: Read throughput (bitswap tests)
