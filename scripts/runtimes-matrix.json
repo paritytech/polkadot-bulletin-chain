@@ -38,7 +38,7 @@
     }
   },
   {
-    "name": "bulletin-stable",
+    "name": "bulletin-pop-stable",
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
     "uris": [
