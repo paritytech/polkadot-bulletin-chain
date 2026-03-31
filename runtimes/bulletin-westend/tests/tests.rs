@@ -23,7 +23,9 @@ use bulletin_westend_runtime::{
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
 	UncheckedExtrinsic,
 };
-use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
+use frame_support::{
+	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
+};
 use pallet_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
 };
@@ -139,8 +141,10 @@ fn transaction_storage_runtime_sizes() {
 			// prepare data
 			let account = Sr25519Keyring::Alice;
 			let who: AccountId = account.to_account_id();
-			let max = pallet_transaction_storage::DEFAULT_MAX_TRANSACTION_SIZE as usize;
-			let sizes: [usize; 5] = [
+			let max =
+				<<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get() as usize;
+			let sizes: [usize; 6] = [
+				1,           // minimum valid size
 				2000,        // small
 				max / 4,     // 25%
 				max / 2,     // 50%

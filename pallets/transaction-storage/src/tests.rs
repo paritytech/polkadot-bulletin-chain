@@ -368,7 +368,8 @@ fn stores_various_sizes_with_account_authorization() {
 		run_to_block(1, || None);
 		let who = 1;
 		let max = DEFAULT_MAX_TRANSACTION_SIZE as usize;
-		let sizes: [usize; 5] = [
+		let sizes: [usize; 6] = [
+			1,           // minimum valid size
 			2000,        // small
 			max / 4,     // 25%
 			max / 2,     // 50%
@@ -397,6 +398,15 @@ fn stores_various_sizes_with_account_authorization() {
 		// cleared
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
+
+		// Zero-size data must be rejected
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1));
+		let empty_call = Call::store { data: vec![] };
+		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &empty_call), BAD_DATA_SIZE);
+		assert_noop!(
+			Into::<RuntimeCall>::into(empty_call).dispatch(RuntimeOrigin::none()),
+			Error::BadDataSize,
+		);
 
 		// Assert that a payload exceeding the max size fails, even with fresh authorization
 		let oversize: usize = max + 1;
