@@ -138,9 +138,10 @@ mod benchmarks {
 				vec![0u8; T::MaxTransactionSize::get() as usize],
 			)?;
 		}
-		// Jump directly to the target block — no need to iterate since only block 1
-		// has stored transactions and on_initialize cleanup targets block n - period - 1
-		// (i.e. block 0 here), so the block-1 Transactions entry is preserved.
+		// Advance to block 2 so on_finalize(1) commits BlockTransactions into Transactions storage,
+		// then jump directly to the target block — no need to iterate the remaining blocks since
+		// on_initialize cleanup targets block n - period - 1 (i.e. block 0), preserving block 1.
+		run_to_block::<T>(2u32.into());
 		System::<T>::set_block_number(
 			crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one(),
 		);
