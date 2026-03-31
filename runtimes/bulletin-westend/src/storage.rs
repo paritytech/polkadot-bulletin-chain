@@ -119,6 +119,7 @@ impl pallet_transaction_storage::Config for Runtime {
 #[cfg(feature = "runtime-benchmarks")]
 pub struct CheckProofHelper;
 
+#[cfg(feature = "runtime-benchmarks")]
 pub const CHECK_PROOF: &str = "\
 	0104000000000000000000000000000000000000000000000000000000000000000000000000\
 	0000000000000000000000000000000000000000000000000000000000000000000000000000\
