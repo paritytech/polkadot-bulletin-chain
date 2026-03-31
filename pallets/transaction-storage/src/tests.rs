@@ -367,12 +367,13 @@ fn stores_various_sizes_with_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
+		let max = DEFAULT_MAX_TRANSACTION_SIZE as usize;
 		let sizes: [usize; 5] = [
-			2000,            // 2 KB
-			512 * 1024,      // 512 KB
-			1024 * 1024,     // 1 MB
-			1536 * 1024,     // 1.5 MB
-			2 * 1024 * 1024, // 2 MB
+			2000,        // small
+			max / 4,     // 25%
+			max / 2,     // 50%
+			max * 3 / 4, // 75%
+			max,         // 100% (exactly at limit)
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 		assert_ok!(TransactionStorage::authorize_account(
@@ -397,9 +398,8 @@ fn stores_various_sizes_with_account_authorization() {
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
 
-		// Now assert that an 11 MB payload exceeds the max size and fails, even with fresh
-		// authorization
-		let oversize: usize = 3 * 1024 * 1024; // 3 MB > DEFAULT_MAX_TRANSACTION_SIZE (2 MB)
+		// Assert that a payload exceeding the max size fails, even with fresh authorization
+		let oversize: usize = max + 1;
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who,
@@ -1286,20 +1286,4 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
-}
-
-#[test]
-fn generate_benchmark_proof() {
-	// Generates the PROOF constant for benchmarking.rs.
-	// The benchmark sets parent_hash to Default::default() (all zeros) before verifying,
-	// so we use all zeros as the randomness source here.
-	//
-	// Run with: cargo test -p pallet-transaction-storage generate_benchmark_proof -- --nocapture
-	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
-	let transactions: Vec<Vec<u8>> =
-		(0..DEFAULT_MAX_BLOCK_TRANSACTIONS).map(|_| vec![0u8; tx_size]).collect();
-	let random_hash = [0u8; 32];
-	let proof = build_proof(&random_hash, transactions).unwrap().unwrap();
-	let encoded = proof.encode();
-	println!("PROOF (hex): {}", encoded.iter().map(|b| format!("{b:02x}")).collect::<String>());
 }

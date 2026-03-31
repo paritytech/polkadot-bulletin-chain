@@ -35,7 +35,7 @@ use sp_transaction_storage_proof::TransactionStorageProof;
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-// Proof generated with `generate_benchmark_proof` test in tests.rs using [0u8; 32] as randomness.
+// Proof generated with `verify_benchmark_proof` test using [0u8; 32] as randomness.
 // The check_proof benchmark sets parent_hash to Default::default() to match.
 const PROOF: &str = "\
 	0104000000000000000000000000000000000000000000000000000000000000000000000000\
@@ -353,4 +353,26 @@ mod benchmarks {
 	}
 
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
+}
+
+/// Verifies the hardcoded PROOF constant matches what `build_proof` generates
+/// from the current `DEFAULT_MAX_TRANSACTION_SIZE` and `DEFAULT_MAX_BLOCK_TRANSACTIONS`.
+/// If this test fails, regenerate the PROOF constant with the hex printed below.
+#[test]
+fn verify_benchmark_proof() {
+	use sp_transaction_storage_proof::registration::build_proof;
+
+	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
+	let transactions: Vec<Vec<u8>> =
+		(0..DEFAULT_MAX_BLOCK_TRANSACTIONS).map(|_| vec![0u8; tx_size]).collect();
+	let random_hash = [0u8; 32];
+	let proof = build_proof(&random_hash, transactions).unwrap().unwrap();
+	let encoded = proof.encode();
+	let generated_hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
+	let expected: String = PROOF.chars().filter(|c| !c.is_whitespace()).collect();
+	assert_eq!(
+		generated_hex, expected,
+		"Generated proof does not match PROOF constant. \
+		 Update PROOF with: {generated_hex}"
+	);
 }

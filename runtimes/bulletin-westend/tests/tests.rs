@@ -139,12 +139,13 @@ fn transaction_storage_runtime_sizes() {
 			// prepare data
 			let account = Sr25519Keyring::Alice;
 			let who: AccountId = account.to_account_id();
+			let max = pallet_transaction_storage::DEFAULT_MAX_TRANSACTION_SIZE as usize;
 			let sizes: [usize; 5] = [
-				2000,            // 2 KB
-				512 * 1024,      // 512 KB
-				1024 * 1024,     // 1 MB
-				1536 * 1024,     // 1.5 MB
-				2 * 1024 * 1024, // 2 MB
+				2000,        // small
+				max / 4,     // 25%
+				max / 2,     // 50%
+				max * 3 / 4, // 75%
+				max,         // 100% (exactly at limit)
 			];
 			let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
