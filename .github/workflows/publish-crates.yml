@@ -45,9 +45,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create release branch
+      - name: Create or checkout release branch
         run: |
-          git checkout -b "${{ inputs.release_branch }}"
+          if git ls-remote --exit-code --heads origin "${{ inputs.release_branch }}" > /dev/null 2>&1; then
+            echo "Branch ${{ inputs.release_branch }} already exists, checking out"
+            git fetch origin "${{ inputs.release_branch }}"
+            git checkout "${{ inputs.release_branch }}"
+          else
+            echo "Creating new branch ${{ inputs.release_branch }}"
+            git checkout -b "${{ inputs.release_branch }}"
+          fi
 
       - name: Update crate versions
         env:
