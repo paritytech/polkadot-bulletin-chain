@@ -73,9 +73,10 @@ parameter_types! {
 	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
 }
 
-// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// Setting higher limit also requires raising the allocator limit.
+/// Setting higher limit also requires raising the allocator limit.
+///
+/// Note: 2 MiB is aligned with Bitswap max limit per chunk.
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
 
 /// Encountered an impossible situation, implies a bug.
