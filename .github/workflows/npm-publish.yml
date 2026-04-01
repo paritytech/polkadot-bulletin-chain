@@ -44,8 +44,10 @@ jobs:
 
       - name: Validate version matches tag
         working-directory: sdk/typescript
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          TAG_VERSION="${{ github.event.release.tag_name }}"
+          TAG_VERSION="${TAG_NAME}"
           TAG_VERSION="${TAG_VERSION#sdk-v}"
           PKG_VERSION=$(node -p "require('./package.json').version")
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then

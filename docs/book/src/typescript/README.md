@@ -1,6 +1,6 @@
 # TypeScript SDK
 
-The `@bulletin/sdk` package provides a modern, type-safe client for Node.js and Browser environments.
+The `@parity/bulletin-sdk` package provides a modern, type-safe client for Node.js and Browser environments.
 
 ## Features
 
@@ -30,7 +30,7 @@ The `@bulletin/sdk` package provides a modern, type-safe client for Node.js and 
 ## Quick Example
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 

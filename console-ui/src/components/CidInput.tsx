@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/utils/cn";
-import { CID, parseCid, cidFromBytes } from "@bulletin/sdk";
+import { CID, parseCid, cidFromBytes } from "@parity/bulletin-sdk";
 import { hexToBytes } from "@/utils/format";
 
 interface CidInputProps {

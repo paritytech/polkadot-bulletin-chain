@@ -7,7 +7,7 @@ The Bulletin SDK automatically handles chunking for large files up to **64 MiB**
 For most use cases, simply use `store()` - it automatically chunks large files:
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
@@ -49,7 +49,7 @@ const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
 Use `withChunkSize()` when you want explicit control over the chunk size:
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
@@ -217,7 +217,7 @@ console.log('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
 Chunked uploads are **not atomic**. If a chunk fails mid-upload, previously submitted chunks remain on-chain and cannot be rolled back. The error will contain details about which chunk failed.
 
 ```typescript
-import { BulletinError } from '@bulletin/sdk';
+import { BulletinError } from '@parity/bulletin-sdk';
 
 try {
     const result = await client.store(largeData).send();
@@ -232,7 +232,7 @@ try {
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient, BulletinError } from '@bulletin/sdk';
+import { AsyncBulletinClient, BulletinError } from '@parity/bulletin-sdk';
 
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 

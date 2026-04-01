@@ -84,7 +84,7 @@ There is no current consumer that requires Go, Python, or another language. If o
      │  Rust consumers │  │  Direct PAPI   │        │  Host API (Product │
      │                 │  │  consumers     │        │  SDK) consumers    │
      │ • Node binary   │  │                │        │                    │
-     │ • Integration   │  │ • bulletin-    │        │ @bulletin/         │
+     │ • Integration   │  │ • bulletin-    │        │ @parity/bulletin-  │
      │   tests         │  │   deploy       │        │ sdk-product        │
      │ • Validator     │  │ • dotNS CLI    │        │ (in triangle-      │
      │   tooling       │  │ • Console UI   │        │  js-sdks)          │

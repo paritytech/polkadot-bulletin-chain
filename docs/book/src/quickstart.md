@@ -41,13 +41,13 @@ Open http://localhost:5173
 ### Step 1: Install
 
 ```bash
-npm install @bulletin/sdk polkadot-api
+npm install @parity/bulletin-sdk polkadot-api
 ```
 
 ### Step 2: Store Data
 
 ```typescript
-import { AsyncBulletinClient } from "@bulletin/sdk";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi

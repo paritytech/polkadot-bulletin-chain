@@ -21,7 +21,7 @@ A web-based console for interacting with the Polkadot Bulletin Chain. Upload and
 
 ### Build the SDK First
 
-The console-ui depends on `@bulletin/sdk`. Build it before running the UI:
+The console-ui depends on `@parity/bulletin-sdk`. Build it before running the UI:
 
 ```bash
 cd sdk/typescript
@@ -148,7 +148,7 @@ This opens the SDK book at http://localhost:3000 with guides on:
 - **Radix UI** for accessible components
 - **RxJS** + @react-rxjs for state management
 - **polkadot-api** for chain interaction
-- **@bulletin/sdk** for CID calculation and storage operations
+- **@parity/bulletin-sdk** for CID calculation and storage operations
 
 ## License
 
