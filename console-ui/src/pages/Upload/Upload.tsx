@@ -560,6 +560,7 @@ export function Upload() {
             disabled={!canUpload || isUploading}
             className="w-full"
             size="lg"
+            data-testid="upload-button"
           >
             {isUploading ? (
               <>
