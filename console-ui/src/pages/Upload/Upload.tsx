@@ -1,6 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X } from "lucide-react";
+import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -17,14 +17,21 @@ import {
 } from "@/components/ui/Select";
 import { FileUpload } from "@/components/FileUpload";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useApi, useChainState, useCreateBulletinClient } from "@/state/chain.state";
+import { useApi, useClient, useChainState, useCreateBulletinClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
-import { useAuthorization } from "@/state/storage.state";
+import {
+  useAuthorization,
+  usePreimageAuth,
+  usePreimageAuthLoading,
+  checkPreimageAuthorization,
+  clearPreimageAuth,
+} from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
 import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@bulletin/sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex } from "@/utils/format";
+import { Binary } from "polkadot-api";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
   { value: HashAlgorithm.Blake2b256, label: "Blake2b-256 (default)" },
@@ -43,15 +50,19 @@ interface UploadResult {
   blockNumber?: number;
   index?: number;
   size: number;
+  unsigned?: boolean;
 }
 
 export function Upload() {
   const api = useApi();
+  const client = useClient();
   const createBulletinClient = useCreateBulletinClient();
   const { network } = useChainState();
   const navigate = useNavigate();
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
+  const preimageAuth = usePreimageAuth();
+  const preimageAuthLoading = usePreimageAuthLoading();
   const [txStatus, setTxStatus] = useState<string | null>(null);
   const handleProgress = useProgressHandler(setTxStatus);
 
@@ -78,13 +89,52 @@ export function Upload() {
 
   const dataSize = getData()?.length ?? 0;
 
-  const canUpload =
-    api &&
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Check preimage authorization when data or hash algorithm changes
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    const data = getData();
+    if (!data || !api) {
+      clearPreimageAuth();
+      return;
+    }
+
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const contentHash = await getContentHash(data, hashAlgorithm);
+        await checkPreimageAuthorization(api, contentHash);
+      } catch (err) {
+        console.error("Failed to check preimage authorization:", err);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [api, inputMode, textData, fileData, hashAlgorithm, getData]);
+
+  const hasAccountAuth =
     selectedAccount?.polkadotSigner &&
     authorization &&
-    dataSize > 0 &&
     authorization.bytes >= BigInt(dataSize) &&
     authorization.transactions > 0n;
+
+  const hasPreimageAuth =
+    preimageAuth &&
+    preimageAuth.bytes >= BigInt(dataSize) &&
+    preimageAuth.transactions > 0n;
+
+  const canUpload =
+    api &&
+    client &&
+    dataSize > 0 &&
+    (hasAccountAuth || hasPreimageAuth);
 
   const handleFileSelect = useCallback((file: File | null, data: Uint8Array | null) => {
     setFileData(data);
@@ -93,11 +143,17 @@ export function Upload() {
     setUploadError(null);
   }, []);
 
+  // Preimage auth is preferred when available (same as pallet behavior)
+  const willUseUnsigned = !!hasPreimageAuth;
+
   const handleUpload = async () => {
-    if (!api || !selectedAccount?.polkadotSigner) return;
+    if (!api || !client) return;
 
     const data = getData();
     if (!data) return;
+
+    // Need either preimage auth or account auth with wallet
+    if (!hasPreimageAuth && !hasAccountAuth) return;
 
     setIsUploading(true);
     setUploadError(null);
@@ -109,42 +165,135 @@ export function Upload() {
       const contentHash = await getContentHash(data, hashAlgorithm);
       const contentHashHex = bytesToHex(contentHash);
 
-      // Create SDK client with user's signer
-      const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
+      if (hasPreimageAuth) {
+        // Unsigned submission via raw PAPI (no wallet/signer needed)
+        const isCustomCid = hashAlgorithm !== HashAlgorithm.Blake2b256 || cidCodec !== CidCodec.Raw;
 
-      // Use SDK to store data with progress callback
-      const result = await bulletinClient
-        .store(data)
-        .withCodec(cidCodec)
-        .withHashAlgorithm(hashAlgorithm)
-        .withCallback(handleProgress)
-        .withWaitFor(WaitFor.Finalized)
-        .send();
+        const toHashingEnum = (alg: HashAlgorithm) => {
+          switch (alg) {
+            case HashAlgorithm.Blake2b256: return { type: "Blake2b256" as const, value: undefined };
+            case HashAlgorithm.Sha2_256: return { type: "Sha2_256" as const, value: undefined };
+            case HashAlgorithm.Keccak256: return { type: "Keccak256" as const, value: undefined };
+            default: return { type: "Blake2b256" as const, value: undefined };
+          }
+        };
 
-      const cidStr = result.cid?.toString() ?? "";
-      const uploadResultData: UploadResult = {
-        cid: cidStr,
-        contentHash: contentHashHex,
-        blockHash: undefined, // SDK doesn't expose this currently
-        blockNumber: result.blockNumber,
-        index: result.extrinsicIndex,
-        size: result.size,
-      };
+        const tx = isCustomCid
+          ? api.tx.TransactionStorage.store_with_cid_config({
+              cid: {
+                codec: BigInt(cidCodec),
+                hashing: toHashingEnum(hashAlgorithm),
+              },
+              data: Binary.fromBytes(data),
+            })
+          : api.tx.TransactionStorage.store({
+              data: Binary.fromBytes(data),
+            });
 
-      setUploadResult(uploadResultData);
+        setTxStatus("Submitting unsigned transaction...");
 
-      // Save to history for easy renewal later
-      if (result.blockNumber !== undefined && result.extrinsicIndex !== undefined) {
-        addStorageEntry({
-          blockNumber: result.blockNumber,
-          index: result.extrinsicIndex,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const bareTx = await (tx as any).getBareTx();
+
+        const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
+          let resolved = false;
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const handleEvent = (ev: any) => {
+            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+
+              let index: number | undefined;
+              if (ev.events) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const storedEvent = ev.events.find((e: any) =>
+                  e.type === "TransactionStorage" && e.value?.type === "Stored"
+                );
+                if (storedEvent?.value?.value?.index !== undefined) {
+                  index = storedEvent.value.value.index;
+                }
+              }
+
+              resolve({
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+                index,
+              });
+            }
+          };
+
+          const subscription = client.submitAndWatch(bareTx).subscribe({
+            next: handleEvent,
+            error: (err) => {
+              if (!resolved) {
+                resolved = true;
+                reject(err);
+              }
+            },
+          });
+
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              subscription.unsubscribe();
+              reject(new Error("Transaction timed out"));
+            }
+          }, 120000);
+        });
+
+        // Calculate CID for display
+        const { calculateCid } = await import("@bulletin/sdk");
+        const cid = await calculateCid(data, cidCodec, hashAlgorithm);
+        const cidStr = cid.toString();
+
+        const uploadResultData: UploadResult = {
           cid: cidStr,
           contentHash: contentHashHex,
+          blockHash: result.blockHash,
+          blockNumber: result.blockNumber,
+          index: result.index,
+          size: data.length,
+          unsigned: true,
+        };
+
+        setUploadResult(uploadResultData);
+      } else {
+        // Signed submission via SDK
+        const bulletinClient = createBulletinClient!(selectedAccount!.polkadotSigner);
+
+        const result = await bulletinClient
+          .store(data)
+          .withCodec(cidCodec)
+          .withHashAlgorithm(hashAlgorithm)
+          .withCallback(handleProgress)
+          .withWaitFor(WaitFor.Finalized)
+          .send();
+
+        const cidStr = result.cid?.toString() ?? "";
+        const uploadResultData: UploadResult = {
+          cid: cidStr,
+          contentHash: contentHashHex,
+          blockNumber: result.blockNumber,
+          index: result.extrinsicIndex,
           size: result.size,
-          account: selectedAccount.address,
-          networkId: network.id,
-          label: fileName || undefined,
-        });
+        };
+
+        setUploadResult(uploadResultData);
+
+        // Save to history for easy renewal later (only for signed transactions)
+        if (result.blockNumber !== undefined && result.extrinsicIndex !== undefined) {
+          addStorageEntry({
+            blockNumber: result.blockNumber,
+            index: result.extrinsicIndex,
+            cid: cidStr,
+            contentHash: contentHashHex,
+            size: result.size,
+            account: selectedAccount!.address,
+            networkId: network.id,
+            label: fileName || undefined,
+          });
+        }
       }
     } catch (err) {
       console.error("Upload failed:", err);
@@ -420,7 +569,7 @@ export function Upload() {
             ) : (
               <>
                 <UploadIcon className="h-5 w-5 mr-2" />
-                Upload to Bulletin Chain
+                {willUseUnsigned ? "Upload (Unsigned)" : "Upload to Bulletin Chain"}
               </>
             )}
           </Button>
@@ -430,7 +579,40 @@ export function Upload() {
         <div className="space-y-6">
           <AuthorizationCard />
 
-          {!selectedAccount && (
+          {(preimageAuth || preimageAuthLoading) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Shield className="h-4 w-4" />
+                  Preimage Authorization
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {preimageAuthLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner size="sm" />
+                    Checking...
+                  </div>
+                ) : preimageAuth ? (
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Transactions</span>
+                      <span>{preimageAuth.transactions.toString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Bytes</span>
+                      <span>{formatBytes(Number(preimageAuth.bytes))}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      No wallet required for upload
+                    </p>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {!selectedAccount && !hasPreimageAuth && (
             <Card>
               <CardContent className="pt-6">
                 <div className="text-center text-muted-foreground">
@@ -443,7 +625,7 @@ export function Upload() {
             </Card>
           )}
 
-          {selectedAccount && !authorization && (
+          {selectedAccount && !authorization && !hasPreimageAuth && (
             <Card>
               <CardContent className="pt-6">
                 <div className="text-center text-muted-foreground">
