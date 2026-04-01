@@ -81,9 +81,7 @@ test.describe("Smoke Tests", () => {
 
     await page.getByPlaceholder("Enter data to store...").fill("test data");
 
-    const uploadButton = page.getByRole("button", {
-      name: /Upload to Bulletin Chain/,
-    });
+    const uploadButton = page.getByTestId("upload-button");
     await expect(uploadButton).toBeDisabled();
   });
 });
