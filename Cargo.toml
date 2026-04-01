@@ -181,8 +181,8 @@ members = [
 	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
-	"stress-test",
 	"sdk/rust",
+	"stress-test",
 ]
 # Exclude rust/authorize-and-store example - it uses subxt directly with metadata codegen
 # and is not part of the main workspace build. Build it separately:

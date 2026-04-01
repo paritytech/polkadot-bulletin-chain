@@ -1,8 +1,8 @@
 use anyhow::Result;
 use subxt::{
 	config::{
-		substrate::SubstrateConfig,
-		transaction_extensions, Config, DefaultExtrinsicParamsBuilder, ExtrinsicParams,
+		substrate::SubstrateConfig, transaction_extensions, Config, DefaultExtrinsicParamsBuilder,
+		ExtrinsicParams,
 	},
 	OnlineClient,
 };
