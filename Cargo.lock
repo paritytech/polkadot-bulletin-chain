@@ -2157,7 +2157,6 @@ dependencies = [
 name = "bulletin-westend-runtime"
 version = "0.1.0"
 dependencies = [
- "array-bytes 6.2.3",
  "cumulus-pallet-aura-ext",
  "cumulus-pallet-parachain-system",
  "cumulus-pallet-session-benchmarking",
@@ -9105,6 +9104,7 @@ dependencies = [
 name = "pallet-transaction-storage"
 version = "4.0.0-dev"
 dependencies = [
+ "array-bytes 6.2.3",
  "pallets-common",
  "parity-scale-codec",
  "polkadot-sdk-frame",

@@ -65,24 +65,7 @@ impl pallet_transaction_storage::Config for Test {
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper = GenerateCheckProof;
-}
-
-#[cfg(feature = "runtime-benchmarks")]
-pub struct GenerateCheckProof;
-
-#[cfg(feature = "runtime-benchmarks")]
-impl pallet_transaction_storage::BenchmarkHelper for GenerateCheckProof {
-	fn check_proof_encoded() -> alloc::vec::Vec<u8> {
-		use codec::Encode;
-		use sp_transaction_storage_proof::registration::build_proof;
-
-		let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
-		let transactions: alloc::vec::Vec<alloc::vec::Vec<u8>> =
-			(0..512).map(|_| alloc::vec![0u8; tx_size]).collect();
-		let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
-		proof.encode()
-	}
+	type BenchmarkHelper = crate::DefaultCheckProofHelper;
 }
 
 pub fn new_test_ext() -> TestExternalities {

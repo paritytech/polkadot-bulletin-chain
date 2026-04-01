@@ -114,15 +114,16 @@ mod benchmarks {
 		System::<T>::set_block_number(
 			crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one(),
 		);
-		// Pin parent_hash to a known value so the pre-computed PROOF selects the right chunk.
-		// The PROOF was generated with [0u8; 32] as randomness (see generate_benchmark_proof test).
+		// Pin parent_hash to T::Hash::default() so the pre-computed proof's chunk selection
+		// matches. The proof was generated with this same hash as randomness.
+		let random_hash = T::Hash::default();
 		frame_support::storage::unhashed::put(
 			&sp_io::hashing::twox_128(b"System")
 				.iter()
 				.chain(sp_io::hashing::twox_128(b"ParentHash").iter())
 				.copied()
 				.collect::<alloc::vec::Vec<u8>>(),
-			&T::Hash::default(),
+			&random_hash,
 		);
 		let encoded_proof = proof::<T>();
 		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();

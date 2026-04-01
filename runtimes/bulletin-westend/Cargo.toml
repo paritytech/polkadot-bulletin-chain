@@ -12,7 +12,6 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 
 [dependencies]
-array-bytes = { optional = true, workspace = true }
 codec = { features = ["derive"], workspace = true }
 scale-info = { features = ["derive"], workspace = true }
 serde = { optional = true, features = ["derive"], workspace = true, default-features = true }
@@ -161,7 +160,6 @@ std = [
 	"xcm/std",
 ]
 runtime-benchmarks = [
-	"array-bytes",
 	"cumulus-pallet-parachain-system/runtime-benchmarks",
 	"cumulus-pallet-session-benchmarking/runtime-benchmarks",
 	"cumulus-pallet-weight-reclaim/runtime-benchmarks",

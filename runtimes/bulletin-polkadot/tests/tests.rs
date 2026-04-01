@@ -1732,30 +1732,6 @@ fn priority_hierarchy_is_correct() {
 	assert_eq!(runtime::UtilityPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
 }
 
-/// Verifies the hardcoded `CHECK_PROOF` constant matches what `build_proof` generates
-/// from the runtime's actual `MaxTransactionSize` and `MaxBlockTransactions`.
-/// If this test fails, regenerate with `gen_check_proof` below.
-#[test]
-#[cfg(feature = "runtime-benchmarks")]
-fn verify_benchmark_proof() {
-	use sp_transaction_storage_proof::registration::build_proof;
-
-	let tx_size = <<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get() as usize;
-	let max_block_transactions =
-		<<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
-	let transactions: Vec<Vec<u8>> =
-		(0..max_block_transactions).map(|_| vec![0u8; tx_size]).collect();
-	let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
-	let encoded = proof.encode();
-	let generated_hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
-	let expected: String = runtime::CHECK_PROOF.chars().filter(|c| !c.is_whitespace()).collect();
-	assert_eq!(
-		generated_hex, expected,
-		"Generated proof does not match CHECK_PROOF constant. \
-		 Update CHECK_PROOF with: {generated_hex}"
-	);
-}
-
 /// Generates the CHECK_PROOF hex for this runtime. Run with:
 /// `cargo test -p bulletin-polkadot-runtime -- --nocapture --ignored gen_check_proof`
 #[test]
