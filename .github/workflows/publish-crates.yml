@@ -85,27 +85,27 @@ jobs:
           git commit -m "Prepare crates release: common=${{ inputs.common_version }}, primitives=${{ inputs.primitives_version }}, pallet=${{ inputs.pallet_version }}"
           git push origin "${{ inputs.release_branch }}"
 
-      # - name: Publish bulletin-pallets-common
-      #   if: ${{ !inputs.dry_run }}
-      #   env:
-      #     CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-      #   run: cargo publish -p bulletin-pallets-common
+      - name: Publish bulletin-pallets-common
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p bulletin-pallets-common
 
-      # - name: Publish bulletin-transaction-storage-primitives
-      #   if: ${{ !inputs.dry_run }}
-      #   env:
-      #     CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-      #   run: cargo publish -p bulletin-transaction-storage-primitives
+      - name: Publish bulletin-transaction-storage-primitives
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p bulletin-transaction-storage-primitives
 
-      # - name: Wait for crates.io index update
-      #   if: ${{ !inputs.dry_run }}
-      #   run: sleep 30
+      - name: Wait for crates.io index update
+        if: ${{ !inputs.dry_run }}
+        run: sleep 30
 
-      # - name: Publish pallet-bulletin-transaction-storage
-      #   if: ${{ !inputs.dry_run }}
-      #   env:
-      #     CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-      #   run: cargo publish -p pallet-bulletin-transaction-storage
+      - name: Publish pallet-bulletin-transaction-storage
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p pallet-bulletin-transaction-storage
 
       - name: Dry run - verify packaging
         if: ${{ inputs.dry_run }}
