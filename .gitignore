@@ -27,6 +27,11 @@ zombienet-*
 console-ui/.vite/
 console-ui/tsconfig.tsbuildinfo
 
+# mdBook build output
+console-ui/public/docs/
+console-ui/public/sdk-docs/
+docs/book/book/
+
 # Playwright
 console-ui/test-results/
 console-ui/playwright-report/
