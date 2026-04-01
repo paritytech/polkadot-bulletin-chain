@@ -67,10 +67,10 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$PRIMITIVES_VERSION\"/" pallets/transaction-storage/primitives/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$PALLET_VERSION\"/" pallets/transaction-storage/Cargo.toml
 
-          # Add versions to workspace path dependencies
-          sed -i "s|bulletin-pallets-common = { path = \"pallets/common\"|bulletin-pallets-common = { version = \"$COMMON_VERSION\", path = \"pallets/common\"|" Cargo.toml
-          sed -i "s|bulletin-transaction-storage-primitives = { path = \"pallets/transaction-storage/primitives\"|bulletin-transaction-storage-primitives = { version = \"$PRIMITIVES_VERSION\", path = \"pallets/transaction-storage/primitives\"|" Cargo.toml
-          sed -i "s|pallet-bulletin-transaction-storage = { path = \"pallets/transaction-storage\"|pallet-bulletin-transaction-storage = { version = \"$PALLET_VERSION\", path = \"pallets/transaction-storage\"|" Cargo.toml
+          # Add or update versions in workspace path dependencies
+          sed -i "s|bulletin-pallets-common = { \(version = \"[^\"]*\", \)\?path = \"pallets/common\"|bulletin-pallets-common = { version = \"$COMMON_VERSION\", path = \"pallets/common\"|" Cargo.toml
+          sed -i "s|bulletin-transaction-storage-primitives = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage/primitives\"|bulletin-transaction-storage-primitives = { version = \"$PRIMITIVES_VERSION\", path = \"pallets/transaction-storage/primitives\"|" Cargo.toml
+          sed -i "s|pallet-bulletin-transaction-storage = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage\"|pallet-bulletin-transaction-storage = { version = \"$PALLET_VERSION\", path = \"pallets/transaction-storage\"|" Cargo.toml
 
           echo "--- Updated crate versions ---"
           grep '^version' pallets/common/Cargo.toml
