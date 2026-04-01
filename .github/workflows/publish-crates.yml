@@ -1,0 +1,107 @@
+name: Publish Crates
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: "Release branch name"
+        type: string
+        required: true
+      common_version:
+        description: "Version for bulletin-pallets-common"
+        type: string
+        required: true
+      primitives_version:
+        description: "Version for bulletin-transaction-storage-primitives"
+        type: string
+        required: true
+      pallet_version:
+        description: "Version for pallet-bulletin-transaction-storage"
+        type: string
+        required: true
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  set-image:
+    uses: ./.github/workflows/set-image.yml
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [set-image]
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Create release branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ inputs.release_branch }}"
+
+      - name: Update crate versions
+        env:
+          COMMON_VERSION: ${{ inputs.common_version }}
+          PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
+          PALLET_VERSION: ${{ inputs.pallet_version }}
+        run: |
+          # Update versions in individual crate Cargo.toml files
+          sed -i "s/^version = \".*\"/version = \"$COMMON_VERSION\"/" pallets/common/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$PRIMITIVES_VERSION\"/" pallets/transaction-storage/primitives/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$PALLET_VERSION\"/" pallets/transaction-storage/Cargo.toml
+
+          # Add versions to workspace path dependencies
+          sed -i "s|bulletin-pallets-common = { path = \"pallets/common\"|bulletin-pallets-common = { version = \"$COMMON_VERSION\", path = \"pallets/common\"|" Cargo.toml
+          sed -i "s|bulletin-transaction-storage-primitives = { path = \"pallets/transaction-storage/primitives\"|bulletin-transaction-storage-primitives = { version = \"$PRIMITIVES_VERSION\", path = \"pallets/transaction-storage/primitives\"|" Cargo.toml
+          sed -i "s|pallet-bulletin-transaction-storage = { path = \"pallets/transaction-storage\"|pallet-bulletin-transaction-storage = { version = \"$PALLET_VERSION\", path = \"pallets/transaction-storage\"|" Cargo.toml
+
+          echo "--- Updated crate versions ---"
+          grep '^version' pallets/common/Cargo.toml
+          grep '^version' pallets/transaction-storage/primitives/Cargo.toml
+          grep '^version' pallets/transaction-storage/Cargo.toml
+          echo "--- Updated workspace dependencies ---"
+          grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage' Cargo.toml
+
+      - name: Commit and push release branch
+        run: |
+          git add Cargo.toml pallets/common/Cargo.toml pallets/transaction-storage/Cargo.toml pallets/transaction-storage/primitives/Cargo.toml
+          git commit -m "Prepare crates release: common=${{ inputs.common_version }}, primitives=${{ inputs.primitives_version }}, pallet=${{ inputs.pallet_version }}"
+          git push origin "${{ inputs.release_branch }}"
+
+      - name: Publish bulletin-pallets-common
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p bulletin-pallets-common
+
+      - name: Publish bulletin-transaction-storage-primitives
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p bulletin-transaction-storage-primitives
+
+      - name: Wait for crates.io index update
+        if: ${{ !inputs.dry_run }}
+        run: sleep 30
+
+      - name: Publish pallet-bulletin-transaction-storage
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish -p pallet-bulletin-transaction-storage
+
+      - name: Dry run - verify packaging
+        if: ${{ inputs.dry_run }}
+        run: |
+          cargo package -p bulletin-pallets-common --allow-dirty
+          cargo package -p bulletin-transaction-storage-primitives --allow-dirty
+          cargo package -p pallet-bulletin-transaction-storage --allow-dirty
+          echo "Dry run complete - all crates packaged successfully"
