@@ -417,9 +417,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), content_hash);
 
-		assert_last_event::<T>(
-			Event::AutoRenewEnabled { content_hash, who: caller }.into(),
-		);
+		assert_last_event::<T>(Event::AutoRenewEnabled { content_hash, who: caller }.into());
 		Ok(())
 	}
 
@@ -450,9 +448,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), content_hash);
 
-		assert_last_event::<T>(
-			Event::AutoRenewDisabled { content_hash, who: caller }.into(),
-		);
+		assert_last_event::<T>(Event::AutoRenewDisabled { content_hash, who: caller }.into());
 		Ok(())
 	}
 

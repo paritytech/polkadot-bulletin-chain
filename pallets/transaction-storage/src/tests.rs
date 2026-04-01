@@ -1116,7 +1116,6 @@ fn try_state_passes_with_active_authorizations() {
 	});
 }
 
-
 #[test]
 fn try_state_detects_zero_authorization_transactions() {
 	new_test_ext().execute_with(|| {

@@ -654,7 +654,7 @@ run-test-authorize-preimage-and-store test_dir ws_url="ws://127.0.0.1:10000" see
     set -e
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
 
-# Run auto-renewal Chopsticks test (no zombienet needed — forks a live chain).
+# Run auto-renewal Chopsticks test
 # Tests enable/disable auto-renewal and verifies on_initialize scheduling.
 # Builds the Westend runtime WASM by default so auto-renewal code is included.
 # Parameters:
