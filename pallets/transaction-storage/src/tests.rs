@@ -1296,3 +1296,22 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
 }
+
+/// Generates the DEFAULT_CHECK_PROOF hex for `DefaultCheckProofHelper` (2 MiB / 512). Run with:
+/// `cargo test -p pallet-transaction-storage -- --nocapture --ignored gen_default_check_proof`
+#[test]
+#[ignore]
+fn gen_default_check_proof() {
+	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
+	let max_block_transactions = 512u32;
+	let transactions: Vec<Vec<u8>> =
+		(0..max_block_transactions).map(|_| vec![0u8; tx_size]).collect();
+	let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
+	let encoded = proof.encode();
+	let hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
+	println!(
+		"DEFAULT_CHECK_PROOF hex for tx_size={tx_size}, \
+		 max_block_transactions={max_block_transactions}:"
+	);
+	println!("{hex}");
+}
