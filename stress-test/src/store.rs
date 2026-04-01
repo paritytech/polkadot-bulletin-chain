@@ -164,6 +164,8 @@ enum TxPoolError {
 	Banned,
 	/// Exhausts block resources (1010 + "exhaust") — payload too large for block.
 	ExhaustsResources,
+	/// WebSocket connection is dead — needs reconnect before retrying.
+	ConnectionDead,
 	/// Any other error — not retriable.
 	Other,
 }
@@ -206,6 +208,18 @@ fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
 	// Resource limits
 	if msg.contains("exhaust") {
 		return TxPoolError::ExhaustsResources;
+	}
+
+	// Connection-level errors — WebSocket died, needs reconnect.
+	if msg.contains("connection reset") ||
+		msg.contains("background task closed") ||
+		msg.contains("connection closed") ||
+		msg.contains("broken pipe") ||
+		msg.contains("restart required") ||
+		msg.contains("not connected") ||
+		msg.contains("i/o error")
+	{
+		return TxPoolError::ConnectionDead;
 	}
 
 	// Generic invalid tx (1010) — could be payment, bad proof, etc.
@@ -720,6 +734,7 @@ pub async fn bulk_store_oneshot(
 
 	// Spawn concurrent submitter tasks
 	let mut handles = Vec::new();
+	let ws_urls_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
 	for task_id in 0..num_submitters {
 		let account_queue = account_queue.clone();
 		let submitted = submitted.clone();
@@ -729,12 +744,14 @@ pub async fn bulk_store_oneshot(
 		let stop = stop.clone();
 		let pool_saturated = pool_saturated.clone();
 		let new_block_notify = new_block_notify.clone();
-		let worker_client = pool[task_id % num_connections].clone();
+		let mut worker_client = pool[task_id % num_connections].clone();
+		let reconnect_url = ws_urls_owned[task_id % ws_urls_owned.len()].clone();
 		let nonce_tracker = nonce_tracker.clone();
 		let has_block_target = stop_after_blocks.is_some();
 
 		handles.push(tokio::spawn(async move {
 			let mut empty_polls = 0u32;
+			let mut consecutive_conn_errors = 0u32;
 			loop {
 				if stop.load(Ordering::Relaxed) {
 					break;
@@ -779,6 +796,7 @@ pub async fn bulk_store_oneshot(
 				match submit_result {
 					Ok(_hash) => {
 						submitted.fetch_add(1, Ordering::Relaxed);
+						consecutive_conn_errors = 0;
 					},
 					Err(e) => {
 						// Don't re-queue after stop — just exit.
@@ -789,6 +807,7 @@ pub async fn bulk_store_oneshot(
 						match classify_tx_error(&e) {
 							TxPoolError::PoolFull => {
 								pool_full_retries.fetch_add(1, Ordering::Relaxed);
+								consecutive_conn_errors = 0;
 								if !pool_saturated.swap(true, Ordering::Relaxed) {
 									log::info!(
 										"bulk_store submitter {task_id}: pool saturated \
@@ -808,6 +827,7 @@ pub async fn bulk_store_oneshot(
 							},
 							TxPoolError::Banned | TxPoolError::ExhaustsResources => {
 								pool_full_retries.fetch_add(1, Ordering::Relaxed);
+								consecutive_conn_errors = 0;
 								log::warn!(
 									"bulk_store submitter {task_id}: banned/exhausts, \
 									 rollback nonce & re-queuing: {e}"
@@ -821,11 +841,60 @@ pub async fn bulk_store_oneshot(
 								.await
 								.ok();
 							},
+							TxPoolError::ConnectionDead => {
+								consecutive_conn_errors += 1;
+								// Re-queue the item — nonce was never sent.
+								nonce_tracker.rollback(&account_id);
+								account_queue.lock().unwrap().push_front((signer, data));
+
+								if consecutive_conn_errors == 1 {
+									log::warn!(
+										"bulk_store submitter {task_id}: connection dead, \
+										 attempting reconnect to {reconnect_url}"
+									);
+								}
+
+								// Exponential backoff: 1s, 2s, 4s, ... up to 30s
+								let backoff = Duration::from_secs(
+									(1u64 << consecutive_conn_errors.min(5)).min(30),
+								);
+								tokio::time::sleep(backoff).await;
+
+								match crate::client::connect(&reconnect_url).await {
+									Ok(new_client) => {
+										worker_client = Arc::new(new_client);
+										log::info!(
+											"bulk_store submitter {task_id}: reconnected \
+											 after {consecutive_conn_errors} failures"
+										);
+										consecutive_conn_errors = 0;
+									},
+									Err(re) => {
+										if consecutive_conn_errors % 10 == 0 {
+											log::warn!(
+												"bulk_store submitter {task_id}: reconnect \
+												 failed ({consecutive_conn_errors} attempts): {re}"
+											);
+										}
+										// Give up after 60 consecutive failures (~5 min)
+										if consecutive_conn_errors >= 60 {
+											log::error!(
+												"bulk_store submitter {task_id}: giving up \
+												 after {consecutive_conn_errors} reconnect \
+												 failures"
+											);
+											errors.fetch_add(1, Ordering::Relaxed);
+											break;
+										}
+									},
+								}
+							},
 							TxPoolError::TxDropped => {
 								// Tx entered pool but was later evicted. The nonce may
 								// have been consumed on-chain (tx could have been
 								// included before eviction). Do NOT re-queue — treat
 								// as a loss.
+								consecutive_conn_errors = 0;
 								log::warn!(
 									"bulk_store submitter {task_id}: tx dropped from \
 									 pool (nonce may be consumed), skipping: {e}"
@@ -839,12 +908,14 @@ pub async fn bulk_store_oneshot(
 								}
 							},
 							TxPoolError::AlreadyImported => {
+								consecutive_conn_errors = 0;
 								log::debug!(
 									"bulk_store submitter {task_id}: already imported, \
 									 skipping: {e}"
 								);
 							},
 							TxPoolError::StaleNonce => {
+								consecutive_conn_errors = 0;
 								log::debug!(
 									"bulk_store submitter {task_id}: stale nonce (already \
 									 used), skipping: {e}"
@@ -852,6 +923,7 @@ pub async fn bulk_store_oneshot(
 								stale_nonces.fetch_add(1, Ordering::Relaxed);
 							},
 							TxPoolError::FutureNonce => {
+								consecutive_conn_errors = 0;
 								log::warn!(
 									"bulk_store submitter {task_id}: future nonce, \
 									 skipping: {e}"
@@ -859,6 +931,7 @@ pub async fn bulk_store_oneshot(
 								errors.fetch_add(1, Ordering::Relaxed);
 							},
 							TxPoolError::Other => {
+								consecutive_conn_errors = 0;
 								log::warn!("bulk_store submitter {task_id}: skipping: {e}");
 								errors.fetch_add(1, Ordering::Relaxed);
 							},
