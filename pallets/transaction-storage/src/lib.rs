@@ -212,8 +212,8 @@ impl CheckContext {
 pub trait BenchmarkHelper {
 	/// Returns an encoded `TransactionStorageProof` for a block full of
 	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
-	/// built with `[0u8; 32]` as randomness.
-	fn check_proof_encoded() -> Vec<u8>;
+	/// built with `random_hash` as randomness.
+	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8>;
 }
 
 /// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] (2 MiB) and
@@ -254,7 +254,11 @@ const DEFAULT_CHECK_PROOF: &str = "\
 
 #[cfg(feature = "runtime-benchmarks")]
 impl BenchmarkHelper for DefaultCheckProofHelper {
-	fn check_proof_encoded() -> Vec<u8> {
+	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8> {
+		assert_eq!(
+			random_hash, &[0u8; 32],
+			"DefaultCheckProofHelper proof was built with [0u8; 32]"
+		);
 		array_bytes::hex2bytes_unchecked(DEFAULT_CHECK_PROOF)
 	}
 }

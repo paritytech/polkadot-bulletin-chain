@@ -35,10 +35,6 @@ use sp_transaction_storage_proof::TransactionStorageProof;
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-fn proof<T: Config>() -> Vec<u8> {
-	T::BenchmarkHelper::check_proof_encoded()
-}
-
 fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
 	let events = System::<T>::events();
 	let system_event: <T as frame_system::Config>::RuntimeEvent = generic_event.into();
@@ -114,8 +110,8 @@ mod benchmarks {
 		System::<T>::set_block_number(
 			crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one(),
 		);
-		// Pin parent_hash to T::Hash::default() so the pre-computed proof's chunk selection
-		// matches. The proof was generated with this same hash as randomness.
+		// The pre-computed proof was built with T::Hash::default() as randomness.
+		// Pin ParentHash to the same value so chunk selection matches.
 		let random_hash = T::Hash::default();
 		frame_support::storage::unhashed::put(
 			&sp_io::hashing::twox_128(b"System")
@@ -125,8 +121,8 @@ mod benchmarks {
 				.collect::<alloc::vec::Vec<u8>>(),
 			&random_hash,
 		);
-		let encoded_proof = proof::<T>();
-		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();
+		let encoded = T::BenchmarkHelper::check_proof_encoded(random_hash.as_ref());
+		let proof = TransactionStorageProof::decode(&mut encoded.as_slice()).unwrap();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, proof);
