@@ -445,15 +445,12 @@ impl pallet_sudo::Config for Runtime {
 	Debug,
 	codec::MaxEncodedLen,
 	scale_info::TypeInfo,
+	Default,
 )]
 pub enum ProxyType {
 	/// Fully permissioned proxy. Can execute any call on behalf of _proxied_.
+	#[default]
 	Any,
-}
-impl Default for ProxyType {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 impl InstanceFilter<RuntimeCall> for ProxyType {
 	fn filter(&self, _c: &RuntimeCall) -> bool {
@@ -840,6 +837,7 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 /// NOTE: `ValidateStorageCalls` must come before `AllowedSignedCalls` because it transforms
 /// the origin for signed TransactionStorage calls, and `AllowedSignedCalls` needs to detect this.
 pub type TxExtension = (
+	frame_system::AuthorizeCall<Runtime>,
 	frame_system::CheckNonZeroSender<Runtime>,
 	frame_system::CheckSpecVersion<Runtime>,
 	frame_system::CheckTxVersion<Runtime>,

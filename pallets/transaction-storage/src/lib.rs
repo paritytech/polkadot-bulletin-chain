@@ -184,28 +184,6 @@ impl TransactionInfo {
 	}
 }
 
-/// Context of a `check_signed`/`check_unsigned` call.
-#[derive(Clone, Copy)]
-enum CheckContext {
-	/// `validate_signed` or `validate_unsigned`.
-	Validate,
-	/// `pre_dispatch_signed` or `pre_dispatch`.
-	PreDispatch,
-}
-
-impl CheckContext {
-	/// Should authorization be consumed in this context? If not, we merely check that
-	/// authorization exists.
-	fn consume_authorization(self) -> bool {
-		matches!(self, CheckContext::PreDispatch)
-	}
-
-	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
-	fn want_valid_transaction(self) -> bool {
-		matches!(self, CheckContext::Validate)
-	}
-}
-
 #[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
@@ -438,9 +416,48 @@ pub mod pallet {
 		/// O(n*log(n)) of data size, as all data is pushed to an in-memory trie.
 		#[pallet::call_index(0)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool { true })]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, data: &Vec<u8>| -> bool {
+			// Check preimage authorization
+			let hash = sp_io::hashing::blake2_256(data);
+			let preimage_extent = Pallet::<T>::preimage_authorization_extent(hash);
+			if preimage_extent.transactions > 0 && preimage_extent.bytes >= data.len() as u64 {
+				return true;
+			}
+			// Check account authorization for signed origins
+			if let Ok(who) = frame_system::ensure_signed(origin.clone()) {
+				let account_extent = Pallet::<T>::account_authorization_extent(who);
+				return account_extent.transactions > 0 &&
+					account_extent.bytes >= data.len() as u64;
+			}
+			false
+		})]
+		#[pallet::authorize(|_source, data: &Vec<u8>| {
+			let valid_tx = Pallet::<T>::check_store_renew_unsigned(
+				data.len(),
+				|| sp_io::hashing::blake2_256(data),
+				false,
+			)?.ok_or(IMPOSSIBLE)?;
+			Ok((valid_tx, Weight::zero()))
+		})]
+		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn store(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
-			let _caller = Self::ensure_authorized(origin)?;
+			match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => {
+					let _ = Self::check_store_renew_unsigned(
+						data.len(),
+						|| sp_io::hashing::blake2_256(&data),
+						true,
+					)
+					.map_err(Self::dispatch_error_from_validity)?;
+				},
+				Ok(frame_system::RawOrigin::Signed(_)) |
+				Ok(frame_system::RawOrigin::None) |
+				Ok(frame_system::RawOrigin::Root) => {},
+				Err(origin) => {
+					// Try pallet origin (set by ValidateStorageCalls extension)
+					let _caller = Self::ensure_authorized(origin)?;
+				},
+			}
 			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
 		}
 
@@ -452,13 +469,51 @@ pub mod pallet {
 		/// Emits [`Stored`](Event::Stored) when successful.
 		#[pallet::call_index(9)]
 		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
-		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, cid: &CidConfig, data: &Vec<u8>| -> bool {
+			// Check preimage authorization
+			let hash = cid.hashing.hash(data);
+			let preimage_extent = Pallet::<T>::preimage_authorization_extent(hash);
+			if preimage_extent.transactions > 0 && preimage_extent.bytes >= data.len() as u64 {
+				return true;
+			}
+			// Check account authorization for signed origins
+			if let Ok(who) = frame_system::ensure_signed(origin.clone()) {
+				let account_extent = Pallet::<T>::account_authorization_extent(who);
+				return account_extent.transactions > 0 &&
+					account_extent.bytes >= data.len() as u64;
+			}
+			false
+		})]
+		#[pallet::authorize(|_source, cid: &CidConfig, data: &Vec<u8>| {
+			let valid_tx = Pallet::<T>::check_store_renew_unsigned(
+				data.len(),
+				|| cid.hashing.hash(data),
+				false,
+			)?.ok_or(IMPOSSIBLE)?;
+			Ok((valid_tx, Weight::zero()))
+		})]
+		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn store_with_cid_config(
 			origin: OriginFor<T>,
 			cid: CidConfig,
 			data: Vec<u8>,
 		) -> DispatchResult {
-			let _caller = Self::ensure_authorized(origin)?;
+			match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => {
+					let _ = Self::check_store_renew_unsigned(
+						data.len(),
+						|| cid.hashing.hash(&data),
+						true,
+					)
+					.map_err(Self::dispatch_error_from_validity)?;
+				},
+				Ok(frame_system::RawOrigin::Signed(_)) |
+				Ok(frame_system::RawOrigin::None) |
+				Ok(frame_system::RawOrigin::Root) => {},
+				Err(origin) => {
+					let _caller = Self::ensure_authorized(origin)?;
+				},
+			}
 			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
@@ -476,12 +531,39 @@ pub mod pallet {
 		/// O(1).
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::renew())]
+		#[pallet::authorize(|_source, block: &BlockNumberFor<T>, index: &u32| {
+			let info = Pallet::<T>::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
+			let valid_tx = Pallet::<T>::check_store_renew_unsigned(
+				info.size as usize,
+				|| info.content_hash,
+				false,
+			)?.ok_or(IMPOSSIBLE)?;
+			Ok((valid_tx, Weight::zero()))
+		})]
+		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn renew(
 			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
 			index: u32,
 		) -> DispatchResultWithPostInfo {
-			let _caller = Self::ensure_authorized(origin)?;
+			match origin.into() {
+				Ok(frame_system::RawOrigin::Authorized) => {
+					let info =
+						Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
+					let _ = Self::check_store_renew_unsigned(
+						info.size as usize,
+						|| info.content_hash,
+						true,
+					)
+					.map_err(Self::dispatch_error_from_validity)?;
+				},
+				Ok(frame_system::RawOrigin::Signed(_)) |
+				Ok(frame_system::RawOrigin::None) |
+				Ok(frame_system::RawOrigin::Root) => {},
+				Err(origin) => {
+					let _caller = Self::ensure_authorized(origin)?;
+				},
+			}
 			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
 			// In the case of a regular unsigned transaction, this should have been checked by
@@ -619,6 +701,22 @@ pub mod pallet {
 		/// when successful.
 		#[pallet::call_index(5)]
 		#[pallet::weight(T::WeightInfo::remove_expired_account_authorization())]
+		#[pallet::authorize(|_source, who: &T::AccountId| {
+			Pallet::<T>::check_authorization_expired(
+				&AuthorizationScope::Account(who.clone()),
+			)?;
+			Ok((
+				ValidTransaction::with_tag_prefix(
+					"TransactionStorageRemoveExpiredAccountAuthorization",
+				)
+				.and_provides(who)
+				.priority(T::RemoveExpiredAuthorizationPriority::get())
+				.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+				.into(),
+				Weight::zero(),
+			))
+		})]
+		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn remove_expired_account_authorization(
 			_origin: OriginFor<T>,
 			who: T::AccountId,
@@ -639,6 +737,22 @@ pub mod pallet {
 		/// when successful.
 		#[pallet::call_index(6)]
 		#[pallet::weight(T::WeightInfo::remove_expired_preimage_authorization())]
+		#[pallet::authorize(|_source, content_hash: &ContentHash| {
+			Pallet::<T>::check_authorization_expired(
+				&AuthorizationScope::Preimage(*content_hash),
+			)?;
+			Ok((
+				ValidTransaction::with_tag_prefix(
+					"TransactionStorageRemoveExpiredPreimageAuthorization",
+				)
+				.and_provides(content_hash)
+				.priority(T::RemoveExpiredAuthorizationPriority::get())
+				.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+				.into(),
+				Weight::zero(),
+			))
+		})]
+		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn remove_expired_preimage_authorization(
 			_origin: OriginFor<T>,
 			content_hash: ContentHash,
@@ -835,25 +949,12 @@ pub mod pallet {
 		}
 	}
 
-	#[pallet::validate_unsigned]
-	impl<T: Config> ValidateUnsigned for Pallet<T> {
-		type Call = Call<T>;
-
-		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
-			Self::check_unsigned(call, CheckContext::Validate)?.ok_or(IMPOSSIBLE.into())
-		}
-
-		fn pre_dispatch(call: &Self::Call) -> Result<(), TransactionValidityError> {
-			// Allow inherents here.
-			if Self::is_inherent(call) {
-				return Ok(());
-			}
-
-			Self::check_unsigned(call, CheckContext::PreDispatch).map(|_| ())
-		}
-	}
-
 	impl<T: Config> Pallet<T> {
+		fn dispatch_error_from_validity(error: TransactionValidityError) -> DispatchError {
+			let message: &'static str = error.into();
+			DispatchError::Other(message)
+		}
+
 		/// Validate that `origin` is one of the accepted caller types for store/renew
 		/// extrinsics, and return a typed description of the caller.
 		///
@@ -1081,7 +1182,7 @@ pub mod pallet {
 			call: &Call<T>,
 		) -> Result<(ValidTransaction, Option<AuthorizationScopeFor<T>>), TransactionValidityError>
 		{
-			let (valid_tx, scope) = Self::check_signed(who, call, CheckContext::Validate)?;
+			let (valid_tx, scope) = Self::check_signed(who, call, false)?;
 			Ok((valid_tx.ok_or(IMPOSSIBLE)?, scope))
 		}
 
@@ -1094,7 +1195,7 @@ pub mod pallet {
 			who: &T::AccountId,
 			call: &Call<T>,
 		) -> Result<(), TransactionValidityError> {
-			let _ = Self::check_signed(who, call, CheckContext::PreDispatch)?;
+			let _ = Self::check_signed(who, call, true)?;
 			Ok(())
 		}
 
@@ -1218,7 +1319,7 @@ pub mod pallet {
 		fn check_store_renew_unsigned(
 			size: usize,
 			content_hash: impl FnOnce() -> ContentHash,
-			context: CheckContext,
+			consume: bool,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
 				return Err(BAD_DATA_SIZE.into());
@@ -1233,68 +1334,16 @@ pub mod pallet {
 			Self::check_authorization(
 				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
-				context.consume_authorization(),
+				consume,
 			)?;
 
-			Ok(context
-				.want_valid_transaction()
-				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
-		}
-
-		fn check_unsigned(
-			call: &Call<T>,
-			context: CheckContext,
-		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
-			match call {
-				Call::<T>::store { data } => Self::check_store_renew_unsigned(
-					data.len(),
-					|| sp_io::hashing::blake2_256(data),
-					context,
-				),
-				Call::<T>::store_with_cid_config { cid, data } =>
-					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
-				Call::<T>::renew { block, index } => {
-					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					Self::check_store_renew_unsigned(
-						info.size as usize,
-						|| info.content_hash,
-						context,
-					)
-				},
-				Call::<T>::remove_expired_account_authorization { who } => {
-					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
-					Ok(context.want_valid_transaction().then(|| {
-						ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExpiredAccountAuthorization",
-						)
-						.and_provides(who)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
-						.into()
-					}))
-				},
-				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
-					Self::check_authorization_expired(&AuthorizationScope::Preimage(
-						*content_hash,
-					))?;
-					Ok(context.want_valid_transaction().then(|| {
-						ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExpiredPreimageAuthorization",
-						)
-						.and_provides(content_hash)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
-						.into()
-					}))
-				},
-				_ => Err(InvalidTransaction::Call.into()),
-			}
+			Ok((!consume).then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
 		}
 
 		fn check_signed(
 			who: &T::AccountId,
 			call: &Call<T>,
-			context: CheckContext,
+			consume: bool,
 		) -> Result<
 			(Option<ValidTransaction>, Option<AuthorizationScopeFor<T>>),
 			TransactionValidityError,
@@ -1321,7 +1370,7 @@ pub mod pallet {
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
 					return Ok((
-						context.want_valid_transaction().then(|| ValidTransaction {
+						(!consume).then(|| ValidTransaction {
 							priority: T::StoreRenewPriority::get(),
 							longevity: T::StoreRenewLongevity::get(),
 							..Default::default()
@@ -1343,8 +1392,6 @@ pub mod pallet {
 			// Prefer preimage authorization if available.
 			// This allows anyone to store/renew pre-authorized content without consuming their
 			// own account authorization.
-			let consume = context.consume_authorization();
-
 			let used_preimage_auth = Self::check_authorization(
 				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
@@ -1363,7 +1410,7 @@ pub mod pallet {
 			// Only build `ValidTransaction` metadata during pool validation, not block
 			// execution. The tx tag/priority differs depending on whether preimage or account
 			// authorization was used.
-			let (valid_tx, scope) = if context.want_valid_transaction() {
+			let (valid_tx, scope) = if !consume {
 				let (valid_tx, scope) = if used_preimage_auth {
 					(
 						Self::preimage_store_renew_valid_transaction(content_hash),

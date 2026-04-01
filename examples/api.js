@@ -3,6 +3,7 @@ import assert from 'assert';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Binary, Enum } from '@polkadot-api/substrate-bindings';
 import { CHUNK_SIZE, toHex, toHashingEnum } from './common.js';
+import { createGeneralSigner } from './general_tx.js';
 
 // Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
 function toBinary(data) {
@@ -138,6 +139,9 @@ export const TX_MODE_IN_POOL = "in-tx-pool";
 
 const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds or 30 blocks
 
+// Singleton general signer for unsigned transactions (reusable across calls)
+const generalSigner = createGeneralSigner();
+
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
         match: (ev) => ev.type === "txBestBlocksState" && ev.found,
@@ -159,17 +163,15 @@ export async function waitForTransaction(tx, signer = null, txName, txMode = TX_
         throw new Error(`Unhandled txMode: ${txMode}`);
     }
 
-    // Get the observable - either signed or unsigned
+    // Get the observable - either signed or unsigned (general)
     let observable;
     if (signer === null) {
-        console.log(`⬆️ Submitting unsigned ${txName}`);
-        // TODO: https://github.com/polkadot-api/polkadot-api/issues/760
-        // const bareTx = await tx.getBareTx(txOpts);
-        if (Object.keys(txOpts).length > 0) {
-            throw new Error(`txOpts not supported for unsigned transactions (getBareTx doesn't accept options). See: https://github.com/polkadot-api/polkadot-api/issues/760`);
-        }
-        const bareTx = await tx.getBareTx();
-        observable = client.submitAndWatch(bareTx);
+        console.log(`⬆️ Submitting unsigned ${txName} as general transaction`);
+        // With #[pallet::authorize], unsigned transactions must be submitted as "general"
+        // extrinsics (with extension pipeline) rather than "bare" extrinsics (which bypass
+        // all extensions including AuthorizeCall).
+        // See: https://github.com/polkadot-api/polkadot-api/issues/760
+        observable = tx.signSubmitAndWatch(generalSigner, txOpts);
     } else {
         observable = tx.signSubmitAndWatch(signer, txOpts);
     }
