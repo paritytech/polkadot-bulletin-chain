@@ -7,7 +7,7 @@ The SDK provides structured error handling through `BulletinError` and the `Erro
 All SDK errors are instances of `BulletinError`, which extends the standard `Error` class:
 
 ```typescript
-import { BulletinError, ErrorCode } from '@bulletin/sdk'
+import { BulletinError, ErrorCode } from '@parity/bulletin-sdk'
 
 try {
   const result = await client.store(data).send()
@@ -116,7 +116,7 @@ When using progress callbacks, you receive two types of events: **transaction st
 Track the lifecycle of a submitted transaction:
 
 ```typescript
-import { TxStatus } from '@bulletin/sdk'
+import { TxStatus } from '@parity/bulletin-sdk'
 
 const result = await client
   .store(data)
@@ -169,7 +169,7 @@ const result = await client
 Track progress of chunked uploads:
 
 ```typescript
-import { ChunkStatus } from '@bulletin/sdk'
+import { ChunkStatus } from '@parity/bulletin-sdk'
 
 const result = await client
   .store(largeData)
@@ -212,7 +212,7 @@ const result = await client
 ### Authorization Flow
 
 ```typescript
-import { BulletinError, ErrorCode } from '@bulletin/sdk'
+import { BulletinError, ErrorCode } from '@parity/bulletin-sdk'
 
 try {
   const result = await client.store(data).send()
