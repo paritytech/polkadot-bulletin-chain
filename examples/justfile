@@ -263,10 +263,15 @@ ipfs-kubo-install:
     esac
     OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     TARBALL="kubo_{{ KUBO_VERSION }}_${OS}-${ARCH}.tar.gz"
-    URL="https://dist.ipfs.tech/kubo/{{ KUBO_VERSION }}/${TARBALL}"
-    echo "   Downloading $URL..."
+    PRIMARY_URL="https://dist.ipfs.tech/kubo/{{ KUBO_VERSION }}/${TARBALL}"
+    FALLBACK_URL="https://github.com/ipfs/kubo/releases/download/{{ KUBO_VERSION }}/${TARBALL}"
     mkdir -p "$KUBO_DIR"
-    curl -fsSL "$URL" | tar xz -C "$KUBO_DIR" --strip-components=1 kubo/ipfs
+    echo "   Downloading $PRIMARY_URL..."
+    if ! curl -fsSL --retry 2 --connect-timeout 30 "$PRIMARY_URL" | tar xz -C "$KUBO_DIR" --strip-components=1 kubo/ipfs; then
+        echo "   ⚠ Primary download failed, trying GitHub mirror..."
+        echo "   Downloading $FALLBACK_URL..."
+        curl -fsSL --retry 2 --connect-timeout 30 "$FALLBACK_URL" | tar xz -C "$KUBO_DIR" --strip-components=1 kubo/ipfs
+    fi
     chmod +x "$KUBO_DIR/ipfs"
     "$KUBO_DIR/ipfs" --version
     echo "   ✓ Kubo installed at $KUBO_DIR/ipfs"
