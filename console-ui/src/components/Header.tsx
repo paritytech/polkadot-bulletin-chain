@@ -157,7 +157,7 @@ function HelpMenu() {
   const helpLinks = [
     {
       label: "User Manual",
-      href: "/docs/index.html",
+      href: `${import.meta.env.BASE_URL}docs/index.html`,
       icon: BookOpen,
       external: true,
       description: "Guides for storing and retrieving data",
