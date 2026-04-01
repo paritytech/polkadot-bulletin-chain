@@ -2132,6 +2132,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletin-sdk-rust"
+version = "0.1.0"
+dependencies = [
+ "cid",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-runtime",
+ "subxt",
+ "subxt-signer",
+ "thiserror 2.0.18",
+ "tokio",
+ "transaction-storage-primitives",
+]
+
+[[package]]
 name = "bulletin-westend-integration-tests"
 version = "0.1.0"
 dependencies = [
@@ -14952,6 +14968,7 @@ dependencies = [
  "frame-metadata",
  "futures",
  "hex",
+ "jsonrpsee",
  "parity-scale-codec",
  "primitive-types 0.13.1",
  "scale-bits",
@@ -14972,6 +14989,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "wasm-bindgen-futures",
  "web-time",
 ]
 
@@ -15090,6 +15108,7 @@ dependencies = [
  "subxt-core",
  "subxt-lightclient",
  "thiserror 2.0.18",
+ "tokio-util",
  "tracing",
  "url",
 ]

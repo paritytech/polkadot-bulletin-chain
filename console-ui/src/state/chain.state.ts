@@ -1,22 +1,24 @@
-import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
+import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
 import { getWsProvider } from "@polkadot-api/ws-provider";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { bulletin_westend, bulletin_paseo, web3_storage } from "@polkadot-api/descriptors";
+import {
+  BULLETIN_NETWORKS,
+  WEB3_STORAGE_NETWORKS,
+  DEFAULT_NETWORKS,
+  type Network,
+} from "../../../shared/networks";
+import { AsyncBulletinClient } from "@bulletin/sdk";
 
 export type StorageType = "bulletin" | "web3storage";
 
 export type NetworkId = string;
 
-export interface Network {
-  id: NetworkId;
-  name: string;
-  endpoints: string[];
-  lightClient: boolean;
-  chainSpec?: string;
-}
+// Re-export Network type for convenience
+export type { Network };
 
 export interface StorageConfig {
   id: StorageType;
@@ -29,58 +31,14 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
   bulletin: {
     id: "bulletin",
     name: "Bulletin",
-    defaultNetwork: "paseo",
-    networks: {
-      local: {
-        id: "local",
-        name: "Local Dev",
-        endpoints: ["ws://localhost:10000"],
-        lightClient: false,
-      },
-      westend: {
-        id: "westend",
-        name: "Bulletin Westend",
-        endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
-        lightClient: false,
-      },
-      paseo: {
-        id: "paseo",
-        name: "Bulletin Paseo",
-        endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
-        lightClient: false,
-      },
-      previewnet: {
-        id: "previewnet",
-        name: "Bulletin Previewnet",
-        endpoints: ["wss://previewnet.substrate.dev/bulletin"],
-        lightClient: false,
-      },
-      polkadot: {
-        id: "polkadot",
-        name: "Bulletin Polkadot (not released yet)",
-        endpoints: [],
-        lightClient: false,
-      },
-    },
+    defaultNetwork: DEFAULT_NETWORKS.bulletin,
+    networks: BULLETIN_NETWORKS,
   },
   web3storage: {
     id: "web3storage",
     name: "Web3 Storage",
-    defaultNetwork: "local",
-    networks: {
-      local: {
-        id: "local",
-        name: "Local Dev",
-        endpoints: ["ws://localhost:2222"],
-        lightClient: false,
-      },
-      westend: {
-        id: "westend",
-        name: "Web3 Westend (not released yet)",
-        endpoints: [],
-        lightClient: false,
-      },
-    },
+    defaultNetwork: DEFAULT_NETWORKS.web3storage,
+    networks: WEB3_STORAGE_NETWORKS,
   },
 };
 
@@ -118,6 +76,8 @@ class NullWebSocket {
 
 // Track the current provider's kill switch so we can silence its reconnection loop
 let killCurrentProvider: (() => void) | null = null;
+// Track the bestBlocks$ subscription so we can clean it up on disconnect/reconnect
+let blockSubscription: { unsubscribe(): void } | null = null;
 
 function createKillableWsProvider(endpoint: string) {
   let killed = false;
@@ -211,9 +171,9 @@ async function createSmoldotProvider(network: Network) {
 
 export function switchStorageType(type: StorageType): void {
   const config = STORAGE_CONFIGS[type];
+  localStorage.setItem(STORAGE_KEY_STORAGE_TYPE, type);
   storageTypeSubject.next(type);
   networksSubject.next(config.networks);
-  localStorage.setItem(STORAGE_KEY_STORAGE_TYPE, type);
   connectToNetwork(config.defaultNetwork);
 }
 
@@ -237,8 +197,8 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     existingClient.destroy();
   }
 
-  networkSubject.next(network);
   localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
+  networkSubject.next(network);
   statusSubject.next("connecting");
   errorSubject.next(undefined);
   apiSubject.next(undefined);
@@ -293,8 +253,9 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
       sudoKeySubject.next(undefined);
     }
 
-    // Subscribe to best block
-    client.bestBlocks$.subscribe({
+    // Subscribe to best block (clean up previous subscription first)
+    blockSubscription?.unsubscribe();
+    blockSubscription = client.bestBlocks$.subscribe({
       next: (blocks) => {
         if (blocks.length > 0) {
           blockNumberSubject.next(blocks[0]!.number);
@@ -314,6 +275,8 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
 }
 
 export function disconnect(): void {
+  blockSubscription?.unsubscribe();
+  blockSubscription = null;
   if (killCurrentProvider) {
     killCurrentProvider();
     killCurrentProvider = null;
@@ -379,6 +342,24 @@ export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
+
+/**
+ * Hook that returns a factory for creating AsyncBulletinClient instances.
+ * Returns undefined if not connected. Call with a signer to get a client.
+ *
+ * @example
+ * ```tsx
+ * const createBulletinClient = useCreateBulletinClient();
+ * // later in a handler:
+ * const bulletinClient = createBulletinClient?.(signer);
+ * ```
+ */
+export function useCreateBulletinClient(): ((signer: PolkadotSigner) => AsyncBulletinClient) | undefined {
+  const api = useApi();
+  const client = useClient();
+  if (!api || !client) return undefined;
+  return (signer: PolkadotSigner) => new AsyncBulletinClient(api, signer, client.submit);
+}
 
 // Direct access to subjects for non-React code
 export const network$ = networkSubject.asObservable();

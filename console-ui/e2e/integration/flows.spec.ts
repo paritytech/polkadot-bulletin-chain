@@ -62,9 +62,7 @@ test.describe("Preimage Round-Trip", () => {
 
       await page.getByPlaceholder("Enter data to store...").fill(testData);
 
-      const uploadButton = page.getByRole("button", {
-        name: /Upload to Bulletin Chain/i,
-      });
+      const uploadButton = page.getByTestId("upload-button");
       await expect(uploadButton).toBeEnabled({ timeout: 60_000 });
 
       await uploadButton.click();
