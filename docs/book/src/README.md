@@ -89,6 +89,7 @@ println!("Stored in block: {}", receipt.block_hash);
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
 | Local Dev | `ws://localhost:10000` | - |
 
+See [networks.ts](https://github.com/paritytech/polkadot-bulletin-chain/blob/main/console-ui/src/config/networks.ts) for the full configuration.
 
 ## Documentation Structure
 
