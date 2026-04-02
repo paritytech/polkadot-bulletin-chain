@@ -464,7 +464,7 @@ const CHECK_PROOF: &str = "\
 ";
 
 #[cfg(feature = "runtime-benchmarks")]
-impl pallet_transaction_storage::benchmarking::BenchmarkHelper for CheckProofHelper {
+impl pallet_transaction_storage::benchmarking::BenchmarkHelper<Runtime> for CheckProofHelper {
 	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8> {
 		assert_eq!(random_hash, &[0u8; 32], "CheckProofHelper proof was built with [0u8; 32]");
 		array_bytes::hex2bytes_unchecked(CHECK_PROOF)

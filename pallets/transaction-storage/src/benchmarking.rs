@@ -33,7 +33,7 @@ use sp_transaction_storage_proof::TransactionStorageProof;
 
 /// Helper trait for benchmarking. The runtime must provide a pre-computed storage proof
 /// that matches its `MaxTransactionSize` and `MaxBlockTransactions` configuration.
-pub trait BenchmarkHelper {
+pub trait BenchmarkHelper<T: Config> {
 	/// Returns an encoded `TransactionStorageProof` for a block full of
 	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
 	/// built with `random_hash` as randomness.
@@ -74,8 +74,19 @@ const DEFAULT_CHECK_PROOF: &str = "\
 	f5e016556efab64517084000\
 ";
 
-impl BenchmarkHelper for DefaultCheckProofHelper {
+impl<T: Config> BenchmarkHelper<T> for DefaultCheckProofHelper {
 	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8> {
+		assert_eq!(
+			T::MaxTransactionSize::get(),
+			DEFAULT_MAX_TRANSACTION_SIZE,
+			"DefaultCheckProofHelper requires MaxTransactionSize == DEFAULT_MAX_TRANSACTION_SIZE ({})",
+			DEFAULT_MAX_TRANSACTION_SIZE,
+		);
+		assert_eq!(
+			T::MaxBlockTransactions::get(),
+			512,
+			"DefaultCheckProofHelper requires MaxBlockTransactions == 512",
+		);
 		assert_eq!(
 			random_hash, &[0u8; 32],
 			"DefaultCheckProofHelper proof was built with [0u8; 32]"

@@ -269,7 +269,7 @@ pub mod pallet {
 		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for 2 MiB
 		/// / 512.
 		#[cfg(feature = "runtime-benchmarks")]
-		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper;
+		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper<Self>;
 	}
 
 	#[pallet::error]
