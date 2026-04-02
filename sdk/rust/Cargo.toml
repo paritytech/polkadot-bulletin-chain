@@ -41,6 +41,7 @@ subxt = "0.44"
 default = ["std"]
 
 std = [
+	"bulletin-transaction-storage-primitives/std",
 	"cid/std",
 	"codec/std",
 	"scale-info/std",
@@ -50,7 +51,6 @@ std = [
 	"subxt-signer",
 	"thiserror",
 	"tokio",
-	"bulletin-transaction-storage-primitives/std",
 ]
 
 # Runtime benchmarking (no-op for SDK, but required for workspace consistency)
