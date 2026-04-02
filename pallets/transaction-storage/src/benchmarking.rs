@@ -41,7 +41,7 @@ pub trait BenchmarkHelper<T: Config> {
 }
 
 /// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
-/// [`DEFAULT_MAX_BLOCK_TRANSACTIONS`]. Regenerate with `gen_check_proof` runtime test if these
+/// [`DEFAULT_MAX_BLOCK_TRANSACTIONS`]. Regenerate with `gen_default_check_proof` test if these
 /// change.
 pub struct DefaultCheckProofHelper;
 

@@ -404,7 +404,8 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
 	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
-	type MaxBlockTransactions = ConstU32<512>;
+	type MaxBlockTransactions =
+		ConstU32<{ pallet_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
