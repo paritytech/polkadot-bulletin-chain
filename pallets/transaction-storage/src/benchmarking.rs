@@ -37,7 +37,7 @@ pub trait BenchmarkHelper<T: Config> {
 	/// Returns an encoded `TransactionStorageProof` for a block full of
 	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
 	/// built with `random_hash` as randomness.
-	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8>;
+	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8>;
 }
 
 /// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
@@ -76,7 +76,7 @@ const DEFAULT_CHECK_PROOF: &str = "\
 ";
 
 impl<T: Config> BenchmarkHelper<T> for DefaultCheckProofHelper {
-	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8> {
+	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8> {
 		assert_eq!(
 			T::MaxTransactionSize::get(),
 			DEFAULT_MAX_TRANSACTION_SIZE,
@@ -185,7 +185,7 @@ mod benchmarks {
 				.collect::<alloc::vec::Vec<u8>>(),
 			&random_hash,
 		);
-		let encoded = T::BenchmarkHelper::check_proof_encoded(random_hash.as_ref());
+		let encoded = T::BenchmarkHelper::encoded_check_proof(random_hash.as_ref());
 		let proof = TransactionStorageProof::decode(&mut encoded.as_slice()).unwrap();
 
 		#[extrinsic_call]
