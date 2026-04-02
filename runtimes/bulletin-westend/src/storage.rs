@@ -111,5 +111,6 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper = pallet_transaction_storage::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper =
+		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
