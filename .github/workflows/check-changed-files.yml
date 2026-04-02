@@ -28,7 +28,7 @@ jobs:
             echo "should-run=true" >> $GITHUB_OUTPUT
             exit 0
           fi
-          if echo "$FILES" | grep -qvE '^(docs/|.claude|)'; then
+          if echo "$FILES" | grep -qvE '^(docs/|.claude/|stress-test/)'; then
             echo "should-run=true" >> $GITHUB_OUTPUT
           else
             echo "should-run=false" >> $GITHUB_OUTPUT
