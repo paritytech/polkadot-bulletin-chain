@@ -29,7 +29,7 @@ The Bulletin SDK consolidates all Bulletin Chain interaction logic into a single
 TypeScript is where the consumers are:
 
 - **bulletin-deploy**: CLI tool for deploying static sites to Bulletin + DotNS. Currently ~300 lines of hand-rolled storage code that the SDK replaces entirely.
-- **dotNS CLI/SDK**: The `packages/cli/src/bulletin/` directory contains ~350 lines of duplicated CID, chunking, and storage code that could be a direct `import` from `@bulletin/sdk`.
+- **dotNS CLI/SDK**: The `packages/cli/src/bulletin/` directory contains ~350 lines of duplicated CID, chunking, and storage code that could be a direct `import` from `@parity/bulletin-sdk`.
 - **Console UI**: The reference web application for Bulletin Chain. Already migrated to the SDK, removing ~130 lines of manual CID calculation.
 - **Product SDK adapter**: Products (pApps) running inside Nova Spektr need Bulletin storage routed through the Host API. The adapter is a thin wrapper around the same core SDK.
 - **Future web tooling**: Any browser-based application, developer tool, or dashboard that reads from or writes to Bulletin Chain.
@@ -66,7 +66,7 @@ There is no current consumer that requires Go, Python, or another language. If o
 │                                                                  │
 │  ┌─────────────────────┐    ┌──────────────────────────────┐     │
 │  │   sdk/rust/          │    │   sdk/typescript/             │     │
-│  │   bulletin-sdk-rust  │    │   @bulletin/sdk               │     │
+│  │   bulletin-sdk-rust  │    │   @parity/bulletin-sdk               │     │
 │  │                      │    │                               │     │
 │  │  • TransactionClient │    │  • AsyncBulletinClient        │     │
 │  │  • CID calculation   │    │  • BulletinPreparer           │     │
@@ -84,7 +84,7 @@ There is no current consumer that requires Go, Python, or another language. If o
      │  Rust consumers │  │  Direct PAPI   │        │  Host API (Product │
      │                 │  │  consumers     │        │  SDK) consumers    │
      │ • Node binary   │  │                │        │                    │
-     │ • Integration   │  │ • bulletin-    │        │ @bulletin/         │
+     │ • Integration   │  │ • bulletin-    │        │ @parity/bulletin-  │
      │   tests         │  │   deploy       │        │ sdk-product        │
      │ • Validator     │  │ • dotNS CLI    │        │ (in triangle-      │
      │   tooling       │  │ • Console UI   │        │  js-sdks)          │
@@ -104,7 +104,7 @@ There is no current consumer that requires Go, Python, or another language. If o
 **With SDK**: Replace the core storage logic with SDK calls. The pool account management and auto-authorization are deploy-specific concerns that stay, but the storage primitives become:
 
 ```javascript
-import { AsyncBulletinClient } from '@bulletin/sdk'
+import { AsyncBulletinClient } from '@parity/bulletin-sdk'
 
 // Replace ~200 lines of createCID + watchTransaction + storeBlock
 const { cid } = await client
@@ -124,7 +124,7 @@ const { cid } = await client
 **With SDK**: The entire `src/bulletin/` directory can be replaced with SDK imports:
 
 ```typescript
-import { AsyncBulletinClient, CidCodec, HashAlgorithm } from '@bulletin/sdk'
+import { AsyncBulletinClient, CidCodec, HashAlgorithm } from '@parity/bulletin-sdk'
 
 // storeSingleFileToBulletin → client.store(data).send()
 // storeChunkedFileToBulletin → client.store(largeData).withChunkSize(1024*1024).send()
@@ -143,10 +143,10 @@ import { AsyncBulletinClient, CidCodec, HashAlgorithm } from '@bulletin/sdk'
 
 **Current state**: Not yet implemented. Products running inside Nova Spektr currently cannot interact with Bulletin Chain.
 
-**With SDK adapter**: A thin `@bulletin/sdk-product` package in the `triangle-js-sdks` monorepo wires `@bulletin/sdk` to the Host API:
+**With SDK adapter**: A thin `@parity/bulletin-sdk-product` package in the `triangle-js-sdks` monorepo wires `@parity/bulletin-sdk` to the Host API:
 
 ```typescript
-import { createBulletinProductClient } from '@bulletin/sdk-product'
+import { createBulletinProductClient } from '@parity/bulletin-sdk-product'
 
 // All calls route through Host API — no direct WebSocket connections
 const client = await createBulletinProductClient({ signer })

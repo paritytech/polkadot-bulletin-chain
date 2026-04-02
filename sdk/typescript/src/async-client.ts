@@ -507,7 +507,7 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
  * ```typescript
  * import { createClient } from 'polkadot-api';
  * import { getWsProvider } from 'polkadot-api/ws-provider/web';
- * import { AsyncBulletinClient } from '@bulletin/sdk';
+ * import { AsyncBulletinClient } from '@parity/bulletin-sdk';
  *
  * // User sets up PAPI client
  * const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');

@@ -17,7 +17,7 @@ Products in the Polkadot Triangle run inside a sandboxed iframe or webview. The 
 | Host API | `@novasamatech/host-api` | Wire protocol (SCALE-encoded messages over `postMessage`) |
 | Product SDK | `@novasamatech/product-sdk` | Product-facing wrappers (accounts, storage, PAPI proxy, etc.) |
 | Host SDK | `paritytech/host-sdk` (Rust) | Native host implementation (smoldot, wallet, DOTNS, IPFS) |
-| Bulletin SDK | `@bulletin/sdk` (this repo) | CID calculation, chunking, DAG building, transaction construction |
+| Bulletin SDK | `@parity/bulletin-sdk` (this repo) | CID calculation, chunking, DAG building, transaction construction |
 
 ### Sandbox Constraints
 
@@ -69,7 +69,7 @@ Bulletin Chain
 ```typescript
 import { createPapiProvider, createAccountsProvider } from '@novasamatech/product-sdk';
 import { createClient } from 'polkadot-api';
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 // PAPI provider routes chain requests through host's smoldot
 const provider = createPapiProvider({

@@ -5,7 +5,7 @@
 
 ---
 
-## TypeScript SDK (`@bulletin/sdk`)
+## TypeScript SDK (`@parity/bulletin-sdk`)
 
 ### Classes
 

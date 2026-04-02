@@ -1,6 +1,6 @@
 import { useCallback } from "react";
-import type { ProgressEvent } from "@bulletin/sdk";
-import { TxStatus } from "@bulletin/sdk";
+import type { ProgressEvent } from "@parity/bulletin-sdk";
+import { TxStatus } from "@parity/bulletin-sdk";
 
 /**
  * Shared progress callback handler for SDK transaction status updates.

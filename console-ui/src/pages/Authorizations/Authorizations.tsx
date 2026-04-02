@@ -19,7 +19,7 @@ import {
   fetchPreimageAuthorizations,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash, HashAlgorithm, WaitFor, BulletinError } from "@bulletin/sdk";
+import { getContentHash, HashAlgorithm, WaitFor, BulletinError } from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex, hexToBytes } from "@/utils/format";
 import { formatBytes, formatNumber, formatAddress } from "@/utils/format";

@@ -28,7 +28,7 @@ import {
 } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@bulletin/sdk";
+import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex } from "@/utils/format";
 import { Binary } from "polkadot-api";
@@ -243,7 +243,7 @@ export function Upload() {
         });
 
         // Calculate CID for display
-        const { calculateCid } = await import("@bulletin/sdk");
+        const { calculateCid } = await import("@parity/bulletin-sdk");
         const cid = await calculateCid(data, cidCodec, hashAlgorithm);
         const cidStr = cid.toString();
 

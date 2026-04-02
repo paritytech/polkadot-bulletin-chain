@@ -128,7 +128,7 @@ See [rust/README.md](rust/README.md) for details.
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 const client = new AsyncBulletinClient(api, signer);
 const result = await client.store(data).send();

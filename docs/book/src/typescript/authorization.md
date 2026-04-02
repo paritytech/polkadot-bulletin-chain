@@ -59,7 +59,7 @@ if (auth) {
 Use the SDK to estimate how much authorization you need:
 
 ```typescript
-import { BulletinPreparer } from "@bulletin/sdk";
+import { BulletinPreparer } from "@parity/bulletin-sdk";
 
 const preparer = new BulletinPreparer();
 
@@ -107,7 +107,7 @@ console.log("Account authorized!");
 Pre-authorize a specific content hash. Useful for allowing anyone to store specific data:
 
 ```typescript
-import { calculateCid, getContentHash, HashAlgorithm, CidCodec } from "@bulletin/sdk";
+import { calculateCid, getContentHash, HashAlgorithm, CidCodec } from "@parity/bulletin-sdk";
 
 // Calculate content hash for the data
 const data = new TextEncoder().encode("Specific content to authorize");
@@ -142,7 +142,7 @@ The faucet grants a default authorization (typically 10 transactions, 1 MiB).
 You can query the chain directly via PAPI before uploading to avoid wasted fees:
 
 ```typescript
-import { BulletinPreparer } from "@bulletin/sdk";
+import { BulletinPreparer } from "@parity/bulletin-sdk";
 
 const preparer = new BulletinPreparer();
 const fileSize = myFile.length;
@@ -199,7 +199,7 @@ if (auth?.expiration) {
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors";
-import { AsyncBulletinClient, BulletinPreparer } from "@bulletin/sdk";
+import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
   // Setup

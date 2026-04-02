@@ -1,5 +1,5 @@
 {
-  "name": "@bulletin/sdk",
+  "name": "@parity/bulletin-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for Polkadot Bulletin Chain",
   "main": "dist/index.js",
@@ -29,8 +29,7 @@
     "test:integration": "vitest run test/integration",
     "lint": "tsc --noEmit && biome check src test",
     "format": "biome check --write src test",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run lint && npm run build"
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "polkadot",
