@@ -16,6 +16,7 @@
     - [Renewal](./typescript/renewal.md)
     - [Error Handling](./typescript/error-handling.md)
     - [PAPI Integration](./typescript/papi-integration.md)
+    - [API Reference](./typescript/api-reference.md)
 - [Rust SDK](./rust/README.md)
     - [Installation](./rust/installation.md)
     - [Authorization](./rust/authorization.md)
@@ -25,3 +26,4 @@
     - [Error Handling](./rust/error-handling.md)
     - [Testing](./rust/mock-testing.md)
     - [no_std Support](./rust/no_std.md)
+    - [API Reference](./rust/api-reference.md)

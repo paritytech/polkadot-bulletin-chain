@@ -3,11 +3,11 @@
 Install the package via your package manager:
 
 ```bash
-npm install @bulletin/sdk
+npm install @parity/bulletin-sdk
 # or
-yarn add @bulletin/sdk
+yarn add @parity/bulletin-sdk
 # or
-pnpm add @bulletin/sdk
+pnpm add @parity/bulletin-sdk
 ```
 
 ## Dependencies

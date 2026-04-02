@@ -35,7 +35,7 @@ There are multiple ways to interact with Bulletin Chain:
 | Language | Package | Status |
 |----------|---------|--------|
 | **Rust** | `bulletin-sdk-rust` | Alpha |
-| **TypeScript** | `@bulletin/sdk` | Alpha |
+| **TypeScript** | `@parity/bulletin-sdk` | Alpha |
 
 The SDKs provide high-level abstractions for:
 - Automatic data chunking for large files
@@ -59,26 +59,26 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 
 ```typescript
 // TypeScript - Store data
-import { BulletinClient } from "@bulletin/sdk";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { createClient, Binary } from "polkadot-api";
+import { getWsProvider } from "polkadot-api/ws-provider/node";
 
-const client = new BulletinClient();
-const data = new TextEncoder().encode("Hello, Bulletin!");
-const operation = client.prepareStore(data);
+const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+const api = papiClient.getTypedApi(bulletinDescriptor);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
-// Submit via PAPI, get CID back
-// See TypeScript SDK documentation for full example
+const result = await client.store(Binary.fromText("Hello, Bulletin!")).send();
+console.log("CID:", result.cid.toString());
 ```
 
 ```rust
 // Rust - Store data
 use bulletin_sdk_rust::prelude::*;
 
-let client = BulletinClient::new();
+let client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
 let data = b"Hello, Bulletin!".to_vec();
-let operation = client.prepare_store(data, None)?;
-
-// Submit via subxt, get CID back
-// See Rust SDK documentation for full example
+let receipt = client.store(data, &signer).await?;
+println!("Stored in block: {}", receipt.block_hash);
 ```
 
 ## Networks

@@ -41,41 +41,33 @@ Open http://localhost:5173
 ### Step 1: Install
 
 ```bash
-npm install @bulletin/sdk polkadot-api
+npm install @parity/bulletin-sdk polkadot-api
 ```
 
 ### Step 2: Store Data
 
 ```typescript
-import { calculateCid, HashAlgorithm, CidCodec } from "@bulletin/sdk";
-import { createClient } from "polkadot-api";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
 async function main() {
   // 1. Connect to testnet
-  const client = createClient(
+  const papiClient = createClient(
     getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")
   );
-  const api = client.getTypedApi(bulletin);
+  const api = papiClient.getTypedApi(bulletin);
 
-  // 2. Prepare your data
-  const data = new TextEncoder().encode("Hello, Bulletin Chain!");
+  // 2. Create SDK client with PAPI client, signer, and submit function
+  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
-  // 3. Calculate CID (what you'll use to retrieve later)
-  const cid = await calculateCid(data, CidCodec.Raw, HashAlgorithm.Blake2b256);
-  console.log("CID:", cid.toString());
+  // 3. Store data (requires authorization - use Faucet first!)
+  const data = Binary.fromText("Hello, Bulletin Chain!");
+  const result = await client.store(data).send();
 
-  // 4. Submit store transaction (requires authorization - use Faucet first!)
-  const signer = /* your polkadot-api signer */;
-
-  const tx = api.tx.TransactionStorage.store({
-    data: data,
-    cid_config: { codec: 0x55, hashing: "Blake2b256" }
-  });
-
-  const result = await tx.signAndSubmit(signer);
-  console.log("Stored in block:", result.block.number);
+  console.log("CID:", result.cid.toString());
+  console.log("Stored in block:", result.blockNumber);
 }
 
 main();
@@ -87,14 +79,7 @@ Before storing, you need authorization. On testnets, use the Faucet in the Conso
 
 ```typescript
 // Only works if you have sudo/root access
-const authTx = api.tx.Sudo.sudo({
-  call: api.tx.TransactionStorage.authorize_account({
-    who: yourAddress,
-    transactions: 10,
-    bytes: 1024 * 1024  // 1 MiB
-  })
-});
-await authTx.signAndSubmit(sudoSigner);
+await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).withSudo().send();
 ```
 
 ---
@@ -114,37 +99,23 @@ tokio = { version = "1", features = ["full"] }
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use subxt_signer::sr25519::Keypair;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Create SDK client
-    let client = BulletinClient::new();
+    // 1. Connect to Bulletin Chain
+    let client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
 
-    // 2. Prepare data
+    // 2. Create signer (replace with your key)
+    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
+    let signer = Keypair::from_uri(&uri)?;
+
+    // 3. Store data (requires authorization - use Faucet first!)
     let data = b"Hello, Bulletin Chain!".to_vec();
-    let operation = client.prepare_store(data, StoreOptions::default())?;
+    let receipt = client.store(data, &signer).await?;
 
-    // 3. Calculate CID
-    let cid = operation.calculate_cid()?;
-    println!("CID: {}", cid.to_string());
-
-    // 4. Connect to chain and submit (requires authorization)
-    let api = subxt::OnlineClient::<subxt::PolkadotConfig>::from_url(
-        "wss://paseo-bulletin-rpc.polkadot.io"
-    ).await?;
-
-    // Build and submit transaction
-    let tx = bulletin::tx()
-        .transaction_storage()
-        .store(operation.data().to_vec(), None);
-
-    let result = api.tx()
-        .sign_and_submit_then_watch_default(&tx, &signer)
-        .await?
-        .wait_for_finalized_success()
-        .await?;
-
-    println!("Stored in block: {}", result.block_number());
+    println!("Stored {} bytes in block: {}", receipt.data_size, receipt.block_hash);
     Ok(())
 }
 ```

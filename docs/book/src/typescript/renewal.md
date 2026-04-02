@@ -228,7 +228,7 @@ if (!auth || auth.extent.transactions < 1 || auth.extent.bytes < dataSize) {
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors";
-import { calculateCid, CidCodec, HashAlgorithm } from "@bulletin/sdk";
+import { calculateCid, CidCodec, HashAlgorithm } from "@parity/bulletin-sdk";
 
 async function storeAndTrackRenewal() {
   const client = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));

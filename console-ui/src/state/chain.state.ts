@@ -11,7 +11,7 @@ import {
   DEFAULT_NETWORKS,
   type Network,
 } from "../../../shared/networks";
-import { AsyncBulletinClient } from "@bulletin/sdk";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 
 export type StorageType = "bulletin" | "web3storage";
 
