@@ -82,14 +82,12 @@ impl<T: Config> BenchmarkHelper<T> for DefaultCheckProofHelper {
 		assert_eq!(
 			T::MaxTransactionSize::get(),
 			DEFAULT_MAX_TRANSACTION_SIZE,
-			"DefaultCheckProofHelper requires MaxTransactionSize == DEFAULT_MAX_TRANSACTION_SIZE ({})",
-			DEFAULT_MAX_TRANSACTION_SIZE,
+			"DefaultCheckProofHelper requires MaxTransactionSize == DEFAULT_MAX_TRANSACTION_SIZE ({DEFAULT_MAX_TRANSACTION_SIZE})",
 		);
 		assert_eq!(
 			T::MaxBlockTransactions::get(),
 			DEFAULT_MAX_BLOCK_TRANSACTIONS,
-			"DefaultCheckProofHelper requires MaxBlockTransactions == DEFAULT_MAX_BLOCK_TRANSACTIONS ({})",
-			DEFAULT_MAX_BLOCK_TRANSACTIONS,
+			"DefaultCheckProofHelper requires MaxBlockTransactions == DEFAULT_MAX_BLOCK_TRANSACTIONS ({DEFAULT_MAX_BLOCK_TRANSACTIONS})",
 		);
 		assert_eq!(
 			random_hash, &[0u8; 32],
