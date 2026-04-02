@@ -27,7 +27,9 @@ use frame_support::{
 	traits::{Contains, EitherOfDiverse, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
-use pallet_bulletin_transaction_storage::CallInspector;
+use pallet_bulletin_transaction_storage::{
+	CallInspector, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+};
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
@@ -90,9 +92,9 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
 	type WeightInfo = crate::weights::pallet_bulletin_transaction_storage::WeightInfo<Runtime>;
-	type MaxBlockTransactions = crate::ConstU32<512>;
+	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
-	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
+	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
@@ -108,4 +110,7 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper =
+		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }

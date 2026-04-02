@@ -405,7 +405,8 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
 	type WeightInfo = weights::pallet_bulletin_transaction_storage::WeightInfo<Runtime>;
-	type MaxBlockTransactions = ConstU32<512>;
+	type MaxBlockTransactions =
+		ConstU32<{ pallet_bulletin_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
@@ -418,6 +419,60 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper = CheckProofHelper;
+}
+
+/// Pre-computed storage proof for benchmarking `check_proof`.
+///
+/// Generated with `gen_check_proof` test for 512 transactions of 8 MiB each
+/// with `[0u8; 32]` as randomness. Must be regenerated when `MaxTransactionSize` or
+/// `MaxBlockTransactions` change.
+#[cfg(feature = "runtime-benchmarks")]
+pub struct CheckProofHelper;
+
+#[cfg(feature = "runtime-benchmarks")]
+const CHECK_PROOF: &str = "\
+	0104000000000000000000000000000000000000000000000000000000000000000000000000\
+	0000000000000000000000000000000000000000000000000000000000000000000000000000\
+	0000000000000000000000000000000000000000000000000000000000000000000000000000\
+	0000000000000000000000000000000000000000000000000000000000000000000000000000\
+	0000000000000000000000000000000000000000000000000000000000000000000000000000\
+	0000000000000000000000000000000000000000000000000000000000000000000000000000\
+	0000000000000000000000000000000000000000000000000000000000000ccd0780ffff0080\
+	302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2\
+	f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15\
+	f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1\
+	004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e304\
+	8cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697\
+	eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a\
+	30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302e\
+	b0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b\
+	834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e7\
+	29d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c10046\
+	57e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf2\
+	06d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb1\
+	53f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba\
+	bd0580777700808da338e6b722f7bf2051901bd5bccee5e71d5cf6b1faff338ad7120b0256c2\
+	8380221ce17f19117affa96e077905fe48a99723a065969c638593b7d9ab57b538438010fd81b\
+	c1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de808da338e6b722f7bf20\
+	51901bd5bccee5e71d5cf6b1faff338ad7120b0256c28380221ce17f19117affa96e077905fe4\
+	8a99723a065969c638593b7d9ab57b538438010fd81bc1359802f0b871aeb95e4410a8ec92b93\
+	af10ea767a2027cf4734e8de808da338e6b722f7bf2051901bd5bccee5e71d5cf6b1faff338ad\
+	7120b0256c28380221ce17f19117affa96e077905fe48a99723a065969c638593b7d9ab57b538\
+	438010fd81bc1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de808da338e\
+	6b722f7bf2051901bd5bccee5e71d5cf6b1faff338ad7120b0256c28380221ce17f19117affa9\
+	6e077905fe48a99723a065969c638593b7d9ab57b53843084000\
+";
+
+#[cfg(feature = "runtime-benchmarks")]
+impl pallet_bulletin_transaction_storage::benchmarking::BenchmarkHelper<Runtime>
+	for CheckProofHelper
+{
+	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8> {
+		assert_eq!(random_hash, &[0u8; 32], "CheckProofHelper proof was built with [0u8; 32]");
+		array_bytes::hex2bytes_unchecked(CHECK_PROOF)
+	}
 }
 
 impl pallet_relayer_set::Config for Runtime {

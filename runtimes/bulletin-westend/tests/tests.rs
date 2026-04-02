@@ -24,7 +24,9 @@ use bulletin_westend_runtime::{
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
 	UncheckedExtrinsic,
 };
-use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
+use frame_support::{
+	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
+};
 use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
 };
@@ -139,13 +141,15 @@ fn transaction_storage_runtime_sizes() {
 			// prepare data
 			let account = Sr25519Keyring::Alice;
 			let who: AccountId = account.to_account_id();
-			#[allow(clippy::identity_op)]
-			let sizes: [usize; 5] = [
-				2000,            // 2 KB
-				1 * 1024 * 1024, // 1 MB
-				4 * 1024 * 1024, // 4 MB
-				6 * 1024 * 1024, // 6 MB
-				8 * 1024 * 1024, // 8 MB
+			let max =
+				<<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get() as usize;
+			let sizes: [usize; 6] = [
+				1,           // minimum valid size
+				2000,        // small
+				max / 4,     // 25%
+				max / 2,     // 50%
+				max * 3 / 4, // 75%
+				max,         // 100% (exactly at limit)
 			];
 			let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
