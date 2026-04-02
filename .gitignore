@@ -22,6 +22,9 @@ tsconfig.tsbuildinfo
 kubo/
 zombienet-*
 
+# Coverage reports
+coverage/
+
 # Build outputs
 **/dist/
 console-ui/.vite/
