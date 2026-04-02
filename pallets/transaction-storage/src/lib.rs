@@ -79,6 +79,8 @@ parameter_types! {
 ///
 /// Note: 2 MiB is aligned with the Bitswap maximum block size.
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
+/// Default maximum number of indexed transactions in a block.
+pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
 pub const IMPOSSIBLE: InvalidTransaction = InvalidTransaction::Custom(0);
@@ -266,8 +268,8 @@ pub mod pallet {
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
 		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
-		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for 2 MiB
-		/// / 512.
+		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for
+		/// [`DEFAULT_MAX_TRANSACTION_SIZE`] / [`DEFAULT_MAX_BLOCK_TRANSACTIONS`].
 		#[cfg(feature = "runtime-benchmarks")]
 		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper<Self>;
 	}

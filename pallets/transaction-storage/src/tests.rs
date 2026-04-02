@@ -25,7 +25,8 @@ use super::{
 	},
 	pallet::Origin,
 	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_TRANSACTION_SIZE,
+	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use crate::migrations::v1::OldTransactionInfo;
 use codec::Encode;
@@ -823,7 +824,7 @@ fn insert_old_format_transactions(block_num: u64, count: u32) {
 			block_chunks: (i + 1) * 8,
 		})
 		.collect();
-	let bounded: BoundedVec<OldTransactionInfo, ConstU32<512>> =
+	let bounded: BoundedVec<OldTransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
 		old_txs.try_into().expect("within bounds");
 	let key = Transactions::hashed_key_for(block_num);
 	unhashed::put_raw(&key, &bounded.encode());
@@ -1295,23 +1296,4 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
-}
-
-/// Generates the DEFAULT_CHECK_PROOF hex for `DefaultCheckProofHelper` (2 MiB / 512). Run with:
-/// `cargo test -p pallet-transaction-storage -- --nocapture --ignored gen_default_check_proof`
-#[test]
-#[ignore]
-fn gen_default_check_proof() {
-	let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
-	let max_block_transactions = 512u32;
-	let transactions: Vec<Vec<u8>> =
-		(0..max_block_transactions).map(|_| vec![0u8; tx_size]).collect();
-	let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
-	let encoded = proof.encode();
-	let hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
-	println!(
-		"DEFAULT_CHECK_PROOF hex for tx_size={tx_size}, \
-		 max_block_transactions={max_block_transactions}:"
-	);
-	println!("{hex}");
 }

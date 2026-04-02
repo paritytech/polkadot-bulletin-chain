@@ -423,7 +423,7 @@ impl pallet_transaction_storage::Config for Runtime {
 
 /// Pre-computed storage proof for benchmarking `check_proof`.
 ///
-/// Generated with `gen_check_proof` test for 512 transactions of 8MB each
+/// Generated with `gen_check_proof` test for 512 transactions of 8 MiB each
 /// with `[0u8; 32]` as randomness. Must be regenerated when `MaxTransactionSize` or
 /// `MaxBlockTransactions` change.
 #[cfg(feature = "runtime-benchmarks")]

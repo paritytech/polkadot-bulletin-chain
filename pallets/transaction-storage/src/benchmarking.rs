@@ -40,8 +40,9 @@ pub trait BenchmarkHelper<T: Config> {
 	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8>;
 }
 
-/// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] (2 MiB) and
-/// 512 `MaxBlockTransactions`. Regenerate with `gen_check_proof` runtime test if these change.
+/// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
+/// [`DEFAULT_MAX_BLOCK_TRANSACTIONS`]. Regenerate with `gen_check_proof` runtime test if these
+/// change.
 pub struct DefaultCheckProofHelper;
 
 const DEFAULT_CHECK_PROOF: &str = "\
@@ -84,8 +85,9 @@ impl<T: Config> BenchmarkHelper<T> for DefaultCheckProofHelper {
 		);
 		assert_eq!(
 			T::MaxBlockTransactions::get(),
-			512,
-			"DefaultCheckProofHelper requires MaxBlockTransactions == 512",
+			DEFAULT_MAX_BLOCK_TRANSACTIONS,
+			"DefaultCheckProofHelper requires MaxBlockTransactions == DEFAULT_MAX_BLOCK_TRANSACTIONS ({})",
+			DEFAULT_MAX_BLOCK_TRANSACTIONS,
 		);
 		assert_eq!(
 			random_hash, &[0u8; 32],
@@ -387,4 +389,45 @@ mod benchmarks {
 	}
 
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use codec::Encode;
+	use sp_transaction_storage_proof::registration::build_proof;
+
+	/// Builds the proof that `DefaultCheckProofHelper` should return for the default config.
+	fn generate_default_check_proof() -> Vec<u8> {
+		let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
+		let transactions: Vec<Vec<u8>> =
+			(0..DEFAULT_MAX_BLOCK_TRANSACTIONS).map(|_| vec![0u8; tx_size]).collect();
+		let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
+		proof.encode()
+	}
+
+	/// Generates the DEFAULT_CHECK_PROOF hex for `DefaultCheckProofHelper`. Run with:
+	/// `cargo test -p pallet-transaction-storage -- --nocapture --ignored gen_default_check_proof`
+	#[test]
+	#[ignore]
+	fn gen_default_check_proof() {
+		let encoded = generate_default_check_proof();
+		let hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
+		println!(
+			"DEFAULT_CHECK_PROOF hex for tx_size={}, max_block_transactions={}:",
+			DEFAULT_MAX_TRANSACTION_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+		);
+		println!("{hex}");
+	}
+
+	#[test]
+	fn default_check_proof_integrity() {
+		let expected = generate_default_check_proof();
+		let stored = array_bytes::hex2bytes_unchecked(DEFAULT_CHECK_PROOF);
+		assert_eq!(
+			stored, expected,
+			"DEFAULT_CHECK_PROOF is stale — regenerate with: \
+			 cargo test -p pallet-transaction-storage -- --nocapture --ignored gen_default_check_proof"
+		);
+	}
 }

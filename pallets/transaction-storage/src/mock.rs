@@ -18,7 +18,8 @@
 //! Test environment for transaction-storage pallet.
 
 use crate::{
-	self as pallet_transaction_storage, TransactionStorageProof, DEFAULT_MAX_TRANSACTION_SIZE,
+	self as pallet_transaction_storage, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
@@ -56,7 +57,7 @@ impl pallet_transaction_storage::Config for Test {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
 	type WeightInfo = ();
-	type MaxBlockTransactions = ConstU32<512>;
+	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
