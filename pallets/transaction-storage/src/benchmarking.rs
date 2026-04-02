@@ -414,8 +414,8 @@ mod tests {
 		let encoded = generate_default_check_proof();
 		let hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
 		println!(
-			"DEFAULT_CHECK_PROOF hex for tx_size={}, max_block_transactions={}:",
-			DEFAULT_MAX_TRANSACTION_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+			"DEFAULT_CHECK_PROOF hex for tx_size={DEFAULT_MAX_TRANSACTION_SIZE}, \
+			max_block_transactions={DEFAULT_MAX_BLOCK_TRANSACTIONS}:",
 		);
 		println!("{hex}");
 	}
