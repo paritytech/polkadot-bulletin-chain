@@ -1,3 +1,11 @@
+# This workflow publishes bulletin-pallets-common, pallet-bulletin-transaction-storage, bulletin-transaction-storage-primitives crates to crates.io.
+# The workflow uses manual tigger.
+# On triggereing the workflow release branch name and the versions of the crates should be provided manually as input parameters.
+# There is a possibility to run the flow in a dry-run mode. In this case crates won't be published, to check if everything compiles well before publishing.
+# The release branch will be cretaed on the first run if it is not exists, if there is branch with such name (let's say we do a patch release) the existing
+# branch will be checked out.
+
+
 name: Publish Crates
 
 on:
