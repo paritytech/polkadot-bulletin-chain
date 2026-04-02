@@ -65,7 +65,7 @@ impl pallet_transaction_storage::Config for Test {
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper = crate::DefaultCheckProofHelper;
+	type BenchmarkHelper = crate::benchmarking::DefaultCheckProofHelper;
 }
 
 pub fn new_test_ext() -> TestExternalities {

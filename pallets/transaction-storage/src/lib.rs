@@ -27,7 +27,8 @@
 
 extern crate alloc;
 
-mod benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+pub mod benchmarking;
 pub mod weights;
 
 pub mod migrations;
@@ -206,63 +207,6 @@ impl CheckContext {
 	}
 }
 
-/// Helper trait for benchmarking. The runtime must provide a pre-computed storage proof
-/// that matches its `MaxTransactionSize` and `MaxBlockTransactions` configuration.
-#[cfg(feature = "runtime-benchmarks")]
-pub trait BenchmarkHelper {
-	/// Returns an encoded `TransactionStorageProof` for a block full of
-	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
-	/// built with `random_hash` as randomness.
-	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8>;
-}
-
-/// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] (2 MiB) and
-/// 512 `MaxBlockTransactions`. Regenerate with `gen_check_proof` runtime test if these change.
-#[cfg(feature = "runtime-benchmarks")]
-pub struct DefaultCheckProofHelper;
-
-#[cfg(feature = "runtime-benchmarks")]
-const DEFAULT_CHECK_PROOF: &str = "\
-	0104000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	0000000000000000000000000000000000000000000000000000000000000ccd0780ffff0080\
-	f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825\
-	c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83\
-	a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a373\
-	3464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b\
-	5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d305\
-	5c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e31\
-	3ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771\
-	032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc\
-	9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0\
-	f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464\
-	780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2\
-	e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04\
-	a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad9\
-	ad03803333008041038b346937eae08686bc2166a94e8ebcad3aac044655f5e016556efab645\
-	178010fd81bc1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de8041038b\
-	346937eae08686bc2166a94e8ebcad3aac044655f5e016556efab645178010fd81bc1359802f\
-	0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de8041038b346937eae08686bc2166\
-	a94e8ebcad3aac044655f5e016556efab645178010fd81bc1359802f0b871aeb95e4410a8ec9\
-	2b93af10ea767a2027cf4734e8de8041038b346937eae08686bc2166a94e8ebcad3aac044655\
-	f5e016556efab64517084000\
-";
-
-#[cfg(feature = "runtime-benchmarks")]
-impl BenchmarkHelper for DefaultCheckProofHelper {
-	fn check_proof_encoded(random_hash: &[u8]) -> Vec<u8> {
-		assert_eq!(
-			random_hash, &[0u8; 32],
-			"DefaultCheckProofHelper proof was built with [0u8; 32]"
-		);
-		array_bytes::hex2bytes_unchecked(DEFAULT_CHECK_PROOF)
-	}
-}
-
 #[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
@@ -322,9 +266,10 @@ pub mod pallet {
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
 		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
-		/// Use [`DefaultCheckProofHelper`](crate::DefaultCheckProofHelper) for 2 MiB / 512.
+		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for 2 MiB
+		/// / 512.
 		#[cfg(feature = "runtime-benchmarks")]
-		type BenchmarkHelper: crate::BenchmarkHelper;
+		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper;
 	}
 
 	#[pallet::error]
