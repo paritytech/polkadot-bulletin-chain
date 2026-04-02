@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for the `@bulletin/sdk` TypeScript package.
+Complete reference for the `@parity/bulletin-sdk` TypeScript package.
 
 ## Classes
 

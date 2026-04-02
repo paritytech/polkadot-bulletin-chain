@@ -33,7 +33,7 @@ Data retrieval will be supported via the smoldot light client's `bitswap_block` 
 
 ```javascript
 // Future SDK API (not yet available)
-import { retrieve } from "@bulletin/sdk";
+import { retrieve } from "@parity/bulletin-sdk";
 
 // Retrieves data via smoldot's bitswap_block RPC
 const data = await retrieve(client, cid);
@@ -160,7 +160,7 @@ For critical data that must outlive the retention period:
 The CID includes a cryptographic hash of the content. After retrieval, verify the data matches:
 
 ```typescript
-import { calculateCid } from "@bulletin/sdk";
+import { calculateCid } from "@parity/bulletin-sdk";
 import { CID } from "multiformats/cid";
 
 // After retrieving data

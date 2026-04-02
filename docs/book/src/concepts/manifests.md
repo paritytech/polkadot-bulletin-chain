@@ -65,7 +65,7 @@ The root manifest contains links to all chunks with their sizes, allowing client
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient } from "@bulletin/sdk";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 const largeFile = new Uint8Array(10_000_000); // 10 MB

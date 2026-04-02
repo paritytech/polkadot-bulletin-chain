@@ -22,7 +22,7 @@ npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 ```typescript
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
 import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
@@ -62,7 +62,7 @@ import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { startFromWorker } from 'polkadot-api/smoldot/from-worker';
 import SmWorker from 'polkadot-api/smoldot/worker?worker';
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 // 1. Start smoldot in a web worker
 const smoldot = startFromWorker(new SmWorker());
@@ -126,7 +126,7 @@ The SDK accepts an existing PAPI client, so you can share one connection across 
 ```typescript
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/web';
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 // Create ONE shared PAPI client for your whole app
 const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
@@ -261,7 +261,7 @@ For advanced use cases, use `BulletinPreparer` for offline CID calculation witho
 **Small data** (< 2 MiB) — single transaction:
 
 ```typescript
-import { BulletinPreparer } from '@bulletin/sdk';
+import { BulletinPreparer } from '@parity/bulletin-sdk';
 
 const preparer = new BulletinPreparer();
 const prepared = await preparer.prepareStore(smallData);
@@ -302,7 +302,7 @@ if (prepared.manifest) {
 Handle blockchain errors properly:
 
 ```typescript
-import { BulletinError } from '@bulletin/sdk';
+import { BulletinError } from '@parity/bulletin-sdk';
 
 try {
     const result = await client.store(data).send();

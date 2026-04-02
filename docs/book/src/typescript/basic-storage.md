@@ -7,7 +7,7 @@ This guide shows how to store data using the `AsyncBulletinClient` with direct P
 The `store()` method with builder pattern automatically handles both small and large files:
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -51,7 +51,7 @@ const api = papiClient.getTypedApi(bulletinDescriptor);
 Create the SDK client with PAPI client, signer, and submit function:
 
 ```typescript
-import { AsyncBulletinClient } from '@bulletin/sdk';
+import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 ```
@@ -127,7 +127,7 @@ if (result.chunks) {
 ## Error Handling
 
 ```typescript
-import { BulletinError, ErrorCode } from '@bulletin/sdk';
+import { BulletinError, ErrorCode } from '@parity/bulletin-sdk';
 
 try {
     const result = await client.store(data).send();
@@ -154,7 +154,7 @@ See the [Error Handling](./error-handling.md) guide for the full error code refe
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient, BulletinError } from '@bulletin/sdk';
+import { AsyncBulletinClient, BulletinError } from '@parity/bulletin-sdk';
 import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -240,7 +240,7 @@ const result = await client.store(data).send();
 For unit tests, use the `MockBulletinClient`:
 
 ```typescript
-import { MockBulletinClient } from '@bulletin/sdk';
+import { MockBulletinClient } from '@parity/bulletin-sdk';
 import { Binary } from 'polkadot-api';
 
 // Create mock client (no blockchain required)

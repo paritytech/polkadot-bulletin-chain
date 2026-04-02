@@ -35,7 +35,7 @@ There are multiple ways to interact with Bulletin Chain:
 | Language | Package | Status |
 |----------|---------|--------|
 | **Rust** | `bulletin-sdk-rust` | Alpha |
-| **TypeScript** | `@bulletin/sdk` | Alpha |
+| **TypeScript** | `@parity/bulletin-sdk` | Alpha |
 
 The SDKs provide high-level abstractions for:
 - Automatic data chunking for large files
@@ -59,7 +59,7 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 
 ```typescript
 // TypeScript - Store data
-import { AsyncBulletinClient } from "@bulletin/sdk";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 
