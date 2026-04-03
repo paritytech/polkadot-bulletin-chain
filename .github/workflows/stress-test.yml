@@ -56,13 +56,25 @@ concurrency:
   group: stress-test-${{ github.run_id }}
   cancel-in-progress: true
 
+env:
+  # Resolve inputs with fallback defaults (inputs.* is empty on push triggers)
+  ST_COMMAND: ${{ inputs.command || 'throughput' }}
+  ST_WS_URL: ${{ inputs.ws_url || 'wss://westend-bulletin-rpc.polkadot.io' }}
+  ST_VARIANTS: ${{ inputs.variants || '1MB' }}
+  ST_TARGET_BLOCKS: ${{ inputs.target_blocks || '5' }}
+  ST_SUBMITTERS: ${{ inputs.submitters || '16' }}
+  ST_ITERATIONS: ${{ inputs.iterations || '128' }}
+  ST_PAYLOAD_SIZE: ${{ inputs.payload_size || '131072' }}
+  ST_AUTHORIZER_SEED: ${{ inputs.authorizer_seed || '//Alice' }}
+  ST_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr || '' }}
+
 jobs:
   set-image:
     uses: ./.github/workflows/set-image.yml
 
   stress-test:
     needs: [set-image]
-    name: "Stress Test (${{ inputs.command }})"
+    name: "Stress Test (${{ inputs.command || 'throughput' }})"
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -86,25 +98,14 @@ jobs:
         run: cargo build --release -p bulletin-stress-test
 
       - name: Mask authorizer seed
-        env:
-          INPUT_AUTHORIZER_SEED: ${{ inputs.authorizer_seed }}
-        run: echo "::add-mask::$INPUT_AUTHORIZER_SEED"
+        run: echo "::add-mask::$ST_AUTHORIZER_SEED"
 
       - name: Validate inputs
-        env:
-          INPUT_WS_URL: ${{ inputs.ws_url }}
-          INPUT_VARIANTS: ${{ inputs.variants }}
-          INPUT_TARGET_BLOCKS: ${{ inputs.target_blocks }}
-          INPUT_SUBMITTERS: ${{ inputs.submitters }}
-          INPUT_ITERATIONS: ${{ inputs.iterations }}
-          INPUT_PAYLOAD_SIZE: ${{ inputs.payload_size }}
-          INPUT_AUTHORIZER_SEED: ${{ inputs.authorizer_seed }}
-          INPUT_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr }}
         run: |
           set -e
 
           # Validate numeric inputs
-          for var in INPUT_TARGET_BLOCKS INPUT_SUBMITTERS INPUT_ITERATIONS INPUT_PAYLOAD_SIZE; do
+          for var in ST_TARGET_BLOCKS ST_SUBMITTERS ST_ITERATIONS ST_PAYLOAD_SIZE; do
             val="${!var}"
             if ! [[ "$val" =~ ^[0-9]+$ ]]; then
               echo "::error::Invalid numeric input $var='$val'"
@@ -113,7 +114,7 @@ jobs:
           done
 
           # Validate URL format (must start with ws:// or wss://)
-          IFS=',' read -ra URLS <<< "$INPUT_WS_URL"
+          IFS=',' read -ra URLS <<< "$ST_WS_URL"
           for url in "${URLS[@]}"; do
             url=$(echo "$url" | xargs)  # trim whitespace
             if ! [[ "$url" =~ ^wss?:// ]]; then
@@ -123,22 +124,22 @@ jobs:
           done
 
           # Validate variants (alphanumeric, dots, commas only)
-          if [ -n "$INPUT_VARIANTS" ]; then
-            if ! [[ "$INPUT_VARIANTS" =~ ^[a-zA-Z0-9.,]+$ ]]; then
-              echo "::error::Invalid variants filter: '$INPUT_VARIANTS' (allowed: alphanumeric, dots, commas)"
+          if [ -n "$ST_VARIANTS" ]; then
+            if ! [[ "$ST_VARIANTS" =~ ^[a-zA-Z0-9.,]+$ ]]; then
+              echo "::error::Invalid variants filter: '$ST_VARIANTS' (allowed: alphanumeric, dots, commas)"
               exit 1
             fi
           fi
 
           # Validate authorizer seed (must start with //)
-          if ! [[ "$INPUT_AUTHORIZER_SEED" =~ ^// ]]; then
+          if ! [[ "$ST_AUTHORIZER_SEED" =~ ^// ]]; then
             echo "::error::Invalid authorizer seed (must start with //)"
             exit 1
           fi
 
           # Validate p2p multiaddr (must start with / if provided)
-          if [ -n "$INPUT_P2P_MULTIADDR" ]; then
-            if ! [[ "$INPUT_P2P_MULTIADDR" =~ ^/ ]]; then
+          if [ -n "$ST_P2P_MULTIADDR" ]; then
+            if ! [[ "$ST_P2P_MULTIADDR" =~ ^/ ]]; then
               echo "::error::Invalid P2P multiaddr (must start with /)"
               exit 1
             fi
@@ -147,43 +148,33 @@ jobs:
           echo "All inputs validated"
 
       - name: Run stress test
-        env:
-          INPUT_WS_URL: ${{ inputs.ws_url }}
-          INPUT_COMMAND: ${{ inputs.command }}
-          INPUT_VARIANTS: ${{ inputs.variants }}
-          INPUT_TARGET_BLOCKS: ${{ inputs.target_blocks }}
-          INPUT_SUBMITTERS: ${{ inputs.submitters }}
-          INPUT_ITERATIONS: ${{ inputs.iterations }}
-          INPUT_PAYLOAD_SIZE: ${{ inputs.payload_size }}
-          INPUT_AUTHORIZER_SEED: ${{ inputs.authorizer_seed }}
-          INPUT_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr }}
         run: |
           set -e
 
           # Build args array safely — no eval, no string interpolation in shell
           ARGS=(
-            --ws-url "$INPUT_WS_URL"
-            --submitters "$INPUT_SUBMITTERS"
-            --target-blocks "$INPUT_TARGET_BLOCKS"
-            --iterations "$INPUT_ITERATIONS"
-            --authorizer-seed "$INPUT_AUTHORIZER_SEED"
+            --ws-url "$ST_WS_URL"
+            --submitters "$ST_SUBMITTERS"
+            --target-blocks "$ST_TARGET_BLOCKS"
+            --iterations "$ST_ITERATIONS"
+            --authorizer-seed "$ST_AUTHORIZER_SEED"
             --output json
             --output-file results.json
           )
 
-          if [ -n "$INPUT_P2P_MULTIADDR" ]; then
-            ARGS+=(--p2p-multiaddr "$INPUT_P2P_MULTIADDR")
+          if [ -n "$ST_P2P_MULTIADDR" ]; then
+            ARGS+=(--p2p-multiaddr "$ST_P2P_MULTIADDR")
           fi
 
-          case "$INPUT_COMMAND" in
+          case "$ST_COMMAND" in
             throughput)
               ARGS+=(throughput)
-              if [ -n "$INPUT_VARIANTS" ]; then
-                ARGS+=(--variants "$INPUT_VARIANTS")
+              if [ -n "$ST_VARIANTS" ]; then
+                ARGS+=(--variants "$ST_VARIANTS")
               fi
               ;;
             bitswap)
-              ARGS+=(bitswap --payload-size "$INPUT_PAYLOAD_SIZE")
+              ARGS+=(bitswap --payload-size "$ST_PAYLOAD_SIZE")
               ;;
             full)
               ARGS+=(full)
@@ -206,7 +197,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: stress-test-results-${{ inputs.command }}-${{ github.run_number }}
+          name: stress-test-results-${{ env.ST_COMMAND }}-${{ github.run_number }}
           path: |
             results.json
             stress-test.log
@@ -218,7 +209,7 @@ jobs:
           if [ -f results.json ]; then
             echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Command:** \`${INPUT_COMMAND}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Command:** \`${ST_COMMAND}\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo '```json' >> $GITHUB_STEP_SUMMARY
             python3 -c "
@@ -259,5 +250,3 @@ jobs:
             echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
             echo "No results.json produced." >> $GITHUB_STEP_SUMMARY
           fi
-        env:
-          INPUT_COMMAND: ${{ inputs.command }}
