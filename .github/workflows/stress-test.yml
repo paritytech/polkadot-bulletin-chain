@@ -1,6 +1,10 @@
 name: Stress Test
 
 on:
+  # TODO: Remove push trigger before merging — only for testing the workflow
+  push:
+    branches: [kk-load-test-gh-action]
+    paths: ['.github/workflows/stress-test.yml']
   workflow_dispatch:
     inputs:
       command:
@@ -19,7 +23,7 @@ on:
       variants:
         description: "Throughput variants filter (e.g. 1KB,128KB,1MB). Empty = all"
         required: false
-        default: ""
+        default: "1MB"
       target_blocks:
         description: "Number of steady-state blocks to measure per variant"
         required: false
@@ -80,6 +84,11 @@ jobs:
 
       - name: Build stress test binary
         run: cargo build --release -p bulletin-stress-test
+
+      - name: Mask authorizer seed
+        env:
+          INPUT_AUTHORIZER_SEED: ${{ inputs.authorizer_seed }}
+        run: echo "::add-mask::$INPUT_AUTHORIZER_SEED"
 
       - name: Validate inputs
         env:
