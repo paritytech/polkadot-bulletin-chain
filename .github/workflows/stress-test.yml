@@ -28,7 +28,7 @@ on:
       target_blocks:
         description: "Number of steady-state blocks to measure per variant"
         required: false
-        default: "5"
+        default: "20"
       submitters:
         description: "Number of concurrent submitter tasks"
         required: false
@@ -62,7 +62,7 @@ env:
   ST_COMMAND: ${{ inputs.command || 'throughput' }}
   ST_WS_URL: ${{ inputs.ws_url || 'wss://westend-bulletin-rpc.polkadot.io' }}
   ST_VARIANTS: ${{ inputs.variants || '1MB' }}
-  ST_TARGET_BLOCKS: ${{ inputs.target_blocks || '5' }}
+  ST_TARGET_BLOCKS: ${{ inputs.target_blocks || '20' }}
   ST_SUBMITTERS: ${{ inputs.submitters || '16' }}
   ST_ITERATIONS: ${{ inputs.iterations || '128' }}
   ST_PAYLOAD_SIZE: ${{ inputs.payload_size || '131072' }}
