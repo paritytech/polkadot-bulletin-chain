@@ -27,7 +27,8 @@
 
 extern crate alloc;
 
-mod benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+pub mod benchmarking;
 pub mod weights;
 
 pub mod migrations;
@@ -73,10 +74,12 @@ parameter_types! {
 	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
 }
 
-// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// Setting higher limit also requires raising the allocator limit.
-pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
+/// Setting a higher limit may exceed the WASM allocator's 128 MiB heap and cause OOM errors.
+///
+/// Note: 2 MiB is aligned with the Bitswap maximum block size.
+pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
+/// Default maximum number of indexed transactions in a block.
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
@@ -264,6 +267,11 @@ pub mod pallet {
 		/// Longevity of unsigned transactions to remove expired authorizations.
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
+		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
+		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for
+		/// [`DEFAULT_MAX_TRANSACTION_SIZE`] / [`DEFAULT_MAX_BLOCK_TRANSACTIONS`].
+		#[cfg(feature = "runtime-benchmarks")]
+		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper<Self>;
 	}
 
 	#[pallet::error]
