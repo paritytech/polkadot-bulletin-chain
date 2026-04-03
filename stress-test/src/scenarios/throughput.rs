@@ -79,11 +79,22 @@ pub async fn run_block_capacity(
 	};
 
 	// Prefer on-chain wall clock duration for throughput; fall back to Instant.
+	// On-chain duration: timestamp span covers N-1 intervals for N blocks,
+	// but the last block also contains data produced during its interval.
+	// Add the average interval to account for it.
 	let onchain_duration_ms = match (
 		steady.first().and_then(|b| b.timestamp_ms),
 		steady.last().and_then(|b| b.timestamp_ms),
 	) {
-		(Some(t1), Some(t2)) if t2 > t1 => Some(t2 - t1),
+		(Some(t1), Some(t2)) if t2 > t1 => {
+			let span = t2 - t1;
+			let avg_interval = if !intervals.is_empty() {
+				intervals.iter().sum::<u64>() / intervals.len() as u64
+			} else {
+				0
+			};
+			Some(span + avg_interval)
+		},
 		_ => None,
 	};
 	let (tps, bps, onchain_timing) = if let Some(ms) = onchain_duration_ms {
