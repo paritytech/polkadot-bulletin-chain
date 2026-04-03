@@ -2,10 +2,6 @@ name: Stress Test
 # Manually triggered stress test for Bulletin Chain
 
 on:
-  # TODO: Remove push trigger before merging — only for testing the workflow
-  push:
-    branches: [kk-load-test-gh-action]
-    paths: ['.github/workflows/stress-test.yml']
   workflow_dispatch:
     inputs:
       command:
