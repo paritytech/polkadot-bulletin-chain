@@ -1,0 +1,110 @@
+name: Zombienet Sync Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+# Only run when manually triggered or when the zombienet-sync-tests label is added
+# The job-level 'if' below handles the label check for pull_request events.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
+
+jobs:
+  set-image:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'zombienet-sync-tests')
+    uses: ./.github/workflows/set-image.yml
+
+  zombienet-sync-tests:
+    needs: [set-image]
+    name: Zombienet Sync Tests
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-sync-tests"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Cache the Polkadot SDK binaries (same pattern as integration-test.yml)
+      - name: Cache Polkadot SDK binaries
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        id: polkadot-sdk-cache
+        with:
+          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-${{ env.POLKADOT_SDK_VERSION_WITH_BULLETIN }}-binaries
+
+      - name: Download Polkadot SDK binaries
+        if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $POLKADOT_SDK_BIN_DIR
+          cd $POLKADOT_SDK_BIN_DIR
+          curl -fL -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
+          curl -fL -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
+          curl -fL -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
+          curl -fL -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
+          curl -fL -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION_WITH_BULLETIN}/polkadot-omni-node
+          echo "${POLKADOT_SHA256}  polkadot" | sha256sum -c -
+          echo "${POLKADOT_PREPARE_WORKER_SHA256}  polkadot-prepare-worker" | sha256sum -c -
+          echo "${POLKADOT_EXECUTE_WORKER_SHA256}  polkadot-execute-worker" | sha256sum -c -
+          echo "${CHAIN_SPEC_BUILDER_SHA256}  chain-spec-builder" | sha256sum -c -
+          echo "${POLKADOT_OMNI_NODE_SHA256}  polkadot-omni-node" | sha256sum -c -
+          chmod +x *
+
+      - name: Add Polkadot SDK binaries to PATH
+        run: |
+          chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
+          echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
+
+      - name: Generate parachain chain spec
+        run: |
+          cargo build --release -p bulletin-westend-runtime
+          mkdir -p ./zombienet
+          chain-spec-builder create \
+            -p 2487 \
+            -c westend \
+            -i bulletin-westend \
+            -n Bulletin \
+            -t local \
+            -r ./target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm \
+            named-preset local_testnet
+          mv chain_spec.json ./zombienet/bulletin-westend-spec.json
+
+      - name: Run zombienet sync tests
+        env:
+          POLKADOT_RELAY_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot
+          POLKADOT_PARACHAIN_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot-omni-node
+          PARACHAIN_CHAIN_SPEC_PATH: ./zombienet/bulletin-westend-spec.json
+        run: |
+          cargo test -p bulletin-chain-zombienet-sdk-tests \
+            --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+            parachain_sync_storage \
+            -- --test-threads=1 --nocapture
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: zombienet-sync-test-logs
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
