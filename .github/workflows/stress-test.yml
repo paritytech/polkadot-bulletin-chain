@@ -1,4 +1,5 @@
 name: Stress Test
+# Manually triggered stress test for Bulletin Chain
 
 on:
   # TODO: Remove push trigger before merging — only for testing the workflow
