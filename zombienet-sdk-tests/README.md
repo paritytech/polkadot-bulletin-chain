@@ -4,16 +4,7 @@ Integration tests for Polkadot Bulletin Chain sync modes and transaction storage
 
 ## Prerequisites
 
-### Solochain tests
-
-Build the bulletin chain node:
-
-```bash
-cargo build --release
-export POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain
-```
-
-### Parachain tests
+### Parachain binaries
 
 Parachain tests require Polkadot SDK binaries and a chain spec. There are two ways to set this up:
 
@@ -38,7 +29,7 @@ export POLKADOT_RELAY_BINARY_PATH=/path/to/polkadot
 export POLKADOT_PARACHAIN_BINARY_PATH=/path/to/polkadot-omni-node
 ```
 
-**Generate the chain spec** (required for both options):
+### Chain spec
 
 The parachain chain spec is not checked into git. Generate it with:
 
@@ -58,7 +49,7 @@ PARACHAIN_ID=2000 ./scripts/create_bulletin_westend_spec.sh
 
 ### LDB tests (optional)
 
-The `ldb_storage_verification_test` tests inspect RocksDB directly and require the `ldb` tool:
+The `parachain_ldb_storage_verification_test` inspects RocksDB directly and requires the `ldb` tool:
 
 ```bash
 export ROCKSDB_LDB_PATH=/path/to/ldb
@@ -69,35 +60,32 @@ export ROCKSDB_LDB_PATH=/path/to/ldb
 Tests are gated behind the `zombie-sync-tests` feature to prevent accidental execution during `cargo test --workspace`.
 
 ```bash
-# All solochain tests
-cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests solochain_sync_storage -- --nocapture
-
 # All parachain tests
-cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests parachain_sync_storage -- --nocapture
+cargo test -p bulletin-chain-zombienet-sdk-tests \
+  --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+  parachain_sync_storage -- --nocapture
 
 # Single test
-cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests fast_sync_test -- --nocapture
+cargo test -p bulletin-chain-zombienet-sdk-tests \
+  --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+  parachain_fast_sync_test -- --nocapture
 ```
 
 Run tests one at a time or with `--test-threads=1`. Each test spawns a full network and they are resource-intensive.
 
 ## Test matrix
 
-### Solochain (`solochain_sync_storage`)
-
 | Test | Sync mode | Pruning | Expected outcome |
 |---|---|---|---|
-| `fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE |
-| `fast_sync_with_pruning_test` | fast | yes | Sync fails (pruned blocks) |
-| `warp_sync_test` | warp | no | Sync completes, bitswap DONT_HAVE (expected) |
-| `warp_sync_with_pruning_test` | warp | yes | Sync completes, bitswap DONT_HAVE (expected) |
-| `full_sync_test` | full | no | Sync completes, bitswap works |
-| `full_sync_with_pruning_test` | full | yes | Sync fails (pruned blocks) |
-| `ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
-
-### Parachain (`parachain_sync_storage`)
-
-Same matrix as solochain, prefixed with `parachain_`. Additionally includes `parachain_ldb_storage_verification_test`.
+| `parachain_fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE |
+| `parachain_fast_sync_with_pruning_test` | fast | yes | Sync fails (pruned blocks) |
+| `parachain_warp_sync_test` | warp | no | Sync completes, bitswap DONT_HAVE |
+| `parachain_warp_sync_with_pruning_test` | warp | yes | Sync completes, bitswap DONT_HAVE |
+| `parachain_full_sync_test` | full | no | Sync completes, bitswap works |
+| `parachain_full_sync_with_pruning_test` | full | yes | Sync fails (pruned blocks) |
+| `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
+| `parachain_rpc_node_bitswap_test` | full | no | RPC node syncs and serves data via bitswap |
+| `parachain_ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
 
 ## Environment variables
 
@@ -105,7 +93,6 @@ Same matrix as solochain, prefixed with `parachain_`. Additionally includes `par
 
 | Variable | Description | Default |
 |---|---|---|
-| `POLKADOT_BULLETIN_BINARY_PATH` | Solochain node binary | `./target/release/polkadot-bulletin-chain` |
 | `POLKADOT_RELAY_BINARY_PATH` | Relay chain binary | `polkadot` |
 | `POLKADOT_PARACHAIN_BINARY_PATH` | Parachain node binary | `polkadot-omni-node` |
 | `PARACHAIN_CHAIN_SPEC_PATH` | Parachain chain spec JSON | `./zombienet/bulletin-westend-spec.json` |
@@ -130,7 +117,8 @@ PARACHAIN_CHAIN_SPEC_PATH=./my-spec.json \
 RELAY_CHAIN=rococo-local \
 PARACHAIN_ID=2000 \
 PARACHAIN_CHAIN_ID=bulletin-rococo \
-  cargo test -p bulletin-chain-zombienet-sdk-tests --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+  cargo test -p bulletin-chain-zombienet-sdk-tests \
+  --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
   parachain_fast_sync_test -- --nocapture
 ```
 
@@ -142,3 +130,9 @@ PARACHAIN_CHAIN_ID=bulletin-rococo \
 - **Block pruning** deletes historical blocks. When all peers prune, fast/full sync cannot complete (no blocks to download).
 - **Warp sync with pruning** still completes because it uses GRANDPA warp proofs instead of downloading historical blocks.
 - **LDB tests** verify RocksDB column 11 (transaction storage): refcount increments on duplicate stores, data expires after the retention period.
+
+## CI
+
+These tests can be triggered in CI via:
+- **`workflow_dispatch`**: Manual trigger from the Actions tab
+- **`zombienet-sync-tests` label**: Add this label to a PR to run the tests

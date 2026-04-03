@@ -21,11 +21,6 @@ pub fn env_or_default(var: &str, default: &str) -> String {
 	std::env::var(var).unwrap_or_else(|_| default.to_string())
 }
 
-pub fn get_binary_path() -> String {
-	let path_str = env_or_default(BINARY_PATH_ENV, DEFAULT_BINARY);
-	resolve_binary_path(&path_str)
-}
-
 pub fn get_relay_binary_path() -> String {
 	let path_str = env_or_default(RELAY_BINARY_PATH_ENV, DEFAULT_RELAY_BINARY);
 	resolve_binary_path(&path_str)
@@ -115,74 +110,6 @@ pub fn verify_parachain_binaries() -> Result<()> {
 	}
 
 	Ok(())
-}
-
-pub fn verify_solo_binary() -> Result<()> {
-	let binary = get_binary_path();
-	log::info!("Solo chain binary: {}", binary);
-	verify_binary(&binary)
-		.context(format!("Solo chain binary '{}' ({})", binary, BINARY_PATH_ENV))?;
-	Ok(())
-}
-
-/// Single-node network with Alice as validator using bulletin-polkadot-local chain spec.
-pub fn build_single_node_network_config(node_args: Vec<String>) -> Result<NetworkConfig> {
-	let binary_path = get_binary_path();
-	log::info!("Using binary: {}", binary_path);
-
-	let args: Vec<_> = node_args.iter().map(|s| s.as_str().into()).collect();
-
-	NetworkConfigBuilder::new()
-		.with_relaychain(|relaychain| {
-			relaychain
-				.with_chain("bulletin-polkadot-local")
-				.with_default_command(binary_path.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(args))
-		})
-		.with_global_settings(|global_settings| {
-			if let Ok(val) = std::env::var("ZOMBIENET_SDK_BASE_DIR") {
-				global_settings.with_base_dir(val)
-			} else {
-				global_settings
-			}
-		})
-		.build()
-		.map_err(|errs| {
-			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
-			anyhow!("config errs: {message}")
-		})
-}
-
-/// 3-validator network (Alice, Bob, Dave) - required for warp sync (needs 3 peers minimum).
-pub fn build_three_node_network_config(node_args: Vec<String>) -> Result<NetworkConfig> {
-	let binary_path = get_binary_path();
-	log::info!("Using binary: {}", binary_path);
-
-	let args: Vec<_> = node_args.iter().map(|s| s.as_str().into()).collect();
-	let args_clone1 = args.clone();
-	let args_clone2 = args.clone();
-
-	NetworkConfigBuilder::new()
-		.with_relaychain(|relaychain| {
-			relaychain
-				.with_chain("bulletin-polkadot-local")
-				.with_default_command(binary_path.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(args_clone1))
-				.with_node(|node| node.with_name("dave").validator(true).with_args(args_clone2))
-		})
-		.with_global_settings(|global_settings| {
-			if let Ok(val) = std::env::var("ZOMBIENET_SDK_BASE_DIR") {
-				global_settings.with_base_dir(val)
-			} else {
-				global_settings
-			}
-		})
-		.build()
-		.map_err(|errs| {
-			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
-			anyhow!("config errs: {message}")
-		})
 }
 
 /// Parachain network: 2 relay validators (alice, bob) + 1 collator.

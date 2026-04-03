@@ -929,12 +929,10 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	log::info!("Historical content hash: {}, CID: {}", hist_hash, hist_cid);
 
 	let (nonce, target_block) = {
-		let collator1 =
-			network.get_node("collator-1").context("Failed to get collator-1 node")?;
+		let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
 		let mut nonce = get_alice_nonce(collator1).await?;
-		let (store_block, _) =
-			authorize_and_store_data(collator1, &historical_data, nonce).await?;
+		let (store_block, _) = authorize_and_store_data(collator1, &historical_data, nonce).await?;
 		nonce += 2; // authorize + store
 		log::info!("Historical data stored at block {}", store_block);
 

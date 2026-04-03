@@ -15,8 +15,6 @@ pub const VALIDATOR_ROLE_VALUE: f64 = 4.0;
 pub const IDLE_VALUE: f64 = 0.0;
 
 // Environment variables
-pub const BINARY_PATH_ENV: &str = "POLKADOT_BULLETIN_BINARY_PATH";
-pub const DEFAULT_BINARY: &str = "./target/release/polkadot-bulletin-chain";
 pub const RELAY_BINARY_PATH_ENV: &str = "POLKADOT_RELAY_BINARY_PATH";
 pub const DEFAULT_RELAY_BINARY: &str = "polkadot";
 pub const PARACHAIN_BINARY_PATH_ENV: &str = "POLKADOT_PARACHAIN_BINARY_PATH";
@@ -50,7 +48,6 @@ pub const DEFAULT_PARA_ID: u32 = 2487;
 pub const PARACHAIN_CHAIN_ID_ENV: &str = "PARACHAIN_CHAIN_ID";
 pub const DEFAULT_PARACHAIN_CHAIN_ID: &str = "bulletin-westend";
 
-pub const SOLO_TEST_DATA_PATTERN: &[u8] = b"ZOMBIENET_TEST_DATA_";
 pub const PARACHAIN_TEST_DATA_PATTERN: &[u8] = b"ZOMBIENET_PARACHAIN_TEST_DATA_";
 
 // LDB tool
