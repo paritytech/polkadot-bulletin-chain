@@ -104,17 +104,18 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_and_store_data, authorize_and_store_data_finalized,
+		authorize_and_store_data, authorize_and_store_data_finalized, authorize_and_store_items,
 		build_parachain_network_config_single_collator,
 		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-		expect_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path, get_para_id,
-		get_parachain_binary_path, get_parachain_chain_id, initialize_network,
-		log_line_at_least_once, set_retention_period, set_retention_period_finalized, verify_col11,
-		verify_ldb_tool, verify_node_bitswap, verify_parachain_binaries,
-		verify_state_sync_completed, verify_warp_sync_completed, wait_for_block_height,
-		wait_for_finalized_height, wait_for_fullnode, wait_for_relay_chain_to_sync,
-		wait_for_session_change_on_node, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
-		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+		expect_all_items_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path,
+		get_para_id, get_parachain_binary_path, get_parachain_chain_id, initialize_network,
+		log_line_at_least_once, set_retention_period, set_retention_period_finalized,
+		verify_all_items_bitswap, verify_col11, verify_ldb_tool, verify_node_bitswap,
+		verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
+		wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
+		wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
+		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{anyhow, Context, Result};
@@ -127,6 +128,8 @@ const MIN_BLOCKS_BEFORE_SYNC_NODE: u64 = 10;
 /// Session changes are critical for parachain block production.
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
+/// Three items of different sizes for multi-item verification.
+const ITEM_SIZES: [usize; 3] = [TEST_DATA_SIZE, TEST_DATA_SIZE / 2, TEST_DATA_SIZE * 2];
 
 /// Uses libp2p for embedded relay chain to avoid litep2p race conditions.
 fn get_para_node_args() -> Vec<String> {
@@ -181,24 +184,20 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	// Get collator
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Store test data
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
-
-	// Get initial nonce for Alice
+	// Store multiple test data items with different sizes
 	let nonce = get_alice_nonce(collator1).await?;
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
+	log::info!("All {} items stored, last at block {}", stored_items.len(), last_store_block);
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
 	// State sync triggers when: finalized_number + 8 >= network_median
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -232,11 +231,9 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	// Verify state sync was used
 	verify_state_sync_completed(sync_node).await?;
 
-	// Verify bitswap returns DONT_HAVE from sync-node
-	// This is expected because state sync (and block sync with storage_chain_mode: false)
-	// does not download indexed transaction data (INDEXED_BODY), so synced nodes
-	// cannot serve historical data via bitswap.
-	expect_bitswap_dont_have(sync_node, &test_data, 30, "sync-node").await?;
+	// Verify bitswap returns DONT_HAVE for all items from sync-node
+	// This is expected because state sync does not download indexed transaction data.
+	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "sync-node").await?;
 	log::info!("Note: sync-node doesn't have indexed transactions - this is expected for state-synced nodes");
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (without pruning) PASSED ===");
@@ -277,7 +274,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Set retention period and store data (blocks are produced in parallel)
+	// Set retention period and store multiple data items
 	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 	let mut nonce = get_alice_nonce(collator1).await?;
@@ -285,19 +282,16 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	set_retention_period(&collator1_client, RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -387,23 +381,18 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Get collator
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Store test data
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
-
-	// Get initial nonce for Alice
+	// Store multiple test data items
 	let nonce = get_alice_nonce(collator1).await?;
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -451,7 +440,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
-	expect_bitswap_dont_have(sync_node, &test_data, 30, "Sync-node").await?;
+	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "Sync-node").await?;
 	log::info!(
 		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
 	);
@@ -503,20 +492,17 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	set_retention_period(&collator1_client, RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
-	// Store transaction data - this will be in an early block that may get pruned
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
+	// Store multiple test data items
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -546,10 +532,6 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	wait_for_fullnode(sync_node).await?;
 
 	// Wait for the sync node's embedded relay chain to sync.
-	// This is critical for warp sync because the parachain warp sync target is determined
-	// by querying the embedded relay chain for the finalized parachain head.
-	// If the relay chain hasn't synced yet, it returns genesis (#0) as the target,
-	// which causes warp sync to get stuck.
 	log::info!("Waiting for sync-node's embedded relay chain to sync...");
 	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
 		.await
@@ -566,7 +548,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
-	expect_bitswap_dont_have(sync_node, &test_data, 30, "Sync-node").await?;
+	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "Sync-node").await?;
 	log::info!(
 		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
 	);
@@ -606,23 +588,18 @@ async fn parachain_full_sync_test() -> Result<()> {
 	// Get collator
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Store test data
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
-
-	// Get initial nonce for Alice
+	// Store multiple test data items
 	let nonce = get_alice_nonce(collator1).await?;
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -653,9 +630,9 @@ async fn parachain_full_sync_test() -> Result<()> {
 	log::info!("Verifying sync-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
-	// Verify bitswap returns data from sync-node
+	// Verify all items via bitswap from sync-node
 	// Full sync downloads all blocks including indexed body, so bitswap should work
-	verify_node_bitswap(sync_node, &test_data, 30, "sync-node").await?;
+	verify_all_items_bitswap(sync_node, &stored_items, 30, "sync-node").await?;
 	log::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
 
 	test_log!(TEST, "=== Parachain Full Sync Test (without pruning) PASSED ===");
@@ -694,7 +671,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Set retention period and store data
+	// Set retention period and store multiple data items
 	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 	let mut nonce = get_alice_nonce(collator1).await?;
@@ -702,19 +679,16 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	set_retention_period(&collator1_client, RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -810,23 +784,18 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	// Get collator
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Store test data
-	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (content_hash, cid) = content_hash_and_cid(&test_data);
-	log::info!("Storing {} bytes of test data", test_data.len());
-	log::info!("Content hash: {}, CID: {}", content_hash, cid);
-
-	// Get initial nonce for Alice
+	// Store multiple test data items
 	let nonce = get_alice_nonce(collator1).await?;
+	let (stored_items, _) =
+		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+			.await?;
+	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
 
-	let (store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
-	log::info!("Store completed at block {}", store_block);
-
-	// Verify data can be fetched from collator1 via bitswap
-	verify_node_bitswap(collator1, &test_data, 30, "Collator-1").await?;
+	// Verify all items can be fetched from collator1 via bitswap
+	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	log::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -858,7 +827,6 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	wait_for_fullnode(sync_node).await?;
 
 	// Wait for the sync node's embedded relay chain to sync via warp sync.
-	// The embedded relay chain must sync before the parachain can determine its sync target.
 	log::info!("Waiting for sync-node's embedded relay chain to warp sync...");
 	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
 		.await
@@ -873,7 +841,7 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 		.context("Sync node failed to full-sync parachain blocks")?;
 
 	// Full sync downloads all blocks including indexed body, so bitswap should work
-	verify_node_bitswap(sync_node, &test_data, 30, "sync-node").await?;
+	verify_all_items_bitswap(sync_node, &stored_items, 30, "sync-node").await?;
 	log::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
 
 	test_log!(TEST, "=== Parachain Full Sync + Relay Warp Sync Test PASSED ===");
@@ -921,33 +889,30 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 		.await
 		.context("Failed to detect session change on relay chain")?;
 
-	// Store historical data on collator before RPC node joins.
+	// Store multiple historical data items on collator before RPC node joins.
 	// Scoped to release the immutable borrow before add_collator.
-	let historical_data = generate_test_data(TEST_DATA_SIZE, b"PARA_RPC_HISTORICAL_");
-	let (hist_hash, hist_cid) = content_hash_and_cid(&historical_data);
-	log::info!("Storing historical data: {} bytes", historical_data.len());
-	log::info!("Historical content hash: {}, CID: {}", hist_hash, hist_cid);
-
-	let (nonce, target_block) = {
+	let (historical_items, nonce, target_block) = {
 		let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-		let mut nonce = get_alice_nonce(collator1).await?;
-		let (store_block, _) = authorize_and_store_data(collator1, &historical_data, nonce).await?;
-		nonce += 2; // authorize + store
-		log::info!("Historical data stored at block {}", store_block);
+		let nonce = get_alice_nonce(collator1).await?;
+		let (items, next_nonce) =
+			authorize_and_store_items(collator1, b"PARA_RPC_HISTORICAL_", &ITEM_SIZES, nonce)
+				.await?;
+		let last_store_block = items.iter().map(|i| i.block_number).max().unwrap();
+		log::info!("Historical items stored, last at block {}", last_store_block);
 
-		// Verify data can be fetched from collator1 via bitswap
-		verify_node_bitswap(collator1, &historical_data, 30, "Collator-1 (historical)").await?;
+		// Verify all items can be fetched from collator1 via bitswap
+		verify_all_items_bitswap(collator1, &items, 30, "Collator-1 (historical)").await?;
 
 		// Wait for enough blocks and finality before adding RPC node
-		let target_block = std::cmp::max(store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+		let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 		log::info!("Waiting for block {} and finality", target_block);
 		try_join!(
 			wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 			wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		)?;
 
-		(nonce, target_block)
+		(items, next_nonce, target_block)
 	};
 
 	// Add RPC node: non-collator with full sync and ipfs-server
@@ -976,10 +941,9 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	log::info!("Verifying rpc-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(rpc_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
-	// Verify RPC node can serve historical data via bitswap
-	// Full sync downloads all blocks including indexed body, so bitswap should work
-	verify_node_bitswap(rpc_node, &historical_data, 30, "rpc-node (historical)").await?;
-	log::info!("✓ RPC node serves historical data via bitswap after full sync");
+	// Verify RPC node can serve all historical items via bitswap
+	verify_all_items_bitswap(rpc_node, &historical_items, 30, "rpc-node (historical)").await?;
+	log::info!("✓ RPC node serves all historical items via bitswap after full sync");
 
 	// Now store NEW data by submitting the transaction THROUGH the RPC node.
 	// This is the realistic production pattern: users submit extrinsics to an RPC node,

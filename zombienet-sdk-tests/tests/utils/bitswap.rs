@@ -432,6 +432,46 @@ pub async fn verify_node_bitswap(
 	Ok(())
 }
 
+/// Verify that all stored items can be fetched via bitswap with correct data.
+pub async fn verify_all_items_bitswap(
+	node: &zombienet_sdk::NetworkNode,
+	items: &[super::tx::StoredItem],
+	timeout_secs: u64,
+	node_name: &str,
+) -> Result<()> {
+	log::info!("=== Verifying bitswap fetch of {} items from {} ===", items.len(), node_name);
+	for (i, item) in items.iter().enumerate() {
+		log::info!("Verifying item {} ({} bytes) from {}", i, item.data.len(), node_name);
+		verify_node_bitswap(node, &item.data, timeout_secs, &format!("{} item {}", node_name, i))
+			.await?;
+	}
+	log::info!("✓ All {} items successfully verified from {} via bitswap", items.len(), node_name);
+	Ok(())
+}
+
+/// Expect DONT_HAVE for all stored items - state/warp synced nodes don't have indexed
+/// transactions.
+pub async fn expect_all_items_bitswap_dont_have(
+	node: &zombienet_sdk::NetworkNode,
+	items: &[super::tx::StoredItem],
+	timeout_secs: u64,
+	node_name: &str,
+) -> Result<()> {
+	log::info!("=== Expecting bitswap DONT_HAVE for {} items from {} ===", items.len(), node_name);
+	for (i, item) in items.iter().enumerate() {
+		log::info!("Verifying DONT_HAVE for item {} from {}", i, node_name);
+		expect_bitswap_dont_have(
+			node,
+			&item.data,
+			timeout_secs,
+			&format!("{} item {}", node_name, i),
+		)
+		.await?;
+	}
+	log::info!("✓ All {} items correctly returned DONT_HAVE from {}", items.len(), node_name);
+	Ok(())
+}
+
 /// Expect DONT_HAVE - state/warp synced nodes don't have indexed transactions.
 pub async fn expect_bitswap_dont_have(
 	node: &zombienet_sdk::NetworkNode,

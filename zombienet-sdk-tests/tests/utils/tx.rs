@@ -134,6 +134,102 @@ pub async fn set_retention_period_finalized(
 	Ok(())
 }
 
+/// A stored data item with its content and metadata for verification.
+#[derive(Clone)]
+pub struct StoredItem {
+	pub data: Vec<u8>,
+	pub block_number: u64,
+}
+
+/// Authorize and store multiple distinct data items. Returns the stored items and next nonce.
+///
+/// Each item gets a unique pattern suffix to ensure distinct content hashes.
+/// Authorization is done once upfront for all items.
+pub async fn authorize_and_store_items(
+	node: &zombienet_sdk::NetworkNode,
+	base_pattern: &[u8],
+	item_sizes: &[usize],
+	mut nonce: u64,
+) -> Result<(Vec<StoredItem>, u64)> {
+	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
+	let signer = dev::alice();
+
+	// Generate distinct data for each item by appending an index suffix to the pattern
+	let items_data: Vec<Vec<u8>> = item_sizes
+		.iter()
+		.enumerate()
+		.map(|(i, &size)| {
+			let mut pattern = base_pattern.to_vec();
+			pattern.extend_from_slice(format!("ITEM_{}_", i).as_bytes());
+			generate_test_data(size, &pattern)
+		})
+		.collect();
+
+	// Authorize enough bytes for all items
+	let total_bytes: u64 = items_data.iter().map(|d| d.len() as u64).sum::<u64>() * 2;
+	let total_transactions = items_data.len() as u32 + 5; // extra margin
+
+	let authorize_call = subxt::tx::dynamic(
+		"Sudo",
+		"sudo",
+		vec![value! {
+			TransactionStorage(authorize_account {
+				who: Value::from_bytes(signer.public_key().0),
+				transactions: total_transactions,
+				bytes: total_bytes
+			})
+		}],
+	);
+
+	log::info!(
+		"Authorizing {} items ({} bytes total, nonce={})",
+		items_data.len(),
+		total_bytes,
+		nonce
+	);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+	nonce += 1;
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress =
+			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("authorization transaction timed out"))??;
+
+	log::info!("Authorization for all items included in block");
+
+	// Store each item
+	let mut stored_items = Vec::new();
+	for (i, data) in items_data.into_iter().enumerate() {
+		let (hash_hex, cid) = content_hash_and_cid(&data);
+		log::info!("Storing item {} ({} bytes): hash={}, CID={}", i, data.len(), hash_hex, cid);
+
+		let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+		nonce += 1;
+
+		let (block_hash, _events) =
+			tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+				let progress =
+					client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
+				wait_for_in_best_block(progress).await
+			})
+			.await
+			.map_err(|_| anyhow!("store transaction for item {} timed out", i))??;
+
+		let block = client.blocks().at(block_hash).await?;
+		let block_number = block.number() as u64;
+		log::info!("Item {} stored at block {}", i, block_number);
+
+		stored_items.push(StoredItem { data, block_number });
+	}
+
+	Ok((stored_items, nonce))
+}
+
 /// Returns (block_number, next_nonce). Waits for best block.
 pub async fn authorize_and_store_data(
 	node: &zombienet_sdk::NetworkNode,
