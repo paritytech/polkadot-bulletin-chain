@@ -172,6 +172,7 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 [workspace]
 resolver = "2"
 members = [
+	"tools/encode-westend-calls",
 	"node",
 	"pallets/common",
 	"pallets/relayer-set",

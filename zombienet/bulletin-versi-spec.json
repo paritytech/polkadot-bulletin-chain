@@ -1,6 +1,9 @@
 {
-  "bootNodes": [],
-  "chainType": "Local",
+  "bootNodes": [
+    "/dns4/versi-bc-3000-node-0/tcp/30334/p2p/12D3KooWKNwmWjk3v1vtojWUpRAVpLvdc71Cwb4xZYZX7vYAH4vF",
+    "/dns4/versi-bc-3000-node-1/tcp/30334/p2p/12D3KooWGuidsWUDchhzSiNGBp74oSs2ZEtFfePQgHJh7gmmRrfC"
+  ],
+  "chainType": "Live",
   "codeSubstitutes": {},
   "genesis": {
     "runtimeGenesis": {
@@ -66,7 +69,7 @@
           ]
         },
         "parachainInfo": {
-          "parachainId": 2487
+          "parachainId": 3000
         },
         "polkadotXcm": {
           "safeXcmVersion": 5
@@ -95,14 +98,14 @@
       }
     }
   },
-  "id": "bulletin-westend",
-  "name": "Bulletin",
-  "para_id": 2000,
+  "id": "bulletin-versi",
+  "name": "Bulletin Versi",
+  "para_id": 3000,
   "properties": {
     "tokenDecimals": 12,
     "tokenSymbol": "UNIT"
   },
   "protocolId": null,
-  "relay_chain": "westend",
+  "relay_chain": "versi_v1_10",
   "telemetryEndpoints": null
 }
