@@ -79,6 +79,9 @@ jobs:
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     timeout-minutes: 2880
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout sources

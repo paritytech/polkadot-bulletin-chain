@@ -161,10 +161,7 @@ pub async fn run_b2_concurrent_read_sweep(
 	payload_size: usize,
 	ws_url: &str,
 ) -> Result<Vec<ScenarioResult>> {
-	log::info!(
-		"B2: Concurrent read sweep ({item_count} items, {}KB payload)",
-		payload_size / 1024
-	);
+	log::info!("B2: Concurrent read sweep ({item_count} items, {}KB payload)", payload_size / 1024);
 
 	// --- Generate unique payloads and compute CIDs ---
 	let mut items: Vec<(cid::Cid, Vec<u8>)> = Vec::with_capacity(item_count as usize);
@@ -220,13 +217,8 @@ pub async fn run_b2_concurrent_read_sweep(
 
 	for &concurrency in B2_CONCURRENCY_LEVELS {
 		log::info!("=== B2 sweep: concurrency={concurrency} ===");
-		match run_b2_concurrent_read_level(
-			multiaddr,
-			Arc::clone(&items),
-			payload_size,
-			concurrency,
-		)
-		.await
+		match run_b2_concurrent_read_level(multiaddr, Arc::clone(&items), payload_size, concurrency)
+			.await
 		{
 			Ok(result) => results.push(result),
 			Err(e) => {
