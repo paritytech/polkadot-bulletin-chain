@@ -166,3 +166,13 @@ For the full review criteria (Parity Standards), see the `/review` skill. The re
 - **@claude** - Mention in any comment to ask questions or request help
 - **Assign to claude[bot]** - Assign an issue to have Claude analyze and propose solutions
 - **Label with `claude`** - Add the `claude` label to an issue for Claude to investigate
+
+## SDK Development Guidelines
+
+When developing or modifying the Bulletin SDK (Rust or TypeScript):
+
+- **Scope**: Only implement what is directly needed for core functionality (storage, authorization, CID/chunking)
+- **No kitchen sink**: Don't add generic utilities (retry, sleep, batch, etc.) - users have their own libraries
+- **No placeholders**: Either implement correctly or don't include - no hardcoded placeholder values
+- **No reimplementing**: If functionality exists in standard libraries or common packages (@polkadot/util-crypto, etc.), don't reimplement it
+- **Minimal API surface**: Smaller, focused APIs are easier to maintain and less likely to have bugs

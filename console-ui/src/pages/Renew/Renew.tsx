@@ -14,15 +14,14 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useApi, useBlockNumber, useChainState } from "@/state/chain.state";
+import { useApi, useBlockNumber, useChainState, useCreateBulletinClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-
-function bytesToHex(bytes: Uint8Array): string {
-  return "0x" + Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
-}
+import { WaitFor } from "@parity/bulletin-sdk";
+import { useProgressHandler } from "@/hooks/useProgressHandler";
+import { bytesToHex } from "@/utils/format";
 
 interface RenewalTarget {
   blockNumber: number;
@@ -33,6 +32,7 @@ interface RenewalTarget {
 
 export function Renew() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
   const { network } = useChainState();
   const selectedAccount = useSelectedAccount();
   const currentBlockNumber = useBlockNumber();
@@ -58,6 +58,8 @@ export function Renew() {
     blockNumber?: number;
     newExpiresAt: number;
   } | null>(null);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   // Retention period from chain
   const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
@@ -127,8 +129,8 @@ export function Renew() {
         return;
       }
 
-      // Calculate expiration block
-      const expiresAtBlock = retentionPeriod ? blockNum + retentionPeriod : blockNum;
+      // retentionPeriod is guaranteed non-null here (lookup button is disabled until loaded)
+      const expiresAtBlock = blockNum + retentionPeriod!;
 
       setRenewalTarget({
         blockNumber: blockNum,
@@ -145,53 +147,27 @@ export function Renew() {
   }, [api, blockInput, indexInput, retentionPeriod]);
 
   const handleRenew = useCallback(async () => {
-    if (!api || !selectedAccount || !renewalTarget) return;
+    if (!api || !selectedAccount?.polkadotSigner || !renewalTarget) return;
 
     setIsRenewing(true);
     setRenewalError(null);
     setRenewalSuccess(null);
+    setTxStatus(null);
 
     try {
-      const tx = api.tx.TransactionStorage.renew({
-        block: renewalTarget.blockNumber,
-        index: renewalTarget.index,
-      });
+      // Create SDK client with user's signer
+      const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
 
-      const result = await new Promise<{ blockNumber?: number }>((resolve, reject) => {
-        let resolved = false;
+      // Use SDK to renew with progress callback
+      const result = await bulletinClient
+        .renew(renewalTarget.blockNumber, renewalTarget.index)
+        .withCallback(handleProgress)
+        .withWaitFor(WaitFor.Finalized)
+        .send();
 
-        const subscription = tx.signSubmitAndWatch(selectedAccount.polkadotSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve({
-                blockNumber: ev.block.number,
-              });
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        // Timeout after 2 minutes
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
-
-      // Calculate new expiration
+      // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
-      const newExpiresAt = retentionPeriod ? renewedAtBlock + retentionPeriod : renewedAtBlock;
+      const newExpiresAt = renewedAtBlock + retentionPeriod!;
 
       setRenewalSuccess({
         blockNumber: result.blockNumber,
@@ -205,12 +181,13 @@ export function Renew() {
       setRenewalError(err instanceof Error ? err.message : "Renewal failed");
     } finally {
       setIsRenewing(false);
+      setTxStatus(null);
     }
   }, [api, selectedAccount, renewalTarget, currentBlockNumber, retentionPeriod]);
 
   const canRenew =
     api &&
-    selectedAccount &&
+    selectedAccount?.polkadotSigner &&
     renewalTarget &&
     !isRenewing;
 
@@ -312,7 +289,7 @@ export function Renew() {
 
               <Button
                 onClick={handleLookup}
-                disabled={!api || isLookingUp || !blockInput || !indexInput}
+                disabled={!api || isLookingUp || !blockInput || !indexInput || retentionPeriod === null}
                 className="w-full"
               >
                 {isLookingUp ? (
@@ -407,7 +384,7 @@ export function Renew() {
                   {isRenewing ? (
                     <>
                       <Spinner size="sm" className="mr-2" />
-                      Renewing...
+                      {txStatus || "Renewing..."}
                     </>
                   ) : (
                     <>
