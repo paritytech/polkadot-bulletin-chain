@@ -1,0 +1,23 @@
+[package]
+name = "encode-westend-calls"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+publish = false
+description = "Print SCALE-encoded RuntimeCall values for bulletin-westend (Bulletin parachain)"
+
+[[bin]]
+name = "encode-westend-calls"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+bulletin-westend-runtime = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+codec = { workspace = true, features = ["derive"] }
+hex = { workspace = true }
+pallet-collator-selection = { workspace = true, default-features = true }
+pallet-session = { workspace = true, default-features = true }
+sp-consensus-aura = { workspace = true, default-features = true }
+sp-core = { workspace = true, default-features = true }
+sp-runtime = { workspace = true, default-features = true }

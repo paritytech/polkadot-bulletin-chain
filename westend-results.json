@@ -1,0 +1,39 @@
+[
+  {
+    "name": "block-cap: Block Capacity (4KB) — ERROR",
+    "duration": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "payload_size": 4096,
+    "throughput_tps": 0.0,
+    "throughput_bytes_per_sec": 0.0,
+    "theoretical": {
+      "weight_cap": 1768,
+      "length_cap": 2243,
+      "count_cap": 512,
+      "effective_cap": 512,
+      "bottleneck": "MaxBlockTxs (512)"
+    },
+    "chain_limits": {
+      "max_normal_weight": 1800000000000,
+      "extrinsic_base_weight": 125000000,
+      "normal_block_length": 9437184,
+      "max_block_transactions": 512,
+      "max_transaction_size": 8388608,
+      "store_weight_base": 980819000,
+      "store_weight_per_byte": 9046,
+      "extrinsic_length_overhead": 110
+    },
+    "environment": {
+      "node_name": "polkadot-parachain",
+      "node_version": "1.22.0-2e4dd0bc223",
+      "chain_name": "Versi Bc 3000",
+      "runtime_spec_version": 1000008,
+      "runtime_transaction_version": 1,
+      "ws_url": "wss://bc-3000-node-0.parity-versi.parity.io",
+      "stress_test_version": "0.1.0",
+      "command_line": "target/release/bulletin-stress-test --ws-url wss://bc-3000-node-0.parity-versi.parity.io --submitters 16 --output-file westend-results.json throughput --variants 4KB --target-blocks 100"
+    }
+  }
+]
