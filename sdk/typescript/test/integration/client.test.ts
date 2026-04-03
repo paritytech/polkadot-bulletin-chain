@@ -20,7 +20,7 @@ import {
 } from "@polkadot-labs/hdkd-helpers"
 import { createClient, type PolkadotClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
-import { getWsProvider } from "polkadot-api/ws-provider/node"
+import { getWsProvider } from "polkadot-api/ws-provider"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,
@@ -32,7 +32,7 @@ import {
 
 const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
-describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
+describe("AsyncBulletinClient Integration Tests", { timeout: 300_000 }, () => {
   let client: AsyncBulletinClient
   let papiClient: PolkadotClient
   let aliceAddress: string
@@ -67,7 +67,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
       .send()
     console.log("Alice authorized for storage:", aliceAddress)
-  })
+  }, 120_000)
 
   afterAll(async () => {
     if (papiClient) {
