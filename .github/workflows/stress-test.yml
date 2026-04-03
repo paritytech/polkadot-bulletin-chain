@@ -212,7 +212,19 @@ jobs:
           if [ -f results.json ]; then
             echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Command:** \`${ST_COMMAND}\`" >> $GITHUB_STEP_SUMMARY
+            echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Command | \`${ST_COMMAND}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Target | \`${ST_WS_URL}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Submitters | ${ST_SUBMITTERS} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Target blocks | ${ST_TARGET_BLOCKS} |" >> $GITHUB_STEP_SUMMARY
+            if [ "$ST_COMMAND" = "throughput" ] && [ -n "$ST_VARIANTS" ]; then
+              echo "| Variants | \`${ST_VARIANTS}\` |" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "$ST_COMMAND" = "bitswap" ]; then
+              echo "| Iterations | ${ST_ITERATIONS} |" >> $GITHUB_STEP_SUMMARY
+              echo "| Payload size | ${ST_PAYLOAD_SIZE} bytes |" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "" >> $GITHUB_STEP_SUMMARY
             echo '```json' >> $GITHUB_STEP_SUMMARY
             python3 -c "
