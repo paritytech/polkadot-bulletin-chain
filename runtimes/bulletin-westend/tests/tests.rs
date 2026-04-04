@@ -558,32 +558,29 @@ fn alice_can_sign_authorize_account_extrinsic() {
 	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
 	// from Alice must pass ValidateSigned (not be rejected as InvalidTransaction::Call)
 	// and succeed at dispatch.
-	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
-		.execute_with(|| {
-			let alice = Sr25519Keyring::Alice;
-			let target = Sr25519Keyring::Eve;
+	let mut genesis = RuntimeGenesisConfig::default();
+	genesis.transaction_storage.account_authorizations =
+		vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)];
+	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+		let alice = Sr25519Keyring::Alice;
+		let target = Sr25519Keyring::Eve;
 
-			// Give Alice balance to cover tx fees (authorize_account is not feeless).
-			use frame_support::traits::fungible::Mutate;
-			Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
-
-			let call =
-				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-					who: target.to_account_id(),
-					transactions: 5,
-					bytes: 1024,
-				});
-
-			let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
-			assert_ok!(res);
-			assert_ok!(res.unwrap());
-
-			// Verify the authorization was actually applied.
-			assert_eq!(
-				TransactionStorage::account_authorization_extent(target.to_account_id()),
-				AuthorizationExtent { transactions: 5, bytes: 1024 },
-			);
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+			who: target.to_account_id(),
+			transactions: 5,
+			bytes: 1024,
 		});
+
+		let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
+		assert_ok!(res);
+		assert_ok!(res.unwrap());
+
+		// Verify the authorization was actually applied.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(target.to_account_id()),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+		);
+	});
 }
 
 #[test]
