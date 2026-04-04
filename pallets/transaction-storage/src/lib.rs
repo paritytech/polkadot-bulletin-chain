@@ -574,6 +574,9 @@ pub mod pallet {
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -605,6 +608,9 @@ pub mod pallet {
 		/// [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::authorize_preimage())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _content_hash: &ContentHash, _max_size: &u64| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
 		pub fn authorize_preimage(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,

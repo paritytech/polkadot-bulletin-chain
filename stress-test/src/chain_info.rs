@@ -12,6 +12,26 @@ use crate::{
 	report::TheoreticalLimits,
 };
 
+/// Redact `--authorizer-seed` value from a command-line args list.
+fn redact_seed(args: Vec<String>) -> String {
+	let mut result = Vec::with_capacity(args.len());
+	let mut skip_next = false;
+	for arg in &args {
+		if skip_next {
+			result.push("<redacted>".to_string());
+			skip_next = false;
+		} else if arg == "--authorizer-seed" {
+			result.push(arg.clone());
+			skip_next = true;
+		} else if arg.starts_with("--authorizer-seed=") {
+			result.push("--authorizer-seed=<redacted>".to_string());
+		} else {
+			result.push(arg.clone());
+		}
+	}
+	result.join(" ")
+}
+
 /// Environment metadata captured at test startup for reproducibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvironmentInfo {
@@ -53,7 +73,7 @@ impl EnvironmentInfo {
 			runtime_transaction_version: rv.transaction_version,
 			ws_url: ws_url.to_string(),
 			stress_test_version: env!("CARGO_PKG_VERSION").to_string(),
-			command_line: std::env::args().collect::<Vec<_>>().join(" "),
+			command_line: redact_seed(std::env::args().collect()),
 		})
 	}
 
