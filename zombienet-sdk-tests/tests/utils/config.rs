@@ -11,7 +11,6 @@ pub const NODE_ROLE_METRIC: &str = "node_roles";
 pub const IS_MAJOR_SYNCING_METRIC: &str = "substrate_sub_libp2p_is_major_syncing";
 
 pub const FULLNODE_ROLE_VALUE: f64 = 1.0;
-pub const VALIDATOR_ROLE_VALUE: f64 = 4.0;
 pub const IDLE_VALUE: f64 = 0.0;
 
 // Environment variables
@@ -34,7 +33,6 @@ pub const LOG_ERROR_TIMEOUT_SECS: u64 = 10;
 
 // Test constants
 pub const TEST_DATA_SIZE: usize = 2048;
-pub const CHAIN_ID: &str = "local_testnet";
 pub const TRANSACTION_STORAGE_COLUMN: &str = "col11";
 pub const NODE_LOG_CONFIG: &str = "-lsync=trace,sub-libp2p=trace,litep2p=trace,request-response=trace,transaction-storage=trace,bitswap=trace";
 

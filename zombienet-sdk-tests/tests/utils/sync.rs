@@ -95,16 +95,6 @@ pub async fn verify_warp_sync_completed(node: &zombienet_sdk::NetworkNode) -> Re
 	Ok(())
 }
 
-pub async fn wait_for_validator(node: &zombienet_sdk::NetworkNode) -> Result<()> {
-	node.wait_metric_with_timeout(
-		NODE_ROLE_METRIC,
-		|role| role == VALIDATOR_ROLE_VALUE,
-		METRIC_TIMEOUT_SECS,
-	)
-	.await
-	.context("Node did not become validator")
-}
-
 pub async fn wait_for_fullnode(node: &zombienet_sdk::NetworkNode) -> Result<()> {
 	node.wait_metric_with_timeout(
 		NODE_ROLE_METRIC,
