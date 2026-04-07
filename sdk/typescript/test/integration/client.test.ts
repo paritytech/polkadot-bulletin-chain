@@ -111,7 +111,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       console.log("   CID:", result.cid.toString())
     })
 
-    it("should store chunked data with progress tracking", { timeout: 300_000 }, async () => {
+    it("should store chunked data with progress tracking", {
+      timeout: 300_000,
+    }, async () => {
       // Create 5 MiB test data
       const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
 
@@ -151,7 +153,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       console.log("   Chunks:", result.chunks?.numChunks)
     })
 
-    it("should fire progress events in correct order during chunked upload", { timeout: 180_000 }, async () => {
+    it("should fire progress events in correct order during chunked upload", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
       const events: { type: string; chunkIndex?: number }[] = []
@@ -225,7 +229,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       }
     })
 
-    it("should fire chunk events sequentially (each chunk submitted before next starts)", { timeout: 180_000 }, async () => {
+    it("should fire chunk events sequentially (each chunk submitted before next starts)", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
 
       const eventLog: { type: string; index: number; time: number }[] = []
@@ -268,7 +274,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       expect(chunk0Completed?.time).toBeLessThanOrEqual(chunk1Started?.time)
     })
 
-    it("should include CID in chunk_completed events", { timeout: 180_000 }, async () => {
+    it("should include CID in chunk_completed events", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
       const chunkCids: string[] = []
@@ -292,7 +300,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
     })
 
-    it("should fire chunk_completed via store() builder for large data", { timeout: 180_000 }, async () => {
+    it("should fire chunk_completed via store() builder for large data", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
       const events: string[] = []
