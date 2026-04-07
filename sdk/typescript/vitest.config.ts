@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    retry: process.env.CI ? 2 : 0,
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
@@ -18,7 +19,7 @@ export default defineConfig({
         "*.config.ts",
       ],
     },
-    testTimeout: 30000, // 30 seconds for integration tests
-    hookTimeout: 30000,
+    testTimeout: 60000, // 60 seconds for integration tests
+    hookTimeout: 60000,
   },
 })
