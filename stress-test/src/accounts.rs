@@ -78,19 +78,6 @@ pub fn generate_keypairs(count: u32, prefix: &str) -> Vec<Keypair> {
 	(0..count).map(|i| keypair_at_derivation_prefix(prefix, i)).collect()
 }
 
-/// Initialize nonce tracker for all accounts (sequential).
-pub async fn init_nonces(
-	client: &OnlineClient<BulletinConfig>,
-	nonce_tracker: &NonceTracker,
-	keypairs: &[Keypair],
-) -> Result<()> {
-	for kp in keypairs {
-		let account_id = kp.public_key().to_account_id();
-		nonce_tracker.init_from_chain(client, &account_id).await?;
-	}
-	Ok(())
-}
-
 /// Batch-initialize nonces for many accounts using concurrent RPC queries.
 ///
 /// Uses the provided connection pool to run up to `concurrency` nonce queries

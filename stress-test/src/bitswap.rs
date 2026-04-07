@@ -411,11 +411,6 @@ pub async fn create_connected_client(multiaddr: &Multiaddr) -> Result<BitswapCli
 	Ok(BitswapClient { cmd_tx, _event_task: event_task })
 }
 
-/// Parse CID bytes (as emitted by the Stored event) into a `cid::Cid`.
-pub fn parse_cid_bytes(bytes: &[u8]) -> Result<cid::Cid> {
-	cid::Cid::try_from(bytes).map_err(|e| anyhow!("Failed to parse CID: {e}"))
-}
-
 /// Clean a multiaddr string by removing duplicate `/p2p/` segments.
 ///
 /// Nodes sometimes report addresses like `/ip4/.../tcp/.../ws/p2p/PEER/p2p/PEER`.

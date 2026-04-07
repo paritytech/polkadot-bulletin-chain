@@ -42,6 +42,11 @@ struct Cli {
 	#[arg(long, default_value = "5", global = true)]
 	target_blocks: u32,
 
+	/// Block-capacity only: measured blocks worth of transactions per pipeline iteration (chunk
+	/// size)
+	#[arg(long, default_value = "20", global = true)]
+	iteration_blocks: u32,
+
 	/// Output format
 	#[arg(long, default_value = "text", global = true)]
 	output: OutputFormat,
@@ -289,6 +294,7 @@ async fn run_throughput(
 				chain_limits,
 				cli.submitters,
 				cli.target_blocks,
+				cli.iteration_blocks,
 				variants,
 				results,
 				on_result,

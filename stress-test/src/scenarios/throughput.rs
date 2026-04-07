@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::sync::Arc;
 use subxt::OnlineClient;
 use subxt_signer::sr25519::Keypair;
 
@@ -113,49 +112,10 @@ fn scenario_result_from_bulk(
 	}
 }
 
-/// Block capacity measurement using one-shot accounts.
-///
-/// Each account submits exactly 1 tx at nonce 0 with its own random payload.
-/// Delegates to `store::bulk_store_oneshot` for concurrent submission with
-/// backpressure. Only steady-state blocks (excluding first and last) are used
-/// for avg/peak.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_block_capacity(
-	_client: &OnlineClient<BulletinConfig>,
-	signers: &[Keypair],
-	payload_size: usize,
-	target_blocks: u32,
-	ws_urls: &[&str],
-	chain_limits: &ChainLimits,
-	submitters: usize,
-	block_input: store::BlockInput,
-) -> Result<ScenarioResult> {
-	log::info!(
-		"block-cap: Block capacity test ({} one-shot accounts, {payload_size} bytes, \
-		 {target_blocks} target blocks)",
-		signers.len()
-	);
-
-	// Each account gets its own random payload.
-	let work_items: Vec<_> = signers
-		.iter()
-		.cloned()
-		.map(|kp| (kp, Arc::new(store::generate_payload(payload_size))))
-		.collect();
-
-	let total_target = target_blocks + 2; // include ramp-up and ramp-down blocks
-	let result =
-		store::bulk_store_oneshot(work_items, ws_urls, Some(total_target), submitters, block_input)
-			.await?;
-
-	Ok(scenario_result_from_bulk(&result, signers.len(), payload_size, "single", chain_limits))
-}
-
 /// Block capacity measurement across multiple payload sizes.
 ///
-/// For each payload size, splits one-shot accounts into iterations (~
-/// [`crate::pipeline::BLOCK_CAPACITY_MEASURED_BLOCKS_PER_ITERATION`] measured blocks worth of txs
-/// per iteration), then runs the producer/consumer pipeline:
+/// For each payload size, splits one-shot accounts into iterations (~`iteration_blocks` measured
+/// blocks worth of txs per iteration), then runs the producer/consumer pipeline:
 /// [`StressWorkItem`]s on a bounded channel; the consumer waits on `txpool_status` before further
 /// `recv`s when the pool is deep, so the generator blocks on `send`. Drains the pool between
 /// variants.
@@ -168,10 +128,12 @@ pub async fn run_block_capacity_sweep(
 	chain_limits: &ChainLimits,
 	submitters: usize,
 	target_blocks: u32,
+	iteration_blocks: u32,
 	variant_filter: Option<&str>,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 ) -> Result<()> {
+	let iteration_blocks = iteration_blocks.max(1);
 	let block_usable_bytes = chain_limits.normal_block_length as usize;
 	let extrinsic_overhead = chain_limits.extrinsic_length_overhead as usize;
 	let max_block_txs = chain_limits.max_block_transactions as usize;
@@ -240,13 +202,13 @@ pub async fn run_block_capacity_sweep(
 		let accounts_needed = ((total_block_slots + backpressure_buffer) * 3 / 2).max(1) as u32;
 		let est_pool_mb =
 			(accounts_needed as usize * (payload_size + extrinsic_overhead)) / (1024 * 1024);
-		let accounts_per_iter = pipeline::block_capacity_accounts_per_iteration(est_block_cap);
+		let accounts_per_iter =
+			pipeline::block_capacity_accounts_per_iteration(est_block_cap, iteration_blocks);
 		let n_iterations = accounts_needed.div_ceil(accounts_per_iter);
 		log::info!(
 			"=== block-capacity variant: {label} payload, {accounts_needed} one-shot accounts \
-			 in {n_iterations} iteration(s) (~{} measured blocks/iter × ~{est_block_cap} txs/block \
+			 in {n_iterations} iteration(s) (~{iteration_blocks} measured blocks/iter × ~{est_block_cap} txs/block \
 			 ≈ {accounts_per_iter} accounts/iter), est. pool demand ~{est_pool_mb} MB ===",
-			pipeline::BLOCK_CAPACITY_MEASURED_BLOCKS_PER_ITERATION,
 		);
 
 		let seed = format!("T2sweep_{label}");

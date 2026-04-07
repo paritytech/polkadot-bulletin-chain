@@ -255,28 +255,6 @@ pub async fn wait_for_in_best_block(
 	anyhow::bail!("Transaction stream ended without InBestBlock status")
 }
 
-/// Wait for a transaction to be finalized.
-pub async fn wait_for_finalized(
-	mut progress: subxt::tx::TxProgress<BulletinConfig, OnlineClient<BulletinConfig>>,
-) -> Result<(H256, ExtrinsicEvents<BulletinConfig>)> {
-	while let Some(status) = progress.next().await {
-		match status? {
-			TxStatus::InFinalizedBlock(tx_in_block) => {
-				let block_hash = tx_in_block.block_hash();
-				let events = tx_in_block.wait_for_success().await?;
-				return Ok((block_hash, events));
-			},
-			TxStatus::Error { message } |
-			TxStatus::Invalid { message } |
-			TxStatus::Dropped { message } => {
-				anyhow::bail!("Transaction failed: {message}");
-			},
-			_ => continue,
-		}
-	}
-	anyhow::bail!("Transaction stream ended without finalization")
-}
-
 /// Fire-and-forget store (highest throughput).
 ///
 /// Returns the extrinsic hash computed the same way as `block.extrinsics()` —
