@@ -59,7 +59,11 @@ export ROCKSDB_LDB_PATH=/path/to/ldb
 
 Tests are gated behind the `zombie-sync-tests` feature to prevent accidental execution during `cargo test --workspace`.
 
+Set `ZOMBIE_PROVIDER=native` to run with local binaries (without Docker):
+
 ```bash
+export ZOMBIE_PROVIDER=native
+
 # All parachain tests
 cargo test -p bulletin-chain-zombienet-sdk-tests \
   --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
