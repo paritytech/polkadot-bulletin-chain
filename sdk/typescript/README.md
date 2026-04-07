@@ -22,11 +22,6 @@ const result = await client.store(data).send();
 console.log('Stored with CID:', result.cid.toString());
 ```
 
-> **Note**: Transaction submission via `store().send()` is not yet fully implemented.
-> Authorization (`authorizeAccount`, `authorizePreimage`) and `renew` operations work.
-> CID calculation, chunking, and DAG-PB manifest generation are fully functional.
-> See the [examples](../../examples/) directory for current working patterns using PAPI directly.
-
 ## Installation
 
 ```bash
