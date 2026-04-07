@@ -367,13 +367,14 @@ fn stores_various_sizes_with_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
-		#[allow(clippy::identity_op)]
-		let sizes: [usize; 5] = [
-			2000,            // 2 KB
-			1 * 1024 * 1024, // 1 MB
-			4 * 1024 * 1024, // 4 MB
-			6 * 1024 * 1024, // 6 MB
-			8 * 1024 * 1024, // 8 MB
+		let max = DEFAULT_MAX_TRANSACTION_SIZE as usize;
+		let sizes: [usize; 6] = [
+			1,           // minimum valid size
+			2000,        // small
+			max / 4,     // 25%
+			max / 2,     // 50%
+			max * 3 / 4, // 75%
+			max,         // 100% (exactly at limit)
 		];
 		let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 		assert_ok!(TransactionStorage::authorize_account(
@@ -398,9 +399,17 @@ fn stores_various_sizes_with_account_authorization() {
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
 
-		// Now assert that an 11 MB payload exceeds the max size and fails, even with fresh
-		// authorization
-		let oversize: usize = 11 * 1024 * 1024; // 11 MB > DEFAULT_MAX_TRANSACTION_SIZE (8 MB)
+		// Zero-size data must be rejected
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1));
+		let empty_call = Call::store { data: vec![] };
+		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &empty_call), BAD_DATA_SIZE);
+		assert_noop!(
+			Into::<RuntimeCall>::into(empty_call).dispatch(RuntimeOrigin::none()),
+			Error::BadDataSize,
+		);
+
+		// Assert that a payload exceeding the max size fails, even with fresh authorization
+		let oversize: usize = max + 1;
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who,
