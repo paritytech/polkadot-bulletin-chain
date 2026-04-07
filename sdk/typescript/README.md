@@ -22,6 +22,8 @@ const result = await client.store(data).send();
 console.log('Stored with CID:', result.cid.toString());
 ```
 
+> See the [examples](../../examples/) directory for more usage patterns.
+
 ## Installation
 
 ```bash
