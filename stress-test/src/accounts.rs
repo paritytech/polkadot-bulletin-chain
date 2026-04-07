@@ -66,15 +66,16 @@ impl Default for NonceTracker {
 	}
 }
 
+/// Derive a single sr25519 keypair (same scheme as [`generate_keypairs`]).
+pub fn keypair_at_derivation_prefix(prefix: &str, index: u32) -> Keypair {
+	let uri = format!("//{prefix}/{index}");
+	let secret_uri: subxt_signer::SecretUri = uri.parse().expect("valid secret URI");
+	Keypair::from_uri(&secret_uri).expect("valid derivation path")
+}
+
 /// Generate N keypairs for stress testing using derivation paths.
 pub fn generate_keypairs(count: u32, prefix: &str) -> Vec<Keypair> {
-	(0..count)
-		.map(|i| {
-			let uri = format!("//{prefix}/{i}");
-			let secret_uri: subxt_signer::SecretUri = uri.parse().expect("valid secret URI");
-			Keypair::from_uri(&secret_uri).expect("valid derivation path")
-		})
-		.collect()
+	(0..count).map(|i| keypair_at_derivation_prefix(prefix, i)).collect()
 }
 
 /// Initialize nonce tracker for all accounts (sequential).

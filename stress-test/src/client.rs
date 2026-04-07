@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use subxt::{
 	config::{
 		substrate::SubstrateConfig, transaction_extensions, Config, DefaultExtrinsicParamsBuilder,
@@ -97,4 +97,31 @@ pub async fn discover_p2p_info(ws_url: &str) -> Result<(String, Vec<String>)> {
 		client.request("system_localListenAddresses", jsonrpsee::rpc_params![]).await?;
 
 	Ok((peer_id, addresses))
+}
+
+/// Ready + future transaction count from the node (lightweight `txpool_status` when available).
+pub async fn fetch_txpool_pending_total(ws_url: &str) -> Result<usize> {
+	use jsonrpsee::{core::client::ClientT, rpc_params, ws_client::WsClientBuilder};
+
+	let client = WsClientBuilder::default().build(ws_url).await?;
+
+	if let Ok(v) = client.request::<serde_json::Value, _>("txpool_status", rpc_params![]).await {
+		let n = match &v {
+			serde_json::Value::Array(arr) if arr.len() >= 2 =>
+				arr[0].as_u64().unwrap_or(0).saturating_add(arr[1].as_u64().unwrap_or(0)),
+			serde_json::Value::Object(map) => map
+				.get("ready")
+				.and_then(|x| x.as_u64())
+				.unwrap_or(0)
+				.saturating_add(map.get("future").and_then(|x| x.as_u64()).unwrap_or(0)),
+			_ => anyhow::bail!("unexpected txpool_status JSON: {v}"),
+		};
+		return Ok(n as usize);
+	}
+
+	let pending: Vec<serde_json::Value> = client
+		.request("author_pendingExtrinsics", rpc_params![])
+		.await
+		.context("author_pendingExtrinsics RPC")?;
+	Ok(pending.len())
 }

@@ -33,7 +33,8 @@ struct Cli {
 	#[arg(long, default_value = "512", global = true)]
 	iterations: u32,
 
-	/// Number of concurrent submitter tasks (increase for remote RPCs)
+	/// WebSocket RPC connections for store submission (one async worker per connection, fed by
+	/// bounded channels from the work reader; increase for remote RPCs)
 	#[arg(long, default_value = "4", global = true)]
 	submitters: usize,
 

@@ -11,7 +11,7 @@ use std::{
 use subxt::{
 	blocks::{Block, ExtrinsicEvents},
 	dynamic::{tx, Value},
-	tx::TxStatus,
+	tx::{SubmittableTransaction, TxStatus},
 	utils::H256,
 	OnlineClient,
 };
@@ -109,7 +109,10 @@ pub enum BlockInput {
 
 /// Read `pallet_timestamp::Now` at a specific block hash.
 /// Returns milliseconds since Unix epoch.
-async fn read_timestamp_at(client: &OnlineClient<BulletinConfig>, block_hash: H256) -> Result<u64> {
+pub(crate) async fn read_timestamp_at(
+	client: &OnlineClient<BulletinConfig>,
+	block_hash: H256,
+) -> Result<u64> {
 	let addr = subxt::dynamic::storage("Timestamp", "Now", vec![]);
 	let value = client
 		.storage()
@@ -123,13 +126,13 @@ async fn read_timestamp_at(client: &OnlineClient<BulletinConfig>, block_hash: H2
 }
 
 /// Internal tracking entry for a best block awaiting finalization confirmation.
-struct PendingBlock {
-	number: u64,
-	hash: H256,
-	tx_count: u64,
-	payload_bytes: u64,
-	timestamp_ms: Option<u64>,
-	prefill: bool,
+pub(crate) struct PendingBlock {
+	pub(crate) number: u64,
+	pub(crate) hash: H256,
+	pub(crate) tx_count: u64,
+	pub(crate) payload_bytes: u64,
+	pub(crate) timestamp_ms: Option<u64>,
+	pub(crate) prefill: bool,
 }
 
 const TX_TIMEOUT_SECS: u64 = 60;
@@ -146,7 +149,7 @@ const TX_TIMEOUT_SECS: u64 = 60;
 ///   1020 = POOL_INVALID_BLOCK_ID
 ///   1021 = POOL_FUTURE_TX (pool not accepting future nonces)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TxPoolError {
+pub(crate) enum TxPoolError {
 	/// Pool is full (1016) or priority too low (1014) — tx never entered pool,
 	/// safe to rollback nonce and retry. On feeless chains all txs have equal
 	/// priority, so 1014 fires instead of 1016 when the pool can't evict.
@@ -170,7 +173,7 @@ enum TxPoolError {
 	Other,
 }
 
-fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
+pub(crate) fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
 	let msg = format!("{e}").to_lowercase();
 
 	// 1016: tx never entered pool (safe to rollback nonce and retry)
@@ -300,6 +303,35 @@ pub async fn store_fire_and_forget(
 	Ok(raw_hash)
 }
 
+/// Build a signed `TransactionStorage::store` extrinsic bytes (use nonce `0` for one-shot accounts
+/// after [`crate::accounts::batch_init_nonces`]).
+pub async fn sign_store_extrinsic(
+	client: &OnlineClient<BulletinConfig>,
+	signer: &Keypair,
+	data: &[u8],
+	nonce: u64,
+) -> Result<Vec<u8>> {
+	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+	let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
+	let signed = client.tx().create_signed(&store_call, signer, params).await?;
+	Ok(signed.into_encoded())
+}
+
+/// Submit a pre-signed store extrinsic (see [`sign_store_extrinsic`]). Same hash semantics as
+/// [`store_fire_and_forget`].
+pub async fn store_submit_pre_signed(
+	client: &OnlineClient<BulletinConfig>,
+	encoded: &[u8],
+) -> Result<H256> {
+	let sub = SubmittableTransaction::<BulletinConfig, OnlineClient<BulletinConfig>>::from_bytes(
+		client.clone(),
+		encoded.to_vec(),
+	);
+	let raw_hash = sub.hash();
+	sub.submit().await.map_err(|e| anyhow!("submit pre-signed store: {e}"))?;
+	Ok(raw_hash)
+}
+
 /// Generate random (incompressible) test payload of given size.
 ///
 /// Uses random bytes so that PoV compression cannot artificially shrink the data,
@@ -335,7 +367,9 @@ pub fn compute_cid_blake2b256(data: &[u8]) -> Result<cid::Cid> {
 
 /// Count `TransactionStorage::Stored` events in a block. Uses events (lightweight)
 /// instead of extrinsics (full block body) to avoid RPC response size limits.
-async fn count_stored_events(block: &Block<BulletinConfig, OnlineClient<BulletinConfig>>) -> u64 {
+pub(crate) async fn count_stored_events(
+	block: &Block<BulletinConfig, OnlineClient<BulletinConfig>>,
+) -> u64 {
 	let block_number = block.number();
 	let mut count = 0u64;
 	match block.events().await {
@@ -870,7 +904,7 @@ pub async fn bulk_store_oneshot(
 										consecutive_conn_errors = 0;
 									},
 									Err(re) => {
-										if consecutive_conn_errors % 10 == 0 {
+										if consecutive_conn_errors.is_multiple_of(10) {
 											log::warn!(
 												"bulk_store submitter {task_id}: reconnect \
 												 failed ({consecutive_conn_errors} attempts): {re}"

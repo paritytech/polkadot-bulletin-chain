@@ -7,9 +7,111 @@ use crate::{
 	accounts::NonceTracker,
 	chain_info::ChainLimits,
 	client::BulletinConfig,
+	pipeline::{self, IterationPlan, StressWorkItem},
 	report::{ScenarioResult, SubmissionStats},
 	store,
 };
+
+fn scenario_result_from_bulk(
+	result: &store::BulkStoreResult,
+	account_count: usize,
+	payload_size: usize,
+	label: &str,
+	chain_limits: &ChainLimits,
+) -> ScenarioResult {
+	let all_blocks = &result.blocks;
+	let measured: Vec<_> = all_blocks.iter().filter(|b| !b.prefill).collect();
+
+	let first_with_txs = measured.iter().position(|b| b.tx_count > 0);
+	let last_with_txs = measured.iter().rposition(|b| b.tx_count > 0);
+	let steady: Vec<_> = match (first_with_txs, last_with_txs) {
+		(Some(first), Some(last)) if last > first + 1 => measured[first + 1..last].to_vec(),
+		_ => measured.clone(),
+	};
+
+	let steady_bytes: u64 = steady.iter().map(|b| b.payload_bytes).sum();
+	let peak = steady.iter().map(|b| b.tx_count).max().unwrap_or(0);
+	let avg = if !steady.is_empty() {
+		steady.iter().map(|b| b.tx_count).sum::<u64>() as f64 / steady.len() as f64
+	} else {
+		0.0
+	};
+	let measured_confirmed: u64 = measured.iter().map(|b| b.tx_count).sum();
+	let prefill_count = all_blocks.iter().filter(|b| b.prefill).count();
+	let empty_count = steady.iter().filter(|b| b.tx_count == 0).count();
+
+	let intervals: Vec<u64> = steady.iter().filter_map(|b| b.interval_ms).collect();
+	let avg_block_interval_ms = if !intervals.is_empty() {
+		Some(intervals.iter().sum::<u64>() as f64 / intervals.len() as f64)
+	} else {
+		None
+	};
+
+	let onchain_duration_ms = match (
+		steady.first().and_then(|b| b.timestamp_ms),
+		steady.last().and_then(|b| b.timestamp_ms),
+	) {
+		(Some(t1), Some(t2)) if t2 > t1 => Some(t2 - t1),
+		_ => None,
+	};
+	let (tps, bps, onchain_timing) = if let Some(ms) = onchain_duration_ms {
+		let secs = ms as f64 / 1000.0;
+		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, true)
+	} else {
+		let secs = result.duration.as_secs_f64();
+		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
+	};
+
+	log::info!(
+		"block-cap: {} total blocks ({} prefill, {} measured), {} steady-state \
+		 ({} empty), avg={:.1}, peak={}, timing={}",
+		all_blocks.len(),
+		prefill_count,
+		measured.len(),
+		steady.len(),
+		empty_count,
+		avg,
+		peak,
+		if onchain_timing { "on-chain" } else { "client" }
+	);
+
+	ScenarioResult {
+		name: format!("block-cap: Block Capacity ({label}, {account_count} accounts)"),
+		duration: result.duration,
+		total_submitted: result.total_submitted,
+		total_confirmed: result.total_confirmed,
+		total_errors: result.total_errors,
+		payload_size,
+		throughput_tps: tps,
+		throughput_bytes_per_sec: bps,
+		avg_tx_per_block: avg,
+		peak_tx_per_block: peak,
+		inclusion_latency: None,
+		finalization_latency: None,
+		retrieval_latency: None,
+		theoretical: Some(chain_limits.compute_theoretical_limits(payload_size)),
+		chain_limits: None,
+		environment: None,
+		blocks: all_blocks.clone(),
+		submission_stats: Some(SubmissionStats {
+			stale_nonces: result.stale_nonces,
+			pool_full_retries: result.pool_full_retries,
+			errors: result.total_errors,
+			remaining_in_queue: result.remaining_in_queue,
+			nonces_initialized: result.nonces_initialized,
+			nonces_failed: result.nonces_failed,
+		}),
+		avg_block_interval_ms,
+		fork_detections: result.fork_detections,
+		onchain_timing,
+		total_reads: None,
+		successful_reads: None,
+		failed_reads: None,
+		reads_per_sec: None,
+		read_bytes_per_sec: None,
+		data_verified: None,
+	}
+}
 
 /// Block capacity measurement using one-shot accounts.
 ///
@@ -46,113 +148,16 @@ pub async fn run_block_capacity(
 		store::bulk_store_oneshot(work_items, ws_urls, Some(total_target), submitters, block_input)
 			.await?;
 
-	// Compute stats over measured (non-prefill) blocks only.
-	// Trim ramp-up and ramp-down: find the first and last blocks with txs,
-	// then take everything in between (including empty blocks from validator
-	// rotation gaps) as the steady-state window.
-	let all_blocks = &result.blocks;
-	let measured: Vec<_> = all_blocks.iter().filter(|b| !b.prefill).collect();
-
-	let first_with_txs = measured.iter().position(|b| b.tx_count > 0);
-	let last_with_txs = measured.iter().rposition(|b| b.tx_count > 0);
-	let steady: Vec<_> = match (first_with_txs, last_with_txs) {
-		(Some(first), Some(last)) if last > first + 1 =>
-		// Skip first and last blocks with txs (ramp-up/down), keep
-		// everything between them including empty blocks.
-			measured[first + 1..last].to_vec(),
-		_ => measured.clone(),
-	};
-
-	let steady_bytes: u64 = steady.iter().map(|b| b.payload_bytes).sum();
-	let peak = steady.iter().map(|b| b.tx_count).max().unwrap_or(0);
-	let avg = if !steady.is_empty() {
-		steady.iter().map(|b| b.tx_count).sum::<u64>() as f64 / steady.len() as f64
-	} else {
-		0.0
-	};
-	let measured_confirmed: u64 = measured.iter().map(|b| b.tx_count).sum();
-	let prefill_count = all_blocks.iter().filter(|b| b.prefill).count();
-	let empty_count = steady.iter().filter(|b| b.tx_count == 0).count();
-
-	// Compute on-chain timing from timestamps of steady blocks.
-	let intervals: Vec<u64> = steady.iter().filter_map(|b| b.interval_ms).collect();
-	let avg_block_interval_ms = if !intervals.is_empty() {
-		Some(intervals.iter().sum::<u64>() as f64 / intervals.len() as f64)
-	} else {
-		None
-	};
-
-	// Prefer on-chain wall clock duration for throughput; fall back to Instant.
-	let onchain_duration_ms = match (
-		steady.first().and_then(|b| b.timestamp_ms),
-		steady.last().and_then(|b| b.timestamp_ms),
-	) {
-		(Some(t1), Some(t2)) if t2 > t1 => Some(t2 - t1),
-		_ => None,
-	};
-	let (tps, bps, onchain_timing) = if let Some(ms) = onchain_duration_ms {
-		let secs = ms as f64 / 1000.0;
-		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, true)
-	} else {
-		let secs = result.duration.as_secs_f64();
-		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
-	};
-
-	log::info!(
-		"block-cap: {} total blocks ({} prefill, {} measured), {} steady-state \
-		 ({} empty), avg={:.1}, peak={}, timing={}",
-		all_blocks.len(),
-		prefill_count,
-		measured.len(),
-		steady.len(),
-		empty_count,
-		avg,
-		peak,
-		if onchain_timing { "on-chain" } else { "client" }
-	);
-
-	Ok(ScenarioResult {
-		name: format!("block-cap: Block Capacity ({} accounts)", signers.len()),
-		duration: result.duration,
-		total_submitted: result.total_submitted,
-		total_confirmed: result.total_confirmed,
-		total_errors: result.total_errors,
-		payload_size,
-		throughput_tps: tps,
-		throughput_bytes_per_sec: bps,
-		avg_tx_per_block: avg,
-		peak_tx_per_block: peak,
-		inclusion_latency: None,
-		finalization_latency: None,
-		retrieval_latency: None,
-		theoretical: Some(chain_limits.compute_theoretical_limits(payload_size)),
-		chain_limits: None,
-		environment: None,
-		blocks: all_blocks.clone(),
-		submission_stats: Some(SubmissionStats {
-			stale_nonces: result.stale_nonces,
-			pool_full_retries: result.pool_full_retries,
-			errors: result.total_errors,
-			remaining_in_queue: result.remaining_in_queue,
-			nonces_initialized: result.nonces_initialized,
-			nonces_failed: result.nonces_failed,
-		}),
-		avg_block_interval_ms,
-		fork_detections: result.fork_detections,
-		onchain_timing,
-		total_reads: None,
-		successful_reads: None,
-		failed_reads: None,
-		reads_per_sec: None,
-		read_bytes_per_sec: None,
-		data_verified: None,
-	})
+	Ok(scenario_result_from_bulk(&result, signers.len(), payload_size, "single", chain_limits))
 }
 
 /// Block capacity measurement across multiple payload sizes.
 ///
-/// For each payload size, calculates how many one-shot accounts are needed,
-/// authorizes them, runs `run_block_capacity`, and drains the pool between
+/// For each payload size, splits one-shot accounts into iterations (~
+/// [`crate::pipeline::BLOCK_CAPACITY_MEASURED_BLOCKS_PER_ITERATION`] measured blocks worth of txs
+/// per iteration), then runs the producer/consumer pipeline:
+/// [`StressWorkItem`]s on a bounded channel; the consumer waits on `txpool_status` before further
+/// `recv`s when the pool is deep, so the generator blocks on `send`. Drains the pool between
 /// variants.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_block_capacity_sweep(
@@ -234,45 +239,75 @@ pub async fn run_block_capacity_sweep(
 		let accounts_needed = ((total_block_slots + backpressure_buffer) * 3 / 2).max(1) as u32;
 		let est_pool_mb =
 			(accounts_needed as usize * (payload_size + extrinsic_overhead)) / (1024 * 1024);
+		let accounts_per_iter = pipeline::block_capacity_accounts_per_iteration(est_block_cap);
+		let n_iterations = accounts_needed.div_ceil(accounts_per_iter);
 		log::info!(
 			"=== block-capacity variant: {label} payload, {accounts_needed} one-shot accounts \
-			 (est. block cap {est_block_cap}, est. pool demand ~{est_pool_mb} MB) ==="
+			 in {n_iterations} iteration(s) (~{} measured blocks/iter × ~{est_block_cap} txs/block \
+			 ≈ {accounts_per_iter} accounts/iter), est. pool demand ~{est_pool_mb} MB ===",
+			pipeline::BLOCK_CAPACITY_MEASURED_BLOCKS_PER_ITERATION,
 		);
 
 		let seed = format!("T2sweep_{label}");
-		let keypairs = crate::accounts::generate_keypairs(accounts_needed, &seed);
-		let account_ids: Vec<_> =
-			keypairs.iter().map(|kp| kp.public_key().to_account_id()).collect();
-
+		let plans: Vec<IterationPlan> =
+			pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
+		let txpool_pause = pipeline::POOL_PENDING_PAUSE_THRESHOLD;
+		log::info!(
+			"{label}: iteration layout ready ({} iterations; continuous AuthorizeAndInitSlice + \
+			 stores; txpool gate every {txpool_pause} dispatches (pause if pool > {txpool_pause}); \
+			 authorize chunks of {})",
+			plans.len(),
+			crate::authorize::AUTHORIZE_BATCH_SIZE,
+		);
 		let variant_result: Result<ScenarioResult> = async {
-			// Authorize accounts, waiting for each batch to land in a best block.
-			log::info!("{label}: authorizing accounts...");
-			crate::authorize::authorize_accounts(
+			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
+			let (work_tx, work_rx) =
+				tokio::sync::mpsc::channel::<StressWorkItem>(pipeline::WORK_CHANNEL_CAPACITY);
+
+			let gen_plans = plans.clone();
+			let gen_payload = payload_size;
+			let gen_client = std::sync::Arc::new(client.clone());
+			let generator = tokio::spawn(async move {
+				pipeline::generate_block_capacity_work(work_tx, &gen_plans, gen_payload, gen_client)
+					.await
+			});
+
+			let pipeline_out = pipeline::run_block_capacity_pipeline(
+				work_rx,
+				dual,
+				ws_urls,
+				submitters,
+				payload_size,
 				client,
 				authorizer_signer,
 				nonce_tracker,
-				&account_ids,
-				1,
-				(payload_size + 1024) as u64,
 			)
-			.await?;
-			log::info!("{label}: all authorizations confirmed, starting load test");
+			.await;
 
-			// Subscribe to blocks AFTER authorization is done so the monitor
-			// only sees load test blocks.
-			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
+			let bulk = match pipeline_out {
+				Ok(b) => b,
+				Err(e) => {
+					generator.abort();
+					let _ = generator.await;
+					return Err(e);
+				},
+			};
 
-			let result = run_block_capacity(
-				client,
-				&keypairs,
+			match generator.await {
+				Ok(Ok(())) => {},
+				Ok(Err(gen_e)) => return Err(gen_e),
+				Err(join_e) =>
+					return Err(anyhow::anyhow!("block-capacity generator task failed: {join_e}")),
+			}
+
+			let total_accounts: u32 = plans.iter().map(|p| p.account_count).sum();
+			let result = scenario_result_from_bulk(
+				&bulk,
+				total_accounts as usize,
 				payload_size,
-				target_blocks,
-				ws_urls,
+				label,
 				chain_limits,
-				submitters,
-				store::BlockInput::Dual(dual),
-			)
-			.await?;
+			);
 
 			if payload_size >= 4 * 1024 * 1024 && result.total_confirmed == 0 {
 				log::warn!(
