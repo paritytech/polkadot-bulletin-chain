@@ -19,3 +19,67 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+
+  publish:
+    name: Build & Publish to NPM
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: sdk/typescript
+
+      - name: Lint
+        run: npm run lint
+        working-directory: sdk/typescript
+
+      - name: Type check
+        run: npm run typecheck
+        working-directory: sdk/typescript
+
+      - name: Test
+        run: npm test
+        working-directory: sdk/typescript
+
+      - name: Build
+        run: npm run build
+        working-directory: sdk/typescript
+
+      - name: Validate version matches tag
+        working-directory: sdk/typescript
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG_VERSION#sdk-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+
+      - name: Pack
+        run: npm pack
+        working-directory: sdk/typescript
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ github.sha }}
+          path: sdk/typescript/*.tgz
+
+      - name: NPM Publish automation
+        uses: octokit/request-action@v2.x
+        with:
+          route: POST /repos/paritytech/npm_publish_automation/actions/workflows/publish.yml/dispatches
+          ref: main
+          inputs: '${{ format(''{{ "repo": "{0}", "run_id": "{1}" }}'', github.repository, github.run_id) }}'
+        env:
+          GITHUB_TOKEN: ${{ secrets.NPM_PUBLISH_AUTOMATION_TOKEN }}
