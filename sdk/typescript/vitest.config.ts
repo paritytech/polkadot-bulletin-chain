@@ -18,7 +18,7 @@ export default defineConfig({
         "*.config.ts",
       ],
     },
-    testTimeout: 60000, // 60 seconds for integration tests
-    hookTimeout: 60000,
+    testTimeout: 30000, // 30 seconds for integration tests
+    hookTimeout: 30000,
   },
 })

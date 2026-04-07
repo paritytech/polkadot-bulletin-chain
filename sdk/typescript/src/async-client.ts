@@ -557,6 +557,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
+      txTimeout: config?.txTimeout ?? 120_000, // 2 minutes per transaction
     }
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
@@ -714,14 +715,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       })
 
-      // Timeout after 2 minutes
+      // Timeout per transaction (configurable, default 2 minutes)
       const timerId = setTimeout(() => {
         if (!resolved) {
           resolved = true
           subscription.unsubscribe()
           reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
         }
-      }, 120000)
+      }, this.config.txTimeout)
     })
   }
 

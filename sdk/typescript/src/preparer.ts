@@ -36,6 +36,7 @@ export class BulletinPreparer {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
+      txTimeout: config?.txTimeout ?? 120_000,
     }
   }
 

@@ -336,4 +336,7 @@ export interface ClientConfig {
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
+  /** Timeout in milliseconds for each individual transaction submission (default: 120_000).
+   * For chunked uploads, this timeout applies per chunk, not per upload. */
+  txTimeout?: number
 }
