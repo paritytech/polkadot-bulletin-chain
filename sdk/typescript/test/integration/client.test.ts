@@ -114,7 +114,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     it(
       "should store chunked data with progress tracking",
       {
-        timeout: 300_000,
+        timeout: 180_000,
       },
       async () => {
         // Create 5 MiB test data
