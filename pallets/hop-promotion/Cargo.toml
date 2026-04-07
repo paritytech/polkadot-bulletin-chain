@@ -33,6 +33,7 @@ std = [
 	"frame-support/std",
 	"frame-system/std",
 	"pallet-transaction-storage/std",
+	"pallets-common/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-io/std",
@@ -43,6 +44,7 @@ runtime-benchmarks = [
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
 	"pallet-transaction-storage/runtime-benchmarks",
+	"pallets-common/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 ]
@@ -50,6 +52,7 @@ try-runtime = [
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
 	"pallet-transaction-storage/try-runtime",
+	"pallets-common/try-runtime",
 	"polkadot-sdk-frame/try-runtime",
 	"sp-runtime/try-runtime",
 ]
