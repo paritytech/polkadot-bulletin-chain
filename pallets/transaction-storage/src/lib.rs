@@ -569,12 +569,14 @@ pub mod pallet {
 		/// - `who`: The account to be credited with an authorization to store data.
 		/// - `transactions`: The number of transactions that `who` may submit to supply that data.
 		/// - `bytes`: The number of bytes that `who` may submit.
+		/// - `refresh_expiry`: If `true`, the expiration block is pushed back. If `false`, the
+		///   existing expiration is preserved when extending an unexpired authorization.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64, _refresh_expiry: &bool| -> bool {
 			T::Authorizer::try_origin(origin.clone()).is_ok()
 		})]
 		pub fn authorize_account(
@@ -582,10 +584,16 @@ pub mod pallet {
 			who: T::AccountId,
 			transactions: u32,
 			bytes: u64,
+			refresh_expiry: bool,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
+			Self::authorize(
+				AuthorizationScope::Account(who.clone()),
+				transactions,
+				bytes,
+				refresh_expiry,
+			);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -618,7 +626,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, true);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -993,7 +1001,12 @@ pub mod pallet {
 		}
 
 		/// Authorize data storage.
-		fn authorize(scope: AuthorizationScopeFor<T>, transactions: u32, bytes: u64) {
+		fn authorize(
+			scope: AuthorizationScopeFor<T>,
+			transactions: u32,
+			bytes: u64,
+			refresh_expiry: bool,
+		) {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
 
@@ -1022,7 +1035,9 @@ pub mod pallet {
 								authorization.extent.bytes = authorization.extent.bytes.max(bytes);
 							},
 						}
-						authorization.expiration = expiration;
+						if refresh_expiry {
+							authorization.expiration = expiration;
+						}
 					}
 				} else {
 					// No previous authorization. Create a fresh one.

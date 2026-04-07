@@ -561,6 +561,7 @@ pub(crate) mod tests {
 					who: who.clone(),
 					transactions: 10,
 					bytes: 1024,
+					refresh_expiry: true,
 				});
 
 			let result = Dispatcher::dispatch(DispatchMessage {

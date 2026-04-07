@@ -83,7 +83,13 @@ fn uses_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let caller = 1;
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), caller, 2, 2001));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			caller,
+			2,
+			2001,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent { transactions: 2, bytes: 2001 }
@@ -258,7 +264,13 @@ fn authorization_expires() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 2000 },
@@ -286,7 +298,13 @@ fn expired_authorization_clears() {
 		run_to_block(1, || None);
 		let who = 1;
 		assert!(System::providers(&who).is_zero());
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			2000,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 2, bytes: 2000 },
@@ -338,7 +356,13 @@ fn consumed_authorization_clears() {
 		run_to_block(1, || None);
 		let who = 1;
 		assert!(System::providers(&who).is_zero());
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			2000,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 2, bytes: 2000 },
@@ -382,6 +406,7 @@ fn stores_various_sizes_with_account_authorization() {
 			who,
 			sizes.len() as u32,
 			total_bytes,
+			true,
 		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
@@ -400,7 +425,7 @@ fn stores_various_sizes_with_account_authorization() {
 		assert!(System::providers(&who).is_zero());
 
 		// Zero-size data must be rejected
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1, true));
 		let empty_call = Call::store { data: vec![] };
 		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &empty_call), BAD_DATA_SIZE);
 		assert_noop!(
@@ -415,6 +440,7 @@ fn stores_various_sizes_with_account_authorization() {
 			who,
 			1,
 			oversize as u64,
+			true,
 		));
 		let too_big_call = Call::store { data: vec![0u8; oversize] };
 		// pre_dispatch should reject due to BAD_DATA_SIZE
@@ -437,7 +463,13 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		let content_hash = blake2_256(&data);
 
 		// Setup: user has account authorization
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 4000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			4000,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 2, bytes: 4000 }
@@ -492,7 +524,13 @@ fn signed_store_falls_back_to_account_authorization() {
 		let different_hash = blake2_256(&[0u8; 100]); // Hash for different content
 
 		// Setup: user has account authorization
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 4000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			4000,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 2, bytes: 4000 }
@@ -545,7 +583,13 @@ fn signed_renew_uses_account_authorization() {
 		run_to_block(3, || None);
 
 		// Setup: user has account authorization for renew
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 1, bytes: 2000 }
@@ -574,7 +618,13 @@ fn signed_renew_prefers_preimage_authorization() {
 		let content_hash = blake2_256(&data);
 
 		// Setup: store data using account authorization
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
 		let store_call = Call::store { data };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
@@ -593,7 +643,13 @@ fn signed_renew_prefers_preimage_authorization() {
 			content_hash,
 			2000
 		));
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
 
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
@@ -746,7 +802,13 @@ fn validate_signed_account_authorization_has_provides_tag() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1u64;
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000,));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
 
 		let call = Call::store { data: vec![0u8; 2000] };
 
@@ -784,7 +846,13 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			2000,
 		));
 		// Re-authorize account so validate_signed can fall through if needed.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
 
 		let (signed_vt, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
 		let unsigned_vt = <TransactionStorage as ValidateUnsigned>::validate_unsigned(
@@ -1024,7 +1092,13 @@ fn try_state_passes_with_active_authorizations() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 10000));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			5,
+			10000,
+			true
+		));
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
 
 		// Partially consume authorization
@@ -1158,7 +1232,13 @@ fn authorize_storage_extension_transforms_origin() {
 		let data = vec![0u8; 16];
 
 		// Give caller account authorization
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), caller, 1, 16));
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			caller,
+			1,
+			16,
+			true
+		));
 
 		// Create the store call
 		let call: RuntimeCall = Call::store { data }.into();
@@ -1295,5 +1375,130 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		// Origin should still be a signed origin (not transformed)
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
+	});
+}
+
+#[test]
+fn authorize_account_refresh_expiry_false_preserves_expiration() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let call = Call::store { data: vec![0; 2000] };
+		// Initial authorization at block 1, expires at block 1 + 10 = 11.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
+
+		// Extend at block 5 without `refresh_expiry` and expiration should stay at 11.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			1000,
+			false,
+		));
+		// Extent should still be extended.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 2, bytes: 3000 },
+		);
+
+		// Still valid at block 10.
+		run_to_block(10, || None);
+		assert_ok!(TransactionStorage::validate_signed(&who, &call));
+
+		// Authorization expires at block 11, not 15, which tells us that the expiry was preserved.
+		run_to_block(11, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+		assert_noop!(TransactionStorage::validate_signed(&who, &call), InvalidTransaction::Payment);
+	});
+}
+
+#[test]
+fn authorize_account_refresh_expiry_false_still_sets_expiry_for_new_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let call = Call::store { data: vec![0; 2000] };
+		// No prior authorization so expiry should be set normally
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			false,
+		));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 2000 },
+		);
+
+		// Valid before expiry.
+		run_to_block(10, || None);
+		assert_ok!(TransactionStorage::validate_signed(&who, &call));
+
+		// Expires at block 11 (1 + 10).
+		run_to_block(11, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+#[test]
+fn authorize_account_refresh_expiry_false_overwrites_expired_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let call = Call::store { data: vec![0; 2000] };
+		// Initial authorization expires at block 11.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			1,
+			2000,
+			true
+		));
+
+		// Let it expire.
+		run_to_block(11, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+
+		// Re-authorize the expired authorization with the `refresh_expiry` not set. Since the old
+		// one is expired, it should be overwritten with new expiry.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			3000,
+			false,
+		));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 2, bytes: 3000 },
+		);
+
+		// Valid before expiry (11 + 10 = 21).
+		run_to_block(20, || None);
+		assert_ok!(TransactionStorage::validate_signed(&who, &call));
+
+		// Expires at block 21.
+		run_to_block(21, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
 	});
 }

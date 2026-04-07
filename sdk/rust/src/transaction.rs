@@ -323,12 +323,15 @@ impl TransactionClient {
 		who: AccountId32,
 		transactions: u32,
 		bytes: u64,
+		refresh_expiry: bool,
 		signer: &Keypair,
 	) -> Result<AuthorizationReceipt> {
 		let tx = bulletin::tx().transaction_storage().authorize_account(
 			who.clone(),
 			transactions,
 			bytes,
+			// TODO: new metadata so this test compiles and passes?
+			refresh_expiry,
 		);
 
 		let block_hash = self

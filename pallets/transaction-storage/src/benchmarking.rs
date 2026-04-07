@@ -204,7 +204,7 @@ mod benchmarks {
 		let bytes: u64 = 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes);
+		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes, true);
 
 		assert_last_event::<T>(Event::AccountAuthorized { who, transactions, bytes }.into());
 		Ok(())
@@ -223,6 +223,7 @@ mod benchmarks {
 			who.clone(),
 			transactions,
 			bytes,
+			true,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
@@ -273,7 +274,7 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		TransactionStorage::<T>::authorize_account(origin, who.clone(), 1, 1)
+		TransactionStorage::<T>::authorize_account(origin, who.clone(), 1, 1, true)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		let period = T::AuthorizationPeriod::get();
@@ -321,6 +322,7 @@ mod benchmarks {
 			caller.clone(),
 			transactions,
 			bytes,
+			true,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
@@ -362,6 +364,7 @@ mod benchmarks {
 			caller.clone(),
 			transactions,
 			bytes,
+			true,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 

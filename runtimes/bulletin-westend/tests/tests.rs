@@ -159,6 +159,7 @@ fn transaction_storage_runtime_sizes() {
 				who.clone(),
 				sizes.len() as u32,
 				total_bytes,
+				true,
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -196,6 +197,7 @@ fn transaction_storage_runtime_sizes() {
 				who.clone(),
 				1,
 				oversized,
+				true,
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -234,6 +236,7 @@ fn transaction_storage_max_throughput_per_block() {
 				who.clone(),
 				NUM_TRANSACTIONS + 1,
 				(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
+				true,
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -303,6 +306,7 @@ fn authorized_storage_transactions_are_for_free() {
 				who.clone(),
 				1,
 				24,
+				true,
 			));
 			// Now should work.
 			let res = construct_and_apply_extrinsic(Some(account.pair()), call);
@@ -327,6 +331,7 @@ fn store_with_cid_config_works() {
 			who.clone(),
 			3,
 			3 * total_bytes,
+			true,
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
@@ -569,6 +574,7 @@ fn alice_can_sign_authorize_account_extrinsic() {
 			who: target.to_account_id(),
 			transactions: 5,
 			bytes: 1024,
+			refresh_expiry: true,
 		});
 
 		let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
@@ -601,6 +607,7 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 					who: target.to_account_id(),
 					transactions: 5,
 					bytes: 1024,
+					refresh_expiry: true,
 				});
 
 			assert_eq!(
@@ -622,6 +629,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 		who: account.to_account_id(),
 		transactions: 16,
 		bytes: 1024,
+		refresh_expiry: true,
 	});
 
 	// Execute XCM as People chain origin would do with `Transact -> Origin::Xcm`.
@@ -666,6 +674,7 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		who: account.to_account_id(),
 		transactions: 16,
 		bytes: 1024,
+		refresh_expiry: true,
 	});
 
 	ExtBuilder::<Runtime>::default()
@@ -853,6 +862,7 @@ fn authorized_wrapped_store_rejected() {
 				who.clone(),
 				4,
 				4 * data.len() as u64,
+				true,
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -909,6 +919,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 				who.clone(),
 				1,
 				data_b.len() as u64,
+				true,
 			));
 
 			let store_a =
@@ -1002,6 +1013,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 				who.clone(),
 				5,
 				500,
+				true,
 			));
 			assert_ok!(TransactionStorage::authorize_preimage(
 				RuntimeOrigin::root(),
@@ -1057,6 +1069,7 @@ fn wrapped_renew_requires_authorization() {
 			who.clone(),
 			1,
 			data.len() as u64,
+			true,
 		));
 		assert_ok_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
@@ -1120,6 +1133,7 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 					who: who.clone(),
 					transactions: 5,
 					bytes: 1024,
+					refresh_expiry: true,
 				});
 
 			// Direct: rejected at validation (BadSigner).
@@ -1164,6 +1178,7 @@ fn wrapped_authorize_account_succeeds() {
 					who: target.clone(),
 					transactions: 10,
 					bytes: 10 * 1024,
+					refresh_expiry: true,
 				});
 			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch_all {
 				calls: vec![authorize_call],
@@ -1210,6 +1225,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 				who.clone(),
 				1,
 				data.len() as u64,
+				true,
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1220,6 +1236,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 					who: target.clone(),
 					transactions: 5,
 					bytes: 1024,
+					refresh_expiry: true,
 				});
 
 			// Mixing store + authorize_account in a batch is rejected at validation.
@@ -1266,6 +1283,7 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 				who.clone(),
 				1,
 				data.len() as u64,
+				true,
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1310,6 +1328,7 @@ fn max_recursion_depth_is_enforced() {
 				who.clone(),
 				1,
 				data.len() as u64,
+				true,
 			));
 
 			// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
@@ -1388,6 +1407,7 @@ fn xcm_transact_store_is_blocked() {
 				who.clone(),
 				1,
 				data.len() as u64,
+				true,
 			));
 			assert_ne!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -1446,6 +1466,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 				who.clone(),
 				1,
 				data.len() as u64,
+				true,
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1500,6 +1521,7 @@ fn xcm_transact_authorize_account_works() {
 					who: target.clone(),
 					transactions: 10,
 					bytes: 1024,
+					refresh_expiry: true,
 				});
 
 			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
