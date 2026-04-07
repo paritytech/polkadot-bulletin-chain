@@ -60,11 +60,11 @@
     "@polkadot-labs/hdkd-helpers": "^0.0.27",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^22.10.5",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^4.1.2",
     "happy-dom": "^20.8.9",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.2"
   },
   "publishConfig": {
     "access": "public"

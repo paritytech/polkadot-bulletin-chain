@@ -64,13 +64,9 @@ pub async fn run_block_capacity(
 	};
 
 	let steady_bytes: u64 = steady.iter().map(|b| b.payload_bytes).sum();
+	let steady_confirmed: u64 = steady.iter().map(|b| b.tx_count).sum();
 	let peak = steady.iter().map(|b| b.tx_count).max().unwrap_or(0);
-	let avg = if !steady.is_empty() {
-		steady.iter().map(|b| b.tx_count).sum::<u64>() as f64 / steady.len() as f64
-	} else {
-		0.0
-	};
-	let measured_confirmed: u64 = measured.iter().map(|b| b.tx_count).sum();
+	let avg = if !steady.is_empty() { steady_confirmed as f64 / steady.len() as f64 } else { 0.0 };
 	let prefill_count = all_blocks.iter().filter(|b| b.prefill).count();
 	let empty_count = steady.iter().filter(|b| b.tx_count == 0).count();
 
@@ -83,19 +79,30 @@ pub async fn run_block_capacity(
 	};
 
 	// Prefer on-chain wall clock duration for throughput; fall back to Instant.
+	// On-chain duration: timestamp span covers N-1 intervals for N blocks,
+	// but the last block also contains data produced during its interval.
+	// Add the average interval to account for it.
 	let onchain_duration_ms = match (
 		steady.first().and_then(|b| b.timestamp_ms),
 		steady.last().and_then(|b| b.timestamp_ms),
 	) {
-		(Some(t1), Some(t2)) if t2 > t1 => Some(t2 - t1),
+		(Some(t1), Some(t2)) if t2 > t1 => {
+			let span = t2 - t1;
+			let avg_interval = if !intervals.is_empty() {
+				intervals.iter().sum::<u64>() / intervals.len() as u64
+			} else {
+				0
+			};
+			Some(span + avg_interval)
+		},
 		_ => None,
 	};
 	let (tps, bps, onchain_timing) = if let Some(ms) = onchain_duration_ms {
 		let secs = ms as f64 / 1000.0;
-		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, true)
+		(steady_confirmed as f64 / secs, steady_bytes as f64 / secs, true)
 	} else {
 		let secs = result.duration.as_secs_f64();
-		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
+		(steady_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
 	};
 
 	log::info!(
@@ -220,7 +227,8 @@ pub async fn run_block_capacity_sweep(
 		payload_sizes.iter().map(|(_, l)| *l).collect::<Vec<_>>().join(", ")
 	);
 
-	for &(payload_size, label) in &payload_sizes {
+	let variant_count = payload_sizes.len();
+	for (variant_idx, &(payload_size, label)) in payload_sizes.iter().enumerate() {
 		let est_block_cap =
 			(block_usable_bytes / (payload_size + extrinsic_overhead)).min(max_block_txs);
 		// One-shot accounts: one account per transaction needed.
@@ -325,6 +333,11 @@ pub async fn run_block_capacity_sweep(
 				// Try to continue with the next variant; if the client connection is
 				// dead, the next authorize call will fail fast.
 			},
+		}
+
+		// Skip pool drain after the last variant — nothing follows.
+		if variant_idx + 1 >= variant_count {
+			break;
 		}
 
 		// Drain the transaction pool before the next variant.

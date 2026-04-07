@@ -27,7 +27,8 @@
 
 extern crate alloc;
 
-mod benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+pub mod benchmarking;
 pub mod weights;
 
 pub mod migrations;
@@ -73,10 +74,12 @@ parameter_types! {
 	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
 }
 
-// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// Setting higher limit also requires raising the allocator limit.
-pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
+/// Setting a higher limit may exceed the WASM allocator's 128 MiB heap and cause OOM errors.
+///
+/// Note: 2 MiB is aligned with the Bitswap maximum block size.
+pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
+/// Default maximum number of indexed transactions in a block.
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
@@ -264,6 +267,11 @@ pub mod pallet {
 		/// Longevity of unsigned transactions to remove expired authorizations.
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
+		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
+		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for
+		/// [`DEFAULT_MAX_TRANSACTION_SIZE`] / [`DEFAULT_MAX_BLOCK_TRANSACTIONS`].
+		#[cfg(feature = "runtime-benchmarks")]
+		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper<Self>;
 	}
 
 	#[pallet::error]
@@ -566,6 +574,9 @@ pub mod pallet {
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -597,6 +608,9 @@ pub mod pallet {
 		/// [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::authorize_preimage())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _content_hash: &ContentHash, _max_size: &u64| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
 		pub fn authorize_preimage(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,

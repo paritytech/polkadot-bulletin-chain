@@ -1731,3 +1731,24 @@ fn priority_hierarchy_is_correct() {
 	assert_eq!(runtime::ProxyPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
 	assert_eq!(runtime::UtilityPriority::get(), runtime::RemoveExpiredAuthorizationPriority::get());
 }
+
+/// Generates the CHECK_PROOF hex for this runtime. Run with:
+/// `cargo test -p bulletin-polkadot-runtime -- --nocapture --ignored gen_check_proof`
+#[test]
+#[ignore]
+fn gen_check_proof() {
+	use sp_transaction_storage_proof::registration::build_proof;
+
+	let tx_size = <<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get() as usize;
+	let max_block_transactions =
+		<<Runtime as TxStorageConfig>::MaxBlockTransactions as Get<u32>>::get();
+	let transactions: Vec<Vec<u8>> =
+		(0..max_block_transactions).map(|_| vec![0u8; tx_size]).collect();
+	let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
+	let encoded = proof.encode();
+	let hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
+	println!(
+		"CHECK_PROOF hex for tx_size={tx_size}, max_block_transactions={max_block_transactions}:"
+	);
+	println!("{hex}");
+}
