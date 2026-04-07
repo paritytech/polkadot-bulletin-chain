@@ -10,7 +10,7 @@ use subxt_signer::sr25519::Keypair;
 use crate::{
 	accounts::NonceTracker,
 	client::{BulletinConfig, BulletinExtrinsicParamsBuilder},
-	store::{classify_tx_error, wait_for_in_best_block, TxPoolError},
+	store::wait_for_in_best_block,
 };
 
 /// Maximum accounts per `Utility::batch_all` authorize call (block weight).
@@ -76,76 +76,6 @@ pub async fn authorize_account_batch(
 			},
 			Ok(Err(e)) => return Err(e),
 			Err(_) => return Err(anyhow!("authorize_account_batch timed out")),
-		}
-	}
-}
-
-/// Submit one authorize batch (sign + `submit()`), without waiting for inclusion.
-pub async fn authorize_account_batch_submit(
-	client: &OnlineClient<BulletinConfig>,
-	authorizer: &Keypair,
-	nonce_tracker: &NonceTracker,
-	accounts: &[subxt::utils::AccountId32],
-	transactions_per_account: u32,
-	bytes_per_account: u64,
-) -> Result<()> {
-	if accounts.is_empty() {
-		return Ok(());
-	}
-
-	let authorizer_id = authorizer.public_key().to_account_id();
-	let mut attempts = 0u32;
-	loop {
-		let call = build_authorize_call(accounts, transactions_per_account, bytes_per_account);
-		let nonce = nonce_tracker.next_nonce(&authorizer_id);
-		let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
-
-		log::info!(
-			"Authorizing batch (submit-only) of {} accounts (nonce={})",
-			accounts.len(),
-			nonce
-		);
-
-		let signed = match client.tx().create_signed(&call, authorizer, params).await {
-			Ok(s) => s,
-			Err(e) => {
-				let err = anyhow::Error::from(e);
-				if is_nonce_error(&err) && attempts < MAX_NONCE_RETRIES {
-					attempts += 1;
-					log::warn!(
-						"Authorize submit: create_signed failed (attempt {attempts}/{MAX_NONCE_RETRIES}): {err:#}"
-					);
-					tokio::time::sleep(Duration::from_secs(6)).await;
-					nonce_tracker.refresh(client, &authorizer_id).await?;
-					continue;
-				}
-				return Err(err);
-			},
-		};
-
-		match signed.submit().await {
-			Ok(_hash) => return Ok(()),
-			Err(e) => {
-				let err = anyhow::Error::from(e);
-				if is_nonce_error(&err) && attempts < MAX_NONCE_RETRIES {
-					attempts += 1;
-					log::warn!(
-						"Authorize submit failed (attempt {attempts}/{MAX_NONCE_RETRIES}): {err:#}"
-					);
-					tokio::time::sleep(Duration::from_secs(6)).await;
-					nonce_tracker.refresh(client, &authorizer_id).await?;
-					continue;
-				}
-				match classify_tx_error(&err) {
-					TxPoolError::PoolFull | TxPoolError::Banned => {
-						nonce_tracker.rollback(&authorizer_id);
-						tokio::time::sleep(Duration::from_millis(150)).await;
-						continue;
-					},
-					TxPoolError::AlreadyImported => return Ok(()),
-					_ => return Err(err),
-				}
-			},
 		}
 	}
 }

@@ -54,14 +54,16 @@ pub const STORE_SIGN_PARALLELISM: usize = 16;
 /// **before** the next `work_rx.recv()` (backpressure when worker queues are saturated).
 pub const POOL_PENDING_PAUSE_THRESHOLD: usize = 4000;
 
-/// Block-capacity sweep splits work so each iteration holds roughly this many **measured** blocks
-/// worth of one-shot accounts (`≈` this × estimated txs/block).
-pub const BLOCK_CAPACITY_MEASURED_BLOCKS_PER_ITERATION: u32 = 10;
-
 /// Accounts per iteration for the block-capacity pipeline (from estimated block tx capacity).
+///
+/// `measured_blocks_per_iteration` is how many **measured** blocks worth of one-shot txs each
+/// iteration targets (`≈` that × `est_block_cap` accounts).
 #[must_use]
-pub fn block_capacity_accounts_per_iteration(est_block_cap: usize) -> u32 {
-	(BLOCK_CAPACITY_MEASURED_BLOCKS_PER_ITERATION as u64 * est_block_cap as u64).max(1) as u32
+pub fn block_capacity_accounts_per_iteration(
+	est_block_cap: usize,
+	measured_blocks_per_iteration: u32,
+) -> u32 {
+	(measured_blocks_per_iteration as u64 * est_block_cap as u64).max(1) as u32
 }
 
 /// One unit of work for the block-capacity pipeline.
