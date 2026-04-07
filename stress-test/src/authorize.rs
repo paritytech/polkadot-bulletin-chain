@@ -10,12 +10,145 @@ use subxt_signer::sr25519::Keypair;
 use crate::{
 	accounts::NonceTracker,
 	client::{BulletinConfig, BulletinExtrinsicParamsBuilder},
-	store::wait_for_in_best_block,
+	store::{classify_tx_error, wait_for_in_best_block, TxPoolError},
 };
 
-const AUTHORIZE_BATCH_SIZE: usize = 1000;
+/// Maximum accounts per `Utility::batch_all` authorize call (block weight).
+///
+/// Kept **moderately small** on purpose: smaller batches mean more frequent authorize extrinsics,
+/// so accounts become usable on-chain sooner and store submitters are less likely to run out of
+/// authorized signers while blocks still have capacity.
+pub const AUTHORIZE_BATCH_SIZE: usize = 2048;
 const AUTHORIZE_TIMEOUT_SECS: u64 = 60;
 const MAX_NONCE_RETRIES: u32 = 10;
+
+/// Authorize a single batch of accounts (at most `AUTHORIZE_BATCH_SIZE` recommended).
+///
+/// Same semantics as one iteration inside [`authorize_accounts`]: waits for inclusion
+/// in a best block and retries on nonce errors.
+pub async fn authorize_account_batch(
+	client: &OnlineClient<BulletinConfig>,
+	authorizer: &Keypair,
+	nonce_tracker: &NonceTracker,
+	accounts: &[subxt::utils::AccountId32],
+	transactions_per_account: u32,
+	bytes_per_account: u64,
+) -> Result<()> {
+	if accounts.is_empty() {
+		return Ok(());
+	}
+
+	let authorizer_id = authorizer.public_key().to_account_id();
+	let mut attempts = 0u32;
+	loop {
+		let call = build_authorize_call(accounts, transactions_per_account, bytes_per_account);
+
+		let nonce = nonce_tracker.next_nonce(&authorizer_id);
+		let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+		log::info!("Authorizing batch of {} accounts (nonce={})", accounts.len(), nonce);
+
+		let result = tokio::time::timeout(Duration::from_secs(AUTHORIZE_TIMEOUT_SECS), async {
+			let progress =
+				client.tx().sign_and_submit_then_watch(&call, authorizer, params).await?;
+			let (block_hash, _events) = wait_for_in_best_block(progress).await?;
+			Ok::<_, anyhow::Error>(block_hash)
+		})
+		.await;
+
+		match result {
+			Ok(Ok(block_hash)) => {
+				log::info!(
+					"Batch of {} accounts included in best block {block_hash:?}",
+					accounts.len()
+				);
+				return Ok(());
+			},
+			Ok(Err(e)) if is_nonce_error(&e) && attempts < MAX_NONCE_RETRIES => {
+				attempts += 1;
+				log::warn!(
+					"Authorization failed (attempt {attempts}/{MAX_NONCE_RETRIES}), \
+					 waiting for block then refreshing nonce: {e}"
+				);
+				tokio::time::sleep(Duration::from_secs(6)).await;
+				nonce_tracker.refresh(client, &authorizer_id).await?;
+				log::info!("Nonce refreshed from chain after retry delay");
+			},
+			Ok(Err(e)) => return Err(e),
+			Err(_) => return Err(anyhow!("authorize_account_batch timed out")),
+		}
+	}
+}
+
+/// Submit one authorize batch (sign + `submit()`), without waiting for inclusion.
+pub async fn authorize_account_batch_submit(
+	client: &OnlineClient<BulletinConfig>,
+	authorizer: &Keypair,
+	nonce_tracker: &NonceTracker,
+	accounts: &[subxt::utils::AccountId32],
+	transactions_per_account: u32,
+	bytes_per_account: u64,
+) -> Result<()> {
+	if accounts.is_empty() {
+		return Ok(());
+	}
+
+	let authorizer_id = authorizer.public_key().to_account_id();
+	let mut attempts = 0u32;
+	loop {
+		let call = build_authorize_call(accounts, transactions_per_account, bytes_per_account);
+		let nonce = nonce_tracker.next_nonce(&authorizer_id);
+		let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+		log::info!(
+			"Authorizing batch (submit-only) of {} accounts (nonce={})",
+			accounts.len(),
+			nonce
+		);
+
+		let signed = match client.tx().create_signed(&call, authorizer, params).await {
+			Ok(s) => s,
+			Err(e) => {
+				let err = anyhow::Error::from(e);
+				if is_nonce_error(&err) && attempts < MAX_NONCE_RETRIES {
+					attempts += 1;
+					log::warn!(
+						"Authorize submit: create_signed failed (attempt {attempts}/{MAX_NONCE_RETRIES}): {err:#}"
+					);
+					tokio::time::sleep(Duration::from_secs(6)).await;
+					nonce_tracker.refresh(client, &authorizer_id).await?;
+					continue;
+				}
+				return Err(err);
+			},
+		};
+
+		match signed.submit().await {
+			Ok(_hash) => return Ok(()),
+			Err(e) => {
+				let err = anyhow::Error::from(e);
+				if is_nonce_error(&err) && attempts < MAX_NONCE_RETRIES {
+					attempts += 1;
+					log::warn!(
+						"Authorize submit failed (attempt {attempts}/{MAX_NONCE_RETRIES}): {err:#}"
+					);
+					tokio::time::sleep(Duration::from_secs(6)).await;
+					nonce_tracker.refresh(client, &authorizer_id).await?;
+					continue;
+				}
+				match classify_tx_error(&err) {
+					TxPoolError::PoolFull | TxPoolError::Banned => {
+						nonce_tracker.rollback(&authorizer_id);
+						tokio::time::sleep(Duration::from_millis(150)).await;
+						continue;
+					},
+					TxPoolError::AlreadyImported => return Ok(()),
+					_ => return Err(err),
+				}
+			},
+		}
+	}
+}
 
 /// Authorize multiple accounts for transaction storage.
 ///
@@ -37,49 +170,16 @@ pub async fn authorize_accounts(
 	transactions_per_account: u32,
 	bytes_per_account: u64,
 ) -> Result<()> {
-	let authorizer_id = authorizer.public_key().to_account_id();
-
 	for batch in accounts.chunks(AUTHORIZE_BATCH_SIZE) {
-		let mut attempts = 0u32;
-		loop {
-			let call = build_authorize_call(batch, transactions_per_account, bytes_per_account);
-
-			let nonce = nonce_tracker.next_nonce(&authorizer_id);
-			let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
-
-			log::info!("Authorizing batch of {} accounts (nonce={})", batch.len(), nonce);
-
-			let result = tokio::time::timeout(Duration::from_secs(AUTHORIZE_TIMEOUT_SECS), async {
-				let progress =
-					client.tx().sign_and_submit_then_watch(&call, authorizer, params).await?;
-				let (block_hash, _events) = wait_for_in_best_block(progress).await?;
-				Ok::<_, anyhow::Error>(block_hash)
-			})
-			.await;
-
-			match result {
-				Ok(Ok(block_hash)) => {
-					log::info!(
-						"Batch of {} accounts included in best block {block_hash:?}",
-						batch.len()
-					);
-					break;
-				},
-				Ok(Err(e)) if is_nonce_error(&e) && attempts < MAX_NONCE_RETRIES => {
-					attempts += 1;
-					log::warn!(
-						"Authorization failed (attempt {attempts}/{MAX_NONCE_RETRIES}), \
-						 waiting for block then refreshing nonce: {e}"
-					);
-					// Wait for the next block so the RPC nonce is up-to-date.
-					tokio::time::sleep(Duration::from_secs(6)).await;
-					nonce_tracker.refresh(client, &authorizer_id).await?;
-					log::info!("Nonce refreshed from chain after retry delay");
-				},
-				Ok(Err(e)) => return Err(e),
-				Err(_) => return Err(anyhow!("authorize_accounts batch timed out")),
-			}
-		}
+		authorize_account_batch(
+			client,
+			authorizer,
+			nonce_tracker,
+			batch,
+			transactions_per_account,
+			bytes_per_account,
+		)
+		.await?;
 	}
 
 	Ok(())
@@ -119,13 +219,18 @@ fn build_authorize_call(
 	}
 }
 
-/// Check if an error is likely caused by a nonce mismatch or stale transaction.
+/// True only for errors where refreshing the account nonce and resubmitting can help.
+///
+/// Do **not** match the substring `"invalid"` — every `Invalid Transaction (1010)` would qualify,
+/// including bad signer, oversized batch, payment, and exhausts-resources.
 fn is_nonce_error(e: &anyhow::Error) -> bool {
-	let msg = format!("{e}");
-	msg.contains("invalid") ||
-		msg.contains("Invalid") ||
-		msg.contains("1010") ||
-		msg.contains("stale") ||
-		msg.contains("Stale") ||
-		msg.contains("nonce")
+	let msg = format!("{e:#}").to_lowercase();
+	msg.contains("stale") ||
+		msg.contains("future") ||
+		msg.contains("outdated") ||
+		msg.contains("priority is too low") ||
+		msg.contains("nonce too low") ||
+		msg.contains("nonce too high") ||
+		msg.contains("transaction is outdated") ||
+		(msg.contains("1010") && (msg.contains("stale") || msg.contains("future")))
 }
