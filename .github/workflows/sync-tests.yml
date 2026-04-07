@@ -92,7 +92,6 @@ jobs:
 
       - name: Run zombienet sync tests
         env:
-          ZOMBIE_PROVIDER: native
           POLKADOT_RELAY_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot
           POLKADOT_PARACHAIN_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot-omni-node
           PARACHAIN_CHAIN_SPEC_PATH: ./zombienet/bulletin-westend-spec.json
