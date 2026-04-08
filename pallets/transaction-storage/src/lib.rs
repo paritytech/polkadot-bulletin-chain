@@ -27,7 +27,8 @@
 
 extern crate alloc;
 
-mod benchmarking;
+#[cfg(feature = "runtime-benchmarks")]
+pub mod benchmarking;
 pub mod weights;
 
 pub mod migrations;
@@ -73,10 +74,12 @@ parameter_types! {
 	pub const DefaultRetentionPeriod: u32 = DEFAULT_RETENTION_PERIOD;
 }
 
-// TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/139 - Clarify purpose of allocator limits and decide whether to remove or use these constants.
 /// Maximum bytes that can be stored in one transaction.
-// Setting higher limit also requires raising the allocator limit.
-pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 8 * 1024 * 1024;
+/// Setting a higher limit may exceed the WASM allocator's 128 MiB heap and cause OOM errors.
+///
+/// Note: 2 MiB is aligned with the Bitswap maximum block size.
+pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
+/// Default maximum number of indexed transactions in a block.
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
 /// Encountered an impossible situation, implies a bug.
@@ -264,6 +267,11 @@ pub mod pallet {
 		/// Longevity of unsigned transactions to remove expired authorizations.
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
+		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
+		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for
+		/// [`DEFAULT_MAX_TRANSACTION_SIZE`] / [`DEFAULT_MAX_BLOCK_TRANSACTIONS`].
+		#[cfg(feature = "runtime-benchmarks")]
+		type BenchmarkHelper: crate::benchmarking::BenchmarkHelper<Self>;
 	}
 
 	#[pallet::error]
@@ -566,6 +574,9 @@ pub mod pallet {
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -597,6 +608,9 @@ pub mod pallet {
 		/// [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::authorize_preimage())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _content_hash: &ContentHash, _max_size: &u64| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
 		pub fn authorize_preimage(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
@@ -891,23 +905,30 @@ pub mod pallet {
 			hashing: HashingAlgorithm,
 			cid_codec: CidCodec,
 		) -> DispatchResult {
+			let data_len = data.len() as u32;
+
 			// In the case of a regular unsigned transaction, this should have been checked by
 			// pre_dispatch. In the case of a regular signed transaction, this should have been
 			// checked by pre_dispatch_signed.
-			Self::ensure_data_size_ok(data.len())?;
+			Self::ensure_data_size_ok(data_len as usize)?;
+
+			let cid_config = CidConfig { codec: cid_codec, hashing };
+			let cid =
+				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
 
 			// Chunk data and compute storage root
 			let chunks: Vec<_> = data.chunks(CHUNK_SIZE).map(|c| c.to_vec()).collect();
+
+			// We don't need `data` anymore.
+			core::mem::drop(data);
+
 			let chunk_count = chunks.len() as u32;
-			debug_assert_eq!(chunk_count, num_chunks(data.len() as u32));
+			debug_assert_eq!(chunk_count, num_chunks(data_len));
 			let root = sp_io::trie::blake2_256_ordered_root(chunks, sp_runtime::StateVersion::V1);
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let cid_config = CidConfig { codec: cid_codec, hashing };
-			let cid =
-				calculate_cid(&data, cid_config).map_err(|_| Error::<T>::InvalidContentHash)?;
-			sp_io::transaction_index::index(extrinsic_index, data.len() as u32, cid.content_hash);
+			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			let mut index = 0;
 			<BlockTransactions<T>>::mutate(|transactions| {
@@ -919,7 +940,7 @@ pub mod pallet {
 				transactions
 					.try_push(TransactionInfo {
 						chunk_root: root,
-						size: data.len() as u32,
+						size: data_len,
 						content_hash: cid.content_hash,
 						hashing,
 						cid_codec,
@@ -927,11 +948,13 @@ pub mod pallet {
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
 			})?;
+
 			Self::deposit_event(Event::Stored {
 				index,
 				content_hash: cid.content_hash,
 				cid: cid.to_bytes(),
 			});
+
 			Ok(())
 		}
 

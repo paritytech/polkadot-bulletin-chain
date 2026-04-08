@@ -17,8 +17,6 @@
 
 //! Benchmarks for transaction-storage Pallet
 
-#![cfg(feature = "runtime-benchmarks")]
-
 use super::{Pallet as TransactionStorage, *};
 use crate::extension::ValidateStorageCalls;
 use alloc::vec;
@@ -33,81 +31,73 @@ use polkadot_sdk_frame::{
 };
 use sp_transaction_storage_proof::TransactionStorageProof;
 
-type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
+/// Helper trait for benchmarking. The runtime must provide a pre-computed storage proof
+/// that matches its `MaxTransactionSize` and `MaxBlockTransactions` configuration.
+pub trait BenchmarkHelper<T: Config> {
+	/// Returns an encoded `TransactionStorageProof` for a block full of
+	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
+	/// built with `random_hash` as randomness.
+	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8>;
+}
 
-// Proof generated from max size storage:
-// ```
-// let mut transactions = Vec::new();
-// let tx_size = DEFAULT_MAX_TRANSACTION_SIZE;
-// for _ in 0..DEFAULT_MAX_BLOCK_TRANSACTIONS {
-//   transactions.push(vec![0; tx_size]);
-// }
-// let content_hash = vec![0; 32];
-// build_proof(content_hash.as_slice(), transactions).unwrap().encode()
-// ```
-// while hardforcing target chunk key in `build_proof` to [22, 21, 1, 0].
-const PROOF: &str = "\
+/// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
+/// [`DEFAULT_MAX_BLOCK_TRANSACTIONS`]. Regenerate with `gen_default_check_proof` test if these
+/// change.
+pub struct DefaultCheckProofHelper;
+
+/// Hex-encoded [`TransactionStorageProof`] for the default configuration
+/// ([`DEFAULT_MAX_TRANSACTION_SIZE`] / [`DEFAULT_MAX_BLOCK_TRANSACTIONS`], randomness `[0u8; 32]`).
+const DEFAULT_CHECK_PROOF: &str = "\
 	0104000000000000000000000000000000000000000000000000000000000000000000000000\
 	0000000000000000000000000000000000000000000000000000000000000000000000000000\
 	0000000000000000000000000000000000000000000000000000000000000000000000000000\
 	0000000000000000000000000000000000000000000000000000000000000000000000000000\
 	0000000000000000000000000000000000000000000000000000000000000000000000000000\
 	0000000000000000000000000000000000000000000000000000000000000000000000000000\
-	00000000000000000000000000000000000000000000000000000000000014cd0780ffff8030\
-	2eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba0080302eb0a6d2\
-	f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15\
-	f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1\
-	004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e304\
-	8cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697\
-	eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a\
-	30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302e\
-	b0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b\
-	834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e7\
-	29d1c1004657e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c10046\
-	57e3048cf206d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf2\
-	06d697eeb153f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb1\
-	53f61a30ba80302eb0a6d2f63b834d15f1e729d1c1004657e3048cf206d697eeb153f61a30ba\
-	bd058077778010fd81bc1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de\
-	808da338e6b722f7bf2051901bd5bccee5e71d5cf6b1faff338ad7120b0256c28380221ce17f\
-	19117affa96e077905fe48a99723a065969c638593b7d9ab57b538438010fd81bc1359802f0b\
-	871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de808da338e6b722f7bf2051901bd5bc\
-	cee5e71d5cf6b1faff338ad7120b0256c283008010fd81bc1359802f0b871aeb95e4410a8ec9\
-	2b93af10ea767a2027cf4734e8de808da338e6b722f7bf2051901bd5bccee5e71d5cf6b1faff\
-	338ad7120b0256c28380221ce17f19117affa96e077905fe48a99723a065969c638593b7d9ab\
-	57b538438010fd81bc1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de80\
-	8da338e6b722f7bf2051901bd5bccee5e71d5cf6b1faff338ad7120b0256c28380221ce17f19\
-	117affa96e077905fe48a99723a065969c638593b7d9ab57b53843cd0780ffff804509f59593\
-	fd47b1a97189127ba65a5649cfb0346637f9836e155eaf891a939c00804509f59593fd47b1a9\
-	7189127ba65a5649cfb0346637f9836e155eaf891a939c804509f59593fd47b1a97189127ba6\
-	5a5649cfb0346637f9836e155eaf891a939c804509f59593fd47b1a97189127ba65a5649cfb0\
-	346637f9836e155eaf891a939c804509f59593fd47b1a97189127ba65a5649cfb0346637f983\
-	6e155eaf891a939c804509f59593fd47b1a97189127ba65a5649cfb0346637f9836e155eaf89\
-	1a939c804509f59593fd47b1a97189127ba65a5649cfb0346637f9836e155eaf891a939c8045\
-	09f59593fd47b1a97189127ba65a5649cfb0346637f9836e155eaf891a939c804509f59593fd\
-	47b1a97189127ba65a5649cfb0346637f9836e155eaf891a939c804509f59593fd47b1a97189\
-	127ba65a5649cfb0346637f9836e155eaf891a939c804509f59593fd47b1a97189127ba65a56\
-	49cfb0346637f9836e155eaf891a939c804509f59593fd47b1a97189127ba65a5649cfb03466\
-	37f9836e155eaf891a939c804509f59593fd47b1a97189127ba65a5649cfb0346637f9836e15\
-	5eaf891a939c804509f59593fd47b1a97189127ba65a5649cfb0346637f9836e155eaf891a93\
-	9c804509f59593fd47b1a97189127ba65a5649cfb0346637f9836e155eaf891a939ccd0780ff\
-	ff8078916e776c64ccea05e958559f015c082d9d06feafa3610fc44a5b2ef543cb818078916e\
-	776c64ccea05e958559f015c082d9d06feafa3610fc44a5b2ef543cb818078916e776c64ccea\
-	05e958559f015c082d9d06feafa3610fc44a5b2ef543cb818078916e776c64ccea05e958559f\
-	015c082d9d06feafa3610fc44a5b2ef543cb818078916e776c64ccea05e958559f015c082d9d\
-	06feafa3610fc44a5b2ef543cb81008078916e776c64ccea05e958559f015c082d9d06feafa3\
-	610fc44a5b2ef543cb818078916e776c64ccea05e958559f015c082d9d06feafa3610fc44a5b\
-	2ef543cb818078916e776c64ccea05e958559f015c082d9d06feafa3610fc44a5b2ef543cb81\
-	8078916e776c64ccea05e958559f015c082d9d06feafa3610fc44a5b2ef543cb818078916e77\
-	6c64ccea05e958559f015c082d9d06feafa3610fc44a5b2ef543cb818078916e776c64ccea05\
-	e958559f015c082d9d06feafa3610fc44a5b2ef543cb818078916e776c64ccea05e958559f01\
-	5c082d9d06feafa3610fc44a5b2ef543cb818078916e776c64ccea05e958559f015c082d9d06\
-	feafa3610fc44a5b2ef543cb818078916e776c64ccea05e958559f015c082d9d06feafa3610f\
-	c44a5b2ef543cb818078916e776c64ccea05e958559f015c082d9d06feafa3610fc44a5b2ef5\
-	43cb811044010000\
+	0000000000000000000000000000000000000000000000000000000000000ccd0780ffff0080\
+	f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825\
+	c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83\
+	a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a373\
+	3464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b\
+	5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d305\
+	5c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e31\
+	3ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771\
+	032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc\
+	9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0\
+	f8a3733464780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464\
+	780a2b5bb2e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2\
+	e5d3055c04a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04\
+	a28e313ad980f771032825c1fc9bea83a6e0f8a3733464780a2b5bb2e5d3055c04a28e313ad9\
+	ad03803333008041038b346937eae08686bc2166a94e8ebcad3aac044655f5e016556efab645\
+	178010fd81bc1359802f0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de8041038b\
+	346937eae08686bc2166a94e8ebcad3aac044655f5e016556efab645178010fd81bc1359802f\
+	0b871aeb95e4410a8ec92b93af10ea767a2027cf4734e8de8041038b346937eae08686bc2166\
+	a94e8ebcad3aac044655f5e016556efab645178010fd81bc1359802f0b871aeb95e4410a8ec9\
+	2b93af10ea767a2027cf4734e8de8041038b346937eae08686bc2166a94e8ebcad3aac044655\
+	f5e016556efab64517084000\
 ";
-fn proof() -> Vec<u8> {
-	array_bytes::hex2bytes_unchecked(PROOF)
+
+impl<T: Config> BenchmarkHelper<T> for DefaultCheckProofHelper {
+	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8> {
+		assert_eq!(
+			T::MaxTransactionSize::get(),
+			DEFAULT_MAX_TRANSACTION_SIZE,
+			"DefaultCheckProofHelper requires MaxTransactionSize == DEFAULT_MAX_TRANSACTION_SIZE ({DEFAULT_MAX_TRANSACTION_SIZE})",
+		);
+		assert_eq!(
+			T::MaxBlockTransactions::get(),
+			DEFAULT_MAX_BLOCK_TRANSACTIONS,
+			"DefaultCheckProofHelper requires MaxBlockTransactions == DEFAULT_MAX_BLOCK_TRANSACTIONS ({DEFAULT_MAX_BLOCK_TRANSACTIONS})",
+		);
+		assert_eq!(
+			random_hash, &[0u8; 32],
+			"DefaultCheckProofHelper proof was built with [0u8; 32]"
+		);
+		array_bytes::hex2bytes_unchecked(DEFAULT_CHECK_PROOF)
+	}
 }
+
+type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
 fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
 	let events = System::<T>::events();
@@ -177,9 +167,26 @@ mod benchmarks {
 				vec![0u8; T::MaxTransactionSize::get() as usize],
 			)?;
 		}
-		run_to_block::<T>(crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one());
-		let encoded_proof = proof();
-		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();
+		// Advance to block 2 so on_finalize(1) commits BlockTransactions into Transactions storage,
+		// then jump directly to the target block — no need to iterate the remaining blocks since
+		// on_initialize cleanup targets block n - period - 1 (i.e. block 0), preserving block 1.
+		run_to_block::<T>(2u32.into());
+		System::<T>::set_block_number(
+			crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one(),
+		);
+		// The pre-computed proof was built with T::Hash::default() as randomness.
+		// Pin ParentHash to the same value so chunk selection matches.
+		let random_hash = T::Hash::default();
+		frame_support::storage::unhashed::put(
+			&sp_io::hashing::twox_128(b"System")
+				.iter()
+				.chain(sp_io::hashing::twox_128(b"ParentHash").iter())
+				.copied()
+				.collect::<alloc::vec::Vec<u8>>(),
+			&random_hash,
+		);
+		let encoded = T::BenchmarkHelper::encoded_check_proof(random_hash.as_ref());
+		let proof = TransactionStorageProof::decode(&mut encoded.as_slice()).unwrap();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, proof);
@@ -271,7 +278,7 @@ mod benchmarks {
 
 		let period = T::AuthorizationPeriod::get();
 		let now = System::<T>::block_number();
-		run_to_block::<T>(now + period);
+		System::<T>::set_block_number(now + period);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, who.clone());
@@ -290,7 +297,7 @@ mod benchmarks {
 
 		let period = T::AuthorizationPeriod::get();
 		let now = System::<T>::block_number();
-		run_to_block::<T>(now + period);
+		System::<T>::set_block_number(now + period);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, content_hash);
@@ -382,4 +389,45 @@ mod benchmarks {
 	}
 
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use codec::Encode;
+	use sp_transaction_storage_proof::registration::build_proof;
+
+	/// Builds the proof that `DefaultCheckProofHelper` should return for the default config.
+	fn generate_default_check_proof() -> Vec<u8> {
+		let tx_size = DEFAULT_MAX_TRANSACTION_SIZE as usize;
+		let transactions: Vec<Vec<u8>> =
+			(0..DEFAULT_MAX_BLOCK_TRANSACTIONS).map(|_| vec![0u8; tx_size]).collect();
+		let proof = build_proof(&[0u8; 32], transactions).unwrap().unwrap();
+		proof.encode()
+	}
+
+	/// Generates the DEFAULT_CHECK_PROOF hex for `DefaultCheckProofHelper`. Run with:
+	/// `cargo test -p pallet-transaction-storage -- --nocapture --ignored gen_default_check_proof`
+	#[test]
+	#[ignore]
+	fn gen_default_check_proof() {
+		let encoded = generate_default_check_proof();
+		let hex: String = encoded.iter().map(|b| format!("{b:02x}")).collect();
+		println!(
+			"DEFAULT_CHECK_PROOF hex for tx_size={DEFAULT_MAX_TRANSACTION_SIZE}, \
+			max_block_transactions={DEFAULT_MAX_BLOCK_TRANSACTIONS}:",
+		);
+		println!("{hex}");
+	}
+
+	#[test]
+	fn default_check_proof_integrity() {
+		let expected = generate_default_check_proof();
+		let stored = array_bytes::hex2bytes_unchecked(DEFAULT_CHECK_PROOF);
+		assert_eq!(
+			stored, expected,
+			"DEFAULT_CHECK_PROOF is stale — regenerate with: \
+			 cargo test -p pallet-transaction-storage -- --nocapture --ignored gen_default_check_proof"
+		);
+	}
 }

@@ -254,6 +254,42 @@ To run all benchmarks:
 python3 scripts/cmd/cmd.py bench
 ```
 
+# SDK & Documentation
+
+## 📚 Bulletin SDK
+
+**Multi-language client SDKs** for Polkadot Bulletin Chain with complete transaction submission, automatic chunking, and DAG-PB manifest generation.
+
+- **[Rust SDK](./sdk/rust/)** - `no_std` compatible, works in native apps and ink! smart contracts
+- **[TypeScript SDK](./sdk/typescript/)** - Browser and Node.js compatible
+
+Both SDKs provide:
+- ✅ All 8 pallet operations (store, authorize, renew, refresh, remove expired)
+- ✅ DAG-PB manifests (IPFS-compatible)
+- ✅ Authorization management (account and preimage)
+- ✅ Progress tracking via callbacks
+
+The **TypeScript SDK** includes automatic chunking with built-in transaction submission.
+The **Rust SDK** provides transaction submission via `TransactionClient` and offline chunking via `BulletinClient` (prepare-only; users submit chunks via subxt).
+
+**Quick Start**: See [sdk/README.md](./sdk/README.md)
+
+## 📖 Documentation
+
+**Complete SDK Book**: [`docs/book`](./docs/book/)
+
+The Bulletin SDK Book contains comprehensive guides including:
+- Concepts (authorization, chunking, DAG-PB manifests)
+- Rust SDK guide (installation, API reference, no_std usage, examples)
+- TypeScript SDK guide (installation, API reference, PAPI integration, examples)
+- Best practices and troubleshooting
+
+To view the documentation locally:
+```bash
+cd docs/book
+mdbook serve --open
+```
+
 # Examples (JavaScript-based)
 
 The `examples/` directory contains Node.js (PJS and/or PAPI) scripts demonstrating how to interact with the Bulletin chain. For detailed setup and usage instructions, see [examples/README.md](./examples/README.md).

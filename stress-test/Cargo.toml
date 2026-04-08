@@ -1,0 +1,59 @@
+[package]
+name = "bulletin-stress-test"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+publish = false
+autotests = false
+
+[[bin]]
+name = "bulletin-stress-test"
+path = "src/main.rs"
+
+[[test]]
+name = "zombienet"
+path = "tests/zombienet.rs"
+
+[dependencies]
+# CLI
+clap = { workspace = true, features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+futures = { workspace = true }
+
+# Subxt (must match zombienet-sdk 0.3.13)
+subxt = { version = "0.43", default-features = false, features = ["jsonrpsee", "native"] }
+subxt-signer = { version = "0.43", features = ["sr25519"] }
+scale-info = { workspace = true }
+jsonrpsee = { workspace = true, features = ["ws-client"] }
+
+# P2P Bitswap (UserProtocol approach with protobuf)
+litep2p = { version = "0.13.0", features = ["websocket"] }
+cid = { workspace = true, features = ["std"] }
+multihash = { version = "0.19", default-features = false, features = ["std"] }
+prost = "0.13"
+async-trait = "0.1"
+bytes = "1"
+
+# Reporting + formatting
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+# Hashing
+blake2 = "0.10"
+twox-hash = "2"
+
+# Utilities
+anyhow = "1"
+log = { workspace = true, features = ["std"] }
+env_logger = "0.11"
+hex = { workspace = true }
+rand = "0.8"
+
+[build-dependencies]
+prost-build = "0.13"
+
+[dev-dependencies]
+zombienet-sdk = "0.3.13"
+zombienet-orchestrator = "0.3.13"

@@ -1,0 +1,202 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
+/**
+ * Utility functions for CID calculation and data manipulation
+ */
+
+import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
+import { CID } from "multiformats/cid"
+import * as digest from "multiformats/hashes/digest"
+import type { Binary } from "polkadot-api"
+import { MAX_CHUNK_SIZE } from "./chunker.js"
+import { BulletinError, CidCodec, ErrorCode, HashAlgorithm } from "./types.js"
+
+/**
+ * Calculate content hash using the specified algorithm
+ *
+ * Note: For production use, integrate with the pallet's hashing functions
+ * via PAPI to ensure exact compatibility.
+ */
+export async function getContentHash(
+  data: Uint8Array,
+  hashAlgorithm: HashAlgorithm,
+): Promise<Uint8Array> {
+  switch (hashAlgorithm) {
+    case HashAlgorithm.Blake2b256: {
+      return blake2AsU8a(data)
+    }
+    case HashAlgorithm.Sha2_256: {
+      return sha256AsU8a(data)
+    }
+    case HashAlgorithm.Keccak256: {
+      return keccak256AsU8a(data)
+    }
+    default:
+      throw new BulletinError(
+        `Unsupported hash algorithm: ${hashAlgorithm}`,
+        ErrorCode.INVALID_HASH_ALGORITHM,
+      )
+  }
+}
+
+/**
+ * Create a CID for data with specified codec and hashing algorithm
+ *
+ * Default to raw codec (0x55) with blake2b-256 hash (0xb220)
+ */
+export async function calculateCid(
+  data: Uint8Array,
+  cidCodec: number = 0x55,
+  hashAlgorithm: HashAlgorithm = HashAlgorithm.Blake2b256,
+): Promise<CID> {
+  try {
+    // Calculate content hash
+    const hash = await getContentHash(data, hashAlgorithm)
+
+    // Create multihash digest
+    const mh = digest.create(hashAlgorithm, hash)
+
+    // Create CIDv1
+    return CID.createV1(cidCodec, mh)
+  } catch (error) {
+    throw new BulletinError(
+      `Failed to calculate CID: ${error}`,
+      ErrorCode.CID_CALCULATION_FAILED,
+      error,
+    )
+  }
+}
+
+/**
+ * Convert CID to different codec while keeping the same hash
+ */
+export function convertCid(cid: CID, newCodec: number): CID {
+  return CID.createV1(newCodec, cid.multihash)
+}
+
+/**
+ * Parse CID from string
+ */
+export function parseCid(cidString: string): CID {
+  try {
+    return CID.parse(cidString)
+  } catch (error) {
+    throw new BulletinError(
+      `Failed to parse CID: ${error}`,
+      ErrorCode.INVALID_CID,
+      error,
+    )
+  }
+}
+
+/** Convert Binary or Uint8Array to Uint8Array */
+export function toBytes(data: Binary | Uint8Array): Uint8Array {
+  return data instanceof Uint8Array ? data : data.asBytes()
+}
+
+/**
+ * Parse CID from bytes
+ */
+export function cidFromBytes(bytes: Uint8Array): CID {
+  try {
+    return CID.decode(bytes)
+  } catch (error) {
+    throw new BulletinError(
+      `Failed to decode CID from bytes: ${error}`,
+      ErrorCode.INVALID_CID,
+      error,
+    )
+  }
+}
+
+/**
+ * Convert CID to bytes
+ */
+export function cidToBytes(cid: CID): Uint8Array {
+  return cid.bytes
+}
+
+/**
+ * Estimate authorization needed for storing data
+ *
+ * @param dataSize - Total data size in bytes
+ * @param chunkSize - Size of each chunk in bytes
+ * @param createManifest - Whether a DAG-PB manifest will be created
+ */
+export function estimateAuthorization(
+  dataSize: number,
+  chunkSize: number,
+  createManifest: boolean,
+): { transactions: number; bytes: number } {
+  const numChunks = Math.ceil(dataSize / chunkSize)
+  let transactions = numChunks
+  let bytes = dataSize
+
+  if (createManifest) {
+    transactions += 1
+    // Estimate manifest size (~50 bytes per DAG-PB link + overhead)
+    bytes += numChunks * 50 + 1000
+  }
+
+  return { transactions, bytes }
+}
+
+/**
+ * SCALE variant type for the on-chain HashingAlgorithm enum
+ */
+export type ScaleHashingAlgorithm =
+  | { type: "Blake2b256" }
+  | { type: "Sha2_256" }
+  | { type: "Keccak256" }
+
+/**
+ * Convert SDK HashAlgorithm (multicodec value) to the PAPI enum variant
+ * expected for the on-chain `HashingAlgorithm` type.
+ */
+export function hashAlgorithmCodecToEnum(
+  alg: HashAlgorithm,
+): ScaleHashingAlgorithm {
+  switch (alg) {
+    case HashAlgorithm.Blake2b256:
+      return { type: "Blake2b256" }
+    case HashAlgorithm.Sha2_256:
+      return { type: "Sha2_256" }
+    case HashAlgorithm.Keccak256:
+      return { type: "Keccak256" }
+    default:
+      throw new BulletinError(
+        `Unsupported hash algorithm for SCALE encoding: ${alg}`,
+        ErrorCode.INVALID_HASH_ALGORITHM,
+      )
+  }
+}
+
+/**
+ * Check whether store options use non-default CID configuration.
+ *
+ * When true, the SDK should use `store_with_cid_config` instead of `store`
+ * to ensure the on-chain CID matches the client-side CID.
+ */
+export function isNonDefaultCidConfig(
+  cidCodec: CidCodec | number,
+  hashAlgorithm: HashAlgorithm,
+): boolean {
+  return cidCodec !== CidCodec.Raw || hashAlgorithm !== HashAlgorithm.Blake2b256
+}
+
+export function validateChunkSize(size: number): void {
+  if (size <= 0) {
+    throw new BulletinError(
+      "Chunk size must be positive",
+      ErrorCode.INVALID_CHUNK_SIZE,
+    )
+  }
+
+  if (size > MAX_CHUNK_SIZE) {
+    throw new BulletinError(
+      `Chunk size ${size} bytes exceeds maximum ${MAX_CHUNK_SIZE} bytes`,
+      ErrorCode.CHUNK_TOO_LARGE,
+    )
+  }
+}
