@@ -288,7 +288,7 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		TransactionStorage::<T>::authorize_account(origin, who.clone(), 1, 1, true)
+		TransactionStorage::<T>::authorize_account(origin, who.clone(), 1, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		let period = T::AuthorizationPeriod::get();
