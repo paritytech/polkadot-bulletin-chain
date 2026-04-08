@@ -329,7 +329,6 @@ interface ClientConfig {
   defaultChunkSize?: number;           // default: 1 MiB
   createManifest?: boolean;            // default: true
   chunkingThreshold?: number;          // default: 2 MiB
-  txTimeout?: number;                  // default: 120_000 (2 min per transaction)
 }
 ```
 

@@ -120,7 +120,6 @@ export class MockBulletinClient implements BulletinClientInterface {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      txTimeout: config?.txTimeout ?? 120_000,
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
       simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,

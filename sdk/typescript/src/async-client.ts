@@ -51,6 +51,7 @@ interface TxStatusEvent {
   txHash?: string
   type?: string
   found?: boolean
+  isValid?: boolean
   nPeers?: number
   block?: { hash: string; number: number; index?: number }
   events?: RuntimeEvent[]
@@ -192,6 +193,8 @@ interface PapiEventMappingResult {
     block: { hash: string; number: number }
     events?: RuntimeEvent[]
   }
+  /** Set when the transaction is no longer valid (e.g. mortality expired, dropped from pool) */
+  invalid?: boolean
 }
 
 /**
@@ -245,6 +248,11 @@ function mapPapiEventToProgress(
       }
     } else {
       progressCallback?.({ type: TxStatus.NoLongerInBlock, chunkIndex })
+      // Transaction dropped from best blocks and no longer valid
+      // (e.g. mortality expired, evicted from pool)
+      if (ev.isValid === false) {
+        result.invalid = true
+      }
     }
   }
 
@@ -557,7 +565,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      txTimeout: config?.txTimeout ?? 120_000, // 2 minutes per transaction
     }
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
@@ -672,7 +679,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ) => {
         if (resolved) return
         resolved = true
-        clearTimeout(timerId)
         subscription.unsubscribe()
         resolve({
           blockHash: block.hash,
@@ -681,6 +687,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           txIndex: extractStoredIndex(events),
           events,
         })
+      }
+
+      const fail = (error: Error) => {
+        if (resolved) return
+        resolved = true
+        subscription.unsubscribe()
+        reject(error)
       }
 
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
@@ -694,11 +707,18 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           )
           if (result.txHash) txHash = result.txHash
           if (result.finish) finish(result.finish.block, result.finish.events)
+          if (result.invalid) {
+            fail(
+              new BulletinError(
+                "Transaction is no longer valid (mortality expired or dropped from pool)",
+                ErrorCode.TIMEOUT,
+              ),
+            )
+          }
         },
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
-            clearTimeout(timerId)
             if (progressCallback) {
               const errorMsg = err instanceof Error ? err.message : String(err)
               // Distinguish pool-related drops from other transaction errors
@@ -714,15 +734,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           }
         },
       })
-
-      // Timeout per transaction (configurable, default 2 minutes)
-      const timerId = setTimeout(() => {
-        if (!resolved) {
-          resolved = true
-          subscription.unsubscribe()
-          reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
-        }
-      }, this.config.txTimeout)
     })
   }
 
