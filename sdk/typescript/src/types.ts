@@ -337,4 +337,7 @@ export interface ClientConfig {
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
+  /** Safety-net timeout in milliseconds per transaction (default: 120_000).
+   * Only fires if PAPI never reports the transaction as invalid. */
+  txTimeout?: number
 }

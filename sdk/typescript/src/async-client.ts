@@ -565,6 +565,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
       createManifest: config?.createManifest ?? true,
       chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
+      txTimeout: config?.txTimeout ?? 120_000, // 2 minutes safety net
     }
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
@@ -673,13 +674,18 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       let resolved = false
       let txHash: string | undefined
 
+      const cleanup = () => {
+        clearTimeout(timerId)
+        subscription.unsubscribe()
+      }
+
       const finish = (
         block: { hash: string; number: number },
         events?: RuntimeEvent[],
       ) => {
         if (resolved) return
         resolved = true
-        subscription.unsubscribe()
+        cleanup()
         resolve({
           blockHash: block.hash,
           txHash: txHash || "",
@@ -692,7 +698,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       const fail = (error: Error) => {
         if (resolved) return
         resolved = true
-        subscription.unsubscribe()
+        cleanup()
         reject(error)
       }
 
@@ -707,6 +713,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           )
           if (result.txHash) txHash = result.txHash
           if (result.finish) finish(result.finish.block, result.finish.events)
+          // Transaction dropped from pool and no longer valid (mortality expired, evicted)
           if (result.invalid) {
             fail(
               new BulletinError(
@@ -719,6 +726,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
+            cleanup()
             if (progressCallback) {
               const errorMsg = err instanceof Error ? err.message : String(err)
               // Distinguish pool-related drops from other transaction errors
@@ -734,6 +742,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           }
         },
       })
+
+      // Safety-net timeout: in case PAPI never emits isValid=false
+      // (e.g. connection drops, unexpected state). Default: 2 minutes.
+      const timerId = setTimeout(
+        () =>
+          fail(
+            new BulletinError("Transaction timed out", ErrorCode.TIMEOUT),
+          ),
+        this.config.txTimeout,
+      )
     })
   }
 
