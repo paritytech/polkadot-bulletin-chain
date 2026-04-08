@@ -296,7 +296,8 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",
-  [ErrorCode.TIMEOUT]: "Transaction mortality expired or dropped from pool. Retry the transaction",
+  [ErrorCode.TIMEOUT]:
+    "Transaction mortality expired or dropped from pool. Retry the transaction",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",
 }
