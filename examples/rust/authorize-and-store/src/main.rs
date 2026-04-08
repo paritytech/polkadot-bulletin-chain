@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
 	info!("\nStep 1: Authorizing account using SDK...");
 
 	let auth_receipt = client
-		.authorize_account(account_id.clone(), 100, 100 * 1024 * 1024, true, &keypair)
+		.authorize_account(account_id.clone(), 100, 100 * 1024 * 1024, &keypair)
 		.await
 		.map_err(|e| anyhow!("Authorization failed: {:?}", e))?;
 

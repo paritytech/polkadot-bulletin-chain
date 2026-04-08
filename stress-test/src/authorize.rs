@@ -98,7 +98,6 @@ fn build_authorize_call(
 					who: Value::from_bytes(account.0),
 					transactions: transactions_per_account,
 					bytes: bytes_per_account,
-					refresh_expiry: Value::bool(true)
 				})
 			}
 		})

@@ -56,6 +56,7 @@ pub trait WeightInfo {
 	fn renew() -> Weight;
 	fn check_proof() -> Weight;
 	fn authorize_account() -> Weight;
+	fn authorize_account_preserve_expiry() -> Weight;
 	fn refresh_account_authorization() -> Weight;
 	fn authorize_preimage() -> Weight;
 	fn refresh_preimage_authorization() -> Weight;
@@ -123,6 +124,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
 	fn authorize_account() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
+	fn authorize_account_preserve_expiry() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn refresh_account_authorization() -> Weight {
@@ -206,6 +210,9 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
 	fn authorize_account() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
+	fn authorize_account_preserve_expiry() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn refresh_account_authorization() -> Weight {
