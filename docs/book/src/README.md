@@ -88,6 +88,7 @@ println!("Stored in block: {}", receipt.block_hash);
 | Polkadot | - | Not released yet |
 | Paseo (Testnet) | `wss://paseo-bulletin-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
+| PoP Testnet (stable) | `wss://pop3-testnet.parity-lab.parity.io/bulletin` | Active |
 | Previewnet | `wss://previewnet.substrate.dev/bulletin` | Active |
 | Local Dev | `ws://localhost:10000` | - |
 
