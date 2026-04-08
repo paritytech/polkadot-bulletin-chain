@@ -25,6 +25,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
     lightClient: false,
   },
+  stable: {
+    id: "stable",
+    name: "PoP Testnet (stable)",
+    endpoints: ["wss://pop3-testnet.parity-lab.parity.io/bulletin"],
+    lightClient: false,
+  },
   previewnet: {
     id: "previewnet",
     name: "Bulletin Previewnet",
