@@ -54,7 +54,10 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
     // Create client directly with api, signer, and submit function
-    client = new AsyncBulletinClient(api, signer, papiClient.submit)
+    // Use a longer txTimeout for CI where block production can be slow
+    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
+      txTimeout: 180_000,
+    })
 
     // Authorize Alice's account for storage operations
     // The bulletin chain requires account authorization before storing data
