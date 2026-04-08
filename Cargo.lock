@@ -2129,6 +2129,7 @@ dependencies = [
 name = "bulletin-polkadot-runtime"
 version = "1.0.0"
 dependencies = [
+ "array-bytes 6.2.3",
  "bp-bridge-hub-cumulus",
  "bp-header-chain",
  "bp-messages",

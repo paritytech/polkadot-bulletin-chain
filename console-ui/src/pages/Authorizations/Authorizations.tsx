@@ -586,33 +586,12 @@ function FaucetAuthorizeAccountPanel() {
     bytes: bigint;
     expiresAt?: number;
   } | null>(null);
-  const [aliceBalance, setAliceBalance] = useState<bigint | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
   const handleProgress = useProgressHandler(setTxStatus);
-
-  // Initialize Alice account
-  useEffect(() => {
-    const initAccounts = async () => {
-      if (!api) return;
-
-      try {
-        await cryptoWaitReady();
-        const keyring = new Keyring({ type: "sr25519" });
-        const alice = keyring.addFromUri("//Alice");
-
-        const accountInfo = await api.query.System.Account.getValue(alice.address as SS58String);
-        setAliceBalance(accountInfo?.data?.free ?? null);
-      } catch (err) {
-        console.error("Failed to initialize dev accounts:", err);
-      }
-    };
-
-    initAccounts();
-  }, [api]);
 
   // Prefill with connected account address
   useEffect(() => {
@@ -734,12 +713,10 @@ function FaucetAuthorizeAccountPanel() {
     }
   };
 
-  const hasBalanceIssue = aliceBalance !== null && aliceBalance === 0n;
   const canSubmit =
     forWho.length > 0 &&
     (parseInt(transactions, 10) > 0 || getBytesValue() > 0n) &&
-    !isSubmitting &&
-    !hasBalanceIssue;
+    !isSubmitting;
 
   return (
     <div className="space-y-6">
@@ -752,13 +729,6 @@ function FaucetAuthorizeAccountPanel() {
       {submitError && (
         <div className="p-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive">
           {submitError}
-        </div>
-      )}
-
-      {hasBalanceIssue && (
-        <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
-          <AlertCircle className="h-4 w-4 inline mr-2" />
-          Warning: Alice account has zero balance. Transactions will fail.
         </div>
       )}
 
@@ -873,11 +843,6 @@ function FaucetAuthorizeAccountPanel() {
                 <>
                   <Spinner size="sm" className="mr-2" />
                   {txStatus || "Authorizing..."}
-                </>
-              ) : hasBalanceIssue ? (
-                <>
-                  <AlertCircle className="h-4 w-4 mr-2" />
-                  Alice Has No Balance
                 </>
               ) : (
                 <>
