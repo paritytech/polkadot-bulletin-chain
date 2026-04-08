@@ -746,10 +746,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       // Safety-net timeout: in case PAPI never emits isValid=false
       // (e.g. connection drops, unexpected state). Default: 2 minutes.
       const timerId = setTimeout(
-        () =>
-          fail(
-            new BulletinError("Transaction timed out", ErrorCode.TIMEOUT),
-          ),
+        () => fail(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT)),
         this.config.txTimeout,
       )
     })
