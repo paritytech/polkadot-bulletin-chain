@@ -36,9 +36,9 @@ pub struct EnvironmentInfo {
 impl EnvironmentInfo {
 	/// Query environment info from a live node.
 	pub async fn query(client: &OnlineClient<BulletinConfig>, ws_url: &str) -> Result<Self> {
-		use jsonrpsee::{core::client::ClientT, ws_client::WsClientBuilder};
+		use jsonrpsee::core::client::ClientT;
 
-		let rpc = WsClientBuilder::default().build(ws_url).await?;
+		let rpc = crate::client::ws_client_builder().build(ws_url).await?;
 		let node_name: String = rpc.request("system_name", jsonrpsee::rpc_params![]).await?;
 		let node_version: String = rpc.request("system_version", jsonrpsee::rpc_params![]).await?;
 		let chain_name: String = rpc.request("system_chain", jsonrpsee::rpc_params![]).await?;

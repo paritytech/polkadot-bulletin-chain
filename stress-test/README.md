@@ -111,7 +111,7 @@ bulletin-stress-test [OPTIONS] <COMMAND>
 
 #### `throughput [block-capacity]`
 
-Measures write throughput by filling blocks with storage transactions across payload sizes from 1KB to 10MB.
+Measures write throughput by filling blocks with storage transactions across payload sizes from 1KB up to **2MB** (maximum per `TransactionStorage::store` for this tooling).
 
 ```bash
 # Run all payload sizes against a local dev node
@@ -121,7 +121,7 @@ Measures write throughput by filling blocks with storage transactions across pay
 ./target/release/bulletin-stress-test throughput --variants "1KB,128KB,1MB"
 ```
 
-Payload sizes tested: 1KB, 4KB, 32KB, 128KB, 512KB, 1MB, 2MB, 4MB, 5MB, 7MB, 7.5MB, 2050KB, 8MB, 10MB.
+Payload sizes tested: 1KB, 4KB, 32KB, 128KB, 512KB, 1MB, 2MB. Use `--variants MIXED` for a weighted random mix over those sizes (see `scenarios/throughput.rs`).
 
 For each size, the tool:
 1. Calculates how many transactions are needed to fill `--target-blocks` steady-state blocks
@@ -130,7 +130,7 @@ For each size, the tool:
 4. Measures avg/peak transactions per block and throughput in bytes/s over steady-state blocks
 5. Drains the transaction pool before proceeding to the next variant
 
-The `--variants` flag accepts a comma-separated list of size labels to run a subset (e.g. `"1KB,128KB,1MB"`).
+The `--variants` flag accepts a comma-separated list of size labels to run a subset (e.g. `"1KB,128KB,1MB"`) or **`MIXED`** for the real-world weighted mix. Global `--mix-seed <u64>` fixes RNG draws for mixed mode.
 
 #### `bitswap [b2]`
 
@@ -268,13 +268,6 @@ All throughput variant tests share a single zombienet network (spawned on first 
 | `test_parachain_throughput_512kb` | 512KB | success |
 | `test_parachain_throughput_1mb` | 1MB | success |
 | `test_parachain_throughput_2mb` | 2MB | success |
-| `test_parachain_throughput_2050kb` | 2050KB | success |
-| `test_parachain_throughput_4mb` | 4MB | rejection (WASM OOM) |
-| `test_parachain_throughput_5mb` | 5MB | rejection |
-| `test_parachain_throughput_7mb` | 7MB | rejection |
-| `test_parachain_throughput_7_5mb` | 7.5MB | rejection |
-| `test_parachain_throughput_8mb` | 8MB | rejection |
-| `test_parachain_throughput_10mb` | 10MB | rejection |
 
 #### Bitswap
 
@@ -286,7 +279,7 @@ All throughput variant tests share a single zombienet network (spawned on first 
 
 The zombienet tests validate results against per-variant expectations tables:
 
-Payload sizes up to 2050KB expected to succeed. 4MB+ may OOM during WASM block import on non-authoring nodes (the WASM freeing-bump allocator has a 16MB heap limit; chunking in `do_store` requires ~2x the payload size in concurrent allocations).
+All listed throughput variants are ≤ 2MB and expected to succeed on the zombienet parachain configuration. If CI flakes on the 2MB case, check WASM heap / PoV limits on full nodes.
 
 ### Network Topology
 

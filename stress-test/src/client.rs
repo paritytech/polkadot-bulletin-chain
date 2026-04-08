@@ -65,19 +65,22 @@ impl Default for BulletinExtrinsicParamsBuilder {
 
 // --- Connection ---
 
-/// 50 MB — enough for 8 MB payloads after hex encoding + JSON-RPC wrapping.
-const MAX_RPC_MESSAGE_SIZE: u32 = 50 * 1024 * 1024;
+/// jsonrpsee defaults to **10 MiB**; large `author_pendingExtrinsics` / submit payloads need more.
+/// Align with the node’s RPC max frame settings if you still hit size errors.
+const MAX_RPC_WS_FRAME: u32 = 50 * 1024 * 1024;
+
+/// WebSocket JSON-RPC client with request/response size limits above the jsonrpsee default (10
+/// MiB).
+pub fn ws_client_builder() -> jsonrpsee::ws_client::WsClientBuilder {
+	jsonrpsee::ws_client::WsClientBuilder::default()
+		.max_request_size(MAX_RPC_WS_FRAME)
+		.max_response_size(MAX_RPC_WS_FRAME)
+}
 
 pub async fn connect(ws_url: &str) -> Result<OnlineClient<BulletinConfig>> {
 	log::info!("Connecting to {ws_url}");
 
-	// Build a WS client with larger message size limits (default is 10 MB,
-	// which is too small for 8 MB payloads after hex encoding).
-	let rpc_client = jsonrpsee::ws_client::WsClientBuilder::default()
-		.max_request_size(MAX_RPC_MESSAGE_SIZE)
-		.max_response_size(MAX_RPC_MESSAGE_SIZE)
-		.build(ws_url)
-		.await?;
+	let rpc_client = ws_client_builder().build(ws_url).await?;
 
 	let client = OnlineClient::<BulletinConfig>::from_rpc_client(rpc_client).await?;
 	log::info!("Connected successfully");
@@ -87,9 +90,9 @@ pub async fn connect(ws_url: &str) -> Result<OnlineClient<BulletinConfig>> {
 /// Discover the node's P2P listen addresses and peer ID via a separate RPC call.
 /// Returns (peer_id, listen_addresses).
 pub async fn discover_p2p_info(ws_url: &str) -> Result<(String, Vec<String>)> {
-	use jsonrpsee::{core::client::ClientT, ws_client::WsClientBuilder};
+	use jsonrpsee::core::client::ClientT;
 
-	let client = WsClientBuilder::default().build(ws_url).await?;
+	let client = ws_client_builder().build(ws_url).await?;
 
 	let peer_id: String = client.request("system_localPeerId", jsonrpsee::rpc_params![]).await?;
 
@@ -101,9 +104,9 @@ pub async fn discover_p2p_info(ws_url: &str) -> Result<(String, Vec<String>)> {
 
 /// Ready + future transaction count from the node (lightweight `txpool_status` when available).
 pub async fn fetch_txpool_pending_total(ws_url: &str) -> Result<usize> {
-	use jsonrpsee::{core::client::ClientT, rpc_params, ws_client::WsClientBuilder};
+	use jsonrpsee::{core::client::ClientT, rpc_params};
 
-	let client = WsClientBuilder::default().build(ws_url).await?;
+	let client = ws_client_builder().build(ws_url).await?;
 
 	if let Ok(v) = client.request::<serde_json::Value, _>("txpool_status", rpc_params![]).await {
 		let n = match &v {

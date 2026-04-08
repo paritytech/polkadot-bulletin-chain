@@ -118,13 +118,6 @@ throughput_variant_test!(test_parachain_throughput_128kb, "128KB", 3);
 throughput_variant_test!(test_parachain_throughput_512kb, "512KB", 4);
 throughput_variant_test!(test_parachain_throughput_1mb, "1MB", 5);
 throughput_variant_test!(test_parachain_throughput_2mb, "2MB", 6);
-throughput_variant_test!(test_parachain_throughput_2050kb, "2050KB", 7);
-throughput_variant_test!(test_parachain_throughput_4mb, "4MB", 8);
-throughput_variant_test!(test_parachain_throughput_5mb, "5MB", 9);
-throughput_variant_test!(test_parachain_throughput_7mb, "7MB", 10);
-throughput_variant_test!(test_parachain_throughput_7_5mb, "7.5MB", 11);
-throughput_variant_test!(test_parachain_throughput_8mb, "8MB", 12);
-throughput_variant_test!(test_parachain_throughput_10mb, "10MB", 13);
 
 // ============================================================================
 // Bitswap read tests (B2: concurrent multi-client)

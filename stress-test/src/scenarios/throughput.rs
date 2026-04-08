@@ -6,10 +6,107 @@ use crate::{
 	accounts::NonceTracker,
 	chain_info::ChainLimits,
 	client::BulletinConfig,
-	pipeline::{self, IterationPlan, StressWorkItem},
+	pipeline::{self, IterationPlan, PayloadSizeMix, StorePayloadMode, StressWorkItem},
 	report::{ScenarioResult, SubmissionStats},
 	store,
 };
+
+/// Maximum raw store payload size for stress-test variants (matches chain / runtime limit, ~2 MiB).
+pub const MAX_STORE_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
+
+/// Canonical payload table for fixed variants and for **`MIXED`** weights (subset of labels).
+/// Every `usize` is ≤ [`MAX_STORE_PAYLOAD_BYTES`].
+const ALL_PAYLOAD_SIZES: &[(usize, &str)] = &[
+	(1024, "1KB"),
+	(4096, "4KB"),
+	(32 * 1024, "32KB"),
+	(128 * 1024, "128KB"),
+	(512 * 1024, "512KB"),
+	(1024 * 1024, "1MB"),
+	(MAX_STORE_PAYLOAD_BYTES, "2MB"),
+];
+
+/// Weighted mix for **`MIXED`**: labels must exist in [`ALL_PAYLOAD_SIZES`] (same strings as
+/// `--variants`). Weights sum to 1000 (~basis points).
+const REAL_WORLD_MIX_LABEL_WEIGHTS: &[(&str, u32)] = &[
+	("1KB", 230),
+	("4KB", 150),
+	("32KB", 120),
+	("128KB", 175),
+	("512KB", 155),
+	("1MB", 90),
+	("2MB", 80),
+];
+
+fn real_world_payload_mix() -> anyhow::Result<PayloadSizeMix> {
+	let pairs: Vec<(usize, u32)> = REAL_WORLD_MIX_LABEL_WEIGHTS
+		.iter()
+		.map(|&(label, w)| {
+			let size =
+				ALL_PAYLOAD_SIZES
+					.iter()
+					.find(|(_, l)| *l == label)
+					.map(|(s, _)| *s)
+					.ok_or_else(|| {
+						anyhow::anyhow!("REAL_WORLD_MIX_LABEL_WEIGHTS: label {label:?} not in ALL_PAYLOAD_SIZES")
+					})?;
+			Ok((size, w))
+		})
+		.collect::<anyhow::Result<_>>()?;
+	PayloadSizeMix::from_weighted_sizes(&pairs)
+}
+
+enum BlockCapacitySweepStep {
+	Fixed { size: usize, label: &'static str },
+	Mixed { mix: PayloadSizeMix },
+}
+
+fn build_sweep_steps(variant_filter: Option<&str>) -> anyhow::Result<Vec<BlockCapacitySweepStep>> {
+	match variant_filter {
+		None => Ok(ALL_PAYLOAD_SIZES
+			.iter()
+			.map(|&(size, label)| BlockCapacitySweepStep::Fixed { size, label })
+			.collect()),
+		Some(f) => {
+			let tokens: Vec<String> = f
+				.split(',')
+				.map(|s| s.trim().to_uppercase())
+				.filter(|s| !s.is_empty())
+				.collect();
+			if tokens.is_empty() {
+				anyhow::bail!("Empty --variants string");
+			}
+			let mix = if tokens.iter().any(|t| t == "MIXED") {
+				Some(real_world_payload_mix()?)
+			} else {
+				None
+			};
+			let mut steps = Vec::with_capacity(tokens.len());
+			for t in tokens {
+				if t == "MIXED" {
+					// `mix` is `Some` because we built it when `tokens` contained `MIXED`.
+					steps.push(BlockCapacitySweepStep::Mixed { mix: mix.clone().unwrap() });
+					continue;
+				}
+				let found =
+					ALL_PAYLOAD_SIZES.iter().find(|(_, label)| label.to_uppercase() == t).copied();
+				match found {
+					Some((size, label)) =>
+						steps.push(BlockCapacitySweepStep::Fixed { size, label }),
+					None => {
+						let available: Vec<&str> =
+							ALL_PAYLOAD_SIZES.iter().map(|(_, l)| *l).collect();
+						anyhow::bail!(
+							"Unknown variant {t:?}. Use a label from the table or MIXED. Available: {}, MIXED",
+							available.join(", ")
+						);
+					},
+				}
+			}
+			Ok(steps)
+		},
+	}
+}
 
 fn scenario_result_from_bulk(
 	result: &store::BulkStoreResult,
@@ -114,8 +211,8 @@ fn scenario_result_from_bulk(
 
 /// Block capacity measurement across multiple payload sizes.
 ///
-/// For each payload size, splits one-shot accounts into iterations (~`iteration_blocks` measured
-/// blocks worth of txs per iteration), then runs the producer/consumer pipeline:
+/// For each step (fixed size or **`MIXED`**), splits one-shot accounts into iterations
+/// (~`iteration_blocks` measured blocks worth of txs per iteration), then runs the pipeline:
 /// [`StressWorkItem`]s on a bounded channel; the consumer waits on `txpool_status` before further
 /// `recv`s when the pool is deep, so the generator blocks on `send`. Drains the pool between
 /// variants.
@@ -130,6 +227,7 @@ pub async fn run_block_capacity_sweep(
 	target_blocks: u32,
 	iteration_blocks: u32,
 	variant_filter: Option<&str>,
+	mix_seed: Option<u64>,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 ) -> Result<()> {
@@ -138,58 +236,65 @@ pub async fn run_block_capacity_sweep(
 	let extrinsic_overhead = chain_limits.extrinsic_length_overhead as usize;
 	let max_block_txs = chain_limits.max_block_transactions as usize;
 
-	let all_payload_sizes: &[(usize, &str)] = &[
-		(1024, "1KB"),
-		(4096, "4KB"),
-		(32 * 1024, "32KB"),
-		(128 * 1024, "128KB"),
-		(512 * 1024, "512KB"),
-		(1024 * 1024, "1MB"),
-		(2 * 1024 * 1024, "2MB"),
-		(4 * 1024 * 1024, "4MB"),
-		(5 * 1024 * 1024, "5MB"),
-		(7 * 1024 * 1024, "7MB"),
-		(7 * 1024 * 1024 + 512 * 1024, "7.5MB"),
-		(2050 * 1024, "2050KB"),
-		(8 * 1024 * 1024, "8MB"),
-		(10 * 1024 * 1024, "10MB"),
-	];
+	let sweep_steps = build_sweep_steps(variant_filter)?;
 
-	// Filter variants if --variants was specified.
-	let filter_set: Option<Vec<String>> = variant_filter.map(|f| {
-		f.split(',')
-			.map(|s| s.trim().to_uppercase())
-			.filter(|s| !s.is_empty())
-			.collect()
-	});
-	let payload_sizes: Vec<(usize, &str)> = all_payload_sizes
+	let step_labels: Vec<String> = sweep_steps
 		.iter()
-		.filter(|(_, label)| {
-			filter_set
-				.as_ref()
-				.is_none_or(|set| set.iter().any(|f| f == &label.to_uppercase()))
+		.map(|s| match s {
+			BlockCapacitySweepStep::Fixed { label, .. } => (*label).to_string(),
+			BlockCapacitySweepStep::Mixed { .. } => "mixed".to_string(),
 		})
-		.copied()
 		.collect();
+	log::info!("Running {} block-capacity step(s): {}", sweep_steps.len(), step_labels.join(", "));
 
-	if payload_sizes.is_empty() {
-		let available: Vec<&str> = all_payload_sizes.iter().map(|(_, l)| *l).collect();
-		anyhow::bail!(
-			"No matching variants for filter {:?}. Available: {}",
-			variant_filter.unwrap_or(""),
-			available.join(", ")
-		);
-	}
+	for step in &sweep_steps {
+		let (
+			label,
+			payload_size_report,
+			est_block_cap,
+			store_payload,
+			est_pool_bytes_per_account,
+			largest_payload_in_step,
+		) = match step {
+			BlockCapacitySweepStep::Fixed { size, label } => {
+				let cap =
+					(block_usable_bytes / (*size + extrinsic_overhead).max(1)).min(max_block_txs);
+				(
+					*label,
+					*size,
+					cap,
+					StorePayloadMode::Fixed(*size),
+					*size + extrinsic_overhead,
+					*size,
+				)
+			},
+			BlockCapacitySweepStep::Mixed { mix } => {
+				let cap = mix.weighted_mean_est_block_cap(
+					block_usable_bytes,
+					extrinsic_overhead,
+					max_block_txs,
+				);
+				let mean = mix.mean_payload_bytes().round().max(1.0) as usize;
+				let max_b = mix.max_payload_bytes();
+				let seed_note = match mix_seed {
+					Some(s) => format!("--mix-seed {s}"),
+					None => "OS entropy (use --mix-seed to reproduce)".to_string(),
+				};
+				log::info!(
+					"mixed: weighted payload mix — mean ≈ {mean} B, max ≈ {max_b} B, est ~{cap} txs/block; \
+					 draws: {seed_note}",
+				);
+				(
+					"mixed",
+					mean,
+					cap,
+					StorePayloadMode::Mixed(mix.clone()),
+					mean + extrinsic_overhead,
+					max_b,
+				)
+			},
+		};
 
-	log::info!(
-		"Running {} variant(s): {}",
-		payload_sizes.len(),
-		payload_sizes.iter().map(|(_, l)| *l).collect::<Vec<_>>().join(", ")
-	);
-
-	for &(payload_size, label) in &payload_sizes {
-		let est_block_cap =
-			(block_usable_bytes / (payload_size + extrinsic_overhead)).min(max_block_txs);
 		// One-shot accounts: one account per transaction needed.
 		// Need enough to fill all target blocks (plus ramp-up/down) plus a
 		// backpressure buffer so the pool stays saturated while blocks drain.
@@ -199,8 +304,7 @@ pub async fn run_block_capacity_sweep(
 		let total_block_slots = (target_blocks + 2) as usize * est_block_cap;
 		let backpressure_buffer = est_block_cap * 3;
 		let accounts_needed = ((total_block_slots + backpressure_buffer) * 3 / 2).max(1) as u32;
-		let est_pool_mb =
-			(accounts_needed as usize * (payload_size + extrinsic_overhead)) / (1024 * 1024);
+		let est_pool_mb = (accounts_needed as usize * est_pool_bytes_per_account) / (1024 * 1024);
 		let accounts_per_iter =
 			pipeline::block_capacity_accounts_per_iteration(est_block_cap, iteration_blocks);
 		let n_iterations = accounts_needed.div_ceil(accounts_per_iter);
@@ -227,11 +331,18 @@ pub async fn run_block_capacity_sweep(
 				tokio::sync::mpsc::channel::<StressWorkItem>(pipeline::WORK_CHANNEL_CAPACITY);
 
 			let gen_plans = plans.clone();
-			let gen_payload = payload_size;
+			let gen_store = store_payload.clone();
+			let gen_mix_seed = mix_seed;
 			let gen_client = std::sync::Arc::new(client.clone());
 			let generator = tokio::spawn(async move {
-				pipeline::generate_block_capacity_work(work_tx, &gen_plans, gen_payload, gen_client)
-					.await
+				pipeline::generate_block_capacity_work(
+					work_tx,
+					&gen_plans,
+					gen_store,
+					gen_mix_seed,
+					gen_client,
+				)
+				.await
 			});
 
 			let pipeline_out = pipeline::run_block_capacity_pipeline(
@@ -239,7 +350,7 @@ pub async fn run_block_capacity_sweep(
 				dual,
 				ws_urls,
 				submitters,
-				payload_size,
+				store_payload.clone(),
 				client,
 				authorizer_signer,
 				nonce_tracker,
@@ -266,12 +377,12 @@ pub async fn run_block_capacity_sweep(
 			let result = scenario_result_from_bulk(
 				&bulk,
 				total_accounts as usize,
-				payload_size,
+				payload_size_report,
 				label,
 				chain_limits,
 			);
 
-			if payload_size >= 4 * 1024 * 1024 && result.total_confirmed == 0 {
+			if largest_payload_in_step >= MAX_STORE_PAYLOAD_BYTES && result.total_confirmed == 0 {
 				log::warn!(
 					"{label}: 0 txs confirmed (may be expected due to WASM heap limits) - \
 					 including result"
@@ -295,7 +406,7 @@ pub async fn run_block_capacity_sweep(
 					total_submitted: 0,
 					total_confirmed: 0,
 					total_errors: 0,
-					payload_size,
+					payload_size: payload_size_report,
 					throughput_tps: 0.0,
 					throughput_bytes_per_sec: 0.0,
 					avg_tx_per_block: 0.0,
@@ -303,7 +414,7 @@ pub async fn run_block_capacity_sweep(
 					inclusion_latency: None,
 					finalization_latency: None,
 					retrieval_latency: None,
-					theoretical: Some(chain_limits.compute_theoretical_limits(payload_size)),
+					theoretical: Some(chain_limits.compute_theoretical_limits(payload_size_report)),
 					chain_limits: None,
 					environment: None,
 					blocks: vec![],

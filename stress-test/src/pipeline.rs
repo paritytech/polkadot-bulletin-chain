@@ -12,6 +12,7 @@
 
 use anyhow::Result;
 use futures::future::{join_all, try_join_all};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
 	collections::HashMap,
 	sync::{
@@ -48,6 +49,119 @@ pub const WORK_CHANNEL_CAPACITY: usize = 1000;
 
 /// Concurrent `sign_store_extrinsic` calls per wave in [`generate_block_capacity_work`].
 pub const STORE_SIGN_PARALLELISM: usize = 16;
+
+/// Weighted mix of store payload sizes (integer weights; any positive scale).
+///
+/// Used by [`StorePayloadMode::Mixed`] so each signed store draws a size from a distribution.
+#[derive(Clone, Debug)]
+pub struct PayloadSizeMix {
+	sizes: Vec<usize>,
+	weights: Vec<u32>,
+	total: u32,
+}
+
+impl PayloadSizeMix {
+	/// Build from `(payload_bytes, weight)` pairs. Entries with weight `0` are skipped.
+	pub fn from_weighted_sizes(pairs: &[(usize, u32)]) -> anyhow::Result<Self> {
+		if pairs.is_empty() {
+			anyhow::bail!("PayloadSizeMix: need at least one (size, weight)");
+		}
+		let mut sizes = Vec::with_capacity(pairs.len());
+		let mut weights = Vec::with_capacity(pairs.len());
+		let mut total = 0u32;
+		for &(sz, w) in pairs {
+			if w == 0 {
+				continue;
+			}
+			sizes.push(sz);
+			weights.push(w);
+			total = total.saturating_add(w);
+		}
+		if total == 0 {
+			anyhow::bail!("PayloadSizeMix: all weights zero");
+		}
+		Ok(Self { sizes, weights, total })
+	}
+
+	#[must_use]
+	pub fn max_payload_bytes(&self) -> usize {
+		*self.sizes.iter().max().unwrap_or(&0)
+	}
+
+	/// Expected payload size (for capacity estimates and monitor byte stats).
+	#[must_use]
+	pub fn mean_payload_bytes(&self) -> f64 {
+		let sum: f64 = self
+			.sizes
+			.iter()
+			.zip(self.weights.iter())
+			.map(|(&s, &w)| s as f64 * f64::from(w))
+			.sum();
+		sum / f64::from(self.total)
+	}
+
+	/// Weighted mean of per-size estimated txs/block (used to size mixed-mode account counts).
+	#[must_use]
+	pub fn weighted_mean_est_block_cap(
+		&self,
+		block_usable_bytes: usize,
+		extrinsic_overhead: usize,
+		max_block_txs: usize,
+	) -> usize {
+		let total_w = u64::from(self.total);
+		let sum_caps: f64 = self
+			.sizes
+			.iter()
+			.zip(self.weights.iter())
+			.map(|(&sz, &w)| {
+				let cap =
+					(block_usable_bytes / (sz + extrinsic_overhead).max(1)).min(max_block_txs);
+				cap as f64 * f64::from(w)
+			})
+			.sum();
+		(sum_caps / total_w as f64).floor().max(1.0) as usize
+	}
+
+	pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+		let mut r = rng.gen_range(0..self.total);
+		for i in 0..self.sizes.len() {
+			let w = self.weights[i];
+			if r < w {
+				return self.sizes[i];
+			}
+			r -= w;
+		}
+		*self.sizes.last().expect("non-empty")
+	}
+}
+
+/// How [`generate_store_work_for_keypairs`] chooses per-account payload sizes.
+#[derive(Clone, Debug)]
+pub enum StorePayloadMode {
+	Fixed(usize),
+	Mixed(PayloadSizeMix),
+}
+
+impl StorePayloadMode {
+	#[must_use]
+	pub fn authorize_bytes_per_account(&self) -> u64 {
+		let max_payload = match self {
+			Self::Fixed(n) => *n,
+			Self::Mixed(m) => m.max_payload_bytes(),
+		};
+		(max_payload.saturating_add(1024)) as u64
+	}
+
+	/// Bytes assumed per store tx in block monitor [`BlockStats::payload_bytes`] (approximate for
+	/// mixed).
+	#[must_use]
+	pub fn monitor_payload_bytes_per_tx(&self) -> u64 {
+		match self {
+			Self::Fixed(n) => *n as u64,
+			Self::Mixed(m) => m.mean_payload_bytes().round().max(1.0) as u64,
+		}
+	}
+}
 
 /// Max ready+future tx pool depth before [`wait_until_txpool_can_pull_work`] returns; also how many
 /// **store work items dispatched** to per-worker channels before the reader calls that check
@@ -167,7 +281,7 @@ async fn wait_until_txpool_can_pull_work(ws_url: &str) {
 #[allow(clippy::too_many_arguments)]
 fn spawn_pipeline_dual_monitor(
 	dual: DualBlockSubscription,
-	payload_size: usize,
+	monitor_payload_bytes_per_tx: u64,
 	fork_detections: Arc<AtomicU64>,
 	new_block_notify: Arc<Notify>,
 	block_stats: Arc<Mutex<Vec<BlockStats>>>,
@@ -235,7 +349,7 @@ fn spawn_pipeline_dual_monitor(
 						number: block_number,
 						hash: block_hash,
 						tx_count: total_store_extrinsics,
-						payload_bytes: total_store_extrinsics * payload_size as u64,
+						payload_bytes: total_store_extrinsics.saturating_mul(monitor_payload_bytes_per_tx),
 						timestamp_ms,
 						prefill: false,
 					});
@@ -547,11 +661,13 @@ pub async fn run_block_capacity_pipeline(
 	dual: DualBlockSubscription,
 	ws_urls: &[&str],
 	submitters: usize,
-	payload_size: usize,
+	store_payload: StorePayloadMode,
 	client: &OnlineClient<BulletinConfig>,
 	authorizer: &Keypair,
 	authorizer_nonce_tracker: &NonceTracker,
 ) -> Result<BulkStoreResult> {
+	let monitor_payload_bytes_per_tx = store_payload.monitor_payload_bytes_per_tx();
+	let authorize_payload_bytes = store_payload.authorize_bytes_per_account();
 	const TX_TIMEOUT_SECS: u64 = 60;
 
 	let fork_detections = Arc::new(AtomicU64::new(0));
@@ -562,7 +678,7 @@ pub async fn run_block_capacity_pipeline(
 
 	let monitor_handle = spawn_pipeline_dual_monitor(
 		dual,
-		payload_size,
+		monitor_payload_bytes_per_tx,
 		fork_detections.clone(),
 		new_block_notify.clone(),
 		block_stats.clone(),
@@ -637,7 +753,7 @@ pub async fn run_block_capacity_pipeline(
 						authorizer_nonce_tracker,
 						&account_ids,
 						1,
-						(payload_size + 1024) as u64,
+						authorize_payload_bytes,
 					)
 					.await?;
 				}
@@ -757,13 +873,27 @@ async fn generate_store_work_for_keypairs(
 	work_tx: &mpsc::Sender<StressWorkItem>,
 	client: Arc<OnlineClient<BulletinConfig>>,
 	keypairs: Vec<Keypair>,
-	payload_size: usize,
+	mode: &StorePayloadMode,
+	mix_rng: Option<Arc<Mutex<StdRng>>>,
 ) -> Result<()> {
 	for chunk in keypairs.chunks(STORE_SIGN_PARALLELISM) {
 		let signed = try_join_all(chunk.iter().map(|kp| {
 			let kp = kp.clone();
 			let client = client.clone();
+			let mix_rng = mix_rng.clone();
+			let mode = mode.clone();
 			async move {
+				let payload_size = match &mode {
+					StorePayloadMode::Fixed(n) => *n,
+					StorePayloadMode::Mixed(mix) => {
+						let mut g = mix_rng
+							.as_ref()
+							.ok_or_else(|| anyhow::anyhow!("pipeline: mixed mode requires RNG"))?
+							.lock()
+							.unwrap();
+						mix.sample(&mut *g)
+					},
+				};
 				let payload = tokio::task::spawn_blocking(move || {
 					crate::store::generate_payload(payload_size)
 				})
@@ -794,15 +924,27 @@ async fn generate_store_work_for_keypairs(
 /// then one signed [`StressWorkItem::Store`] per account (nonce 0). Signing runs in waves of
 /// [`STORE_SIGN_PARALLELISM`] (parallel per wave), with [`tokio::task::spawn_blocking`] for
 /// payloads.
+///
+/// For [`StorePayloadMode::Mixed`], `mix_seed` fixes the RNG (`StdRng::seed_from_u64`); if `None`,
+/// uses a fresh `StdRng::from_entropy()` for this run.
 pub async fn generate_block_capacity_work(
 	work_tx: mpsc::Sender<StressWorkItem>,
 	plans: &[IterationPlan],
-	payload_size: usize,
+	store_payload: StorePayloadMode,
+	mix_seed: Option<u64>,
 	client: Arc<OnlineClient<BulletinConfig>>,
 ) -> Result<()> {
 	if plans.is_empty() || plans.iter().all(|p| p.account_count == 0) {
 		return Ok(());
 	}
+
+	let mix_rng = match &store_payload {
+		StorePayloadMode::Mixed(_) => Some(Arc::new(Mutex::new(match mix_seed {
+			Some(s) => StdRng::seed_from_u64(s),
+			None => StdRng::from_entropy(),
+		}))),
+		StorePayloadMode::Fixed(_) => None,
+	};
 
 	for i in 0..plans.len() {
 		if plans[i].account_count == 0 {
@@ -832,8 +974,14 @@ pub async fn generate_block_capacity_work(
 				.await
 				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (authorize+init)"))?;
 
-			generate_store_work_for_keypairs(&work_tx, client.clone(), keypairs, payload_size)
-				.await?;
+			generate_store_work_for_keypairs(
+				&work_tx,
+				client.clone(),
+				keypairs,
+				&store_payload,
+				mix_rng.clone(),
+			)
+			.await?;
 
 			batch_start = batch_end;
 		}
