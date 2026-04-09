@@ -184,6 +184,47 @@ fn spawn_pipeline_dual_monitor(
 		let mut prev_confirmed_timestamp_ms: Option<u64> = None;
 		monitor_ready.notify_one();
 
+		// Shared logic: confirm a finalized pending block and push to stats.
+		let confirm_block = |pb: PendingBlock,
+		                     prev_ts: &mut Option<u64>,
+		                     measured: &mut u32,
+		                     cumulative: &mut u64| {
+			let interval_ms = match (pb.timestamp_ms, *prev_ts) {
+				(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
+				_ => None,
+			};
+			if pb.timestamp_ms.is_some() {
+				*prev_ts = pb.timestamp_ms;
+			}
+
+			let is_measured = !pb.prefill && pb.tx_count > 0;
+			*cumulative = cumulative.saturating_add(pb.tx_count);
+			if is_measured {
+				*measured += 1;
+				if *measured == 1 || measured.is_multiple_of(5) {
+					log::debug!(
+						"pipeline monitor: finalized measured #{} height={} \
+						 store_txs_in_block={} cumulative_stored_events_seen={}",
+						*measured,
+						pb.number,
+						pb.tx_count,
+						*cumulative,
+					);
+				}
+			}
+
+			block_stats.lock().unwrap().push(BlockStats {
+				number: pb.number,
+				tx_count: pb.tx_count,
+				payload_bytes: pb.payload_bytes,
+				prefill: pb.prefill,
+				timestamp_ms: pb.timestamp_ms,
+				hash: Some(format!("{:?}", pb.hash)),
+				finalized: true,
+				interval_ms,
+			});
+		};
+
 		loop {
 			tokio::select! {
 				Some(block) = best_rx.recv() => {
@@ -242,38 +283,12 @@ fn spawn_pipeline_dual_monitor(
 
 					if block_number <= max_finalized {
 						if let Some(pb) = pending.remove(&block_number) {
-							let interval_ms = match (pb.timestamp_ms, prev_confirmed_timestamp_ms) {
-								(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
-								_ => None,
-							};
-							if pb.timestamp_ms.is_some() {
-								prev_confirmed_timestamp_ms = pb.timestamp_ms;
-							}
-
-							let is_measured = !pb.prefill && pb.tx_count > 0;
-							cumulative_stored_events = cumulative_stored_events.saturating_add(pb.tx_count);
-							if is_measured {
-								measured_blocks += 1;
-								if measured_blocks == 1 || measured_blocks.is_multiple_of(5) {
-									log::debug!(
-										"pipeline monitor: finalized measured #{measured_blocks} height={} \
-										 store_txs_in_block={} cumulative_stored_events_seen={cumulative_stored_events}",
-										pb.number,
-										pb.tx_count
-									);
-								}
-							}
-
-							block_stats.lock().unwrap().push(BlockStats {
-								number: pb.number,
-								tx_count: pb.tx_count,
-								payload_bytes: pb.payload_bytes,
-								prefill: pb.prefill,
-								timestamp_ms: pb.timestamp_ms,
-								hash: Some(format!("{:?}", pb.hash)),
-								finalized: true,
-								interval_ms,
-							});
+							confirm_block(
+								pb,
+								&mut prev_confirmed_timestamp_ms,
+								&mut measured_blocks,
+								&mut cumulative_stored_events,
+							);
 						}
 					}
 				}
@@ -291,38 +306,12 @@ fn spawn_pipeline_dual_monitor(
 
 					for num in to_confirm {
 						if let Some(pb) = pending.remove(&num) {
-							let interval_ms = match (pb.timestamp_ms, prev_confirmed_timestamp_ms) {
-								(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
-								_ => None,
-							};
-							if pb.timestamp_ms.is_some() {
-								prev_confirmed_timestamp_ms = pb.timestamp_ms;
-							}
-
-							let is_measured = !pb.prefill && pb.tx_count > 0;
-							cumulative_stored_events = cumulative_stored_events.saturating_add(pb.tx_count);
-							if is_measured {
-								measured_blocks += 1;
-								if measured_blocks == 1 || measured_blocks.is_multiple_of(5) {
-									log::debug!(
-										"pipeline monitor: finalized measured #{measured_blocks} height={} \
-										 store_txs_in_block={} cumulative_stored_events_seen={cumulative_stored_events}",
-										pb.number,
-										pb.tx_count
-									);
-								}
-							}
-
-							block_stats.lock().unwrap().push(BlockStats {
-								number: pb.number,
-								tx_count: pb.tx_count,
-								payload_bytes: pb.payload_bytes,
-								prefill: pb.prefill,
-								timestamp_ms: pb.timestamp_ms,
-								hash: Some(format!("{:?}", pb.hash)),
-								finalized: true,
-								interval_ms,
-							});
+							confirm_block(
+								pb,
+								&mut prev_confirmed_timestamp_ms,
+								&mut measured_blocks,
+								&mut cumulative_stored_events,
+							);
 						}
 					}
 
@@ -607,9 +596,7 @@ pub async fn run_block_capacity_pipeline(
 	let mut stores_dispatched_since_txpool: u64 = 0;
 
 	loop {
-		if POOL_PENDING_PAUSE_THRESHOLD > 0 &&
-			stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64
-		{
+		if stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64 {
 			wait_until_txpool_can_pull_work(ws_urls[0]).await;
 			stores_dispatched_since_txpool = 0;
 		}
@@ -750,15 +737,15 @@ pub async fn run_block_capacity_pipeline(
 	})
 }
 
-/// Sign and enqueue [`StressWorkItem::Store`] for `keypairs`. Processes keypairs in waves of
-/// [`STORE_SIGN_PARALLELISM`]: each wave builds payloads in [`tokio::task::spawn_blocking`], signs
-/// in parallel, then sends in order before starting the next wave.
-async fn generate_store_work_for_keypairs(
-	work_tx: &mpsc::Sender<StressWorkItem>,
-	client: Arc<OnlineClient<BulletinConfig>>,
-	keypairs: Vec<Keypair>,
+/// Sign [`StressWorkItem::Store`] items for `keypairs` (does not send them). Processes keypairs in
+/// waves of [`STORE_SIGN_PARALLELISM`]: each wave builds payloads in
+/// [`tokio::task::spawn_blocking`] and signs in parallel.
+async fn build_store_work_items(
+	client: &OnlineClient<BulletinConfig>,
+	keypairs: &[Keypair],
 	payload_size: usize,
-) -> Result<()> {
+) -> Result<Vec<StressWorkItem>> {
+	let mut items = Vec::with_capacity(keypairs.len());
 	for chunk in keypairs.chunks(STORE_SIGN_PARALLELISM) {
 		let signed = try_join_all(chunk.iter().map(|kp| {
 			let kp = kp.clone();
@@ -776,13 +763,10 @@ async fn generate_store_work_for_keypairs(
 		.await?;
 
 		for (account_id, encoded) in signed {
-			work_tx
-				.send(StressWorkItem::Store { account_id, extrinsic: Arc::new(encoded) })
-				.await
-				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
+			items.push(StressWorkItem::Store { account_id, extrinsic: Arc::new(encoded) });
 		}
 	}
-	Ok(())
+	Ok(items)
 }
 
 /// Push work items for iterative block-capacity runs (continuous production). Backpressure comes
@@ -824,16 +808,24 @@ pub async fn generate_block_capacity_work(
 
 			let keypairs = keypairs_for_range(&plans[i], batch_start, batch_end);
 			let auth_batches = auth_batches_from_keypairs(&keypairs);
+
+			// Sign store extrinsics before sending the auth item — signing only
+			// needs the keypairs by reference and does not touch the chain, so
+			// ordering is safe.  The reader will process AuthorizeAndInitSlice
+			// first (it arrives on the channel before the Store items).
+			let store_items = build_store_work_items(&client, &keypairs, payload_size).await?;
+
 			work_tx
-				.send(StressWorkItem::AuthorizeAndInitSlice {
-					auth_batches,
-					keypairs: keypairs.clone(),
-				})
+				.send(StressWorkItem::AuthorizeAndInitSlice { auth_batches, keypairs })
 				.await
 				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (authorize+init)"))?;
 
-			generate_store_work_for_keypairs(&work_tx, client.clone(), keypairs, payload_size)
-				.await?;
+			for item in store_items {
+				work_tx
+					.send(item)
+					.await
+					.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
+			}
 
 			batch_start = batch_end;
 		}
