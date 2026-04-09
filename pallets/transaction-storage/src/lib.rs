@@ -297,11 +297,11 @@ pub mod pallet {
 		/// Content hash was not calculated.
 		InvalidContentHash,
 		/// Auto-renewal is already enabled for this content hash.
-		AutoRenewAlreadyEnabled,
+		AutoRenewalAlreadyEnabled,
 		/// Auto-renewal is not enabled for this content hash.
-		AutoRenewNotEnabled,
+		AutoRenewalNotEnabled,
 		/// Caller is not the owner of the auto-renewal registration.
-		NotAutoRenewOwner,
+		NotAutoRenewalOwner,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -823,8 +823,8 @@ pub mod pallet {
 		/// registration is automatically removed for failed items.
 		#[pallet::call_index(11)]
 		#[pallet::weight((T::WeightInfo::process_auto_renewals(), DispatchClass::Mandatory))]
-		pub fn process_auto_renewals(_origin: OriginFor<T>) -> DispatchResultWithPostInfo {
-			ensure_none(_origin)?;
+		pub fn process_auto_renewals(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
+			ensure_none(origin)?;
 			let pending = PendingAutoRenewals::<T>::take();
 
 			let extrinsic_index =
@@ -885,6 +885,7 @@ pub mod pallet {
 		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
 		/// data size). The authorization is **not** consumed here; it is consumed each time
 		/// the data is auto-renewed (every `StoragePeriod` blocks).
+		/// Authorization is checked here but might still be missing when it actually renewed.
 		///
 		/// Emits [`AutoRenewEnabled`](Event::AutoRenewEnabled) when successful.
 		#[pallet::call_index(12)]
@@ -966,11 +967,11 @@ pub mod pallet {
 		/// An expired preimage authorization was removed.
 		ExpiredPreimageAuthorizationRemoved { content_hash: ContentHash },
 		/// Auto-renewal was enabled for `content_hash` by `who`.
-		AutoRenewEnabled { content_hash: ContentHash, who: T::AccountId },
+		AutoRenewalEnabled { content_hash: ContentHash, who: T::AccountId },
 		/// Auto-renewal was disabled for `content_hash` by `who`.
-		AutoRenewDisabled { content_hash: ContentHash, who: T::AccountId },
+		AutoRenewalDisabled { content_hash: ContentHash, who: T::AccountId },
 		/// Data was automatically renewed at `index` with `content_hash` for `account`.
-		TransactionAutoRenewed { index: u32, content_hash: ContentHash, account: T::AccountId },
+		DataAutoRenewed { index: u32, content_hash: ContentHash, account: T::AccountId },
 		/// Auto-renewal failed for `content_hash` (insufficient authorization for `account`).
 		AutoRenewalFailed { content_hash: ContentHash, account: T::AccountId },
 	}
