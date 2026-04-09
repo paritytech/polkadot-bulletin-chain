@@ -183,7 +183,6 @@ members = [
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
 	"stress-test",
-	"tools/encode-westend-calls",
 ]
 # Exclude rust/authorize-and-store example - it uses subxt directly with metadata codegen
 # and is not part of the main workspace build. Build it separately:
