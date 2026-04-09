@@ -47,6 +47,11 @@ struct Cli {
 	#[arg(long, default_value = "20", global = true)]
 	iteration_blocks: u32,
 
+	/// Block-capacity `--variants mixed` only: seed for random payload-size draws (reproducible
+	/// runs)
+	#[arg(long, global = true)]
+	mix_seed: Option<u64>,
+
 	/// Output format
 	#[arg(long, default_value = "text", global = true)]
 	output: OutputFormat,
@@ -70,8 +75,8 @@ enum Commands {
 		#[arg(default_value = "block-capacity")]
 		test: String,
 
-		/// Comma-separated payload size labels (e.g. "1KB,128KB,1MB").
-		/// Omit to run all.
+		/// Comma-separated payload size labels (e.g. "1KB,128KB,1MB") or **MIXED** for a weighted
+		/// real-world size mix. Omit to run all fixed sizes (no mixed).
 		#[arg(long)]
 		variants: Option<String>,
 	},
@@ -296,6 +301,7 @@ async fn run_throughput(
 				cli.target_blocks,
 				cli.iteration_blocks,
 				variants,
+				cli.mix_seed,
 				results,
 				on_result,
 			)
