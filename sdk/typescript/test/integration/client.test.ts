@@ -114,237 +114,217 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       console.log("   CID:", result.cid.toString())
     })
 
-    it(
-      "should store chunked data with progress tracking",
-      {
-        timeout: 180_000,
-      },
-      async () => {
-        // Create 5 MiB test data
-        const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
+    it("should store chunked data with progress tracking", {
+      timeout: 180_000,
+    }, async () => {
+      // Create 5 MiB test data
+      const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
 
-        let chunksCompleted = 0
-        let manifestCreated = false
-        let totalChunks = 0
+      let chunksCompleted = 0
+      let manifestCreated = false
+      let totalChunks = 0
 
-        const result = await client
-          .store(data)
-          .withChunkSize(1024 * 1024)
-          .withCallback((event) => {
-            switch (event.type) {
-              case "chunk_started":
-                if (totalChunks === 0) totalChunks = event.total
-                break
-              case "chunk_completed":
-                chunksCompleted++
-                console.log(
-                  `   Chunk ${event.index + 1}/${event.total} completed`,
-                )
-                break
-              case "manifest_created":
-                manifestCreated = true
-                console.log("   Manifest created:", event.cid.toString())
-                break
-            }
+      const result = await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
+          switch (event.type) {
+            case "chunk_started":
+              if (totalChunks === 0) totalChunks = event.total
+              break
+            case "chunk_completed":
+              chunksCompleted++
+              console.log(
+                `   Chunk ${event.index + 1}/${event.total} completed`,
+              )
+              break
+            case "manifest_created":
+              manifestCreated = true
+              console.log("   Manifest created:", event.cid.toString())
+              break
+          }
+        })
+        .send()
+
+      expect(result).toBeDefined()
+      expect(result.chunks).toBeDefined()
+      expect(result.chunks?.numChunks).toBe(5) // 5 MiB / 1 MiB = 5 chunks
+      expect(chunksCompleted).toBe(5)
+      expect(manifestCreated).toBe(true)
+
+      console.log("Chunked store test passed")
+      console.log("   Chunks:", result.chunks?.numChunks)
+    })
+
+    it("should fire progress events in correct order during chunked upload", {
+      timeout: 180_000,
+    }, async () => {
+      const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
+
+      const events: { type: string; chunkIndex?: number }[] = []
+      const highLevelTypes = new Set([
+        "chunk_started",
+        "chunk_completed",
+        "manifest_started",
+        "manifest_created",
+        "completed",
+      ])
+
+      const result = await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
+          events.push({
+            type: event.type,
+            chunkIndex: "chunkIndex" in event ? event.chunkIndex : undefined,
           })
-          .send()
+        })
+        .send()
 
-        expect(result).toBeDefined()
-        expect(result.chunks).toBeDefined()
-        expect(result.chunks?.numChunks).toBe(5) // 5 MiB / 1 MiB = 5 chunks
-        expect(chunksCompleted).toBe(5)
-        expect(manifestCreated).toBe(true)
+      // Verify event order: started/completed pairs for each chunk, then manifest, then completed
+      expect(result.chunks?.numChunks).toBe(3)
 
-        console.log("Chunked store test passed")
-        console.log("   Chunks:", result.chunks?.numChunks)
-      },
-    )
+      // Filter to high-level events (ignore intermediate tx status: signed, broadcasted, in_block)
+      const highLevelEvents = events.filter((e) => highLevelTypes.has(e.type))
+      const expectedOrder = [
+        "chunk_started",
+        "chunk_completed",
+        "chunk_started",
+        "chunk_completed",
+        "chunk_started",
+        "chunk_completed",
+        "manifest_started",
+        "manifest_created",
+        "completed",
+      ]
+      expect(highLevelEvents.map((e) => e.type)).toEqual(expectedOrder)
 
-    it(
-      "should fire progress events in correct order during chunked upload",
-      {
-        timeout: 180_000,
-      },
-      async () => {
-        const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
+      // Verify chunkIndex is set on tx status events for chunk submissions
+      const chunkTxEvents = events.filter(
+        (e) =>
+          (e.type === "signed" ||
+            e.type === "broadcasted" ||
+            e.type === "in_block") &&
+          e.chunkIndex !== undefined,
+      )
+      expect(chunkTxEvents.length).toBeGreaterThan(0)
 
-        const events: { type: string; chunkIndex?: number }[] = []
-        const highLevelTypes = new Set([
-          "chunk_started",
-          "chunk_completed",
-          "manifest_started",
-          "manifest_created",
-          "completed",
-        ])
+      // Each chunk tx event should reference a valid chunk index (0, 1, or 2)
+      for (const e of chunkTxEvents) {
+        expect(e.chunkIndex).toBeGreaterThanOrEqual(0)
+        expect(e.chunkIndex).toBeLessThan(3)
+      }
 
-        const result = await client
-          .store(data)
-          .withChunkSize(1024 * 1024)
-          .withCallback((event) => {
-            events.push({
+      // Manifest tx events should NOT have chunkIndex
+      // Find events between manifest_started and manifest_created
+      const manifestStartIdx = events.findIndex(
+        (e) => e.type === "manifest_started",
+      )
+      const manifestEndIdx = events.findIndex(
+        (e) => e.type === "manifest_created",
+      )
+      const manifestTxEvents = events.slice(
+        manifestStartIdx + 1,
+        manifestEndIdx,
+      )
+      for (const e of manifestTxEvents) {
+        expect(e.chunkIndex).toBeUndefined()
+      }
+    })
+
+    it("should fire chunk events sequentially (each chunk submitted before next starts)", {
+      timeout: 180_000,
+    }, async () => {
+      const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
+
+      const eventLog: { type: string; index: number; time: number }[] = []
+
+      await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
+          if (
+            event.type === ChunkStatus.ChunkStarted ||
+            event.type === ChunkStatus.ChunkCompleted
+          ) {
+            eventLog.push({
               type: event.type,
-              chunkIndex: "chunkIndex" in event ? event.chunkIndex : undefined,
+              index: event.index,
+              time: Date.now(),
             })
-          })
-          .send()
+          }
+        })
+        .send()
 
-        // Verify event order: started/completed pairs for each chunk, then manifest, then completed
-        expect(result.chunks?.numChunks).toBe(3)
-
-        // Filter to high-level events (ignore intermediate tx status: signed, broadcasted, in_block)
-        const highLevelEvents = events.filter((e) => highLevelTypes.has(e.type))
-        const expectedOrder = [
-          "chunk_started",
-          "chunk_completed",
-          "chunk_started",
-          "chunk_completed",
-          "chunk_started",
-          "chunk_completed",
-          "manifest_started",
-          "manifest_created",
-          "completed",
-        ]
-        expect(highLevelEvents.map((e) => e.type)).toEqual(expectedOrder)
-
-        // Verify chunkIndex is set on tx status events for chunk submissions
-        const chunkTxEvents = events.filter(
+      // 2x started + 2x completed for chunks, plus manifest events
+      expect(
+        eventLog.filter(
           (e) =>
-            (e.type === "signed" ||
-              e.type === "broadcasted" ||
-              e.type === "in_block") &&
-            e.chunkIndex !== undefined,
-        )
-        expect(chunkTxEvents.length).toBeGreaterThan(0)
+            e.type === ChunkStatus.ChunkStarted ||
+            e.type === ChunkStatus.ChunkCompleted,
+        ),
+      ).toHaveLength(4)
 
-        // Each chunk tx event should reference a valid chunk index (0, 1, or 2)
-        for (const e of chunkTxEvents) {
-          expect(e.chunkIndex).toBeGreaterThanOrEqual(0)
-          expect(e.chunkIndex).toBeLessThan(3)
-        }
+      // Verify sequential order: chunk 0 must complete before chunk 1 starts
+      const chunk0Completed = eventLog.find(
+        (e) => e.type === ChunkStatus.ChunkCompleted && e.index === 0,
+      )
+      const chunk1Started = eventLog.find(
+        (e) => e.type === ChunkStatus.ChunkStarted && e.index === 1,
+      )
+      expect(chunk0Completed).toBeDefined()
+      expect(chunk1Started).toBeDefined()
+      expect(chunk0Completed?.time).toBeLessThanOrEqual(chunk1Started?.time)
+    })
 
-        // Manifest tx events should NOT have chunkIndex
-        // Find events between manifest_started and manifest_created
-        const manifestStartIdx = events.findIndex(
-          (e) => e.type === "manifest_started",
-        )
-        const manifestEndIdx = events.findIndex(
-          (e) => e.type === "manifest_created",
-        )
-        const manifestTxEvents = events.slice(
-          manifestStartIdx + 1,
-          manifestEndIdx,
-        )
-        for (const e of manifestTxEvents) {
-          expect(e.chunkIndex).toBeUndefined()
-        }
-      },
-    )
+    it("should include CID in chunk_completed events", {
+      timeout: 180_000,
+    }, async () => {
+      const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
-    it(
-      "should fire chunk events sequentially (each chunk submitted before next starts)",
-      {
-        timeout: 180_000,
-      },
-      async () => {
-        const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
+      const chunkCids: string[] = []
 
-        const eventLog: { type: string; index: number; time: number }[] = []
+      const result = await client
+        .store(data)
+        .withChunkSize(1024 * 1024)
+        .withCallback((event) => {
+          if (event.type === ChunkStatus.ChunkCompleted) {
+            chunkCids.push(event.cid.toString())
+          }
+        })
+        .send()
 
-        await client
-          .store(data)
-          .withChunkSize(1024 * 1024)
-          .withCallback((event) => {
-            if (
-              event.type === ChunkStatus.ChunkStarted ||
-              event.type === ChunkStatus.ChunkCompleted
-            ) {
-              eventLog.push({
-                type: event.type,
-                index: event.index,
-                time: Date.now(),
-              })
-            }
-          })
-          .send()
+      expect(chunkCids).toHaveLength(2)
+      expect(result.chunks).toBeDefined()
+      expect(result.chunks?.chunkCids).toHaveLength(2)
+      // CIDs from events should match CIDs from result
+      expect(chunkCids).toEqual(
+        result.chunks?.chunkCids.map((c) => c.toString()),
+      )
+    })
 
-        // 2x started + 2x completed for chunks, plus manifest events
-        expect(
-          eventLog.filter(
-            (e) =>
-              e.type === ChunkStatus.ChunkStarted ||
-              e.type === ChunkStatus.ChunkCompleted,
-          ),
-        ).toHaveLength(4)
+    it("should fire chunk_completed via store() builder for large data", {
+      timeout: 180_000,
+    }, async () => {
+      const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
-        // Verify sequential order: chunk 0 must complete before chunk 1 starts
-        const chunk0Completed = eventLog.find(
-          (e) => e.type === ChunkStatus.ChunkCompleted && e.index === 0,
-        )
-        const chunk1Started = eventLog.find(
-          (e) => e.type === ChunkStatus.ChunkStarted && e.index === 1,
-        )
-        expect(chunk0Completed).toBeDefined()
-        expect(chunk1Started).toBeDefined()
-        expect(chunk0Completed?.time).toBeLessThanOrEqual(chunk1Started?.time)
-      },
-    )
+      const events: string[] = []
 
-    it(
-      "should include CID in chunk_completed events",
-      {
-        timeout: 180_000,
-      },
-      async () => {
-        const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
+      const result = await client
+        .store(data)
+        .withCallback((event) => {
+          events.push(event.type)
+        })
+        .send()
 
-        const chunkCids: string[] = []
+      expect(result.cid).toBeDefined()
+      expect(result.chunks).toBeDefined()
+      expect(result.chunks?.numChunks).toBe(3)
 
-        const result = await client
-          .store(data)
-          .withChunkSize(1024 * 1024)
-          .withCallback((event) => {
-            if (event.type === ChunkStatus.ChunkCompleted) {
-              chunkCids.push(event.cid.toString())
-            }
-          })
-          .send()
-
-        expect(chunkCids).toHaveLength(2)
-        expect(result.chunks).toBeDefined()
-        expect(result.chunks?.chunkCids).toHaveLength(2)
-        // CIDs from events should match CIDs from result
-        expect(chunkCids).toEqual(
-          result.chunks?.chunkCids.map((c) => c.toString()),
-        )
-      },
-    )
-
-    it(
-      "should fire chunk_completed via store() builder for large data",
-      {
-        timeout: 180_000,
-      },
-      async () => {
-        const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
-
-        const events: string[] = []
-
-        const result = await client
-          .store(data)
-          .withCallback((event) => {
-            events.push(event.type)
-          })
-          .send()
-
-        expect(result.cid).toBeDefined()
-        expect(result.chunks).toBeDefined()
-        expect(result.chunks?.numChunks).toBe(3)
-
-        // Should have chunk events from the submission loop
-        expect(events.filter((e) => e === "chunk_completed")).toHaveLength(3)
-        expect(events.filter((e) => e === "chunk_started")).toHaveLength(3)
-      },
-    )
+      // Should have chunk events from the submission loop
+      expect(events.filter((e) => e === "chunk_completed")).toHaveLength(3)
+      expect(events.filter((e) => e === "chunk_started")).toHaveLength(3)
+    })
   })
 
   describe("Authorization Operations", () => {
