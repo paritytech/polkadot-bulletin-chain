@@ -1,17 +1,19 @@
 //! Producer / consumer pipeline for long block-capacity runs.
 //!
-//! A **generator** sends [`StressWorkItem`]s on a **bounded** `mpsc` channel. A **reader task**
-//! pulls that channel: authorize + nonce init for [`StressWorkItem::AuthorizeAndInitSlice`], then
-//! hands each [`StressWorkItem::Store`] to **N worker tasks** over bounded per-worker `mpsc`
-//! channels (load-balanced `try_send`, then blocking `send`); each worker uses **one** RPC
-//! connection. Every [`POOL_PENDING_PAUSE_THRESHOLD`] items **dispatched** to workers, it calls
-//! [`wait_until_txpool_can_pull_work`] **before** the next `recv`, so the generator blocks on the
-//! full channel while the node pool drains. The dual best/finalized monitor is **stats only**;
-//! after the run it is [`JoinHandle::abort`]ed. Store txs are signed in the generator
-//! ([`crate::store::sign_store_extrinsic`]).
+//! A **generator** sends [`StressWorkItem`]s on a **bounded** `mpsc` channel. The **reader** pulls
+//! that channel: [`StressWorkItem::Authorize`] is **spawned as a background task**, and
+//! [`StressWorkItem::AwaitPendingAuth`] is a barrier that awaits completion of the in-flight auth.
+//! Between barriers the reader dispatches [`StressWorkItem::Store`] items to **N worker tasks**
+//! over bounded per-worker `mpsc` channels, so authorization of batch N+1 runs concurrently with
+//! store dispatch of batch N. Every [`POOL_PENDING_PAUSE_THRESHOLD`] items dispatched to workers,
+//! the reader calls [`wait_until_txpool_can_pull_work`] before the next `recv`. Store txs are
+//! pre-signed at nonce 0 in the generator ([`crate::store::sign_store_extrinsic`]).
 
 use anyhow::Result;
-use futures::future::{join_all, try_join_all};
+use futures::{
+	future::join_all,
+	stream::{self, StreamExt, TryStreamExt},
+};
 use std::{
 	collections::HashMap,
 	sync::{
@@ -30,8 +32,8 @@ use crate::{
 	client::BulletinConfig,
 	report::BlockStats,
 	store::{
-		classify_tx_error, count_stored_events, read_timestamp_at, store_submit_pre_signed,
-		BulkStoreResult, DualBlockSubscription, PendingBlock, TxPoolError,
+		classify_tx_error, count_stored_events, read_timestamp_at, sign_store_extrinsic_blocking,
+		store_submit_pre_signed, BulkStoreResult, DualBlockSubscription, PendingBlock, TxPoolError,
 	},
 };
 
@@ -46,8 +48,10 @@ struct SubmitStats {
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
 
-/// Concurrent `sign_store_extrinsic` calls per wave in [`generate_block_capacity_work`].
-pub const STORE_SIGN_PARALLELISM: usize = 16;
+/// Maximum in-flight `sign_store_extrinsic` + `generate_payload` futures when building store work
+/// items ([`build_store_work_items`]). Uses `buffer_unordered` so a new future starts as soon as
+/// one completes (no chunk barriers).
+pub const STORE_SIGN_PARALLELISM: usize = 64;
 
 /// Max ready+future tx pool depth before [`wait_until_txpool_can_pull_work`] returns; also how many
 /// **store work items dispatched** to per-worker channels before the reader calls that check
@@ -70,12 +74,12 @@ pub fn block_capacity_accounts_per_iteration(
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum StressWorkItem {
-	/// Pre-built authorize batches and keypairs (derivation done in the generator). The reader
-	/// submits extrinsics (best-block wait), then runs [`crate::accounts::batch_init_nonces`].
-	AuthorizeAndInitSlice {
-		auth_batches: Vec<Vec<subxt::utils::AccountId32>>,
-		keypairs: Vec<Keypair>,
-	},
+	/// Authorization batch. The reader spawns this as a **background task** so store dispatch
+	/// from the previous batch can continue concurrently.
+	Authorize { batches: Vec<Vec<subxt::utils::AccountId32>> },
+	/// Barrier: the reader must await the in-flight background authorization task before
+	/// processing further [`Store`](Self::Store) items.
+	AwaitPendingAuth,
 	/// Pre-signed `TransactionStorage::store` extrinsic for a one-shot account (nonce 0).
 	Store { account_id: AccountId32, extrinsic: Arc<Vec<u8>> },
 }
@@ -573,7 +577,6 @@ pub async fn run_block_capacity_pipeline(
 	log::info!("pipeline: {num_connections} store worker(s), each with a dedicated RPC connection");
 
 	let submit_stats = Arc::new(Mutex::new(SubmitStats::default()));
-	let store_nonce_tracker = NonceTracker::new();
 	let ws_urls_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
 
 	let (worker_txs, worker_handles) = spawn_store_submit_workers(
@@ -584,16 +587,16 @@ pub async fn run_block_capacity_pipeline(
 		new_block_notify.clone(),
 	);
 
-	let mut nonce_ok_total = 0u64;
-	let mut nonce_fail_total = 0u64;
 	let start = Instant::now();
 
-	let mut dbg_work_authinit = 0u64;
+	let mut dbg_work_auth = 0u64;
 	let mut dbg_work_store = 0u64;
 
 	let mut store_worker_rr: usize = 0;
-
 	let mut stores_dispatched_since_txpool: u64 = 0;
+
+	// Background authorization task handle (interleaved with store dispatch).
+	let mut pending_auth: Option<tokio::task::JoinHandle<Result<()>>> = None;
 
 	loop {
 		if stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64 {
@@ -607,41 +610,49 @@ pub async fn run_block_capacity_pipeline(
 		};
 
 		match item {
-			StressWorkItem::AuthorizeAndInitSlice { auth_batches, keypairs } => {
-				if auth_batches.is_empty() || keypairs.is_empty() {
+			StressWorkItem::Authorize { batches } => {
+				if batches.is_empty() {
 					continue;
 				}
-				dbg_work_authinit += 1;
+				debug_assert!(
+					pending_auth.is_none(),
+					"Authorize received while previous auth still pending — \
+					 generator must send AwaitPendingAuth between Authorize items"
+				);
+				dbg_work_auth += 1;
+				let n_accounts: usize = batches.iter().map(|b| b.len()).sum();
 				log::info!(
-					"pipeline: AuthorizeAndInitSlice {} keypairs, {} batches (dispatch #{dbg_work_authinit})",
-					keypairs.len(),
-					auth_batches.len(),
+					"pipeline: Authorize {n_accounts} accounts, {} batches \
+					 (dispatch #{dbg_work_auth})",
+					batches.len(),
 				);
-				for account_ids in auth_batches {
-					authorize::authorize_account_batch(
-						client,
-						authorizer,
-						authorizer_nonce_tracker,
-						&account_ids,
-						1,
-						(payload_size + 1024) as u64,
-					)
-					.await?;
-				}
-				log::debug!(
-					"pipeline: AuthorizeAndInitSlice #{dbg_work_authinit} init nonces for {} accounts",
-					keypairs.len()
-				);
-				let (ok, fail) = crate::accounts::batch_init_nonces(
-					&pool,
-					&store_nonce_tracker,
-					&keypairs,
-					num_connections * 4,
-				)
-				.await;
-				nonce_ok_total += ok;
-				nonce_fail_total += fail;
+
+				// Spawn authorization as a background task so the reader can
+				// continue dispatching Store items from the previous batch.
+				let task_client = client.clone();
+				let task_authorizer = authorizer.clone();
+				let task_nonce = authorizer_nonce_tracker.clone();
+				let task_payload_size = payload_size;
+				pending_auth = Some(tokio::spawn(async move {
+					for account_ids in batches {
+						authorize::authorize_account_batch(
+							&task_client,
+							&task_authorizer,
+							&task_nonce,
+							&account_ids,
+							1,
+							(task_payload_size + 1024) as u64,
+						)
+						.await?;
+					}
+					Ok(())
+				}));
 			},
+			StressWorkItem::AwaitPendingAuth =>
+				if let Some(handle) = pending_auth.take() {
+					handle.await.map_err(|e| anyhow::anyhow!("auth task join: {e}"))??;
+					log::debug!("pipeline: AwaitPendingAuth completed (auth #{dbg_work_auth})");
+				},
 			StressWorkItem::Store { account_id, extrinsic } => {
 				dispatch_store_to_workers(account_id, extrinsic, &worker_txs, &mut store_worker_rr)
 					.await?;
@@ -657,6 +668,11 @@ pub async fn run_block_capacity_pipeline(
 				}
 			},
 		}
+	}
+
+	// Await any trailing auth task.
+	if let Some(handle) = pending_auth.take() {
+		handle.await.map_err(|e| anyhow::anyhow!("trailing auth task join: {e}"))??;
 	}
 
 	log::info!("pipeline: work stream finished, closing store worker inputs");
@@ -719,7 +735,7 @@ pub async fn run_block_capacity_pipeline(
 	);
 	log::debug!(
 		"pipeline: DONE detail — pool_full_retries={total_pool_full} stale_nonces={total_stale} \
-		 nonce_init_ok={nonce_ok_total} nonce_init_fail={nonce_fail_total} fork_detections={fork_detections}"
+		 fork_detections={fork_detections}"
 	);
 
 	Ok(BulkStoreResult {
@@ -729,55 +745,61 @@ pub async fn run_block_capacity_pipeline(
 		stale_nonces: total_stale,
 		pool_full_retries: total_pool_full,
 		remaining_in_queue: 0,
-		nonces_initialized: nonce_ok_total,
-		nonces_failed: nonce_fail_total,
+		nonces_initialized: 0,
+		nonces_failed: 0,
 		duration,
 		blocks: all_blocks,
 		fork_detections,
 	})
 }
 
-/// Sign [`StressWorkItem::Store`] items for `keypairs` (does not send them). Processes keypairs in
-/// waves of [`STORE_SIGN_PARALLELISM`]: each wave builds payloads in
-/// [`tokio::task::spawn_blocking`] and signs in parallel.
+/// Sign [`StressWorkItem::Store`] items for `keypairs` (does not send them). Runs up to
+/// [`STORE_SIGN_PARALLELISM`] tasks concurrently via `buffer_unordered`. Each task runs payload
+/// generation, SCALE encoding, and sr25519 signing in a single [`tokio::task::spawn_blocking`]
+/// call, keeping all CPU work off the async runtime.
 async fn build_store_work_items(
 	client: &OnlineClient<BulletinConfig>,
 	keypairs: &[Keypair],
 	payload_size: usize,
 ) -> Result<Vec<StressWorkItem>> {
-	let mut items = Vec::with_capacity(keypairs.len());
-	for chunk in keypairs.chunks(STORE_SIGN_PARALLELISM) {
-		let signed = try_join_all(chunk.iter().map(|kp| {
-			let kp = kp.clone();
+	stream::iter(keypairs.iter().cloned())
+		.map(|kp| {
 			let client = client.clone();
 			async move {
-				let payload = tokio::task::spawn_blocking(move || {
-					crate::store::generate_payload(payload_size)
+				let (account_id, encoded) = tokio::task::spawn_blocking(move || {
+					let payload = crate::store::generate_payload(payload_size);
+					let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
+					Ok::<_, anyhow::Error>((kp.public_key().to_account_id(), encoded))
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("pipeline: payload spawn_blocking join error: {e}"))?;
-				let encoded = crate::store::sign_store_extrinsic(&client, &kp, &payload, 0).await?;
-				Ok::<_, anyhow::Error>((kp.public_key().to_account_id(), encoded))
+				.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
+				Ok::<_, anyhow::Error>(StressWorkItem::Store {
+					account_id,
+					extrinsic: Arc::new(encoded),
+				})
 			}
-		}))
-		.await?;
-
-		for (account_id, encoded) in signed {
-			items.push(StressWorkItem::Store { account_id, extrinsic: Arc::new(encoded) });
-		}
-	}
-	Ok(items)
+		})
+		.buffer_unordered(STORE_SIGN_PARALLELISM)
+		.try_collect()
+		.await
 }
 
-/// Push work items for iterative block-capacity runs (continuous production). Backpressure comes
-/// from the bounded channel when the reader/workers are slow, and from periodic `txpool_status`
-/// checks (see [`POOL_PENDING_PAUSE_THRESHOLD`]) before further `recv`s after enough store items
-/// are dispatched to workers.
+/// Push work items for iterative block-capacity runs (continuous production).
 ///
-/// For each iteration: [`AUTHORIZE_BATCH_SIZE`]-chunk [`StressWorkItem::AuthorizeAndInitSlice`],
-/// then one signed [`StressWorkItem::Store`] per account (nonce 0). Signing runs in waves of
-/// [`STORE_SIGN_PARALLELISM`] (parallel per wave), with [`tokio::task::spawn_blocking`] for
-/// payloads.
+/// Work items are **interleaved** so that authorization of batch N+1 runs concurrently with store
+/// dispatch of batch N:
+///
+/// ```text
+/// Authorize(0), AwaitPendingAuth,
+/// Authorize(1), Store(0)…, AwaitPendingAuth,
+/// Authorize(2), Store(1)…, AwaitPendingAuth,
+/// …
+/// Store(last)…
+/// ```
+///
+/// The reader spawns each `Authorize` as a background task and only blocks on
+/// `AwaitPendingAuth`, so stores from the previous batch flow to workers while the next batch's
+/// authorization waits for block inclusion.
 pub async fn generate_block_capacity_work(
 	work_tx: mpsc::Sender<StressWorkItem>,
 	plans: &[IterationPlan],
@@ -788,46 +810,73 @@ pub async fn generate_block_capacity_work(
 		return Ok(());
 	}
 
-	for i in 0..plans.len() {
-		if plans[i].account_count == 0 {
+	let mut prev_store_items: Option<Vec<StressWorkItem>> = None;
+	let mut is_first_batch = true;
+
+	for (iter_idx, plan) in plans.iter().enumerate() {
+		if plan.account_count == 0 {
 			continue;
 		}
 
-		let ni = plans[i].account_count;
+		let ni = plan.account_count;
 		log::info!(
 			"pipeline: block-capacity iteration {} of {} starting ({ni} accounts)",
-			i + 1,
+			iter_idx + 1,
 			plans.len(),
 		);
 
 		let mut batch_start = 0u32;
 		while batch_start < ni {
-			let batch_end = batch_start
-				.saturating_add(AUTHORIZE_BATCH_SIZE as u32)
-				.min(plans[i].account_count);
+			let batch_end =
+				batch_start.saturating_add(AUTHORIZE_BATCH_SIZE as u32).min(plan.account_count);
 
-			let keypairs = keypairs_for_range(&plans[i], batch_start, batch_end);
+			let keypairs = keypairs_for_range(plan, batch_start, batch_end);
 			let auth_batches = auth_batches_from_keypairs(&keypairs);
-
-			// Sign store extrinsics before sending the auth item — signing only
-			// needs the keypairs by reference and does not touch the chain, so
-			// ordering is safe.  The reader will process AuthorizeAndInitSlice
-			// first (it arrives on the channel before the Store items).
 			let store_items = build_store_work_items(&client, &keypairs, payload_size).await?;
 
+			// Send auth for this batch (reader spawns as background task).
 			work_tx
-				.send(StressWorkItem::AuthorizeAndInitSlice { auth_batches, keypairs })
+				.send(StressWorkItem::Authorize { batches: auth_batches })
 				.await
-				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (authorize+init)"))?;
+				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (auth)"))?;
 
-			for item in store_items {
+			if is_first_batch {
+				// First batch: reader must await auth before any stores.
 				work_tx
-					.send(item)
+					.send(StressWorkItem::AwaitPendingAuth)
 					.await
-					.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
+					.map_err(|_| anyhow::anyhow!("pipeline work channel closed (await)"))?;
+				is_first_batch = false;
 			}
 
+			// Dispatch previous batch's stores (reader processes them while
+			// this batch's authorization runs in the background).
+			if let Some(prev_items) = prev_store_items.take() {
+				for item in prev_items {
+					work_tx
+						.send(item)
+						.await
+						.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
+				}
+				// Barrier: reader must await this batch's auth before its stores.
+				work_tx
+					.send(StressWorkItem::AwaitPendingAuth)
+					.await
+					.map_err(|_| anyhow::anyhow!("pipeline work channel closed (await)"))?;
+			}
+
+			prev_store_items = Some(store_items);
 			batch_start = batch_end;
+		}
+	}
+
+	// Send final batch's stores (auth already awaited by the last AwaitPendingAuth).
+	if let Some(last_items) = prev_store_items.take() {
+		for item in last_items {
+			work_tx
+				.send(item)
+				.await
+				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
 		}
 	}
 
