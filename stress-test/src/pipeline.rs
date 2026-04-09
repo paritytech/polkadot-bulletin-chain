@@ -7,7 +7,7 @@
 //! over bounded per-worker `mpsc` channels, so authorization of batch N+1 runs concurrently with
 //! store dispatch of batch N. Every [`POOL_PENDING_PAUSE_THRESHOLD`] items dispatched to workers,
 //! the reader calls [`wait_until_txpool_can_pull_work`] before the next `recv`. Store txs are
-//! pre-signed at nonce 0 in the generator ([`crate::store::sign_store_extrinsic`]).
+//! pre-signed at nonce 0 in the generator ([`crate::store::sign_store_extrinsic_blocking`]).
 
 use anyhow::Result;
 use futures::{
@@ -48,9 +48,9 @@ struct SubmitStats {
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
 
-/// Maximum in-flight `sign_store_extrinsic` + `generate_payload` futures when building store work
-/// items ([`build_store_work_items`]). Uses `buffer_unordered` so a new future starts as soon as
-/// one completes (no chunk barriers).
+/// Maximum in-flight `spawn_blocking` tasks (each running `generate_payload` +
+/// `sign_store_extrinsic_blocking`) when building store work items ([`build_store_work_items`]).
+/// Uses `buffer_unordered` so a new task starts as soon as one completes (no chunk barriers).
 pub const STORE_SIGN_PARALLELISM: usize = 64;
 
 /// Max ready+future tx pool depth before [`wait_until_txpool_can_pull_work`] returns; also how many
@@ -533,7 +533,7 @@ fn spawn_store_submit_workers(
 /// task + per-connection store workers).
 ///
 /// `submitters` is how many WebSocket RPC clients and matching store worker tasks to spawn (each
-/// worker owns one connection); count is at least `max(1, 8)` for nonce-init fan-out.
+/// worker owns one connection); actual count is `max(submitters, 8)`.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_block_capacity_pipeline(
 	mut work_rx: mpsc::Receiver<StressWorkItem>,
