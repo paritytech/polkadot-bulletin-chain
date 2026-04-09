@@ -293,6 +293,25 @@ pub async fn sign_store_extrinsic(
 	Ok(signed.into_encoded())
 }
 
+/// Synchronous version of [`sign_store_extrinsic`] for use inside
+/// [`tokio::task::spawn_blocking`]. Uses `create_partial_offline` + `sign` (both sync) instead of
+/// the async `create_signed`.
+pub fn sign_store_extrinsic_blocking(
+	client: &OnlineClient<BulletinConfig>,
+	signer: &Keypair,
+	data: &[u8],
+	nonce: u64,
+) -> Result<Vec<u8>> {
+	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+	let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
+	let mut partial = client
+		.tx()
+		.create_partial_offline(&store_call, params)
+		.map_err(|e| anyhow!("create_partial_offline: {e}"))?;
+	let signed = partial.sign(signer);
+	Ok(signed.into_encoded())
+}
+
 /// Submit a pre-signed store extrinsic (see [`sign_store_extrinsic`]). Same hash semantics as
 /// [`store_fire_and_forget`].
 pub async fn store_submit_pre_signed(
