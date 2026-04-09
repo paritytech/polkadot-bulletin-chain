@@ -4117,22 +4117,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "encode-westend-calls"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bulletin-westend-runtime",
- "clap",
- "hex",
- "pallet-collator-selection",
- "pallet-session",
- "parity-scale-codec",
- "sp-consensus-aura",
- "sp-core 28.0.0",
- "sp-runtime",
-]
-
-[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
