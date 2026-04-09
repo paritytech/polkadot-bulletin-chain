@@ -115,10 +115,12 @@ fn scenario_result_from_bulk(
 /// Block capacity measurement across multiple payload sizes.
 ///
 /// For each payload size, splits one-shot accounts into iterations (~`iteration_blocks` measured
-/// blocks worth of txs per iteration), then runs the producer/consumer pipeline:
-/// [`StressWorkItem`]s on a bounded channel; the consumer waits on `txpool_status` before further
-/// `recv`s when the pool is deep, so the generator blocks on `send`. Drains the pool between
-/// variants.
+/// blocks worth of txs per iteration), then runs the producer/consumer pipeline.  Authorization of
+/// each batch is interleaved with store dispatch of the previous batch (see
+/// [`generate_block_capacity_work`](pipeline::generate_block_capacity_work)).  The reader applies
+/// txpool backpressure every
+/// [`POOL_PENDING_PAUSE_THRESHOLD`](pipeline::POOL_PENDING_PAUSE_THRESHOLD) dispatches.  Drains the
+/// pool between variants.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_block_capacity_sweep(
 	client: &OnlineClient<BulletinConfig>,
@@ -216,8 +218,8 @@ pub async fn run_block_capacity_sweep(
 			pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
 		let txpool_pause = pipeline::POOL_PENDING_PAUSE_THRESHOLD;
 		log::info!(
-			"{label}: iteration layout ready ({} iterations; continuous AuthorizeAndInitSlice + \
-			 stores; txpool gate every {txpool_pause} dispatches (pause if pool > {txpool_pause}); \
+			"{label}: iteration layout ready ({} iterations; interleaved Authorize + Store; \
+			 txpool gate every {txpool_pause} dispatches (pause if pool > {txpool_pause}); \
 			 authorize chunks of {})",
 			plans.len(),
 			crate::authorize::AUTHORIZE_BATCH_SIZE,
