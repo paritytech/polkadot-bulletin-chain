@@ -193,8 +193,8 @@ interface PapiEventMappingResult {
     block: { hash: string; number: number }
     events?: RuntimeEvent[]
   }
-  /** Set when the transaction is no longer valid (e.g. mortality expired, dropped from pool) */
-  invalid?: boolean
+  /** Set to false when the transaction is no longer valid (e.g. mortality expired, dropped from pool) */
+  isValid?: boolean
 }
 
 /**
@@ -251,7 +251,7 @@ function mapPapiEventToProgress(
       // Transaction dropped from best blocks and no longer valid
       // (e.g. mortality expired, evicted from pool)
       if (ev.isValid === false) {
-        result.invalid = true
+        result.isValid = false
       }
     }
   }
@@ -714,7 +714,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (result.txHash) txHash = result.txHash
           if (result.finish) finish(result.finish.block, result.finish.events)
           // Transaction dropped from pool and no longer valid (mortality expired, evicted)
-          if (result.invalid) {
+          if (result.isValid === false) {
             fail(
               new BulletinError(
                 "Transaction is no longer valid (mortality expired or dropped from pool)",
