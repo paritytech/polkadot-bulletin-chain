@@ -297,7 +297,7 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",
   [ErrorCode.TIMEOUT]:
-    "Transaction mortality expired or dropped from pool. Retry the transaction",
+    "Transaction was not finalized within the timeout window. Retry the transaction",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",
 }
@@ -337,8 +337,8 @@ export interface ClientConfig {
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
-  /** Safety-net timeout in milliseconds per transaction (default: 120_000).
-   * Only fires if PAPI never reports the transaction as invalid. */
+  /** Timeout in milliseconds per transaction (default: 120_000).
+   * Fires if the transaction is never finalized within this window. */
   txTimeout?: number
 }
 
@@ -352,5 +352,5 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
   defaultChunkSize: 1024 * 1024, // 1 MiB
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
-  txTimeout: 120_000, // 2 minutes safety net
+  txTimeout: 120_000, // 2 minutes
 }

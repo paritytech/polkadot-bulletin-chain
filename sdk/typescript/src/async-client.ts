@@ -682,13 +682,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         })
       }
 
-      const fail = (error: Error) => {
-        if (resolved) return
-        resolved = true
-        cleanup()
-        reject(error)
-      }
-
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
         next: (ev: TxStatusEvent) => {
           const result = mapPapiEventToProgress(
@@ -721,13 +714,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       })
 
-      // Safety-net timeout: fires if the transaction is never finalized
+      // Timeout: fires if the transaction is never finalized
       // (e.g. mortality expires, connection drops). Default: 2 minutes.
-      const timerId = setTimeout(
-        () =>
-          fail(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT)),
-        this.config.txTimeout,
-      )
+      const timerId = setTimeout(() => {
+        if (resolved) return
+        resolved = true
+        cleanup()
+        reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
+      }, this.config.txTimeout)
     })
   }
 
