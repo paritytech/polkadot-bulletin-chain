@@ -22,6 +22,20 @@ updates:
           - "*"
 
   - package-ecosystem: "npm"
+    directory: "/sdk/typescript"
+    schedule:
+      interval: "weekly"
+    groups:
+      sdk-typescript-deps:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      sdk-typescript-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
     directory: "/examples"
     schedule:
       interval: "weekly"

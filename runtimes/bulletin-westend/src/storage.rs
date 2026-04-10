@@ -16,31 +16,43 @@
 
 //! Storage-specific configurations.
 
-use super::{AccountId, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason};
-use crate::xcm_config::PeopleNextLocation;
+use super::{
+	xcm_config::IsSiblingParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
+	RuntimeHoldReason,
+};
 use alloc::vec::Vec;
 use frame_support::{
 	parameter_types,
-	traits::{Contains, EitherOfDiverse, Equals, SortedMembers},
+	traits::{Contains, EitherOfDiverse, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
-use pallet_transaction_storage::CallInspector;
+use pallet_transaction_storage::{
+	CallInspector, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+};
 use pallet_xcm::EnsureXcm;
 use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-use testnet_parachains_constants::westend::locations::PeopleLocation;
-
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
 	fn sorted_members() -> Vec<AccountId> {
-		alloc::vec![Sr25519Keyring::Alice.to_account_id()]
+		let mut members = alloc::vec![
+			Sr25519Keyring::Alice.to_account_id(),
+			// 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
+			AccountId::new([
+				0xb6, 0x45, 0x5b, 0xc5, 0x38, 0x36, 0x5d, 0x32, 0xd3, 0x29, 0x67, 0xb6, 0xf2, 0x1a,
+				0x0c, 0x9b, 0x07, 0x15, 0x65, 0xe8, 0x78, 0xfe, 0x98, 0x5f, 0x88, 0xd1, 0x54, 0x3c,
+				0xb1, 0x99, 0x1a, 0x7d,
+			]),
+		];
+		members.sort();
+		members
 	}
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 7 * crate::DAYS;
+	pub const AuthorizationPeriod: crate::BlockNumber = 90 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
@@ -89,19 +101,16 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
 	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
-	type MaxBlockTransactions = crate::ConstU32<512>;
+	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
-	type MaxTransactionSize = crate::ConstU32<{ 8 * 1024 * 1024 }>;
+	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
 			// Root can do whatever.
 			crate::EnsureRoot<Self::AccountId>,
-			// People chains can also handle authorizations.
-			EitherOfDiverse<
-				EnsureXcm<Equals<PeopleLocation>>,
-				EnsureXcm<Equals<PeopleNextLocation>>,
-			>,
+			// Any sibling parachain can handle authorizations.
+			EnsureXcm<IsSiblingParachain>,
 		>,
 		// Test accounts can also authorize for testing purposes.
 		EnsureSignedBy<TestAccounts, Self::AccountId>,
@@ -110,4 +119,6 @@ impl pallet_transaction_storage::Config for Runtime {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper = pallet_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }

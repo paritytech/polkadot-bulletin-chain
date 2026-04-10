@@ -23,7 +23,9 @@ use bulletin_westend_runtime::{
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
 	UncheckedExtrinsic,
 };
-use frame_support::{assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks};
+use frame_support::{
+	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
+};
 use pallet_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
 };
@@ -139,13 +141,15 @@ fn transaction_storage_runtime_sizes() {
 			// prepare data
 			let account = Sr25519Keyring::Alice;
 			let who: AccountId = account.to_account_id();
-			#[allow(clippy::identity_op)]
-			let sizes: [usize; 5] = [
-				2000,            // 2 KB
-				1 * 1024 * 1024, // 1 MB
-				4 * 1024 * 1024, // 4 MB
-				6 * 1024 * 1024, // 6 MB
-				8 * 1024 * 1024, // 8 MB
+			let max =
+				<<Runtime as TxStorageConfig>::MaxTransactionSize as Get<u32>>::get() as usize;
+			let sizes: [usize; 6] = [
+				1,           // minimum valid size
+				2000,        // small
+				max / 4,     // 25%
+				max / 2,     // 50%
+				max * 3 / 4, // 75%
+				max,         // 100% (exactly at limit)
 			];
 			let total_bytes: u64 = sizes.iter().map(|s| *s as u64).sum();
 
@@ -499,26 +503,27 @@ fn xcm_payment_api_works() {
 fn governance_authorize_upgrade_works() {
 	use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 
-	// no - random para
+	// no - random para (passes barrier since any sibling parachain gets unpaid execution,
+	// but fails at Transact with BadOrigin since it's not a governance origin)
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
 			RuntimeOrigin,
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(12334)))),
-		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
+		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
 	);
 	// ok - AssetHub
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 		Runtime,
 		RuntimeOrigin,
 	>(GovernanceOrigin::Location(Location::new(1, Parachain(ASSET_HUB_ID)))));
-	// no - Collectives
+	// no - Collectives (passes barrier but not a governance origin)
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
 			RuntimeOrigin,
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(COLLECTIVES_ID)))),
-		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
+		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
 	);
 	// no - Collectives Voice of Fellows plurality
 	assert_err!(
@@ -553,32 +558,29 @@ fn alice_can_sign_authorize_account_extrinsic() {
 	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
 	// from Alice must pass ValidateSigned (not be rejected as InvalidTransaction::Call)
 	// and succeed at dispatch.
-	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
-		.execute_with(|| {
-			let alice = Sr25519Keyring::Alice;
-			let target = Sr25519Keyring::Eve;
+	let mut genesis = RuntimeGenesisConfig::default();
+	genesis.transaction_storage.account_authorizations =
+		vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)];
+	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+		let alice = Sr25519Keyring::Alice;
+		let target = Sr25519Keyring::Eve;
 
-			// Give Alice balance to cover tx fees (authorize_account is not feeless).
-			use frame_support::traits::fungible::Mutate;
-			Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
-
-			let call =
-				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-					who: target.to_account_id(),
-					transactions: 5,
-					bytes: 1024,
-				});
-
-			let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
-			assert_ok!(res);
-			assert_ok!(res.unwrap());
-
-			// Verify the authorization was actually applied.
-			assert_eq!(
-				TransactionStorage::account_authorization_extent(target.to_account_id()),
-				AuthorizationExtent { transactions: 5, bytes: 1024 },
-			);
+		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+			who: target.to_account_id(),
+			transactions: 5,
+			bytes: 1024,
 		});
+
+		let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
+		assert_ok!(res);
+		assert_ok!(res.unwrap());
+
+		// Verify the authorization was actually applied.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(target.to_account_id()),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+		);
+	});
 }
 
 #[test]

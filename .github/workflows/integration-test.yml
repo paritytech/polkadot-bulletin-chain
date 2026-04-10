@@ -149,10 +149,20 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: examples/package.json
+          cache-dependency-path: |
+            examples/package.json
+            console-ui/package-lock.json
 
       - name: Install just
         run: cargo install just --locked || true
+
+      - name: Install subxt-cli
+        run: |
+          if ! command -v subxt &> /dev/null; then
+            cargo install subxt-cli --locked
+          else
+            echo "subxt-cli already installed"
+          fi
 
       - name: Cache Polkadot SDK binaries
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
@@ -214,6 +224,31 @@ jobs:
       - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
+
+      # SDK Client Tests
+      - name: Test Rust SDK
+        working-directory: examples
+        run: just test-rust-sdk "${{ env.TEST_DIR }}" "$RUNTIME_PACKAGE"
+
+      - name: Test TypeScript SDK
+        working-directory: examples
+        run: just test-ts-sdk "${{ env.TEST_DIR }}"
+
+      - name: Test TypeScript SDK (vitest integration)
+        working-directory: examples
+        run: just test-ts-sdk-vitest
+
+      - name: Run console-ui tests
+        working-directory: console-ui
+        run: just test
+
+      - name: Upload console-ui tests report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: playwright-report-${{ matrix.runtime.name }}
+          path: console-ui/playwright-report/
+          retention-days: 14
 
       - name: Stop services
         if: always()
