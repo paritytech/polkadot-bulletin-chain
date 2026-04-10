@@ -13,9 +13,107 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Generate SDK release notes
+        id: notes
+        run: |
+          set -euo pipefail
+
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+          # Find the previous sdk-v* tag
+          PREVIOUS_TAG=$(git tag --list 'sdk-v*' --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1 || true)
+          if [ -z "$PREVIOUS_TAG" ]; then
+            # First SDK release — include all commits up to this tag touching sdk/typescript
+            RANGE="${CURRENT_TAG}"
+          else
+            RANGE="${PREVIOUS_TAG}..${CURRENT_TAG}"
+          fi
+          # Generate notes from commits that touched sdk/typescript/
+          NOTES=$(git log "$RANGE" --pretty=format:"- %s (%h)" -- sdk/typescript/)
+          if [ -z "$NOTES" ]; then
+            NOTES="No SDK-specific changes in this release."
+          fi
+          # Write to file to preserve multiline content
+          echo "$NOTES" > /tmp/release-notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
-          generate_release_notes: true
+          body_path: /tmp/release-notes.md
+
+  publish:
+    name: Build & Publish to NPM
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Validate version matches tag
+        working-directory: sdk/typescript
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG_VERSION#sdk-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+
+      - name: Check version is not already published
+        working-directory: sdk/typescript
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version &>/dev/null; then
+            echo "::error::Version ${PKG_VERSION} of ${PKG_NAME} is already published on npm"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+        working-directory: sdk/typescript
+
+      - name: Lint
+        run: npm run lint
+        working-directory: sdk/typescript
+
+      - name: Type check
+        run: npm run typecheck
+        working-directory: sdk/typescript
+
+      - name: Test
+        run: npm test
+        working-directory: sdk/typescript
+
+      - name: Build
+        run: npm run build
+        working-directory: sdk/typescript
+
+      - name: Pack
+        run: npm pack
+        working-directory: sdk/typescript
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-${{ github.sha }}
+          path: sdk/typescript/*.tgz
+
+      - name: NPM Publish automation
+        uses: octokit/request-action@dad4362715b7fb2ddedf9772c8670824af564f0d # v2.4.0
+        with:
+          route: POST /repos/paritytech/npm_publish_automation/actions/workflows/publish.yml/dispatches
+          ref: main
+          inputs: '${{ format(''{{ "repo": "{0}", "run_id": "{1}" }}'', github.repository, github.run_id) }}'
+        env:
+          GITHUB_TOKEN: ${{ secrets.NPM_PUBLISH_AUTOMATION_TOKEN }}
