@@ -337,8 +337,10 @@ export interface ClientConfig {
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
-  /** Timeout in milliseconds per transaction (default: 120_000).
-   * Fires if the transaction is never finalized within this window. */
+  /** Timeout in milliseconds per transaction (default: 420_000).
+   * Set above PAPI's default mortality window (64 blocks ~ 6.4 min at 6s blocks)
+   * so it never races against PAPI's own InvalidTxError. Only fires if PAPI
+   * itself never reports back (e.g. connection drop). */
   txTimeout?: number
 }
 
@@ -352,5 +354,5 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
   defaultChunkSize: 1024 * 1024, // 1 MiB
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
-  txTimeout: 120_000, // 2 minutes
+  txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
 }

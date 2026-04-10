@@ -714,8 +714,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       })
 
-      // Timeout: fires if the transaction is never finalized
-      // (e.g. mortality expires, connection drops). Default: 2 minutes.
+      // Fallback timeout: only fires if PAPI never reports back
+      // (e.g. connection drops). Default: 7 min (above 64-block mortality).
       const timerId = setTimeout(() => {
         if (resolved) return
         resolved = true

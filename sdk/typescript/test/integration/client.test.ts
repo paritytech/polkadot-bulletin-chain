@@ -54,7 +54,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
     // Create client directly with api, signer, and submit function
-    // Use a longer txTimeout for CI where block production can be slow
+    // Override txTimeout (default 420s) to fit within test timeouts
     client = new AsyncBulletinClient(api, signer, papiClient.submit, {
       txTimeout: 180_000,
     })
