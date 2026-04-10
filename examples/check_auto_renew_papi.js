@@ -1,31 +1,103 @@
 /**
- * Chopsticks integration test for auto-renewal.
+ * Chopsticks integration test for auto-renewal using PAPI typed codecs.
  *
  * Forks a live Bulletin chain with a local runtime WASM override, then:
- *  1. Sets up authorization, stored transaction data
- *  2. Tests enable_auto_renew: sets AutoRenewals storage entry, verifies it exists
- *  3. Tests disable_auto_renew: removes AutoRenewals entry, verifies it's cleared
- *  4. Re-enables auto-renewal for expiry test
- *  5. Jumps to the expiry block and triggers on_initialize
- *  6. Verifies PendingAutoRenewals was populated (proven by on_finalize panic)
+ *  1. Overrides RetentionPeriod and mocks ProofChecked
+ *  2. Sets up authorization, stored transaction data via PAPI-encoded storage
+ *  3. Tests enable_auto_renew: sets AutoRenewals storage entry, verifies it exists
+ *  4. Tests disable_auto_renew: removes AutoRenewals entry, verifies it's cleared
+ *  5. Re-enables auto-renewal for expiry test
+ *  6. Jumps to the expiry block and triggers on_initialize
+ *  7. Verifies PendingAutoRenewals was populated (proven by on_finalize panic)
  *
  * Usage:
- *   node check_auto_renew_chopsticks.js [endpoint] [wasm_path]
+ *   node check_auto_renew_papi.js [endpoint] [wasm_path]
  *
  * Example:
  *   cargo build --release -p bulletin-westend-runtime
- *   node check_auto_renew_chopsticks.js wss://westend-bulletin-rpc.polkadot.io \
+ *   node check_auto_renew_papi.js wss://westend-bulletin-rpc.polkadot.io \
  *     ../target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm
  */
 
 import { ChopsticksProvider, setup } from "@acala-network/chopsticks-core";
 import { Keyring } from "@polkadot/keyring";
 import { cryptoWaitReady, blake2AsU8a, xxhashAsHex } from "@polkadot/util-crypto";
+import { Struct, u8, u32, u64, Bytes, Vector, Tuple } from "@polkadot-api/substrate-bindings";
 
 const endpoint = process.argv[2] || "wss://westend-bulletin-rpc.polkadot.io";
 const runtimeWasm = process.argv[3] || null;
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// ─── PAPI Typed Codecs ────────────────────────────────────────────────────
+//
+// These codecs replace manual SCALE hex encoding with type-safe PAPI codecs.
+// See: https://papi.how/typed-codecs
+
+/** Authorization { extent: AuthorizationExtent { transactions: u32, bytes: u64 }, expiration: u32 } */
+const AuthorizationCodec = Struct({
+  extent: Struct({ transactions: u32, bytes: u64 }),
+  expiration: u32,
+});
+
+/** (BlockNumber, u32) — stored in TransactionByContentHash */
+const BlockAndIndexCodec = Tuple(u32, u32);
+
+/** AutoRenewalData { account: AccountId(32 bytes) } */
+const AutoRenewalDataCodec = Struct({
+  account: Bytes(32),
+});
+
+/**
+ * TransactionInfo {
+ *   chunk_root: H256, content_hash: [u8;32], hashing: HashingAlgorithm(u8 enum),
+ *   cid_codec: CidCodec(u64), size: u32, block_chunks: u32
+ * }
+ */
+const TransactionInfoCodec = Struct({
+  chunk_root: Bytes(32),
+  size: u32,
+  content_hash: Bytes(32),
+  hashing: u8,
+  cid_codec: u64,
+  block_chunks: u32,
+});
+
+/** BoundedVec<TransactionInfo> with SCALE compact length prefix */
+const TransactionInfoVecCodec = Vector(TransactionInfoCodec);
+
+// ─── Storage key helpers ──────────────────────────────────────────────────
+
+function toHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function twox128(text) {
+  return xxhashAsHex(text, 128).slice(2);
+}
+
+function blake2_128Concat(data) {
+  const hash = blake2AsU8a(data, 128);
+  const out = new Uint8Array(hash.length + data.length);
+  out.set(hash);
+  out.set(data, hash.length);
+  return toHex(out);
+}
+
+/** Plain storage key: twox128(pallet) ++ twox128(name) */
+function storageKey(pallet, name) {
+  return "0x" + twox128(pallet) + twox128(name);
+}
+
+/** Map storage key: twox128(pallet) ++ twox128(name) ++ blake2_128Concat(keyBytes) */
+function mapKey(pallet, name, keyBytes) {
+  return "0x" + twox128(pallet) + twox128(name) + blake2_128Concat(keyBytes);
+}
+
+/** Encode a value with a PAPI codec and return a 0x-prefixed hex string */
+function encodeHex(codec, value) {
+  return "0x" + toHex(codec.enc(value));
+}
+
+// ─── Logging helpers ──────────────────────────────────────────────────────
 
 function logHeader(text) {
   console.log("\n" + "=".repeat(80));
@@ -36,81 +108,11 @@ function logStep(n, msg) { console.log(`\n[Step ${n}] ${msg}`); }
 function logOk(msg) { console.log(`  OK: ${msg}`); }
 function logFail(msg) { console.error(`  FAIL: ${msg}`); }
 
-function toHex(bytes) {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-function hexToBytes(hex) {
-  hex = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-  return bytes;
-}
-function twox128(text) { return xxhashAsHex(text, 128).slice(2); }
-function blake2_128Concat(data) {
-  const hash = blake2AsU8a(data, 128);
-  const out = new Uint8Array(hash.length + data.length);
-  out.set(hash);
-  out.set(data, hash.length);
-  return toHex(out);
-}
-function encodeU32LE(v) {
-  const b = new Uint8Array(4);
-  b[0]=v&0xff; b[1]=(v>>8)&0xff; b[2]=(v>>16)&0xff; b[3]=(v>>24)&0xff;
-  return toHex(b);
-}
-function encodeU64LE(v) {
-  const b = new Uint8Array(8);
-  let n = BigInt(v);
-  for (let i = 0; i < 8; i++) { b[i] = Number(n & 0xffn); n >>= 8n; }
-  return toHex(b);
-}
-
-// ─── Storage key builders ──────────────────────────────────────────────────
-
-function storageKey(pallet, name) {
-  return "0x" + twox128(pallet) + twox128(name);
-}
-function mapKey(pallet, name, keyBytes) {
-  return "0x" + twox128(pallet) + twox128(name) + blake2_128Concat(keyBytes);
-}
-
-// ─── SCALE encoding helpers ────────────────────────────────────────────────
-
-function encodeAuthorization_u32(transactions, bytes, expiration) {
-  // Authorization { extent: { transactions: u32, bytes: u64 }, expiration: u32 (BlockNumber) }
-  return "0x" + encodeU32LE(transactions) + encodeU64LE(bytes) + encodeU32LE(expiration);
-}
-
-function encodeBlockAndIndex_u32(block, index) {
-  // (BlockNumber(u32), u32)
-  return "0x" + encodeU32LE(block) + encodeU32LE(index);
-}
-
-function encodeAutoRenewalData(publicKey) {
-  // AutoRenewalData { account: AccountId } — 32 bytes
-  return "0x" + toHex(publicKey);
-}
-
-function encodeTransactionInfoVec(contentHash, size) {
-  // BoundedVec<TransactionInfo> with one element
-  const chunkRoot = "00".repeat(32); // dummy
-  const chunks = Math.ceil(size / (1024 * 1024)) || 1;
-  // TransactionInfo { chunk_root: H256, content_hash: [u8;32], hashing: HashingAlgorithm(u8 enum), cid_codec: CidCodec(u64), size: u32, block_chunks: u32 }
-  let data = "04"; // compact len = 1
-  data += chunkRoot; // chunk_root
-  data += toHex(contentHash); // content_hash
-  data += "00"; // hashing = Blake2b256 (variant 0)
-  data += encodeU64LE(0x55); // cid_codec = RAW_CODEC
-  data += encodeU32LE(size); // size
-  data += encodeU32LE(chunks); // block_chunks
-  return "0x" + data;
-}
-
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 async function main() {
   await cryptoWaitReady();
-  logHeader("AUTO-RENEWAL CHOPSTICKS INTEGRATION TEST");
+  logHeader("AUTO-RENEWAL CHOPSTICKS INTEGRATION TEST (PAPI codecs)");
   console.log(`Endpoint: ${endpoint}`);
 
   logStep(0, "Setting up Chopsticks fork...");
@@ -131,13 +133,12 @@ async function main() {
 
   // ── Override RetentionPeriod to 1 block (so expiry triggers in 2 blocks) ──
   // Also set ProofChecked to true to bypass the check_proof assertion in on_finalize.
-  // Chopsticks doesn't include inherents (check_proof), so we must mock it.
   logStep(1, "Overriding RetentionPeriod and mocking ProofChecked...");
   const retentionPeriod = 1;
   const proofCheckedKey = storageKey("TransactionStorage", "ProofChecked");
   await provider.send("dev_setStorage", [
     [
-      [storageKey("TransactionStorage", "RetentionPeriod"), "0x" + encodeU32LE(retentionPeriod)],
+      [storageKey("TransactionStorage", "RetentionPeriod"), encodeHex(u32, retentionPeriod)],
       [proofCheckedKey, "0x01"],
     ]
   ], false);
@@ -158,8 +159,7 @@ async function main() {
   console.log(`  Store block: #${storeBlock} (current)`);
   console.log(`  Expiry block: #${expiryBlock} (${retentionPeriod + 1} blocks away)`);
 
-  // ── Set base storage: authorization, transactions, content hash map ──
-  // AutoRenewals is NOT set here — we test enable/disable separately.
+  // ── Set base storage with PAPI codecs ──
   logStep(2, "Setting base storage state (authorization, transactions, content hash map)...");
 
   // AuthorizationScope::Account(alice) = 0x00 ++ alice.publicKey
@@ -167,21 +167,32 @@ async function main() {
   scopeBytes[0] = 0; // Account variant
   scopeBytes.set(alice.publicKey, 1);
 
+  const chunks = Math.ceil(testData.length / (1024 * 1024)) || 1;
   const baseStorageItems = [
     // Authorizations(Account(alice))
     [
       mapKey("TransactionStorage", "Authorizations", scopeBytes),
-      encodeAuthorization_u32(100, 100_000_000, startBlock + 200000),
+      encodeHex(AuthorizationCodec, {
+        extent: { transactions: 100, bytes: BigInt(100_000_000) },
+        expiration: startBlock + 200000,
+      }),
     ],
     // Transactions(storeBlock)
     [
-      mapKey("TransactionStorage", "Transactions", hexToBytes("0x" + encodeU32LE(storeBlock))),
-      encodeTransactionInfoVec(contentHash, testData.length),
+      mapKey("TransactionStorage", "Transactions", u32.enc(storeBlock)),
+      encodeHex(TransactionInfoVecCodec, [{
+        chunk_root: new Uint8Array(32), // dummy
+        size: testData.length,
+        content_hash: contentHash,
+        hashing: 0,          // Blake2b256 variant
+        cid_codec: BigInt(0x55), // RAW_CODEC
+        block_chunks: chunks,
+      }]),
     ],
     // TransactionByContentHash(contentHash)
     [
       mapKey("TransactionStorage", "TransactionByContentHash", contentHash),
-      encodeBlockAndIndex_u32(storeBlock, 0),
+      encodeHex(BlockAndIndexCodec, [storeBlock, 0]),
     ],
   ];
 
@@ -207,18 +218,17 @@ async function main() {
   }
 
   // ── Test enable_auto_renew ──
-  // Simulates enable_auto_renew(content_hash) by writing AutoRenewals storage directly.
-  // The extrinsic dispatch path is covered by Rust unit tests (enable_auto_renew_works).
   logStep(3, "Testing enable_auto_renew: setting AutoRenewals entry...");
-  const autoRenewalValue = encodeAutoRenewalData(alice.publicKey);
+  const autoRenewalValue = encodeHex(AutoRenewalDataCodec, {
+    account: alice.publicKey,
+  });
   await provider.send("dev_setStorage", [[[autoRenewalsKey, autoRenewalValue]]], false);
 
   // Verify AutoRenewals was stored
   const enableCheck = await provider.send("state_getStorage", [autoRenewalsKey], false);
   if (enableCheck) {
     logOk("AutoRenewals entry created (enable_auto_renew verified)");
-    // Verify the stored account matches alice
-    const expectedValue = autoRenewalValue.slice(2); // remove 0x
+    const expectedValue = autoRenewalValue.slice(2);
     const actualValue = enableCheck.slice(2);
     if (actualValue === expectedValue) {
       logOk(`  Account matches: 0x${actualValue.slice(0, 16)}...`);
@@ -231,13 +241,9 @@ async function main() {
   }
 
   // ── Test disable_auto_renew ──
-  // Simulates disable_auto_renew(content_hash) by removing AutoRenewals storage entry.
-  // The extrinsic dispatch path is covered by Rust unit tests (disable_auto_renew_works).
   logStep(4, "Testing disable_auto_renew: removing AutoRenewals entry...");
-  // Setting value to null/empty removes the storage entry
   await provider.send("dev_setStorage", [[[autoRenewalsKey, null]]], false);
 
-  // Verify AutoRenewals was cleared
   const disableCheck = await provider.send("state_getStorage", [autoRenewalsKey], false);
   if (!disableCheck) {
     logOk("AutoRenewals entry removed (disable_auto_renew verified)");
@@ -260,7 +266,6 @@ async function main() {
   // ── Advance blocks to trigger expiry ──
   logStep(6, `Advancing ${retentionPeriod + 1} blocks to trigger expiry...`);
 
-  // Advance blocks. Before each block, set ProofChecked=true to bypass check_proof assertion.
   for (let i = 0; i < retentionPeriod; i++) {
     await provider.send("dev_setStorage", [[[proofCheckedKey, "0x01"]]], false);
     await provider.send("dev_newBlock", [], false);
@@ -269,8 +274,6 @@ async function main() {
 
   // Expiry block: on_initialize will populate PendingAutoRenewals.
   // on_finalize will then panic because process_auto_renewals wasn't included.
-  // We set ProofChecked=true but NOT PendingAutoRenewals — so the panic is
-  // specifically about auto-renewals, proving our code works.
   logStep(7, "Advancing one more block (triggers expiry + on_finalize assertion)...");
   await provider.send("dev_setStorage", [[[proofCheckedKey, "0x01"]]], false);
   let expiryTriggered = false;
@@ -278,9 +281,6 @@ async function main() {
     await provider.send("dev_newBlock", [], false);
     logOk(`Block #${chain.head.number} produced (no expiry? checking...)`);
   } catch (e) {
-    // on_finalize panics with "unreachable" because:
-    // - PendingAutoRenewals is non-empty (auto-renewal was scheduled)
-    // - process_auto_renewals was not included
     logOk("Block production failed at on_finalize — EXPECTED!");
     expiryTriggered = true;
   }
@@ -301,7 +301,7 @@ async function main() {
   } else {
     logFail("Expiry was not triggered as expected.");
     console.log("  Checking storage state...");
-    const txKey2 = mapKey("TransactionStorage", "Transactions", hexToBytes("0x" + encodeU32LE(storeBlock)));
+    const txKey2 = mapKey("TransactionStorage", "Transactions", u32.enc(storeBlock));
     const txCheck = await provider.send("state_getStorage", [txKey2], false);
     if (!txCheck) {
       logOk("Transactions entry was consumed — on_initialize DID process the expiry!");
