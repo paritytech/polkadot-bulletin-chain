@@ -58,6 +58,27 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Validate version matches tag
+        working-directory: sdk/typescript
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG_VERSION#sdk-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+
+      - name: Check version is not already published
+        working-directory: sdk/typescript
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version &>/dev/null; then
+            echo "::error::Version ${PKG_VERSION} of ${PKG_NAME} is already published on npm"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
         working-directory: sdk/typescript
@@ -77,17 +98,6 @@ jobs:
       - name: Build
         run: npm run build
         working-directory: sdk/typescript
-
-      - name: Validate version matches tag
-        working-directory: sdk/typescript
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME}"
-          TAG_VERSION="${TAG_VERSION#sdk-v}"
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
-            exit 1
-          fi
 
       - name: Pack
         run: npm pack
