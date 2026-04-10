@@ -98,6 +98,7 @@ export {
   HashAlgorithm,
   type ProgressCallback,
   type ProgressEvent,
+  resolveClientConfig,
   type StoreOptions,
   type StoreResult,
   type TransactionStatusEvent,

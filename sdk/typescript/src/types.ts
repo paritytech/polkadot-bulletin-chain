@@ -356,3 +356,17 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
 }
+
+/** Merge caller-supplied config with defaults, ignoring undefined values. */
+export function resolveClientConfig(
+  config?: Partial<ClientConfig>,
+): Required<ClientConfig> {
+  if (!config) return { ...DEFAULT_CLIENT_CONFIG }
+  const result = { ...DEFAULT_CLIENT_CONFIG }
+  for (const key of Object.keys(config) as (keyof ClientConfig)[]) {
+    if (config[key] !== undefined) {
+      ;(result as Record<string, unknown>)[key] = config[key]
+    }
+  }
+  return result
+}

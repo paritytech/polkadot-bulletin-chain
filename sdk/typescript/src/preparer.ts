@@ -15,9 +15,9 @@ import {
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
-  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
+  resolveClientConfig,
   type StoreOptions,
 } from "./types.js"
 import { calculateCid, estimateAuthorization } from "./utils.js"
@@ -33,7 +33,7 @@ export class BulletinPreparer {
   private config: Required<ClientConfig>
 
   constructor(config?: ClientConfig) {
-    this.config = { ...DEFAULT_CLIENT_CONFIG, ...config }
+    this.config = resolveClientConfig(config)
   }
 
   /**

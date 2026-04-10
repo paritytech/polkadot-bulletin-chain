@@ -25,10 +25,10 @@ import {
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
-  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   type ProgressCallback,
+  resolveClientConfig,
   type StoreOptions,
   type StoreResult,
 } from "./types.js"
@@ -118,8 +118,7 @@ export class MockBulletinClient implements BulletinClientInterface {
    */
   constructor(config?: Partial<MockClientConfig>) {
     this.config = {
-      ...DEFAULT_CLIENT_CONFIG,
-      ...config,
+      ...resolveClientConfig(config),
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
       simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,

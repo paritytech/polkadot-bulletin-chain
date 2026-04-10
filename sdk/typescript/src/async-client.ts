@@ -15,11 +15,11 @@ import {
   ChunkStatus,
   CidCodec,
   type ClientConfig,
-  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
+  resolveClientConfig,
   type StoreOptions,
   type StoreResult,
   TxStatus,
@@ -553,7 +553,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     this.api = api
     this.signer = signer
     this.submit = submit
-    this.config = { ...DEFAULT_CLIENT_CONFIG, ...config }
+    this.config = resolveClientConfig(config)
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
