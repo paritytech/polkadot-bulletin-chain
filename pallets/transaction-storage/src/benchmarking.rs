@@ -417,7 +417,7 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), content_hash);
 
-		assert_last_event::<T>(Event::AutoRenewEnabled { content_hash, who: caller }.into());
+		assert_last_event::<T>(Event::AutoRenewalEnabled { content_hash, who: caller }.into());
 		Ok(())
 	}
 
@@ -448,45 +448,48 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), content_hash);
 
-		assert_last_event::<T>(Event::AutoRenewDisabled { content_hash, who: caller }.into());
+		assert_last_event::<T>(Event::AutoRenewalDisabled { content_hash, who: caller }.into());
 		Ok(())
 	}
 
 	#[benchmark]
-	fn process_auto_renewals() -> Result<(), BenchmarkError> {
+	fn process_auto_renewals(
+		n: Linear<1, { T::MaxBlockTransactions::get() }>,
+	) -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
-		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
-		let content_hash = sp_io::hashing::blake2_256(&data);
 
-		// Authorize and store data
+		// Authorize enough for n renewals
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
-			10,
-			T::MaxTransactionSize::get() as u64 * 10,
+			n * 10,
+			T::MaxTransactionSize::get() as u64 * n as u64 * 10,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
-		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 
-		// Finalize block 0 to move BlockTransactions → Transactions(0)
-		run_to_block::<T>(1u32.into());
+		// Store n distinct transactions so we have n TransactionInfo entries
+		let mut pending = PendingAutoRenewals::<T>::get();
+		for i in 0..n {
+			let data = vec![i as u8; T::MaxTransactionSize::get() as usize];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+			TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 
-		// Read the stored TransactionInfo to build PendingAutoRenewals manually.
-		// (We can't use run_to_block through expiry because on_finalize would panic
-		// when PendingAutoRenewals is non-empty and process_auto_renewals hasn't run.)
-		let tx_info = Transactions::<T>::get(BlockNumberFor::<T>::zero())
-			.and_then(|txs| txs.into_iter().next())
-			.ok_or(BenchmarkError::Stop("no transactions at block 0"))?;
+			// Finalize block to move BlockTransactions → Transactions
+			run_to_block::<T>((i + 1).into());
 
-		let renewal_data = AutoRenewalData { account: caller.clone() };
+			let tx_info = Transactions::<T>::get(BlockNumberFor::<T>::from(i))
+				.and_then(|txs| txs.into_iter().next())
+				.ok_or(BenchmarkError::Stop("no transactions at expected block"))?;
+
+			let renewal_data = AutoRenewalData { account: caller.clone() };
+			pending
+				.try_push((content_hash, tx_info, renewal_data))
+				.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
+		}
 
 		// Directly populate PendingAutoRenewals (simulating what on_initialize does)
-		let mut pending = PendingAutoRenewals::<T>::get();
-		pending
-			.try_push((content_hash, tx_info, renewal_data))
-			.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
 		PendingAutoRenewals::<T>::put(&pending);
 
 		#[extrinsic_call]

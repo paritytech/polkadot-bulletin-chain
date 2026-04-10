@@ -552,35 +552,9 @@ pub mod pallet {
 			// checked by pre_dispatch_signed.
 			Self::ensure_data_size_ok(info.size as usize)?;
 
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 			let content_hash = info.content_hash;
-			sp_io::transaction_index::renew(extrinsic_index, content_hash);
-
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
-					return Err(Error::<T>::TooManyTransactions);
-				}
-				let chunks = num_chunks(info.size);
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: info.chunk_root,
-						size: info.size,
-						content_hash: info.content_hash,
-						hashing: info.hashing,
-						cid_codec: info.cid_codec,
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-			TransactionByContentHash::<T>::insert(
-				content_hash,
-				(frame_system::Pallet::<T>::block_number(), index),
-			);
-			Self::deposit_event(Event::Renewed { index, content_hash });
+			let new_index = Self::do_renew(info)?;
+			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
 			Ok(().into())
 		}
 
@@ -781,32 +755,7 @@ pub mod pallet {
 
 			ensure!(Self::data_size_ok(info.size as usize), Error::<T>::BadDataSize);
 
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::renew(extrinsic_index, content_hash);
-
-			let mut new_index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				let chunks = num_chunks(info.size);
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
-				new_index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: info.chunk_root,
-						size: info.size,
-						content_hash: info.content_hash,
-						hashing: info.hashing,
-						cid_codec: info.cid_codec,
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-
-			TransactionByContentHash::<T>::insert(
-				content_hash,
-				(frame_system::Pallet::<T>::block_number(), new_index),
-			);
-
+			let new_index = Self::do_renew(info)?;
 			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
 			Ok(().into())
 		}
@@ -822,13 +771,10 @@ pub mod pallet {
 		/// and an [`AutoRenewalFailed`](Event::AutoRenewalFailed) event is emitted. Auto-renewal
 		/// registration is automatically removed for failed items.
 		#[pallet::call_index(11)]
-		#[pallet::weight((T::WeightInfo::process_auto_renewals(), DispatchClass::Mandatory))]
+		#[pallet::weight((T::WeightInfo::process_auto_renewals(T::MaxBlockTransactions::get()), DispatchClass::Mandatory))]
 		pub fn process_auto_renewals(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			ensure_none(origin)?;
 			let pending = PendingAutoRenewals::<T>::take();
-
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 				let scope = AuthorizationScope::Account(renewal_data.account.clone());
@@ -837,35 +783,24 @@ pub mod pallet {
 				let can_renew = Self::check_authorization(&scope, tx_info.size, true).is_ok();
 
 				if can_renew {
-					sp_io::transaction_index::renew(extrinsic_index, content_hash);
-
-					let mut new_index = 0u32;
-					<BlockTransactions<T>>::mutate(|transactions| {
-						let chunks = num_chunks(tx_info.size);
-						let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
-						new_index = transactions.len() as u32;
-						transactions
-							.try_push(TransactionInfo {
-								chunk_root: tx_info.chunk_root,
-								size: tx_info.size,
-								content_hash: tx_info.content_hash,
-								hashing: tx_info.hashing,
-								cid_codec: tx_info.cid_codec,
-								block_chunks: total_chunks,
-							})
-							.map_err(|_| Error::<T>::TooManyTransactions)
-					})?;
-
-					TransactionByContentHash::<T>::insert(
-						content_hash,
-						(frame_system::Pallet::<T>::block_number(), new_index),
-					);
-
-					Self::deposit_event(Event::TransactionAutoRenewed {
-						index: new_index,
-						content_hash,
-						account: renewal_data.account,
-					});
+					match Self::do_renew(tx_info) {
+						Ok(new_index) => {
+							Self::deposit_event(Event::DataAutoRenewed {
+								index: new_index,
+								content_hash,
+								account: renewal_data.account,
+							});
+						},
+						Err(_) => {
+							// Block is full — remove the auto-renewal registration.
+							// The data will expire; the user can re-register if desired.
+							AutoRenewals::<T>::remove(content_hash);
+							Self::deposit_event(Event::AutoRenewalFailed {
+								content_hash,
+								account: renewal_data.account,
+							});
+						},
+					}
 				} else {
 					// Insufficient authorization — remove the auto-renewal registration so the
 					// chain doesn't try (and fail) to renew it again next cycle.
@@ -885,9 +820,9 @@ pub mod pallet {
 		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
 		/// data size). The authorization is **not** consumed here; it is consumed each time
 		/// the data is auto-renewed (every `StoragePeriod` blocks).
-		/// Authorization is checked here but might still be missing when it actually renewed.
+		/// Authorization is checked here but might still be missing when actually renewed.
 		///
-		/// Emits [`AutoRenewEnabled`](Event::AutoRenewEnabled) when successful.
+		/// Emits [`AutoRenewalEnabled`](Event::AutoRenewalEnabled) when successful.
 		#[pallet::call_index(12)]
 		#[pallet::weight(T::WeightInfo::enable_auto_renew())]
 		pub fn enable_auto_renew(
@@ -897,15 +832,11 @@ pub mod pallet {
 			let who = ensure_signed(origin)?;
 
 			ensure!(
-				TransactionByContentHash::<T>::contains_key(content_hash),
-				Error::<T>::RenewedNotFound
-			);
-			ensure!(
 				!AutoRenewals::<T>::contains_key(content_hash),
-				Error::<T>::AutoRenewAlreadyEnabled
+				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// Verify the account has authorization sufficient for at least one future renewal.
+			// Verify the content hash exists and the account has sufficient authorization.
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 			let tx_info =
@@ -917,7 +848,7 @@ pub mod pallet {
 			);
 
 			AutoRenewals::<T>::insert(content_hash, AutoRenewalData { account: who.clone() });
-			Self::deposit_event(Event::AutoRenewEnabled { content_hash, who });
+			Self::deposit_event(Event::AutoRenewalEnabled { content_hash, who });
 			Ok(())
 		}
 
@@ -925,7 +856,7 @@ pub mod pallet {
 		///
 		/// Can only be called by the account that originally enabled auto-renewal.
 		///
-		/// Emits [`AutoRenewDisabled`](Event::AutoRenewDisabled) when successful.
+		/// Emits [`AutoRenewalDisabled`](Event::AutoRenewalDisabled) when successful.
 		#[pallet::call_index(13)]
 		#[pallet::weight(T::WeightInfo::disable_auto_renew())]
 		pub fn disable_auto_renew(
@@ -935,11 +866,11 @@ pub mod pallet {
 			let who = ensure_signed(origin)?;
 
 			let renewal_data =
-				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewNotEnabled)?;
-			ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewOwner);
+				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
+			ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
 
 			AutoRenewals::<T>::remove(content_hash);
-			Self::deposit_event(Event::AutoRenewDisabled { content_hash, who });
+			Self::deposit_event(Event::AutoRenewalDisabled { content_hash, who });
 			Ok(())
 		}
 	}
@@ -1234,6 +1165,44 @@ pub mod pallet {
 			});
 
 			Ok(())
+		}
+
+		/// Common implementation for [`renew`](Self::renew),
+		/// [`renew_content_hash`](Self::renew_content_hash), and
+		/// [`process_auto_renewals`](Self::process_auto_renewals).
+		///
+		/// Indexes the renewal via `sp_io::transaction_index::renew`, pushes a new
+		/// `TransactionInfo` into [`BlockTransactions`], and updates
+		/// [`TransactionByContentHash`]. Returns the new transaction index on success.
+		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			let content_hash = info.content_hash;
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
+
+			let mut new_index = 0u32;
+			<BlockTransactions<T>>::mutate(|transactions| {
+				let chunks = num_chunks(info.size);
+				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
+				new_index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root: info.chunk_root,
+						size: info.size,
+						content_hash: info.content_hash,
+						hashing: info.hashing,
+						cid_codec: info.cid_codec,
+						block_chunks: total_chunks,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)
+			})?;
+
+			TransactionByContentHash::<T>::insert(
+				content_hash,
+				(frame_system::Pallet::<T>::block_number(), new_index),
+			);
+
+			Ok(new_index)
 		}
 
 		/// Returns `true` if the system is beyond the given expiration point.
