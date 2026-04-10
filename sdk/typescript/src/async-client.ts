@@ -52,7 +52,6 @@ interface TxStatusEvent {
   txHash?: string
   type?: string
   found?: boolean
-  isValid?: boolean
   nPeers?: number
   block?: { hash: string; number: number; index?: number }
   events?: RuntimeEvent[]
@@ -186,10 +185,6 @@ export interface AuthCallOptions extends CallOptions {
  *
  * `txHash` - set when the event carries a new transaction hash.
  * `finish` - set when the transaction reached the desired confirmation level.
- * `isValid` - set to false when the transaction is no longer valid
- *   (mortality expired, dropped from pool). Mutually exclusive with `finish`:
- *   `finish` requires the tx to be found in a block, while `isValid=false`
- *   only occurs when PAPI reports `found=false, isValid=false`.
  */
 interface MappedTxStatus {
   txHash?: string
@@ -197,7 +192,6 @@ interface MappedTxStatus {
     block: { hash: string; number: number }
     events?: RuntimeEvent[]
   }
-  isValid?: boolean
 }
 
 /**
@@ -251,11 +245,6 @@ function mapPapiEventToProgress(
       }
     } else {
       progressCallback?.({ type: TxStatus.NoLongerInBlock, chunkIndex })
-      // Transaction dropped from best blocks and no longer valid
-      // (e.g. mortality expired, evicted from pool)
-      if (ev.isValid === false) {
-        result.isValid = false
-      }
     }
   }
 
@@ -711,15 +700,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           )
           if (result.txHash) txHash = result.txHash
           if (result.finish) finish(result.finish.block, result.finish.events)
-          // Transaction dropped from pool and no longer valid (mortality expired, evicted)
-          if (result.isValid === false) {
-            fail(
-              new BulletinError(
-                "Transaction is no longer valid (mortality expired or dropped from pool)",
-                ErrorCode.TIMEOUT,
-              ),
-            )
-          }
         },
         error: (err: unknown) => {
           if (!resolved) {
@@ -741,8 +721,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       })
 
-      // Safety-net timeout: in case PAPI never emits isValid=false
-      // (e.g. connection drops, unexpected state). Default: 2 minutes.
+      // Safety-net timeout: fires if the transaction is never finalized
+      // (e.g. mortality expires, connection drops). Default: 2 minutes.
       const timerId = setTimeout(
         () =>
           fail(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT)),
