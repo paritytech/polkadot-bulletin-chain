@@ -341,3 +341,16 @@ export interface ClientConfig {
    * Only fires if PAPI never reports the transaction as invalid. */
   txTimeout?: number
 }
+
+/**
+ * Default client configuration values.
+ *
+ * Used by AsyncBulletinClient, MockBulletinClient, and BulletinPreparer
+ * so that defaults are defined in one place.
+ */
+export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
+  defaultChunkSize: 1024 * 1024, // 1 MiB
+  createManifest: true,
+  chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
+  txTimeout: 120_000, // 2 minutes safety net
+}

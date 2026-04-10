@@ -92,6 +92,7 @@ export {
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
+  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   HashAlgorithm,

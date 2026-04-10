@@ -25,6 +25,7 @@ import {
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
+  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   type ProgressCallback,
@@ -117,10 +118,8 @@ export class MockBulletinClient implements BulletinClientInterface {
    */
   constructor(config?: Partial<MockClientConfig>) {
     this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
-      createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      txTimeout: config?.txTimeout ?? 120_000,
+      ...DEFAULT_CLIENT_CONFIG,
+      ...config,
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
       simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,

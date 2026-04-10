@@ -15,6 +15,7 @@ import {
   ChunkStatus,
   CidCodec,
   type ClientConfig,
+  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   HashAlgorithm,
@@ -181,19 +182,21 @@ export interface AuthCallOptions extends CallOptions {
 }
 
 /**
- * Result of mapping a single PAPI event to SDK progress events.
+ * Transaction status extracted from a PAPI event by `mapPapiEventToProgress`.
  *
- * `txHash` is set when the event carries a new transaction hash.
- * `finish` is set when the event signals the transaction has reached
- * the caller's desired confirmation level (in-block or finalized).
+ * `txHash` - set when the event carries a new transaction hash.
+ * `finish` - set when the transaction reached the desired confirmation level.
+ * `isValid` - set to false when the transaction is no longer valid
+ *   (mortality expired, dropped from pool). Mutually exclusive with `finish`:
+ *   `finish` requires the tx to be found in a block, while `isValid=false`
+ *   only occurs when PAPI reports `found=false, isValid=false`.
  */
-interface PapiEventMappingResult {
+interface MappedTxStatus {
   txHash?: string
   finish?: {
     block: { hash: string; number: number }
     events?: RuntimeEvent[]
   }
-  /** Set to false when the transaction is no longer valid (e.g. mortality expired, dropped from pool) */
   isValid?: boolean
 }
 
@@ -210,8 +213,8 @@ function mapPapiEventToProgress(
   progressCallback: ProgressCallback | undefined,
   chunkIndex: number | undefined,
   waitFor: "in_block" | "finalized" = "finalized",
-): PapiEventMappingResult {
-  const result: PapiEventMappingResult = {}
+): MappedTxStatus {
+  const result: MappedTxStatus = {}
 
   // Capture the transaction hash on the first event that carries it
   if (ev.txHash && !currentTxHash) {
@@ -561,12 +564,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     this.api = api
     this.signer = signer
     this.submit = submit
-    this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
-      createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-      txTimeout: config?.txTimeout ?? 120_000, // 2 minutes safety net
-    }
+    this.config = { ...DEFAULT_CLIENT_CONFIG, ...config }
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,

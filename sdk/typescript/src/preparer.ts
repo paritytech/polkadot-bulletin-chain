@@ -15,6 +15,7 @@ import {
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
+  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   type StoreOptions,
@@ -32,12 +33,7 @@ export class BulletinPreparer {
   private config: Required<ClientConfig>
 
   constructor(config?: ClientConfig) {
-    this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
-      createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
-      txTimeout: config?.txTimeout ?? 120_000,
-    }
+    this.config = { ...DEFAULT_CLIENT_CONFIG, ...config }
   }
 
   /**
