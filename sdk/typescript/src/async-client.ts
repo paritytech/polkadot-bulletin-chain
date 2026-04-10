@@ -714,8 +714,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       })
 
-      // Fallback timeout: only fires if PAPI never reports back
-      // (e.g. connection drops). Default: 7 min (above 64-block mortality).
+      // Defensive timeout: PAPI handles reconnects and mortality, so this
+      // should rarely fire. If it does, it likely indicates a bug. Default:
+      // 7 min (above PAPI's 64-block mortality window).
       const timerId = setTimeout(() => {
         if (resolved) return
         resolved = true
