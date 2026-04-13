@@ -54,9 +54,10 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
     // Create client directly with api, signer, and submit function
-    // Override txTimeout (default 420s) to fit within test timeouts
+    // Use a per-transaction timeout suitable for a local dev chain (~6s blocks).
+    // The default 420s is for production; 60s is plenty for CI zombienet nodes.
     client = new AsyncBulletinClient(api, signer, papiClient.submit, {
-      txTimeout: 180_000,
+      txTimeout: 60_000,
     })
 
     // Authorize Alice's account for storage operations
