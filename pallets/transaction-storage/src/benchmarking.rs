@@ -211,6 +211,35 @@ mod benchmarks {
 	}
 
 	#[benchmark]
+	fn add_authorizer() -> Result<(), BenchmarkError> {
+		let origin = T::ManagerOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let who: T::AccountId = whitelisted_caller();
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, who.clone());
+
+		assert_last_event::<T>(Event::AuthorizerAdded { who }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn remove_authorizer() -> Result<(), BenchmarkError> {
+		let origin = T::ManagerOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let who: T::AccountId = whitelisted_caller();
+		let origin2 = origin.clone();
+		TransactionStorage::<T>::add_authorizer(origin2 as T::RuntimeOrigin, who.clone())
+			.map_err(|_| BenchmarkError::Stop("unable to add authorizer"))?;
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, who.clone());
+
+		assert_last_event::<T>(Event::AuthorizerRemoved { who }.into());
+		Ok(())
+	}
+
+	#[benchmark]
 	fn refresh_account_authorization() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
