@@ -78,6 +78,13 @@ pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 	pallet_sudo::GenesisConfig::<Runtime> { key: Some(sudo_relayer_signer().into()) }
 		.assimilate_storage(&mut t)
 		.unwrap();
+	// Previously this was implicit via the hardcoded `TestAccounts` SortedMembers impl.
+	pallet_transaction_storage::GenesisConfig::<Runtime> {
+		allowed_authorizers: vec![sudo_relayer_signer().to_account_id()],
+		..Default::default()
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
 
 	sp_io::TestExternalities::new(t).execute_with(test)
 }
@@ -1293,6 +1300,7 @@ fn wrapped_renew_requires_authorization() {
 		entry_fee: 0,
 		account_authorizations: vec![],
 		preimage_authorizations: vec![],
+		allowed_authorizers: vec![],
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
@@ -1751,4 +1759,100 @@ fn gen_check_proof() {
 		"CHECK_PROOF hex for tx_size={tx_size}, max_block_transactions={max_block_transactions}:"
 	);
 	println!("{hex}");
+}
+
+#[test]
+fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
+	// Sudo adds Charlie as an authorizer; Charlie then dispatches authorize_account.
+	run_test(|| {
+		let sudo = sudo_relayer_signer(); // Alice, holds sudo key
+		let new_authorizer = non_relay_signer(); // Charlie, not currently authorized
+		let target = relayer_signer(); // Bob, target of authorization
+
+		// Step 1: sudo adds Charlie.
+		let add_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::add_authorizer {
+				who: new_authorizer.to_account_id(),
+			});
+		let sudo_call = RuntimeCall::Sudo(pallet_sudo::Call::<runtime::Runtime>::sudo {
+			call: Box::new(add_call),
+		});
+		assert_ok_ok(construct_and_apply_extrinsic(sudo.pair(), sudo_call));
+		assert!(pallet_transaction_storage::AllowedAuthorizers::<runtime::Runtime>::contains_key(
+			new_authorizer.to_account_id()
+		));
+
+		// Step 2: Charlie, now an authorizer, authorizes Bob.
+		// Charlie needs providers>0 so CheckNonce passes (same as the existing
+		// non_authorizer_cannot_sign test pattern).
+		frame_system::Pallet::<Runtime>::inc_providers(&new_authorizer.to_account_id());
+		let authorize_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+		assert_ok_ok(construct_and_apply_extrinsic(new_authorizer.pair(), authorize_call));
+
+		assert_eq!(
+			runtime::TransactionStorage::account_authorization_extent(target.to_account_id()),
+			AuthorizationExtent { transactions: 5, bytes: 1024 },
+		);
+	});
+}
+
+#[test]
+fn sudo_can_remove_authorizer_and_removed_cannot_authorize() {
+	// Alice is an authorizer via genesis seed in run_test. Sudo removes her,
+	// then her next authorize_account attempt fails validation.
+	run_test(|| {
+		let alice = sudo_relayer_signer();
+		let target = non_relay_signer();
+
+		// Sanity: Alice can authorize first.
+		let authorize_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 1,
+				bytes: 1,
+			});
+		assert_ok_ok(construct_and_apply_extrinsic(alice.pair(), authorize_call.clone()));
+
+		// Sudo removes Alice.
+		let remove_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::remove_authorizer {
+				who: alice.to_account_id(),
+			});
+		let sudo_call = RuntimeCall::Sudo(pallet_sudo::Call::<runtime::Runtime>::sudo {
+			call: Box::new(remove_call),
+		});
+		assert_ok_ok(construct_and_apply_extrinsic(alice.pair(), sudo_call));
+
+		// Now Alice's authorize attempt is rejected at validation.
+		assert_eq!(
+			construct_and_apply_extrinsic(alice.pair(), authorize_call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::BadSigner)),
+		);
+	});
+}
+
+#[test]
+fn non_sudo_cannot_add_authorizer() {
+	// A signed but non-sudo account calling add_authorizer directly fails
+	// at dispatch with BadOrigin (validation passes — it's a signed call
+	// that the payment pipeline accepts, but the ManagerOrigin check rejects).
+	run_test(|| {
+		let signer = relayer_signer(); // Bob, not sudo
+		frame_system::Pallet::<Runtime>::inc_providers(&signer.to_account_id());
+
+		let call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::add_authorizer {
+				who: non_relay_signer().to_account_id(),
+			});
+
+		assert_ok_err(
+			construct_and_apply_extrinsic(signer.pair(), call),
+			sp_runtime::DispatchError::BadOrigin,
+		);
+	});
 }

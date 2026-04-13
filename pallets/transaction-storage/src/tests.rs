@@ -24,11 +24,15 @@ use super::{
 		System, Test, TransactionStorage,
 	},
 	pallet::Origin,
-	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
+	EnsureAllowedAuthorizers, Event, TransactionInfo, AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use crate::migrations::v1::OldTransactionInfo;
+
+use crate::{
+	migrations::{v1::OldTransactionInfo, PopulateAllowedAuthorizersIfEmpty},
+	mock::RuntimeGenesisConfig,
+};
 use codec::Encode;
 use polkadot_sdk_frame::{
 	deps::frame_support::{
@@ -1295,5 +1299,179 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		// Origin should still be a signed origin (not transformed)
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
+	});
+}
+
+#[test]
+fn add_authorizer_inserts_into_storage_and_emits_event() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who));
+
+		assert!(AllowedAuthorizers::<Test>::contains_key(who));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AuthorizerAdded { who }));
+	});
+}
+
+#[test]
+fn remove_authorizer_removes_from_storage_and_emits_event() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, ());
+
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AuthorizerRemoved {
+			who,
+		}));
+	});
+}
+
+#[test]
+fn add_authorizer_rejects_non_manager_origin() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			TransactionStorage::add_authorizer(RuntimeOrigin::signed(1), 42),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
+fn remove_authorizer_rejects_non_manager_origin() {
+	new_test_ext().execute_with(|| {
+		AllowedAuthorizers::<Test>::insert(42u64, ());
+		assert_noop!(
+			TransactionStorage::remove_authorizer(RuntimeOrigin::signed(1), 42),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
+fn add_authorizer_is_idempotent() {
+	new_test_ext().execute_with(|| {
+		let who = 42u64;
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who));
+		// Second call overwrites with same value, still Ok.
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who));
+		assert!(AllowedAuthorizers::<Test>::contains_key(who));
+	});
+}
+
+#[test]
+fn remove_authorizer_on_absent_entry_is_ok() {
+	new_test_ext().execute_with(|| {
+		// Not present; remove is still a successful no-op write.
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), 42));
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_accepts_signed_account_in_storage() {
+	new_test_ext().execute_with(|| {
+		let who = 7u64;
+		AllowedAuthorizers::<Test>::insert(who, ());
+		let origin = RuntimeOrigin::signed(who);
+		assert_eq!(EnsureAllowedAuthorizers::<Test>::try_origin(origin).ok(), Some(who));
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_rejects_signed_account_not_in_storage() {
+	new_test_ext().execute_with(|| {
+		let origin = RuntimeOrigin::signed(99);
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(origin).is_err());
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_rejects_root() {
+	new_test_ext().execute_with(|| {
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::root()).is_err());
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_rejects_none() {
+	new_test_ext().execute_with(|| {
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::none()).is_err());
+	});
+}
+
+#[test]
+fn genesis_populates_allowed_authorizers() {
+	let t = RuntimeGenesisConfig {
+		system: Default::default(),
+		transaction_storage: crate::GenesisConfig::<Test> {
+			retention_period: 10,
+			byte_fee: 2,
+			entry_fee: 200,
+			account_authorizations: vec![],
+			preimage_authorizations: vec![],
+			allowed_authorizers: vec![1, 2, 3],
+		},
+	}
+	.build_storage()
+	.unwrap();
+
+	TestExternalities::new(t).execute_with(|| {
+		assert!(AllowedAuthorizers::<Test>::contains_key(1));
+		assert!(AllowedAuthorizers::<Test>::contains_key(2));
+		assert!(AllowedAuthorizers::<Test>::contains_key(3));
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 3);
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_seeds_empty_storage() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 0);
+
+		parameter_types! {
+			pub Seed: Vec<u64> = vec![10, 20];
+		}
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed>::on_runtime_upgrade();
+
+		assert!(AllowedAuthorizers::<Test>::contains_key(10));
+		assert!(AllowedAuthorizers::<Test>::contains_key(20));
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_skips_non_empty_storage() {
+	new_test_ext().execute_with(|| {
+		AllowedAuthorizers::<Test>::insert(99u64, ());
+
+		parameter_types! {
+			pub Seed: Vec<u64> = vec![10, 20];
+		}
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed>::on_runtime_upgrade();
+
+		// Only the pre-existing entry; seed not applied.
+		assert!(AllowedAuthorizers::<Test>::contains_key(99));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(10));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(20));
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_is_idempotent() {
+	new_test_ext().execute_with(|| {
+		parameter_types! {
+			pub Seed: Vec<u64> = vec![10];
+		}
+		// First run: seeds.
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed>::on_runtime_upgrade();
+		assert!(AllowedAuthorizers::<Test>::contains_key(10));
+
+		// Second run: non-empty, no-op.
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed>::on_runtime_upgrade();
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 1);
 	});
 }
