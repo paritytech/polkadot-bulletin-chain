@@ -452,24 +452,6 @@ pub mod pallet {
 			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
 		}
 
-		/// Index and store data off chain with an explicit CID configuration.
-		///
-		/// Behaves identically to [`store`](Self::store), but the CID configuration
-		/// (codec and hashing algorithm) is passed directly as a parameter.
-		///
-		/// Emits [`Stored`](Event::Stored) when successful.
-		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
-		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
-		pub fn store_with_cid_config(
-			origin: OriginFor<T>,
-			cid: CidConfig,
-			data: Vec<u8>,
-		) -> DispatchResult {
-			let _caller = Self::ensure_authorized(origin)?;
-			Self::do_store(data, cid.hashing, cid.codec)
-		}
-
 		/// Renew previously stored data. Parameters are the block number that contains previous
 		/// `store` or `renew` call and transaction index within that block. Transaction index is
 		/// emitted in the `Stored` or `Renewed` event.
@@ -706,6 +688,65 @@ pub mod pallet {
 			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
+
+		/// Index and store data off chain with an explicit CID configuration.
+		///
+		/// Behaves identically to [`store`](Self::store), but the CID configuration
+		/// (codec and hashing algorithm) is passed directly as a parameter.
+		///
+		/// Emits [`Stored`](Event::Stored) when successful.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
+		pub fn store_with_cid_config(
+			origin: OriginFor<T>,
+			cid: CidConfig,
+			data: Vec<u8>,
+		) -> DispatchResult {
+			let _caller = Self::ensure_authorized(origin)?;
+			Self::do_store(data, cid.hashing, cid.codec)
+		}
+
+		/// Add an account to the set of allowed authorizers. Allowed authorizers can call
+		/// [`authorize_account`](Self::authorize_account) and
+		/// [`authorize_preimage`](Self::authorize_preimage) to grant storage access.
+		///
+		/// If the account is already an allowed authorizer, this is a no-op.
+		///
+		/// Parameters:
+		///
+		/// - `who`: The account to add as an allowed authorizer.
+		///
+		/// The origin for this call must satisfy `ManagerOrigin`. Emits
+		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
+		#[pallet::call_index(10)]
+		#[pallet::weight(T::WeightInfo::add_authorizer())]
+		pub fn add_authorizer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
+			T::ManagerOrigin::ensure_origin(origin)?;
+			AllowedAuthorizers::<T>::insert(&who, ());
+			Self::deposit_event(Event::AuthorizerAdded { who });
+			Ok(())
+		}
+		/// Remove an account from the set of allowed authorizers. The removed account will no
+		/// longer be able to call [`authorize_account`](Self::authorize_account) or
+		/// [`authorize_preimage`](Self::authorize_preimage).
+		///
+		/// If the account is not currently an allowed authorizer, this is a no-op.
+		///
+		/// Parameters:
+		///
+		/// - `who`: The account to remove from the allowed authorizers.
+		///
+		/// The origin for this call must satisfy `ManagerOrigin`. Emits
+		/// [`AuthorizerRemoved`](Event::AuthorizerRemoved) when successful.
+		#[pallet::call_index(11)]
+		#[pallet::weight(T::WeightInfo::remove_authorizer())]
+		pub fn remove_authorizer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
+			T::ManagerOrigin::ensure_origin(origin)?;
+			AllowedAuthorizers::<T>::remove(&who);
+			Self::deposit_event(Event::AuthorizerRemoved { who });
+			Ok(())
+		}
 	}
 
 	#[pallet::event]
@@ -730,12 +771,21 @@ pub mod pallet {
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
 		/// An expired preimage authorization was removed.
 		ExpiredPreimageAuthorizationRemoved { content_hash: ContentHash },
+		/// An authorizer was added to the allowed list.
+		AuthorizerAdded { who: T::AccountId },
+		/// An authorizer was removed from the allowed list.
+		AuthorizerRemoved { who: T::AccountId },
 	}
 
 	/// Authorizations, keyed by scope.
 	#[pallet::storage]
 	pub(super) type Authorizations<T: Config> =
 		StorageMap<_, Blake2_128Concat, AuthorizationScopeFor<T>, AuthorizationFor<T>, OptionQuery>;
+
+	/// List of accounts allowed to give authorizations.
+	#[pallet::storage]
+	pub type AllowedAuthorizers<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, (), OptionQuery>;
 
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
