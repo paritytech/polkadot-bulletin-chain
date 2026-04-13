@@ -62,6 +62,7 @@ fn bulletin_westend_genesis(
 		sudo: SudoConfig { key: sudo_account },
 		transaction_storage: TransactionStorageConfig {
 			account_authorizations,
+			allowed_authorizers: vec![Sr25519Keyring::Alice.to_account_id(),],
 			..Default::default()
 		},
 	})

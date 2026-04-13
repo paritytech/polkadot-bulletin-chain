@@ -2,7 +2,7 @@ use crate::{
 	bridge_config::XCM_LANE, opaque::SessionKeys, AccountId, BabeConfig,
 	BridgePolkadotGrandpaConfig, BridgePolkadotMessagesConfig, BridgePolkadotParachainsConfig,
 	RelayerSetConfig, RuntimeGenesisConfig, SessionConfig, Signature, SudoConfig,
-	ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
+	TransactionStorageConfig, ValidatorSetConfig, BABE_GENESIS_EPOCH_CONFIG,
 };
 use alloc::{vec, vec::Vec};
 use scale_info::prelude::format;
@@ -85,6 +85,10 @@ fn testnet_genesis(
 			..Default::default()
 		},
 		sudo: SudoConfig { key: sudo_account },
+		transaction_storage: TransactionStorageConfig {
+			allowed_authorizers: vec![sp_keyring::Sr25519Keyring::Alice.to_account_id()],
+			..Default::default()
+		},
 		..Default::default()
 	};
 

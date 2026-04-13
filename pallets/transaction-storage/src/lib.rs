@@ -861,6 +861,8 @@ pub mod pallet {
 		pub byte_fee: BalanceOf<T>,
 		pub entry_fee: BalanceOf<T>,
 		pub retention_period: BlockNumberFor<T>,
+		/// Initial accounts that are allowed to issue authorizations.
+		pub allowed_authorizers: Vec<T::AccountId>,
 		/// Initial account authorizations as (account, transactions, bytes) tuples.
 		pub account_authorizations: Vec<(T::AccountId, u32, u64)>,
 		/// Initial preimage authorizations as (content_hash, max_size) tuples.
@@ -873,6 +875,7 @@ pub mod pallet {
 				byte_fee: 10u32.into(),
 				entry_fee: 1000u32.into(),
 				retention_period: DEFAULT_RETENTION_PERIOD.into(),
+				allowed_authorizers: Vec::new(),
 				account_authorizations: Vec::new(),
 				preimage_authorizations: Vec::new(),
 			}
@@ -906,6 +909,9 @@ pub mod pallet {
 						expiration,
 					},
 				);
+			}
+			for who in &self.allowed_authorizers {
+				AllowedAuthorizers::<T>::insert(who, ());
 			}
 		}
 	}
