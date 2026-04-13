@@ -4,8 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    # TODO: remove before merging to main
-    branches: [main, naren-client, bko-on-naren-client]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -66,7 +65,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
 
