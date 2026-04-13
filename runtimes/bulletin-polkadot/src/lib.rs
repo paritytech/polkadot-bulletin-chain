@@ -13,9 +13,9 @@ use bp_runtime::OwnedBridgeModule;
 use bridge_runtime_common::generate_bridge_reject_obsolete_headers_and_messages;
 use frame_support::{
 	derive_impl,
-	traits::{EitherOfDiverse, InstanceFilter, SortedMembers, ValidatorRegistration},
+	traits::{EitherOfDiverse, InstanceFilter, ValidatorRegistration},
 };
-use frame_system::{EnsureRoot, EnsureSignedBy};
+use frame_system::EnsureRoot;
 use pallet_bridge_grandpa::Call as BridgeGrandpaCall;
 use pallet_bridge_messages::Call as BridgeMessagesCall;
 use pallet_bridge_parachains::Call as BridgeParachainsCall;
@@ -359,14 +359,6 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
 }
 
-/// Provides test accounts for use with `EnsureSignedBy`.
-pub struct TestAccounts;
-impl SortedMembers<AccountId> for TestAccounts {
-	fn sorted_members() -> alloc::vec::Vec<AccountId> {
-		alloc::vec![sp_keyring::Sr25519Keyring::Alice.to_account_id()]
-	}
-}
-
 /// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
 /// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
 ///
@@ -409,10 +401,12 @@ impl pallet_transaction_storage::Config for Runtime {
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
+	type ManagerOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOfDiverse<
 		EnsureRoot<Self::AccountId>,
-		// Test accounts can also authorize for testing purposes.
-		EnsureSignedBy<TestAccounts, Self::AccountId>,
+		// Otherwise authorizers (test accounts included) must come from a list first set at
+		// genesis and modified in runtime.
+		EnsureAllowedAuthorizers<Runtime>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
@@ -608,7 +602,7 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
-use pallet_transaction_storage::{CallInspector, MAX_WRAPPER_DEPTH};
+use pallet_transaction_storage::{CallInspector, EnsureAllowedAuthorizers, MAX_WRAPPER_DEPTH};
 use pallets_common::{
 	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, proxy_inner_calls,
 	utility_inner_calls,
