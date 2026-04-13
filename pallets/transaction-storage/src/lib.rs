@@ -209,6 +209,37 @@ impl CheckContext {
 	}
 }
 
+pub struct EnsureAllowedAuthorizers<T>(core::marker::PhantomData<T>);
+
+impl<T: Config> EnsureOrigin<T::RuntimeOrigin> for EnsureAllowedAuthorizers<T>
+where
+	T::RuntimeOrigin: From<frame_system::RawOrigin<T::AccountId>>
+		+ Into<Result<frame_system::RawOrigin<T::AccountId>, T::RuntimeOrigin>>,
+{
+	type Success = T::AccountId;
+
+	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
+		o.into().and_then(|raw| match raw {
+			frame_system::RawOrigin::Signed(who) if AllowedAuthorizers::<T>::contains_key(&who) =>
+				Ok(who),
+			other => Err(T::RuntimeOrigin::from(other)),
+		})
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<T::RuntimeOrigin, ()> {
+		let who = match AllowedAuthorizers::<T>::iter_keys().next() {
+			Some(existing) => existing,
+			None => {
+				let new: T::AccountId = frame_benchmarking::account("allowed_authorizer", 0, 0);
+				AllowedAuthorizers::<T>::insert(&new, ());
+				new
+			},
+		};
+		Ok(frame_system::RawOrigin::Signed(who).into())
+	}
+}
+
 #[polkadot_sdk_frame::pallet]
 pub mod pallet {
 	use super::*;
@@ -253,6 +284,8 @@ pub mod pallet {
 		/// Authorizations expire after this many blocks.
 		#[pallet::constant]
 		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;
+		/// The origin that manages the authorizer list.
+		type ManagerOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 		/// The origin that can authorize data storage.
 		type Authorizer: EnsureOrigin<Self::RuntimeOrigin>;
 		/// Priority of store/renew transactions.
