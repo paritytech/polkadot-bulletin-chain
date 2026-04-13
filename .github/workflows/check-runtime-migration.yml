@@ -165,7 +165,7 @@ jobs:
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
         run: |
-          cargo build --release -p "$PACKAGE_NAME" -q --locked
+          cargo build --release -p "$PACKAGE_NAME" --features on-chain-release-build -q --locked
 
       - name: Check runtime
         timeout-minutes: 10
