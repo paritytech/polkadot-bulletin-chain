@@ -4,8 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    # TODO: remove before merging to main
-    branches: [ main, naren-client, bko-on-naren-client ]
+    branches: [ main ]
 
 jobs:
   build:
@@ -24,7 +23,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: console-ui/package-lock.json
 
