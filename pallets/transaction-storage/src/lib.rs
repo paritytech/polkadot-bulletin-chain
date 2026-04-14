@@ -1432,6 +1432,15 @@ pub mod pallet {
 						None,
 					));
 				},
+				Call::<T>::add_authorizer { .. } | Call::<T>::remove_authorizer { .. } => {
+					// Manager-origin calls. No signed authorization check needed here —
+					// the ManagerOrigin check happens at dispatch. Just let them through
+					// validation so they can reach dispatch.
+					return Ok((
+						context.want_valid_transaction().then(ValidTransaction::default),
+						None,
+					));
+				},
 				_ => return Err(InvalidTransaction::Call.into()),
 			};
 
