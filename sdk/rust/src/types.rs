@@ -280,6 +280,22 @@ pub struct RenewalResult {
 	pub size: u64,
 }
 
+/// Transaction confirmation level.
+///
+/// Controls when transaction submission methods resolve:
+/// - `InBlock`: Return when the transaction is included in a best block (faster, may reorg)
+/// - `Finalized`: Return when the transaction is finalized (safer, slower)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Encode, Decode, TypeInfo)]
+pub enum WaitFor {
+	/// Return when the transaction is in a best block.
+	/// Faster but the block may be reorganized.
+	#[default]
+	InBlock,
+	/// Return when the transaction is finalized.
+	/// Slower but guarantees the transaction is permanent.
+	Finalized,
+}
+
 /// Options for storing data.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct StoreOptions {
@@ -287,8 +303,8 @@ pub struct StoreOptions {
 	pub cid_codec: CidCodec,
 	/// Hashing algorithm to use (default: blake2b-256).
 	pub hash_algorithm: HashingAlgorithm,
-	/// Whether to wait for finalization (default: false).
-	pub wait_for_finalization: bool,
+	/// What to wait for before returning (default: InBlock).
+	pub wait_for: WaitFor,
 }
 
 impl Default for StoreOptions {
@@ -296,7 +312,7 @@ impl Default for StoreOptions {
 		Self {
 			cid_codec: CidCodec::Raw,
 			hash_algorithm: HashingAlgorithm::Blake2b256,
-			wait_for_finalization: false,
+			wait_for: WaitFor::default(),
 		}
 	}
 }
