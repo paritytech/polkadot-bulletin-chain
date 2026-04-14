@@ -1328,3 +1328,34 @@ fn authorize_account_does_not_push_expiry() {
 		assert_noop!(TransactionStorage::validate_signed(&who, &call), InvalidTransaction::Payment);
 	});
 }
+
+#[test]
+fn authorize_preimage_does_not_push_expiry() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![0u8; 2000];
+		let hash = blake2_256(&data);
+		let call = Call::store { data };
+		// Initial authorization at block 1: expires at block 1 + 10 = 11.
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2000));
+
+		// Re-authorize at block 5 with larger max_size: expiration should stay at 11.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 3000));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 1, bytes: 3000 },
+		);
+
+		// Still valid at block 10.
+		run_to_block(10, || None);
+		assert_ok!(TransactionStorage::validate_signed(&1, &call));
+
+		// Expires at block 11 (original expiry), NOT 15.
+		run_to_block(11, || None);
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}

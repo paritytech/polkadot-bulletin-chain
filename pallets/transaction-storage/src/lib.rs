@@ -596,8 +596,10 @@ pub mod pallet {
 		/// expire after a configured number of blocks.
 		///
 		/// If authorization already exists for a preimage of the given hash to be stored, the
-		/// maximum size of the preimage will be increased to `max_size`, and the expiration block
-		/// will be pushed back.
+		/// maximum size of the preimage will be increased to `max_size`. The expiration block
+		/// is **not** pushed back; use
+		/// [`refresh_preimage_authorization`](Self::refresh_preimage_authorization) to extend
+		/// expiry.
 		///
 		/// Parameters:
 		///
@@ -620,7 +622,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, true);
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, false);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
