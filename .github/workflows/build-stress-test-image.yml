@@ -2,7 +2,7 @@ name: Build stress-test image
 
 on:
   push:
-    branches: [main]
+    branches: [main, sandreim/stress-image]
     paths:
       - "stress-test/**"
   pull_request:
