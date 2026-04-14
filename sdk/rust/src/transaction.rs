@@ -229,10 +229,11 @@ impl TransactionClient {
 			}
 		}
 
-		Ok(SubmitResult {
-			block_hash: result_block_hash.unwrap_or_default(),
-			extrinsic_hash: result_extrinsic_hash.unwrap_or_default(),
-		})
+		match (result_block_hash, result_extrinsic_hash) {
+			(Some(block_hash), Some(extrinsic_hash)) =>
+				Ok(SubmitResult { block_hash, extrinsic_hash }),
+			_ => Err(make_error("Transaction stream ended without block inclusion".into())),
+		}
 	}
 
 	/// Query the current authorization for an account.

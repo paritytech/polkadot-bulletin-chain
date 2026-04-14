@@ -44,6 +44,7 @@ let receipt = client.authorize_preimage(
     content_hash,     // ContentHash of the data
     max_size,         // Maximum size in bytes
     &signer,
+    WaitFor::InBlock,
 ).await?;
 ```
 
@@ -80,10 +81,10 @@ Extend the expiry of an existing authorization:
 
 ```rust
 // Refresh account authorization
-client.refresh_account_authorization(account, &signer).await?;
+client.refresh_account_authorization(account, &signer, WaitFor::InBlock).await?;
 
 // Refresh preimage authorization
-client.refresh_preimage_authorization(content_hash, &signer).await?;
+client.refresh_preimage_authorization(content_hash, &signer, WaitFor::InBlock).await?;
 ```
 
 ### Remove Expired Authorization
@@ -91,8 +92,8 @@ client.refresh_preimage_authorization(content_hash, &signer).await?;
 Clean up expired authorizations:
 
 ```rust
-client.remove_expired_account_authorization(account, &signer).await?;
-client.remove_expired_preimage_authorization(content_hash, &signer).await?;
+client.remove_expired_account_authorization(account, &signer, WaitFor::InBlock).await?;
+client.remove_expired_preimage_authorization(content_hash, &signer, WaitFor::InBlock).await?;
 ```
 
 ## Estimating Authorization
