@@ -10,7 +10,6 @@ use crate::{
 	cid::ContentHash,
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
-use std::{collections::HashMap, sync::Mutex};
 use subxt::{
 	blocks::BlockRef, config::DefaultExtrinsicParamsBuilder, utils::AccountId32, OnlineClient,
 	PolkadotConfig,
@@ -26,14 +25,11 @@ pub mod bulletin {}
 /// This wraps a subxt OnlineClient and provides high-level methods
 /// for all TransactionStorage pallet operations.
 ///
-/// Tracks nonces locally so that sequential transactions work correctly
-/// with `WaitFor::InBlock` (subxt's default nonce resolution queries the
-/// finalized chain state, which lags behind the best block).
+/// Resolves nonces from the best block (not finalized) before each
+/// submission, matching PAPI's approach. This ensures sequential
+/// transactions work correctly with `WaitFor::InBlock`.
 pub struct TransactionClient {
 	api: OnlineClient<PolkadotConfig>,
-	/// Local nonce cache keyed by account id bytes.
-	/// Lazily initialized on first transaction per account.
-	nonces: Mutex<HashMap<[u8; 32], u64>>,
 }
 
 impl TransactionClient {
@@ -43,12 +39,12 @@ impl TransactionClient {
 			.await
 			.map_err(|e| Error::NetworkError(format!("Failed to connect: {e:?}")))?;
 
-		Ok(Self { api, nonces: Mutex::new(HashMap::new()) })
+		Ok(Self { api })
 	}
 
 	/// Create a transaction client from an existing subxt client.
 	pub fn from_client(api: OnlineClient<PolkadotConfig>) -> Self {
-		Self { api, nonces: Mutex::new(HashMap::new()) }
+		Self { api }
 	}
 
 	/// Get the underlying subxt client.
@@ -56,69 +52,50 @@ impl TransactionClient {
 		&self.api
 	}
 
-	/// Get the next nonce for an account and increment the local counter.
+	/// Submit a transaction with the nonce resolved from the best block.
 	///
-	/// On first call for a given account, queries the chain to initialize.
-	/// Subsequent calls return locally-tracked nonces without RPC queries.
-	async fn next_nonce(&self, account: &AccountId32) -> Result<u64> {
-		// Check cache first (short lock)
-		{
-			let mut nonces = self.nonces.lock().expect("nonce lock poisoned");
-			if let Some(nonce) = nonces.get_mut(&account.0) {
-				let current = *nonce;
-				*nonce += 1;
-				return Ok(current);
-			}
-		}
-		// Cache miss: query chain and initialize
-		let chain_nonce = self
-			.api
-			.tx()
-			.account_nonce(account)
-			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to query nonce: {e:?}")))?;
-		let mut nonces = self.nonces.lock().expect("nonce lock poisoned");
-		let nonce = nonces.entry(account.0).or_insert(chain_nonce);
-		let current = *nonce;
-		*nonce += 1;
-		Ok(current)
-	}
-
-	/// Roll back the nonce by 1 (undo a `next_nonce` that was not consumed).
-	fn rollback_nonce(&self, account: &AccountId32) {
-		let mut nonces = self.nonces.lock().expect("nonce lock poisoned");
-		if let Some(nonce) = nonces.get_mut(&account.0) {
-			*nonce = nonce.saturating_sub(1);
-		}
-	}
-
-	/// Submit a transaction with locally-tracked nonces.
-	///
-	/// Uses `DefaultExtrinsicParamsBuilder` to pre-set the nonce so that
-	/// sequential transactions work correctly even with `WaitFor::InBlock`.
-	///
-	/// The `make_error` closure maps the subxt error into the caller's error type.
-	async fn submit_with_nonce(
+	/// Subxt's default nonce resolution queries the finalized block, which
+	/// lags behind for sequential `WaitFor::InBlock` transactions. Instead,
+	/// we query `AccountNonceApi_account_nonce` at the current best block
+	/// (the same approach PAPI uses), which sees recently-included transactions.
+	async fn submit_at_best_block(
 		&self,
 		tx: &impl subxt::tx::Payload,
 		signer: &Keypair,
-		make_error: impl Fn(String) -> Error,
+		make_error: &impl Fn(String) -> Error,
 	) -> Result<subxt::tx::TxProgress<PolkadotConfig, OnlineClient<PolkadotConfig>>> {
 		let account = AccountId32::from(signer.public_key().0);
-		let nonce = self.next_nonce(&account).await?;
+
+		// Get the best block and query nonce at that block
+		let best_block = self
+			.api
+			.blocks()
+			.subscribe_best()
+			.await
+			.map_err(|e| make_error(format!("{e:?}")))?
+			.next()
+			.await
+			.ok_or_else(|| make_error("Best block stream ended".into()))?
+			.map_err(|e| make_error(format!("{e:?}")))?;
+
+		let nonce = best_block
+			.account_nonce(&account)
+			.await
+			.map_err(|e| make_error(format!("{e:?}")))?;
+
 		let params = DefaultExtrinsicParamsBuilder::<PolkadotConfig>::new().nonce(nonce).build();
-		self.api.tx().sign_and_submit_then_watch(tx, signer, params).await.map_err(|e| {
-			// Submission failed before entering pool — rollback nonce
-			self.rollback_nonce(&account);
-			make_error(format!("{e:?}"))
-		})
+		self.api
+			.tx()
+			.sign_and_submit_then_watch(tx, signer, params)
+			.await
+			.map_err(|e| make_error(format!("{e:?}")))
 	}
 
 	/// Submit a transaction, stream status events, and return when the target
 	/// confirmation level is reached.
 	///
 	/// This is the single submission loop used by all public methods. It:
-	/// - Submits via `submit_with_nonce` (local nonce tracking)
+	/// - Resolves nonce from the best block via `submit_at_best_block`
 	/// - Streams all `TxStatus` events, firing the optional progress callback
 	/// - Breaks on `InBestBlock` or `InFinalizedBlock` based on `wait_for`
 	/// - Returns block hash and extrinsic hash on success
@@ -130,7 +107,7 @@ impl TransactionClient {
 		progress_callback: Option<ProgressCallback>,
 		make_error: impl Fn(String) -> Error,
 	) -> Result<SubmitResult> {
-		let mut progress = self.submit_with_nonce(tx, signer, &make_error).await?;
+		let mut progress = self.submit_at_best_block(tx, signer, &make_error).await?;
 
 		let mut result_block_hash = None;
 		let mut result_extrinsic_hash = None;
