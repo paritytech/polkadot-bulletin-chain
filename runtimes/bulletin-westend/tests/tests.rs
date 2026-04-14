@@ -1624,6 +1624,6 @@ fn non_sudo_cannot_add_authorizer() {
 			// outer Result is Ok but the inner DispatchResult is Err.
 			let applied = construct_and_apply_extrinsic(Some(bob.pair()), call);
 			let dispatch = applied.expect("validation passes (balance present)");
-			assert!(dispatch.is_err(), "expected BadOrigin, got {:?}", dispatch);
+			assert!(dispatch.is_err(), "expected BadOrigin, got {dispatch:?}");
 		});
 }
