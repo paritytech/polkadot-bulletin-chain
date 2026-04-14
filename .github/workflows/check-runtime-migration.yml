@@ -141,6 +141,9 @@ jobs:
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
 
 
+  # Runs @polkadot-api/check-runtime against live RPCs to detect common runtime
+  # upgrade issues: missing or outdated metadata versions, absent runtime APIs,
+  # incorrect CheckMetadataHash configuration, and dev APIs in production builds.
   check-runtimes:
     needs: [runtime-matrix]
     runs-on: ubuntu-latest
