@@ -54,6 +54,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Find associated PR
+        id: pr
+        if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh pr list --repo ${{ github.repository }} --head ${{ github.ref_name }} --json number --jq '.[0].number')
+          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
@@ -63,6 +72,7 @@ jobs:
             type=sha,format=long
             type=ref,event=branch
             type=ref,event=pr
+            type=raw,value=pr-${{ steps.pr.outputs.number }},enable=${{ steps.pr.outputs.number != '' }}
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
