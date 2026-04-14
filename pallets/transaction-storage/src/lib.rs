@@ -562,7 +562,9 @@ pub mod pallet {
 		///
 		/// If the account is already authorized to store data, this will increase the amount of
 		/// data the account is authorized to store (and the number of transactions the account may
-		/// submit to supply the data), and push back the expiration block.
+		/// submit to supply the data). The expiration block is **not** pushed back; use
+		/// [`refresh_account_authorization`](Self::refresh_account_authorization) to extend
+		/// expiry.
 		///
 		/// Parameters:
 		///
@@ -585,7 +587,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes, true);
+			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes, false);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -620,39 +622,6 @@ pub mod pallet {
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, true);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
-			Ok(())
-		}
-
-		/// Like [`authorize_account`](Self::authorize_account), but preserves the existing
-		/// expiration block when extending an unexpired authorization instead of pushing it
-		/// back.
-		///
-		/// If no prior authorization exists or the existing one has expired, a new expiration
-		/// is set normally.
-		///
-		/// Parameters:
-		///
-		/// - `who`: The account to be credited with an authorization to store data.
-		/// - `transactions`: The number of transactions that `who` may submit to supply that data.
-		/// - `bytes`: The number of bytes that `who` may submit.
-		///
-		/// The origin for this call must be the pallet's `Authorizer`. Emits
-		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
-		#[pallet::call_index(10)]
-		#[pallet::weight(T::WeightInfo::authorize_account())]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
-			T::Authorizer::try_origin(origin.clone()).is_ok()
-		})]
-		pub fn authorize_account_preserve_expiry(
-			origin: OriginFor<T>,
-			who: T::AccountId,
-			transactions: u32,
-			bytes: u64,
-		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes, false);
-			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
 
@@ -1367,7 +1336,6 @@ pub mod pallet {
 					(info.size as usize, info.content_hash)
 				},
 				Call::<T>::authorize_account { .. } |
-				Call::<T>::authorize_account_preserve_expiry { .. } |
 				Call::<T>::authorize_preimage { .. } |
 				Call::<T>::refresh_account_authorization { .. } |
 				Call::<T>::refresh_preimage_authorization { .. } => {

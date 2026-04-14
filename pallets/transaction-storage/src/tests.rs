@@ -1299,7 +1299,7 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 }
 
 #[test]
-fn authorize_account_preserve_expiry_keeps_original_expiration() {
+fn authorize_account_does_not_push_expiry() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
@@ -1307,15 +1307,9 @@ fn authorize_account_preserve_expiry_keeps_original_expiration() {
 		// Initial authorization at block 1: expires at block 1 + 10 = 11.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
 
-		// Extend at block 5 with preserve_expiry: expiration should stay at 11.
+		// Extend at block 5: expiration should stay at 11, not move to 15.
 		run_to_block(5, || None);
-		assert_ok!(TransactionStorage::authorize_account_preserve_expiry(
-			RuntimeOrigin::root(),
-			who,
-			1,
-			1000,
-		));
-		// Extent should still be extended.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 2, bytes: 3000 },
@@ -1325,85 +1319,12 @@ fn authorize_account_preserve_expiry_keeps_original_expiration() {
 		run_to_block(10, || None);
 		assert_ok!(TransactionStorage::validate_signed(&who, &call));
 
-		// Authorization expires at block 11, NOT 15 (expiry was preserved).
+		// Expires at block 11 (original expiry), NOT 15.
 		run_to_block(11, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 		);
 		assert_noop!(TransactionStorage::validate_signed(&who, &call), InvalidTransaction::Payment);
-	});
-}
-
-#[test]
-fn authorize_account_preserve_expiry_sets_expiry_for_new_authorization() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		let call = Call::store { data: vec![0; 2000] };
-		// No prior authorization; should still create one with proper expiry.
-		assert_ok!(TransactionStorage::authorize_account_preserve_expiry(
-			RuntimeOrigin::root(),
-			who,
-			1,
-			2000,
-		));
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 1, bytes: 2000 },
-		);
-
-		// Valid before expiry.
-		run_to_block(10, || None);
-		assert_ok!(TransactionStorage::validate_signed(&who, &call));
-
-		// Expires at block 11 (1 + 10).
-		run_to_block(11, || None);
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
-		);
-	});
-}
-
-#[test]
-fn authorize_account_preserve_expiry_overwrites_expired_authorization() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		let call = Call::store { data: vec![0; 2000] };
-		// Initial authorization expires at block 11.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
-
-		// Let it expire.
-		run_to_block(11, || None);
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
-		);
-
-		// Re-authorize with preserve_expiry on an expired authorization.
-		// Since the old one is expired, it should be fully overwritten with new expiry.
-		assert_ok!(TransactionStorage::authorize_account_preserve_expiry(
-			RuntimeOrigin::root(),
-			who,
-			2,
-			3000,
-		));
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 2, bytes: 3000 },
-		);
-
-		// Valid before expiry (11 + 10 = 21).
-		run_to_block(20, || None);
-		assert_ok!(TransactionStorage::validate_signed(&who, &call));
-
-		// Expires at block 21.
-		run_to_block(21, || None);
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
-		);
 	});
 }

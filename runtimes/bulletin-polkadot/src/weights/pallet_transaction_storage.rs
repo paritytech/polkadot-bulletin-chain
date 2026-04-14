@@ -107,13 +107,6 @@ impl<T: frame_system::Config> pallet_transaction_storage::WeightInfo for WeightI
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-	fn authorize_account_preserve_expiry() -> Weight {
-		// Same storage access pattern as authorize_account.
-		Weight::from_parts(17_550_000, 0)
-			.saturating_add(Weight::from_parts(0, 3530))
-			.saturating_add(T::DbWeight::get().reads(1))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
 	fn refresh_account_authorization() -> Weight {
