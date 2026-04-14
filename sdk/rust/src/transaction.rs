@@ -114,6 +114,127 @@ impl TransactionClient {
 		})
 	}
 
+	/// Submit a transaction, stream status events, and return when the target
+	/// confirmation level is reached.
+	///
+	/// This is the single submission loop used by all public methods. It:
+	/// - Submits via `submit_with_nonce` (local nonce tracking)
+	/// - Streams all `TxStatus` events, firing the optional progress callback
+	/// - Breaks on `InBestBlock` or `InFinalizedBlock` based on `wait_for`
+	/// - Returns block hash and extrinsic hash on success
+	async fn submit_and_watch(
+		&self,
+		tx: &impl subxt::tx::Payload,
+		signer: &Keypair,
+		wait_for: WaitFor,
+		progress_callback: Option<ProgressCallback>,
+		make_error: impl Fn(String) -> Error,
+	) -> Result<SubmitResult> {
+		let mut progress = self.submit_with_nonce(tx, signer, &make_error).await?;
+
+		let mut result_block_hash = None;
+		let mut result_extrinsic_hash = None;
+
+		while let Some(status) = progress.next().await {
+			match status {
+				Ok(status) => {
+					use subxt::tx::TxStatus;
+					match status {
+						TxStatus::Validated =>
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::tx_validated());
+							},
+						TxStatus::Broadcasted =>
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::tx_broadcasted());
+							},
+						TxStatus::InBestBlock(in_block) => {
+							let block_hash = format!("{:?}", in_block.block_hash());
+							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
+
+							if let Some(ref cb) = progress_callback {
+								let block_number =
+									self.get_block_number(in_block.block_hash()).await.ok();
+								cb(ProgressEvent::tx_in_best_block(
+									block_hash.clone(),
+									block_number,
+									None,
+								));
+							}
+
+							result_block_hash = Some(block_hash);
+							result_extrinsic_hash = Some(extrinsic_hash);
+
+							if wait_for == WaitFor::InBlock {
+								in_block.wait_for_success().await.map_err(|e| {
+									make_error(format!("Transaction failed: {e:?}"))
+								})?;
+								break;
+							}
+						},
+						TxStatus::InFinalizedBlock(in_block) => {
+							let block_hash = format!("{:?}", in_block.block_hash());
+							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
+
+							if let Some(ref cb) = progress_callback {
+								let block_number =
+									self.get_block_number(in_block.block_hash()).await.ok();
+								cb(ProgressEvent::tx_finalized(
+									block_hash.clone(),
+									block_number,
+									None,
+								));
+							}
+
+							result_block_hash = Some(block_hash);
+							result_extrinsic_hash = Some(extrinsic_hash);
+
+							in_block
+								.wait_for_success()
+								.await
+								.map_err(|e| make_error(format!("Transaction failed: {e:?}")))?;
+							break;
+						},
+						TxStatus::NoLongerInBestBlock =>
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::NoLongerInBestBlock,
+								));
+							},
+						TxStatus::Invalid { message } => {
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::Invalid {
+										error: message.clone(),
+									},
+								));
+							}
+							return Err(make_error(format!("Transaction invalid: {message}")));
+						},
+						TxStatus::Dropped { message } => {
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::Dropped {
+										error: message.clone(),
+									},
+								));
+							}
+							return Err(make_error(format!("Transaction dropped: {message}")));
+						},
+						TxStatus::Error { message } =>
+							return Err(make_error(format!("Transaction error: {message}"))),
+					}
+				},
+				Err(e) => return Err(make_error(format!("Status error: {e:?}"))),
+			}
+		}
+
+		Ok(SubmitResult {
+			block_hash: result_block_hash.unwrap_or_default(),
+			extrinsic_hash: result_extrinsic_hash.unwrap_or_default(),
+		})
+	}
+
 	/// Query the current authorization for an account.
 	///
 	/// Returns `Some((transactions, bytes))` if authorization exists and is not expired,
@@ -224,131 +345,15 @@ impl TransactionClient {
 		self.check_authorization_for_store(&account, 1, data_size).await?;
 
 		let tx = bulletin::tx().transaction_storage().store(data);
-
-		let mut progress = self
-			.submit_with_nonce(&tx, signer, |e| {
-				Error::StorageFailed(format!("Transaction submission failed: {e}"))
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, progress_callback, |e| {
+				Error::StorageFailed(format!("Store failed: {e}"))
 			})
 			.await?;
 
-		let mut final_block_hash = None;
-		let mut final_extrinsic_hash = None;
-
-		// Stream transaction status events
-		while let Some(status) = progress.next().await {
-			match status {
-				Ok(status) => {
-					use subxt::tx::TxStatus;
-					match status {
-						TxStatus::Validated =>
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_validated());
-							},
-						TxStatus::Broadcasted =>
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_broadcasted());
-							},
-						TxStatus::InBestBlock(in_block) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
-
-							if let Some(ref callback) = progress_callback {
-								// Only fetch block number when callback needs it
-								let block_number =
-									self.get_block_number(in_block.block_hash()).await.ok();
-								callback(ProgressEvent::tx_in_best_block(
-									block_hash.clone(),
-									block_number,
-									None, // extrinsic index not easily available here
-								));
-							}
-
-							final_block_hash = Some(block_hash);
-							final_extrinsic_hash = Some(extrinsic_hash);
-
-							if wait_for == WaitFor::InBlock {
-								in_block.wait_for_success().await.map_err(|e| {
-									Error::TransactionFailed(format!("Transaction failed: {e:?}"))
-								})?;
-								break;
-							}
-						},
-						TxStatus::InFinalizedBlock(in_block) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
-
-							// Only fetch block number when callback needs it
-							let block_number = if progress_callback.is_some() {
-								self.get_block_number(in_block.block_hash()).await.ok()
-							} else {
-								None
-							};
-
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_finalized(
-									block_hash.clone(),
-									block_number,
-									None,
-								));
-							}
-
-							final_block_hash = Some(block_hash);
-							final_extrinsic_hash = Some(extrinsic_hash);
-
-							// Check for success
-							in_block.wait_for_success().await.map_err(|e| {
-								Error::TransactionFailed(format!("Transaction failed: {e:?}"))
-							})?;
-
-							break;
-						},
-						TxStatus::NoLongerInBestBlock => {
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::NoLongerInBestBlock,
-								));
-							}
-						},
-						TxStatus::Invalid { message } => {
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::Invalid {
-										error: message.clone(),
-									},
-								));
-							}
-							return Err(Error::TransactionFailed(format!(
-								"Transaction invalid: {message}"
-							)));
-						},
-						TxStatus::Dropped { message } => {
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::Dropped {
-										error: message.clone(),
-									},
-								));
-							}
-							return Err(Error::TransactionFailed(format!(
-								"Transaction dropped: {message}"
-							)));
-						},
-						TxStatus::Error { message } => {
-							return Err(Error::TransactionFailed(format!(
-								"Transaction error: {message}"
-							)));
-						},
-					}
-				},
-				Err(e) => {
-					return Err(Error::TransactionFailed(format!("Status error: {e:?}")));
-				},
-			}
-		}
-
 		Ok(StoreReceipt {
-			block_hash: final_block_hash.unwrap_or_default(),
-			extrinsic_hash: final_extrinsic_hash.unwrap_or_default(),
+			block_hash: result.block_hash,
+			extrinsic_hash: result.extrinsic_hash,
 			data_size,
 		})
 	}
@@ -368,77 +373,6 @@ impl TransactionClient {
 		Ok(block.number())
 	}
 
-	/// Submit a transaction, wait for inclusion or finalization, and return the block hash.
-	///
-	/// The `wait_for` parameter controls when the method returns:
-	/// - `WaitFor::InBlock` - Returns after the transaction is in a best block
-	/// - `WaitFor::Finalized` - Returns after the transaction is finalized
-	///
-	/// The `make_error` closure maps a formatted message into the appropriate
-	/// `Error` variant for the calling context (e.g. `Error::StorageFailed`,
-	/// `Error::RenewalFailed`).
-	async fn submit_and_wait(
-		&self,
-		tx: &impl subxt::tx::Payload,
-		signer: &Keypair,
-		context: &str,
-		wait_for: WaitFor,
-		make_error: impl Fn(String) -> Error,
-	) -> Result<String> {
-		let mut progress = self
-			.submit_with_nonce(tx, signer, |e| make_error(format!("{context} failed: {e}")))
-			.await?;
-
-		match wait_for {
-			WaitFor::Finalized => {
-				let in_block = progress
-					.wait_for_finalized()
-					.await
-					.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
-
-				let block_hash = format!("{:?}", in_block.block_hash());
-
-				in_block
-					.wait_for_success()
-					.await
-					.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
-
-				Ok(block_hash)
-			},
-			WaitFor::InBlock => {
-				while let Some(status) = progress.next().await {
-					match status {
-						Ok(subxt::tx::TxStatus::InBestBlock(in_block)) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							in_block
-								.wait_for_success()
-								.await
-								.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
-							return Ok(block_hash);
-						},
-						Ok(subxt::tx::TxStatus::Invalid { message }) =>
-							return Err(make_error(format!(
-								"{context} failed: transaction invalid: {message}"
-							))),
-						Ok(subxt::tx::TxStatus::Dropped { message }) =>
-							return Err(make_error(format!(
-								"{context} failed: transaction dropped: {message}"
-							))),
-						Ok(subxt::tx::TxStatus::Error { message }) =>
-							return Err(make_error(format!(
-								"{context} failed: transaction error: {message}"
-							))),
-						Err(e) => return Err(make_error(format!("{context} failed: {e:?}"))),
-						_ => continue,
-					}
-				}
-				Err(make_error(format!(
-					"{context} failed: transaction stream ended without block inclusion"
-				)))
-			},
-		}
-	}
-
 	/// Authorize an account to store data.
 	///
 	/// Requires authorizer origin (typically sudo).
@@ -456,11 +390,18 @@ impl TransactionClient {
 			bytes,
 		);
 
-		let block_hash = self
-			.submit_and_wait(&tx, signer, "Authorization", wait_for, Error::TransactionFailed)
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::TransactionFailed(format!("Authorization failed: {e}"))
+			})
 			.await?;
 
-		Ok(AuthorizationReceipt { account: who, transactions, bytes, block_hash })
+		Ok(AuthorizationReceipt {
+			account: who,
+			transactions,
+			bytes,
+			block_hash: result.block_hash,
+		})
 	}
 
 	/// Authorize a preimage (by content hash) to be stored.
@@ -475,11 +416,13 @@ impl TransactionClient {
 	) -> Result<PreimageAuthorizationReceipt> {
 		let tx = bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
-		let block_hash = self
-			.submit_and_wait(&tx, signer, "Authorization", wait_for, Error::TransactionFailed)
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::TransactionFailed(format!("Authorization failed: {e}"))
+			})
 			.await?;
 
-		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash })
+		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
 	/// Renew/extend the retention period for stored data.
@@ -492,11 +435,17 @@ impl TransactionClient {
 	) -> Result<RenewReceipt> {
 		let tx = bulletin::tx().transaction_storage().renew(block, index);
 
-		let block_hash = self
-			.submit_and_wait(&tx, signer, "Renew", wait_for, Error::RenewalFailed)
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::RenewalFailed(format!("Renew failed: {e}"))
+			})
 			.await?;
 
-		Ok(RenewReceipt { original_block: block, transaction_index: index, block_hash })
+		Ok(RenewReceipt {
+			original_block: block,
+			transaction_index: index,
+			block_hash: result.block_hash,
+		})
 	}
 
 	/// Refresh an account authorization (extends expiry).
@@ -509,8 +458,10 @@ impl TransactionClient {
 		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
-		self.submit_and_wait(&tx, signer, "Refresh", wait_for, Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Refresh failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
 
@@ -526,8 +477,10 @@ impl TransactionClient {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.refresh_preimage_authorization(content_hash);
-		self.submit_and_wait(&tx, signer, "Refresh", wait_for, Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Refresh failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
 
@@ -539,8 +492,10 @@ impl TransactionClient {
 		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
-		self.submit_and_wait(&tx, signer, "Removal", wait_for, Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Removal failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
 
@@ -554,10 +509,18 @@ impl TransactionClient {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.remove_expired_preimage_authorization(content_hash);
-		self.submit_and_wait(&tx, signer, "Removal", wait_for, Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Removal failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
+}
+
+/// Internal result from `submit_and_watch`.
+struct SubmitResult {
+	block_hash: String,
+	extrinsic_hash: String,
 }
 
 /// Receipt from a successful store operation.
