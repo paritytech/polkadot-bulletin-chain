@@ -587,7 +587,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(transactions > 0 && bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes, false);
+			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -622,7 +622,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, false);
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -997,12 +997,7 @@ pub mod pallet {
 		}
 
 		/// Authorize data storage.
-		fn authorize(
-			scope: AuthorizationScopeFor<T>,
-			transactions: u32,
-			bytes: u64,
-			refresh_expiry: bool,
-		) {
+		fn authorize(scope: AuthorizationScopeFor<T>, transactions: u32, bytes: u64) {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
 
@@ -1030,9 +1025,6 @@ pub mod pallet {
 									authorization.extent.transactions.max(transactions);
 								authorization.extent.bytes = authorization.extent.bytes.max(bytes);
 							},
-						}
-						if refresh_expiry {
-							authorization.expiration = expiration;
 						}
 					}
 				} else {
