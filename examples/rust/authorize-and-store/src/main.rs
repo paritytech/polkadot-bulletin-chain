@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
 	let options = StoreOptions {
 		cid_codec: CidCodec::Raw,
 		hash_algorithm: HashingAlgorithm::Blake2b256,
-		wait_for: WaitFor::Finalized,
+		wait_for: WaitFor::InBlock,
 	};
 
 	let operation = sdk_client
@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
 		.store_with_progress(
 			data_to_store.as_bytes().to_vec(),
 			&keypair,
-			WaitFor::Finalized,
+			WaitFor::InBlock,
 			Some(std::sync::Arc::new(|event| {
 				info!("Progress: {:?}", event);
 			})),
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
 	let dag_options = StoreOptions {
 		cid_codec: CidCodec::DagPb, // Use DAG-PB codec for manifest
 		hash_algorithm: HashingAlgorithm::Blake2b256,
-		wait_for: WaitFor::Finalized,
+		wait_for: WaitFor::InBlock,
 	};
 
 	// Prepare chunked storage using SDK
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
 		info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
 
 		let chunk_receipt = client
-			.store(chunk_op.data.clone(), &keypair, WaitFor::Finalized)
+			.store(chunk_op.data.clone(), &keypair, WaitFor::InBlock)
 			.await
 			.map_err(|e| anyhow!("Chunk {} store failed: {:?}", i + 1, e))?;
 
@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
 		info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
 
 		let manifest_receipt = client
-			.store(manifest, &keypair, WaitFor::Finalized)
+			.store(manifest, &keypair, WaitFor::InBlock)
 			.await
 			.map_err(|e| anyhow!("Manifest store failed: {:?}", e))?;
 
