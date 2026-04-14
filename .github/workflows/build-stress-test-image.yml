@@ -2,7 +2,7 @@ name: Build stress-test image
 
 on:
   push:
-    branches: [main, sandreim/stress-image]
+    branches: [main]
     paths:
       - "stress-test/**"
   pull_request:
@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: docker.io/parity/bulletin-stress-test
+  IMAGE_NAME: docker.io/paritypr/bulletin-stress-test
 
 jobs:
   check:
@@ -48,39 +48,33 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
+        if: ${{ secrets.PARITYPR_DOCKERHUB_USERNAME != '' && secrets.PARITYPR_DOCKERHUB_PASSWORD != '' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.PARITYPR_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.PARITYPR_DOCKERHUB_PASSWORD }}
 
-      - name: Find associated PR
-        id: pr
-        if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+      - name: Compute image tag
+        id: tag
+        shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          PR_NUMBER=$(gh pr list --repo ${{ github.repository }} --head ${{ github.ref_name }} --json number --jq '.[0].number')
-          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,format=long
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=pr-${{ steps.pr.outputs.number }},enable=${{ steps.pr.outputs.number != '' }}
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TAG="${{ github.event.pull_request.number }}-${GITHUB_PR_HEAD_SHA::8}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            TAG="main-${GITHUB_SHA::8}"
+          else
+            TAG="${GITHUB_SHA::8}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: stress-test/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ secrets.PARITYPR_DOCKERHUB_USERNAME != '' && secrets.PARITYPR_DOCKERHUB_PASSWORD != '' }}
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
