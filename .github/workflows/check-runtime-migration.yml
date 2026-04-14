@@ -39,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
+      check-runtime: ${{ steps.runtime.outputs.check-runtime }}
     name: Extract tasks from matrix
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -54,6 +55,12 @@ jobs:
           # Strip whitespace from Tasks now that we've logged it
           TASKS=$(echo $TASKS | jq -c .)
           echo "runtime=$TASKS" >> $GITHUB_OUTPUT
+
+          # Filter runtimes with check_runtime enabled (metadata hash matches the live chain)
+          CHECK_RUNTIME_TASKS=$(jq -c '[.[] | select(.check_runtime == true)]' scripts/runtimes-matrix.json)
+          echo --- check-runtime tasks ---
+          echo $CHECK_RUNTIME_TASKS
+          echo "check-runtime=$CHECK_RUNTIME_TASKS" >> $GITHUB_OUTPUT
 
   prepare-snapshots:
     needs: [runtime-matrix]
@@ -137,11 +144,11 @@ jobs:
   check-runtimes:
     needs: [runtime-matrix]
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' && needs.runtime-matrix.outputs.check-runtime != '[]'
     strategy:
       fail-fast: false
       matrix:
-        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.check-runtime) }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

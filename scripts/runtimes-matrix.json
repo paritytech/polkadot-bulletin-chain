@@ -28,6 +28,7 @@
     "uris": [
       "wss://westend-bulletin-rpc.polkadot.io"
     ],
+    "check_runtime": true,
     "integration_tests": true,
     "try_runtime": {
         "extra_flags": "--blocktime 6000 --disable-spec-version-check"
