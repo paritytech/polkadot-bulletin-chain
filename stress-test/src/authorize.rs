@@ -97,7 +97,7 @@ fn build_authorize_call(
 				TransactionStorage(authorize_account {
 					who: Value::from_bytes(account.0),
 					transactions: transactions_per_account,
-					bytes: bytes_per_account
+					bytes: bytes_per_account,
 				})
 			}
 		})
