@@ -19,6 +19,7 @@ import {
   ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
+  resolveClientConfig,
   type StoreOptions,
   type StoreResult,
   TxStatus,
@@ -180,13 +181,12 @@ export interface AuthCallOptions extends CallOptions {
 }
 
 /**
- * Result of mapping a single PAPI event to SDK progress events.
+ * Transaction status extracted from a PAPI event by `mapPapiEventToProgress`.
  *
- * `txHash` is set when the event carries a new transaction hash.
- * `finish` is set when the event signals the transaction has reached
- * the caller's desired confirmation level (in-block or finalized).
+ * `txHash` - set when the event carries a new transaction hash.
+ * `finish` - set when the transaction reached the desired confirmation level.
  */
-interface PapiEventMappingResult {
+interface MappedTxStatus {
   txHash?: string
   finish?: {
     block: { hash: string; number: number }
@@ -207,8 +207,8 @@ function mapPapiEventToProgress(
   progressCallback: ProgressCallback | undefined,
   chunkIndex: number | undefined,
   waitFor: "in_block" | "finalized" = "finalized",
-): PapiEventMappingResult {
-  const result: PapiEventMappingResult = {}
+): MappedTxStatus {
+  const result: MappedTxStatus = {}
 
   // Capture the transaction hash on the first event that carries it
   if (ev.txHash && !currentTxHash) {
@@ -553,11 +553,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     this.api = api
     this.signer = signer
     this.submit = submit
-    this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
-      createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-    }
+    this.config = resolveClientConfig(config)
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
@@ -665,14 +661,18 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       let resolved = false
       let txHash: string | undefined
 
+      const cleanup = () => {
+        clearTimeout(timerId)
+        subscription.unsubscribe()
+      }
+
       const finish = (
         block: { hash: string; number: number },
         events?: RuntimeEvent[],
       ) => {
         if (resolved) return
         resolved = true
-        clearTimeout(timerId)
-        subscription.unsubscribe()
+        cleanup()
         resolve({
           blockHash: block.hash,
           txHash: txHash || "",
@@ -697,7 +697,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
-            clearTimeout(timerId)
+            cleanup()
             if (progressCallback) {
               const errorMsg = err instanceof Error ? err.message : String(err)
               // Distinguish pool-related drops from other transaction errors
@@ -714,14 +714,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       })
 
-      // Timeout after 2 minutes
+      // Defensive timeout: PAPI handles reconnects and mortality, so this
+      // should rarely fire. If it does, it likely indicates a bug. Default:
+      // 7 min (above PAPI's 64-block mortality window).
       const timerId = setTimeout(() => {
-        if (!resolved) {
-          resolved = true
-          subscription.unsubscribe()
-          reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
-        }
-      }, 120000)
+        if (resolved) return
+        resolved = true
+        cleanup()
+        reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
+      }, this.config.txTimeout)
     })
   }
 

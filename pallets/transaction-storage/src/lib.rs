@@ -562,7 +562,9 @@ pub mod pallet {
 		///
 		/// If the account is already authorized to store data, this will increase the amount of
 		/// data the account is authorized to store (and the number of transactions the account may
-		/// submit to supply the data), and push back the expiration block.
+		/// submit to supply the data). The expiration block is **not** pushed back; use
+		/// [`refresh_account_authorization`](Self::refresh_account_authorization) to extend
+		/// expiry.
 		///
 		/// Parameters:
 		///
@@ -594,8 +596,10 @@ pub mod pallet {
 		/// expire after a configured number of blocks.
 		///
 		/// If authorization already exists for a preimage of the given hash to be stored, the
-		/// maximum size of the preimage will be increased to `max_size`, and the expiration block
-		/// will be pushed back.
+		/// maximum size of the preimage will be increased to `max_size`. The expiration block
+		/// is **not** pushed back; use
+		/// [`refresh_preimage_authorization`](Self::refresh_preimage_authorization) to extend
+		/// expiry.
 		///
 		/// Parameters:
 		///
@@ -1022,7 +1026,6 @@ pub mod pallet {
 								authorization.extent.bytes = authorization.extent.bytes.max(bytes);
 							},
 						}
-						authorization.expiration = expiration;
 					}
 				} else {
 					// No previous authorization. Create a fresh one.
