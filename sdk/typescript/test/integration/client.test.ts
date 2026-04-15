@@ -20,7 +20,7 @@ import {
 } from "@polkadot-labs/hdkd-helpers"
 import { createClient, type PolkadotClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
-import { getWsProvider } from "polkadot-api/ws-provider/node"
+import { getWsProvider } from "polkadot-api/ws-provider"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,
