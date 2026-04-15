@@ -80,6 +80,10 @@ enum Commands {
 		/// Which test: b2
 		#[arg(default_value = "b2")]
 		test: String,
+
+		/// Payload size in bytes for each stored item (default: 128KB)
+		#[arg(long, default_value = "131072")]
+		payload_size: usize,
 	},
 	/// Run all test suites (block-capacity + bitswap)
 	Full,
@@ -188,13 +192,14 @@ async fn main() -> Result<()> {
 				command_error = Some(e);
 			}
 		},
-		Commands::Bitswap { ref test } => {
+		Commands::Bitswap { ref test, payload_size } => {
 			if let Err(e) = run_bitswap(
 				&client,
 				&authorizer_signer,
 				&nonce_tracker,
 				&cli,
 				test,
+				payload_size,
 				control_url,
 				&mut all_results,
 				&flush,
@@ -230,6 +235,7 @@ async fn main() -> Result<()> {
 					&nonce_tracker,
 					&cli,
 					"b2",
+					128 * 1024,
 					control_url,
 					&mut all_results,
 					&flush,
@@ -307,6 +313,7 @@ async fn run_bitswap(
 	nonce_tracker: &accounts::NonceTracker,
 	cli: &Cli,
 	test: &str,
+	payload_size: usize,
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
@@ -327,6 +334,7 @@ async fn run_bitswap(
 				nonce_tracker,
 				&multiaddr,
 				cli.iterations,
+				payload_size,
 				control_url,
 			)
 			.await?;

@@ -1,6 +1,9 @@
 use anyhow::Result;
 use std::{
-	sync::Arc,
+	sync::{
+		atomic::{AtomicBool, Ordering},
+		Arc,
+	},
 	time::{Duration, Instant},
 };
 use subxt::OnlineClient;
@@ -13,9 +16,6 @@ use crate::{
 	report::{compute_latency_stats, ScenarioResult},
 	store,
 };
-
-/// B2 payload size: 128KB
-const B2_PAYLOAD_SIZE: usize = 128 * 1024;
 
 /// Concurrency levels to sweep.
 const B2_CONCURRENCY_LEVELS: &[usize] = &[1, 2, 4, 8, 16, 32, 64];
@@ -49,15 +49,27 @@ async fn run_b2_concurrent_read_level(
 
 	let wall_start = Instant::now();
 
+	// Shared abort flag: any client hitting 3 consecutive failures sets this,
+	// causing all clients to stop. Prevents grinding through thousands of
+	// timeouts when the node is overloaded.
+	const ABORT_AFTER_CONSECUTIVE_FAILURES: u32 = 3;
+	let abort = Arc::new(AtomicBool::new(false));
+
 	// Spawn one task per client — each reads ALL items sequentially
 	let mut handles = Vec::with_capacity(actual_concurrency);
 	for (idx, client) in clients.into_iter().enumerate() {
 		let items = Arc::clone(&items);
+		let abort = Arc::clone(&abort);
 		handles.push(tokio::spawn(async move {
 			let mut timings: Vec<(Duration, bool, bool)> = Vec::with_capacity(items.len());
+			let mut my_consecutive_failures = 0u32;
 			for (cid, expected) in items.iter() {
+				if abort.load(Ordering::Relaxed) {
+					break;
+				}
+
 				let start = Instant::now();
-				match client.fetch_block(peer_id, *cid, Duration::from_secs(30)).await {
+				match client.fetch_block(peer_id, *cid, Duration::from_secs(10)).await {
 					Ok(data) => {
 						let elapsed = start.elapsed();
 						let verified = data == *expected;
@@ -69,11 +81,21 @@ async fn run_b2_concurrent_read_level(
 							);
 						}
 						timings.push((elapsed, true, verified));
+						my_consecutive_failures = 0;
 					},
 					Err(e) => {
 						let elapsed = start.elapsed();
 						log::warn!("B2 client-{idx}: fetch failed: {e}");
 						timings.push((elapsed, false, false));
+						my_consecutive_failures += 1;
+						if my_consecutive_failures >= ABORT_AFTER_CONSECUTIVE_FAILURES {
+							log::warn!(
+								"B2 client-{idx}: {my_consecutive_failures} consecutive \
+								 failures, aborting all clients"
+							);
+							abort.store(true, Ordering::Relaxed);
+							break;
+						}
 					},
 				}
 			}
@@ -136,23 +158,21 @@ pub async fn run_b2_concurrent_read_sweep(
 	nonce_tracker: &NonceTracker,
 	multiaddr: &litep2p::types::multiaddr::Multiaddr,
 	item_count: u32,
+	payload_size: usize,
 	ws_url: &str,
 ) -> Result<Vec<ScenarioResult>> {
-	log::info!(
-		"B2: Concurrent read sweep ({item_count} items, {}KB payload)",
-		B2_PAYLOAD_SIZE / 1024
-	);
+	log::info!("B2: Concurrent read sweep ({item_count} items, {}KB payload)", payload_size / 1024);
 
 	// --- Generate unique payloads and compute CIDs ---
 	let mut items: Vec<(cid::Cid, Vec<u8>)> = Vec::with_capacity(item_count as usize);
 	let mut work_items: Vec<(Keypair, Arc<Vec<u8>>)> = Vec::with_capacity(item_count as usize);
 
-	let seed = format!("B2read_{B2_PAYLOAD_SIZE}");
+	let seed = format!("B2read_{payload_size}");
 	let keypairs = crate::accounts::generate_keypairs(item_count, &seed);
 	let account_ids: Vec<_> = keypairs.iter().map(|kp| kp.public_key().to_account_id()).collect();
 
 	for (i, kp) in keypairs.into_iter().enumerate() {
-		let data = store::generate_indexed_payload(B2_PAYLOAD_SIZE, i as u32);
+		let data = store::generate_indexed_payload(payload_size, i as u32);
 		let cid = store::compute_cid_blake2b256(&data)?;
 		items.push((cid, data.clone()));
 		work_items.push((kp, Arc::new(data)));
@@ -165,7 +185,7 @@ pub async fn run_b2_concurrent_read_sweep(
 		nonce_tracker,
 		&account_ids,
 		1,
-		(B2_PAYLOAD_SIZE + 1024) as u64,
+		(payload_size + 1024) as u64,
 	)
 	.await?;
 
@@ -197,22 +217,18 @@ pub async fn run_b2_concurrent_read_sweep(
 
 	for &concurrency in B2_CONCURRENCY_LEVELS {
 		log::info!("=== B2 sweep: concurrency={concurrency} ===");
-		match run_b2_concurrent_read_level(
-			multiaddr,
-			Arc::clone(&items),
-			B2_PAYLOAD_SIZE,
-			concurrency,
-		)
-		.await
+		match run_b2_concurrent_read_level(multiaddr, Arc::clone(&items), payload_size, concurrency)
+			.await
 		{
 			Ok(result) => results.push(result),
 			Err(e) => {
 				log::warn!("B2 sweep: concurrency={concurrency} failed: {e}");
 				results.push(ScenarioResult {
 					name: format!(
-						"B2: Concurrent Read (128KB, concurrency={concurrency} - FAILED)"
+						"B2: Concurrent Read ({}KB, concurrency={concurrency} - FAILED)",
+						payload_size / 1024
 					),
-					payload_size: B2_PAYLOAD_SIZE,
+					payload_size,
 					total_reads: Some(0),
 					successful_reads: Some(0),
 					failed_reads: Some((item_count as u64) * (concurrency as u64)),
