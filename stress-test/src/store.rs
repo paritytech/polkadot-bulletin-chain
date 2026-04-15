@@ -66,43 +66,71 @@ pub struct DualBlockSubscription {
 }
 
 /// Subscribe to both best and finalized blocks, eagerly draining each in a
-/// background task. The `monitor_client` is kept alive for storage queries.
+/// background task that automatically reconnects on failure.
+/// The `monitor_client` is kept alive for storage queries.
 pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription> {
 	let client = crate::client::connect(ws_url).await?;
 
-	// Best blocks
-	let mut best_sub = client.blocks().subscribe_best().await?;
+	// Best blocks — reconnects on subscription failure.
 	let (best_tx, best_rx) = tokio::sync::mpsc::unbounded_channel();
-	let client_for_best = client.clone();
-	tokio::spawn(async move {
-		let _client = client_for_best;
-		while let Some(Ok(block)) = best_sub.next().await {
-			if best_tx.send(block).is_err() {
-				break;
+	{
+		let url = ws_url.to_string();
+		let mut client = client.clone();
+		let best_tx = best_tx.clone();
+		tokio::spawn(async move {
+			loop {
+				match client.blocks().subscribe_best().await {
+					Ok(mut sub) => {
+						while let Some(Ok(block)) = sub.next().await {
+							if best_tx.send(block).is_err() {
+								return;
+							}
+						}
+						log::warn!("monitor: best block subscription ended, reconnecting");
+					},
+					Err(e) => {
+						log::warn!("monitor: best block subscribe failed: {e}, retrying in 2s");
+					},
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+				match crate::client::connect(&url).await {
+					Ok(new_client) => client = new_client,
+					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
+				}
 			}
-		}
-	});
+		});
+	}
 
-	// Finalized blocks
-	let mut fin_sub = client.blocks().subscribe_finalized().await?;
+	// Finalized blocks — reconnects on subscription failure.
 	let (fin_tx, fin_rx) = tokio::sync::mpsc::unbounded_channel();
-	let client_for_fin = client.clone();
-	tokio::spawn(async move {
-		let _client = client_for_fin;
-		while let Some(Ok(block)) = fin_sub.next().await {
-			if fin_tx.send(block.number() as u64).is_err() {
-				break;
+	{
+		let url = ws_url.to_string();
+		let mut client = client.clone();
+		tokio::spawn(async move {
+			loop {
+				match client.blocks().subscribe_finalized().await {
+					Ok(mut sub) => {
+						while let Some(Ok(block)) = sub.next().await {
+							if fin_tx.send(block.number() as u64).is_err() {
+								return;
+							}
+						}
+						log::warn!("monitor: finalized subscription ended, reconnecting");
+					},
+					Err(e) => {
+						log::warn!("monitor: finalized subscribe failed: {e}, retrying in 2s");
+					},
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+				match crate::client::connect(&url).await {
+					Ok(new_client) => client = new_client,
+					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
+				}
 			}
-		}
-	});
+		});
+	}
 
 	Ok(DualBlockSubscription { best_rx, finalized_rx: fin_rx, monitor_client: client })
-}
-
-/// Input for the block monitor.
-pub enum BlockInput {
-	/// Best blocks only — no finalization tracking or timestamps.
-	BestOnly(BlockReceiver),
 }
 
 /// Read `pallet_timestamp::Now` at a specific block hash.
@@ -437,7 +465,7 @@ pub async fn bulk_store_oneshot(
 	ws_urls: &[&str],
 	stop_after_blocks: Option<u32>,
 	submitters: usize,
-	block_input: BlockInput,
+	block_input: BlockReceiver,
 ) -> Result<BulkStoreResult> {
 	if work_items.is_empty() {
 		return Ok(BulkStoreResult {
@@ -507,7 +535,7 @@ pub async fn bulk_store_oneshot(
 	let monitor_ready_signal = monitor_ready.clone();
 	let fork_detections = Arc::new(AtomicU64::new(0));
 
-	let BlockInput::BestOnly(mut blocks_rx) = block_input;
+	let mut blocks_rx = block_input;
 	let monitor_handle = tokio::spawn(async move {
 		let mut total_store_blocks = 0u32;
 		monitor_ready_signal.notify_one();

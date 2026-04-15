@@ -241,7 +241,7 @@ async fn wait_until_txpool_can_pull_work(
 	let mut logged = false;
 	loop {
 		let submitted = submit_stats.lock().unwrap().submitted;
-		let confirmed = total_confirmed(&block_stats);
+		let confirmed = total_confirmed(block_stats);
 		let estimated_pending = submitted.saturating_sub(confirmed) as usize;
 
 		if estimated_pending <= POOL_PENDING_PAUSE_THRESHOLD {
@@ -1121,9 +1121,8 @@ pub async fn generate_block_capacity_work(
 
 	// Process batches with look-ahead: sign batch N+1 concurrently while
 	// dispatching batch N's stores. This avoids the pool draining during signing.
-	let mut pending_sign: Option<
-		tokio::task::JoinHandle<Result<(Vec<Vec<AccountId32>>, Vec<StressWorkItem>)>>,
-	> = None;
+	type SignResult = Result<(Vec<Vec<AccountId32>>, Vec<StressWorkItem>)>;
+	let mut pending_sign: Option<tokio::task::JoinHandle<SignResult>> = None;
 
 	for (batch_idx, &(plan_idx, start, end)) in batches.iter().enumerate() {
 		let batch_num = batch_idx + 1;
