@@ -54,10 +54,11 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
     // Create client directly with api, signer, and submit function
-    // Use a per-transaction timeout suitable for a local dev chain (~6s blocks).
-    // The default 420s is for production; 60s is plenty for CI zombienet nodes.
+    // Use a per-transaction timeout suitable for CI zombienet nodes (~6s blocks).
+    // The default 420s is for production; 90s gives headroom for slow CI runners
+    // where individual txs can occasionally take 40-70s to finalize.
     client = new AsyncBulletinClient(api, signer, papiClient.submit, {
-      txTimeout: 60_000,
+      txTimeout: 90_000,
     })
 
     // Authorize Alice's account for storage operations
@@ -116,7 +117,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should store chunked data with progress tracking", {
-      timeout: 180_000,
+      timeout: 360_000,
     }, async () => {
       // Create 5 MiB test data
       const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
@@ -158,7 +159,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire progress events in correct order during chunked upload", {
-      timeout: 180_000,
+      timeout: 360_000,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
@@ -234,7 +235,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk events sequentially (each chunk submitted before next starts)", {
-      timeout: 180_000,
+      timeout: 360_000,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
 
@@ -279,7 +280,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should include CID in chunk_completed events", {
-      timeout: 180_000,
+      timeout: 360_000,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
@@ -305,7 +306,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk_completed via store() builder for large data", {
-      timeout: 180_000,
+      timeout: 360_000,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
