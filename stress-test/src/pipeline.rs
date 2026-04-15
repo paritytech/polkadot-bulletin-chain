@@ -249,6 +249,11 @@ pub fn auth_batches_from_keypairs(keypairs: &[Keypair]) -> Vec<Vec<subxt::utils:
 		.collect()
 }
 
+/// Total confirmed store events across all tracked blocks.
+fn total_confirmed(block_stats: &Arc<Mutex<Vec<BlockStats>>>) -> u64 {
+	block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum()
+}
+
 /// Block until the estimated number of in-flight transactions (submitted − confirmed)
 /// drops to [`POOL_PENDING_PAUSE_THRESHOLD`] or below.
 ///
@@ -262,7 +267,7 @@ async fn wait_until_txpool_can_pull_work(
 	let mut logged = false;
 	loop {
 		let submitted = submit_stats.lock().unwrap().submitted;
-		let confirmed: u64 = block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum();
+		let confirmed = total_confirmed(&block_stats);
 		let estimated_pending = submitted.saturating_sub(confirmed) as usize;
 
 		if estimated_pending <= POOL_PENDING_PAUSE_THRESHOLD {
@@ -723,7 +728,10 @@ pub async fn run_block_capacity_pipeline(
 	// Background authorization task handle (interleaved with store dispatch).
 	let mut pending_auth: Option<tokio::task::JoinHandle<Result<()>>> = None;
 
-	loop {
+	// Run the work loop; capture errors but don't bail — we always want measurements.
+	let mut work_error: Option<anyhow::Error> = None;
+
+	'work: loop {
 		if stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64 {
 			wait_until_txpool_can_pull_work(&submit_stats, &block_stats, &new_block_notify).await;
 			stores_dispatched_since_txpool = 0;
@@ -774,17 +782,41 @@ pub async fn run_block_capacity_pipeline(
 			},
 			StressWorkItem::AwaitPendingAuth =>
 				if let Some(handle) = pending_auth.take() {
-					handle.await.map_err(|e| anyhow::anyhow!("auth task join: {e}"))??;
-					log::debug!("pipeline: AwaitPendingAuth completed (auth #{dbg_work_auth})");
+					match handle.await {
+						Ok(Ok(())) =>
+							log::debug!(
+								"pipeline: AwaitPendingAuth completed (auth #{dbg_work_auth})"
+							),
+						Ok(Err(e)) => {
+							log::error!("pipeline: auth task failed: {e:#}");
+							work_error = Some(e);
+							break 'work;
+						},
+						Err(e) => {
+							log::error!("pipeline: auth task join failed: {e}");
+							work_error = Some(e.into());
+							break 'work;
+						},
+					}
 				},
 			StressWorkItem::Store { account_id, extrinsic } => {
-				dispatch_store_to_workers(account_id, extrinsic, &worker_txs, &mut store_worker_rr)
-					.await?;
+				if let Err(e) = dispatch_store_to_workers(
+					account_id,
+					extrinsic,
+					&worker_txs,
+					&mut store_worker_rr,
+				)
+				.await
+				{
+					log::error!("pipeline: dispatch_store_to_workers failed: {e:#}");
+					work_error = Some(e);
+					break 'work;
+				}
 				stores_dispatched_since_txpool += 1;
 				dbg_work_store += 1;
 				if dbg_work_store == 1 || dbg_work_store.is_multiple_of(256) {
 					let sub = submit_stats.lock().unwrap().submitted;
-					let conf: u64 = block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum();
+					let conf = total_confirmed(&block_stats);
 					log::debug!(
 						"pipeline: Store #{dbg_work_store} dispatched (rpc_submitted={sub} \
 						 confirmed_store_events_in_stats={conf})"
@@ -794,16 +826,24 @@ pub async fn run_block_capacity_pipeline(
 		}
 	}
 
-	// Await any trailing auth task.
+	// Await any trailing auth task (best-effort).
 	if let Some(handle) = pending_auth.take() {
-		handle.await.map_err(|e| anyhow::anyhow!("trailing auth task join: {e}"))??;
+		match handle.await {
+			Ok(Ok(())) => {},
+			Ok(Err(e)) => log::warn!("pipeline: trailing auth task failed: {e:#}"),
+			Err(e) => log::warn!("pipeline: trailing auth task join failed: {e}"),
+		}
 	}
 
 	log::info!("pipeline: work stream finished, closing store worker inputs");
 	drop(worker_txs);
 
 	for join_res in join_all(worker_handles).await {
-		join_res.map_err(|e| anyhow::anyhow!("store worker task join: {e}"))??;
+		match join_res {
+			Ok(Ok(())) => {},
+			Ok(Err(e)) => log::warn!("pipeline: store worker failed: {e:#}"),
+			Err(e) => log::warn!("pipeline: store worker join failed: {e}"),
+		}
 	}
 
 	{
@@ -813,17 +853,19 @@ pub async fn run_block_capacity_pipeline(
 		}
 	}
 
+	// Best-effort wait for confirmations to catch up with submissions.
 	if submit_stats.lock().unwrap().submitted > 0 {
 		let deadline = Instant::now() + Duration::from_secs(TX_TIMEOUT_SECS * 3);
 		loop {
-			let confirmed: u64 = block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum();
+			let confirmed = total_confirmed(&block_stats);
 			let sub = submit_stats.lock().unwrap().submitted;
 			if confirmed >= sub {
 				break;
 			}
 			if Instant::now() > deadline {
 				log::warn!(
-					"pipeline: confirmation wait deadline ({}) — confirmed={confirmed} submitted={sub}",
+					"pipeline: confirmation wait timed out ({}s) — \
+					 confirmed={confirmed} submitted={sub}, proceeding with partial results",
 					TX_TIMEOUT_SECS * 3,
 				);
 				break;
@@ -852,11 +894,19 @@ pub async fn run_block_capacity_pipeline(
 	let total_confirmed: u64 = all_blocks.iter().map(|b| b.tx_count).sum();
 	let fork_detections = fork_detections.load(Ordering::Relaxed);
 
-	log::info!(
-		"pipeline: DONE — wall={:.1}s, submitted={total_submitted}, confirmed={total_confirmed}, \
-		 errors={total_errors}",
-		total_wall.as_secs_f64(),
-	);
+	if let Some(e) = &work_error {
+		log::warn!(
+			"pipeline: FINISHED WITH ERROR — wall={:.1}s, submitted={total_submitted}, \
+			 confirmed={total_confirmed}, errors={total_errors}, cause: {e:#}",
+			total_wall.as_secs_f64(),
+		);
+	} else {
+		log::info!(
+			"pipeline: DONE — wall={:.1}s, submitted={total_submitted}, \
+			 confirmed={total_confirmed}, errors={total_errors}",
+			total_wall.as_secs_f64(),
+		);
+	}
 	log::debug!(
 		"pipeline: DONE detail — pool_full_retries={total_pool_full} stale_nonces={total_stale} \
 		 fork_detections={fork_detections}"
