@@ -1,4 +1,8 @@
 use anyhow::Result;
+use std::sync::{
+	atomic::{AtomicBool, Ordering},
+	Arc,
+};
 use subxt::OnlineClient;
 use subxt_signer::sr25519::Keypair;
 
@@ -117,6 +121,15 @@ fn scenario_result_from_bulk(
 ) -> ScenarioResult {
 	let all_blocks = &result.blocks;
 	let measured: Vec<_> = all_blocks.iter().filter(|b| !b.prefill).collect();
+	let with_txs = measured.iter().filter(|b| b.tx_count > 0).count();
+	log::debug!(
+		"scenario_result_from_bulk({label}): {} total blocks, {} measured, \
+		 {} with txs, {} finalized",
+		all_blocks.len(),
+		measured.len(),
+		with_txs,
+		all_blocks.iter().filter(|b| b.finalized).count(),
+	);
 
 	let first_with_txs = measured.iter().position(|b| b.tx_count > 0);
 	let last_with_txs = measured.iter().rposition(|b| b.tx_count > 0);
@@ -232,6 +245,7 @@ pub async fn run_block_capacity_sweep(
 	mix_seed: Option<u64>,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
+	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
 	let iteration_blocks = iteration_blocks.max(1);
 	let block_usable_bytes = chain_limits.normal_block_length as usize;
@@ -250,6 +264,10 @@ pub async fn run_block_capacity_sweep(
 	log::info!("Running {} block-capacity step(s): {}", sweep_steps.len(), step_labels.join(", "));
 
 	for step in &sweep_steps {
+		if cancel.load(Ordering::Relaxed) {
+			log::warn!("block-capacity sweep: cancelled, skipping remaining variants");
+			break;
+		}
 		let (
 			label,
 			payload_size_report,
@@ -271,11 +289,12 @@ pub async fn run_block_capacity_sweep(
 				)
 			},
 			BlockCapacitySweepStep::Mixed { mix } => {
-				let cap = mix.weighted_mean_est_block_cap(
-					block_usable_bytes,
-					extrinsic_overhead,
-					max_block_txs,
-				);
+				// Use the smallest payload in the mix to estimate max accounts needed
+				// per block. This ensures we always generate enough accounts to fill
+				// blocks even when small payloads dominate a given block.
+				let min_b = mix.min_payload_bytes().max(1);
+				let cap =
+					(block_usable_bytes / (min_b + extrinsic_overhead).max(1)).min(max_block_txs);
 				let mean = mix.mean_payload_bytes().round().max(1.0) as usize;
 				let max_b = mix.max_payload_bytes();
 				let seed_note = match mix_seed {
@@ -283,15 +302,15 @@ pub async fn run_block_capacity_sweep(
 					None => "OS entropy (use --mix-seed to reproduce)".to_string(),
 				};
 				log::info!(
-					"mixed: weighted payload mix — mean ≈ {mean} B, max ≈ {max_b} B, est ~{cap} txs/block; \
-					 draws: {seed_note}",
+					"mixed: weighted payload mix — mean ≈ {mean} B, min ≈ {min_b} B, \
+					 max ≈ {max_b} B, est ≤ {cap} txs/block (worst case); draws: {seed_note}",
 				);
 				(
 					"mixed",
 					mean,
 					cap,
 					StorePayloadMode::Mixed(mix.clone()),
-					mean + extrinsic_overhead,
+					min_b + extrinsic_overhead,
 					max_b,
 				)
 			},
@@ -310,7 +329,11 @@ pub async fn run_block_capacity_sweep(
 			 ≈ {accounts_per_iter} accounts/iter), est. pool demand ~{est_pool_mb} MB ===",
 		);
 
-		let seed = format!("T2sweep_{label}");
+		let run_id = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.unwrap_or_default()
+			.as_millis();
+		let seed = format!("T2sweep_{label}_{run_id}");
 		let plans: Vec<IterationPlan> =
 			pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
 		let txpool_pause = pipeline::POOL_PENDING_PAUSE_THRESHOLD;
@@ -350,24 +373,20 @@ pub async fn run_block_capacity_sweep(
 				client,
 				authorizer_signer,
 				nonce_tracker,
+				cancel,
+				Some(target_blocks),
 			)
 			.await;
 
+			// Always abort the generator — it may still be producing work items
+			// after the pipeline stopped (target reached, cancel, or error).
+			generator.abort();
+			let _ = generator.await;
+
 			let bulk = match pipeline_out {
 				Ok(b) => b,
-				Err(e) => {
-					generator.abort();
-					let _ = generator.await;
-					return Err(e);
-				},
+				Err(e) => return Err(e),
 			};
-
-			match generator.await {
-				Ok(Ok(())) => {},
-				Ok(Err(gen_e)) => return Err(gen_e),
-				Err(join_e) =>
-					return Err(anyhow::anyhow!("block-capacity generator task failed: {join_e}")),
-			}
 
 			let total_accounts: u32 = plans.iter().map(|p| p.account_count).sum();
 			let result = scenario_result_from_bulk(
@@ -429,7 +448,10 @@ pub async fn run_block_capacity_sweep(
 			},
 		}
 
-		// Drain the transaction pool before the next variant.
+		// Drain the transaction pool before the next variant (skip if stopping).
+		if cancel.load(Ordering::Relaxed) {
+			break;
+		}
 		log::info!("Draining pool after {label} variant...");
 		if let Ok(mut blocks_sub) = client.blocks().subscribe_best().await {
 			let mut consecutive_empty = 0u32;
