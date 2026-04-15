@@ -33,13 +33,19 @@ struct Cli {
 	#[arg(long, default_value = "512", global = true)]
 	iterations: u32,
 
-	/// Number of concurrent submitter tasks (increase for remote RPCs)
+	/// WebSocket RPC connections for store submission (one async worker per connection, fed by
+	/// bounded channels from the work reader; increase for remote RPCs)
 	#[arg(long, default_value = "4", global = true)]
 	submitters: usize,
 
 	/// Number of steady-state blocks to measure per variant (excludes ramp-up/down)
 	#[arg(long, default_value = "5", global = true)]
 	target_blocks: u32,
+
+	/// Block-capacity only: measured blocks worth of transactions per pipeline iteration (chunk
+	/// size)
+	#[arg(long, default_value = "20", global = true)]
+	iteration_blocks: u32,
 
 	/// Output format
 	#[arg(long, default_value = "text", global = true)]
@@ -288,6 +294,7 @@ async fn run_throughput(
 				chain_limits,
 				cli.submitters,
 				cli.target_blocks,
+				cli.iteration_blocks,
 				variants,
 				results,
 				on_result,

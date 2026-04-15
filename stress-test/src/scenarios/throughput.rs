@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::sync::Arc;
 use subxt::OnlineClient;
 use subxt_signer::sr25519::Keypair;
 
@@ -7,59 +6,25 @@ use crate::{
 	accounts::NonceTracker,
 	chain_info::ChainLimits,
 	client::BulletinConfig,
+	pipeline::{self, IterationPlan, StressWorkItem},
 	report::{ScenarioResult, SubmissionStats},
 	store,
 };
 
-/// Block capacity measurement using one-shot accounts.
-///
-/// Each account submits exactly 1 tx at nonce 0 with its own random payload.
-/// Delegates to `store::bulk_store_oneshot` for concurrent submission with
-/// backpressure. Only steady-state blocks (excluding first and last) are used
-/// for avg/peak.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_block_capacity(
-	_client: &OnlineClient<BulletinConfig>,
-	signers: &[Keypair],
+fn scenario_result_from_bulk(
+	result: &store::BulkStoreResult,
+	account_count: usize,
 	payload_size: usize,
-	target_blocks: u32,
-	ws_urls: &[&str],
+	label: &str,
 	chain_limits: &ChainLimits,
-	submitters: usize,
-	block_input: store::BlockInput,
-) -> Result<ScenarioResult> {
-	log::info!(
-		"block-cap: Block capacity test ({} one-shot accounts, {payload_size} bytes, \
-		 {target_blocks} target blocks)",
-		signers.len()
-	);
-
-	// Each account gets its own random payload.
-	let work_items: Vec<_> = signers
-		.iter()
-		.cloned()
-		.map(|kp| (kp, Arc::new(store::generate_payload(payload_size))))
-		.collect();
-
-	let total_target = target_blocks + 2; // include ramp-up and ramp-down blocks
-	let result =
-		store::bulk_store_oneshot(work_items, ws_urls, Some(total_target), submitters, block_input)
-			.await?;
-
-	// Compute stats over measured (non-prefill) blocks only.
-	// Trim ramp-up and ramp-down: find the first and last blocks with txs,
-	// then take everything in between (including empty blocks from validator
-	// rotation gaps) as the steady-state window.
+) -> ScenarioResult {
 	let all_blocks = &result.blocks;
 	let measured: Vec<_> = all_blocks.iter().filter(|b| !b.prefill).collect();
 
 	let first_with_txs = measured.iter().position(|b| b.tx_count > 0);
 	let last_with_txs = measured.iter().rposition(|b| b.tx_count > 0);
 	let steady: Vec<_> = match (first_with_txs, last_with_txs) {
-		(Some(first), Some(last)) if last > first + 1 =>
-		// Skip first and last blocks with txs (ramp-up/down), keep
-		// everything between them including empty blocks.
-			measured[first + 1..last].to_vec(),
+		(Some(first), Some(last)) if last > first + 1 => measured[first + 1..last].to_vec(),
 		_ => measured.clone(),
 	};
 
@@ -70,7 +35,6 @@ pub async fn run_block_capacity(
 	let prefill_count = all_blocks.iter().filter(|b| b.prefill).count();
 	let empty_count = steady.iter().filter(|b| b.tx_count == 0).count();
 
-	// Compute on-chain timing from timestamps of steady blocks.
 	let intervals: Vec<u64> = steady.iter().filter_map(|b| b.interval_ms).collect();
 	let avg_block_interval_ms = if !intervals.is_empty() {
 		Some(intervals.iter().sum::<u64>() as f64 / intervals.len() as f64)
@@ -118,8 +82,8 @@ pub async fn run_block_capacity(
 		if onchain_timing { "on-chain" } else { "client" }
 	);
 
-	Ok(ScenarioResult {
-		name: format!("block-cap: Block Capacity ({} accounts)", signers.len()),
+	ScenarioResult {
+		name: format!("block-cap: Block Capacity ({label}, {account_count} accounts)"),
 		duration: result.duration,
 		total_submitted: result.total_submitted,
 		total_confirmed: result.total_confirmed,
@@ -153,14 +117,18 @@ pub async fn run_block_capacity(
 		reads_per_sec: None,
 		read_bytes_per_sec: None,
 		data_verified: None,
-	})
+	}
 }
 
 /// Block capacity measurement across multiple payload sizes.
 ///
-/// For each payload size, calculates how many one-shot accounts are needed,
-/// authorizes them, runs `run_block_capacity`, and drains the pool between
-/// variants.
+/// For each payload size, splits one-shot accounts into iterations (~`iteration_blocks` measured
+/// blocks worth of txs per iteration), then runs the producer/consumer pipeline.  Authorization of
+/// each batch is interleaved with store dispatch of the previous batch (see
+/// [`generate_block_capacity_work`](pipeline::generate_block_capacity_work)).  The reader applies
+/// txpool backpressure every
+/// [`POOL_PENDING_PAUSE_THRESHOLD`](pipeline::POOL_PENDING_PAUSE_THRESHOLD) dispatches.  Drains the
+/// pool between variants.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_block_capacity_sweep(
 	client: &OnlineClient<BulletinConfig>,
@@ -170,10 +138,12 @@ pub async fn run_block_capacity_sweep(
 	chain_limits: &ChainLimits,
 	submitters: usize,
 	target_blocks: u32,
+	iteration_blocks: u32,
 	variant_filter: Option<&str>,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 ) -> Result<()> {
+	let iteration_blocks = iteration_blocks.max(1);
 	let block_usable_bytes = chain_limits.normal_block_length as usize;
 	let extrinsic_overhead = chain_limits.extrinsic_length_overhead as usize;
 	let max_block_txs = chain_limits.max_block_transactions as usize;
@@ -242,45 +212,75 @@ pub async fn run_block_capacity_sweep(
 		let accounts_needed = ((total_block_slots + backpressure_buffer) * 3 / 2).max(1) as u32;
 		let est_pool_mb =
 			(accounts_needed as usize * (payload_size + extrinsic_overhead)) / (1024 * 1024);
+		let accounts_per_iter =
+			pipeline::block_capacity_accounts_per_iteration(est_block_cap, iteration_blocks);
+		let n_iterations = accounts_needed.div_ceil(accounts_per_iter);
 		log::info!(
 			"=== block-capacity variant: {label} payload, {accounts_needed} one-shot accounts \
-			 (est. block cap {est_block_cap}, est. pool demand ~{est_pool_mb} MB) ==="
+			 in {n_iterations} iteration(s) (~{iteration_blocks} measured blocks/iter × ~{est_block_cap} txs/block \
+			 ≈ {accounts_per_iter} accounts/iter), est. pool demand ~{est_pool_mb} MB ===",
 		);
 
 		let seed = format!("T2sweep_{label}");
-		let keypairs = crate::accounts::generate_keypairs(accounts_needed, &seed);
-		let account_ids: Vec<_> =
-			keypairs.iter().map(|kp| kp.public_key().to_account_id()).collect();
-
+		let plans: Vec<IterationPlan> =
+			pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
+		let txpool_pause = pipeline::POOL_PENDING_PAUSE_THRESHOLD;
+		log::info!(
+			"{label}: iteration layout ready ({} iterations; interleaved Authorize + Store; \
+			 txpool gate every {txpool_pause} dispatches (pause if pool > {txpool_pause}); \
+			 authorize chunks of {})",
+			plans.len(),
+			crate::authorize::AUTHORIZE_BATCH_SIZE,
+		);
 		let variant_result: Result<ScenarioResult> = async {
-			// Authorize accounts, waiting for each batch to land in a best block.
-			log::info!("{label}: authorizing accounts...");
-			crate::authorize::authorize_accounts(
+			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
+			let (work_tx, work_rx) =
+				tokio::sync::mpsc::channel::<StressWorkItem>(pipeline::WORK_CHANNEL_CAPACITY);
+
+			let gen_plans = plans.clone();
+			let gen_payload = payload_size;
+			let gen_client = std::sync::Arc::new(client.clone());
+			let generator = tokio::spawn(async move {
+				pipeline::generate_block_capacity_work(work_tx, &gen_plans, gen_payload, gen_client)
+					.await
+			});
+
+			let pipeline_out = pipeline::run_block_capacity_pipeline(
+				work_rx,
+				dual,
+				ws_urls,
+				submitters,
+				payload_size,
 				client,
 				authorizer_signer,
 				nonce_tracker,
-				&account_ids,
-				1,
-				(payload_size + 1024) as u64,
 			)
-			.await?;
-			log::info!("{label}: all authorizations confirmed, starting load test");
+			.await;
 
-			// Subscribe to blocks AFTER authorization is done so the monitor
-			// only sees load test blocks.
-			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
+			let bulk = match pipeline_out {
+				Ok(b) => b,
+				Err(e) => {
+					generator.abort();
+					let _ = generator.await;
+					return Err(e);
+				},
+			};
 
-			let result = run_block_capacity(
-				client,
-				&keypairs,
+			match generator.await {
+				Ok(Ok(())) => {},
+				Ok(Err(gen_e)) => return Err(gen_e),
+				Err(join_e) =>
+					return Err(anyhow::anyhow!("block-capacity generator task failed: {join_e}")),
+			}
+
+			let total_accounts: u32 = plans.iter().map(|p| p.account_count).sum();
+			let result = scenario_result_from_bulk(
+				&bulk,
+				total_accounts as usize,
 				payload_size,
-				target_blocks,
-				ws_urls,
+				label,
 				chain_limits,
-				submitters,
-				store::BlockInput::Dual(dual),
-			)
-			.await?;
+			);
 
 			if payload_size >= 4 * 1024 * 1024 && result.total_confirmed == 0 {
 				log::warn!(

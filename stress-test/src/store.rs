@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use blake2::digest::{consts::U32, Digest};
 use std::{
-	collections::{HashMap, VecDeque},
+	collections::VecDeque,
 	sync::{
 		atomic::{AtomicBool, AtomicU64, Ordering},
 		Arc, Mutex,
@@ -11,7 +11,7 @@ use std::{
 use subxt::{
 	blocks::{Block, ExtrinsicEvents},
 	dynamic::{tx, Value},
-	tx::TxStatus,
+	tx::{SubmittableTransaction, TxStatus},
 	utils::H256,
 	OnlineClient,
 };
@@ -99,17 +99,18 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 	Ok(DualBlockSubscription { best_rx, finalized_rx: fin_rx, monitor_client: client })
 }
 
-/// Input for the block monitor: either best-only (legacy) or dual streams.
+/// Input for the block monitor.
 pub enum BlockInput {
 	/// Best blocks only — no finalization tracking or timestamps.
 	BestOnly(BlockReceiver),
-	/// Dual: best + finalized with on-chain timestamp reading.
-	Dual(DualBlockSubscription),
 }
 
 /// Read `pallet_timestamp::Now` at a specific block hash.
 /// Returns milliseconds since Unix epoch.
-async fn read_timestamp_at(client: &OnlineClient<BulletinConfig>, block_hash: H256) -> Result<u64> {
+pub(crate) async fn read_timestamp_at(
+	client: &OnlineClient<BulletinConfig>,
+	block_hash: H256,
+) -> Result<u64> {
 	let addr = subxt::dynamic::storage("Timestamp", "Now", vec![]);
 	let value = client
 		.storage()
@@ -123,13 +124,13 @@ async fn read_timestamp_at(client: &OnlineClient<BulletinConfig>, block_hash: H2
 }
 
 /// Internal tracking entry for a best block awaiting finalization confirmation.
-struct PendingBlock {
-	number: u64,
-	hash: H256,
-	tx_count: u64,
-	payload_bytes: u64,
-	timestamp_ms: Option<u64>,
-	prefill: bool,
+pub(crate) struct PendingBlock {
+	pub(crate) number: u64,
+	pub(crate) hash: H256,
+	pub(crate) tx_count: u64,
+	pub(crate) payload_bytes: u64,
+	pub(crate) timestamp_ms: Option<u64>,
+	pub(crate) prefill: bool,
 }
 
 const TX_TIMEOUT_SECS: u64 = 60;
@@ -146,7 +147,7 @@ const TX_TIMEOUT_SECS: u64 = 60;
 ///   1020 = POOL_INVALID_BLOCK_ID
 ///   1021 = POOL_FUTURE_TX (pool not accepting future nonces)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TxPoolError {
+pub(crate) enum TxPoolError {
 	/// Pool is full (1016) or priority too low (1014) — tx never entered pool,
 	/// safe to rollback nonce and retry. On feeless chains all txs have equal
 	/// priority, so 1014 fires instead of 1016 when the pool can't evict.
@@ -170,7 +171,7 @@ enum TxPoolError {
 	Other,
 }
 
-fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
+pub(crate) fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
 	let msg = format!("{e}").to_lowercase();
 
 	// 1016: tx never entered pool (safe to rollback nonce and retry)
@@ -252,28 +253,6 @@ pub async fn wait_for_in_best_block(
 	anyhow::bail!("Transaction stream ended without InBestBlock status")
 }
 
-/// Wait for a transaction to be finalized.
-pub async fn wait_for_finalized(
-	mut progress: subxt::tx::TxProgress<BulletinConfig, OnlineClient<BulletinConfig>>,
-) -> Result<(H256, ExtrinsicEvents<BulletinConfig>)> {
-	while let Some(status) = progress.next().await {
-		match status? {
-			TxStatus::InFinalizedBlock(tx_in_block) => {
-				let block_hash = tx_in_block.block_hash();
-				let events = tx_in_block.wait_for_success().await?;
-				return Ok((block_hash, events));
-			},
-			TxStatus::Error { message } |
-			TxStatus::Invalid { message } |
-			TxStatus::Dropped { message } => {
-				anyhow::bail!("Transaction failed: {message}");
-			},
-			_ => continue,
-		}
-	}
-	anyhow::bail!("Transaction stream ended without finalization")
-}
-
 /// Fire-and-forget store (highest throughput).
 ///
 /// Returns the extrinsic hash computed the same way as `block.extrinsics()` —
@@ -297,6 +276,54 @@ pub async fn store_fire_and_forget(
 	// block.extrinsics().iter().hash() does — so we can match hashes.
 	let raw_hash = client.hasher().hash(signed.encoded());
 	signed.submit().await?;
+	Ok(raw_hash)
+}
+
+/// Build a signed `TransactionStorage::store` extrinsic bytes (use nonce `0` for one-shot accounts
+/// after [`crate::accounts::batch_init_nonces`]).
+pub async fn sign_store_extrinsic(
+	client: &OnlineClient<BulletinConfig>,
+	signer: &Keypair,
+	data: &[u8],
+	nonce: u64,
+) -> Result<Vec<u8>> {
+	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+	let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
+	let signed = client.tx().create_signed(&store_call, signer, params).await?;
+	Ok(signed.into_encoded())
+}
+
+/// Synchronous version of [`sign_store_extrinsic`] for use inside
+/// [`tokio::task::spawn_blocking`]. Uses `create_partial_offline` + `sign` (both sync) instead of
+/// the async `create_signed`.
+pub fn sign_store_extrinsic_blocking(
+	client: &OnlineClient<BulletinConfig>,
+	signer: &Keypair,
+	data: &[u8],
+	nonce: u64,
+) -> Result<Vec<u8>> {
+	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+	let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
+	let mut partial = client
+		.tx()
+		.create_partial_offline(&store_call, params)
+		.map_err(|e| anyhow!("create_partial_offline: {e}"))?;
+	let signed = partial.sign(signer);
+	Ok(signed.into_encoded())
+}
+
+/// Submit a pre-signed store extrinsic (see [`sign_store_extrinsic`]). Same hash semantics as
+/// [`store_fire_and_forget`].
+pub async fn store_submit_pre_signed(
+	client: &OnlineClient<BulletinConfig>,
+	encoded: &[u8],
+) -> Result<H256> {
+	let sub = SubmittableTransaction::<BulletinConfig, OnlineClient<BulletinConfig>>::from_bytes(
+		client.clone(),
+		encoded.to_vec(),
+	);
+	let raw_hash = sub.hash();
+	sub.submit().await.map_err(|e| anyhow!("submit pre-signed store: {e}"))?;
 	Ok(raw_hash)
 }
 
@@ -335,7 +362,9 @@ pub fn compute_cid_blake2b256(data: &[u8]) -> Result<cid::Cid> {
 
 /// Count `TransactionStorage::Stored` events in a block. Uses events (lightweight)
 /// instead of extrinsics (full block body) to avoid RPC response size limits.
-async fn count_stored_events(block: &Block<BulletinConfig, OnlineClient<BulletinConfig>>) -> u64 {
+pub(crate) async fn count_stored_events(
+	block: &Block<BulletinConfig, OnlineClient<BulletinConfig>>,
+) -> u64 {
 	let block_number = block.number();
 	let mut count = 0u64;
 	match block.events().await {
@@ -455,278 +484,71 @@ pub async fn bulk_store_oneshot(
 	let monitor_ready = Arc::new(Notify::new());
 	let monitor_ready_signal = monitor_ready.clone();
 	let fork_detections = Arc::new(AtomicU64::new(0));
-	let fork_detections_monitor = fork_detections.clone();
 
-	let monitor_handle = match block_input {
-		BlockInput::BestOnly(mut blocks_rx) => tokio::spawn(async move {
-			let mut total_store_blocks = 0u32;
-			monitor_ready_signal.notify_one();
+	let BlockInput::BestOnly(mut blocks_rx) = block_input;
+	let monitor_handle = tokio::spawn(async move {
+		let mut total_store_blocks = 0u32;
+		monitor_ready_signal.notify_one();
 
-			while !stop_monitor.load(Ordering::Relaxed) {
-				if let Some(block) = blocks_rx.recv().await {
-					let block_number = block.number() as u64;
-					new_block_notify_monitor.notify_waiters();
+		while !stop_monitor.load(Ordering::Relaxed) {
+			if let Some(block) = blocks_rx.recv().await {
+				let block_number = block.number() as u64;
+				new_block_notify_monitor.notify_waiters();
 
-					let total_store_extrinsics = count_stored_events(&block).await;
-					let is_prefill = !pool_saturated_monitor.load(Ordering::Relaxed);
+				let total_store_extrinsics = count_stored_events(&block).await;
+				let is_prefill = !pool_saturated_monitor.load(Ordering::Relaxed);
 
-					if is_prefill && total_store_extrinsics == 0 {
-						continue;
-					}
+				if is_prefill && total_store_extrinsics == 0 {
+					continue;
+				}
 
-					let phase = if is_prefill { "[pre-fill]" } else { "[measured]" };
+				let phase = if is_prefill { "[pre-fill]" } else { "[measured]" };
 
-					if !is_prefill {
-						let mut ms = measure_start_monitor.lock().unwrap();
-						if ms.is_none() {
-							log::info!(
-								"bulk_store: measurement clock starts at block \
-								 #{block_number}"
-							);
-							*ms = Some(Instant::now());
-						}
-					}
-
-					if total_store_extrinsics > 0 || !is_prefill {
+				if !is_prefill {
+					let mut ms = measure_start_monitor.lock().unwrap();
+					if ms.is_none() {
 						log::info!(
-							"bulk_store: {phase} block #{block_number}: \
-							 {total_store_extrinsics} store txs"
+							"bulk_store: measurement clock starts at block \
+							 #{block_number}"
 						);
-					}
-
-					block_stats_monitor.lock().unwrap().push(BlockStats {
-						number: block_number,
-						tx_count: total_store_extrinsics,
-						payload_bytes: total_store_extrinsics * payload_size as u64,
-						prefill: is_prefill,
-						timestamp_ms: None,
-						hash: None,
-						finalized: false,
-						interval_ms: None,
-					});
-
-					if !is_prefill && total_store_extrinsics > 0 {
-						total_store_blocks += 1;
-						if let Some(limit) = stop_after_blocks {
-							if total_store_blocks >= limit {
-								log::info!(
-									"bulk_store: reached {total_store_blocks} measured \
-									 blocks with txs (target {limit}), stopping"
-								);
-								stop_monitor.store(true, Ordering::Relaxed);
-								new_block_notify_monitor.notify_waiters();
-							}
-						}
+						*ms = Some(Instant::now());
 					}
 				}
-			}
-		}),
 
-		BlockInput::Dual(DualBlockSubscription {
-			mut best_rx,
-			mut finalized_rx,
-			monitor_client,
-		}) => tokio::spawn(async move {
-			let mut total_store_blocks = 0u32;
-			let mut pending: HashMap<u64, PendingBlock> = HashMap::new();
-			let mut max_finalized: u64 = 0;
-			let mut prev_confirmed_timestamp_ms: Option<u64> = None;
-			monitor_ready_signal.notify_one();
-
-			loop {
-				if stop_monitor.load(Ordering::Relaxed) {
-					break;
+				if total_store_extrinsics > 0 || !is_prefill {
+					log::info!(
+						"bulk_store: {phase} block #{block_number}: \
+						 {total_store_extrinsics} store txs"
+					);
 				}
 
-				tokio::select! {
-					Some(block) = best_rx.recv() => {
-						let block_number = block.number() as u64;
-						let block_hash = block.hash();
-						new_block_notify_monitor.notify_waiters();
+				block_stats_monitor.lock().unwrap().push(BlockStats {
+					number: block_number,
+					tx_count: total_store_extrinsics,
+					payload_bytes: total_store_extrinsics * payload_size as u64,
+					prefill: is_prefill,
+					timestamp_ms: None,
+					hash: None,
+					finalized: false,
+					interval_ms: None,
+				});
 
-						let total_store_extrinsics = count_stored_events(&block).await;
-						let is_prefill = !pool_saturated_monitor.load(Ordering::Relaxed);
-
-						if is_prefill && total_store_extrinsics == 0 {
-							continue;
-						}
-
-						// Read on-chain timestamp
-						let timestamp_ms = match read_timestamp_at(
-							&monitor_client,
-							block_hash,
-						)
-						.await
-						{
-							Ok(ts) => Some(ts),
-							Err(e) => {
-								log::warn!(
-									"bulk_store: block #{block_number}: \
-									 failed to read timestamp: {e}"
-								);
-								None
-							},
-						};
-
-						let phase = if is_prefill { "[pre-fill]" } else { "[measured]" };
-
-						if !is_prefill {
-							let mut ms = measure_start_monitor.lock().unwrap();
-							if ms.is_none() {
-								log::info!(
-									"bulk_store: measurement clock starts at block \
-									 #{block_number}"
-								);
-								*ms = Some(Instant::now());
-							}
-						}
-
-						if total_store_extrinsics > 0 || !is_prefill {
+				if !is_prefill && total_store_extrinsics > 0 {
+					total_store_blocks += 1;
+					if let Some(limit) = stop_after_blocks {
+						if total_store_blocks >= limit {
 							log::info!(
-								"bulk_store: {phase} block #{block_number}: \
-								 {total_store_extrinsics} store txs"
+								"bulk_store: reached {total_store_blocks} measured \
+								 blocks with txs (target {limit}), stopping"
 							);
-						}
-
-						// Fork detection: if we already have a different hash for
-						// this block number, it's a re-org.
-						if let Some(old) = pending.get(&block_number) {
-							if old.hash != block_hash {
-								log::warn!(
-									"bulk_store: fork detected at block #{block_number}: \
-									 hash changed from {:?} to {block_hash:?}",
-									old.hash
-								);
-								fork_detections_monitor.fetch_add(1, Ordering::Relaxed);
-							}
-						}
-
-						pending.insert(block_number, PendingBlock {
-							number: block_number,
-							hash: block_hash,
-							tx_count: total_store_extrinsics,
-							payload_bytes: total_store_extrinsics * payload_size as u64,
-							timestamp_ms,
-							prefill: is_prefill,
-						});
-
-						// If finalized already passed this number, confirm now.
-						if block_number <= max_finalized {
-							if let Some(pb) = pending.remove(&block_number) {
-								let interval_ms = match (pb.timestamp_ms, prev_confirmed_timestamp_ms) {
-									(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
-									_ => None,
-								};
-								if pb.timestamp_ms.is_some() {
-									prev_confirmed_timestamp_ms = pb.timestamp_ms;
-								}
-
-								let is_measured = !pb.prefill && pb.tx_count > 0;
-								block_stats_monitor.lock().unwrap().push(BlockStats {
-									number: pb.number,
-									tx_count: pb.tx_count,
-									payload_bytes: pb.payload_bytes,
-									prefill: pb.prefill,
-									timestamp_ms: pb.timestamp_ms,
-									hash: Some(format!("{:?}", pb.hash)),
-									finalized: true,
-									interval_ms,
-								});
-
-								if is_measured {
-									total_store_blocks += 1;
-									if let Some(limit) = stop_after_blocks {
-										if total_store_blocks >= limit {
-											log::info!(
-												"bulk_store: reached {total_store_blocks} \
-												 finalized measured blocks (target {limit}), \
-												 stopping"
-											);
-											stop_monitor.store(true, Ordering::Relaxed);
-											new_block_notify_monitor.notify_waiters();
-										}
-									}
-								}
-							}
+							stop_monitor.store(true, Ordering::Relaxed);
+							new_block_notify_monitor.notify_waiters();
 						}
 					}
-
-					Some(fin_number) = finalized_rx.recv() => {
-						let old_max = max_finalized;
-						max_finalized = max_finalized.max(fin_number);
-
-						// Confirm all pending blocks at or below the new finalized
-						// height, in order.
-						let mut to_confirm: Vec<u64> = pending
-							.keys()
-							.filter(|&&n| n > old_max && n <= max_finalized)
-							.copied()
-							.collect();
-						to_confirm.sort();
-
-						for num in to_confirm {
-							if let Some(pb) = pending.remove(&num) {
-								let interval_ms = match (pb.timestamp_ms, prev_confirmed_timestamp_ms) {
-									(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
-									_ => None,
-								};
-								if pb.timestamp_ms.is_some() {
-									prev_confirmed_timestamp_ms = pb.timestamp_ms;
-								}
-
-								let is_measured = !pb.prefill && pb.tx_count > 0;
-								block_stats_monitor.lock().unwrap().push(BlockStats {
-									number: pb.number,
-									tx_count: pb.tx_count,
-									payload_bytes: pb.payload_bytes,
-									prefill: pb.prefill,
-									timestamp_ms: pb.timestamp_ms,
-									hash: Some(format!("{:?}", pb.hash)),
-									finalized: true,
-									interval_ms,
-								});
-
-								if is_measured {
-									total_store_blocks += 1;
-									if let Some(limit) = stop_after_blocks {
-										if total_store_blocks >= limit {
-											log::info!(
-												"bulk_store: reached {total_store_blocks} \
-												 finalized measured blocks (target {limit}), \
-												 stopping"
-											);
-											stop_monitor.store(true, Ordering::Relaxed);
-											new_block_notify_monitor.notify_waiters();
-										}
-									}
-								}
-							}
-						}
-
-						// Prune stale pending entries that finalized skipped
-						// (fork victims).
-						let stale: Vec<u64> = pending
-							.keys()
-							.filter(|&&n| n < max_finalized.saturating_sub(10))
-							.copied()
-							.collect();
-						for num in stale {
-							if let Some(pb) = pending.remove(&num) {
-								log::warn!(
-									"bulk_store: fork victim: block #{num} (hash {:?}) \
-									 was never finalized, dropping from stats",
-									pb.hash
-								);
-								fork_detections_monitor.fetch_add(1, Ordering::Relaxed);
-							}
-						}
-					}
-
-					else => break,
 				}
 			}
-		}),
-	};
+		}
+	});
 
 	// Wait for the monitor to be actively consuming blocks before submitting.
 	monitor_ready.notified().await;
@@ -870,7 +692,7 @@ pub async fn bulk_store_oneshot(
 										consecutive_conn_errors = 0;
 									},
 									Err(re) => {
-										if consecutive_conn_errors % 10 == 0 {
+										if consecutive_conn_errors.is_multiple_of(10) {
 											log::warn!(
 												"bulk_store submitter {task_id}: reconnect \
 												 failed ({consecutive_conn_errors} attempts): {re}"
