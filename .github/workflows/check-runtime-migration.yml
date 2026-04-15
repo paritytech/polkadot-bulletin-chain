@@ -147,7 +147,7 @@ jobs:
   check-runtimes:
     needs: [runtime-matrix]
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' && needs.runtime-matrix.outputs.check-runtime != '[]'
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' && needs.runtime-matrix.outputs.runtime.check-runtime
     strategy:
       fail-fast: false
       matrix:
