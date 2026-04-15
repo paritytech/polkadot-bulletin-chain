@@ -56,8 +56,7 @@ impl TransactionClient {
 	///
 	/// Subxt's default nonce resolution queries the finalized block, which
 	/// lags behind for sequential `WaitFor::InBlock` transactions. Instead,
-	/// we query `AccountNonceApi_account_nonce` at the current best block
-	/// (the same approach PAPI uses), which sees recently-included transactions.
+	/// we query at the current best block
 	async fn submit_at_best_block(
 		&self,
 		tx: &impl subxt::tx::Payload,
@@ -95,7 +94,6 @@ impl TransactionClient {
 	/// confirmation level is reached.
 	///
 	/// This is the single submission loop used by all public methods. It:
-	/// - Resolves nonce from the best block via `submit_at_best_block`
 	/// - Streams all `TxStatus` events, firing the optional progress callback
 	/// - Breaks on `InBestBlock` or `InFinalizedBlock` based on `wait_for`
 	/// - Returns block hash and extrinsic hash on success
