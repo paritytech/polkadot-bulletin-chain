@@ -1,6 +1,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use std::{
+	path::PathBuf,
+	sync::{
+		atomic::{AtomicBool, Ordering},
+		Arc,
+	},
+};
 use subxt_signer::sr25519::Keypair;
 
 use bulletin_stress_test::{
@@ -148,6 +154,21 @@ async fn main() -> Result<()> {
 
 	let mut all_results = Vec::new();
 	let mut command_error = None;
+	let cancel = Arc::new(AtomicBool::new(false));
+
+	// Spawn Ctrl+C handler that sets the cancel flag instead of killing the process.
+	// This lets the pipeline finish gracefully and produce partial results.
+	{
+		let cancel = cancel.clone();
+		tokio::spawn(async move {
+			tokio::signal::ctrl_c().await.ok();
+			log::warn!("Ctrl+C received — stopping gracefully to collect partial results");
+			cancel.store(true, Ordering::Relaxed);
+			tokio::signal::ctrl_c().await.ok();
+			log::warn!("Second Ctrl+C — force exit");
+			std::process::exit(130);
+		});
+	}
 
 	// Closure that stamps metadata and flushes results to --output-file after each variant.
 	let flush = |results: &mut Vec<report::ScenarioResult>| {
@@ -190,6 +211,7 @@ async fn main() -> Result<()> {
 				&ws_url_refs,
 				&mut all_results,
 				&flush,
+				&cancel,
 			)
 			.await
 			{
@@ -227,13 +249,14 @@ async fn main() -> Result<()> {
 				&ws_url_refs,
 				&mut all_results,
 				&flush,
+				&cancel,
 			)
 			.await
 			{
 				log::error!("Throughput command failed: {e}");
 				command_error = Some(e);
 			}
-			if command_error.is_none() {
+			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
 				if let Err(e) = run_bitswap(
 					&client,
 					&authorizer_signer,
@@ -254,7 +277,7 @@ async fn main() -> Result<()> {
 		},
 	}
 
-	// Always print results (even partial) before propagating errors
+	// Always print results (even partial / aborted) before exiting.
 	match cli.output {
 		OutputFormat::Text =>
 			for result in &all_results {
@@ -267,6 +290,12 @@ async fn main() -> Result<()> {
 
 	if all_results.len() > 1 && matches!(cli.output, OutputFormat::Text) {
 		report::print_summary_table(&all_results);
+	}
+
+	if cancel.load(Ordering::Relaxed) {
+		// Flush to file one last time before exiting.
+		flush(&mut all_results);
+		std::process::exit(130);
 	}
 
 	if let Some(e) = command_error {
@@ -288,6 +317,7 @@ async fn run_throughput(
 	ws_urls: &[&str],
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
 	match test {
 		"block-capacity" | "all" => {
@@ -304,6 +334,7 @@ async fn run_throughput(
 				cli.mix_seed,
 				results,
 				on_result,
+				cancel,
 			)
 			.await?;
 		},

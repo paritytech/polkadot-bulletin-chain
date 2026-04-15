@@ -1,13 +1,11 @@
-//! Producer / consumer pipeline for long block-capacity runs.
+//! Producer / consumer pipeline for block-capacity throughput testing.
 //!
-//! A **generator** sends [`StressWorkItem`]s on a **bounded** `mpsc` channel. The **reader** pulls
-//! that channel: [`StressWorkItem::Authorize`] is **spawned as a background task**, and
-//! [`StressWorkItem::AwaitPendingAuth`] is a barrier that awaits completion of the in-flight auth.
-//! Between barriers the reader dispatches [`StressWorkItem::Store`] items to **N worker tasks**
-//! over bounded per-worker `mpsc` channels, so authorization of batch N+1 runs concurrently with
-//! store dispatch of batch N. Every [`POOL_PENDING_PAUSE_THRESHOLD`] items dispatched to workers,
-//! the reader calls [`wait_until_txpool_can_pull_work`] before the next `recv`. Store txs are
-//! pre-signed at nonce 0 in the generator ([`crate::store::sign_store_extrinsic_blocking`]).
+//! A **generator** ([`generate_block_capacity_work`]) signs store extrinsics and sends
+//! [`StressWorkItem`]s on a bounded `mpsc` channel. Signing of batch N+1 is overlapped with
+//! dispatch of batch N (look-ahead). For each batch the reader sends `Authorize` → `AwaitPendingAuth`
+//! → `Store` items. Store items are dispatched to **N worker tasks** over bounded per-worker channels.
+//! Every [`POOL_PENDING_PAUSE_THRESHOLD`] items, the reader pauses until the estimated pending pool
+//! depth drops. Workers use fire-and-forget RPC (`author_submitExtrinsic`) for maximum throughput.
 
 use anyhow::Result;
 use futures::{
@@ -15,14 +13,11 @@ use futures::{
 	stream::{self, StreamExt, TryStreamExt},
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::{
-	collections::HashMap,
-	sync::{
-		atomic::{AtomicU64, Ordering},
+use std::sync::{
+		atomic::{AtomicBool, Ordering},
 		Arc, Mutex,
-	},
-	time::{Duration, Instant},
 };
+use std::time::{Duration, Instant};
 use subxt::{utils::AccountId32, OnlineClient};
 use subxt_signer::sr25519::Keypair;
 use tokio::sync::{mpsc, mpsc::error::TrySendError, Notify};
@@ -33,7 +28,8 @@ use crate::{
 	client::BulletinConfig,
 	report::BlockStats,
 	store::{
-		classify_tx_error, count_stored_events, read_timestamp_at, sign_store_extrinsic_blocking,
+		classify_tx_error, read_timestamp_at, sign_store_extrinsic_blocking,
+		stored_content_hashes,
 		store_submit_pre_signed, BulkStoreResult, DualBlockSubscription, PendingBlock, TxPoolError,
 	},
 };
@@ -41,10 +37,15 @@ use crate::{
 #[derive(Default)]
 struct SubmitStats {
 	submitted: u64,
+	submitted_bytes: u64,
+	/// Map from content hash (blake2b-256 of payload) to extrinsic encoded size.
+	/// The monitor removes entries as it sees `Stored` events, keeping memory bounded.
+	content_hash_to_ext_size: std::collections::HashMap<[u8; 32], u64>,
 	errors: u64,
 	pool_full_retries: u64,
 	stale_nonces: u64,
 }
+
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
@@ -92,6 +93,11 @@ impl PayloadSizeMix {
 		*self.sizes.iter().max().unwrap_or(&0)
 	}
 
+	#[must_use]
+	pub fn min_payload_bytes(&self) -> usize {
+		*self.sizes.iter().min().unwrap_or(&0)
+	}
+
 	/// Expected payload size (for capacity estimates and monitor byte stats).
 	#[must_use]
 	pub fn mean_payload_bytes(&self) -> f64 {
@@ -102,28 +108,6 @@ impl PayloadSizeMix {
 			.map(|(&s, &w)| s as f64 * f64::from(w))
 			.sum();
 		sum / f64::from(self.total)
-	}
-
-	/// Weighted mean of per-size estimated txs/block (used to size mixed-mode account counts).
-	#[must_use]
-	pub fn weighted_mean_est_block_cap(
-		&self,
-		block_usable_bytes: usize,
-		extrinsic_overhead: usize,
-		max_block_txs: usize,
-	) -> usize {
-		let total_w = u64::from(self.total);
-		let sum_caps: f64 = self
-			.sizes
-			.iter()
-			.zip(self.weights.iter())
-			.map(|(&sz, &w)| {
-				let cap =
-					(block_usable_bytes / (sz + extrinsic_overhead).max(1)).min(max_block_txs);
-				cap as f64 * f64::from(w)
-			})
-			.sum();
-		(sum_caps / total_w as f64).floor().max(1.0) as usize
 	}
 
 	pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
@@ -155,16 +139,6 @@ impl StorePayloadMode {
 		};
 		(max_payload.saturating_add(1024)) as u64
 	}
-
-	/// Bytes assumed per store tx in block monitor [`BlockStats::payload_bytes`] (approximate for
-	/// mixed).
-	#[must_use]
-	pub fn monitor_payload_bytes_per_tx(&self) -> u64 {
-		match self {
-			Self::Fixed(n) => *n as u64,
-			Self::Mixed(m) => m.mean_payload_bytes().round().max(1.0) as u64,
-		}
-	}
 }
 
 /// Max ready+future tx pool depth before [`wait_until_txpool_can_pull_work`] returns; also how many
@@ -195,7 +169,7 @@ pub enum StressWorkItem {
 	/// processing further [`Store`](Self::Store) items.
 	AwaitPendingAuth,
 	/// Pre-signed `TransactionStorage::store` extrinsic for a one-shot account (nonce 0).
-	Store { account_id: AccountId32, extrinsic: Arc<Vec<u8>> },
+	Store { account_id: AccountId32, extrinsic: Arc<Vec<u8>>, content_hash: [u8; 32] },
 }
 
 /// One iteration of the sweep: account count and derivation prefix for `//{prefix}/{idx}`.
@@ -272,7 +246,7 @@ async fn wait_until_txpool_can_pull_work(
 
 		if estimated_pending <= POOL_PENDING_PAUSE_THRESHOLD {
 			if logged {
-				log::info!(
+				log::debug!(
 					"pipeline: estimated pending at {estimated_pending} \
 					 (≤ {POOL_PENDING_PAUSE_THRESHOLD}), resuming reader",
 				);
@@ -281,7 +255,7 @@ async fn wait_until_txpool_can_pull_work(
 		}
 
 		if !logged {
-			log::info!(
+			log::debug!(
 				"pipeline: estimated pending {estimated_pending} \
 				 (> {POOL_PENDING_PAUSE_THRESHOLD}), pausing reader \
 				 (backpressure, submitted={submitted} confirmed={confirmed})",
@@ -299,28 +273,26 @@ async fn wait_until_txpool_can_pull_work(
 #[allow(clippy::too_many_arguments)]
 fn spawn_pipeline_dual_monitor(
 	dual: DualBlockSubscription,
-	monitor_payload_bytes_per_tx: u64,
-	fork_detections: Arc<AtomicU64>,
 	new_block_notify: Arc<Notify>,
 	block_stats: Arc<Mutex<Vec<BlockStats>>>,
 	measure_start: Arc<Mutex<Option<Instant>>>,
 	monitor_ready: Arc<Notify>,
+	cancel: Arc<AtomicBool>,
+	target_blocks: Option<u32>,
+	target_reached: Arc<AtomicBool>,
+	submit_stats: Arc<Mutex<SubmitStats>>,
 ) -> tokio::task::JoinHandle<()> {
 	let DualBlockSubscription { mut best_rx, mut finalized_rx, monitor_client } = dual;
 
 	tokio::spawn(async move {
-		let mut measured_blocks = 0u32;
-		let mut cumulative_stored_events = 0u64;
-		let mut pending: HashMap<u64, PendingBlock> = HashMap::new();
+		let mut best_measured_blocks = 0u32;
+		let mut pending: std::collections::HashMap<u64, PendingBlock> =
+			std::collections::HashMap::new();
 		let mut max_finalized: u64 = 0;
 		let mut prev_confirmed_timestamp_ms: Option<u64> = None;
 		monitor_ready.notify_one();
 
-		// Shared logic: confirm a finalized pending block and push to stats.
-		let confirm_block = |pb: PendingBlock,
-		                     prev_ts: &mut Option<u64>,
-		                     measured: &mut u32,
-		                     cumulative: &mut u64| {
+		let push_finalized = |pb: &PendingBlock, prev_ts: &mut Option<u64>| {
 			let interval_ms = match (pb.timestamp_ms, *prev_ts) {
 				(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
 				_ => None,
@@ -328,28 +300,11 @@ fn spawn_pipeline_dual_monitor(
 			if pb.timestamp_ms.is_some() {
 				*prev_ts = pb.timestamp_ms;
 			}
-
-			let is_measured = !pb.prefill && pb.tx_count > 0;
-			*cumulative = cumulative.saturating_add(pb.tx_count);
-			if is_measured {
-				*measured += 1;
-				if *measured == 1 || measured.is_multiple_of(5) {
-					log::debug!(
-						"pipeline monitor: finalized measured #{} height={} \
-						 store_txs_in_block={} cumulative_stored_events_seen={}",
-						*measured,
-						pb.number,
-						pb.tx_count,
-						*cumulative,
-					);
-				}
-			}
-
 			block_stats.lock().unwrap().push(BlockStats {
 				number: pb.number,
 				tx_count: pb.tx_count,
 				payload_bytes: pb.payload_bytes,
-				prefill: pb.prefill,
+				prefill: false,
 				timestamp_ms: pb.timestamp_ms,
 				hash: Some(format!("{:?}", pb.hash)),
 				finalized: true,
@@ -358,13 +313,34 @@ fn spawn_pipeline_dual_monitor(
 		};
 
 		loop {
+			if cancel.load(Ordering::Relaxed) {
+				break;
+			}
+
+			// Once target is reached, stop processing best blocks and
+			// fall through to the finalization drain below.
+			if target_reached.load(Ordering::Relaxed) {
+				break;
+			}
+
 			tokio::select! {
 				Some(block) = best_rx.recv() => {
 					let block_number = block.number() as u64;
 					let block_hash = block.hash();
 					new_block_notify.notify_waiters();
 
-					let total_store_extrinsics = count_stored_events(&block).await;
+					// Lightweight: get content hashes from Stored events (no block body fetch).
+					let hashes = stored_content_hashes(&block).await;
+					let store_tx_count = hashes.len() as u64;
+
+					// Look up actual extrinsic sizes from the content_hash map and remove entries.
+					let store_tx_bytes = {
+						let mut ss = submit_stats.lock().unwrap();
+						hashes
+							.iter()
+							.filter_map(|h| ss.content_hash_to_ext_size.remove(h))
+							.sum::<u64>()
+					};
 
 					let timestamp_ms = match read_timestamp_at(&monitor_client, block_hash).await {
 						Ok(ts) => Some(ts),
@@ -386,41 +362,36 @@ fn spawn_pipeline_dual_monitor(
 						}
 					}
 
-					if total_store_extrinsics > 0 {
+					if store_tx_count > 0 {
+						best_measured_blocks += 1;
 						log::info!(
 							"pipeline: [measured] block #{block_number}: \
-							 {total_store_extrinsics} store txs"
+							 {store_tx_count} store txs, {store_tx_bytes} bytes \
+							 (best measured #{best_measured_blocks})"
 						);
-					}
-
-					if let Some(old) = pending.get(&block_number) {
-						if old.hash != block_hash {
-							log::warn!(
-								"pipeline: fork detected at block #{block_number}: \
-								 hash changed from {:?} to {block_hash:?}",
-								old.hash
-							);
-							fork_detections.fetch_add(1, Ordering::Relaxed);
+						if let Some(target) = target_blocks {
+							if best_measured_blocks >= target {
+								log::info!(
+									"pipeline monitor: reached {best_measured_blocks} \
+									 measured best blocks (target {target}), signalling stop"
+								);
+								target_reached.store(true, Ordering::Relaxed);
+							}
 						}
 					}
 
 					pending.insert(block_number, PendingBlock {
 						number: block_number,
 						hash: block_hash,
-						tx_count: total_store_extrinsics,
-						payload_bytes: total_store_extrinsics.saturating_mul(monitor_payload_bytes_per_tx),
+						tx_count: store_tx_count,
+						payload_bytes: store_tx_bytes,
 						timestamp_ms,
-						prefill: false,
 					});
 
+					// If already finalized (lagging best), confirm immediately.
 					if block_number <= max_finalized {
 						if let Some(pb) = pending.remove(&block_number) {
-							confirm_block(
-								pb,
-								&mut prev_confirmed_timestamp_ms,
-								&mut measured_blocks,
-								&mut cumulative_stored_events,
-							);
+							push_finalized(&pb, &mut prev_confirmed_timestamp_ms);
 						}
 					}
 				}
@@ -438,28 +409,7 @@ fn spawn_pipeline_dual_monitor(
 
 					for num in to_confirm {
 						if let Some(pb) = pending.remove(&num) {
-							confirm_block(
-								pb,
-								&mut prev_confirmed_timestamp_ms,
-								&mut measured_blocks,
-								&mut cumulative_stored_events,
-							);
-						}
-					}
-
-					let stale: Vec<u64> = pending
-						.keys()
-						.filter(|&&n| n < max_finalized.saturating_sub(10))
-						.copied()
-						.collect();
-					for num in stale {
-						if let Some(pb) = pending.remove(&num) {
-							log::warn!(
-								"pipeline: fork victim: block #{num} (hash {:?}) \
-								 was never finalized, dropping from stats",
-								pb.hash
-							);
-							fork_detections.fetch_add(1, Ordering::Relaxed);
+							push_finalized(&pb, &mut prev_confirmed_timestamp_ms);
 						}
 					}
 				}
@@ -467,148 +417,196 @@ fn spawn_pipeline_dual_monitor(
 				else => break,
 			}
 		}
+
+		// After work loop stopped: wait for remaining best blocks to finalize.
+		if !pending.is_empty() && !cancel.load(Ordering::Relaxed) {
+			log::info!(
+				"pipeline monitor: waiting for {} pending best blocks to finalize",
+				pending.len()
+			);
+			let finalize_deadline = Instant::now() + Duration::from_secs(30);
+			while !pending.is_empty() && Instant::now() < finalize_deadline {
+				match tokio::time::timeout(
+					Duration::from_secs(12),
+					finalized_rx.recv(),
+				)
+				.await
+				{
+					Ok(Some(fin_number)) => {
+						let old_max = max_finalized;
+						max_finalized = max_finalized.max(fin_number);
+						let mut to_confirm: Vec<u64> = pending
+							.keys()
+							.filter(|&&n| n > old_max && n <= max_finalized)
+							.copied()
+							.collect();
+						to_confirm.sort();
+						for num in to_confirm {
+							if let Some(pb) = pending.remove(&num) {
+								push_finalized(&pb, &mut prev_confirmed_timestamp_ms);
+							}
+						}
+					},
+					Ok(None) => {
+						log::warn!("pipeline monitor: finalized subscription closed");
+						break;
+					},
+					Err(_) => {
+						// No finalization event in 12s — subscription may be stale.
+					},
+				}
+			}
+			if !pending.is_empty() {
+				log::warn!(
+					"pipeline monitor: {} blocks not finalized after timeout, dropping",
+					pending.len()
+				);
+			}
+		}
 	})
 }
 
-type StoreWorkMsg = (AccountId32, Arc<Vec<u8>>);
-
-/// Submit one pre-signed store on a **single** RPC client; retries pool-full / banned / reconnect.
-#[allow(clippy::too_many_arguments)]
-async fn submit_one_store_single_connection(
-	worker_id: usize,
+struct StoreWorkMsg {
 	account_id: AccountId32,
 	extrinsic: Arc<Vec<u8>>,
-	client: &mut Arc<OnlineClient<BulletinConfig>>,
-	reconnect_url: &str,
-	consecutive_conn_errors: &mut u32,
-	stats: &Arc<Mutex<SubmitStats>>,
-	new_block_notify: &Arc<Notify>,
-) -> Result<()> {
-	loop {
-		let submit_result = store_submit_pre_signed(client.as_ref(), extrinsic.as_ref()).await;
+	content_hash: [u8; 32],
+}
 
-		match submit_result {
-			Ok(hash) => {
-				let n = {
-					let mut s = stats.lock().unwrap();
-					s.submitted += 1;
-					s.submitted
-				};
-				*consecutive_conn_errors = 0;
-				if n == 1 || n.is_multiple_of(256) {
+/// Per-worker state for store submission.
+struct StoreWorker {
+	worker_id: usize,
+	client: Arc<jsonrpsee::ws_client::WsClient>,
+	reconnect_url: String,
+	consecutive_conn_errors: u32,
+	stats: Arc<Mutex<SubmitStats>>,
+	new_block_notify: Arc<Notify>,
+}
+
+impl StoreWorker {
+	/// Submit one pre-signed store extrinsic; retries pool-full / banned / reconnect.
+	async fn submit(&mut self, msg: &StoreWorkMsg) -> Result<()> {
+		let id = self.worker_id;
+		loop {
+			let result = store_submit_pre_signed(self.client.as_ref(), msg.extrinsic.as_ref()).await;
+
+			match result {
+				Ok(hash) => {
+					let ext_len = msg.extrinsic.len() as u64;
+					let n = {
+						let mut s = self.stats.lock().unwrap();
+						s.submitted += 1;
+						s.submitted_bytes += ext_len;
+						s.content_hash_to_ext_size.insert(msg.content_hash, ext_len);
+						s.submitted
+					};
+					self.consecutive_conn_errors = 0;
+					if n == 1 || n.is_multiple_of(256) {
+						log::debug!("pipeline store: worker {id} accepted total={n} hash={hash:?}");
+					}
+					return Ok(());
+				},
+				Err(e) => {
+					let class = classify_tx_error(&e);
 					log::debug!(
-						"pipeline store: worker {worker_id} rpc_accepted total={n} \
-						 extrinsic_hash={hash:?}"
+						"pipeline store: worker {id} class={class:?} account={} err={e:#}",
+						msg.account_id
 					);
-				}
-				return Ok(());
-			},
-			Err(e) => {
-				let class = classify_tx_error(&e);
-				log::debug!(
-					"pipeline store: worker {worker_id} class={class:?} account={account_id} \
-					 err={e:#}"
-				);
-				match class {
-					TxPoolError::PoolFull => {
-						stats.lock().unwrap().pool_full_retries += 1;
-						*consecutive_conn_errors = 0;
-						tokio::time::sleep(Duration::from_millis(100)).await;
-					},
-					TxPoolError::Banned | TxPoolError::ExhaustsResources => {
-						stats.lock().unwrap().pool_full_retries += 1;
-						*consecutive_conn_errors = 0;
-						tokio::time::timeout(Duration::from_secs(12), new_block_notify.notified())
+					match class {
+						TxPoolError::PoolFull => {
+							self.stats.lock().unwrap().pool_full_retries += 1;
+							self.consecutive_conn_errors = 0;
+							tokio::time::sleep(Duration::from_secs(1)).await;
+						},
+						TxPoolError::Banned | TxPoolError::ExhaustsResources => {
+							self.stats.lock().unwrap().pool_full_retries += 1;
+							self.consecutive_conn_errors = 0;
+							tokio::time::timeout(
+								Duration::from_secs(3),
+								self.new_block_notify.notified(),
+							)
 							.await
 							.ok();
-					},
-					TxPoolError::ConnectionDead => {
-						*consecutive_conn_errors += 1;
-						if *consecutive_conn_errors == 1 {
-							log::warn!(
-								"pipeline store: worker {worker_id} connection dead, reconnecting \
-								 to {reconnect_url}"
-							);
-						}
-						let c = *consecutive_conn_errors;
-						let backoff = Duration::from_secs((1u64 << c.min(5)).min(30));
-						tokio::time::sleep(backoff).await;
+						},
+						TxPoolError::ConnectionDead => {
+							self.consecutive_conn_errors += 1;
+							if self.consecutive_conn_errors == 1 {
+								log::warn!(
+									"pipeline store: worker {id} connection dead, reconnecting"
+								);
+							}
+							let c = self.consecutive_conn_errors;
+							let backoff = Duration::from_secs((1u64 << c.min(5)).min(30));
+							tokio::time::sleep(backoff).await;
 
-						match crate::client::connect(reconnect_url).await {
-							Ok(new_client) => {
-								*client = Arc::new(new_client);
-								*consecutive_conn_errors = 0;
-							},
-							Err(_) =>
-								if *consecutive_conn_errors >= 60 {
-									log::error!(
-										"pipeline store: worker {worker_id}: giving up reconnect"
-									);
-									stats.lock().unwrap().errors += 1;
-									return Err(anyhow::anyhow!(
-										"pipeline store: reconnect failed (worker {worker_id})"
-									));
+							match crate::client::connect_ws(&self.reconnect_url).await {
+								Ok(new_client) => {
+									self.client = Arc::new(new_client);
+									self.consecutive_conn_errors = 0;
 								},
-						}
-					},
-					TxPoolError::TxDropped => {
-						*consecutive_conn_errors = 0;
-						stats.lock().unwrap().pool_full_retries += 1;
-						return Ok(());
-					},
-					TxPoolError::AlreadyImported => {
-						*consecutive_conn_errors = 0;
-						return Ok(());
-					},
-					TxPoolError::StaleNonce => {
-						*consecutive_conn_errors = 0;
-						stats.lock().unwrap().stale_nonces += 1;
-						return Ok(());
-					},
-					TxPoolError::FutureNonce => {
-						*consecutive_conn_errors = 0;
-						stats.lock().unwrap().errors += 1;
-						return Ok(());
-					},
-					TxPoolError::Other => {
-						*consecutive_conn_errors = 0;
-						log::warn!("pipeline store: worker {worker_id} (class={class:?}): {e:#}");
-						stats.lock().unwrap().errors += 1;
-						return Ok(());
-					},
-				}
-			},
+								Err(_) =>
+									if self.consecutive_conn_errors >= 60 {
+										log::error!("pipeline store: worker {id}: giving up reconnect");
+										self.stats.lock().unwrap().errors += 1;
+										return Err(anyhow::anyhow!(
+											"pipeline store: reconnect failed (worker {id})"
+										));
+									},
+							}
+						},
+						TxPoolError::TxDropped => {
+							self.consecutive_conn_errors = 0;
+							self.stats.lock().unwrap().pool_full_retries += 1;
+							return Ok(());
+						},
+						TxPoolError::AlreadyImported => {
+							self.consecutive_conn_errors = 0;
+							return Ok(());
+						},
+						TxPoolError::StaleNonce => {
+							self.consecutive_conn_errors = 0;
+							self.stats.lock().unwrap().stale_nonces += 1;
+							return Ok(());
+						},
+						TxPoolError::FutureNonce => {
+							self.consecutive_conn_errors = 0;
+							self.stats.lock().unwrap().errors += 1;
+							return Ok(());
+						},
+						TxPoolError::Other => {
+							self.consecutive_conn_errors = 0;
+							log::warn!("pipeline store: worker {id} (class={class:?}): {e:#}");
+							self.stats.lock().unwrap().errors += 1;
+							return Ok(());
+						},
+					}
+				},
+			}
 		}
 	}
 }
 
 /// Prefer a worker with spare capacity; otherwise block on `rr`’s channel.
 async fn dispatch_store_to_workers(
-	mut account_id: AccountId32,
-	mut extrinsic: Arc<Vec<u8>>,
+	mut msg: StoreWorkMsg,
 	txs: &[mpsc::Sender<StoreWorkMsg>],
 	rr: &mut usize,
 ) -> Result<()> {
 	let n = txs.len().max(1);
 	for attempt in 0..n {
 		let i = (*rr + attempt) % n;
-		let msg = (account_id, extrinsic);
 		match txs[i].try_send(msg) {
 			Ok(()) => {
 				*rr = (i + 1) % n;
 				return Ok(());
 			},
-			Err(TrySendError::Full((a, x))) => {
-				account_id = a;
-				extrinsic = x;
-			},
+			Err(TrySendError::Full(returned)) => msg = returned,
 			Err(TrySendError::Closed(_)) =>
 				return Err(anyhow::anyhow!("store worker {i} input channel closed")),
 		}
 	}
 	let i = *rr % n;
 	txs[i]
-		.send((account_id, extrinsic))
+		.send(msg)
 		.await
 		.map_err(|_| anyhow::anyhow!("store worker {i} send failed (channel closed)"))?;
 	*rr = (i + 1) % n;
@@ -617,12 +615,12 @@ async fn dispatch_store_to_workers(
 
 fn spawn_store_submit_workers(
 	num_workers: usize,
-	pool: &[Arc<OnlineClient<BulletinConfig>>],
+	pool: &[Arc<jsonrpsee::ws_client::WsClient>],
 	ws_urls_owned: &[String],
 	stats: Arc<Mutex<SubmitStats>>,
 	new_block_notify: Arc<Notify>,
 ) -> (Vec<mpsc::Sender<StoreWorkMsg>>, Vec<tokio::task::JoinHandle<Result<()>>>) {
-	let per_worker_cap = (WORK_CHANNEL_CAPACITY / num_workers.max(1)).max(32);
+	let per_worker_cap = 2;
 	let mut txs = Vec::with_capacity(num_workers);
 	let mut handles = Vec::with_capacity(num_workers);
 
@@ -630,25 +628,18 @@ fn spawn_store_submit_workers(
 		let (tx, mut rx) = mpsc::channel::<StoreWorkMsg>(per_worker_cap);
 		txs.push(tx);
 
-		let stats = stats.clone();
-		let new_block_notify = new_block_notify.clone();
-		let reconnect_url = ws_urls_owned[worker_id % ws_urls_owned.len()].clone();
-		let mut worker_client = pool[worker_id].clone();
+		let mut worker = StoreWorker {
+			worker_id,
+			client: pool[worker_id].clone(),
+			reconnect_url: ws_urls_owned[worker_id % ws_urls_owned.len()].clone(),
+			consecutive_conn_errors: 0,
+			stats: stats.clone(),
+			new_block_notify: new_block_notify.clone(),
+		};
 
 		handles.push(tokio::spawn(async move {
-			let mut consecutive_conn_errors = 0u32;
-			while let Some((account_id, extrinsic)) = rx.recv().await {
-				submit_one_store_single_connection(
-					worker_id,
-					account_id,
-					extrinsic,
-					&mut worker_client,
-					&reconnect_url,
-					&mut consecutive_conn_errors,
-					&stats,
-					&new_block_notify,
-				)
-				.await?;
+			while let Some(msg) = rx.recv().await {
+				worker.submit(&msg).await?;
 			}
 			Ok(())
 		}));
@@ -672,25 +663,28 @@ pub async fn run_block_capacity_pipeline(
 	client: &OnlineClient<BulletinConfig>,
 	authorizer: &Keypair,
 	authorizer_nonce_tracker: &NonceTracker,
+	cancel: &Arc<AtomicBool>,
+	target_blocks: Option<u32>,
 ) -> Result<BulkStoreResult> {
-	let monitor_payload_bytes_per_tx = store_payload.monitor_payload_bytes_per_tx();
 	let authorize_bytes = store_payload.authorize_bytes_per_account();
-	const TX_TIMEOUT_SECS: u64 = 60;
 
-	let fork_detections = Arc::new(AtomicU64::new(0));
 	let new_block_notify = Arc::new(Notify::new());
 	let block_stats = Arc::new(Mutex::new(Vec::<BlockStats>::new()));
 	let measure_start = Arc::new(Mutex::new(None::<Instant>));
 	let monitor_ready = Arc::new(Notify::new());
+	let target_reached = Arc::new(AtomicBool::new(false));
+	let submit_stats = Arc::new(Mutex::new(SubmitStats::default()));
 
 	let monitor_handle = spawn_pipeline_dual_monitor(
 		dual,
-		monitor_payload_bytes_per_tx,
-		fork_detections.clone(),
 		new_block_notify.clone(),
 		block_stats.clone(),
 		measure_start.clone(),
 		monitor_ready.clone(),
+		cancel.clone(),
+		target_blocks,
+		target_reached.clone(),
+		submit_stats.clone(),
 	);
 
 	monitor_ready.notified().await;
@@ -698,18 +692,19 @@ pub async fn run_block_capacity_pipeline(
 
 	let num_connections = submitters.max(1).max(8);
 
-	let mut pool = Vec::with_capacity(num_connections);
-	for i in 0..num_connections {
-		let url = ws_urls[i % ws_urls.len()];
-		pool.push(Arc::new(crate::client::connect(url).await?));
-	}
+	let connect_futs: Vec<_> = (0..num_connections)
+		.map(|i| {
+			let url = ws_urls[i % ws_urls.len()].to_string();
+			async move { crate::client::connect_ws(&url).await.map(Arc::new) }
+		})
+		.collect();
+	let pool: Vec<_> = futures::future::try_join_all(connect_futs).await?;
 
-	log::info!("pipeline: {num_connections} store worker(s), each with a dedicated RPC connection");
+	log::info!("pipeline: {num_connections} store worker(s) connected");
 
-	let submit_stats = Arc::new(Mutex::new(SubmitStats::default()));
 	let ws_urls_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
 
-	let (worker_txs, worker_handles) = spawn_store_submit_workers(
+	let (worker_txs, mut worker_handles) = spawn_store_submit_workers(
 		num_connections,
 		&pool,
 		&ws_urls_owned,
@@ -732,13 +727,29 @@ pub async fn run_block_capacity_pipeline(
 	let mut work_error: Option<anyhow::Error> = None;
 
 	'work: loop {
+		if cancel.load(Ordering::Relaxed) {
+			log::warn!("pipeline: cancel requested, stopping work loop");
+			break;
+		}
+		if target_reached.load(Ordering::Relaxed) {
+			log::info!("pipeline: target block count reached, stopping work loop");
+			break;
+		}
+
 		if stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64 {
+			let bp_start = Instant::now();
 			wait_until_txpool_can_pull_work(&submit_stats, &block_stats, &new_block_notify).await;
+			let bp_elapsed = bp_start.elapsed();
+			if bp_elapsed.as_millis() > 100 {
+				log::debug!(
+					"pipeline: backpressure paused reader for {:.1}s",
+					bp_elapsed.as_secs_f64()
+				);
+			}
 			stores_dispatched_since_txpool = 0;
 		}
 
-		let item = work_rx.recv().await;
-		let Some(item) = item else {
+		let Some(item) = work_rx.recv().await else {
 			break;
 		};
 
@@ -766,43 +777,60 @@ pub async fn run_block_capacity_pipeline(
 				let task_authorizer = authorizer.clone();
 				let task_nonce = authorizer_nonce_tracker.clone();
 				pending_auth = Some(tokio::spawn(async move {
-					for account_ids in batches {
-						authorize::authorize_account_batch(
+					let mut failed = 0u32;
+					for account_ids in &batches {
+						if let Err(e) = authorize::authorize_account_batch(
 							&task_client,
 							&task_authorizer,
 							&task_nonce,
-							&account_ids,
+							account_ids,
 							1,
 							authorize_bytes,
 						)
-						.await?;
+						.await
+						{
+							failed += 1;
+							log::warn!(
+								"pipeline: auth batch failed ({} accounts), \
+								 continuing with remaining batches: {e:#}",
+								account_ids.len()
+							);
+						}
+					}
+					if failed > 0 {
+						anyhow::bail!(
+							"{failed} of {} auth batches failed",
+							batches.len()
+						);
 					}
 					Ok(())
 				}));
 			},
-			StressWorkItem::AwaitPendingAuth =>
+			StressWorkItem::AwaitPendingAuth => {
+				let await_start = Instant::now();
 				if let Some(handle) = pending_auth.take() {
 					match handle.await {
-						Ok(Ok(())) =>
+						Ok(Ok(())) => {
 							log::debug!(
-								"pipeline: AwaitPendingAuth completed (auth #{dbg_work_auth})"
-							),
+								"pipeline: AwaitPendingAuth completed in {:.1}s (auth #{dbg_work_auth})",
+								await_start.elapsed().as_secs_f64()
+							);
+						},
 						Ok(Err(e)) => {
-							log::error!("pipeline: auth task failed: {e:#}");
-							work_error = Some(e);
-							break 'work;
+							log::warn!(
+								"pipeline: auth task failed after {:.1}s (continuing): {e:#}",
+								await_start.elapsed().as_secs_f64()
+							);
 						},
 						Err(e) => {
-							log::error!("pipeline: auth task join failed: {e}");
-							work_error = Some(e.into());
-							break 'work;
+							log::warn!("pipeline: auth task join failed (continuing): {e}");
 						},
 					}
-				},
-			StressWorkItem::Store { account_id, extrinsic } => {
+				}
+			},
+			StressWorkItem::Store { account_id, extrinsic, content_hash } => {
 				if let Err(e) = dispatch_store_to_workers(
-					account_id,
-					extrinsic,
+					StoreWorkMsg { account_id, extrinsic, content_hash },
 					&worker_txs,
 					&mut store_worker_rr,
 				)
@@ -814,70 +842,121 @@ pub async fn run_block_capacity_pipeline(
 				}
 				stores_dispatched_since_txpool += 1;
 				dbg_work_store += 1;
-				if dbg_work_store == 1 || dbg_work_store.is_multiple_of(256) {
+				if dbg_work_store.is_multiple_of(512) {
 					let sub = submit_stats.lock().unwrap().submitted;
 					let conf = total_confirmed(&block_stats);
 					log::debug!(
-						"pipeline: Store #{dbg_work_store} dispatched (rpc_submitted={sub} \
-						 confirmed_store_events_in_stats={conf})"
+						"pipeline: dispatched={dbg_work_store} submitted={sub} \
+						 confirmed={conf} pending_estimate={}",
+						sub.saturating_sub(conf)
 					);
 				}
 			},
 		}
 	}
 
-	// Await any trailing auth task (best-effort).
-	if let Some(handle) = pending_auth.take() {
-		match handle.await {
-			Ok(Ok(())) => {},
-			Ok(Err(e)) => log::warn!("pipeline: trailing auth task failed: {e:#}"),
-			Err(e) => log::warn!("pipeline: trailing auth task join failed: {e}"),
-		}
-	}
+	shutdown_pipeline(
+		cancel,
+		&target_reached,
+		pending_auth,
+		worker_txs,
+		&mut worker_handles,
+		&submit_stats,
+		&block_stats,
+		&new_block_notify,
+	)
+	.await;
 
-	log::info!("pipeline: work stream finished, closing store worker inputs");
-	drop(worker_txs);
+	// Ensure measurement clock is set (even if no blocks were seen).
+	measure_start.lock().unwrap().get_or_insert(start);
 
-	for join_res in join_all(worker_handles).await {
-		match join_res {
-			Ok(Ok(())) => {},
-			Ok(Err(e)) => log::warn!("pipeline: store worker failed: {e:#}"),
-			Err(e) => log::warn!("pipeline: store worker join failed: {e}"),
-		}
-	}
-
-	{
-		let mut ms = measure_start.lock().unwrap();
-		if ms.is_none() {
-			*ms = Some(start);
-		}
-	}
-
-	// Best-effort wait for confirmations to catch up with submissions.
-	if submit_stats.lock().unwrap().submitted > 0 {
-		let deadline = Instant::now() + Duration::from_secs(TX_TIMEOUT_SECS * 3);
-		loop {
-			let confirmed = total_confirmed(&block_stats);
-			let sub = submit_stats.lock().unwrap().submitted;
-			if confirmed >= sub {
-				break;
-			}
-			if Instant::now() > deadline {
-				log::warn!(
-					"pipeline: confirmation wait timed out ({}s) — \
-					 confirmed={confirmed} submitted={sub}, proceeding with partial results",
-					TX_TIMEOUT_SECS * 3,
-				);
-				break;
-			}
-			tokio::time::sleep(Duration::from_millis(500)).await;
-		}
-	}
-
+	// Wait for the monitor to finalize pending blocks.
 	new_block_notify.notify_waiters();
-	monitor_handle.abort();
-	let _ = monitor_handle.await;
+	let monitor_timeout = if cancel.load(Ordering::Relaxed) { 1 } else { 35 };
+	if tokio::time::timeout(Duration::from_secs(monitor_timeout), monitor_handle)
+		.await
+		.is_err()
+	{
+		log::warn!("pipeline: monitor did not exit in time, aborting");
+	}
 
+	collect_results(start, &measure_start, &submit_stats, &block_stats, work_error)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn shutdown_pipeline(
+	cancel: &Arc<AtomicBool>,
+	target_reached: &Arc<AtomicBool>,
+	pending_auth: Option<tokio::task::JoinHandle<Result<()>>>,
+	worker_txs: Vec<mpsc::Sender<StoreWorkMsg>>,
+	worker_handles: &mut Vec<tokio::task::JoinHandle<Result<()>>>,
+	submit_stats: &Arc<Mutex<SubmitStats>>,
+	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
+	_new_block_notify: &Arc<Notify>,
+) {
+	const TX_TIMEOUT_SECS: u64 = 60;
+	let stopping = cancel.load(Ordering::Relaxed) || target_reached.load(Ordering::Relaxed);
+
+	if stopping {
+		if let Some(handle) = pending_auth {
+			handle.abort();
+		}
+		drop(worker_txs);
+		for h in worker_handles.iter() {
+			h.abort();
+		}
+	} else {
+		if let Some(handle) = pending_auth {
+			match tokio::time::timeout(Duration::from_secs(2), handle).await {
+				Ok(Ok(Ok(()))) => {},
+				Ok(Ok(Err(e))) => log::warn!("pipeline: trailing auth task failed: {e:#}"),
+				Ok(Err(e)) => log::warn!("pipeline: trailing auth task join failed: {e}"),
+				Err(_) => log::warn!("pipeline: trailing auth task timed out, skipping"),
+			}
+		}
+
+		log::info!("pipeline: work stream finished, closing store worker inputs");
+		drop(worker_txs);
+
+		if tokio::time::timeout(Duration::from_secs(10), join_all(&mut *worker_handles))
+			.await
+			.is_err()
+		{
+			log::warn!("pipeline: store workers did not finish in time, aborting");
+			for h in worker_handles.iter() {
+				h.abort();
+			}
+		}
+
+		// Wait for confirmations to catch up with submissions.
+		if submit_stats.lock().unwrap().submitted > 0 {
+			let deadline = Instant::now() + Duration::from_secs(TX_TIMEOUT_SECS * 3);
+			loop {
+				let confirmed = total_confirmed(block_stats);
+				let sub = submit_stats.lock().unwrap().submitted;
+				if confirmed >= sub {
+					break;
+				}
+				if Instant::now() > deadline {
+					log::warn!(
+						"pipeline: confirmation wait timed out — \
+						 confirmed={confirmed} submitted={sub}, proceeding with partial results",
+					);
+					break;
+				}
+				tokio::time::sleep(Duration::from_millis(500)).await;
+			}
+		}
+	}
+}
+
+fn collect_results(
+	start: Instant,
+	measure_start: &Arc<Mutex<Option<Instant>>>,
+	submit_stats: &Arc<Mutex<SubmitStats>>,
+	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
+	work_error: Option<anyhow::Error>,
+) -> Result<BulkStoreResult> {
 	let duration = measure_start
 		.lock()
 		.unwrap()
@@ -892,7 +971,6 @@ pub async fn run_block_capacity_pipeline(
 	drop(ss);
 	let all_blocks = block_stats.lock().unwrap().clone();
 	let total_confirmed: u64 = all_blocks.iter().map(|b| b.tx_count).sum();
-	let fork_detections = fork_detections.load(Ordering::Relaxed);
 
 	if let Some(e) = &work_error {
 		log::warn!(
@@ -908,8 +986,7 @@ pub async fn run_block_capacity_pipeline(
 		);
 	}
 	log::debug!(
-		"pipeline: DONE detail — pool_full_retries={total_pool_full} stale_nonces={total_stale} \
-		 fork_detections={fork_detections}"
+		"pipeline: DONE detail — pool_full_retries={total_pool_full} stale_nonces={total_stale}"
 	);
 
 	Ok(BulkStoreResult {
@@ -923,7 +1000,7 @@ pub async fn run_block_capacity_pipeline(
 		nonces_failed: 0,
 		duration,
 		blocks: all_blocks,
-		fork_detections,
+		fork_detections: 0,
 	})
 }
 
@@ -957,16 +1034,23 @@ async fn build_store_work_items(
 						mix.sample(&mut *g)
 					},
 				};
-				let (account_id, encoded) = tokio::task::spawn_blocking(move || {
-					let payload = crate::store::generate_payload(payload_size);
-					let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
-					Ok::<_, anyhow::Error>((kp.public_key().to_account_id(), encoded))
-				})
-				.await
-				.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
+				let (account_id, encoded, content_hash) =
+					tokio::task::spawn_blocking(move || {
+						let payload = crate::store::generate_payload(payload_size);
+						let content_hash = crate::client::blake2b_256(&payload);
+						let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
+						Ok::<_, anyhow::Error>((
+							kp.public_key().to_account_id(),
+							encoded,
+							content_hash,
+						))
+					})
+					.await
+					.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
 				Ok::<_, anyhow::Error>(StressWorkItem::Store {
 					account_id,
 					extrinsic: Arc::new(encoded),
+					content_hash,
 				})
 			}
 		})
@@ -1013,75 +1097,117 @@ pub async fn generate_block_capacity_work(
 		StorePayloadMode::Fixed(_) => None,
 	};
 
-	let mut prev_store_items: Option<Vec<StressWorkItem>> = None;
-	let mut is_first_batch = true;
-
+	// Collect all (plan_idx, batch_start, batch_end) ranges up front so we can
+	// look ahead to sign the next batch while dispatching the current one.
+	let mut batches: Vec<(usize, u32, u32)> = Vec::new();
 	for (iter_idx, plan) in plans.iter().enumerate() {
 		if plan.account_count == 0 {
 			continue;
 		}
-
-		let ni = plan.account_count;
 		log::info!(
-			"pipeline: block-capacity iteration {} of {} starting ({ni} accounts)",
+			"pipeline: block-capacity iteration {} of {} ({} accounts)",
 			iter_idx + 1,
 			plans.len(),
+			plan.account_count,
 		);
-
 		let mut batch_start = 0u32;
-		while batch_start < ni {
+		while batch_start < plan.account_count {
 			let batch_end =
 				batch_start.saturating_add(AUTHORIZE_BATCH_SIZE as u32).min(plan.account_count);
-
-			let keypairs = keypairs_for_range(plan, batch_start, batch_end);
-			let auth_batches = auth_batches_from_keypairs(&keypairs);
-			let store_items =
-				build_store_work_items(&client, &keypairs, &store_payload, &mix_rng).await?;
-
-			// Send auth for this batch (reader spawns as background task).
-			work_tx
-				.send(StressWorkItem::Authorize { batches: auth_batches })
-				.await
-				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (auth)"))?;
-
-			if is_first_batch {
-				// First batch: reader must await auth before any stores.
-				work_tx
-					.send(StressWorkItem::AwaitPendingAuth)
-					.await
-					.map_err(|_| anyhow::anyhow!("pipeline work channel closed (await)"))?;
-				is_first_batch = false;
-			}
-
-			// Dispatch previous batch's stores (reader processes them while
-			// this batch's authorization runs in the background).
-			if let Some(prev_items) = prev_store_items.take() {
-				for item in prev_items {
-					work_tx
-						.send(item)
-						.await
-						.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
-				}
-				// Barrier: reader must await this batch's auth before its stores.
-				work_tx
-					.send(StressWorkItem::AwaitPendingAuth)
-					.await
-					.map_err(|_| anyhow::anyhow!("pipeline work channel closed (await)"))?;
-			}
-
-			prev_store_items = Some(store_items);
+			batches.push((iter_idx, batch_start, batch_end));
 			batch_start = batch_end;
 		}
 	}
 
-	// Send final batch's stores (auth already awaited by the last AwaitPendingAuth).
-	if let Some(last_items) = prev_store_items.take() {
-		for item in last_items {
+	// Process batches with look-ahead: sign batch N+1 concurrently while
+	// dispatching batch N's stores. This avoids the pool draining during signing.
+	let mut pending_sign: Option<
+		tokio::task::JoinHandle<Result<(Vec<Vec<AccountId32>>, Vec<StressWorkItem>)>>,
+	> = None;
+
+	for (batch_idx, &(plan_idx, start, end)) in batches.iter().enumerate() {
+		let batch_num = batch_idx + 1;
+		let n_accounts = end - start;
+
+		// Get this batch's signed items: either from a previously spawned task
+		// or by signing now (first batch, or if look-ahead wasn't possible).
+		let sign_start = Instant::now();
+		let (auth_batches, store_items) = if let Some(handle) = pending_sign.take() {
+			log::debug!(
+				"generator: batch {batch_num}/{} — awaiting look-ahead signing \
+				 ({n_accounts} accounts)",
+				batches.len(),
+			);
+			handle
+				.await
+				.map_err(|e| anyhow::anyhow!("pipeline: sign task join: {e}"))??
+		} else {
+			log::debug!(
+				"generator: batch {batch_num}/{} — signing {n_accounts} accounts (no look-ahead)",
+				batches.len(),
+			);
+			let keypairs = keypairs_for_range(&plans[plan_idx], start, end);
+			let auth_batches = auth_batches_from_keypairs(&keypairs);
+			let store_items =
+				build_store_work_items(&client, &keypairs, &store_payload, &mix_rng).await?;
+			(auth_batches, store_items)
+		};
+		let sign_elapsed = sign_start.elapsed();
+		let total_bytes: u64 = store_items
+			.iter()
+			.map(|item| match item {
+				StressWorkItem::Store { extrinsic, .. } => extrinsic.len() as u64,
+				_ => 0,
+			})
+			.sum();
+		log::info!(
+			"generator: batch {batch_num}/{} — {} stores ready \
+			 ({:.1} MB, signed {:.1}s)",
+			batches.len(),
+			store_items.len(),
+			total_bytes as f64 / (1024.0 * 1024.0),
+			sign_elapsed.as_secs_f64(),
+		);
+
+		// Start signing the NEXT batch in the background while we authorize + dispatch.
+		if let Some(&(next_plan_idx, next_start, next_end)) = batches.get(batch_idx + 1) {
+			let sign_client = client.clone();
+			let sign_payload = store_payload.clone();
+			let sign_rng = mix_rng.clone();
+			let sign_plans = plans[next_plan_idx].clone();
+			pending_sign = Some(tokio::spawn(async move {
+				let keypairs = keypairs_for_range(&sign_plans, next_start, next_end);
+				let auth_batches = auth_batches_from_keypairs(&keypairs);
+				let store_items =
+					build_store_work_items(&sign_client, &keypairs, &sign_payload, &sign_rng)
+						.await?;
+				Ok((auth_batches, store_items))
+			}));
+		}
+
+		// Authorize → wait → dispatch stores.
+		work_tx
+			.send(StressWorkItem::Authorize { batches: auth_batches })
+			.await
+			.map_err(|_| anyhow::anyhow!("pipeline work channel closed (auth)"))?;
+		work_tx
+			.send(StressWorkItem::AwaitPendingAuth)
+			.await
+			.map_err(|_| anyhow::anyhow!("pipeline work channel closed (await)"))?;
+
+		let dispatch_start = Instant::now();
+		let n_stores = store_items.len();
+		for item in store_items {
 			work_tx
 				.send(item)
 				.await
 				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
 		}
+		log::debug!(
+			"generator: batch {batch_num}/{} — dispatched {n_stores} stores in {:.1}s",
+			batches.len(),
+			dispatch_start.elapsed().as_secs_f64(),
+		);
 	}
 
 	Ok(())

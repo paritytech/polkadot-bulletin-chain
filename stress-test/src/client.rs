@@ -69,19 +69,31 @@ impl Default for BulletinExtrinsicParamsBuilder {
 const MAX_RPC_MESSAGE_SIZE: u32 = 50 * 1024 * 1024;
 
 pub async fn connect(ws_url: &str) -> Result<OnlineClient<BulletinConfig>> {
-	log::info!("Connecting to {ws_url}");
+	log::debug!("Connecting to {ws_url}");
 
-	// Build a WS client with larger message size limits (default is 10 MB,
-	// which is too small for 8 MB payloads after hex encoding).
-	let rpc_client = jsonrpsee::ws_client::WsClientBuilder::default()
+	let rpc_client = connect_ws(ws_url).await?;
+	let client = OnlineClient::<BulletinConfig>::from_rpc_client(rpc_client).await?;
+	log::debug!("Connected to {ws_url}");
+	Ok(client)
+}
+
+/// Raw WebSocket RPC client (for fire-and-forget submissions).
+pub async fn connect_ws(ws_url: &str) -> Result<jsonrpsee::ws_client::WsClient> {
+	let client = jsonrpsee::ws_client::WsClientBuilder::default()
 		.max_request_size(MAX_RPC_MESSAGE_SIZE)
 		.max_response_size(MAX_RPC_MESSAGE_SIZE)
 		.build(ws_url)
 		.await?;
-
-	let client = OnlineClient::<BulletinConfig>::from_rpc_client(rpc_client).await?;
-	log::info!("Connected successfully");
 	Ok(client)
+}
+
+/// Compute blake2b-256 hash (same as the runtime's `content_hash` for `store` calls).
+pub fn blake2b_256(data: &[u8]) -> [u8; 32] {
+	use blake2::digest::{consts::U32, Digest};
+	let hash = blake2::Blake2b::<U32>::digest(data);
+	let mut out = [0u8; 32];
+	out.copy_from_slice(&hash);
+	out
 }
 
 /// Discover the node's P2P listen addresses and peer ID via a separate RPC call.
