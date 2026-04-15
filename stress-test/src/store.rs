@@ -11,7 +11,7 @@ use std::{
 use subxt::{
 	blocks::{Block, ExtrinsicEvents},
 	dynamic::{tx, Value},
-	tx::{SubmittableTransaction, TxStatus},
+	tx::TxStatus,
 	utils::H256,
 	OnlineClient,
 };
@@ -66,43 +66,71 @@ pub struct DualBlockSubscription {
 }
 
 /// Subscribe to both best and finalized blocks, eagerly draining each in a
-/// background task. The `monitor_client` is kept alive for storage queries.
+/// background task that automatically reconnects on failure.
+/// The `monitor_client` is kept alive for storage queries.
 pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription> {
 	let client = crate::client::connect(ws_url).await?;
 
-	// Best blocks
-	let mut best_sub = client.blocks().subscribe_best().await?;
+	// Best blocks — reconnects on subscription failure.
 	let (best_tx, best_rx) = tokio::sync::mpsc::unbounded_channel();
-	let client_for_best = client.clone();
-	tokio::spawn(async move {
-		let _client = client_for_best;
-		while let Some(Ok(block)) = best_sub.next().await {
-			if best_tx.send(block).is_err() {
-				break;
+	{
+		let url = ws_url.to_string();
+		let mut client = client.clone();
+		let best_tx = best_tx.clone();
+		tokio::spawn(async move {
+			loop {
+				match client.blocks().subscribe_best().await {
+					Ok(mut sub) => {
+						while let Some(Ok(block)) = sub.next().await {
+							if best_tx.send(block).is_err() {
+								return;
+							}
+						}
+						log::warn!("monitor: best block subscription ended, reconnecting");
+					},
+					Err(e) => {
+						log::warn!("monitor: best block subscribe failed: {e}, retrying in 2s");
+					},
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+				match crate::client::connect(&url).await {
+					Ok(new_client) => client = new_client,
+					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
+				}
 			}
-		}
-	});
+		});
+	}
 
-	// Finalized blocks
-	let mut fin_sub = client.blocks().subscribe_finalized().await?;
+	// Finalized blocks — reconnects on subscription failure.
 	let (fin_tx, fin_rx) = tokio::sync::mpsc::unbounded_channel();
-	let client_for_fin = client.clone();
-	tokio::spawn(async move {
-		let _client = client_for_fin;
-		while let Some(Ok(block)) = fin_sub.next().await {
-			if fin_tx.send(block.number() as u64).is_err() {
-				break;
+	{
+		let url = ws_url.to_string();
+		let mut client = client.clone();
+		tokio::spawn(async move {
+			loop {
+				match client.blocks().subscribe_finalized().await {
+					Ok(mut sub) => {
+						while let Some(Ok(block)) = sub.next().await {
+							if fin_tx.send(block.number() as u64).is_err() {
+								return;
+							}
+						}
+						log::warn!("monitor: finalized subscription ended, reconnecting");
+					},
+					Err(e) => {
+						log::warn!("monitor: finalized subscribe failed: {e}, retrying in 2s");
+					},
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+				match crate::client::connect(&url).await {
+					Ok(new_client) => client = new_client,
+					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
+				}
 			}
-		}
-	});
+		});
+	}
 
 	Ok(DualBlockSubscription { best_rx, finalized_rx: fin_rx, monitor_client: client })
-}
-
-/// Input for the block monitor.
-pub enum BlockInput {
-	/// Best blocks only — no finalization tracking or timestamps.
-	BestOnly(BlockReceiver),
 }
 
 /// Read `pallet_timestamp::Now` at a specific block hash.
@@ -130,7 +158,6 @@ pub(crate) struct PendingBlock {
 	pub(crate) tx_count: u64,
 	pub(crate) payload_bytes: u64,
 	pub(crate) timestamp_ms: Option<u64>,
-	pub(crate) prefill: bool,
 }
 
 const TX_TIMEOUT_SECS: u64 = 60;
@@ -314,16 +341,24 @@ pub fn sign_store_extrinsic_blocking(
 
 /// Submit a pre-signed store extrinsic (see [`sign_store_extrinsic`]). Same hash semantics as
 /// [`store_fire_and_forget`].
+/// Fire-and-forget submit using `author_submitExtrinsic` (no subscription).
+///
+/// This is much faster than subxt's `submit()` which uses `author_submitAndWatchExtrinsic`
+/// and holds one subscription per tx waiting for a status event.
 pub async fn store_submit_pre_signed(
-	client: &OnlineClient<BulletinConfig>,
+	rpc_client: &jsonrpsee::ws_client::WsClient,
 	encoded: &[u8],
 ) -> Result<H256> {
-	let sub = SubmittableTransaction::<BulletinConfig, OnlineClient<BulletinConfig>>::from_bytes(
-		client.clone(),
-		encoded.to_vec(),
-	);
-	let raw_hash = sub.hash();
-	sub.submit().await.map_err(|e| anyhow!("submit pre-signed store: {e}"))?;
+	use jsonrpsee::core::client::ClientT;
+
+	let raw_hash = H256::from(crate::client::blake2b_256(encoded));
+
+	let hex = format!("0x{}", hex::encode(encoded));
+	let _hash: String = rpc_client
+		.request("author_submitExtrinsic", jsonrpsee::rpc_params![hex])
+		.await
+		.map_err(|e| anyhow!("author_submitExtrinsic: {e}"))?;
+
 	Ok(raw_hash)
 }
 
@@ -362,23 +397,39 @@ pub fn compute_cid_blake2b256(data: &[u8]) -> Result<cid::Cid> {
 
 /// Count `TransactionStorage::Stored` events in a block. Uses events (lightweight)
 /// instead of extrinsics (full block body) to avoid RPC response size limits.
-pub(crate) async fn count_stored_events(
+/// Count of store transactions and their total encoded extrinsic bytes in a block.
+/// Extract content hashes from `TransactionStorage::Stored` events in a block.
+///
+/// The `Stored` event is `{ index: u32, content_hash: [u8; 32], cid: Option<Cid> }`.
+/// In SCALE encoding the content_hash occupies bytes 4..36 of `field_bytes()`.
+pub(crate) async fn stored_content_hashes(
 	block: &Block<BulletinConfig, OnlineClient<BulletinConfig>>,
-) -> u64 {
+) -> Vec<[u8; 32]> {
 	let block_number = block.number();
-	let mut count = 0u64;
+	let mut hashes = Vec::new();
 	match block.events().await {
 		Ok(events) =>
 			for ev in events.iter().flatten() {
 				if ev.pallet_name() == "TransactionStorage" && ev.variant_name() == "Stored" {
-					count += 1;
+					let fb = ev.field_bytes();
+					// index: u32 (4 bytes) then content_hash: [u8; 32]
+					if fb.len() >= 36 {
+						let mut h = [0u8; 32];
+						h.copy_from_slice(&fb[4..36]);
+						hashes.push(h);
+					} else {
+						log::warn!(
+							"block #{block_number}: Stored event field_bytes too short ({})",
+							fb.len()
+						);
+					}
 				}
 			},
 		Err(e) => {
-			log::warn!("bulk_store: block #{block_number}: failed to fetch events: {e}");
+			log::warn!("block #{block_number}: failed to fetch events: {e}");
 		},
 	}
-	count
+	hashes
 }
 
 /// Result of a bulk store operation.
@@ -414,7 +465,7 @@ pub async fn bulk_store_oneshot(
 	ws_urls: &[&str],
 	stop_after_blocks: Option<u32>,
 	submitters: usize,
-	block_input: BlockInput,
+	block_input: BlockReceiver,
 ) -> Result<BulkStoreResult> {
 	if work_items.is_empty() {
 		return Ok(BulkStoreResult {
@@ -433,7 +484,6 @@ pub async fn bulk_store_oneshot(
 	}
 
 	let total_items = work_items.len();
-	let payload_size = work_items.first().map(|(_, d)| d.len()).unwrap_or(0);
 	let num_submitters = submitters.min(total_items).max(1);
 	let num_connections = num_submitters.max(8).min(total_items).max(1);
 	log::info!(
@@ -485,7 +535,7 @@ pub async fn bulk_store_oneshot(
 	let monitor_ready_signal = monitor_ready.clone();
 	let fork_detections = Arc::new(AtomicU64::new(0));
 
-	let BlockInput::BestOnly(mut blocks_rx) = block_input;
+	let mut blocks_rx = block_input;
 	let monitor_handle = tokio::spawn(async move {
 		let mut total_store_blocks = 0u32;
 		monitor_ready_signal.notify_one();
@@ -495,10 +545,10 @@ pub async fn bulk_store_oneshot(
 				let block_number = block.number() as u64;
 				new_block_notify_monitor.notify_waiters();
 
-				let total_store_extrinsics = count_stored_events(&block).await;
+				let store_tx_count = stored_content_hashes(&block).await.len() as u64;
 				let is_prefill = !pool_saturated_monitor.load(Ordering::Relaxed);
 
-				if is_prefill && total_store_extrinsics == 0 {
+				if is_prefill && store_tx_count == 0 {
 					continue;
 				}
 
@@ -515,17 +565,17 @@ pub async fn bulk_store_oneshot(
 					}
 				}
 
-				if total_store_extrinsics > 0 || !is_prefill {
+				if store_tx_count > 0 || !is_prefill {
 					log::info!(
 						"bulk_store: {phase} block #{block_number}: \
-						 {total_store_extrinsics} store txs"
+						 {store_tx_count} store txs"
 					);
 				}
 
 				block_stats_monitor.lock().unwrap().push(BlockStats {
 					number: block_number,
-					tx_count: total_store_extrinsics,
-					payload_bytes: total_store_extrinsics * payload_size as u64,
+					tx_count: store_tx_count,
+					payload_bytes: 0,
 					prefill: is_prefill,
 					timestamp_ms: None,
 					hash: None,
@@ -533,7 +583,7 @@ pub async fn bulk_store_oneshot(
 					interval_ms: None,
 				});
 
-				if !is_prefill && total_store_extrinsics > 0 {
+				if !is_prefill && store_tx_count > 0 {
 					total_store_blocks += 1;
 					if let Some(limit) = stop_after_blocks {
 						if total_store_blocks >= limit {
