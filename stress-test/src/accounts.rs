@@ -66,28 +66,16 @@ impl Default for NonceTracker {
 	}
 }
 
-/// Generate N keypairs for stress testing using derivation paths.
-pub fn generate_keypairs(count: u32, prefix: &str) -> Vec<Keypair> {
-	(0..count)
-		.map(|i| {
-			let uri = format!("//{prefix}/{i}");
-			let secret_uri: subxt_signer::SecretUri = uri.parse().expect("valid secret URI");
-			Keypair::from_uri(&secret_uri).expect("valid derivation path")
-		})
-		.collect()
+/// Derive a single sr25519 keypair (same scheme as [`generate_keypairs`]).
+pub fn keypair_at_derivation_prefix(prefix: &str, index: u32) -> Keypair {
+	let uri = format!("//{prefix}/{index}");
+	let secret_uri: subxt_signer::SecretUri = uri.parse().expect("valid secret URI");
+	Keypair::from_uri(&secret_uri).expect("valid derivation path")
 }
 
-/// Initialize nonce tracker for all accounts (sequential).
-pub async fn init_nonces(
-	client: &OnlineClient<BulletinConfig>,
-	nonce_tracker: &NonceTracker,
-	keypairs: &[Keypair],
-) -> Result<()> {
-	for kp in keypairs {
-		let account_id = kp.public_key().to_account_id();
-		nonce_tracker.init_from_chain(client, &account_id).await?;
-	}
-	Ok(())
+/// Generate N keypairs for stress testing using derivation paths.
+pub fn generate_keypairs(count: u32, prefix: &str) -> Vec<Keypair> {
+	(0..count).map(|i| keypair_at_derivation_prefix(prefix, i)).collect()
 }
 
 /// Batch-initialize nonces for many accounts using concurrent RPC queries.
