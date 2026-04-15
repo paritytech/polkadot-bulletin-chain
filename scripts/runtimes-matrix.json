@@ -61,6 +61,8 @@
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],
+    "check_runtime": true,
+    "extra_features": "metadata-hash-paseo",
     "try_runtime": {
         "spec_name_check": "--disable-spec-name-check",
         "extra_flags": "--blocktime 6000 --disable-spec-version-check"

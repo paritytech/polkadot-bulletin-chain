@@ -25,14 +25,21 @@ fn main() {
 
 #[cfg(all(feature = "metadata-hash", feature = "std"))]
 fn main() {
+	// Token symbol and decimals for the metadata hash.
+	// Paseo uses PAS/10, everything else (Westend) uses WND/12.
+	#[cfg(feature = "metadata-hash-paseo")]
+	let (symbol, decimals) = ("PAS", 10);
+	#[cfg(not(feature = "metadata-hash-paseo"))]
+	let (symbol, decimals) = ("WND", 12);
+
 	substrate_wasm_builder::WasmBuilder::init_with_defaults()
-		.enable_metadata_hash("WND", 12)
+		.enable_metadata_hash(symbol, decimals)
 		.build();
 
 	substrate_wasm_builder::WasmBuilder::init_with_defaults()
 		.set_file_name("fast_runtime_binary.rs")
 		.enable_feature("fast-runtime")
-		.enable_metadata_hash("WND", 12)
+		.enable_metadata_hash(symbol, decimals)
 		.build();
 }
 

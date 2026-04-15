@@ -870,7 +870,7 @@ pub async fn bulk_store_oneshot(
 										consecutive_conn_errors = 0;
 									},
 									Err(re) => {
-										if consecutive_conn_errors % 10 == 0 {
+										if consecutive_conn_errors.is_multiple_of(10) {
 											log::warn!(
 												"bulk_store submitter {task_id}: reconnect \
 												 failed ({consecutive_conn_errors} attempts): {re}"

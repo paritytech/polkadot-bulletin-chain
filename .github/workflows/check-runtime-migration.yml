@@ -174,8 +174,13 @@ jobs:
       - name: Build ${{ matrix.runtime.name }} runtime
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          EXTRA_FEATURES: ${{ matrix.runtime.extra_features }}
         run: |
-          cargo build --release -p "$PACKAGE_NAME" --features on-chain-release-build -q --locked
+          FEATURES="on-chain-release-build"
+          if [ -n "$EXTRA_FEATURES" ]; then
+            FEATURES="$FEATURES,$EXTRA_FEATURES"
+          fi
+          cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
 
       - name: Check runtime
         timeout-minutes: 10

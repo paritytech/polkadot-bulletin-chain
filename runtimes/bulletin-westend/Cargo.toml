@@ -229,6 +229,10 @@ fast-runtime = [
 # Enable the metadata hash generation in the wasm builder.
 metadata-hash = ["substrate-wasm-builder/metadata-hash"]
 
+# Token configuration for the metadata hash. Only one should be enabled at a time.
+# Defaults to WND/12 (Westend) when neither is set.
+metadata-hash-paseo = []
+
 # A feature that should be enabled when the runtime should be built for on-chain
 # deployment. This will disable stuff that shouldn't be part of the on-chain wasm
 # to make it smaller, like logging for example.
