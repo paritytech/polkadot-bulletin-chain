@@ -249,36 +249,45 @@ pub fn auth_batches_from_keypairs(keypairs: &[Keypair]) -> Vec<Vec<subxt::utils:
 		.collect()
 }
 
-/// Block until `txpool_status` (or fallback RPC) reports ready+future count ≤
-/// [`POOL_PENDING_PAUSE_THRESHOLD`], polling the given WS URL (control node).
-async fn wait_until_txpool_can_pull_work(ws_url: &str) {
+/// Block until the estimated number of in-flight transactions (submitted − confirmed)
+/// drops to [`POOL_PENDING_PAUSE_THRESHOLD`] or below.
+///
+/// This avoids the `author_pendingExtrinsics` RPC which fetches all pending
+/// transaction bodies and can fail with "message too large" under heavy load.
+async fn wait_until_txpool_can_pull_work(
+	submit_stats: &Arc<Mutex<SubmitStats>>,
+	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
+	new_block_notify: &Arc<Notify>,
+) {
 	let mut logged = false;
 	loop {
-		match crate::client::fetch_txpool_pending_total(ws_url).await {
-			Ok(n) if n <= POOL_PENDING_PAUSE_THRESHOLD => {
-				if logged {
-					log::info!(
-						"pipeline: txpool pending at {n} (≤ {POOL_PENDING_PAUSE_THRESHOLD}), \
-						 resuming reader",
-					);
-				}
-				return;
-			},
-			Ok(n) => {
-				if !logged {
-					log::info!(
-						"pipeline: txpool pending {n} (> {POOL_PENDING_PAUSE_THRESHOLD}), pausing \
-						 reader (backpressure)",
-					);
-					logged = true;
-				}
-				tokio::time::sleep(Duration::from_millis(100)).await;
-			},
-			Err(e) => {
-				log::warn!("pipeline: txpool RPC check failed: {e:#}");
-				tokio::time::sleep(Duration::from_millis(500)).await;
-			},
+		let submitted = submit_stats.lock().unwrap().submitted;
+		let confirmed: u64 = block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum();
+		let estimated_pending = submitted.saturating_sub(confirmed) as usize;
+
+		if estimated_pending <= POOL_PENDING_PAUSE_THRESHOLD {
+			if logged {
+				log::info!(
+					"pipeline: estimated pending at {estimated_pending} \
+					 (≤ {POOL_PENDING_PAUSE_THRESHOLD}), resuming reader",
+				);
+			}
+			return;
 		}
+
+		if !logged {
+			log::info!(
+				"pipeline: estimated pending {estimated_pending} \
+				 (> {POOL_PENDING_PAUSE_THRESHOLD}), pausing reader \
+				 (backpressure, submitted={submitted} confirmed={confirmed})",
+			);
+			logged = true;
+		}
+
+		// Wait for the next block (which will confirm more txs) or timeout.
+		tokio::time::timeout(Duration::from_millis(500), new_block_notify.notified())
+			.await
+			.ok();
 	}
 }
 
@@ -716,7 +725,7 @@ pub async fn run_block_capacity_pipeline(
 
 	loop {
 		if stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64 {
-			wait_until_txpool_can_pull_work(ws_urls[0]).await;
+			wait_until_txpool_can_pull_work(&submit_stats, &block_stats, &new_block_notify).await;
 			stores_dispatched_since_txpool = 0;
 		}
 
