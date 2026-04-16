@@ -72,6 +72,7 @@ export { type DagManifest, UnixFsDagBuilder } from "./dag.js"
 // pipeline: high-throughput bulk submission
 export {
   pipelineStore,
+  type BlockLimits,
   type PipelineConfig,
   type PipelineResult,
   type PipelineStats,
