@@ -2,10 +2,11 @@
 //!
 //! A **generator** ([`generate_block_capacity_work`]) signs store extrinsics and sends
 //! [`StressWorkItem`]s on a bounded `mpsc` channel. Signing of batch N+1 is overlapped with
-//! dispatch of batch N (look-ahead). For each batch the reader sends `Authorize` → `AwaitPendingAuth`
-//! → `Store` items. Store items are dispatched to **N worker tasks** over bounded per-worker channels.
-//! Every [`POOL_PENDING_PAUSE_THRESHOLD`] items, the reader pauses until the estimated pending pool
-//! depth drops. Workers use fire-and-forget RPC (`author_submitExtrinsic`) for maximum throughput.
+//! dispatch of batch N (look-ahead). For each batch the reader sends `Authorize` →
+//! `AwaitPendingAuth` → `Store` items. Store items are dispatched to **N worker tasks** over
+//! bounded per-worker channels. Every [`POOL_PENDING_PAUSE_THRESHOLD`] items, the reader pauses
+//! until the estimated pending pool depth drops. Workers use fire-and-forget RPC
+//! (`author_submitExtrinsic`) for maximum throughput.
 
 use anyhow::Result;
 use futures::{
@@ -13,11 +14,13 @@ use futures::{
 	stream::{self, StreamExt, TryStreamExt},
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use std::sync::{
+use std::{
+	sync::{
 		atomic::{AtomicBool, Ordering},
 		Arc, Mutex,
+	},
+	time::{Duration, Instant},
 };
-use std::time::{Duration, Instant};
 use subxt::{utils::AccountId32, OnlineClient};
 use subxt_signer::sr25519::Keypair;
 use tokio::sync::{mpsc, mpsc::error::TrySendError, Notify};
@@ -29,8 +32,8 @@ use crate::{
 	report::BlockStats,
 	store::{
 		classify_tx_error, read_timestamp_at, sign_store_extrinsic_blocking,
-		stored_content_hashes,
-		store_submit_pre_signed, BulkStoreResult, DualBlockSubscription, PendingBlock, TxPoolError,
+		store_submit_pre_signed, stored_content_hashes, BulkStoreResult, DualBlockSubscription,
+		PendingBlock, TxPoolError,
 	},
 };
 
@@ -45,7 +48,6 @@ struct SubmitStats {
 	pool_full_retries: u64,
 	stale_nonces: u64,
 }
-
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
@@ -426,12 +428,7 @@ fn spawn_pipeline_dual_monitor(
 			);
 			let finalize_deadline = Instant::now() + Duration::from_secs(30);
 			while !pending.is_empty() && Instant::now() < finalize_deadline {
-				match tokio::time::timeout(
-					Duration::from_secs(12),
-					finalized_rx.recv(),
-				)
-				.await
-				{
+				match tokio::time::timeout(Duration::from_secs(12), finalized_rx.recv()).await {
 					Ok(Some(fin_number)) => {
 						let old_max = max_finalized;
 						max_finalized = max_finalized.max(fin_number);
@@ -487,7 +484,8 @@ impl StoreWorker {
 	async fn submit(&mut self, msg: &StoreWorkMsg) -> Result<()> {
 		let id = self.worker_id;
 		loop {
-			let result = store_submit_pre_signed(self.client.as_ref(), msg.extrinsic.as_ref()).await;
+			let result =
+				store_submit_pre_signed(self.client.as_ref(), msg.extrinsic.as_ref()).await;
 
 			match result {
 				Ok(hash) => {
@@ -545,7 +543,9 @@ impl StoreWorker {
 								},
 								Err(_) =>
 									if self.consecutive_conn_errors >= 60 {
-										log::error!("pipeline store: worker {id}: giving up reconnect");
+										log::error!(
+											"pipeline store: worker {id}: giving up reconnect"
+										);
 										self.stats.lock().unwrap().errors += 1;
 										return Err(anyhow::anyhow!(
 											"pipeline store: reconnect failed (worker {id})"
@@ -798,10 +798,7 @@ pub async fn run_block_capacity_pipeline(
 						}
 					}
 					if failed > 0 {
-						anyhow::bail!(
-							"{failed} of {} auth batches failed",
-							batches.len()
-						);
+						anyhow::bail!("{failed} of {} auth batches failed", batches.len());
 					}
 					Ok(())
 				}));
@@ -1034,19 +1031,14 @@ async fn build_store_work_items(
 						mix.sample(&mut *g)
 					},
 				};
-				let (account_id, encoded, content_hash) =
-					tokio::task::spawn_blocking(move || {
-						let payload = crate::store::generate_payload(payload_size);
-						let content_hash = crate::client::blake2b_256(&payload);
-						let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
-						Ok::<_, anyhow::Error>((
-							kp.public_key().to_account_id(),
-							encoded,
-							content_hash,
-						))
-					})
-					.await
-					.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
+				let (account_id, encoded, content_hash) = tokio::task::spawn_blocking(move || {
+					let payload = crate::store::generate_payload(payload_size);
+					let content_hash = crate::client::blake2b_256(&payload);
+					let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
+					Ok::<_, anyhow::Error>((kp.public_key().to_account_id(), encoded, content_hash))
+				})
+				.await
+				.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
 				Ok::<_, anyhow::Error>(StressWorkItem::Store {
 					account_id,
 					extrinsic: Arc::new(encoded),
@@ -1137,9 +1129,7 @@ pub async fn generate_block_capacity_work(
 				 ({n_accounts} accounts)",
 				batches.len(),
 			);
-			handle
-				.await
-				.map_err(|e| anyhow::anyhow!("pipeline: sign task join: {e}"))??
+			handle.await.map_err(|e| anyhow::anyhow!("pipeline: sign task join: {e}"))??
 		} else {
 			log::debug!(
 				"generator: batch {batch_num}/{} — signing {n_accounts} accounts (no look-ahead)",
