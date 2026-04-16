@@ -69,6 +69,14 @@ export {
 // dag: DAG-PB manifest building
 export { type DagManifest, UnixFsDagBuilder } from "./dag.js"
 
+// pipeline: high-throughput bulk submission
+export {
+  pipelineStore,
+  type PipelineConfig,
+  type PipelineResult,
+  type PipelineStats,
+} from "./pipeline.js"
+
 // mock-client: testing support
 export {
   MockBulletinClient,
