@@ -116,7 +116,7 @@ const contentHash = await getContentHash(data, HashAlgorithm.Blake2b256);
 // Authorize this specific content
 const authTx = api.tx.Sudo.sudo({
   call: api.tx.TransactionStorage.authorize_preimage({
-    content_hash: Binary.fromBytes(contentHash),
+    content_hash: contentHash,
     max_size: BigInt(data.length)
   })
 });
@@ -196,8 +196,8 @@ if (auth?.expiration) {
 ## Complete Example
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { createClient } from "polkadot-api";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
 

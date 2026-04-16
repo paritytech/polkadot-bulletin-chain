@@ -21,7 +21,7 @@ npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 
 ```typescript
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
@@ -125,7 +125,7 @@ The SDK accepts an existing PAPI client, so you can share one connection across 
 
 ```typescript
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/web';
+import { getWsProvider } from 'polkadot-api/ws';
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 // Create ONE shared PAPI client for your whole app
@@ -269,7 +269,7 @@ const prepared = await preparer.prepareStore(smallData);
 console.log('CID:', prepared.cid.toString());
 
 const tx = api.tx.TransactionStorage.store({
-    data: Binary.fromBytes(prepared.data)
+    data: prepared.data
 });
 await tx.signAndSubmit(signer);
 ```
@@ -281,14 +281,14 @@ const prepared = await preparer.prepareStoreChunked(largeData);
 
 for (const chunk of prepared.chunks) {
     const tx = api.tx.TransactionStorage.store({
-        data: Binary.fromBytes(chunk.data)
+        data: chunk.data
     });
     await tx.signAndSubmit(signer);
 }
 
 if (prepared.manifest) {
     const tx = api.tx.TransactionStorage.store({
-        data: Binary.fromBytes(prepared.manifest.data)
+        data: prepared.manifest.data
     });
     await tx.signAndSubmit(signer);
     console.log('Manifest CID:', prepared.manifest.cid.toString());

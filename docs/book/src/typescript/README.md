@@ -32,7 +32,7 @@ The `@parity/bulletin-sdk` package provides a modern, type-safe client for Node.
 ```typescript
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 
 // Setup PAPI client
 const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');

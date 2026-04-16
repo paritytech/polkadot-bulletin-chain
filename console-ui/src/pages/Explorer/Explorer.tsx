@@ -18,17 +18,14 @@ function serializeArgs(obj: unknown): Record<string, unknown> {
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (value instanceof Binary) {
-      result[key] = value.asHex();
+    if (value instanceof Uint8Array) {
+      result[key] = bytesToHex(value);
     } else if (typeof value === "bigint") {
       result[key] = value.toString();
-    } else if (value instanceof Uint8Array) {
-      result[key] = bytesToHex(value);
     } else if (Array.isArray(value)) {
       result[key] = value.map((v) =>
-        v instanceof Binary ? v.asHex() :
-        typeof v === "bigint" ? v.toString() :
         v instanceof Uint8Array ? bytesToHex(v) :
+        typeof v === "bigint" ? v.toString() :
         typeof v === "object" ? serializeArgs(v) : v
       );
     } else if (typeof value === "object" && value !== null) {
@@ -93,7 +90,7 @@ function compactValue(bytes: Uint8Array, offset: number): number {
 // For signed: returns null (extensions are runtime-specific, caller uses fallback).
 function extractCallData(hexExt: HexString): Uint8Array | null {
   try {
-    const bytes = Binary.fromHex(hexExt).asBytes();
+    const bytes = Binary.fromHex(hexExt);
     if (bytes.length < 3) return null;
 
     let offset = compactLen(bytes, 0);
@@ -130,7 +127,7 @@ function extractCallData(hexExt: HexString): Uint8Array | null {
 // most likely position outward until txFromCallData succeeds.
 function getSignedExtOffsetRange(hexExt: HexString): { bytes: Uint8Array; minOffset: number } | null {
   try {
-    const bytes = Binary.fromHex(hexExt).asBytes();
+    const bytes = Binary.fromHex(hexExt);
     if (bytes.length < 3) return null;
 
     let offset = compactLen(bytes, 0);
@@ -235,7 +232,7 @@ export function Explorer() {
       if (!hashHex && api) {
         const blockHash = await api.query.System.BlockHash.getValue(blockNumber);
         if (blockHash) {
-          const hex = blockHash.asHex();
+          const hex = blockHash as string;
           // Ignore zero hash (block not in storage)
           if (hex !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
             hashHex = hex;
@@ -247,7 +244,8 @@ export function Explorer() {
       let body: string[] = [];
       try {
         if (hashHex) {
-          body = await client.getBlockBody(hashHex);
+          const rawBody = await client.getBlockBody(hashHex);
+          body = rawBody.map((item) => Binary.toHex(item));
         }
       } catch {
         // Block body not available (e.g. unpinned finalized block)
@@ -267,7 +265,7 @@ export function Explorer() {
             // Try direct extraction (works for unsigned/bare/general)
             const callData = extractCallData(hex as HexString);
             if (callData) {
-              const tx = await api.txFromCallData(Binary.fromBytes(callData));
+              const tx = await api.txFromCallData(callData);
               const pallet = tx.decodedCall.type;
               const callValue = tx.decodedCall.value as { type: string; value?: unknown };
               const call = callValue.type;
@@ -282,7 +280,7 @@ export function Explorer() {
               for (let i = range.bytes.length - 2; i >= range.minOffset; i--) {
                 try {
                   const slice = range.bytes.slice(i);
-                  const tx = await api.txFromCallData(Binary.fromBytes(slice));
+                  const tx = await api.txFromCallData(slice);
                   const pallet = tx.decodedCall.type;
                   const callValue = tx.decodedCall.value as { type: string; value?: unknown };
                   const call = callValue.type;
@@ -291,7 +289,7 @@ export function Explorer() {
                   // Try to extract signer from the original hex
                   let signer: string | undefined;
                   try {
-                    const bytes = Binary.fromHex(hex as HexString).asBytes();
+                    const bytes = Binary.fromHex(hex as HexString);
                     let offset = compactLen(bytes, 0) + 1; // Skip length + preamble
                     const addrType = bytes[offset]!;
                     if (addrType === 0) {

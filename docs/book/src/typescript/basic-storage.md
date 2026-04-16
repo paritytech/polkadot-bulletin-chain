@@ -9,7 +9,7 @@ The `store()` method with builder pattern automatically handles both small and l
 ```typescript
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { createClient, Binary } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 
 // 1. Connect to Bulletin Chain
 const wsProvider = getWsProvider('ws://localhost:9944');
@@ -36,7 +36,7 @@ First, create a PAPI client and get the typed API:
 
 ```typescript
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 
 // Connect to chain
 const wsProvider = getWsProvider('ws://localhost:9944');
@@ -70,10 +70,10 @@ const data = Binary.fromText('Hello, Bulletin!');
 const data = Binary.fromHex('0x48656c6c6f');
 
 // From Uint8Array
-const data = Binary.fromBytes(new Uint8Array([72, 101, 108, 108, 111]));
+const data = new Uint8Array([72, 101, 108, 108, 111]);
 
 // From Buffer (Node.js)
-const data = Binary.fromBytes(Buffer.from('Hello'));
+const data = new Uint8Array(Buffer.from('Hello'));
 ```
 
 ### 4. Store Data
@@ -155,8 +155,8 @@ See the [Error Handling](./error-handling.md) guide for the full error code refe
 
 ```typescript
 import { AsyncBulletinClient, BulletinError } from '@parity/bulletin-sdk';
-import { createClient, Binary } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws';
 
 const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
@@ -165,8 +165,8 @@ const api = papiClient.getTypedApi(bulletinDescriptor);
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 // Estimate what's needed
-const data = Binary.fromBytes(new Uint8Array(5_000_000)); // 5 MB
-const estimate = client.estimateAuthorization(data.asBytes().length);
+const data = new Uint8Array(5_000_000); // 5 MB
+const estimate = client.estimateAuthorization(data.length);
 console.log('Need authorization for', estimate.transactions, 'txs and', estimate.bytes, 'bytes');
 
 // Authorize (if needed - requires sudo)
@@ -209,19 +209,16 @@ const result = await client.store(data).send();
 ```typescript
 // From Uint8Array
 const bytes = new Uint8Array([1, 2, 3, 4, 5]);
-const data = Binary.fromBytes(bytes);
-const result = await client.store(data).send();
+const result = await client.store(bytes).send();
 ```
 
 ### File Data (Node.js)
 
 ```typescript
 import { readFile } from 'fs/promises';
-import { Binary } from 'polkadot-api';
 
-const fileBuffer = await readFile('document.pdf');
-const data = Binary.fromBytes(fileBuffer);
-const result = await client.store(data).send();
+const fileBuffer = new Uint8Array(await readFile('document.pdf'));
+const result = await client.store(fileBuffer).send();
 ```
 
 ### JSON Data

@@ -8,7 +8,7 @@ import { authorizeAccount, fetchCid, store } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
@@ -77,19 +77,24 @@ function initSmoldot() {
 async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
 
-    const mainChain = await sd.addChain({ chainSpec: readChainSpec(chainSpecPath) });
-    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    const mainChainSpec = readChainSpec(chainSpecPath);
+    console.log(`✅ Loaded main chain spec: ${chainSpecPath}`);
 
-    let targetChain = mainChain;
     if (parachainSpecPath) {
-        targetChain = await sd.addChain({
-            chainSpec: readChainSpec(parachainSpecPath),
-            potentialRelayChains: [mainChain]
+        const paraChainSpec = readChainSpec(parachainSpecPath);
+        console.log(`✅ Loaded parachain spec: ${parachainSpecPath}`);
+        const provider = getSmProvider(async () => {
+            const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
+            return sd.addChain({
+                chainSpec: paraChainSpec,
+                potentialRelayChains: [mainChain]
+            });
         });
-        console.log(`✅ Added parachain: ${parachainSpecPath}`);
+        return { client: createClient(provider), sd };
     }
 
-    return { client: createClient(getSmProvider(targetChain)), sd };
+    const provider = getSmProvider(() => sd.addChain({ chainSpec: mainChainSpec }));
+    return { client: createClient(provider), sd };
 }
 
 async function main() {

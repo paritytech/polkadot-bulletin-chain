@@ -18,12 +18,12 @@
     "fs": "^0.0.1-security",
     "ipfs-unixfs": "^12.0.0",
     "multiformats": "^13.4.1",
-    "polkadot-api": "^1.23.3",
-    "smoldot": "^2.0.40",
+    "polkadot-api": "^2.0.0",
+    "smoldot": "^3.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@polkadot-api/cli": "^0.18.1",
+    "@polkadot-api/cli": "^0.20.1",
     "@types/bun": "latest"
   }
 }

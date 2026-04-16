@@ -17,12 +17,12 @@ The renewal flow:
 ## The Complete Flow
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
+import { createClient } from "polkadot-api";
 import { bulletin } from "@polkadot-api/descriptors";
 
 // 1. STORE - Submit data and track the result
 const storeTx = api.tx.TransactionStorage.store({
-  data: Binary.fromBytes(myData),
+  data: myData,
   cid_config: { codec: 0x55, hashing: "Blake2b256" }
 });
 
@@ -96,7 +96,7 @@ if (!txInfo || txInfo.length <= index) {
 const info = txInfo[index];
 console.log("Data exists:");
 console.log("  Size:", info.size, "bytes");
-console.log("  Content hash:", info.content_hash.asHex());
+console.log("  Content hash:", info.content_hash);
 ```
 
 ## Building a Renewal Tracker
@@ -225,8 +225,8 @@ if (!auth || auth.extent.transactions < 1 || auth.extent.bytes < dataSize) {
 ## Complete Example: Store and Schedule Renewal
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { createClient } from "polkadot-api";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 import { calculateCid, CidCodec, HashAlgorithm } from "@parity/bulletin-sdk";
 
@@ -239,7 +239,7 @@ async function storeAndTrackRenewal() {
   const cid = await calculateCid(data, CidCodec.Raw, HashAlgorithm.Blake2b256);
 
   const storeTx = api.tx.TransactionStorage.store({
-    data: Binary.fromBytes(data),
+    data,
     cid_config: { codec: 0x55, hashing: "Blake2b256" }
   });
 

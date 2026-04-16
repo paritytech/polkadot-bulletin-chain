@@ -11,9 +11,9 @@ import { logHeader, logConnection, logSuccess, logError, logTestResult } from '.
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
-import { Binary } from '@polkadot-api/substrate-bindings';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from "polkadot-api/ws";
+import { Binary } from 'polkadot-api';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);

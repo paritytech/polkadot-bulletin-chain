@@ -61,7 +61,7 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 // TypeScript - Store data
 import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 
 const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
 const api = papiClient.getTypedApi(bulletinDescriptor);

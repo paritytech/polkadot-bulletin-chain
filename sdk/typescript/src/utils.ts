@@ -8,7 +8,7 @@
 import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
-import type { Binary } from "polkadot-api"
+
 import { MAX_CHUNK_SIZE } from "./chunker.js"
 import { BulletinError, CidCodec, ErrorCode, HashAlgorithm } from "./types.js"
 
@@ -88,11 +88,6 @@ export function parseCid(cidString: string): CID {
       error,
     )
   }
-}
-
-/** Convert Binary or Uint8Array to Uint8Array */
-export function toBytes(data: Binary | Uint8Array): Uint8Array {
-  return data instanceof Uint8Array ? data : data.asBytes()
 }
 
 /**

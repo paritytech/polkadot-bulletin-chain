@@ -24,8 +24,8 @@ import {
     logTestResult,
 } from "./logger.js";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from "polkadot-api/ws";
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
 // Note: --signer-disc=XX flag is also supported for parallel runs

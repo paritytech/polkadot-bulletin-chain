@@ -30,7 +30,6 @@ import {
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
-  toBytes,
 } from "./utils.js"
 
 /**
@@ -77,7 +76,7 @@ interface PapiTransaction {
     }): { unsubscribe(): void }
   }
   /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
-  getBareTx(): Promise<string>
+  getBareTx(): Promise<Uint8Array>
   decodedCall: unknown
 }
 
@@ -91,10 +90,10 @@ interface PapiTransaction {
 export interface BulletinTypedApi {
   tx: {
     TransactionStorage: {
-      store(args: { data: Binary | Uint8Array }): PapiTransaction
+      store(args: { data: Uint8Array }): PapiTransaction
       store_with_cid_config(args: {
         cid: { codec: bigint; hashing: ScaleHashingAlgorithm }
-        data: Binary | Uint8Array
+        data: Uint8Array
       }): PapiTransaction
       authorize_account(args: {
         who: string
@@ -102,7 +101,7 @@ export interface BulletinTypedApi {
         bytes: bigint
       }): PapiTransaction
       authorize_preimage(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
         max_size: bigint
       }): PapiTransaction
       renew(args: { block: number; index: number }): PapiTransaction
@@ -110,11 +109,11 @@ export interface BulletinTypedApi {
         who: string
       }): PapiTransaction
       remove_expired_preimage_authorization(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
       }): PapiTransaction
       refresh_account_authorization(args: { who: string }): PapiTransaction
       refresh_preimage_authorization(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
       }): PapiTransaction
     }
     Sudo?: {
@@ -144,7 +143,7 @@ export interface BulletinTypedApi {
  * Pass `papiClient.submit` directly when constructing the client.
  */
 export type SubmitFn = (
-  transaction: string,
+  transaction: Uint8Array,
   at?: string,
 ) => Promise<{
   ok: boolean
@@ -270,17 +269,17 @@ function mapPapiEventToProgress(
 export interface BulletinClientInterface {
   /** Store data with options (used internally by StoreBuilder) */
   storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult>
   /** Store preimage-authorized content as unsigned transaction */
   storeWithPreimageAuth?(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult>
-  store(data: Binary | Uint8Array): StoreBuilder
+  store(data: Uint8Array): StoreBuilder
   authorizeAccount(
     who: string,
     transactions: number,
@@ -321,9 +320,9 @@ export class StoreBuilder {
 
   constructor(
     private executor: BulletinClientInterface,
-    data: Binary | Uint8Array,
+    data: Uint8Array,
   ) {
-    this.data = toBytes(data)
+    this.data = data
   }
 
   /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
@@ -506,7 +505,7 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
  * @example
  * ```typescript
  * import { createClient } from 'polkadot-api';
- * import { getWsProvider } from 'polkadot-api/ws-provider/web';
+ * import { getWsProvider } from 'polkadot-api/ws';
  * import { AsyncBulletinClient } from '@parity/bulletin-sdk';
  *
  * // User sets up PAPI client
@@ -630,9 +629,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             codec: BigInt(cidCodec),
             hashing: hashAlgorithmCodecToEnum(hashAlgorithm),
           },
-          data: new Binary(data),
+          data,
         })
-      : this.api.tx.TransactionStorage.store({ data: new Binary(data) })
+      : this.api.tx.TransactionStorage.store({ data })
   }
 
   /**
@@ -773,13 +772,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * Returns a builder that allows fluent configuration of store options.
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store (Uint8Array)
    *
    * @example
    * ```typescript
    * import { Binary } from 'polkadot-api';
    *
-   * // Using PAPI's Binary class (recommended)
+   * // Using PAPI's Binary.fromText helper
    * const result = await client
    *   .store(Binary.fromText('Hello, Bulletin!'))
    *   .withCodec(CidCodec.DagPb)
@@ -795,7 +794,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *   .send();
    * ```
    */
-  store(data: Binary | Uint8Array): StoreBuilder {
+  store(data: Uint8Array): StoreBuilder {
     return new StoreBuilder(this, data)
   }
 
@@ -808,12 +807,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Automatically chunks data if it exceeds the configured threshold.
    */
   async storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
+    const dataBytes = data
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
@@ -926,15 +925,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * check the error and `chunkCids` in the thrown error's context to understand
    * what was partially uploaded.
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store (Uint8Array)
    */
   private async storeChunked(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     config?: Partial<ChunkerConfig>,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<ChunkedStoreResult> {
-    const dataBytes = toBytes(data)
+    const dataBytes = data
 
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
@@ -1079,7 +1078,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
       const authTx = this.api.tx.TransactionStorage.authorize_preimage({
-        content_hash: new Binary(contentHash),
+        content_hash: Binary.toHex(contentHash),
         max_size: maxSize,
       })
       return this.submitTx(
@@ -1140,7 +1139,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new AuthCallBuilder((options) => {
       const authTx =
         this.api.tx.TransactionStorage.refresh_preimage_authorization({
-          content_hash: new Binary(contentHash),
+          content_hash: Binary.toHex(contentHash),
         })
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
@@ -1184,7 +1183,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new CallBuilder((options) => {
       const tx =
         this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
-          content_hash: new Binary(contentHash),
+          content_hash: Binary.toHex(contentHash),
         })
       return this.submitTx(
         tx,
@@ -1211,18 +1210,18 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * // First, authorize the content hash (requires sudo)
    * const data = Binary.fromText('Hello, Bulletin!');
-   * const hash = blake2b256(data.asBytes());
-   * await sudoClient.authorizePreimage(hash, BigInt(data.asBytes().length));
+   * const hash = blake2b256(data);
+   * await sudoClient.authorizePreimage(hash, BigInt(data.length));
    *
    * // Anyone can now submit without fees
    * const result = await client.store(data).sendUnsigned();
    * ```
    */
   async storeWithPreimageAuth(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
+    const dataBytes = data
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }

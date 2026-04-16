@@ -74,7 +74,7 @@ export async function checkPreimageAuthorization(
 
   try {
     const auth = await api.query.TransactionStorage.Authorizations.getValue(
-      Enum("Preimage", Binary.fromBytes(contentHash))
+      Enum("Preimage", Binary.toHex(contentHash))
     );
 
     if (!auth) {
@@ -118,17 +118,7 @@ export async function fetchPreimageAuthorizations(
     const preimageAuths: PreimageAuthorization[] = entries
       .filter(({ keyArgs }: any) => keyArgs[0].type === "Preimage")
       .map(({ keyArgs, value }: any) => {
-        // Extract content hash from the preimage key
-        const preimageValue = keyArgs[0].value;
-        let contentHash: Uint8Array;
-        if (typeof preimageValue === "object" && preimageValue !== null && "content_hash" in preimageValue) {
-          const ch = (preimageValue as { content_hash: { asBytes: () => Uint8Array } }).content_hash;
-          contentHash = ch.asBytes();
-        } else if (typeof preimageValue === "object" && preimageValue !== null && "asBytes" in preimageValue) {
-          contentHash = (preimageValue as { asBytes: () => Uint8Array }).asBytes();
-        } else {
-          contentHash = new Uint8Array(32);
-        }
+        const contentHash = Binary.fromHex(keyArgs[0].value as string);
         return {
           contentHash,
           maxSize: value.extent.bytes,
@@ -165,8 +155,8 @@ export async function fetchTransactionInfo(
     }
 
     return {
-      chunkRoot: info.chunk_root.asBytes(),
-      contentHash: info.content_hash.asBytes(),
+      chunkRoot: Binary.fromHex(info.chunk_root as string),
+      contentHash: Binary.fromHex(info.content_hash as string),
       size: info.size,
       blockChunks: info.block_chunks,
     };

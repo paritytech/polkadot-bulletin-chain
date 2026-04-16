@@ -11,7 +11,6 @@
  * - Development and prototyping
  */
 
-import type { Binary } from "polkadot-api"
 import {
   AuthCallBuilder,
   type BulletinClientInterface,
@@ -32,7 +31,7 @@ import {
   type StoreOptions,
   type StoreResult,
 } from "./types.js"
-import { calculateCid, estimateAuthorization, toBytes } from "./utils.js"
+import { calculateCid, estimateAuthorization } from "./utils.js"
 
 /**
  * Configuration for the mock Bulletin client
@@ -142,9 +141,9 @@ export class MockBulletinClient implements BulletinClientInterface {
   /**
    * Store data using builder pattern
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store (Uint8Array)
    */
-  store(data: Binary | Uint8Array): StoreBuilder {
+  store(data: Uint8Array): StoreBuilder {
     return new StoreBuilder(this, data)
   }
 
@@ -152,12 +151,12 @@ export class MockBulletinClient implements BulletinClientInterface {
    * Store data with custom options (internal, used by builder)
    */
   async storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     _progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
+    const dataBytes = data
 
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
@@ -338,10 +337,10 @@ export class MockBulletinClient implements BulletinClientInterface {
    * Store preimage-authorized content (mock)
    */
   async storeWithPreimageAuth(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
+    const dataBytes = data
 
     if (dataBytes.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
