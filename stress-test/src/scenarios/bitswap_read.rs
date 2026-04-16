@@ -197,7 +197,7 @@ pub async fn run_b2_concurrent_read_sweep(
 		&[ws_url],
 		None,
 		4,
-		store::BlockInput::BestOnly(blocks_rx),
+		blocks_rx,
 	)
 	.await?;
 	log::info!(
