@@ -69,21 +69,20 @@ export {
 // dag: DAG-PB manifest building
 export { type DagManifest, UnixFsDagBuilder } from "./dag.js"
 
-// pipeline: high-throughput bulk submission
-export {
-  pipelineStore,
-  type BlockLimits,
-  type PipelineConfig,
-  type PipelineResult,
-  type PipelineStats,
-} from "./pipeline.js"
-
 // mock-client: testing support
 export {
   MockBulletinClient,
   type MockClientConfig,
   type MockOperation,
 } from "./mock-client.js"
+// pipeline: high-throughput bulk submission
+export {
+  type BlockLimits,
+  type PipelineConfig,
+  type PipelineResult,
+  type PipelineStats,
+  pipelineStore,
+} from "./pipeline.js"
 
 // preparer: offline CID calculation and chunking
 export { BulletinPreparer } from "./preparer.js"

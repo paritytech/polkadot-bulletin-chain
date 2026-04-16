@@ -154,16 +154,18 @@ export async function pipelineStore(
   // Pre-compute cumulative byte sizes for throughput reporting
   const prefixBytes = new Float64Array(items.length + 1)
   for (let i = 0; i < items.length; i++) {
-    prefixBytes[i + 1] = prefixBytes[i]! + items[i]!.length
+    prefixBytes[i + 1] = (prefixBytes[i] ?? 0) + (items[i]?.length ?? 0)
   }
-  const totalDataBytes = prefixBytes[items.length]!
+  const totalDataBytes = prefixBytes[items.length] ?? 0
 
   // ---------------------------------------------------------------------------
   // Connections
   // ---------------------------------------------------------------------------
 
   // Monitor: one client for block-following + nonce queries
-  const monitorClient = createSubstrateClient(createProvider(wsUrls[0]!))
+  const monitorClient = createSubstrateClient(
+    createProvider(wsUrls[0] as string),
+  )
 
   // Submission: one client per RPC URL (broadcast to all)
   const submitClients = wsUrls.map((url) =>
@@ -205,7 +207,8 @@ export async function pipelineStore(
     async function drain(): Promise<void> {
       draining = true
       while (queue.length > 0 && !done && !ctl.signal.aborted) {
-        const fn = queue.shift()!
+        const fn = queue.shift()
+        if (!fn) break
         try {
           await fn()
         } catch {
@@ -270,7 +273,8 @@ export async function pipelineStore(
           // ---------------------------------------------------------------
           case "initialized": {
             const hashes = event.finalizedBlockHashes
-            const lastHash = hashes[hashes.length - 1]!
+            const lastHash = hashes[hashes.length - 1]
+            if (!lastHash) break
             enqueue(async () => {
               startNonce = await readNonceAtBlock(
                 monitorClient,
@@ -323,7 +327,7 @@ export async function pipelineStore(
               const signed: string[] = []
               for (let i = fromIndex; i < toIndex; i++) {
                 const tx = api.tx.TransactionStorage.store({
-                  data: Binary.fromBytes(items[i]!),
+                  data: Binary.fromBytes(items[i] as Uint8Array),
                 })
                 const hex = await (tx as unknown as SignableTransaction).sign(
                   signer,
@@ -373,7 +377,8 @@ export async function pipelineStore(
           case "finalized": {
             const { finalizedBlockHashes, prunedBlockHashes } = event
             const lastHash =
-              finalizedBlockHashes[finalizedBlockHashes.length - 1]!
+              finalizedBlockHashes[finalizedBlockHashes.length - 1]
+            if (!lastHash) break
 
             enqueue(async () => {
               // Unpin all reported blocks to avoid hitting the server's pin limit
@@ -387,11 +392,7 @@ export async function pipelineStore(
                 signerAddress,
                 lastHash,
               )
-              counters.finalized = clamp(
-                finNonce - startNonce,
-                0,
-                items.length,
-              )
+              counters.finalized = clamp(finNonce - startNonce, 0, items.length)
 
               if (onProgress) {
                 emitProgress(
@@ -447,7 +448,7 @@ function computeBatchEnd(
   let accLength = 0
 
   while (toIndex < items.length) {
-    const size = items[toIndex]!.length
+    const size = items[toIndex]?.length ?? 0
     const txWeight =
       limits.storeWeightBase + limits.storeWeightPerByte * BigInt(size)
     const txLength = size + limits.extrinsicOverhead
@@ -496,11 +497,11 @@ async function readNonceAtBlock(
 function decodeU32LE(hex: string): number {
   const h = hex.startsWith("0x") ? hex.slice(2) : hex
   return (
-    ((parseInt(h.slice(0, 2), 16) |
+    (parseInt(h.slice(0, 2), 16) |
       (parseInt(h.slice(2, 4), 16) << 8) |
       (parseInt(h.slice(4, 6), 16) << 16) |
       (parseInt(h.slice(6, 8), 16) << 24)) >>>
-      0)
+    0
   )
 }
 
