@@ -296,7 +296,8 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",
-  [ErrorCode.TIMEOUT]: "Increase timeout or retry",
+  [ErrorCode.TIMEOUT]:
+    "Transaction was not finalized within the timeout window. Retry the transaction",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",
 }
@@ -336,4 +337,35 @@ export interface ClientConfig {
   /** Threshold for automatic chunking (default: 2 MiB).
    * Data larger than this will be automatically chunked by `store()`. */
   chunkingThreshold?: number
+  /** Defensive timeout in milliseconds per transaction (default: 420_000).
+   * PAPI handles reconnects and mortality, so this should rarely fire.
+   * Set above PAPI's default mortality window (64 blocks ~ 6.4 min at 6s blocks). */
+  txTimeout?: number
+}
+
+/**
+ * Default client configuration values.
+ *
+ * Used by AsyncBulletinClient, MockBulletinClient, and BulletinPreparer
+ * so that defaults are defined in one place.
+ */
+export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
+  defaultChunkSize: 1024 * 1024, // 1 MiB
+  createManifest: true,
+  chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
+  txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
+}
+
+/** Merge caller-supplied config with defaults, ignoring undefined values. */
+export function resolveClientConfig(
+  config?: Partial<ClientConfig>,
+): Required<ClientConfig> {
+  if (!config) return { ...DEFAULT_CLIENT_CONFIG }
+  const result = { ...DEFAULT_CLIENT_CONFIG }
+  for (const key of Object.keys(config) as (keyof ClientConfig)[]) {
+    if (config[key] !== undefined) {
+      ;(result as Record<string, unknown>)[key] = config[key]
+    }
+  }
+  return result
 }
