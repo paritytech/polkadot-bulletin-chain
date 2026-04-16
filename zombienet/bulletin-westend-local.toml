@@ -38,6 +38,7 @@ validator = true
 p2p_port = 10001
 rpc_port = 10000
 args = [
+	"--authoring=slot-based",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
@@ -57,6 +58,7 @@ validator = true
 p2p_port = 12347
 rpc_port = 12346
 args = [
+	"--authoring=slot-based",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
