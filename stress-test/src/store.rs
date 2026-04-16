@@ -59,10 +59,10 @@ pub type FinalizedBlockReceiver = tokio::sync::mpsc::UnboundedReceiver<u64>;
 
 /// Dual best + finalized block subscription.
 pub struct DualBlockSubscription {
-	pub best_rx: BlockReceiver,
-	pub finalized_rx: FinalizedBlockReceiver,
-	/// Client for storage queries (e.g. reading Timestamp::Now at a block hash).
-	pub monitor_client: OnlineClient<BulletinConfig>,
+	pub(crate) best_rx: BlockReceiver,
+	pub(crate) finalized_rx: FinalizedBlockReceiver,
+	pub(crate) monitor_client: OnlineClient<BulletinConfig>,
+	pub(crate) ws_url: String,
 }
 
 /// Subscribe to both best and finalized blocks, eagerly draining each in a
@@ -130,7 +130,12 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 		});
 	}
 
-	Ok(DualBlockSubscription { best_rx, finalized_rx: fin_rx, monitor_client: client })
+	Ok(DualBlockSubscription {
+		best_rx,
+		finalized_rx: fin_rx,
+		monitor_client: client,
+		ws_url: ws_url.to_string(),
+	})
 }
 
 /// Read `pallet_timestamp::Now` at a specific block hash.
