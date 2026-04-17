@@ -192,14 +192,7 @@ pub async fn run_b2_concurrent_read_sweep(
 	// --- Store phase ---
 	log::info!("B2: storing {item_count} items via bulk_store_oneshot...");
 	let blocks_rx = store::subscribe_blocks(ws_url).await?;
-	let store_result = store::bulk_store_oneshot(
-		work_items,
-		&[ws_url],
-		None,
-		4,
-		blocks_rx,
-	)
-	.await?;
+	let store_result = store::bulk_store_oneshot(work_items, &[ws_url], None, 4, blocks_rx).await?;
 	log::info!(
 		"B2: store complete — {}/{} confirmed in {:.1}s",
 		store_result.total_confirmed,
