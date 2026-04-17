@@ -56,9 +56,9 @@ frame-system-benchmarking = { workspace = true, optional = true }
 
 # Local dependencies
 pallet-relayer-set = { workspace = true }
-pallet-transaction-storage = { workspace = true }
+pallet-bulletin-transaction-storage = { workspace = true }
 pallet-validator-set = { workspace = true }
-pallets-common = { workspace = true }
+bulletin-pallets-common = { workspace = true }
 
 # Bridge dependencies
 bp-header-chain = { workspace = true }
@@ -101,7 +101,7 @@ sp-io = { workspace = true }
 sp-trie = { workspace = true }
 static_assertions = { workspace = true }
 sp-tracing = { workspace = true }
-transaction-storage-primitives = { workspace = true }
+bulletin-transaction-storage-primitives = { workspace = true }
 
 [features]
 default = ["std"]
@@ -145,12 +145,12 @@ std = [
 	"frame-benchmarking?/std",
 	"frame-system-benchmarking?/std",
 
+	"bulletin-pallets-common/std",
+	"pallet-bulletin-transaction-storage/std",
 	"pallet-relayer-set/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
 	"pallet-transaction-payment/std",
-	"pallet-transaction-storage/std",
 	"pallet-validator-set/std",
-	"pallets-common/std",
 
 	"bp-header-chain/std",
 	"bp-messages/std",
@@ -168,6 +168,7 @@ std = [
 	"xcm-executor/std",
 	"xcm/std",
 
+	"bulletin-transaction-storage-primitives/std",
 	"pallet-bridge-relayers/std",
 	"pallet-staking?/std",
 	"pallet-xcm?/std",
@@ -178,7 +179,6 @@ std = [
 	"sp-storage?/std",
 	"sp-trie/std",
 	"substrate-wasm-builder",
-	"transaction-storage-primitives/std",
 ]
 runtime-benchmarks = [
 	"array-bytes",
@@ -203,14 +203,14 @@ runtime-benchmarks = [
 	"pallet-bridge-parachains/runtime-benchmarks",
 	"pallet-xcm-bridge-hub/runtime-benchmarks",
 
+	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-relayer-set/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
-	"pallet-transaction-storage/runtime-benchmarks",
 	"pallet-validator-set/runtime-benchmarks",
 
+	"bulletin-pallets-common/runtime-benchmarks",
 	"pallet-bridge-relayers/runtime-benchmarks",
-	"pallets-common/runtime-benchmarks",
 	"xcm-builder/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",
@@ -240,14 +240,14 @@ try-runtime = [
 	"pallet-bridge-parachains/try-runtime",
 	"pallet-xcm-bridge-hub/try-runtime",
 
+	"bulletin-pallets-common/try-runtime",
 	"pallet-bridge-relayers/try-runtime",
+	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-relayer-set/try-runtime",
 	"pallet-staking/try-runtime",
 	"pallet-transaction-payment/try-runtime",
-	"pallet-transaction-storage/try-runtime",
 	"pallet-validator-set/try-runtime",
 	"pallet-xcm?/try-runtime",
-	"pallets-common/try-runtime",
 	"parachains-common?/try-runtime",
 	"sp-runtime/try-runtime",
 ]
