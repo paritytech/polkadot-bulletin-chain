@@ -98,6 +98,13 @@ enum Commands {
 	},
 	/// Run all test suites (block-capacity + bitswap)
 	Full,
+	/// Run a test plan (YAML file or built-in).
+	Plan {
+		/// Path to a YAML plan file. If omitted, runs the built-in quick performance test
+		/// (1KB 10min, MIXED 10min, 2MB 10min).
+		#[arg(long)]
+		file: Option<PathBuf>,
+	},
 }
 
 #[tokio::main]
@@ -212,6 +219,7 @@ async fn main() -> Result<()> {
 				&mut all_results,
 				&flush,
 				&cancel,
+				None,
 			)
 			.await
 			{
@@ -237,6 +245,149 @@ async fn main() -> Result<()> {
 				command_error = Some(e);
 			}
 		},
+		Commands::Plan { ref file } => {
+			let test_plan = match file {
+				Some(path) => {
+					log::info!("Loading plan from {}", path.display());
+					match bulletin_stress_test::plan::load_from_file(path) {
+						Ok(p) => p,
+						Err(e) => {
+							log::error!("Failed to load plan: {e}");
+							command_error = Some(e);
+							bulletin_stress_test::plan::quick_performance_test()
+						},
+					}
+				},
+				None => {
+					log::info!("Running built-in quick performance test plan");
+					bulletin_stress_test::plan::quick_performance_test()
+				},
+			};
+
+			if command_error.is_none() {
+				let total_entries = test_plan.steps.len();
+				for (i, entry) in test_plan.steps.iter().enumerate() {
+					if cancel.load(Ordering::Relaxed) {
+						break;
+					}
+					log::info!(
+						"=== Plan entry {}/{}: {} ===",
+						i + 1,
+						total_entries,
+						entry.description(),
+					);
+
+					let err = match entry {
+						bulletin_stress_test::plan::PlanEntry::Single(step) =>
+							run_plan_step(
+								step,
+								&client,
+								&authorizer_signer,
+								&nonce_tracker,
+								&cli,
+								&chain_limits,
+								&ws_url_refs,
+								control_url,
+								&mut all_results,
+								&flush,
+								&cancel,
+							)
+							.await
+							.err(),
+						bulletin_stress_test::plan::PlanEntry::Parallel { parallel } => {
+							// Each parallel task collects results independently.
+							let mut handles = Vec::new();
+							for step in parallel {
+								let client = client.clone();
+								let authorizer_signer = authorizer_signer.clone();
+								let nonce_tracker = nonce_tracker.clone();
+								let chain_limits = chain_limits.clone();
+								let ws_url_refs: Vec<String> =
+									ws_url_refs.iter().map(|s| s.to_string()).collect();
+								let control_url = control_url.to_string();
+								let cancel = cancel.clone();
+								let submitters = step.submitters.unwrap_or(cli.submitters);
+								let target_blocks =
+									step.target_blocks.unwrap_or(cli.target_blocks);
+								let iteration_blocks =
+									step.iteration_blocks.unwrap_or(cli.iteration_blocks);
+								let mix_seed = step.mix_seed.or(cli.mix_seed);
+								let variants = step.variants.clone();
+								let scenario = step.scenario;
+								let payload_size = step.payload_size.unwrap_or(128 * 1024);
+
+								fn noop(_: &mut Vec<report::ScenarioResult>) {}
+								handles.push(tokio::spawn(async move {
+									let mut step_results = Vec::new();
+									let ws_refs: Vec<&str> =
+										ws_url_refs.iter().map(|s| s.as_str()).collect();
+									let err = match scenario {
+										bulletin_stress_test::plan::Scenario::Throughput => {
+											scenarios::throughput::run_block_capacity_sweep(
+												&client,
+												&authorizer_signer,
+												&nonce_tracker,
+												&ws_refs,
+												&chain_limits,
+												submitters,
+												target_blocks,
+												iteration_blocks,
+												variants.as_deref(),
+												mix_seed,
+												&mut step_results,
+												&(noop as fn(&mut Vec<report::ScenarioResult>)),
+												&cancel,
+											)
+											.await
+										},
+										bulletin_stress_test::plan::Scenario::Bitswap => {
+											run_bitswap_inner(
+												&client,
+												&authorizer_signer,
+												&nonce_tracker,
+												payload_size,
+												&control_url,
+												&mut step_results,
+											)
+											.await
+										},
+									};
+									(step_results, err)
+								}));
+							}
+
+							let mut first_error = None;
+							for handle in handles {
+								match handle.await {
+									Ok((results, err)) => {
+										all_results.extend(results);
+										flush(&mut all_results);
+										if let Err(e) = err {
+											if first_error.is_none() {
+												first_error = Some(e);
+											}
+										}
+									},
+									Err(e) => {
+										if first_error.is_none() {
+											first_error =
+												Some(anyhow::anyhow!("parallel task panicked: {e}"));
+										}
+									},
+								}
+							}
+							first_error.map(Err::<(), _>).map(|r| r.unwrap_err())
+						},
+					};
+
+					if let Some(e) = err {
+						log::error!("Plan entry {}/{} failed: {e}", i + 1, total_entries);
+						command_error = Some(e);
+						break;
+					}
+				}
+			}
+		},
 		Commands::Full => {
 			if let Err(e) = run_throughput(
 				&client,
@@ -250,6 +401,7 @@ async fn main() -> Result<()> {
 				&mut all_results,
 				&flush,
 				&cancel,
+				None,
 			)
 			.await
 			{
@@ -316,9 +468,15 @@ async fn run_throughput(
 	chain_limits: &ChainLimits,
 	ws_urls: &[&str],
 	results: &mut Vec<report::ScenarioResult>,
-	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	on_result: &(dyn Fn(&mut Vec<report::ScenarioResult>) + Send + Sync),
 	cancel: &Arc<AtomicBool>,
+	overrides: Option<&bulletin_stress_test::plan::PlanStep>,
 ) -> Result<()> {
+	let target_blocks = overrides.and_then(|o| o.target_blocks).unwrap_or(cli.target_blocks);
+	let submitters = overrides.and_then(|o| o.submitters).unwrap_or(cli.submitters);
+	let iteration_blocks = overrides.and_then(|o| o.iteration_blocks).unwrap_or(cli.iteration_blocks);
+	let mix_seed = overrides.and_then(|o| o.mix_seed).or(cli.mix_seed);
+
 	match test {
 		"block-capacity" | "all" => {
 			scenarios::throughput::run_block_capacity_sweep(
@@ -327,11 +485,11 @@ async fn run_throughput(
 				nonce_tracker,
 				ws_urls,
 				chain_limits,
-				cli.submitters,
-				cli.target_blocks,
-				cli.iteration_blocks,
+				submitters,
+				target_blocks,
+				iteration_blocks,
 				variants,
-				cli.mix_seed,
+				mix_seed,
 				results,
 				on_result,
 				cancel,
@@ -353,7 +511,7 @@ async fn run_bitswap(
 	payload_size: usize,
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
-	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	on_result: &(dyn Fn(&mut Vec<report::ScenarioResult>) + Send + Sync),
 ) -> Result<()> {
 	let multiaddr = match resolve_p2p_multiaddr(cli, control_url).await {
 		Ok(r) => r,
@@ -383,6 +541,89 @@ async fn run_bitswap(
 		other => anyhow::bail!("Unknown bitswap test: {other} (expected: b2)"),
 	}
 
+	Ok(())
+}
+
+/// Execute a single plan step (used by sequential plan execution).
+#[allow(clippy::too_many_arguments)]
+async fn run_plan_step(
+	step: &bulletin_stress_test::plan::PlanStep,
+	client: &subxt::OnlineClient<client::BulletinConfig>,
+	authorizer_signer: &Keypair,
+	nonce_tracker: &accounts::NonceTracker,
+	cli: &Cli,
+	chain_limits: &ChainLimits,
+	ws_urls: &[&str],
+	control_url: &str,
+	results: &mut Vec<report::ScenarioResult>,
+	on_result: &(dyn Fn(&mut Vec<report::ScenarioResult>) + Send + Sync),
+	cancel: &Arc<AtomicBool>,
+) -> Result<()> {
+	match step.scenario {
+		bulletin_stress_test::plan::Scenario::Throughput => run_throughput(
+			client,
+			authorizer_signer,
+			nonce_tracker,
+			cli,
+			"block-capacity",
+			step.variants.as_deref(),
+			chain_limits,
+			ws_urls,
+			results,
+			on_result,
+			cancel,
+			Some(step),
+		)
+		.await,
+		bulletin_stress_test::plan::Scenario::Bitswap => run_bitswap(
+			client,
+			authorizer_signer,
+			nonce_tracker,
+			cli,
+			"b2",
+			step.payload_size.unwrap_or(128 * 1024),
+			control_url,
+			results,
+			on_result,
+		)
+		.await,
+	}
+}
+
+/// Bitswap execution without CLI dependency (for parallel plan tasks).
+async fn run_bitswap_inner(
+	client: &subxt::OnlineClient<client::BulletinConfig>,
+	authorizer_signer: &Keypair,
+	nonce_tracker: &accounts::NonceTracker,
+	payload_size: usize,
+	control_url: &str,
+	results: &mut Vec<report::ScenarioResult>,
+) -> Result<()> {
+	let multiaddr_str = {
+		log::info!("Auto-discovering P2P address via RPC...");
+		let (peer_id_str, addresses) = client::discover_p2p_info(control_url).await?;
+		let raw = addresses
+			.iter()
+			.find(|a| a.contains("/ws"))
+			.or_else(|| addresses.first())
+			.map(|a| if a.contains("/p2p/") { a.clone() } else { format!("{a}/p2p/{peer_id_str}") })
+			.ok_or_else(|| anyhow::anyhow!("No P2P addresses discovered"))?;
+		bitswap::clean_multiaddr(&raw)
+	};
+	let multiaddr: litep2p::types::multiaddr::Multiaddr = multiaddr_str.parse()?;
+	bitswap::BitswapClient::peer_id_from_multiaddr(&multiaddr)?;
+
+	let rs = scenarios::bitswap_read::run_b2_concurrent_read_sweep(
+		client,
+		authorizer_signer,
+		nonce_tracker,
+		&multiaddr,
+		512,
+		payload_size,
+		control_url,
+	)
+	.await?;
+	results.extend(rs);
 	Ok(())
 }
 

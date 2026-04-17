@@ -39,6 +39,7 @@ bytes = "1"
 # Reporting + formatting
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
+serde_yaml = "0.9"
 
 # Hashing
 blake2 = "0.10"

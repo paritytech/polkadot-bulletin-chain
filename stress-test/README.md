@@ -170,6 +170,83 @@ Runs all test suites sequentially (throughput + bitswap).
 ./target/release/bulletin-stress-test --output-file results.json full
 ```
 
+#### `plan [--file <PATH>]`
+
+Runs a multi-step test plan — either a built-in plan or a custom YAML file.
+
+```bash
+# Built-in quick performance test: 1KB (10min), MIXED (10min), 2MB (10min)
+./target/release/bulletin-stress-test --output-file results.json plan
+
+# Custom plan from YAML file
+./target/release/bulletin-stress-test --output-file results.json plan --file my-plan.yaml
+```
+
+Without `--file`, runs the built-in **quick performance test** (3 throughput variants, ~10 minutes each, ~30 minutes total).
+
+**YAML plan format:**
+
+```yaml
+steps:
+  - scenario: throughput
+    variants: "1KB"
+    target_blocks: 100
+    submitters: 32
+
+  - scenario: throughput
+    variants: "MIXED"
+    target_blocks: 200
+    mix_seed: 42
+
+  - scenario: throughput
+    variants: "2MB"
+    target_blocks: 50
+
+  - scenario: bitswap
+    iterations: 256
+    payload_size: 131072
+```
+
+Each step specifies a `scenario` (`throughput` or `bitswap`) and optional parameters. Omitted fields fall back to CLI defaults (e.g. `--submitters`, `--target-blocks`).
+
+| Step field | Applies to | Description |
+|---|---|---|
+| `scenario` | all | Required. `throughput` or `bitswap` |
+| `variants` | throughput | Variant filter (e.g. `"1KB"`, `"MIXED"`, `"1KB,2MB"`) |
+| `target_blocks` | throughput | Measured blocks per variant |
+| `submitters` | throughput | RPC submission workers |
+| `iteration_blocks` | throughput | Blocks per pipeline iteration |
+| `mix_seed` | throughput | RNG seed for MIXED mode |
+| `iterations` | bitswap | Number of items to store and read |
+| `payload_size` | bitswap | Bytes per item |
+
+Steps run sequentially by default. Use `parallel` to run different scenario types concurrently:
+
+```yaml
+steps:
+  # Sequential throughput step
+  - scenario: throughput
+    variants: "1KB"
+    target_blocks: 100
+
+  # Parallel group: throughput + bitswap running at the same time
+  - parallel:
+    - scenario: throughput
+      variants: "MIXED"
+      target_blocks: 100
+      submitters: 16
+    - scenario: bitswap
+      iterations: 256
+      payload_size: 131072
+
+  # Sequential step after the parallel group completes
+  - scenario: throughput
+    variants: "2MB"
+    target_blocks: 50
+```
+
+Ctrl+C stops gracefully between steps. All results are collected into a single output file.
+
 ## Running Against Remote Endpoints
 
 The stress test can target any live Bulletin Chain node via its public WebSocket endpoint. The authorizer seed must correspond to an account in the runtime's Authorizer origin on that chain.

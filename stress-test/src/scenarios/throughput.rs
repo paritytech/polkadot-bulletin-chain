@@ -244,7 +244,7 @@ pub async fn run_block_capacity_sweep(
 	variant_filter: Option<&str>,
 	mix_seed: Option<u64>,
 	results: &mut Vec<ScenarioResult>,
-	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
+	on_result: &(dyn Fn(&mut Vec<ScenarioResult>) + Send + Sync),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
 	let iteration_blocks = iteration_blocks.max(1);

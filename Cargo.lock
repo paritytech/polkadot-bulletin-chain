@@ -2240,6 +2240,7 @@ dependencies = [
  "scale-info",
  "serde",
  "serde_json",
+ "serde_yaml",
  "subxt 0.43.1",
  "subxt-signer 0.43.0",
  "tokio",

@@ -4,6 +4,7 @@ pub mod bitswap;
 pub mod chain_info;
 pub mod client;
 pub mod pipeline;
+pub mod plan;
 pub mod report;
 pub mod scenarios;
 pub mod store;
