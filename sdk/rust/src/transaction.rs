@@ -95,7 +95,7 @@ impl TransactionClient {
 	///
 	/// This is the single submission loop used by all public methods. It:
 	/// - Streams all `TxStatus` events, firing the optional progress callback
-	/// - Breaks on `InBestBlock` or `InFinalizedBlock` based on `wait_for`
+	/// - Breaks on `InBestBlock` or `InFinalizedBlock` depending on the value of `wait_for`
 	/// - Returns block hash and extrinsic hash on success
 	async fn submit_and_watch(
 		&self,
