@@ -1,27 +1,5 @@
 [
   {
-    "name": "bulletin-polkadot",
-    "package": "bulletin-polkadot-runtime",
-    "path": "runtimes/bulletin-polkadot",
-    "integration_tests": false,
-    "try_runtime": {
-        "extra_flags": "--blocktime 6000 --disable-spec-version-check"
-    },        
-    "benchmarks_templates": {
-      "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
-      "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
-    },
-    "benchmarks_exclude_extrinsics": {
-      "pallet_proxy": [
-        "announce",
-        "proxy_announced",
-        "reject_announcement",
-        "remove_announcement",
-        "poke_deposit"
-      ]
-    }
-  },
-  {
     "name": "bulletin-westend",
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
@@ -30,22 +8,6 @@
     ],
     "integration_tests": true,
     "try_runtime": {
-        "extra_flags": "--blocktime 6000 --disable-spec-version-check"
-    },
-    "benchmarks_templates": {
-      "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
-      "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
-    }
-  },
-  {
-    "name": "bulletin-pop-stable",
-    "package": "bulletin-westend-runtime",
-    "path": "runtimes/bulletin-westend",
-    "uris": [
-      "wss://pop3-testnet.parity-lab.parity.io/bulletin"
-    ],
-    "try_runtime": {
-        "spec_name_check": "--disable-spec-name-check",
         "extra_flags": "--blocktime 6000 --disable-spec-version-check"
     },
     "benchmarks_templates": {

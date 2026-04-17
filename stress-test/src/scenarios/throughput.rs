@@ -417,32 +417,9 @@ pub async fn run_block_capacity_sweep(
 				log::error!("{label}: variant failed: {e}");
 				results.push(ScenarioResult {
 					name: format!("block-cap: Block Capacity ({label}) — ERROR"),
-					duration: std::time::Duration::ZERO,
-					total_submitted: 0,
-					total_confirmed: 0,
-					total_errors: 0,
 					payload_size: payload_size_report,
-					throughput_tps: 0.0,
-					throughput_bytes_per_sec: 0.0,
-					avg_tx_per_block: 0.0,
-					peak_tx_per_block: 0,
-					inclusion_latency: None,
-					finalization_latency: None,
-					retrieval_latency: None,
 					theoretical: Some(chain_limits.compute_theoretical_limits(payload_size_report)),
-					chain_limits: None,
-					environment: None,
-					blocks: vec![],
-					submission_stats: None,
-					avg_block_interval_ms: None,
-					fork_detections: 0,
-					onchain_timing: false,
-					total_reads: None,
-					successful_reads: None,
-					failed_reads: None,
-					reads_per_sec: None,
-					read_bytes_per_sec: None,
-					data_verified: None,
+					..Default::default()
 				});
 				on_result(results);
 			},
@@ -462,21 +439,7 @@ pub async fn run_block_capacity_sweep(
 					break;
 				}
 				if let Some(Ok(block)) = blocks_sub.next().await {
-					let stored_count = block
-						.events()
-						.await
-						.map(|events| {
-							events
-								.iter()
-								.filter(|e| {
-									e.as_ref().is_ok_and(|ev| {
-										ev.pallet_name() == "TransactionStorage" &&
-											ev.variant_name() == "Stored"
-									})
-								})
-								.count()
-						})
-						.unwrap_or(0);
+					let stored_count = store::stored_content_hashes(&block).await.len();
 					if stored_count == 0 {
 						consecutive_empty += 1;
 						if consecutive_empty >= 2 {
