@@ -303,7 +303,7 @@ pub struct StoreOptions {
 	pub cid_codec: CidCodec,
 	/// Hashing algorithm to use (default: blake2b-256).
 	pub hash_algorithm: HashingAlgorithm,
-	/// What to wait for before returning (default: InBlock).
+	/// What to wait for before returning (default: best block inclusion).
 	pub wait_for: WaitFor,
 }
 
