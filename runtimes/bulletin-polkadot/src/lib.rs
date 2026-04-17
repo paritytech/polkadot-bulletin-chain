@@ -1,5 +1,4 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-// `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
 #![recursion_limit = "256"]
 
 extern crate alloc;
@@ -40,8 +39,12 @@ use sp_runtime::{
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
+use frame_support::{
+	dispatch::GetDispatchInfo,
+	genesis_builder_helper::{build_state, get_preset},
+};
 pub use frame_support::{
-	construct_runtime, parameter_types,
+	parameter_types,
 	traits::{
 		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, OriginTrait,
 		Randomness, StorageInfo,
@@ -53,10 +56,6 @@ pub use frame_support::{
 		IdentityFee, Weight,
 	},
 	StorageValue,
-};
-use frame_support::{
-	dispatch::GetDispatchInfo,
-	genesis_builder_helper::{build_state, get_preset},
 };
 pub use frame_system::Call as SystemCall;
 pub use pallet_timestamp::Call as TimestampCall;
@@ -558,35 +557,66 @@ where
 	}
 }
 
-construct_runtime!(
-	pub struct Runtime {
-		System: frame_system = 0,
-		// Babe must be called before Session
-		Babe: pallet_babe = 1,
-		Timestamp: pallet_timestamp = 2,
-		Utility: pallet_utility = 3,
-		// Authorship must be before session in order to note author in the correct session.
-		Authorship: pallet_authorship = 10,
-		Offences: pallet_offences = 11,
-		Historical: pallet_session::historical = 12,
-		ValidatorSet: pallet_validator_set = 13,
-		Session: pallet_session = 14,
-		Grandpa: pallet_grandpa = 15,
+#[frame_support::runtime(legacy_ordering)]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Runtime;
 
-		// Storage
-		TransactionStorage: pallet_transaction_storage = 40,
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+	// Babe must be called before Session
+	#[runtime::pallet_index(1)]
+	pub type Babe = pallet_babe;
+	#[runtime::pallet_index(2)]
+	pub type Timestamp = pallet_timestamp;
+	#[runtime::pallet_index(3)]
+	pub type Utility = pallet_utility;
+	// Authorship must be before session in order to note author in the correct session.
+	#[runtime::pallet_index(10)]
+	pub type Authorship = pallet_authorship;
+	#[runtime::pallet_index(11)]
+	pub type Offences = pallet_offences;
+	#[runtime::pallet_index(12)]
+	pub type Historical = pallet_session::historical;
+	#[runtime::pallet_index(13)]
+	pub type ValidatorSet = pallet_validator_set;
+	#[runtime::pallet_index(14)]
+	pub type Session = pallet_session;
+	#[runtime::pallet_index(15)]
+	pub type Grandpa = pallet_grandpa;
 
-		// Bridge
-		RelayerSet: pallet_relayer_set = 50,
-		BridgePolkadotGrandpa: pallet_bridge_grandpa = 51,
-		BridgePolkadotParachains: pallet_bridge_parachains = 52,
-		BridgePolkadotMessages: pallet_bridge_messages = 53,
+	// Storage
+	#[runtime::pallet_index(40)]
+	pub type TransactionStorage = pallet_transaction_storage;
 
-		// Local Root
-		Sudo: pallet_sudo = 61,
-		Proxy: pallet_proxy = 62,
-	}
-);
+	// Bridge
+	#[runtime::pallet_index(50)]
+	pub type RelayerSet = pallet_relayer_set;
+	#[runtime::pallet_index(51)]
+	pub type BridgePolkadotGrandpa = pallet_bridge_grandpa;
+	#[runtime::pallet_index(52)]
+	pub type BridgePolkadotParachains = pallet_bridge_parachains;
+	#[runtime::pallet_index(53)]
+	pub type BridgePolkadotMessages = pallet_bridge_messages;
+
+	// Local Root
+	#[runtime::pallet_index(61)]
+	pub type Sudo = pallet_sudo;
+	#[runtime::pallet_index(62)]
+	pub type Proxy = pallet_proxy;
+}
 
 /// The address format for describing accounts.
 pub type Address = sp_runtime::MultiAddress<AccountId, ()>;
