@@ -20,7 +20,7 @@ import {
 } from "@polkadot-labs/hdkd-helpers"
 import { createClient, type PolkadotClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
-import { getWsProvider } from "polkadot-api/ws-provider/node"
+import { getWsProvider } from "polkadot-api/ws-provider"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,
@@ -54,7 +54,12 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
     // Create client directly with api, signer, and submit function
-    client = new AsyncBulletinClient(api, signer, papiClient.submit)
+    // Per-tx timeout for CI zombienet nodes. 60s was too aggressive —
+    // finalization regularly takes >60s under CI load, causing flaky
+    // "Transaction timed out" failures on chunked store tests.
+    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
+      txTimeout: 120_000,
+    })
 
     // Authorize Alice's account for storage operations
     // The bulletin chain requires account authorization before storing data
@@ -111,7 +116,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       console.log("   CID:", result.cid.toString())
     })
 
-    it("should store chunked data with progress tracking", async () => {
+    it("should store chunked data with progress tracking", {
+      timeout: 180_000,
+    }, async () => {
       // Create 5 MiB test data
       const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
 
@@ -151,7 +158,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       console.log("   Chunks:", result.chunks?.numChunks)
     })
 
-    it("should fire progress events in correct order during chunked upload", async () => {
+    it("should fire progress events in correct order during chunked upload", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
       const events: { type: string; chunkIndex?: number }[] = []
@@ -225,7 +234,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       }
     })
 
-    it("should fire chunk events sequentially (each chunk submitted before next starts)", async () => {
+    it("should fire chunk events sequentially (each chunk submitted before next starts)", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
 
       const eventLog: { type: string; index: number; time: number }[] = []
@@ -268,7 +279,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       expect(chunk0Completed?.time).toBeLessThanOrEqual(chunk1Started?.time)
     })
 
-    it("should include CID in chunk_completed events", async () => {
+    it("should include CID in chunk_completed events", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
       const chunkCids: string[] = []
@@ -292,7 +305,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
     })
 
-    it("should fire chunk_completed via store() builder for large data", async () => {
+    it("should fire chunk_completed via store() builder for large data", {
+      timeout: 180_000,
+    }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
       const events: string[] = []
