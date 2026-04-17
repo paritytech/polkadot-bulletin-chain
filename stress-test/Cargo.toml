@@ -19,7 +19,7 @@ path = "tests/zombienet.rs"
 clap = { workspace = true, features = ["derive"] }
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 futures = { workspace = true }
 
 # Subxt (must match zombienet-sdk 0.3.13)
