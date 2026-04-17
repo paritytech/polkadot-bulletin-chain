@@ -124,8 +124,8 @@ impl TransactionClient {
 								cb(ProgressEvent::tx_broadcasted());
 							},
 						TxStatus::InBestBlock(in_block) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
+							let block_hash = in_block.block_hash().to_string();
+							let extrinsic_hash = in_block.extrinsic_hash().to_string();
 
 							if let Some(ref cb) = progress_callback {
 								let block_number =
@@ -148,8 +148,8 @@ impl TransactionClient {
 							}
 						},
 						TxStatus::InFinalizedBlock(in_block) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
+							let block_hash = in_block.block_hash().to_string();
+							let extrinsic_hash = in_block.extrinsic_hash().to_string();
 
 							if let Some(ref cb) = progress_callback {
 								let block_number =
