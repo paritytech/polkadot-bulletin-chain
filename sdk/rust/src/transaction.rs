@@ -298,10 +298,6 @@ impl TransactionClient {
 	/// Returns an error immediately if authorization is missing, expired,
 	/// or insufficient (avoiding a wasted transaction submission).
 	///
-	/// The `wait_for` parameter controls when the method returns:
-	/// - `WaitFor::InBlock` - Returns after transaction is included in a best block (faster)
-	/// - `WaitFor::Finalized` - Returns after transaction is finalized (safer)
-	///
 	/// Progress events emitted:
 	/// - `TransactionStatusEvent::Validated` - Transaction validated in pool
 	/// - `TransactionStatusEvent::Broadcasted` - Transaction sent to peers
