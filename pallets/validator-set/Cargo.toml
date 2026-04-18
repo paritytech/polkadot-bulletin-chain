@@ -5,6 +5,7 @@ authors = ['Gautam Dhameja <quasijatt@outlook.com>', 'Parity Technologies <admin
 edition.workspace = true
 repository.workspace = true
 license = 'Apache-2.0'
+publish = false
 
 [dependencies]
 codec = { workspace = true, features = ["derive"] }
@@ -21,19 +22,19 @@ pallet-session = { workspace = true, default-features = false, features = [
 
 [dev-dependencies]
 serde = { features = ["derive"], workspace = true }
-pallets-common = { workspace = true, default-features = false }
+bulletin-pallets-common = { workspace = true, default-features = false }
 
 [features]
 default = ['std']
 runtime-benchmarks = [
+	"bulletin-pallets-common/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
-	"pallets-common/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-staking/runtime-benchmarks",
 ]
 std = [
+	"bulletin-pallets-common/std",
 	"log/std",
-	"pallets-common/std",
 	"sp-staking/std",
 	'codec/std',
 	'pallet-session/std',
@@ -41,7 +42,7 @@ std = [
 	'scale-info/std',
 ]
 try-runtime = [
+	"bulletin-pallets-common/try-runtime",
 	"pallet-session/try-runtime",
-	"pallets-common/try-runtime",
 	'polkadot-sdk-frame/try-runtime',
 ]

@@ -322,8 +322,8 @@ pub fn new_full<
 							// Fallback for solochain runtimes that do not yet have the transaction
 							// storage API. TODO: remove once bulletin-polkadot is upgraded
 							// with the TX storage runtime API. TODO: also remove the
-							// pallet_transaction_storage dependency.
-							pallet_transaction_storage::DEFAULT_RETENTION_PERIOD
+							// pallet_bulletin_transaction_storage dependency.
+							pallet_bulletin_transaction_storage::DEFAULT_RETENTION_PERIOD
 						}
 					};
 					let storage_proof =

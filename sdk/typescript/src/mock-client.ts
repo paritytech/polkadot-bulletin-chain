@@ -140,6 +140,11 @@ export class MockBulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * No-op for the mock client — present to satisfy `BulletinClientInterface`.
+   */
+  async destroy(): Promise<void> {}
+
+  /**
    * Store data using builder pattern
    *
    * @param data - Data to store (PAPI Binary or Uint8Array)
