@@ -406,8 +406,7 @@ fn spawn_pipeline_dual_monitor(
 						if target_blocks.is_some_and(|t| best_measured_blocks >= t) {
 							log::info!(
 								"pipeline monitor: reached {best_measured_blocks} \
-								 measured best blocks (target {:?}), signalling stop",
-								target_blocks
+								 measured best blocks (target {target_blocks:?}), signalling stop",
 							);
 							target_reached.store(true, Ordering::Relaxed);
 						}
