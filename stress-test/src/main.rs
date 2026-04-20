@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::{
-	path::PathBuf,
+	path::{Path, PathBuf},
 	sync::{
 		atomic::{AtomicBool, Ordering},
 		Arc,
@@ -65,6 +65,10 @@ struct Cli {
 	/// JSON output file (flushed after every variant so partial results survive crashes)
 	#[arg(long, global = true)]
 	output_file: Option<PathBuf>,
+
+	/// Generate an HTML chart of throughput over time
+	#[arg(long, global = true)]
+	chart: Option<PathBuf>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -105,13 +109,53 @@ enum Commands {
 		#[arg(long)]
 		file: Option<PathBuf>,
 	},
+	/// Generate charts from an existing JSON results file.
+	Chart {
+		/// Path to the JSON results file.
+		input: PathBuf,
+		/// Output HTML file. Defaults to the input path with .html extension.
+		#[arg(long)]
+		output: Option<PathBuf>,
+	},
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-	let cli = Cli::parse();
+	let mut cli = Cli::parse();
+
+	// Append timestamp to output filenames (e.g. results.json → results_2026-04-20_15h.json).
+	let ts = {
+		use std::time::SystemTime;
+		let secs = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap_or_default()
+			.as_secs();
+		// Simple UTC formatting without chrono: YYYY-MM-DD_HHh
+		let days = secs / 86400;
+		let h = (secs % 86400) / 3600;
+		// Days since epoch → date (good enough approximation using chrono-free math)
+		let (y, m, d) = days_to_ymd(days);
+		format!("{y:04}-{m:02}-{d:02}_{h:02}h")
+	};
+	if let Some(ref path) = cli.output_file {
+		cli.output_file = Some(append_timestamp(path, &ts));
+	}
+	if let Some(ref path) = cli.chart {
+		cli.chart = Some(append_timestamp(path, &ts));
+	}
+
+	// Handle chart-only command early (no RPC needed).
+	if let Commands::Chart { ref input, ref output } = cli.command {
+		let json = std::fs::read_to_string(input)
+			.map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", input.display()))?;
+		let results: Vec<report::ScenarioResult> = serde_json::from_str(&json)
+			.map_err(|e| anyhow::anyhow!("Failed to parse {}: {e}", input.display()))?;
+		let chart_path = output.clone().unwrap_or_else(|| input.with_extension("html"));
+		bulletin_stress_test::chart::generate_chart(&results, &chart_path)?;
+		return Ok(());
+	}
 
 	// Parse comma-separated WS URLs. First URL is used for control operations
 	// (authorization, chain info, monitoring); all URLs are used for submission.
@@ -295,88 +339,40 @@ async fn main() -> Result<()> {
 							.await
 							.err(),
 						bulletin_stress_test::plan::PlanEntry::Parallel { parallel } => {
-							// Each parallel task collects results independently.
-							let mut handles = Vec::new();
-							for step in parallel {
-								let client = client.clone();
-								let authorizer_signer = authorizer_signer.clone();
-								let nonce_tracker = nonce_tracker.clone();
-								let chain_limits = chain_limits.clone();
-								let ws_url_refs: Vec<String> =
-									ws_url_refs.iter().map(|s| s.to_string()).collect();
-								let control_url = control_url.to_string();
-								let cancel = cancel.clone();
-								let submitters = step.submitters.unwrap_or(cli.submitters);
-								let target_blocks =
-									step.target_blocks.unwrap_or(cli.target_blocks);
-								let iteration_blocks =
-									step.iteration_blocks.unwrap_or(cli.iteration_blocks);
-								let mix_seed = step.mix_seed.or(cli.mix_seed);
-								let variants = step.variants.clone();
-								let scenario = step.scenario;
-								let payload_size = step.payload_size.unwrap_or(128 * 1024);
+							let futs: Vec<_> = parallel
+								.iter()
+								.map(|step| {
+									run_parallel_step(
+										step.scenario,
+										client.clone(),
+										authorizer_signer.clone(),
+										nonce_tracker.clone(),
+										chain_limits.clone(),
+										ws_url_refs.iter().map(|s| s.to_string()).collect(),
+										control_url.to_string(),
+										cancel.clone(),
+										step.submitters.unwrap_or(cli.submitters),
+										step.target_blocks.unwrap_or(cli.target_blocks),
+										step.iteration_blocks.unwrap_or(cli.iteration_blocks),
+										step.mix_seed.or(cli.mix_seed),
+										step.variants.clone(),
+										step.payload_size.unwrap_or(128 * 1024),
+									)
+								})
+								.collect();
 
-								fn noop(_: &mut Vec<report::ScenarioResult>) {}
-								handles.push(tokio::spawn(async move {
-									let mut step_results = Vec::new();
-									let ws_refs: Vec<&str> =
-										ws_url_refs.iter().map(|s| s.as_str()).collect();
-									let err = match scenario {
-										bulletin_stress_test::plan::Scenario::Throughput => {
-											scenarios::throughput::run_block_capacity_sweep(
-												&client,
-												&authorizer_signer,
-												&nonce_tracker,
-												&ws_refs,
-												&chain_limits,
-												submitters,
-												target_blocks,
-												iteration_blocks,
-												variants.as_deref(),
-												mix_seed,
-												&mut step_results,
-												&(noop as fn(&mut Vec<report::ScenarioResult>)),
-												&cancel,
-											)
-											.await
-										},
-										bulletin_stress_test::plan::Scenario::Bitswap => {
-											run_bitswap_inner(
-												&client,
-												&authorizer_signer,
-												&nonce_tracker,
-												payload_size,
-												&control_url,
-												&mut step_results,
-											)
-											.await
-										},
-									};
-									(step_results, err)
-								}));
-							}
-
+							let outcomes = futures::future::join_all(futs).await;
 							let mut first_error = None;
-							for handle in handles {
-								match handle.await {
-									Ok((results, err)) => {
-										all_results.extend(results);
-										flush(&mut all_results);
-										if let Err(e) = err {
-											if first_error.is_none() {
-												first_error = Some(e);
-											}
-										}
-									},
-									Err(e) => {
-										if first_error.is_none() {
-											first_error =
-												Some(anyhow::anyhow!("parallel task panicked: {e}"));
-										}
-									},
+							for (results, err) in outcomes {
+								all_results.extend(results);
+								flush(&mut all_results);
+								if let Err(e) = err {
+									if first_error.is_none() {
+										first_error = Some(e);
+									}
 								}
 							}
-							first_error.map(Err::<(), _>).map(|r| r.unwrap_err())
+							first_error
 						},
 					};
 
@@ -427,6 +423,7 @@ async fn main() -> Result<()> {
 				}
 			}
 		},
+		Commands::Chart { .. } => unreachable!("handled above"),
 	}
 
 	// Always print results (even partial / aborted) before exiting.
@@ -444,9 +441,21 @@ async fn main() -> Result<()> {
 		report::print_summary_table(&all_results);
 	}
 
+	// Generate chart: explicit --chart path, or derive from --output-file.
+	let chart_path = cli.chart.clone().or_else(|| {
+		cli.output_file.as_ref().map(|p| p.with_extension("html"))
+	});
+	if let Some(ref path) = chart_path {
+		if let Err(e) = bulletin_stress_test::chart::generate_chart(&all_results, path) {
+			log::error!("Failed to generate chart: {e}");
+		}
+	}
+
 	if cancel.load(Ordering::Relaxed) {
-		// Flush to file one last time before exiting.
 		flush(&mut all_results);
+		if let Some(ref path) = chart_path {
+			let _ = bulletin_stress_test::chart::generate_chart(&all_results, path);
+		}
 		std::process::exit(130);
 	}
 
@@ -627,6 +636,60 @@ async fn run_bitswap_inner(
 	Ok(())
 }
 
+/// Execute a single step in a parallel group (owns all data, `'static` safe).
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel_step(
+	scenario: bulletin_stress_test::plan::Scenario,
+	client: subxt::OnlineClient<client::BulletinConfig>,
+	authorizer_signer: Keypair,
+	nonce_tracker: accounts::NonceTracker,
+	chain_limits: ChainLimits,
+	ws_url_refs: Vec<String>,
+	control_url: String,
+	cancel: Arc<AtomicBool>,
+	submitters: usize,
+	target_blocks: u32,
+	iteration_blocks: u32,
+	mix_seed: Option<u64>,
+	variants: Option<String>,
+	payload_size: usize,
+) -> (Vec<report::ScenarioResult>, Result<()>) {
+	fn noop(_: &mut Vec<report::ScenarioResult>) {}
+
+	let mut step_results = Vec::new();
+	let ws_refs: Vec<&str> = ws_url_refs.iter().map(|s| s.as_str()).collect();
+	let err = match scenario {
+		bulletin_stress_test::plan::Scenario::Throughput =>
+			scenarios::throughput::run_block_capacity_sweep(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				&ws_refs,
+				&chain_limits,
+				submitters,
+				target_blocks,
+				iteration_blocks,
+				variants.as_deref(),
+				mix_seed,
+				&mut step_results,
+				&(noop as fn(&mut Vec<report::ScenarioResult>)),
+				&cancel,
+			)
+			.await,
+		bulletin_stress_test::plan::Scenario::Bitswap =>
+			run_bitswap_inner(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				payload_size,
+				&control_url,
+				&mut step_results,
+			)
+			.await,
+	};
+	(step_results, err)
+}
+
 /// Resolve the node's P2P multiaddr from CLI args or RPC auto-discovery.
 async fn resolve_p2p_multiaddr(
 	cli: &Cli,
@@ -663,4 +726,28 @@ async fn resolve_p2p_multiaddr(
 	bitswap::BitswapClient::peer_id_from_multiaddr(&multiaddr)?;
 
 	Ok(multiaddr)
+}
+
+/// Insert a timestamp before the file extension: `foo.json` → `foo_2026-04-20_15h.json`.
+fn append_timestamp(path: &Path, ts: &str) -> PathBuf {
+	let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+	let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("json");
+	let new_name = format!("{stem}_{ts}.{ext}");
+	path.with_file_name(new_name)
+}
+
+/// Convert days since Unix epoch to (year, month, day). No leap-second precision needed.
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+	// Algorithm from http://howardhinnant.github.io/date_algorithms.html
+	let z = days + 719468;
+	let era = z / 146097;
+	let doe = z - era * 146097;
+	let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+	let y = yoe + era * 400;
+	let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+	let mp = (5 * doy + 2) / 153;
+	let d = doy - (153 * mp + 2) / 5 + 1;
+	let m = if mp < 10 { mp + 3 } else { mp - 9 };
+	let y = if m <= 2 { y + 1 } else { y };
+	(y, m, d)
 }

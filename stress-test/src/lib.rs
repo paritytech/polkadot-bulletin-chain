@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod authorize;
 pub mod bitswap;
 pub mod chain_info;
+pub mod chart;
 pub mod client;
 pub mod pipeline;
 pub mod plan;
