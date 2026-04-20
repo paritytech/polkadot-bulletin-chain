@@ -20,7 +20,7 @@ const MAX_NONCE_RETRIES: u32 = 10;
 /// Authorize multiple accounts for transaction storage.
 ///
 /// The signer must be a member of the runtime's `Authorizer` origin (e.g. Alice
-/// is in `TestAccounts` on both bulletin-polkadot and bulletin-westend runtimes).
+/// is in `TestAccounts` on the bulletin-westend runtime).
 /// No sudo wrapping is needed — `authorize_account` is called directly.
 ///
 /// Splits into batches of AUTHORIZE_BATCH_SIZE to stay within block weight limits.
