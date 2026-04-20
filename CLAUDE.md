@@ -15,23 +15,20 @@
 
 Polkadot Bulletin Chain is a specialized blockchain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It serves as a storage solution primarily for the People/Proof-of-Personhood chain, functioning as a bridge-connected parachain with integrated IPFS support.
 
-**Deployment Modes**:
-- **Solochain**: Run with the custom `node/` binary which includes BABE + GRANDPA consensus and integrated IPFS support
-- **Parachain**: Run with Polkadot SDK's `polkadot-omni-node` for parachain deployments
+**Deployment Mode**: Parachain, run with the Polkadot SDK's `polkadot-omni-node` binary against the `bulletin-westend-runtime` WASM.
 
 **Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable `RetentionPeriod`.
 
 ## Build Commands
 
 ```bash
-# Build the node (debug)
+# Build the runtime (debug)
 cargo build
 
-# Build the node (release)
+# Build the runtime (release)
 cargo build --release
 
 # Build production runtime (with optimizations, strips logs)
-cargo build --profile production -p bulletin-polkadot-runtime --features on-chain-release-build
 cargo build --profile production -p bulletin-westend-runtime --features on-chain-release-build
 
 # Build with runtime benchmarks enabled
@@ -45,29 +42,18 @@ cargo build --release --features runtime-benchmarks
 cargo test
 
 # Run pallet tests
-cargo test -p pallet-transaction-storage
+cargo test -p pallet-bulletin-transaction-storage
 cargo test -p pallet-validator-set
 cargo test -p pallet-relayer-set
 
 # Run runtime tests
-cargo test -p bulletin-polkadot-runtime
 cargo test -p bulletin-westend-runtime
+
+# Run XCM integration tests
+cargo test -p bulletin-westend-integration-tests
 ```
 
 For formatting, linting, and clippy checks, run `/format`.
-
-## Run Commands
-
-```bash
-# Run local dev node
-./target/release/polkadot-bulletin-chain --dev
-
-# Run with IPFS server enabled
-./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot
-
-# Generate chain spec
-./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot > spec.json
-```
 
 ## Architecture
 
@@ -75,27 +61,23 @@ For formatting, linting, and clippy checks, run `/format`.
 
 ```
 polkadot-bulletin-chain/
-├── node/                     # Off-chain solochain node implementation (CLI, service, RPC)
 ├── runtimes/
-│   ├── bulletin-polkadot/    # Production Polkadot runtime
-│   └── bulletin-westend/     # Westend testnet runtime
+│   └── bulletin-westend/     # Westend parachain runtime
 ├── pallets/
 │   ├── common/               # Shared pallet utilities
 │   ├── transaction-storage/  # Core storage pallet
 │   ├── validator-set/        # PoA validator management
 │   └── relayer-set/          # Bridge relayer management
-├── examples/                 # JavaScript integration examples
+├── sdk/                      # Rust and TypeScript SDKs
+├── examples/                 # JavaScript/Rust integration examples
 ├── scripts/                  # Build and deployment scripts
 └── zombienet/                # Network testing configurations
 ```
 
 ### Key Components
 
-**Node (`node/`)**: Off-chain validator/full-node binary with BABE + GRANDPA consensus and integrated IPFS (Bitswap/Kademlia).
-
-**Runtimes**: Two WASM runtimes targeting different networks:
-- `runtimes/bulletin-polkadot/` - Production Polkadot (bridges to People Chain)
-- `runtimes/bulletin-westend/` - Westend testnet
+**Runtime**: A WASM runtime targeting the Westend testnet parachain slot.
+- `runtimes/bulletin-westend/` - Westend testnet runtime (also used for Paseo)
 
 **Core Pallets**:
 - `pallet-transaction-storage` - Stores data, manages retention, provides storage proofs
@@ -112,15 +94,14 @@ polkadot-bulletin-chain/
 
 Local network spawning for integration tests:
 ```bash
-# Requires zombienet binary and polkadot binaries
-zombienet spawn zombienet/bulletin-polkadot-local.toml
+zombienet spawn zombienet/bulletin-westend-local.toml
 ```
 
 ### Benchmarking
 
 ```bash
 # Run benchmarks using the Python script
-python3 scripts/cmd/cmd.py bench
+python3 scripts/cmd/cmd.py bench --runtime bulletin-westend
 ```
 
 ## Polkadot SDK (Upstream)
@@ -132,9 +113,8 @@ This project is built on the **Polkadot SDK** (formerly Substrate/Polkadot/Cumul
 
 The Polkadot SDK provides:
 - FRAME pallet system and runtime macros
-- Consensus engines (BABE, GRANDPA)
+- Consensus engines (Aura for parachain block authoring; relay-chain GRANDPA finality)
 - Networking (libp2p, litep2p)
-- Bridge pallets for cross-chain messaging
 - XCM (Cross-Consensus Messaging) infrastructure
 
 ## Dependencies
@@ -153,9 +133,8 @@ The Polkadot SDK provides:
 
 - Configurable Storage Retention Period
 - Maximum storage requirement: 1.5-2TB
-- IPFS idle connection timeout: 1 hour
-- Node supports litep2p/Bitswap
-- Solochain validators need BABE and GRANDPA session keys
+- IPFS idle connection timeout: 1 hour (configured on the collator/full-node via `polkadot-omni-node`)
+- IPFS retrieval supports litep2p/Bitswap
 
 ## Code Review Guidelines
 

@@ -36,11 +36,11 @@ It's only needed once after checkout or when dependencies change:
 Standalone recipes handle full setup/teardown automatically:
 
 ```bash
-# Solochain (Polkadot runtime) with WebSocket + Kubo Docker IPFS (default)
-just run-authorize-and-store bulletin-polkadot-runtime ws
+# Westend parachain with WebSocket + Kubo Docker IPFS (default)
+just run-authorize-and-store bulletin-westend-runtime ws
 
-# Solochain with WebSocket + Kubo native (no Docker required)
-just run-authorize-and-store bulletin-polkadot-runtime ws kubo-native
+# Westend parachain with WebSocket + Kubo native (no Docker required)
+just run-authorize-and-store bulletin-westend-runtime ws kubo-native
 
 # Westend parachain with smoldot light client
 just run-authorize-and-store bulletin-westend-runtime smoldot
@@ -57,13 +57,13 @@ Two IPFS backends are supported:
 
 ```bash
 # Start services (zombienet + IPFS with Peering.Peers auto-reconnect)
-just start-services /tmp/my-test bulletin-polkadot-runtime kubo-native
+just start-services /tmp/my-test bulletin-westend-runtime kubo-native
 
 # Generate PAPI descriptors from running node
 just papi-generate
 
 # Run individual tests (services must be running)
-just run-test-authorize-and-store /tmp/my-test bulletin-polkadot-runtime ws
+just run-test-authorize-and-store /tmp/my-test bulletin-westend-runtime ws
 just run-test-store-chunked-data /tmp/my-test
 just run-test-store-big-data /tmp/my-test big32
 
@@ -189,40 +189,11 @@ docker run -d --name ipfs-node -v ipfs-data:/data/ipfs \
 docker logs -f ipfs-node
 ```
 
-### Run Bulletin Solochain with `--ipfs-server`
-
-```shell
-cargo build --release -p polkadot-bulletin-chain
-
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
-```
-
-### Connect IPFS Nodes
-
-Kubo's **Peering.Peers** feature handles automatic (re)connection to chain nodes.
-The `just` recipes configure this automatically before starting the IPFS daemon.
-
-For manual setup, configure Peering.Peers in your Kubo config:
-
-```shell
-# Local Kubo -- configure peering before starting the daemon
-./kubo/ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/ip4/127.0.0.1/tcp/10001/ws"]},
-  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/ip4/127.0.0.1/tcp/12347/ws"]}
-]'
-```
-
-```shell
-# Docker Kubo -- configure peering, then restart the container
-docker exec ipfs-node ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/dns4/host.docker.internal/tcp/10001/ws"]},
-  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/dns4/host.docker.internal/tcp/12347/ws"]}
-]'
-docker restart ipfs-node
-```
-
 ### Run Bulletin (Westend) Parachain with `--ipfs-server`
+
+Kubo's **Peering.Peers** feature handles automatic (re)connection to chain
+nodes. The `just` recipes configure this automatically before starting the
+IPFS daemon.
 
 #### Prerequisites
 
@@ -337,7 +308,7 @@ npx papi add -w ws://localhost:10000 bulletin
 ### 2. Start Services
 
 See the justfile for full setup details. At minimum you need:
-- A running Bulletin Chain node (solochain or parachain via zombienet)
+- A running Bulletin Chain parachain (via zombienet)
 - An IPFS node connected to the chain's IPFS peers
 
 ### 3. Run Examples

@@ -67,9 +67,9 @@ cargo test --lib --all-features
 cd sdk/typescript
 npm run test:unit
 
-# Integration tests (requires running node at ws://localhost:9944)
-# Start node first:
-./target/release/polkadot-bulletin-chain --dev --tmp
+# Integration tests (requires a running Bulletin collator at ws://localhost:9944)
+# Start a local network first, e.g.:
+#   zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
 
 # TypeScript integration tests:
 cd sdk/typescript && npm run test:integration

@@ -45,11 +45,10 @@ If you're building an application that needs authorization:
 For local development, you have sudo access:
 
 ```bash
-# Start a local dev node
-./polkadot-bulletin-chain --dev
+# Start a local network (Bulletin parachain + Westend relay chain)
+zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
 
-# The //Alice account has sudo privileges
-# Use it to authorize other accounts
+# The //Alice account is in TestAccounts and can authorize other accounts
 ```
 
 ## Types of Authorization

@@ -11,16 +11,15 @@ This example demonstrates using the `bulletin-sdk-rust` crate to interact with B
 
 ## Prerequisites
 
-1. **Running Bulletin Chain node**: You need a running Bulletin Chain node with WebSocket endpoint available
+1. **Running Bulletin Chain collator**: You need a running Bulletin Chain collator with a WebSocket endpoint available.
 
-   Example for local development:
+   Example for local development (spawns the Bulletin parachain alongside a Westend relay chain):
    ```bash
    # From project root
-   cargo build --release
-   ./target/release/polkadot-bulletin-chain --dev --tmp
+   zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
    ```
 
-   This typically runs on `ws://localhost:10000`.
+   This typically exposes a collator RPC on `ws://localhost:10000`.
 
 ## Usage
 

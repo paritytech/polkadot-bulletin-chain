@@ -939,9 +939,6 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 		});
 }
 
-// NOTE: The following preimage/renew/authorize tests mirror those in
-// bulletin-polkadot/tests/tests.rs. Keep in sync when modifying.
-
 /// Preimage authorization allows anyone to store pre-authorized content.
 #[test]
 fn preimage_authorized_storage_transactions_work() {

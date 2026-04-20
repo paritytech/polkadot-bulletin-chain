@@ -13,15 +13,14 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 /release <network>
 ```
 
-**Networks**: `westend`, `paseo`, `pop`, `polkadot`
+**Networks**: `westend`, `paseo`
 
 ## Steps
 
 1. **Pre-checks** (optional): `cargo test && cargo clippy --all-targets --all-features --workspace -- -D warnings`
 
-2. **Bump spec_version** in the appropriate runtime file:
-   - westend/paseo/pop: `runtimes/bulletin-westend/src/lib.rs`
-   - polkadot: `runtimes/bulletin-polkadot/src/lib.rs`
+2. **Bump spec_version** in the runtime file:
+   - westend/paseo: `runtimes/bulletin-westend/src/lib.rs`
 
 3. **Create a PR** with the version bump:
    ```bash
