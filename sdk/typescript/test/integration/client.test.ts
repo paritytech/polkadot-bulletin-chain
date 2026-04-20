@@ -116,7 +116,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should store chunked data with progress tracking", {
-      timeout: 600_000,
+      timeout: 480_000,
     }, async () => {
       // Create 5 MiB test data
       const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
@@ -158,7 +158,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire progress events in correct order during chunked upload", {
-      timeout: 600_000,
+      timeout: 480_000,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
@@ -234,7 +234,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk events sequentially (each chunk submitted before next starts)", {
-      timeout: 600_000,
+      timeout: 480_000,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
 
@@ -279,7 +279,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should include CID in chunk_completed events", {
-      timeout: 600_000,
+      timeout: 480_000,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
@@ -305,7 +305,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk_completed via store() builder for large data", {
-      timeout: 600_000,
+      timeout: 480_000,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
