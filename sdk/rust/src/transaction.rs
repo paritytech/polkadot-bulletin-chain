@@ -55,8 +55,8 @@ impl TransactionClient {
 	/// Submit a transaction with the nonce resolved from the best block.
 	///
 	/// Subxt's default nonce resolution queries the finalized block which
-	/// lags behind actual block inclusion for sequential `WaitFor::InBlock` transactions. So we manually override that by choosing to
-	/// query at the current best block instead.
+	/// lags behind actual block inclusion for sequential `WaitFor::InBlock` transactions. So we
+	/// manually override that by choosing to query at the current best block instead.
 	async fn submit_at_best_block(
 		&self,
 		tx: &impl subxt::tx::Payload,

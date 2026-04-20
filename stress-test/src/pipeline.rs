@@ -50,7 +50,6 @@ struct SubmitCounters {
 /// Content hash → extrinsic size mapping (separate lock from counters to reduce contention).
 type ContentHashMap = std::collections::HashMap<[u8; 32], u64>;
 
-
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
 
@@ -227,7 +226,6 @@ pub fn auth_batches_from_keypairs(keypairs: &[Keypair]) -> Vec<Vec<subxt::utils:
 		.collect()
 }
 
-
 /// Block until the estimated number of in-flight transactions (submitted − confirmed)
 /// drops to [`POOL_PENDING_PAUSE_THRESHOLD`] or below.
 ///
@@ -317,23 +315,19 @@ fn spawn_pipeline_dual_monitor(
 		};
 
 		// Confirm all pending blocks in [old_max+1..new_max].
-		let drain_finalized =
-			|pending: &mut std::collections::HashMap<u64, PendingBlock>,
-			 old_max: u64,
-			 new_max: u64,
-			 prev_ts: &mut Option<u64>| {
-				let mut nums: Vec<u64> = pending
-					.keys()
-					.filter(|&&n| n > old_max && n <= new_max)
-					.copied()
-					.collect();
-				nums.sort();
-				for n in nums {
-					if let Some(pb) = pending.remove(&n) {
-						push_finalized(&pb, prev_ts);
-					}
+		let drain_finalized = |pending: &mut std::collections::HashMap<u64, PendingBlock>,
+		                       old_max: u64,
+		                       new_max: u64,
+		                       prev_ts: &mut Option<u64>| {
+			let mut nums: Vec<u64> =
+				pending.keys().filter(|&&n| n > old_max && n <= new_max).copied().collect();
+			nums.sort();
+			for n in nums {
+				if let Some(pb) = pending.remove(&n) {
+					push_finalized(&pb, prev_ts);
 				}
-			};
+			}
+		};
 
 		loop {
 			if cancel.load(Ordering::Relaxed) {
@@ -457,7 +451,12 @@ fn spawn_pipeline_dual_monitor(
 					Ok(Some(fin_number)) => {
 						let old_max = max_finalized;
 						max_finalized = max_finalized.max(fin_number);
-						drain_finalized(&mut pending, old_max, max_finalized, &mut prev_confirmed_timestamp_ms);
+						drain_finalized(
+							&mut pending,
+							old_max,
+							max_finalized,
+							&mut prev_confirmed_timestamp_ms,
+						);
 					},
 					Ok(None) => {
 						log::warn!("pipeline monitor: finalized subscription closed");
