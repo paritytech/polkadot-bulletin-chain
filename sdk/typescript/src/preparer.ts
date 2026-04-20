@@ -17,6 +17,7 @@ import {
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
+  resolveClientConfig,
   type StoreOptions,
 } from "./types.js"
 import { calculateCid, estimateAuthorization } from "./utils.js"
@@ -32,11 +33,7 @@ export class BulletinPreparer {
   private config: Required<ClientConfig>
 
   constructor(config?: ClientConfig) {
-    this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024,
-      createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024,
-    }
+    this.config = resolveClientConfig(config)
   }
 
   /**

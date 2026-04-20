@@ -92,11 +92,13 @@ export {
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
+  DEFAULT_CLIENT_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
   type ProgressEvent,
+  resolveClientConfig,
   type StoreOptions,
   type StoreResult,
   type TransactionStatusEvent,
@@ -116,8 +118,3 @@ export {
   toBytes,
   validateChunkSize,
 } from "./utils.js"
-
-/**
- * SDK version
- */
-export const VERSION = "0.1.0"

@@ -15,13 +15,14 @@ use bulletin_polkadot_runtime::{
 	},
 	AccountId, BridgePolkadotGrandpa, BridgePolkadotMessages,
 };
+use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use frame_support::{assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get};
 use pallet_bridge_messages::{
 	messages_generation::{encode_all_messages, encode_lane_data, prepare_messages_storage_proof},
 	BridgedChainOf, LaneIdOf, ThisChainOf,
 };
 use pallet_bridge_parachains::ParachainHeaders;
-use pallet_transaction_storage::{
+use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig, BAD_DATA_SIZE,
 };
 use runtime::{
@@ -39,7 +40,6 @@ use sp_runtime::{
 };
 use sp_trie::{trie_types::TrieDBMutBuilderV1, LayoutV1, MemoryDB, TrieMut};
 use std::collections::HashMap;
-use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 
 fn advance_block() {
 	let current_number = System::block_number();
@@ -280,7 +280,7 @@ fn construct_extrinsic(
 			frame_system::Pallet::<Runtime>::account(&account_id).nonce,
 		),
 		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_transaction_storage::extension::ValidateStorageCalls::<
+		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
 			Runtime,
 			runtime::StorageCallInspector,
 		>::default(),
@@ -341,7 +341,7 @@ fn transaction_storage_runtime_sizes() {
 			runtime::RuntimeOrigin::root(),
 			who.clone(),
 			sizes.len() as u32,
-			total_bytes,
+			total_bytes
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
@@ -374,7 +374,7 @@ fn transaction_storage_runtime_sizes() {
 			runtime::RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			oversized,
+			oversized
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who),
@@ -407,7 +407,7 @@ fn store_with_cid_config_works() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			3,
-			3 * total_bytes,
+			3 * total_bytes
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
@@ -512,7 +512,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			5,
-			500,
+			500
 		));
 		assert_ok!(runtime::TransactionStorage::authorize_preimage(
 			RuntimeOrigin::root(),
@@ -1061,10 +1061,10 @@ fn allowed_signed_calls_preserves_storage_priority() {
 	});
 }
 
-/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+/// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
-	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(None);
+	pallet_bulletin_transaction_storage::ensure_weight_sanity::<Runtime>(None);
 }
 
 // ============================================================================
@@ -1287,7 +1287,7 @@ fn wrapped_renew_requires_authorization() {
 	pallet_sudo::GenesisConfig::<Runtime> { key: Some(sudo_relayer_signer().into()) }
 		.assimilate_storage(&mut t)
 		.unwrap();
-	pallet_transaction_storage::GenesisConfig::<Runtime> {
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
 		byte_fee: 0,
 		entry_fee: 0,
@@ -1306,7 +1306,7 @@ fn wrapped_renew_requires_authorization() {
 			RuntimeOrigin::root(),
 			authorized.to_account_id(),
 			1,
-			data.len() as u64,
+			data.len() as u64
 		));
 		assert_ok_ok(construct_and_apply_extrinsic(
 			authorized.pair(),
@@ -1443,7 +1443,7 @@ fn authorized_wrapped_store_rejected() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			4,
-			4 * data.len() as u64,
+			4 * data.len() as u64
 		));
 
 		let store_call =
@@ -1493,7 +1493,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			data_b.len() as u64,
+			data_b.len() as u64
 		));
 
 		let store_a =
@@ -1566,7 +1566,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			data.len() as u64,
+			data.len() as u64
 		));
 
 		let store_call =
@@ -1617,7 +1617,7 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			data.len() as u64,
+			data.len() as u64
 		));
 
 		let store_call =
@@ -1655,13 +1655,13 @@ fn max_recursion_depth_is_enforced() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			data.len() as u64,
+			data.len() as u64
 		));
 
 		// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
 		let mut call: RuntimeCall =
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
-		for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+		for _ in 0..=pallet_bulletin_transaction_storage::MAX_WRAPPER_DEPTH {
 			call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 		}
 
@@ -1698,7 +1698,7 @@ fn store_extrinsic_has_expected_priority_and_longevity() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			data.len() as u64,
+			data.len() as u64
 		));
 
 		let call = RuntimeCall::TransactionStorage(TxStorageCall::<runtime::Runtime>::store {
