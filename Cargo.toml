@@ -35,12 +35,12 @@ tracing = { version = "0.1.41", default-features = false }
 westend-runtime-constants = { version = "26.0.0", package = "westend-runtime-constants", default-features = false }
 
 # Local workspace members
-bulletin-pallets-common = { path = "pallets/common", default-features = false }
+bulletin-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
 bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
-bulletin-transaction-storage-primitives = { path = "pallets/transaction-storage/primitives", default-features = false }
+bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
-pallet-bulletin-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
+pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
 pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
 pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 
