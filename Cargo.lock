@@ -8398,16 +8398,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-relayer-set"
-version = "1.0.0"
-dependencies = [
- "log",
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
-]
-
-[[package]]
 name = "pallet-revive"
 version = "0.1.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -8825,20 +8815,6 @@ dependencies = [
  "sp-core 28.0.0",
  "sp-io",
  "sp-runtime",
-]
-
-[[package]]
-name = "pallet-validator-set"
-version = "1.0.0"
-dependencies = [
- "bulletin-pallets-common",
- "log",
- "pallet-session",
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
- "serde",
- "sp-staking",
 ]
 
 [[package]]

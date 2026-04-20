@@ -8,8 +8,7 @@ as a parachain using the Polkadot SDK's `polkadot-omni-node` binary against the
 ## Runtime functionality
 
 The Bulletin chain runtime stores transactions for a configurable retention
-period (currently set at 2 weeks) and provides proof of storage. It uses Aura
-for parachain block authoring, with finality provided by the relay chain.
+period (currently set at 2 weeks) and provides proof of storage.
 
 ### Core functionality
 
@@ -43,15 +42,6 @@ user account will submit the data via `transactionStorage.store` (over the
 bridge).
 
 ### Pallets
-
-#### pallets/relayer-set
-
-Controls the authorized relayers between Bulletin and PoP-polkadot.
-
-#### pallets/validator-set
-
-Controls the validator set. Currently set in genesis and validators can be
-added and removed by root.
 
 #### pallets/transaction-storage
 

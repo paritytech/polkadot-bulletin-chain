@@ -37,8 +37,6 @@ bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-bulletin-transaction-storage = { path = "pallets/transaction-storage", default-features = false }
-pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
-pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { git = "https://github.com/paritytech/polkadot-sdk.git", rev = "f9df32360c6c22747f60b3ff58243890eecafc8e", default-features = false }
@@ -119,10 +117,8 @@ substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git
 resolver = "2"
 members = [
 	"pallets/common",
-	"pallets/relayer-set",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
-	"pallets/validator-set",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",

@@ -43,8 +43,6 @@ cargo test
 
 # Run pallet tests
 cargo test -p pallet-bulletin-transaction-storage
-cargo test -p pallet-validator-set
-cargo test -p pallet-relayer-set
 
 # Run runtime tests
 cargo test -p bulletin-westend-runtime
@@ -65,9 +63,7 @@ polkadot-bulletin-chain/
 │   └── bulletin-westend/     # Westend parachain runtime
 ├── pallets/
 │   ├── common/               # Shared pallet utilities
-│   ├── transaction-storage/  # Core storage pallet
-│   ├── validator-set/        # PoA validator management
-│   └── relayer-set/          # Bridge relayer management
+│   └── transaction-storage/  # Core storage pallet
 ├── sdk/                      # Rust and TypeScript SDKs
 ├── examples/                 # JavaScript/Rust integration examples
 ├── scripts/                  # Build and deployment scripts
@@ -81,8 +77,6 @@ polkadot-bulletin-chain/
 
 **Core Pallets**:
 - `pallet-transaction-storage` - Stores data, manages retention, provides storage proofs
-- `pallet-validator-set` - Dynamic validator set management (PoA)
-- `pallet-relayer-set` - Manages bridge relayers between Bulletin and PoP chain
 
 ## Development Workflow
 
@@ -113,7 +107,6 @@ This project is built on the **Polkadot SDK** (formerly Substrate/Polkadot/Cumul
 
 The Polkadot SDK provides:
 - FRAME pallet system and runtime macros
-- Consensus engines (Aura for parachain block authoring; relay-chain GRANDPA finality)
 - Networking (libp2p, litep2p)
 - XCM (Cross-Consensus Messaging) infrastructure
 
