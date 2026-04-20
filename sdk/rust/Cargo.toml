@@ -6,6 +6,7 @@ edition.workspace = true
 repository.workspace = true
 license = "GPL-3.0-or-later"
 description = "Off-chain client SDK for Polkadot Bulletin Chain"
+publish = false
 
 [dependencies]
 # Core dependencies
@@ -18,7 +19,7 @@ scale-info = { workspace = true, features = [
 cid = { version = "0.11", default-features = false, features = ["alloc"] }
 
 # CID primitives
-transaction-storage-primitives = { workspace = true }
+bulletin-transaction-storage-primitives = { workspace = true }
 
 # Substrate primitives
 sp-core = { workspace = true }
@@ -40,6 +41,7 @@ subxt = "0.44"
 default = ["std"]
 
 std = [
+	"bulletin-transaction-storage-primitives/std",
 	"cid/std",
 	"codec/std",
 	"scale-info/std",
@@ -49,7 +51,6 @@ std = [
 	"subxt-signer",
 	"thiserror",
 	"tokio",
-	"transaction-storage-primitives/std",
 ]
 
 # Runtime benchmarking (no-op for SDK, but required for workspace consistency)

@@ -6,6 +6,7 @@ edition.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
 description = "Relayer set pallet"
+publish = false
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

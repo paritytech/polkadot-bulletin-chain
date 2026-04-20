@@ -16,6 +16,7 @@
 
 #![cfg(test)]
 
+use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
@@ -26,7 +27,7 @@ use bulletin_westend_runtime::{
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
-use pallet_transaction_storage::{
+use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
 };
 use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
@@ -40,7 +41,6 @@ use sp_runtime::{
 };
 use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
-use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -86,7 +86,7 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		pallet_transaction_storage::extension::ValidateStorageCalls::<
+		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
 			Runtime,
 			bulletin_westend_runtime::storage::StorageCallInspector,
 		>::default(),
@@ -210,7 +210,7 @@ fn transaction_storage_runtime_sizes() {
 			// On the Westend, very large extrinsics may be rejected earlier for exhausting
 			// resources (block length/weight) before reaching the pallet's BAD_DATA_SIZE check.
 			assert!(
-				res == Err(pallet_transaction_storage::BAD_DATA_SIZE.into()) ||
+				res == Err(pallet_bulletin_transaction_storage::BAD_DATA_SIZE.into()) ||
 					res == Err(InvalidTransaction::ExhaustsResources.into()),
 				"unexpected error: {res:?}"
 			);
@@ -616,13 +616,13 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 fn people_chain_can_authorize_storage_with_transact() {
 	// Prepare call.
 	let account = Sr25519Keyring::Ferdie;
-	let authorize_call = RuntimeCall::TransactionStorage(pallet_transaction_storage::Call::<
-		Runtime,
-	>::authorize_account {
-		who: account.to_account_id(),
-		transactions: 16,
-		bytes: 1024,
-	});
+	let authorize_call = RuntimeCall::TransactionStorage(
+		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
+			who: account.to_account_id(),
+			transactions: 16,
+			bytes: 1024,
+		},
+	);
 
 	// Execute XCM as People chain origin would do with `Transact -> Origin::Xcm`.
 	ExtBuilder::<Runtime>::default()
@@ -644,7 +644,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 
 			// Check event.
 			System::assert_has_event(RuntimeEvent::TransactionStorage(
-				pallet_transaction_storage::Event::AccountAuthorized {
+				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
 					who: account.to_account_id(),
 					transactions: 16,
 					bytes: 1024,
@@ -660,13 +660,13 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 	let people_next_location = Location::new(1, [Parachain(5140)]);
 
 	let account = Sr25519Keyring::Ferdie;
-	let authorize_call = RuntimeCall::TransactionStorage(pallet_transaction_storage::Call::<
-		Runtime,
-	>::authorize_account {
-		who: account.to_account_id(),
-		transactions: 16,
-		bytes: 1024,
-	});
+	let authorize_call = RuntimeCall::TransactionStorage(
+		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
+			who: account.to_account_id(),
+			transactions: 16,
+			bytes: 1024,
+		},
+	);
 
 	ExtBuilder::<Runtime>::default()
 		.with_collators(vec![AccountId::from(ALICE)])
@@ -687,7 +687,7 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 
 			// Check event.
 			System::assert_has_event(RuntimeEvent::TransactionStorage(
-				pallet_transaction_storage::Event::AccountAuthorized {
+				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
 					who: account.to_account_id(),
 					transactions: 16,
 					bytes: 1024,
@@ -696,10 +696,10 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		})
 }
 
-/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+/// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
-	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
+	pallet_bulletin_transaction_storage::ensure_weight_sanity::<Runtime>(
 		// Collator-side PoV cap: default 85% of max_pov_size.
 		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
 		Some(85),
@@ -1033,7 +1033,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 #[test]
 fn wrapped_renew_requires_authorization() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
-	pallet_transaction_storage::GenesisConfig::<Runtime> {
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
 		byte_fee: 0,
 		entry_fee: 0,
@@ -1317,7 +1317,7 @@ fn max_recursion_depth_is_enforced() {
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: data.clone(),
 				});
-			for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+			for _ in 0..=pallet_bulletin_transaction_storage::MAX_WRAPPER_DEPTH {
 				call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 			}
 

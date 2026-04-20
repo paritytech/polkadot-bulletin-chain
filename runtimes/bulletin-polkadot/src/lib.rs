@@ -292,7 +292,7 @@ impl pallet_session::Config for Runtime {
 	type SessionHandler = <opaque::SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = opaque::SessionKeys;
 	type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
-	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
+	type Currency = bulletin_pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
 	type KeyDeposit = ();
 	// TODO: nothing for now, maybe in the future.
 	type DisablingStrategy = ();
@@ -367,8 +367,9 @@ impl SortedMembers<AccountId> for TestAccounts {
 	}
 }
 
-/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
-/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// storage calls inside wrapper extrinsics so it can recursively validate and consume
+/// authorization.
 ///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
 /// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM
@@ -377,7 +378,7 @@ impl SortedMembers<AccountId> for TestAccounts {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct StorageCallInspector;
 
-impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
+impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<alloc::vec::Vec<&RuntimeCall>> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
@@ -397,15 +398,15 @@ impl frame_support::traits::Contains<RuntimeCall> for StorageCallInspector {
 	}
 }
 
-impl pallet_transaction_storage::Config for Runtime {
+impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
-	type WeightInfo = weights::pallet_transaction_storage::WeightInfo<Runtime>;
+	type WeightInfo = weights::pallet_bulletin_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions =
-		ConstU32<{ pallet_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
+		ConstU32<{ pallet_bulletin_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with [`BlockLength`].
 	type MaxTransactionSize = ConstU32<{ 8 * 1024 * 1024 }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
@@ -465,7 +466,9 @@ const CHECK_PROOF: &str = "\
 ";
 
 #[cfg(feature = "runtime-benchmarks")]
-impl pallet_transaction_storage::benchmarking::BenchmarkHelper<Runtime> for CheckProofHelper {
+impl pallet_bulletin_transaction_storage::benchmarking::BenchmarkHelper<Runtime>
+	for CheckProofHelper
+{
 	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8> {
 		assert_eq!(random_hash, &[0u8; 32], "CheckProofHelper proof was built with [0u8; 32]");
 		array_bytes::hex2bytes_unchecked(CHECK_PROOF)
@@ -521,7 +524,7 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 impl pallet_proxy::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
-	type Currency = pallets_common::NoCurrency<AccountId>;
+	type Currency = bulletin_pallets_common::NoCurrency<AccountId>;
 	type ProxyType = ProxyType;
 	type ProxyDepositBase = ();
 	type ProxyDepositFactor = ();
@@ -574,7 +577,7 @@ construct_runtime!(
 		Grandpa: pallet_grandpa = 15,
 
 		// Storage
-		TransactionStorage: pallet_transaction_storage = 40,
+		TransactionStorage: pallet_bulletin_transaction_storage = 40,
 
 		// Bridge
 		RelayerSet: pallet_relayer_set = 50,
@@ -608,11 +611,11 @@ fn validate_purge_keys(who: &AccountId) -> TransactionValidity {
 	}
 }
 
-use pallet_transaction_storage::{CallInspector, MAX_WRAPPER_DEPTH};
-use pallets_common::{
+use bulletin_pallets_common::{
 	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, proxy_inner_calls,
 	utility_inner_calls,
 };
+use pallet_bulletin_transaction_storage::{CallInspector, MAX_WRAPPER_DEPTH};
 
 /// Extract the signer from an origin that may be either `Signed` or `Authorized`.
 ///
@@ -624,7 +627,9 @@ fn extract_signer(origin: &RuntimeOrigin) -> Option<AccountId> {
 	}
 	match origin.caller() {
 		OriginCaller::TransactionStorage(
-			pallet_transaction_storage::pallet::Origin::<Runtime>::Authorized { who, .. },
+			pallet_bulletin_transaction_storage::pallet::Origin::<Runtime>::Authorized {
+				who, ..
+			},
 		) => Some(who.clone()),
 		_ => None,
 	}
@@ -900,7 +905,10 @@ pub type TxExtension = (
 	frame_system::CheckEra<Runtime>,
 	frame_system::CheckNonce<Runtime>,
 	frame_system::CheckWeight<Runtime>,
-	pallet_transaction_storage::extension::ValidateStorageCalls<Runtime, StorageCallInspector>,
+	pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+		Runtime,
+		StorageCallInspector,
+	>,
 	AllowedSignedCalls,
 	BridgeRejectObsoleteHeadersAndMessages,
 );
@@ -924,13 +932,13 @@ pub type Executive = frame_executive::Executive<
 pub mod migrations {
 	/// Unreleased migrations. Add new ones here:
 	pub type Unreleased =
-		(pallet_transaction_storage::migrations::v1::MigrateV0ToV1<crate::Runtime>,);
+		(pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<crate::Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
-		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+		pallet_bulletin_transaction_storage::migrations::SetRetentionPeriodIfZero<
 			crate::Runtime,
-			pallet_transaction_storage::DefaultRetentionPeriod,
+			pallet_bulletin_transaction_storage::DefaultRetentionPeriod,
 		>,
 	);
 
@@ -950,7 +958,7 @@ mod benches {
 		[frame_system, SystemBench::<Runtime>]
 		[frame_system_extensions, SystemExtensionsBench::<Runtime>]
 		[pallet_timestamp, Timestamp]
-		[pallet_transaction_storage, TransactionStorage]
+		[pallet_bulletin_transaction_storage, TransactionStorage]
 		[pallet_validator_set, ValidatorSet]
 		[pallet_relayer_set, RelayerSet]
 
@@ -1070,7 +1078,7 @@ mod benches {
 
 #[cfg(feature = "runtime-benchmarks")]
 use benches::*;
-use pallets_common::NoCurrency;
+use bulletin_pallets_common::NoCurrency;
 
 impl_runtime_apis! {
 	impl sp_api::Core<Block> for Runtime {

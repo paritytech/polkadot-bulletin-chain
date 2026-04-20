@@ -16,7 +16,7 @@ use futures::{
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
 	sync::{
-		atomic::{AtomicBool, Ordering},
+		atomic::{AtomicBool, AtomicU64, Ordering},
 		Arc, Mutex,
 	},
 	time::{Duration, Instant},
@@ -37,17 +37,18 @@ use crate::{
 	},
 };
 
+/// Atomic counters updated by workers (lock-free hot path).
 #[derive(Default)]
-struct SubmitStats {
-	submitted: u64,
-	submitted_bytes: u64,
-	/// Map from content hash (blake2b-256 of payload) to extrinsic encoded size.
-	/// The monitor removes entries as it sees `Stored` events, keeping memory bounded.
-	content_hash_to_ext_size: std::collections::HashMap<[u8; 32], u64>,
-	errors: u64,
-	pool_full_retries: u64,
-	stale_nonces: u64,
+struct SubmitCounters {
+	submitted: AtomicU64,
+	submitted_bytes: AtomicU64,
+	errors: AtomicU64,
+	pool_full_retries: AtomicU64,
+	stale_nonces: AtomicU64,
 }
+
+/// Content hash → extrinsic size mapping (separate lock from counters to reduce contention).
+type ContentHashMap = std::collections::HashMap<[u8; 32], u64>;
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
@@ -225,25 +226,20 @@ pub fn auth_batches_from_keypairs(keypairs: &[Keypair]) -> Vec<Vec<subxt::utils:
 		.collect()
 }
 
-/// Total confirmed store events across all tracked blocks.
-fn total_confirmed(block_stats: &Arc<Mutex<Vec<BlockStats>>>) -> u64 {
-	block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum()
-}
-
 /// Block until the estimated number of in-flight transactions (submitted − confirmed)
 /// drops to [`POOL_PENDING_PAUSE_THRESHOLD`] or below.
 ///
 /// This avoids the `author_pendingExtrinsics` RPC which fetches all pending
 /// transaction bodies and can fail with "message too large" under heavy load.
 async fn wait_until_txpool_can_pull_work(
-	submit_stats: &Arc<Mutex<SubmitStats>>,
-	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
+	counters: &Arc<SubmitCounters>,
+	confirmed_count: &Arc<AtomicU64>,
 	new_block_notify: &Arc<Notify>,
 ) {
 	let mut logged = false;
 	loop {
-		let submitted = submit_stats.lock().unwrap().submitted;
-		let confirmed = total_confirmed(block_stats);
+		let submitted = counters.submitted.load(Ordering::Relaxed);
+		let confirmed = confirmed_count.load(Ordering::Relaxed);
 		let estimated_pending = submitted.saturating_sub(confirmed) as usize;
 
 		if estimated_pending <= POOL_PENDING_PAUSE_THRESHOLD {
@@ -282,11 +278,13 @@ fn spawn_pipeline_dual_monitor(
 	cancel: Arc<AtomicBool>,
 	target_blocks: Option<u32>,
 	target_reached: Arc<AtomicBool>,
-	submit_stats: Arc<Mutex<SubmitStats>>,
+	content_hash_map: Arc<Mutex<ContentHashMap>>,
+	confirmed_count: Arc<AtomicU64>,
 ) -> tokio::task::JoinHandle<()> {
-	let DualBlockSubscription { mut best_rx, mut finalized_rx, monitor_client } = dual;
+	let DualBlockSubscription { mut best_rx, mut finalized_rx, monitor_client, ws_url } = dual;
 
 	tokio::spawn(async move {
+		let mut monitor_client = monitor_client;
 		let mut best_measured_blocks = 0u32;
 		let mut pending: std::collections::HashMap<u64, PendingBlock> =
 			std::collections::HashMap::new();
@@ -294,6 +292,7 @@ fn spawn_pipeline_dual_monitor(
 		let mut prev_confirmed_timestamp_ms: Option<u64> = None;
 		monitor_ready.notify_one();
 
+		let confirmed_count = confirmed_count.clone();
 		let push_finalized = |pb: &PendingBlock, prev_ts: &mut Option<u64>| {
 			let interval_ms = match (pb.timestamp_ms, *prev_ts) {
 				(Some(ts), Some(prev)) => Some(ts.saturating_sub(prev)),
@@ -302,6 +301,7 @@ fn spawn_pipeline_dual_monitor(
 			if pb.timestamp_ms.is_some() {
 				*prev_ts = pb.timestamp_ms;
 			}
+			confirmed_count.fetch_add(pb.tx_count, Ordering::Relaxed);
 			block_stats.lock().unwrap().push(BlockStats {
 				number: pb.number,
 				tx_count: pb.tx_count,
@@ -312,6 +312,21 @@ fn spawn_pipeline_dual_monitor(
 				finalized: true,
 				interval_ms,
 			});
+		};
+
+		// Confirm all pending blocks in [old_max+1..new_max].
+		let drain_finalized = |pending: &mut std::collections::HashMap<u64, PendingBlock>,
+		                       old_max: u64,
+		                       new_max: u64,
+		                       prev_ts: &mut Option<u64>| {
+			let mut nums: Vec<u64> =
+				pending.keys().filter(|&&n| n > old_max && n <= new_max).copied().collect();
+			nums.sort();
+			for n in nums {
+				if let Some(pb) = pending.remove(&n) {
+					push_finalized(&pb, prev_ts);
+				}
+			}
 		};
 
 		loop {
@@ -335,23 +350,40 @@ fn spawn_pipeline_dual_monitor(
 					let hashes = stored_content_hashes(&block).await;
 					let store_tx_count = hashes.len() as u64;
 
-					// Look up actual extrinsic sizes from the content_hash map and remove entries.
+					// Look up actual extrinsic sizes and remove entries.
 					let store_tx_bytes = {
-						let mut ss = submit_stats.lock().unwrap();
+						let mut map = content_hash_map.lock().unwrap();
 						hashes
 							.iter()
-							.filter_map(|h| ss.content_hash_to_ext_size.remove(h))
+							.filter_map(|h| map.remove(h))
 							.sum::<u64>()
 					};
 
-					let timestamp_ms = match read_timestamp_at(&monitor_client, block_hash).await {
-						Ok(ts) => Some(ts),
-						Err(e) => {
-							log::warn!(
-								"pipeline: block #{block_number}: failed to read timestamp: {e}"
-							);
-							None
-						},
+					// Only read timestamp for blocks with txs (skip empty blocks).
+					let timestamp_ms = if store_tx_count == 0 {
+						None
+					} else {
+						match read_timestamp_at(&monitor_client, block_hash).await {
+							Ok(ts) => Some(ts),
+							Err(e) => {
+								log::warn!(
+									"pipeline: block #{block_number}: timestamp read failed, \
+									 reconnecting: {e}"
+								);
+								match crate::client::connect(&ws_url).await {
+									Ok(new_client) => {
+										monitor_client = new_client;
+										read_timestamp_at(&monitor_client, block_hash)
+											.await
+											.ok()
+									},
+									Err(re) => {
+										log::warn!("pipeline: monitor reconnect failed: {re}");
+										None
+									},
+								}
+							},
+						}
 					};
 
 					{
@@ -371,14 +403,12 @@ fn spawn_pipeline_dual_monitor(
 							 {store_tx_count} store txs, {store_tx_bytes} bytes \
 							 (best measured #{best_measured_blocks})"
 						);
-						if let Some(target) = target_blocks {
-							if best_measured_blocks >= target {
-								log::info!(
-									"pipeline monitor: reached {best_measured_blocks} \
-									 measured best blocks (target {target}), signalling stop"
-								);
-								target_reached.store(true, Ordering::Relaxed);
-							}
+						if target_blocks.is_some_and(|t| best_measured_blocks >= t) {
+							log::info!(
+								"pipeline monitor: reached {best_measured_blocks} \
+								 measured best blocks (target {target_blocks:?}), signalling stop"
+							);
+							target_reached.store(true, Ordering::Relaxed);
 						}
 					}
 
@@ -401,19 +431,7 @@ fn spawn_pipeline_dual_monitor(
 				Some(fin_number) = finalized_rx.recv() => {
 					let old_max = max_finalized;
 					max_finalized = max_finalized.max(fin_number);
-
-					let mut to_confirm: Vec<u64> = pending
-						.keys()
-						.filter(|&&n| n > old_max && n <= max_finalized)
-						.copied()
-						.collect();
-					to_confirm.sort();
-
-					for num in to_confirm {
-						if let Some(pb) = pending.remove(&num) {
-							push_finalized(&pb, &mut prev_confirmed_timestamp_ms);
-						}
-					}
+					drain_finalized(&mut pending, old_max, max_finalized, &mut prev_confirmed_timestamp_ms);
 				}
 
 				else => break,
@@ -432,17 +450,12 @@ fn spawn_pipeline_dual_monitor(
 					Ok(Some(fin_number)) => {
 						let old_max = max_finalized;
 						max_finalized = max_finalized.max(fin_number);
-						let mut to_confirm: Vec<u64> = pending
-							.keys()
-							.filter(|&&n| n > old_max && n <= max_finalized)
-							.copied()
-							.collect();
-						to_confirm.sort();
-						for num in to_confirm {
-							if let Some(pb) = pending.remove(&num) {
-								push_finalized(&pb, &mut prev_confirmed_timestamp_ms);
-							}
-						}
+						drain_finalized(
+							&mut pending,
+							old_max,
+							max_finalized,
+							&mut prev_confirmed_timestamp_ms,
+						);
 					},
 					Ok(None) => {
 						log::warn!("pipeline monitor: finalized subscription closed");
@@ -475,7 +488,8 @@ struct StoreWorker {
 	client: Arc<jsonrpsee::ws_client::WsClient>,
 	reconnect_url: String,
 	consecutive_conn_errors: u32,
-	stats: Arc<Mutex<SubmitStats>>,
+	counters: Arc<SubmitCounters>,
+	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	new_block_notify: Arc<Notify>,
 }
 
@@ -490,13 +504,9 @@ impl StoreWorker {
 			match result {
 				Ok(hash) => {
 					let ext_len = msg.extrinsic.len() as u64;
-					let n = {
-						let mut s = self.stats.lock().unwrap();
-						s.submitted += 1;
-						s.submitted_bytes += ext_len;
-						s.content_hash_to_ext_size.insert(msg.content_hash, ext_len);
-						s.submitted
-					};
+					let n = self.counters.submitted.fetch_add(1, Ordering::Relaxed) + 1;
+					self.counters.submitted_bytes.fetch_add(ext_len, Ordering::Relaxed);
+					self.content_hash_map.lock().unwrap().insert(msg.content_hash, ext_len);
 					self.consecutive_conn_errors = 0;
 					if n == 1 || n.is_multiple_of(256) {
 						log::debug!("pipeline store: worker {id} accepted total={n} hash={hash:?}");
@@ -511,12 +521,12 @@ impl StoreWorker {
 					);
 					match class {
 						TxPoolError::PoolFull => {
-							self.stats.lock().unwrap().pool_full_retries += 1;
+							self.counters.pool_full_retries.fetch_add(1, Ordering::Relaxed);
 							self.consecutive_conn_errors = 0;
 							tokio::time::sleep(Duration::from_secs(1)).await;
 						},
 						TxPoolError::Banned | TxPoolError::ExhaustsResources => {
-							self.stats.lock().unwrap().pool_full_retries += 1;
+							self.counters.pool_full_retries.fetch_add(1, Ordering::Relaxed);
 							self.consecutive_conn_errors = 0;
 							tokio::time::timeout(
 								Duration::from_secs(3),
@@ -546,7 +556,7 @@ impl StoreWorker {
 										log::error!(
 											"pipeline store: worker {id}: giving up reconnect"
 										);
-										self.stats.lock().unwrap().errors += 1;
+										self.counters.errors.fetch_add(1, Ordering::Relaxed);
 										return Err(anyhow::anyhow!(
 											"pipeline store: reconnect failed (worker {id})"
 										));
@@ -555,7 +565,7 @@ impl StoreWorker {
 						},
 						TxPoolError::TxDropped => {
 							self.consecutive_conn_errors = 0;
-							self.stats.lock().unwrap().pool_full_retries += 1;
+							self.counters.pool_full_retries.fetch_add(1, Ordering::Relaxed);
 							return Ok(());
 						},
 						TxPoolError::AlreadyImported => {
@@ -564,18 +574,18 @@ impl StoreWorker {
 						},
 						TxPoolError::StaleNonce => {
 							self.consecutive_conn_errors = 0;
-							self.stats.lock().unwrap().stale_nonces += 1;
+							self.counters.stale_nonces.fetch_add(1, Ordering::Relaxed);
 							return Ok(());
 						},
 						TxPoolError::FutureNonce => {
 							self.consecutive_conn_errors = 0;
-							self.stats.lock().unwrap().errors += 1;
+							self.counters.errors.fetch_add(1, Ordering::Relaxed);
 							return Ok(());
 						},
 						TxPoolError::Other => {
 							self.consecutive_conn_errors = 0;
 							log::warn!("pipeline store: worker {id} (class={class:?}): {e:#}");
-							self.stats.lock().unwrap().errors += 1;
+							self.counters.errors.fetch_add(1, Ordering::Relaxed);
 							return Ok(());
 						},
 					}
@@ -617,7 +627,8 @@ fn spawn_store_submit_workers(
 	num_workers: usize,
 	pool: &[Arc<jsonrpsee::ws_client::WsClient>],
 	ws_urls_owned: &[String],
-	stats: Arc<Mutex<SubmitStats>>,
+	counters: Arc<SubmitCounters>,
+	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	new_block_notify: Arc<Notify>,
 ) -> (Vec<mpsc::Sender<StoreWorkMsg>>, Vec<tokio::task::JoinHandle<Result<()>>>) {
 	let per_worker_cap = 2;
@@ -633,7 +644,8 @@ fn spawn_store_submit_workers(
 			client: pool[worker_id].clone(),
 			reconnect_url: ws_urls_owned[worker_id % ws_urls_owned.len()].clone(),
 			consecutive_conn_errors: 0,
-			stats: stats.clone(),
+			counters: counters.clone(),
+			content_hash_map: content_hash_map.clone(),
 			new_block_notify: new_block_notify.clone(),
 		};
 
@@ -673,7 +685,10 @@ pub async fn run_block_capacity_pipeline(
 	let measure_start = Arc::new(Mutex::new(None::<Instant>));
 	let monitor_ready = Arc::new(Notify::new());
 	let target_reached = Arc::new(AtomicBool::new(false));
-	let submit_stats = Arc::new(Mutex::new(SubmitStats::default()));
+	let counters = Arc::new(SubmitCounters::default());
+	let content_hash_map: Arc<Mutex<ContentHashMap>> =
+		Arc::new(Mutex::new(std::collections::HashMap::new()));
+	let confirmed_count = Arc::new(AtomicU64::new(0));
 
 	let monitor_handle = spawn_pipeline_dual_monitor(
 		dual,
@@ -684,7 +699,8 @@ pub async fn run_block_capacity_pipeline(
 		cancel.clone(),
 		target_blocks,
 		target_reached.clone(),
-		submit_stats.clone(),
+		content_hash_map.clone(),
+		confirmed_count.clone(),
 	);
 
 	monitor_ready.notified().await;
@@ -708,7 +724,8 @@ pub async fn run_block_capacity_pipeline(
 		num_connections,
 		&pool,
 		&ws_urls_owned,
-		submit_stats.clone(),
+		counters.clone(),
+		content_hash_map.clone(),
 		new_block_notify.clone(),
 	);
 
@@ -720,7 +737,6 @@ pub async fn run_block_capacity_pipeline(
 	let mut store_worker_rr: usize = 0;
 	let mut stores_dispatched_since_txpool: u64 = 0;
 
-	// Background authorization task handle (interleaved with store dispatch).
 	let mut pending_auth: Option<tokio::task::JoinHandle<Result<()>>> = None;
 
 	// Run the work loop; capture errors but don't bail — we always want measurements.
@@ -738,7 +754,7 @@ pub async fn run_block_capacity_pipeline(
 
 		if stores_dispatched_since_txpool >= POOL_PENDING_PAUSE_THRESHOLD as u64 {
 			let bp_start = Instant::now();
-			wait_until_txpool_can_pull_work(&submit_stats, &block_stats, &new_block_notify).await;
+			wait_until_txpool_can_pull_work(&counters, &confirmed_count, &new_block_notify).await;
 			let bp_elapsed = bp_start.elapsed();
 			if bp_elapsed.as_millis() > 100 {
 				log::debug!(
@@ -840,8 +856,8 @@ pub async fn run_block_capacity_pipeline(
 				stores_dispatched_since_txpool += 1;
 				dbg_work_store += 1;
 				if dbg_work_store.is_multiple_of(512) {
-					let sub = submit_stats.lock().unwrap().submitted;
-					let conf = total_confirmed(&block_stats);
+					let sub = counters.submitted.load(Ordering::Relaxed);
+					let conf = confirmed_count.load(Ordering::Relaxed);
 					log::debug!(
 						"pipeline: dispatched={dbg_work_store} submitted={sub} \
 						 confirmed={conf} pending_estimate={}",
@@ -858,9 +874,8 @@ pub async fn run_block_capacity_pipeline(
 		pending_auth,
 		worker_txs,
 		&mut worker_handles,
-		&submit_stats,
-		&block_stats,
-		&new_block_notify,
+		&counters,
+		&confirmed_count,
 	)
 	.await;
 
@@ -877,7 +892,7 @@ pub async fn run_block_capacity_pipeline(
 		log::warn!("pipeline: monitor did not exit in time, aborting");
 	}
 
-	collect_results(start, &measure_start, &submit_stats, &block_stats, work_error)
+	collect_results(start, &measure_start, &counters, &block_stats, work_error)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -887,9 +902,8 @@ async fn shutdown_pipeline(
 	pending_auth: Option<tokio::task::JoinHandle<Result<()>>>,
 	worker_txs: Vec<mpsc::Sender<StoreWorkMsg>>,
 	worker_handles: &mut Vec<tokio::task::JoinHandle<Result<()>>>,
-	submit_stats: &Arc<Mutex<SubmitStats>>,
-	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
-	_new_block_notify: &Arc<Notify>,
+	counters: &Arc<SubmitCounters>,
+	confirmed_count: &Arc<AtomicU64>,
 ) {
 	const TX_TIMEOUT_SECS: u64 = 60;
 	let stopping = cancel.load(Ordering::Relaxed) || target_reached.load(Ordering::Relaxed);
@@ -926,11 +940,11 @@ async fn shutdown_pipeline(
 		}
 
 		// Wait for confirmations to catch up with submissions.
-		if submit_stats.lock().unwrap().submitted > 0 {
+		if counters.submitted.load(Ordering::Relaxed) > 0 {
 			let deadline = Instant::now() + Duration::from_secs(TX_TIMEOUT_SECS * 3);
 			loop {
-				let confirmed = total_confirmed(block_stats);
-				let sub = submit_stats.lock().unwrap().submitted;
+				let confirmed = confirmed_count.load(Ordering::Relaxed);
+				let sub = counters.submitted.load(Ordering::Relaxed);
 				if confirmed >= sub {
 					break;
 				}
@@ -950,7 +964,7 @@ async fn shutdown_pipeline(
 fn collect_results(
 	start: Instant,
 	measure_start: &Arc<Mutex<Option<Instant>>>,
-	submit_stats: &Arc<Mutex<SubmitStats>>,
+	counters: &Arc<SubmitCounters>,
 	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
 	work_error: Option<anyhow::Error>,
 ) -> Result<BulkStoreResult> {
@@ -960,12 +974,10 @@ fn collect_results(
 		.map(|ms| ms.elapsed())
 		.unwrap_or_else(|| start.elapsed());
 	let total_wall = start.elapsed();
-	let ss = submit_stats.lock().unwrap();
-	let total_submitted = ss.submitted;
-	let total_errors = ss.errors;
-	let total_pool_full = ss.pool_full_retries;
-	let total_stale = ss.stale_nonces;
-	drop(ss);
+	let total_submitted = counters.submitted.load(Ordering::Relaxed);
+	let total_errors = counters.errors.load(Ordering::Relaxed);
+	let total_pool_full = counters.pool_full_retries.load(Ordering::Relaxed);
+	let total_stale = counters.stale_nonces.load(Ordering::Relaxed);
 	let all_blocks = block_stats.lock().unwrap().clone();
 	let total_confirmed: u64 = all_blocks.iter().map(|b| b.tx_count).sum();
 
@@ -1014,23 +1026,23 @@ async fn build_store_work_items(
 	mode: &StorePayloadMode,
 	mix_rng: &Option<Arc<Mutex<StdRng>>>,
 ) -> Result<Vec<StressWorkItem>> {
-	stream::iter(keypairs.iter().cloned())
-		.map(|kp| {
+	// Pre-sample all payload sizes under the lock once, then release it.
+	let payload_sizes: Vec<usize> = match mode {
+		StorePayloadMode::Fixed(n) => vec![*n; keypairs.len()],
+		StorePayloadMode::Mixed(mix) => {
+			let mut g = mix_rng
+				.as_ref()
+				.ok_or_else(|| anyhow::anyhow!("pipeline: mixed mode requires RNG"))?
+				.lock()
+				.unwrap();
+			(0..keypairs.len()).map(|_| mix.sample(&mut *g)).collect()
+		},
+	};
+
+	stream::iter(keypairs.iter().cloned().zip(payload_sizes))
+		.map(|(kp, payload_size)| {
 			let client = client.clone();
-			let mode = mode.clone();
-			let mix_rng = mix_rng.clone();
 			async move {
-				let payload_size = match &mode {
-					StorePayloadMode::Fixed(n) => *n,
-					StorePayloadMode::Mixed(mix) => {
-						let mut g = mix_rng
-							.as_ref()
-							.ok_or_else(|| anyhow::anyhow!("pipeline: mixed mode requires RNG"))?
-							.lock()
-							.unwrap();
-						mix.sample(&mut *g)
-					},
-				};
 				let (account_id, encoded, content_hash) = tokio::task::spawn_blocking(move || {
 					let payload = crate::store::generate_payload(payload_size);
 					let content_hash = crate::client::blake2b_256(&payload);
@@ -1051,25 +1063,12 @@ async fn build_store_work_items(
 		.await
 }
 
-/// Push work items for iterative block-capacity runs (continuous production).
+/// Sign and push work items with look-ahead signing.
 ///
-/// Work items are **interleaved** so that authorization of batch N+1 runs concurrently with store
-/// dispatch of batch N:
+/// Signing of batch N+1 runs concurrently (background task) while batch N is
+/// authorized and dispatched. Each batch follows: `Authorize` → `AwaitPendingAuth` → `Store` items.
 ///
-/// ```text
-/// Authorize(0), AwaitPendingAuth,
-/// Authorize(1), Store(0)…, AwaitPendingAuth,
-/// Authorize(2), Store(1)…, AwaitPendingAuth,
-/// …
-/// Store(last)…
-/// ```
-///
-/// The reader spawns each `Authorize` as a background task and only blocks on
-/// `AwaitPendingAuth`, so stores from the previous batch flow to workers while the next batch's
-/// authorization waits for block inclusion.
-///
-/// For [`StorePayloadMode::Mixed`], `mix_seed` fixes the RNG (`StdRng::seed_from_u64`); if `None`,
-/// uses a fresh `StdRng::from_entropy()` for this run.
+/// For [`StorePayloadMode::Mixed`], `mix_seed` fixes the RNG; if `None`, uses OS entropy.
 pub async fn generate_block_capacity_work(
 	work_tx: mpsc::Sender<StressWorkItem>,
 	plans: &[IterationPlan],

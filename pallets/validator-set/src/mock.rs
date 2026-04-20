@@ -144,7 +144,7 @@ impl pallet_session::Config for Test {
 	type Keys = MockSessionKeys;
 	type WeightInfo = ();
 	type RuntimeEvent = RuntimeEvent;
-	type Currency = pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
+	type Currency = bulletin_pallets_common::NoCurrency<AccountId, RuntimeHoldReason>;
 	type KeyDeposit = ();
 	type DisablingStrategy = ();
 }
