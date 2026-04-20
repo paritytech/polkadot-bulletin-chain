@@ -407,7 +407,7 @@ pub(crate) mod tests {
 	#[test]
 	fn xcm_transact_store_is_blocked() {
 		run_test(|| {
-			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+			use pallet_bulletin_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
 
 			let data = vec![42u8; 100];
 			let content_hash = sp_io::hashing::blake2_256(&data);
@@ -460,7 +460,7 @@ pub(crate) mod tests {
 	#[test]
 	fn xcm_transact_wrapped_store_is_blocked() {
 		run_test(|| {
-			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+			use pallet_bulletin_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
 
 			let data = vec![42u8; 100];
 			let content_hash = sp_io::hashing::blake2_256(&data);
@@ -515,7 +515,7 @@ pub(crate) mod tests {
 	#[test]
 	fn xcm_transact_renew_is_blocked() {
 		run_test(|| {
-			use pallet_transaction_storage::Call as TxStorageCall;
+			use pallet_bulletin_transaction_storage::Call as TxStorageCall;
 
 			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
 				block: 1,
@@ -546,7 +546,7 @@ pub(crate) mod tests {
 	#[test]
 	fn xcm_transact_authorize_account_works() {
 		run_test(|| {
-			use pallet_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+			use pallet_bulletin_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
 
 			let who = AccountKeyring::Ferdie.to_account_id();
 
