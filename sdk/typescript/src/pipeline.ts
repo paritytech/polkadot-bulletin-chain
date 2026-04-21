@@ -9,10 +9,10 @@
  * and submits to a single RPC (gossip distributes to the rest).
  *
  * Key properties:
- * - Speculative pre-signing: after broadcasting, immediately signs the next
- *   batch using the predicted nonce. On the next block, if the prediction
- *   holds, just broadcast (sub-second); if not, re-sign.
- * - Single-RPC submission with round-robin rotation across endpoints
+ * - Speculative pre-signing: signs the next batch concurrently with the
+ *   current broadcast. On the next block, if prediction holds, just
+ *   broadcast (sub-second); if not, re-sign.
+ * - Broadcasts to all RPC endpoints for maximum propagation
  * - Mortal transactions (64-block period) so waves eventually expire
  * - Batch size computed from block weight/length limits
  * - Finalization-based completion — no false positives from pool nonces
@@ -123,18 +123,20 @@ export interface PipelineResult extends PipelineStats {
 // ---------------------------------------------------------------------------
 
 /** Offline transaction entry returned by the offline API. */
-interface OfflineStoreTx {
-  (args: { data: Binary }): {
-    sign(
-      from: PolkadotSigner,
-      extensions: {
-        nonce: number
-        mortality:
-          | { mortal: true; period: number; startAtBlock: { height: number; hash: string } }
-          | { mortal: false }
-      },
-    ): Promise<string>
-  }
+type OfflineStoreTx = (args: { data: Binary }) => {
+  sign(
+    from: PolkadotSigner,
+    extensions: {
+      nonce: number
+      mortality:
+        | {
+            mortal: true
+            period: number
+            startAtBlock: { height: number; hash: string }
+          }
+        | { mortal: false }
+    },
+  ): Promise<string>
 }
 
 // ---------------------------------------------------------------------------
@@ -188,11 +190,10 @@ export async function pipelineStore(
     createProvider(wsUrls[0] as string),
   )
 
-  // Submission: one client per RPC URL (round-robin, one per wave)
+  // Submission: one client per RPC URL (broadcast to all)
   const submitClients = wsUrls.map((url) =>
     createSubstrateClient(createProvider(url)),
   )
-  let submitRoundRobin = 0
 
   // Abort plumbing
   const ctl = new AbortController()
@@ -315,11 +316,13 @@ export async function pipelineStore(
 
               // Build offline API — metadata decoded once, reused for all signing
               const metadataRaw = hexToBytes(metadataHex)
-              const offlineApi = await (getOfflineApi as (opts: {
-                genesis: string
-                getMetadata: () => Promise<Uint8Array>
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              }) => Promise<any>)({
+              const offlineApi = await (
+                getOfflineApi as (opts: {
+                  genesis: string
+                  getMetadata: () => Promise<Uint8Array>
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                }) => Promise<any>
+              )({
                 genesis: genesisHash,
                 getMetadata: async () => metadataRaw,
               })
@@ -361,14 +364,12 @@ export async function pipelineStore(
 
               // Query nonce and block header in parallel
               const [bestNonce, header] = await Promise.all([
-                monitorClient.request<number>(
-                  "system_accountNextIndex",
-                  [signerSs58],
-                ),
-                monitorClient.request<{ number: string }>(
-                  "chain_getHeader",
-                  [bestBlockHash],
-                ),
+                monitorClient.request<number>("system_accountNextIndex", [
+                  signerSs58,
+                ]),
+                monitorClient.request<{ number: string }>("chain_getHeader", [
+                  bestBlockHash,
+                ]),
               ])
               const bestBlockNumber = parseInt(header.number, 16)
               counters.confirmed = clamp(
@@ -385,10 +386,7 @@ export async function pipelineStore(
 
               // Use pre-signed batch if the nonce prediction was correct
               let signed: string[]
-              if (
-                preSigned &&
-                preSigned.fromNonce === startNonce + fromIndex
-              ) {
+              if (preSigned && preSigned.fromNonce === startNonce + fromIndex) {
                 signed = preSigned.hexes
                 preSigned = null
               } else {
@@ -406,24 +404,55 @@ export async function pipelineStore(
                 )
               }
 
-              // Broadcast to one RPC (round-robin), gossip distributes
-              const client =
-                submitClients[submitRoundRobin % submitClients.length]!
-              submitRoundRobin++
-              const promises: Promise<void>[] = []
+              // Broadcast to all RPCs; pre-sign next batch concurrently
+              const broadcastPromises: Promise<void>[] = []
               for (const hex of signed) {
-                promises.push(
-                  client
-                    .request("author_submitExtrinsic", [hex])
-                    .then(() => {
-                      counters.txsBroadcast++
-                    })
-                    .catch(() => {
-                      counters.broadcastErrors++
-                    }),
-                )
+                for (const client of submitClients) {
+                  broadcastPromises.push(
+                    client
+                      .request("author_submitExtrinsic", [hex])
+                      .then(() => {
+                        counters.txsBroadcast++
+                      })
+                      .catch(() => {
+                        counters.broadcastErrors++
+                      }),
+                  )
+                }
               }
-              await Promise.allSettled(promises)
+
+              // Pre-sign the next batch while broadcast is in flight
+              const nextFromIndex = toIndex
+              let preSignPromise: Promise<void> = Promise.resolve()
+              if (nextFromIndex < items.length) {
+                const nextToIndex = computeBatchEnd(
+                  items,
+                  nextFromIndex,
+                  blockLimits,
+                )
+                if (nextFromIndex < nextToIndex) {
+                  preSignPromise = signBatch(
+                    offlineStoreTx,
+                    effectiveSigner,
+                    items,
+                    nextFromIndex,
+                    nextToIndex,
+                    startNonce,
+                    bestBlockNumber,
+                    bestBlockHash,
+                  ).then((nextSigned) => {
+                    preSigned = {
+                      fromNonce: startNonce + nextFromIndex,
+                      hexes: nextSigned,
+                    }
+                  })
+                }
+              }
+
+              await Promise.all([
+                Promise.allSettled(broadcastPromises),
+                preSignPromise,
+              ])
               counters.waves++
 
               if (onProgress) {
@@ -434,32 +463,6 @@ export async function pipelineStore(
                   startTime,
                   onProgress,
                 )
-              }
-
-              // Speculatively pre-sign the next batch (predicted nonce)
-              const nextFromIndex = toIndex
-              if (nextFromIndex < items.length) {
-                const nextToIndex = computeBatchEnd(
-                  items,
-                  nextFromIndex,
-                  blockLimits,
-                )
-                if (nextFromIndex < nextToIndex) {
-                  const nextSigned = await signBatch(
-                    offlineStoreTx,
-                    effectiveSigner,
-                    items,
-                    nextFromIndex,
-                    nextToIndex,
-                    startNonce,
-                    bestBlockNumber,
-                    bestBlockHash,
-                  )
-                  preSigned = {
-                    fromNonce: startNonce + nextFromIndex,
-                    hexes: nextSigned,
-                  }
-                }
               }
             })
             break
@@ -732,8 +735,9 @@ async function createFastSigner(
   // Extract signed extension identifiers (order matters)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const signedExts = (decMeta.extrinsic as any).signedExtensions
-  const extList: Array<{ identifier: string }> =
-    Array.isArray(signedExts) ? signedExts[0] ?? [] : Object.values(signedExts)[0] ?? []
+  const extList: Array<{ identifier: string }> = Array.isArray(signedExts)
+    ? (signedExts[0] ?? [])
+    : (Object.values(signedExts)[0] ?? [])
   const extIdentifiers: string[] = extList.map((e) => e.identifier)
 
   // Pre-compute address and signature assembly
@@ -764,11 +768,7 @@ async function createFastSigner(
       }
 
       // Sign
-      const toSign = utils.mergeUint8([
-        callData,
-        ...extra,
-        ...additionalSigned,
-      ])
+      const toSign = utils.mergeUint8([callData, ...extra, ...additionalSigned])
       const signed = await rawSign(
         toSign.length > 256 ? hasher(toSign) : toSign,
       )

@@ -10,17 +10,16 @@ import { parseArgs } from "node:util"
 import { createClient as createSubstrateClient } from "@polkadot-api/substrate-client"
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
 import { DEV_MINI_SECRET, ss58Address } from "@polkadot-labs/hdkd-helpers"
-import { createClient as createPolkadotClient, Binary } from "polkadot-api"
+import { createClient as createPolkadotClient } from "polkadot-api"
+import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws-provider/node"
-import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
-
+import type { BulletinTypedApi } from "../../src/async-client.js"
 import {
-  pipelineStore,
   type BlockLimits,
   type PipelineStats,
+  pipelineStore,
 } from "../../src/pipeline.js"
-import type { BulletinTypedApi } from "../../src/async-client.js"
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -140,9 +139,7 @@ async function main() {
   // Create accounts
   const authorizer = createSigner(authorizerSeed)
   const submitter =
-    submitterSeed === authorizerSeed
-      ? authorizer
-      : createSigner(submitterSeed)
+    submitterSeed === authorizerSeed ? authorizer : createSigner(submitterSeed)
 
   console.log(`  Authorizer: ${authorizer.address} (${authorizerSeed})`)
   console.log(`  Submitter:  ${submitter.address} (${submitterSeed})`)
@@ -189,14 +186,16 @@ async function main() {
   }
 
   // Generate payloads
-  console.log(`Generating ${numItems} payloads of ${formatBytes(payloadSize)}...`)
+  console.log(
+    `Generating ${numItems} payloads of ${formatBytes(payloadSize)}...`,
+  )
   const items = generatePayloads(numItems, payloadSize)
   console.log("Payloads ready")
   console.log()
 
   // Run pipeline
   console.log("Starting pipeline...")
-  const startTime = Date.now()
+  const _startTime = Date.now()
 
   const result = await pipelineStore(api, submitter.signer, items, {
     wsUrls,
@@ -224,17 +223,27 @@ async function main() {
   console.log("=== Results ===")
   console.log(`  Duration:      ${formatDuration(result.durationMs)}`)
   console.log(`  Waves:         ${result.waves}`)
-  console.log(`  Broadcast:     ${result.txsBroadcast} (${result.broadcastErrors} errors)`)
+  console.log(
+    `  Broadcast:     ${result.txsBroadcast} (${result.broadcastErrors} errors)`,
+  )
   console.log(`  Confirmed:     ${result.confirmed} (best)`)
   console.log(`  Finalized:     ${result.finalized} / ${result.totalItems}`)
   console.log(`  Throughput:    ${result.txPerSec.toFixed(4)} tx/s`)
   console.log(`  Data rate:     ${formatBytes(result.throughputBytesPerSec)}/s`)
   console.log(`  Total data:    ${formatBytes(result.totalBytes)}`)
-  console.log(`  Nonce range:   ${result.startNonce} -> ${result.expectedFinalNonce}`)
+  console.log(
+    `  Nonce range:   ${result.startNonce} -> ${result.expectedFinalNonce}`,
+  )
   console.log()
 
   // JSON output
-  console.log(JSON.stringify(result, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2))
+  console.log(
+    JSON.stringify(
+      result,
+      (_k, v) => (typeof v === "bigint" ? v.toString() : v),
+      2,
+    ),
+  )
 
   papiClient.destroy()
   process.exit(result.finalized === result.totalItems ? 0 : 1)
