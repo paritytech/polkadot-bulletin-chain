@@ -803,8 +803,18 @@ pub async fn run_block_capacity_pipeline(
 							{
 								Ok(()) => break,
 								Err(e) => {
-									if crate::client::is_connection_error(&e) && attempts < 5 {
-										attempts += 1;
+									attempts += 1;
+									// Always refresh nonce from chain — the failed tx
+									// may have bumped the local counter without landing.
+									let authorizer_id =
+										task_authorizer.public_key().to_account_id();
+									if let Err(re) =
+										task_nonce.refresh(&task_client, &authorizer_id).await
+									{
+										log::warn!("pipeline: nonce refresh failed: {re}");
+									}
+
+									if crate::client::is_connection_error(&e) && attempts <= 5 {
 										crate::client::reconnect(
 											&mut task_client,
 											&task_ws_url,
