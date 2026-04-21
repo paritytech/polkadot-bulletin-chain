@@ -189,9 +189,14 @@ async function main() {
     const rawClient = createSubstrateClient(
       withPolkadotSdkCompat(getWsProvider(wsUrls[0]!)),
     )
+    // Fetch authorizer nonce once, then increment manually to avoid
+    // pool-based nonce collision when submitting multiple auth txs
+    let authNonce = await rawClient.request<number>("system_accountNextIndex", [
+      authorizer.address,
+    ])
     for (const sub of submitters) {
       console.log(
-        `Authorizing ${sub.address} for ${budgetTxs} txs / ${formatBytes(Number(budgetBytes))}...`,
+        `Authorizing ${sub.address} for ${budgetTxs} txs / ${formatBytes(Number(budgetBytes))} (nonce ${authNonce})...`,
       )
       try {
         const authTx = api.tx.TransactionStorage.authorize_account({
@@ -199,14 +204,16 @@ async function main() {
           transactions: budgetTxs,
           bytes: budgetBytes,
         })
-        const hex = await (authTx as any).sign(authorizer.signer)
+        const hex = await (authTx as any).sign(authorizer.signer, {
+          nonce: authNonce,
+        })
         await rawClient.request("author_submitExtrinsic", [hex])
-        // Small delay between authorization txs to avoid nonce collision
-        await new Promise((r) => setTimeout(r, 500))
+        authNonce++
       } catch (e: any) {
         console.log(
           `Authorization for ${sub.address}: ${e.message?.slice(0, 80) ?? e}`,
         )
+        authNonce++ // still increment to avoid stuck nonce
       }
     }
     // Wait a block for inclusion
@@ -240,7 +247,22 @@ async function main() {
       rawSign: s.rawSign,
     }))
 
-    const result = await pipelineStoreMulti(api, signers, items, pipelineConfig)
+    const result = await pipelineStoreMulti(api, signers, items, {
+      ...pipelineConfig,
+      onProgress: (stats: PipelineStats) => {
+        const pct =
+          stats.totalItems > 0
+            ? ((stats.finalized / stats.totalItems) * 100).toFixed(1)
+            : "0"
+        const elapsed = formatDuration(stats.elapsedMs)
+        console.log(
+          `  [${elapsed}] wave ${stats.waves}: ` +
+            `${stats.confirmed} best, ${stats.finalized}/${stats.totalItems} fin (${pct}%), ` +
+            `${stats.txsBroadcast} broadcast, ${stats.broadcastErrors} errs, ` +
+            `${stats.txPerSec.toFixed(2)} tx/s, ${formatBytes(stats.throughputBytesPerSec)}/s`,
+        )
+      },
+    })
 
     console.log()
     console.log("=== Results (multi-account) ===")

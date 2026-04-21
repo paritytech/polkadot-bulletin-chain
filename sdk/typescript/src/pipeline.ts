@@ -554,21 +554,21 @@ export async function pipelineStore(
 }
 
 // ---------------------------------------------------------------------------
-// pipelineStoreMulti — parallel multi-account submission
+// pipelineStoreMulti — shared-monitor multi-account submission
 // ---------------------------------------------------------------------------
 
 /**
  * Submit items using multiple accounts in parallel.
  *
- * Splits `items` evenly across `signers`, runs one {@link pipelineStore}
- * per account concurrently, and aggregates results. Each account
- * maintains its own nonce chain, eliminating single-account pool
- * contention and approaching the theoretical block throughput limit.
+ * Uses a **single** chainHead subscription shared across all accounts.
+ * On each best block, signs and broadcasts batches for every account
+ * concurrently. This avoids the WS connection overload that occurs when
+ * running N independent {@link pipelineStore} instances.
  *
  * Callers must authorize every account **before** calling this function.
  */
 export async function pipelineStoreMulti(
-  api: BulletinTypedApi,
+  _api: BulletinTypedApi,
   signers: MultiAccountSigner[],
   items: Uint8Array[],
   config: PipelineConfig,
@@ -589,53 +589,455 @@ export async function pipelineStoreMulti(
     }
   }
 
-  // Split items into N roughly equal chunks (round-robin for even size distribution)
-  const chunks: Uint8Array[][] = Array.from({ length: n }, () => [])
+  const { wsUrls, createProvider, blockLimits, onProgress, rawSign } = config
+  const signingType = config.signingType ?? "Sr25519"
+  if (wsUrls.length === 0) {
+    throw new Error("pipelineStoreMulti: at least one wsUrl is required")
+  }
+
+  // Split items round-robin across accounts
+  const perAcct: Uint8Array[][] = Array.from({ length: n }, () => [])
   for (let i = 0; i < items.length; i++) {
-    chunks[i % n]!.push(items[i]!)
+    perAcct[i % n]?.push(items[i]!)
   }
 
-  const start = Date.now()
+  // Per-account state
+  interface AcctState {
+    items: Uint8Array[]
+    signerHex: string
+    signerSs58: string
+    signer: PolkadotSigner
+    effectiveSigner: PolkadotSigner
+    prefixBytes: Float64Array
+    startNonce: number
+    expectedFinalNonce: number
+    confirmed: number
+    finalized: number
+    waves: number
+    txsBroadcast: number
+    broadcastErrors: number
+    preSigned: { fromNonce: number; hexes: string[] } | null
+  }
 
-  // Run N pipelines concurrently
-  const results = await Promise.all(
-    signers.map((s, i) => {
-      const chunk = chunks[i]!
-      if (chunk.length === 0) return Promise.resolve(emptyResult())
-      return pipelineStore(
-        api,
-        s.signer,
-        chunk,
-        {
-          ...config,
-          rawSign: s.rawSign ?? config.rawSign,
-          onProgress: undefined, // per-account progress is noisy
-        },
-        signal,
+  const accounts: AcctState[] = signers.map((s, i) => {
+    const acctItems = perAcct[i]!
+    const pb = new Float64Array(acctItems.length + 1)
+    for (let j = 0; j < acctItems.length; j++) {
+      pb[j + 1] = (pb[j] ?? 0) + (acctItems[j]?.length ?? 0)
+    }
+    return {
+      items: acctItems,
+      signerHex: hexEncodePublicKey(s.signer.publicKey),
+      signerSs58: ss58Encode(s.signer.publicKey, 42),
+      signer: s.signer,
+      effectiveSigner: s.signer,
+      prefixBytes: pb,
+      startNonce: 0,
+      expectedFinalNonce: 0,
+      confirmed: 0,
+      finalized: 0,
+      waves: 0,
+      txsBroadcast: 0,
+      broadcastErrors: 0,
+      preSigned: null,
+    }
+  })
+
+  // Single monitor client + shared submit clients
+  const monitorClient = createSubstrateClient(
+    createProvider(wsUrls[0] as string),
+  )
+  const submitClients = wsUrls.map((url) =>
+    createSubstrateClient(createProvider(url)),
+  )
+
+  const ctl = new AbortController()
+  if (signal) {
+    signal.addEventListener("abort", () => ctl.abort(), { once: true })
+  }
+
+  const startTime = Date.now()
+  let initialized = false
+  let done = false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let offlineStoreTx: OfflineStoreTx = null as any
+
+  return new Promise<MultiPipelineResult>((resolve, reject) => {
+    const queue: Array<() => Promise<void>> = []
+    let draining = false
+
+    function enqueue(fn: () => Promise<void>): void {
+      queue.push(fn)
+      if (!draining) drain()
+    }
+
+    async function drain(): Promise<void> {
+      draining = true
+      while (queue.length > 0 && !done && !ctl.signal.aborted) {
+        const fn = queue.shift()
+        if (!fn) break
+        try {
+          await fn()
+        } catch {
+          /* non-fatal */
+        }
+      }
+      draining = false
+    }
+
+    function allFinalized(): boolean {
+      return accounts.every(
+        (a) => a.finalized >= a.items.length || a.items.length === 0,
       )
-    }),
-  )
+    }
 
-  const durationMs = Date.now() - start
-  const sec = durationMs / 1000
-  const totalItems = results.reduce((s, r) => s + r.totalItems, 0)
-  const totalBytes = results.reduce((s, r) => s + r.totalBytes, 0)
-  const finalized = results.reduce((s, r) => s + r.finalized, 0)
-  const finalizedBytes = results.reduce(
-    (s, r) => s + r.throughputBytesPerSec * (r.durationMs / 1000),
-    0,
-  )
+    function finish(): void {
+      if (done) return
+      done = true
+      try {
+        follower.unfollow()
+      } catch {
+        /* ignore */
+      }
+      try {
+        monitorClient.destroy()
+      } catch {
+        /* ignore */
+      }
+      for (const c of submitClients) {
+        try {
+          c.destroy()
+        } catch {
+          /* ignore */
+        }
+      }
 
-  return {
-    accounts: n,
-    perAccount: results,
-    totalItems,
-    totalBytes,
-    durationMs,
-    finalized,
-    txPerSec: sec > 0 ? finalized / sec : 0,
-    throughputBytesPerSec: sec > 0 ? finalizedBytes / (durationMs / 1000) : 0,
-  }
+      const durationMs = Date.now() - startTime
+      const sec = durationMs / 1000
+      const totalItems = accounts.reduce((s, a) => s + a.items.length, 0)
+      const totalBytes = accounts.reduce(
+        (s, a) => s + (a.prefixBytes[a.items.length] ?? 0),
+        0,
+      )
+      const finalized = accounts.reduce((s, a) => s + a.finalized, 0)
+      const finalizedBytes = accounts.reduce(
+        (s, a) => s + (a.prefixBytes[a.finalized] ?? 0),
+        0,
+      )
+
+      const perAccount: PipelineResult[] = accounts.map((a) => {
+        const aBytes = a.prefixBytes[a.finalized] ?? 0
+        return {
+          waves: a.waves,
+          txsBroadcast: a.txsBroadcast,
+          broadcastErrors: a.broadcastErrors,
+          confirmed: a.confirmed,
+          finalized: a.finalized,
+          totalItems: a.items.length,
+          totalBytes: a.prefixBytes[a.items.length] ?? 0,
+          elapsedMs: durationMs,
+          durationMs,
+          txPerSec: sec > 0 ? a.finalized / sec : 0,
+          throughputBytesPerSec: sec > 0 ? aBytes / sec : 0,
+          startNonce: a.startNonce,
+          expectedFinalNonce: a.expectedFinalNonce,
+        }
+      })
+
+      resolve({
+        accounts: n,
+        perAccount,
+        totalItems,
+        totalBytes,
+        durationMs,
+        finalized,
+        txPerSec: sec > 0 ? finalized / sec : 0,
+        throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
+      })
+    }
+
+    // Single chainHead subscription drives all accounts
+    const follower: FollowResponse = monitorClient.chainHead(
+      false,
+      (event: FollowEventWithoutRuntime) => {
+        if (done || ctl.signal.aborted) return
+
+        switch (event.type) {
+          case "initialized": {
+            const hashes = event.finalizedBlockHashes
+            const lastHash = hashes[hashes.length - 1]
+            if (!lastHash) break
+            enqueue(async () => {
+              // Read start nonces for all accounts + genesis + metadata
+              const noncePromises = accounts.map((a) =>
+                readNonceAtBlock(monitorClient, a.signerHex, lastHash),
+              )
+              const [genesisHash, metadataHex, ...nonces] = await Promise.all([
+                monitorClient.request<string>("chain_getBlockHash", [0]),
+                monitorClient.request<string>("state_getMetadata", []),
+                ...noncePromises,
+              ])
+
+              for (let i = 0; i < accounts.length; i++) {
+                const a = accounts[i]!
+                a.startNonce = nonces[i]!
+                a.expectedFinalNonce = a.startNonce + a.items.length
+              }
+
+              // Build offline API once
+              const metadataRaw = hexToBytes(metadataHex)
+              const offlineApi = await (
+                getOfflineApi as (opts: {
+                  genesis: string
+                  getMetadata: () => Promise<Uint8Array>
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                }) => Promise<any>
+              )({
+                genesis: genesisHash,
+                getMetadata: async () => metadataRaw,
+              })
+              offlineStoreTx = offlineApi.tx.TransactionStorage
+                .store as OfflineStoreTx
+
+              // Build fast signers for all accounts
+              await Promise.all(
+                accounts.map(async (a, i) => {
+                  const acctRawSign = signers[i]?.rawSign ?? rawSign
+                  if (acctRawSign) {
+                    a.effectiveSigner = await createFastSigner(
+                      acctRawSign,
+                      a.signer.publicKey,
+                      signingType,
+                      metadataRaw,
+                    )
+                  }
+                }),
+              )
+
+              initialized = true
+              follower.unpin(hashes).catch(() => {})
+            })
+            break
+          }
+
+          case "newBlock":
+            break
+
+          case "bestBlockChanged": {
+            const bestBlockHash = (
+              event as { type: "bestBlockChanged"; bestBlockHash: string }
+            ).bestBlockHash
+            enqueue(async () => {
+              if (!initialized || done) return
+
+              // Query header + all account nonces in parallel
+              const [header, ...bestNonces] = await Promise.all([
+                monitorClient.request<{ number: string }>("chain_getHeader", [
+                  bestBlockHash,
+                ]),
+                ...accounts.map((a) =>
+                  monitorClient.request<number>("system_accountNextIndex", [
+                    a.signerSs58,
+                  ]),
+                ),
+              ])
+              const bestBlockNumber = parseInt(header.number, 16)
+
+              // Sign and broadcast for each account concurrently
+              const acctWork = accounts.map(async (a, idx) => {
+                const bestNonce = bestNonces[idx]!
+                a.confirmed = clamp(bestNonce - a.startNonce, 0, a.items.length)
+                if (bestNonce >= a.expectedFinalNonce) return
+
+                const fromIndex = Math.max(0, bestNonce - a.startNonce)
+                const toIndex = computeBatchEnd(a.items, fromIndex, blockLimits)
+                if (fromIndex >= toIndex) return
+
+                // Use pre-signed batch if prediction holds
+                let signed: string[]
+                if (
+                  a.preSigned &&
+                  a.preSigned.fromNonce === a.startNonce + fromIndex
+                ) {
+                  signed = a.preSigned.hexes
+                  a.preSigned = null
+                } else {
+                  a.preSigned = null
+                  signed = await signBatch(
+                    offlineStoreTx,
+                    a.effectiveSigner,
+                    a.items,
+                    fromIndex,
+                    toIndex,
+                    a.startNonce,
+                    bestBlockNumber,
+                    bestBlockHash,
+                  )
+                }
+
+                // Broadcast
+                const broadcasts: Promise<void>[] = []
+                for (const hex of signed) {
+                  for (const client of submitClients) {
+                    broadcasts.push(
+                      client
+                        .request("author_submitExtrinsic", [hex])
+                        .then(() => {
+                          a.txsBroadcast++
+                        })
+                        .catch(() => {
+                          a.broadcastErrors++
+                        }),
+                    )
+                  }
+                }
+
+                // Pre-sign next batch
+                const nextFrom = toIndex
+                let preSignP: Promise<void> = Promise.resolve()
+                if (nextFrom < a.items.length) {
+                  const nextTo = computeBatchEnd(a.items, nextFrom, blockLimits)
+                  if (nextFrom < nextTo) {
+                    preSignP = signBatch(
+                      offlineStoreTx,
+                      a.effectiveSigner,
+                      a.items,
+                      nextFrom,
+                      nextTo,
+                      a.startNonce,
+                      bestBlockNumber,
+                      bestBlockHash,
+                    ).then((nextSigned) => {
+                      a.preSigned = {
+                        fromNonce: a.startNonce + nextFrom,
+                        hexes: nextSigned,
+                      }
+                    })
+                  }
+                }
+
+                await Promise.all([Promise.allSettled(broadcasts), preSignP])
+                a.waves++
+              })
+
+              await Promise.all(acctWork)
+
+              if (onProgress) {
+                const elapsedMs = Date.now() - startTime
+                const sec = elapsedMs / 1000
+                const finalized = accounts.reduce((s, a) => s + a.finalized, 0)
+                const confirmed = accounts.reduce((s, a) => s + a.confirmed, 0)
+                const totalItems = accounts.reduce(
+                  (s, a) => s + a.items.length,
+                  0,
+                )
+                const waves = Math.max(...accounts.map((a) => a.waves))
+                const txsBroadcast = accounts.reduce(
+                  (s, a) => s + a.txsBroadcast,
+                  0,
+                )
+                const broadcastErrors = accounts.reduce(
+                  (s, a) => s + a.broadcastErrors,
+                  0,
+                )
+                const finalizedBytes = accounts.reduce(
+                  (s, a) => s + (a.prefixBytes[a.finalized] ?? 0),
+                  0,
+                )
+                onProgress({
+                  waves,
+                  txsBroadcast,
+                  broadcastErrors,
+                  confirmed,
+                  finalized,
+                  totalItems,
+                  elapsedMs,
+                  txPerSec: sec > 0 ? finalized / sec : 0,
+                  throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
+                })
+              }
+            })
+            break
+          }
+
+          case "finalized": {
+            const { finalizedBlockHashes, prunedBlockHashes } = event
+            const lastHash =
+              finalizedBlockHashes[finalizedBlockHashes.length - 1]
+            if (!lastHash) break
+
+            enqueue(async () => {
+              const toUnpin = [...finalizedBlockHashes, ...prunedBlockHashes]
+              follower.unpin(toUnpin).catch(() => {})
+
+              if (!initialized || done) return
+
+              // Read finalized nonces for all accounts
+              const finNonces = await Promise.all(
+                accounts.map((a) =>
+                  readNonceAtBlock(monitorClient, a.signerHex, lastHash),
+                ),
+              )
+              for (let i = 0; i < accounts.length; i++) {
+                const a = accounts[i]!
+                a.finalized = clamp(
+                  finNonces[i]! - a.startNonce,
+                  0,
+                  a.items.length,
+                )
+              }
+
+              if (onProgress) {
+                const elapsedMs = Date.now() - startTime
+                const sec = elapsedMs / 1000
+                const finalized = accounts.reduce((s, a) => s + a.finalized, 0)
+                const confirmed = accounts.reduce((s, a) => s + a.confirmed, 0)
+                const totalItems = accounts.reduce(
+                  (s, a) => s + a.items.length,
+                  0,
+                )
+                const finalizedBytes = accounts.reduce(
+                  (s, a) => s + (a.prefixBytes[a.finalized] ?? 0),
+                  0,
+                )
+                onProgress({
+                  waves: Math.max(...accounts.map((a) => a.waves)),
+                  txsBroadcast: accounts.reduce(
+                    (s, a) => s + a.txsBroadcast,
+                    0,
+                  ),
+                  broadcastErrors: accounts.reduce(
+                    (s, a) => s + a.broadcastErrors,
+                    0,
+                  ),
+                  confirmed,
+                  finalized,
+                  totalItems,
+                  elapsedMs,
+                  txPerSec: sec > 0 ? finalized / sec : 0,
+                  throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
+                })
+              }
+
+              if (allFinalized()) finish()
+            })
+            break
+          }
+        }
+      },
+      (error) => {
+        if (!done) reject(error)
+      },
+    )
+
+    ctl.signal.addEventListener(
+      "abort",
+      () => {
+        if (!done) finish()
+      },
+      { once: true },
+    )
+  })
 }
 
 // ---------------------------------------------------------------------------
