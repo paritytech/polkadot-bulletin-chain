@@ -6,8 +6,6 @@ repository = "https://github.com/paritytech/polkadot-bulletin-chain.git"
 
 [workspace.dependencies]
 array-bytes = { version = "6.1" }
-bp-test-utils = { version = "0.26.0" }
-cfg-if = { version = "1.0" }
 cid = { version = "0.11.1", default-features = false }
 clap = { version = "4.2.5" }
 codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false }
@@ -29,24 +27,19 @@ polkadot-parachain-primitives = { version = "21.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
 serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
-static_assertions = { version = "1.1" }
 testnet-parachains-constants = { version = "19.0.0", package = "testnet-parachains-constants", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 westend-runtime-constants = { version = "26.0.0", package = "westend-runtime-constants", default-features = false }
 
 # Local workspace members
 bulletin-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
-bulletin-polkadot-runtime = { path = "runtimes/bulletin-polkadot" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
-pallet-relayer-set = { path = "pallets/relayer-set", default-features = false }
-pallet-validator-set = { path = "pallets/validator-set", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "46.0.0", default-features = false }
-frame-benchmarking-cli = { version = "54.0.0", default-features = false }
 frame-executive = { version = "46.0.0", default-features = false }
 frame-support = { version = "46.0.0", default-features = false }
 frame-system = { version = "46.0.0", default-features = false }
@@ -55,55 +48,25 @@ frame-system-rpc-runtime-api = { version = "41.0.0", default-features = false }
 frame-try-runtime = { version = "0.52.0", default-features = false }
 polkadot-sdk-frame = { version = "0.15.0", default-features = false }
 
-sc-basic-authorship = { version = "0.54.0" }
-sc-chain-spec = { version = "49.0.0" }
-sc-cli = { version = "0.58.0" }
-sc-client-api = { version = "45.0.0" }
-sc-consensus = { version = "0.55.0" }
-sc-consensus-babe = { version = "0.56.0" }
-sc-consensus-babe-rpc = { version = "0.56.0" }
-sc-consensus-grandpa = { version = "0.41.0" }
-sc-consensus-grandpa-rpc = { version = "0.41.0" }
-sc-executor = { version = "0.48.0" }
-sc-network = { version = "0.56.0" }
-sc-offchain = { version = "51.0.0" }
-sc-rpc = { version = "51.0.0" }
-sc-service = { version = "0.57.0" }
-sc-sync-state-rpc = { version = "0.56.0" }
-sc-telemetry = { version = "30.0.1" }
-sc-transaction-pool = { version = "45.0.0" }
-sc-transaction-pool-api = { version = "44.0.0" }
-
 sp-api = { version = "41.0.0", default-features = false }
 sp-authority-discovery = { version = "41.0.0", default-features = false }
 sp-block-builder = { version = "41.0.0", default-features = false }
-sp-blockchain = { version = "44.0.0", default-features = false }
-sp-consensus = { version = "0.47.0", default-features = false }
 sp-consensus-babe = { version = "0.47.0", default-features = false }
 sp-consensus-beefy = { version = "29.0.0", default-features = false }
-sp-consensus-grandpa = { version = "28.0.0", default-features = false }
 sp-core = { version = "40.0.0", default-features = false }
 sp-genesis-builder = { version = "0.22.0", default-features = false }
 sp-inherents = { version = "41.0.0", default-features = false }
 sp-io = { version = "45.0.0", default-features = false }
 sp-keyring = { version = "46.0.0", default-features = false }
-sp-keystore = { version = "0.46.0", default-features = false }
 sp-offchain = { version = "41.0.0", default-features = false }
 sp-runtime = { version = "46.0.0", default-features = false }
 sp-session = { version = "43.0.0", default-features = false }
 sp-storage = { version = "23.0.0", default-features = false }
-sp-timestamp = { version = "41.0.0", default-features = false }
-sp-tracing = { version = "19.0.0", default-features = false }
 sp-transaction-pool = { version = "41.0.0", default-features = false }
 sp-transaction-storage-proof = { version = "41.0.0", default-features = false }
-sp-trie = { version = "43.0.0", default-features = false }
 sp-version = { version = "44.0.0", default-features = false }
-sp-weights = { version = "34.0.0", default-features = false }
 
 pallet-authorship = { version = "46.0.0", default-features = false }
-pallet-babe = { version = "46.0.0", default-features = false }
-pallet-grandpa = { version = "46.0.0", default-features = false }
-pallet-offences = { version = "45.0.0", default-features = false }
 pallet-proxy = { version = "46.0.0", default-features = false }
 pallet-session = { version = "46.0.0", default-features = false }
 pallet-skip-feeless-payment = { version = "21.0.0", default-features = false }
@@ -112,28 +75,7 @@ pallet-timestamp = { version = "45.0.0", default-features = false }
 pallet-transaction-payment = { version = "46.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "46.0.0", default-features = false }
 
-bp-bridge-hub-cumulus = { version = "0.28.0", default-features = false }
-bp-bridge-hub-rococo = { version = "0.28.0", default-features = false }
-bp-header-chain = { version = "0.26.0", default-features = false }
-bp-messages = { version = "0.26.0", default-features = false }
-bp-parachains = { version = "0.26.0", default-features = false }
-# TODO: remove this and replace with local runtime/src/bridge-primitives
-bp-polkadot-bulletin = { version = "0.23.0", default-features = false }
-bp-polkadot-core = { version = "0.26.0", default-features = false }
-bp-rococo = { version = "0.25.0", default-features = false }
-bp-runtime = { version = "0.26.0", default-features = false }
-bridge-runtime-common = { version = "0.27.0", default-features = false }
-
-pallet-bridge-grandpa = { version = "0.26.0", default-features = false }
-pallet-bridge-messages = { version = "0.26.0", default-features = false }
-pallet-bridge-parachains = { version = "0.26.0", default-features = false }
-pallet-bridge-relayers = { version = "0.26.0", default-features = false }
-pallet-xcm-bridge-hub = { version = "0.22.0", default-features = false }
-
-pallet-staking = { version = "46.0.0", default-features = false }
 pallet-xcm = { version = "26.0.0", default-features = false }
-polkadot-primitives = { version = "23.0.0", default-features = false }
-sp-staking = { version = "43.0.0", default-features = false }
 xcm = { version = "22.0.0", package = "staging-xcm", default-features = false }
 xcm-builder = { version = "26.0.0", package = "staging-xcm-builder", default-features = false }
 xcm-executor = { version = "25.0.0", package = "staging-xcm-executor", default-features = false }
@@ -152,7 +94,9 @@ frame-metadata-hash-extension = { version = "0.14.0", default-features = false }
 
 # Polkadot runtime common utilities
 parachains-runtimes-test-utils = { version = "29.0.0", default-features = true }
+polkadot-primitives = { version = "23.0.0", default-features = false }
 polkadot-runtime-common = { version = "25.0.0", default-features = false }
+sc-consensus-grandpa = { version = "0.41.0" }
 sp-consensus-aura = { version = "0.47.0", default-features = false }
 xcm-runtime-apis = { version = "0.13.0", default-features = false }
 
@@ -161,25 +105,18 @@ pallet-aura = { version = "45.0.0", default-features = false }
 pallet-balances = { version = "47.0.0", default-features = false }
 pallet-collator-selection = { version = "27.0.0", default-features = false }
 pallet-message-queue = { version = "49.0.0", default-features = false }
-pallet-multisig = { version = "46.0.0", default-features = false }
 pallet-utility = { version = "46.0.0", default-features = false }
 pallet-xcm-benchmarks = { version = "26.0.0", default-features = false }
 
 # Substrate tooling
-substrate-build-script-utils = { version = "11.0.0" }
-substrate-frame-rpc-system = { version = "50.0.0" }
 substrate-wasm-builder = { version = "32.0.0" }
 
 [workspace]
 resolver = "2"
 members = [
-	"node",
 	"pallets/common",
-	"pallets/relayer-set",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
-	"pallets/validator-set",
-	"runtimes/bulletin-polkadot",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
@@ -191,7 +128,6 @@ members = [
 exclude = ["examples/rust/authorize-and-store"]
 
 [profile.release]
-# Polkadot runtime requires unwinding.
 opt-level = 3
 panic = "unwind"
 
