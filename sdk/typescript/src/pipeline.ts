@@ -18,6 +18,7 @@
  * @packageDocumentation
  */
 
+import { base58Encode, blake2AsU8a } from "@polkadot/util-crypto"
 import type { JsonRpcProvider } from "@polkadot-api/json-rpc-provider"
 import {
   createClient as createSubstrateClient,
@@ -149,7 +150,10 @@ export async function pipelineStore(
     throw new Error("pipelineStore: at least one wsUrl is required")
   }
 
-  const signerAddress = hexEncodePublicKey(signer.publicKey)
+  // Hex-encoded pubkey for SCALE state_call (AccountNonceApi)
+  const signerHex = hexEncodePublicKey(signer.publicKey)
+  // SS58 address for system_accountNextIndex RPC
+  const signerSs58 = ss58Encode(signer.publicKey, 42)
 
   // Pre-compute cumulative byte sizes for throughput reporting
   const prefixBytes = new Float64Array(items.length + 1)
@@ -278,7 +282,7 @@ export async function pipelineStore(
             enqueue(async () => {
               startNonce = await readNonceAtBlock(
                 monitorClient,
-                signerAddress,
+                signerHex,
                 lastHash,
               )
               expectedFinalNonce = startNonce + items.length
@@ -307,7 +311,7 @@ export async function pipelineStore(
               // Query nonce — assigned directly, NOT max (reorgs can lower it)
               const bestNonce = await monitorClient.request<number>(
                 "system_accountNextIndex",
-                [signerAddress],
+                [signerSs58],
               )
               counters.confirmed = clamp(
                 bestNonce - startNonce,
@@ -389,7 +393,7 @@ export async function pipelineStore(
 
               const finNonce = await readNonceAtBlock(
                 monitorClient,
-                signerAddress,
+                signerHex,
                 lastHash,
               )
               counters.finalized = clamp(finNonce - startNonce, 0, items.length)
@@ -503,6 +507,21 @@ function decodeU32LE(hex: string): number {
       (parseInt(h.slice(6, 8), 16) << 24)) >>>
     0
   )
+}
+
+/** Encode a 32-byte public key as SS58 address for RPC calls like system_accountNextIndex. */
+function ss58Encode(pubKey: Uint8Array, prefix: number): string {
+  const payload = new Uint8Array(35)
+  payload[0] = prefix
+  payload.set(pubKey, 1)
+  const SS58_PREFIX = new TextEncoder().encode("SS58PRE")
+  const input = new Uint8Array(SS58_PREFIX.length + 35)
+  input.set(SS58_PREFIX)
+  input.set(payload.subarray(0, 33), SS58_PREFIX.length)
+  const hash = blake2AsU8a(input, 512)
+  payload[33] = hash[0] ?? 0
+  payload[34] = hash[1] ?? 0
+  return base58Encode(payload)
 }
 
 /** Hex-encode a 32-byte public key as `0x...` for RPC calls. */
