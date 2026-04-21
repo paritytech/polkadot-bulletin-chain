@@ -78,10 +78,13 @@ export {
 // pipeline: high-throughput bulk submission
 export {
   type BlockLimits,
+  type MultiAccountSigner,
+  type MultiPipelineResult,
   type PipelineConfig,
   type PipelineResult,
   type PipelineStats,
   pipelineStore,
+  pipelineStoreMulti,
 } from "./pipeline.js"
 
 // preparer: offline CID calculation and chunking

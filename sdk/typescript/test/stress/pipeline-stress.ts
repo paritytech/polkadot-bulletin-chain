@@ -17,8 +17,10 @@ import { getWsProvider } from "polkadot-api/ws-provider/node"
 import type { BulletinTypedApi } from "../../src/async-client.js"
 import {
   type BlockLimits,
+  type MultiAccountSigner,
   type PipelineStats,
   pipelineStore,
+  pipelineStoreMulti,
 } from "../../src/pipeline.js"
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,7 @@ const { values } = parseArgs({
     "authorizer-seed": { type: "string", default: "//Alice" },
     "submitter-seed": { type: "string" },
     "authorize-budget-mb": { type: "string", default: "50" },
+    accounts: { type: "string", default: "1" },
     "skip-authorize": { type: "boolean", default: false },
     help: { type: "boolean", default: false },
   },
@@ -49,6 +52,7 @@ Options:
   --payload-size <bytes>    Payload size per item in bytes (default: 1024)
   --authorizer-seed <seed>  Authorizer key URI (default: //Alice)
   --submitter-seed <seed>   Submitter key URI (default: same as authorizer)
+  --accounts <n>            Number of parallel submitter accounts (default: 1)
   --authorize-budget-mb <n> Authorization budget in MB (default: 50)
 `)
   process.exit(0)
@@ -63,6 +67,7 @@ const payloadSize = parseInt(values["payload-size"] ?? "1024", 10)
 const authorizerSeed = values["authorizer-seed"] ?? "//Alice"
 const submitterSeed = values["submitter-seed"] ?? authorizerSeed
 const authBudgetMb = parseInt(values["authorize-budget-mb"] ?? "50", 10)
+const numAccounts = parseInt(values.accounts ?? "1", 10)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -134,15 +139,32 @@ async function main() {
   console.log(`  Items:         ${numItems}`)
   console.log(`  Payload size:  ${formatBytes(payloadSize)}`)
   console.log(`  Total data:    ${formatBytes(numItems * payloadSize)}`)
+  console.log(`  Accounts:      ${numAccounts}`)
   console.log()
 
   // Create accounts
   const authorizer = createSigner(authorizerSeed)
-  const submitter =
-    submitterSeed === authorizerSeed ? authorizer : createSigner(submitterSeed)
+
+  // Generate submitter accounts: single account or N derived accounts
+  const submitters: ReturnType<typeof createSigner>[] = []
+  if (numAccounts <= 1) {
+    const s =
+      submitterSeed === authorizerSeed
+        ? authorizer
+        : createSigner(submitterSeed)
+    submitters.push(s)
+  } else {
+    for (let i = 0; i < numAccounts; i++) {
+      submitters.push(createSigner(`${submitterSeed}/${i}`))
+    }
+  }
 
   console.log(`  Authorizer: ${authorizer.address} (${authorizerSeed})`)
-  console.log(`  Submitter:  ${submitter.address} (${submitterSeed})`)
+  for (let i = 0; i < submitters.length; i++) {
+    const s = submitters[i]!
+    const seed = numAccounts <= 1 ? submitterSeed : `${submitterSeed}/${i}`
+    console.log(`  Submitter ${i}: ${s.address} (${seed})`)
+  }
   console.log()
 
   // Connect PAPI client for authorization
@@ -152,37 +174,45 @@ async function main() {
   )
   const api = papiClient.getUnsafeApi() as unknown as BulletinTypedApi
 
-  // Authorize submitter account (use fire-and-forget to avoid signAndSubmit hang)
+  // Authorize submitter accounts (use fire-and-forget to avoid signAndSubmit hang)
   if (values["skip-authorize"]) {
     console.log("Skipping authorization (--skip-authorize)")
   } else {
-    // Budget must cover total payload; use max of user-specified and actual data
-    const dataSizeMb = Math.ceil((numItems * payloadSize) / (1024 * 1024)) + 10 // +10MB headroom
+    // Budget must cover total payload per account
+    const itemsPerAccount = Math.ceil(numItems / submitters.length)
+    const dataSizeMb =
+      Math.ceil((itemsPerAccount * payloadSize) / (1024 * 1024)) + 10
     const effectiveMb = Math.max(authBudgetMb, dataSizeMb)
     const budgetBytes = BigInt(effectiveMb) * 1024n * 1024n
-    const budgetTxs = numItems + 100 // some headroom
-    console.log(
-      `Authorizing ${submitter.address} for ${budgetTxs} txs / ${formatBytes(Number(budgetBytes))}...`,
+    const budgetTxs = itemsPerAccount + 100
+
+    const rawClient = createSubstrateClient(
+      withPolkadotSdkCompat(getWsProvider(wsUrls[0]!)),
     )
-    try {
-      const authTx = api.tx.TransactionStorage.authorize_account({
-        who: submitter.address,
-        transactions: budgetTxs,
-        bytes: budgetBytes,
-      })
-      const hex = await (authTx as any).sign(authorizer.signer)
-      const rawClient = createSubstrateClient(
-        withPolkadotSdkCompat(getWsProvider(wsUrls[0]!)),
+    for (const sub of submitters) {
+      console.log(
+        `Authorizing ${sub.address} for ${budgetTxs} txs / ${formatBytes(Number(budgetBytes))}...`,
       )
-      await rawClient.request("author_submitExtrinsic", [hex])
-      rawClient.destroy()
-      // Wait a block for inclusion
-      await new Promise((r) => setTimeout(r, 4000))
-      console.log("Authorization submitted")
-    } catch (e: any) {
-      // May already be authorized — continue
-      console.log(`Authorization: ${e.message?.slice(0, 80) ?? e}`)
+      try {
+        const authTx = api.tx.TransactionStorage.authorize_account({
+          who: sub.address,
+          transactions: budgetTxs,
+          bytes: budgetBytes,
+        })
+        const hex = await (authTx as any).sign(authorizer.signer)
+        await rawClient.request("author_submitExtrinsic", [hex])
+        // Small delay between authorization txs to avoid nonce collision
+        await new Promise((r) => setTimeout(r, 500))
+      } catch (e: any) {
+        console.log(
+          `Authorization for ${sub.address}: ${e.message?.slice(0, 80) ?? e}`,
+        )
+      }
     }
+    // Wait a block for inclusion
+    await new Promise((r) => setTimeout(r, 4000))
+    rawClient.destroy()
+    console.log(`Authorization submitted for ${submitters.length} account(s)`)
   }
 
   // Generate payloads
@@ -195,58 +225,106 @@ async function main() {
 
   // Run pipeline
   console.log("Starting pipeline...")
-  const _startTime = Date.now()
 
-  const result = await pipelineStore(api, submitter.signer, items, {
+  const pipelineConfig = {
     wsUrls,
     createProvider: (url: string) => withPolkadotSdkCompat(getWsProvider(url)),
     blockLimits: BLOCK_LIMITS,
-    rawSign: submitter.rawSign,
-    signingType: "Sr25519",
-    onProgress: (stats: PipelineStats) => {
-      const pct =
-        stats.totalItems > 0
-          ? ((stats.finalized / stats.totalItems) * 100).toFixed(1)
-          : "0"
-      const elapsed = formatDuration(stats.elapsedMs)
+    signingType: "Sr25519" as const,
+  }
+
+  if (numAccounts > 1) {
+    // Multi-account mode
+    const signers: MultiAccountSigner[] = submitters.map((s) => ({
+      signer: s.signer,
+      rawSign: s.rawSign,
+    }))
+
+    const result = await pipelineStoreMulti(api, signers, items, pipelineConfig)
+
+    console.log()
+    console.log("=== Results (multi-account) ===")
+    console.log(`  Accounts:      ${result.accounts}`)
+    console.log(`  Duration:      ${formatDuration(result.durationMs)}`)
+    console.log(`  Finalized:     ${result.finalized} / ${result.totalItems}`)
+    console.log(`  Throughput:    ${result.txPerSec.toFixed(4)} tx/s`)
+    console.log(
+      `  Data rate:     ${formatBytes(result.throughputBytesPerSec)}/s`,
+    )
+    console.log(`  Total data:    ${formatBytes(result.totalBytes)}`)
+    console.log()
+
+    for (let i = 0; i < result.perAccount.length; i++) {
+      const r = result.perAccount[i]!
       console.log(
-        `  [${elapsed}] wave ${stats.waves}: ` +
-          `${stats.confirmed} best, ${stats.finalized}/${stats.totalItems} fin (${pct}%), ` +
-          `${stats.txsBroadcast} broadcast, ${stats.broadcastErrors} errs, ` +
-          `${stats.txPerSec.toFixed(2)} tx/s, ${formatBytes(stats.throughputBytesPerSec)}/s`,
+        `  Account ${i}: ${r.finalized}/${r.totalItems} fin, ` +
+          `${r.txPerSec.toFixed(2)} tx/s, ${formatBytes(r.throughputBytesPerSec)}/s, ` +
+          `nonce ${r.startNonce}->${r.expectedFinalNonce}`,
       )
-    },
-  })
+    }
+    console.log()
 
-  // Print results
-  console.log()
-  console.log("=== Results ===")
-  console.log(`  Duration:      ${formatDuration(result.durationMs)}`)
-  console.log(`  Waves:         ${result.waves}`)
-  console.log(
-    `  Broadcast:     ${result.txsBroadcast} (${result.broadcastErrors} errors)`,
-  )
-  console.log(`  Confirmed:     ${result.confirmed} (best)`)
-  console.log(`  Finalized:     ${result.finalized} / ${result.totalItems}`)
-  console.log(`  Throughput:    ${result.txPerSec.toFixed(4)} tx/s`)
-  console.log(`  Data rate:     ${formatBytes(result.throughputBytesPerSec)}/s`)
-  console.log(`  Total data:    ${formatBytes(result.totalBytes)}`)
-  console.log(
-    `  Nonce range:   ${result.startNonce} -> ${result.expectedFinalNonce}`,
-  )
-  console.log()
+    console.log(
+      JSON.stringify(
+        result,
+        (_k, v) => (typeof v === "bigint" ? v.toString() : v),
+        2,
+      ),
+    )
 
-  // JSON output
-  console.log(
-    JSON.stringify(
-      result,
-      (_k, v) => (typeof v === "bigint" ? v.toString() : v),
-      2,
-    ),
-  )
+    papiClient.destroy()
+    process.exit(result.finalized === result.totalItems ? 0 : 1)
+  } else {
+    // Single-account mode
+    const submitter = submitters[0]!
+    const result = await pipelineStore(api, submitter.signer, items, {
+      ...pipelineConfig,
+      rawSign: submitter.rawSign,
+      onProgress: (stats: PipelineStats) => {
+        const pct =
+          stats.totalItems > 0
+            ? ((stats.finalized / stats.totalItems) * 100).toFixed(1)
+            : "0"
+        const elapsed = formatDuration(stats.elapsedMs)
+        console.log(
+          `  [${elapsed}] wave ${stats.waves}: ` +
+            `${stats.confirmed} best, ${stats.finalized}/${stats.totalItems} fin (${pct}%), ` +
+            `${stats.txsBroadcast} broadcast, ${stats.broadcastErrors} errs, ` +
+            `${stats.txPerSec.toFixed(2)} tx/s, ${formatBytes(stats.throughputBytesPerSec)}/s`,
+        )
+      },
+    })
 
-  papiClient.destroy()
-  process.exit(result.finalized === result.totalItems ? 0 : 1)
+    console.log()
+    console.log("=== Results ===")
+    console.log(`  Duration:      ${formatDuration(result.durationMs)}`)
+    console.log(`  Waves:         ${result.waves}`)
+    console.log(
+      `  Broadcast:     ${result.txsBroadcast} (${result.broadcastErrors} errors)`,
+    )
+    console.log(`  Confirmed:     ${result.confirmed} (best)`)
+    console.log(`  Finalized:     ${result.finalized} / ${result.totalItems}`)
+    console.log(`  Throughput:    ${result.txPerSec.toFixed(4)} tx/s`)
+    console.log(
+      `  Data rate:     ${formatBytes(result.throughputBytesPerSec)}/s`,
+    )
+    console.log(`  Total data:    ${formatBytes(result.totalBytes)}`)
+    console.log(
+      `  Nonce range:   ${result.startNonce} -> ${result.expectedFinalNonce}`,
+    )
+    console.log()
+
+    console.log(
+      JSON.stringify(
+        result,
+        (_k, v) => (typeof v === "bigint" ? v.toString() : v),
+        2,
+      ),
+    )
+
+    papiClient.destroy()
+    process.exit(result.finalized === result.totalItems ? 0 : 1)
+  }
 }
 
 main().catch((e) => {

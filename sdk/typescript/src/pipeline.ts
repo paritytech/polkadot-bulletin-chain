@@ -118,6 +118,34 @@ export interface PipelineResult extends PipelineStats {
   expectedFinalNonce: number
 }
 
+/** Signer descriptor for multi-account pipeline. */
+export interface MultiAccountSigner {
+  /** PAPI signer. */
+  signer: PolkadotSigner
+  /** Raw signing function for fast-path (same as {@link PipelineConfig.rawSign}). */
+  rawSign?: (message: Uint8Array) => Promise<Uint8Array>
+}
+
+/** Aggregated result from {@link pipelineStoreMulti}. */
+export interface MultiPipelineResult {
+  /** Number of accounts used. */
+  accounts: number
+  /** Per-account results. */
+  perAccount: PipelineResult[]
+  /** Total items across all accounts. */
+  totalItems: number
+  /** Total data bytes across all accounts. */
+  totalBytes: number
+  /** Wall-clock duration in milliseconds. */
+  durationMs: number
+  /** Total finalized items. */
+  finalized: number
+  /** Aggregate finalized throughput in tx/s. */
+  txPerSec: number
+  /** Aggregate finalized throughput in bytes/s. */
+  throughputBytesPerSec: number
+}
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
@@ -523,6 +551,91 @@ export async function pipelineStore(
       { once: true },
     )
   })
+}
+
+// ---------------------------------------------------------------------------
+// pipelineStoreMulti — parallel multi-account submission
+// ---------------------------------------------------------------------------
+
+/**
+ * Submit items using multiple accounts in parallel.
+ *
+ * Splits `items` evenly across `signers`, runs one {@link pipelineStore}
+ * per account concurrently, and aggregates results. Each account
+ * maintains its own nonce chain, eliminating single-account pool
+ * contention and approaching the theoretical block throughput limit.
+ *
+ * Callers must authorize every account **before** calling this function.
+ */
+export async function pipelineStoreMulti(
+  api: BulletinTypedApi,
+  signers: MultiAccountSigner[],
+  items: Uint8Array[],
+  config: PipelineConfig,
+  signal?: AbortSignal,
+): Promise<MultiPipelineResult> {
+  const n = signers.length
+  if (n === 0) throw new Error("pipelineStoreMulti: at least one signer")
+  if (items.length === 0) {
+    return {
+      accounts: n,
+      perAccount: [],
+      totalItems: 0,
+      totalBytes: 0,
+      durationMs: 0,
+      finalized: 0,
+      txPerSec: 0,
+      throughputBytesPerSec: 0,
+    }
+  }
+
+  // Split items into N roughly equal chunks (round-robin for even size distribution)
+  const chunks: Uint8Array[][] = Array.from({ length: n }, () => [])
+  for (let i = 0; i < items.length; i++) {
+    chunks[i % n]!.push(items[i]!)
+  }
+
+  const start = Date.now()
+
+  // Run N pipelines concurrently
+  const results = await Promise.all(
+    signers.map((s, i) => {
+      const chunk = chunks[i]!
+      if (chunk.length === 0) return Promise.resolve(emptyResult())
+      return pipelineStore(
+        api,
+        s.signer,
+        chunk,
+        {
+          ...config,
+          rawSign: s.rawSign ?? config.rawSign,
+          onProgress: undefined, // per-account progress is noisy
+        },
+        signal,
+      )
+    }),
+  )
+
+  const durationMs = Date.now() - start
+  const sec = durationMs / 1000
+  const totalItems = results.reduce((s, r) => s + r.totalItems, 0)
+  const totalBytes = results.reduce((s, r) => s + r.totalBytes, 0)
+  const finalized = results.reduce((s, r) => s + r.finalized, 0)
+  const finalizedBytes = results.reduce(
+    (s, r) => s + r.throughputBytesPerSec * (r.durationMs / 1000),
+    0,
+  )
+
+  return {
+    accounts: n,
+    perAccount: results,
+    totalItems,
+    totalBytes,
+    durationMs,
+    finalized,
+    txPerSec: sec > 0 ? finalized / sec : 0,
+    throughputBytesPerSec: sec > 0 ? finalizedBytes / (durationMs / 1000) : 0,
+  }
 }
 
 // ---------------------------------------------------------------------------
