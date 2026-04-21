@@ -243,14 +243,15 @@ pub(crate) fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
 		return TxPoolError::ExhaustsResources;
 	}
 
-	// Connection-level errors — WebSocket died, needs reconnect.
+	// Connection-level errors — WebSocket died or state pruned, needs reconnect.
 	if msg.contains("connection reset") ||
 		msg.contains("background task closed") ||
 		msg.contains("connection closed") ||
 		msg.contains("broken pipe") ||
 		msg.contains("restart required") ||
 		msg.contains("not connected") ||
-		msg.contains("i/o error")
+		msg.contains("i/o error") ||
+		msg.contains("state already discarded")
 	{
 		return TxPoolError::ConnectionDead;
 	}

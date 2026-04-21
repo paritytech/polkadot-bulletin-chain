@@ -106,7 +106,8 @@ pub fn is_connection_error(e: &anyhow::Error) -> bool {
 		msg.contains("broken pipe") ||
 		msg.contains("not connected") ||
 		msg.contains("connection reset") ||
-		msg.contains("i/o error")
+		msg.contains("i/o error") ||
+		msg.contains("state already discarded")
 }
 
 /// Reconnect an `OnlineClient`, logging on failure. Returns `true` if successful.
