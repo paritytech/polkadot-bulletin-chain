@@ -10,7 +10,7 @@
  *
  * Key properties:
  * - Re-signs per block to bypass pool bans (fresh hashes on each wave)
- * - Short mortality (8 blocks) so old waves expire quickly
+ * - Mortal transactions (64-block period) so waves eventually expire
  * - Batch size computed from block weight/length limits
  * - bestNonce assigned directly (not max) to handle reorgs
  * - Finalization-based completion — no false positives from pool nonces
@@ -380,7 +380,7 @@ export async function pipelineStore(
               // Sign the batch (effectiveSigner uses fast path when rawSign provided)
               const mortality = {
                 mortal: true as const,
-                period: 8,
+                period: 64,
                 startAtBlock: {
                   height: bestBlockNumber,
                   hash: bestBlockHash,
