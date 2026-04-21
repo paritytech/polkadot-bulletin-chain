@@ -1030,25 +1030,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
-name = "asset-hub-westend-emulated-chain"
-version = "0.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
-dependencies = [
- "asset-hub-westend-runtime",
- "bp-bridge-hub-westend",
- "cumulus-primitives-core",
- "emulated-integration-tests-common",
- "frame-support",
- "parachains-common",
- "sp-core 28.0.0",
- "sp-keyring",
- "staging-xcm",
- "staging-xcm-builder",
- "testnet-parachains-constants",
- "westend-emulated-chain",
-]
-
-[[package]]
 name = "asset-hub-westend-runtime"
 version = "0.15.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -2126,6 +2107,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletin-pallets-common"
+version = "0.1.0"
+dependencies = [
+ "pallet-proxy",
+ "pallet-sudo",
+ "pallet-utility",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+]
+
+[[package]]
 name = "bulletin-polkadot-runtime"
 version = "1.0.0"
 dependencies = [
@@ -2139,6 +2132,8 @@ dependencies = [
  "bp-runtime",
  "bp-test-utils",
  "bridge-runtime-common",
+ "bulletin-pallets-common",
+ "bulletin-transaction-storage-primitives",
  "frame-benchmarking",
  "frame-executive",
  "frame-support",
@@ -2154,6 +2149,7 @@ dependencies = [
  "pallet-bridge-messages",
  "pallet-bridge-parachains",
  "pallet-bridge-relayers",
+ "pallet-bulletin-transaction-storage",
  "pallet-grandpa",
  "pallet-offences",
  "pallet-proxy",
@@ -2164,12 +2160,10 @@ dependencies = [
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
  "pallet-utility",
  "pallet-validator-set",
  "pallet-xcm",
  "pallet-xcm-bridge-hub",
- "pallets-common",
  "parachains-common",
  "parity-scale-codec",
  "scale-info",
@@ -2198,13 +2192,13 @@ dependencies = [
  "staging-xcm-executor",
  "static_assertions",
  "substrate-wasm-builder",
- "transaction-storage-primitives",
 ]
 
 [[package]]
 name = "bulletin-sdk-rust"
 version = "0.1.0"
 dependencies = [
+ "bulletin-transaction-storage-primitives",
  "cid",
  "parity-scale-codec",
  "scale-info",
@@ -2214,7 +2208,6 @@ dependencies = [
  "subxt-signer 0.44.2",
  "thiserror 2.0.18",
  "tokio",
- "transaction-storage-primitives",
 ]
 
 [[package]]
@@ -2250,23 +2243,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletin-transaction-storage-primitives"
+version = "0.1.0"
+dependencies = [
+ "cid",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io",
+ "tracing",
+]
+
+[[package]]
 name = "bulletin-westend-integration-tests"
 version = "0.1.0"
 dependencies = [
- "asset-hub-westend-emulated-chain",
  "asset-hub-westend-runtime",
  "bulletin-westend-runtime",
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",
  "parachains-common",
+ "polkadot-primitives",
+ "sc-consensus-grandpa",
+ "sp-authority-discovery",
+ "sp-consensus-babe",
+ "sp-consensus-beefy",
  "sp-core 28.0.0",
  "sp-keyring",
  "sp-runtime",
  "staging-xcm",
  "staging-xcm-executor",
- "westend-emulated-chain",
+ "testnet-parachains-constants",
  "westend-runtime",
+ "westend-runtime-constants",
  "xcm-emulator",
 ]
 
@@ -2274,6 +2283,8 @@ dependencies = [
 name = "bulletin-westend-runtime"
 version = "0.1.0"
 dependencies = [
+ "bulletin-pallets-common",
+ "bulletin-transaction-storage-primitives",
  "cumulus-pallet-aura-ext",
  "cumulus-pallet-parachain-system",
  "cumulus-pallet-session-benchmarking",
@@ -2294,6 +2305,7 @@ dependencies = [
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
  "pallet-message-queue",
  "pallet-session",
@@ -2302,11 +2314,9 @@ dependencies = [
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
  "pallet-utility",
  "pallet-xcm",
  "pallet-xcm-benchmarks",
- "pallets-common",
  "parachains-common",
  "parachains-runtimes-test-utils",
  "parity-scale-codec",
@@ -2337,7 +2347,6 @@ dependencies = [
  "substrate-wasm-builder",
  "testnet-parachains-constants",
  "tracing",
- "transaction-storage-primitives",
  "westend-runtime-constants",
  "xcm-runtime-apis",
 ]
@@ -8745,6 +8754,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-bulletin-transaction-storage"
+version = "0.1.0"
+dependencies = [
+ "array-bytes 6.2.3",
+ "bulletin-pallets-common",
+ "bulletin-transaction-storage-primitives",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+ "sp-transaction-storage-proof",
+ "tracing",
+]
+
+[[package]]
 name = "pallet-collator-selection"
 version = "9.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -9630,20 +9653,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-transaction-storage"
-version = "4.0.0-dev"
-dependencies = [
- "array-bytes 6.2.3",
- "pallets-common",
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
- "sp-transaction-storage-proof",
- "tracing",
- "transaction-storage-primitives",
-]
-
-[[package]]
 name = "pallet-treasury"
 version = "27.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
@@ -9695,9 +9704,9 @@ dependencies = [
 name = "pallet-validator-set"
 version = "1.0.0"
 dependencies = [
+ "bulletin-pallets-common",
  "log",
  "pallet-session",
- "pallets-common",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
@@ -9839,18 +9848,6 @@ dependencies = [
  "staging-xcm",
  "staging-xcm-executor",
  "tracing",
-]
-
-[[package]]
-name = "pallets-common"
-version = "0.1.0"
-dependencies = [
- "pallet-proxy",
- "pallet-sudo",
- "pallet-utility",
- "parity-scale-codec",
- "polkadot-sdk-frame",
- "scale-info",
 ]
 
 [[package]]
@@ -10309,9 +10306,9 @@ dependencies = [
  "frame-try-runtime",
  "futures",
  "jsonrpsee",
+ "pallet-bulletin-transaction-storage",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
- "pallet-transaction-storage",
  "polkadot-primitives",
  "sc-basic-authorship",
  "sc-chain-spec",
@@ -16983,17 +16980,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "transaction-storage-primitives"
-version = "0.1.0"
-dependencies = [
- "cid",
- "parity-scale-codec",
- "scale-info",
- "sp-io",
- "tracing",
-]
-
-[[package]]
 name = "trie-db"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17921,25 +17907,6 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
-
-[[package]]
-name = "westend-emulated-chain"
-version = "0.0.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?rev=f9df32360c6c22747f60b3ff58243890eecafc8e#f9df32360c6c22747f60b3ff58243890eecafc8e"
-dependencies = [
- "emulated-integration-tests-common",
- "pallet-staking",
- "parachains-common",
- "polkadot-primitives",
- "sc-consensus-grandpa",
- "sp-authority-discovery",
- "sp-consensus-babe",
- "sp-consensus-beefy",
- "sp-core 28.0.0",
- "sp-runtime",
- "westend-runtime",
- "westend-runtime-constants",
-]
 
 [[package]]
 name = "westend-runtime"

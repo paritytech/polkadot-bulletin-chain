@@ -296,6 +296,8 @@ export interface BulletinClientInterface {
     transactions: number
     bytes: number
   }
+  /** Release resources held on behalf of this client (e.g. underlying PAPI client). */
+  destroy(): Promise<void>
 }
 
 /**
@@ -532,6 +534,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
+  /** Optional teardown callback invoked by `destroy()` */
+  private onDestroy?: () => void | Promise<void>
 
   /**
    * Create a new async client with PAPI client and signer
@@ -543,22 +547,40 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param signer - Polkadot signer for transaction signing
    * @param submit - Raw transaction submit function (pass `papiClient.submit`)
    * @param config - Optional client configuration
+   * @param onDestroy - Optional teardown callback. When provided, `destroy()`
+   *   awaits it so callers (e.g. wrappers that own the underlying
+   *   `PolkadotClient`) can route cleanup through this client.
    */
   constructor(
     api: BulletinTypedApi,
     signer: PolkadotSigner,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
+    onDestroy?: () => void | Promise<void>,
   ) {
     this.api = api
     this.signer = signer
     this.submit = submit
     this.config = resolveClientConfig(config)
+    this.onDestroy = onDestroy
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
       chunkingThreshold: this.config.chunkingThreshold,
     })
+  }
+
+  /**
+   * Release resources held on behalf of this client.
+   *
+   * Invokes the optional `onDestroy` callback supplied at construction time.
+   * Without one, this is a no-op — the SDK itself holds no long-lived
+   * resources, so callers that own the underlying `PolkadotClient` (or other
+   * connection) can either tear it down themselves or pass `onDestroy` to
+   * route teardown through here.
+   */
+  async destroy(): Promise<void> {
+    await this.onDestroy?.()
   }
 
   /**
