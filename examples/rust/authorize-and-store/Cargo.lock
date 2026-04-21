@@ -800,6 +800,7 @@ dependencies = [
 name = "bulletin-sdk-rust"
 version = "0.1.0"
 dependencies = [
+ "bulletin-transaction-storage-primitives",
  "cid",
  "parity-scale-codec",
  "scale-info",
@@ -809,7 +810,17 @@ dependencies = [
  "subxt-signer",
  "thiserror 2.0.18",
  "tokio",
- "transaction-storage-primitives",
+]
+
+[[package]]
+name = "bulletin-transaction-storage-primitives"
+version = "0.1.0"
+dependencies = [
+ "cid",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io",
+ "tracing",
 ]
 
 [[package]]
@@ -4998,17 +5009,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "transaction-storage-primitives"
-version = "0.1.0"
-dependencies = [
- "cid",
- "parity-scale-codec",
- "scale-info",
- "sp-io",
- "tracing",
 ]
 
 [[package]]
