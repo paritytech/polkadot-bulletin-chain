@@ -368,23 +368,17 @@ fn spawn_pipeline_dual_monitor(
 					} else {
 						match read_timestamp_at(&monitor_client, block_hash).await {
 							Ok(ts) => Some(ts),
+							Err(e) if crate::client::is_connection_error(&e) => {
+								crate::client::reconnect(
+									&mut monitor_client, &ws_url, "pipeline monitor", 1,
+								).await;
+								read_timestamp_at(&monitor_client, block_hash).await.ok()
+							},
 							Err(e) => {
 								log::warn!(
-									"pipeline: block #{block_number}: timestamp read failed, \
-									 reconnecting: {e}"
+									"pipeline: block #{block_number}: timestamp read failed: {e}"
 								);
-								match crate::client::connect(&ws_url).await {
-									Ok(new_client) => {
-										monitor_client = new_client;
-										read_timestamp_at(&monitor_client, block_hash)
-											.await
-											.ok()
-									},
-									Err(re) => {
-										log::warn!("pipeline: monitor reconnect failed: {re}");
-										None
-									},
-								}
+								None
 							},
 						}
 					};
@@ -788,37 +782,51 @@ pub async fn run_block_capacity_pipeline(
 					batches.len(),
 				);
 
-				// Spawn authorization as a background task so the reader can
-				// continue dispatching Store items from the previous batch.
-				let task_client = client.clone();
+				// Spawn authorization as a background task. Reconnects on RPC failure.
+				let mut task_client = client.clone();
 				let task_authorizer = authorizer.clone();
 				let task_nonce = authorizer_nonce_tracker.clone();
+				let task_ws_url = ws_urls[0].to_string();
 				pending_auth = Some(tokio::spawn(async move {
 					let mut failed = 0u32;
 					for account_ids in &batches {
-						if let Err(e) = authorize::authorize_account_batch(
-							&task_client,
-							&task_authorizer,
-							&task_nonce,
-							account_ids,
-							1,
-							authorize_bytes,
-						)
-						.await
-						{
-							failed += 1;
-							log::warn!(
-								"pipeline: auth batch failed ({} accounts), \
-								 continuing with remaining batches: {e:#}",
-								account_ids.len()
-							);
+						let mut attempts = 0u32;
+						loop {
+							match authorize::authorize_account_batch(
+								&task_client,
+								&task_authorizer,
+								&task_nonce,
+								account_ids,
+								1,
+								authorize_bytes,
+							)
+							.await
+							{
+								Ok(()) => break,
+								Err(e) => {
+									if crate::client::is_connection_error(&e) && attempts < 5 {
+										attempts += 1;
+										crate::client::reconnect(
+											&mut task_client,
+											&task_ws_url,
+											"pipeline auth",
+											attempts,
+										)
+										.await;
+										continue;
+									}
+									failed += 1;
+									log::warn!(
+										"pipeline: auth batch failed ({} accounts): {e:#}",
+										account_ids.len()
+									);
+									break;
+								},
+							}
 						}
 					}
 					if failed > 0 {
-						anyhow::bail!(
-							"{failed} of {} auth batches failed",
-							batches.len()
-						);
+						anyhow::bail!("{failed} of {} auth batches failed", batches.len());
 					}
 					Ok(())
 				}));

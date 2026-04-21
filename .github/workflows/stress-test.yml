@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "Command: throughput, bitswap, or full"
+        description: "Command: throughput, bitswap, full, or plan"
         required: true
         default: "throughput"
         type: choice
@@ -13,22 +13,31 @@ on:
           - throughput
           - bitswap
           - full
+          - plan
       ws_url:
         description: "WebSocket URL(s), comma-separated for multi-node"
         required: true
         default: "wss://westend-bulletin-rpc.polkadot.io"
       variants:
-        description: "Throughput variants filter (e.g. 1KB,128KB,1MB). Empty = all"
+        description: "Throughput variants filter (e.g. 1KB,128KB,MIXED). Empty = all"
         required: false
         default: "1MB"
       target_blocks:
-        description: "Number of steady-state blocks to measure per variant"
+        description: "Number of measured blocks per variant"
         required: false
         default: "20"
       submitters:
         description: "Number of concurrent submitter tasks"
         required: false
         default: "16"
+      iteration_blocks:
+        description: "Blocks worth of txs per pipeline iteration"
+        required: false
+        default: "20"
+      mix_seed:
+        description: "RNG seed for MIXED mode (empty = OS entropy)"
+        required: false
+        default: ""
       iterations:
         description: "Number of items for Bitswap read tests"
         required: false
@@ -37,6 +46,10 @@ on:
         description: "Bitswap payload size in bytes"
         required: false
         default: "131072"
+      plan_file:
+        description: "YAML plan file path (for plan command only)"
+        required: false
+        default: ""
       authorizer_seed:
         description: "Seed for the authorizer account"
         required: false
@@ -54,14 +67,16 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Resolve inputs with fallback defaults (inputs.* is empty on push triggers)
   ST_COMMAND: ${{ inputs.command || 'throughput' }}
   ST_WS_URL: ${{ inputs.ws_url || 'wss://westend-bulletin-rpc.polkadot.io' }}
   ST_VARIANTS: ${{ inputs.variants || '1MB' }}
   ST_TARGET_BLOCKS: ${{ inputs.target_blocks || '20' }}
   ST_SUBMITTERS: ${{ inputs.submitters || '16' }}
+  ST_ITERATION_BLOCKS: ${{ inputs.iteration_blocks || '20' }}
+  ST_MIX_SEED: ${{ inputs.mix_seed || '' }}
   ST_ITERATIONS: ${{ inputs.iterations || '128' }}
   ST_PAYLOAD_SIZE: ${{ inputs.payload_size || '131072' }}
+  ST_PLAN_FILE: ${{ inputs.plan_file || '' }}
   ST_AUTHORIZER_SEED: ${{ inputs.authorizer_seed || '//Alice' }}
   ST_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr || '' }}
 
@@ -104,8 +119,7 @@ jobs:
         run: |
           set -e
 
-          # Validate numeric inputs
-          for var in ST_TARGET_BLOCKS ST_SUBMITTERS ST_ITERATIONS ST_PAYLOAD_SIZE; do
+          for var in ST_TARGET_BLOCKS ST_SUBMITTERS ST_ITERATIONS ST_PAYLOAD_SIZE ST_ITERATION_BLOCKS; do
             val="${!var}"
             if ! [[ "$val" =~ ^[0-9]+$ ]]; then
               echo "::error::Invalid numeric input $var='$val'"
@@ -113,36 +127,40 @@ jobs:
             fi
           done
 
-          # Validate URL format (must start with ws:// or wss://)
+          if [ -n "$ST_MIX_SEED" ] && ! [[ "$ST_MIX_SEED" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid mix_seed='$ST_MIX_SEED' (must be numeric)"
+            exit 1
+          fi
+
           IFS=',' read -ra URLS <<< "$ST_WS_URL"
           for url in "${URLS[@]}"; do
-            url=$(echo "$url" | xargs)  # trim whitespace
+            url=$(echo "$url" | xargs)
             if ! [[ "$url" =~ ^wss?:// ]]; then
               echo "::error::Invalid WebSocket URL: '$url' (must start with ws:// or wss://)"
               exit 1
             fi
           done
 
-          # Validate variants (alphanumeric, dots, commas only)
           if [ -n "$ST_VARIANTS" ]; then
             if ! [[ "$ST_VARIANTS" =~ ^[a-zA-Z0-9.,]+$ ]]; then
-              echo "::error::Invalid variants filter: '$ST_VARIANTS' (allowed: alphanumeric, dots, commas)"
+              echo "::error::Invalid variants filter: '$ST_VARIANTS'"
               exit 1
             fi
           fi
 
-          # Validate authorizer seed (must start with //)
           if ! [[ "$ST_AUTHORIZER_SEED" =~ ^// ]]; then
             echo "::error::Invalid authorizer seed (must start with //)"
             exit 1
           fi
 
-          # Validate p2p multiaddr (must start with / if provided)
-          if [ -n "$ST_P2P_MULTIADDR" ]; then
-            if ! [[ "$ST_P2P_MULTIADDR" =~ ^/ ]]; then
-              echo "::error::Invalid P2P multiaddr (must start with /)"
-              exit 1
-            fi
+          if [ -n "$ST_P2P_MULTIADDR" ] && ! [[ "$ST_P2P_MULTIADDR" =~ ^/ ]]; then
+            echo "::error::Invalid P2P multiaddr (must start with /)"
+            exit 1
+          fi
+
+          if [ -n "$ST_PLAN_FILE" ] && [ ! -f "$ST_PLAN_FILE" ]; then
+            echo "::error::Plan file not found: '$ST_PLAN_FILE'"
+            exit 1
           fi
 
           echo "All inputs validated"
@@ -151,16 +169,20 @@ jobs:
         run: |
           set -e
 
-          # Build args array safely — no eval, no string interpolation in shell
           ARGS=(
             --ws-url "$ST_WS_URL"
             --submitters "$ST_SUBMITTERS"
             --target-blocks "$ST_TARGET_BLOCKS"
+            --iteration-blocks "$ST_ITERATION_BLOCKS"
             --iterations "$ST_ITERATIONS"
             --authorizer-seed "$ST_AUTHORIZER_SEED"
             --output json
             --output-file results.json
           )
+
+          if [ -n "$ST_MIX_SEED" ]; then
+            ARGS+=(--mix-seed "$ST_MIX_SEED")
+          fi
 
           if [ -n "$ST_P2P_MULTIADDR" ]; then
             ARGS+=(--p2p-multiaddr "$ST_P2P_MULTIADDR")
@@ -179,6 +201,12 @@ jobs:
             full)
               ARGS+=(full)
               ;;
+            plan)
+              ARGS+=(plan)
+              if [ -n "$ST_PLAN_FILE" ]; then
+                ARGS+=(--file "$ST_PLAN_FILE")
+              fi
+              ;;
           esac
 
           # Log command without authorizer seed
@@ -190,7 +218,6 @@ jobs:
           done
           echo "Running: ./target/release/bulletin-stress-test ${SAFE_ARGS[*]}"
 
-          # Tee stderr to file for artifact; results.json written by --output-file.
           ./target/release/bulletin-stress-test "${ARGS[@]}" 2> >(tee stress-test.log)
 
       - name: Upload results
@@ -199,35 +226,43 @@ jobs:
         with:
           name: stress-test-results-${{ env.ST_COMMAND }}-${{ github.run_number }}
           path: |
-            results.json
+            results*.json
+            results*.html
             stress-test.log
           retention-days: 90
 
       - name: Print summary
         if: always()
         run: |
-          if [ -f results.json ]; then
+          # Find the timestamped results file
+          RESULTS_FILE=$(ls -t results*.json 2>/dev/null | head -1)
+          if [ -z "$RESULTS_FILE" ]; then
             echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Command | \`${ST_COMMAND}\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Target | \`${ST_WS_URL}\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Submitters | ${ST_SUBMITTERS} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Target blocks | ${ST_TARGET_BLOCKS} |" >> $GITHUB_STEP_SUMMARY
-            if [ "$ST_COMMAND" = "throughput" ] && [ -n "$ST_VARIANTS" ]; then
-              echo "| Variants | \`${ST_VARIANTS}\` |" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ "$ST_COMMAND" = "bitswap" ]; then
-              echo "| Iterations | ${ST_ITERATIONS} |" >> $GITHUB_STEP_SUMMARY
-              echo "| Payload size | ${ST_PAYLOAD_SIZE} bytes |" >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            python3 -c "
+            echo "No results produced." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Command | \`${ST_COMMAND}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | \`${ST_WS_URL}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Submitters | ${ST_SUBMITTERS} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target blocks | ${ST_TARGET_BLOCKS} |" >> $GITHUB_STEP_SUMMARY
+          if [ "$ST_COMMAND" = "throughput" ] && [ -n "$ST_VARIANTS" ]; then
+            echo "| Variants | \`${ST_VARIANTS}\` |" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "$ST_COMMAND" = "bitswap" ]; then
+            echo "| Iterations | ${ST_ITERATIONS} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Payload size | ${ST_PAYLOAD_SIZE} bytes |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          python3 -c "
           import json, sys
           try:
-              with open('results.json') as f:
+              with open('$RESULTS_FILE') as f:
                   data = json.load(f)
           except (json.JSONDecodeError, FileNotFoundError) as e:
               print(f'Failed to parse results: {e}', file=sys.stderr)
@@ -257,8 +292,4 @@ jobs:
               print(json.dumps(summary, indent=2))
               print()
           " >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "No results.json produced." >> $GITHUB_STEP_SUMMARY
-          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY

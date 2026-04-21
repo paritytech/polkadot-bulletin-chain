@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::time::Duration;
 use subxt::{
 	config::{
 		substrate::SubstrateConfig, transaction_extensions, Config, DefaultExtrinsicParamsBuilder,
@@ -94,6 +95,40 @@ pub fn blake2b_256(data: &[u8]) -> [u8; 32] {
 	let mut out = [0u8; 32];
 	out.copy_from_slice(&hash);
 	out
+}
+
+/// Check if an error indicates a dead RPC connection that needs reconnecting.
+pub fn is_connection_error(e: &anyhow::Error) -> bool {
+	let msg = e.to_string().to_lowercase();
+	msg.contains("closed") ||
+		msg.contains("restart required") ||
+		msg.contains("background task") ||
+		msg.contains("broken pipe") ||
+		msg.contains("not connected") ||
+		msg.contains("connection reset") ||
+		msg.contains("i/o error")
+}
+
+/// Reconnect an `OnlineClient`, logging on failure. Returns `true` if successful.
+pub async fn reconnect(
+	client: &mut OnlineClient<BulletinConfig>,
+	ws_url: &str,
+	context: &str,
+	attempt: u32,
+) -> bool {
+	let backoff = Duration::from_secs((1u64 << attempt.min(4)).min(16));
+	log::warn!("{context}: reconnecting in {backoff:?} (attempt {attempt})");
+	tokio::time::sleep(backoff).await;
+	match connect(ws_url).await {
+		Ok(new_client) => {
+			*client = new_client;
+			true
+		},
+		Err(re) => {
+			log::warn!("{context}: reconnect failed: {re}");
+			false
+		},
+	}
 }
 
 /// Discover the node's P2P listen addresses and peer ID via a separate RPC call.
