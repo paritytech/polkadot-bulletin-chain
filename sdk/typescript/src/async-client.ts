@@ -744,6 +744,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           if (!resolved) {
             resolved = true
             cleanup()
+            progressCallback?.({
+              type: TxStatus.Dropped,
+              error:
+                "Transaction subscription ended before reaching the expected status",
+              chunkIndex,
+            })
             reject(
               new BulletinError(
                 "Transaction subscription ended before reaching the expected status. " +
