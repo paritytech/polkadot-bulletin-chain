@@ -10,7 +10,7 @@
  *
  * Key properties:
  * - Re-signs per block to bypass pool bans (fresh hashes on each wave)
- * - Short mortality (4 blocks) so old waves expire quickly
+ * - Mortal transactions (64-block period) so old waves expire
  * - Batch size computed from block weight/length limits
  * - bestNonce assigned directly (not max) to handle reorgs
  * - Finalization-based completion — no false positives from pool nonces
@@ -216,7 +216,7 @@ export async function pipelineStore(
         try {
           await fn()
         } catch {
-          /* all event processing errors are non-fatal */
+          /* event processing errors are non-fatal */
         }
       }
       draining = false
@@ -337,7 +337,7 @@ export async function pipelineStore(
                   signer,
                   {
                     nonce: startNonce + i,
-                    mortality: { mortal: true, period: 4 },
+                    mortality: { mortal: true, period: 64 },
                   },
                 )
                 signed.push(hex)
@@ -511,11 +511,13 @@ function decodeU32LE(hex: string): number {
 
 /** Encode a 32-byte public key as SS58 address for RPC calls like system_accountNextIndex. */
 function ss58Encode(pubKey: Uint8Array, prefix: number): string {
+  // SS58 for simple prefixes (0-63): [prefix(1), pubkey(32), checksum(2)]
   const payload = new Uint8Array(35)
   payload[0] = prefix
   payload.set(pubKey, 1)
+  // Checksum = first 2 bytes of blake2b-512("SS58PRE" || prefix || pubkey)
   const SS58_PREFIX = new TextEncoder().encode("SS58PRE")
-  const input = new Uint8Array(SS58_PREFIX.length + 35)
+  const input = new Uint8Array(SS58_PREFIX.length + 33) // 7 + 1 + 32 = 40
   input.set(SS58_PREFIX)
   input.set(payload.subarray(0, 33), SS58_PREFIX.length)
   const hash = blake2AsU8a(input, 512)
