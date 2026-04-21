@@ -74,6 +74,9 @@ use sp_runtime::{
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
+
+/// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
+const SLOT_DURATION: u64 = 24_000;
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
