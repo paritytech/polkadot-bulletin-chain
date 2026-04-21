@@ -146,6 +146,74 @@ export async function fetchPreimageAuthorizations(
   }
 }
 
+// CID on-chain lookup result
+export interface CidOnChainInfo {
+  /** Block number where the data was stored */
+  blockNumber: number;
+  /** Transaction index within the block */
+  index: number;
+  /** Data size in bytes */
+  size: number;
+  /** Block number when data expires (blockNumber + retentionPeriod) */
+  expiresAtBlock: number;
+  /** Current block number at the time of lookup */
+  currentBlock: number;
+  /** Retention period in blocks */
+  retentionPeriod: number;
+}
+
+/**
+ * Look up a CID on-chain by searching all Transactions entries for a matching content hash.
+ * Returns the most recent match (highest block number).
+ */
+export async function lookupCidOnChain(
+  api: any,
+  contentHashDigest: Uint8Array,
+  currentBlock: number,
+): Promise<CidOnChainInfo | null> {
+  try {
+    const [entries, retentionPeriod] = await Promise.all([
+      api.query.TransactionStorage.Transactions.getEntries(),
+      api.query.TransactionStorage.RetentionPeriod.getValue(),
+    ]);
+
+    const retention = Number(retentionPeriod);
+    let bestMatch: CidOnChainInfo | null = null;
+
+    for (const { keyArgs, value } of entries) {
+      const blockNum = Number(keyArgs[0]);
+      const txInfos: any[] = value;
+
+      for (let idx = 0; idx < txInfos.length; idx++) {
+        const info = txInfos[idx];
+        const onChainHash: Uint8Array = info.content_hash.asBytes();
+
+        if (onChainHash.length === contentHashDigest.length &&
+            onChainHash.every((b: number, i: number) => b === contentHashDigest[i])) {
+          const match: CidOnChainInfo = {
+            blockNumber: blockNum,
+            index: idx,
+            size: info.size,
+            expiresAtBlock: blockNum + retention,
+            currentBlock,
+            retentionPeriod: retention,
+          };
+          // Keep the most recent (highest block number) match — this is the latest
+          // upload or renewal.
+          if (!bestMatch || blockNum > bestMatch.blockNumber) {
+            bestMatch = match;
+          }
+        }
+      }
+    }
+
+    return bestMatch;
+  } catch (err) {
+    console.error("Failed to look up CID on chain:", err);
+    return null;
+  }
+}
+
 // Transaction info by block/index
 export async function fetchTransactionInfo(
   api: any,
