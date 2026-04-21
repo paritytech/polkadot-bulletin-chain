@@ -10,7 +10,7 @@
  *
  * Key properties:
  * - Re-signs per block to bypass pool bans (fresh hashes on each wave)
- * - Mortal transactions (64-block period) so old waves expire
+ * - Short mortality (8 blocks) so old waves expire quickly
  * - Batch size computed from block weight/length limits
  * - bestNonce assigned directly (not max) to handle reorgs
  * - Finalization-based completion — no false positives from pool nonces
@@ -26,7 +26,7 @@ import {
   type FollowResponse,
   type SubstrateClient,
 } from "@polkadot-api/substrate-client"
-import { Binary, type PolkadotSigner } from "polkadot-api"
+import { Binary, getOfflineApi, type PolkadotSigner } from "polkadot-api"
 
 import type { BulletinTypedApi } from "./async-client.js"
 
@@ -70,6 +70,16 @@ export interface PipelineConfig {
   blockLimits: BlockLimits
   /** Progress callback fired on each best/finalized block. */
   onProgress?: (stats: PipelineStats) => void
+  /**
+   * Raw signing function for fast-path signing.
+   *
+   * When provided, the pipeline bypasses PAPI's per-tx metadata decode
+   * (which costs ~100ms per tx) and signs transactions directly.
+   * Pass the `sign` function from your keypair (e.g. `keyPair.sign`).
+   */
+  rawSign?: (message: Uint8Array) => Promise<Uint8Array>
+  /** Signing type. Required when `rawSign` is provided. Default: `"Sr25519"`. */
+  signingType?: "Sr25519" | "Ed25519" | "Ecdsa"
 }
 
 /** Snapshot of pipeline progress (emitted via {@link PipelineConfig.onProgress}). */
@@ -110,15 +120,19 @@ export interface PipelineResult extends PipelineStats {
 // Internal types
 // ---------------------------------------------------------------------------
 
-/** Extended PAPI transaction with the `sign()` method (not in the SDK's minimal interface). */
-interface SignableTransaction {
-  sign(
-    from: PolkadotSigner,
-    options?: {
-      nonce?: number
-      mortality?: { mortal: boolean; period?: number }
-    },
-  ): Promise<string>
+/** Offline transaction entry returned by the offline API. */
+interface OfflineStoreTx {
+  (args: { data: Binary }): {
+    sign(
+      from: PolkadotSigner,
+      extensions: {
+        nonce: number
+        mortality:
+          | { mortal: true; period: number; startAtBlock: { height: number; hash: string } }
+          | { mortal: false }
+      },
+    ): Promise<string>
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,13 +145,13 @@ interface SignableTransaction {
  * On each best block:
  * 1. Query `system_accountNextIndex` for the current nonce
  * 2. Compute a batch that fits in one block (weight + length + count)
- * 3. Sign each tx with a 4-block mortal era
+ * 3. Sign each tx with a short mortal era via pre-cached offline API
  * 4. Broadcast every signed tx to every RPC endpoint
  *
  * Completion: when the account nonce at a finalized block ≥ `startNonce + items.length`.
  */
 export async function pipelineStore(
-  api: BulletinTypedApi,
+  _api: BulletinTypedApi,
   signer: PolkadotSigner,
   items: Uint8Array[],
   config: PipelineConfig,
@@ -145,7 +159,8 @@ export async function pipelineStore(
 ): Promise<PipelineResult> {
   if (items.length === 0) return emptyResult()
 
-  const { wsUrls, createProvider, blockLimits, onProgress } = config
+  const { wsUrls, createProvider, blockLimits, onProgress, rawSign } = config
+  const signingType = config.signingType ?? "Sr25519"
   if (wsUrls.length === 0) {
     throw new Error("pipelineStore: at least one wsUrl is required")
   }
@@ -187,6 +202,9 @@ export async function pipelineStore(
   let expectedFinalNonce = 0
   let initialized = false
   let done = false
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let offlineStoreTx: OfflineStoreTx = null as any
+  let effectiveSigner: PolkadotSigner = signer
 
   const counters = {
     waves: 0,
@@ -280,15 +298,39 @@ export async function pipelineStore(
             const lastHash = hashes[hashes.length - 1]
             if (!lastHash) break
             enqueue(async () => {
-              startNonce = await readNonceAtBlock(
-                monitorClient,
-                signerHex,
-                lastHash,
-              )
+              // Fetch start nonce, genesis hash, and metadata in parallel
+              const [nonce, genesisHash, metadataHex] = await Promise.all([
+                readNonceAtBlock(monitorClient, signerHex, lastHash),
+                monitorClient.request<string>("chain_getBlockHash", [0]),
+                monitorClient.request<string>("state_getMetadata", []),
+              ])
+              startNonce = nonce
               expectedFinalNonce = startNonce + items.length
-              initialized = true
 
-              // Unpin initialization blocks (we queried via legacy RPC, not chainHead)
+              // Build offline API — metadata decoded once, reused for all signing
+              const metadataRaw = hexToBytes(metadataHex)
+              const offlineApi = await (getOfflineApi as (opts: {
+                genesis: string
+                getMetadata: () => Promise<Uint8Array>
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              }) => Promise<any>)({
+                genesis: genesisHash,
+                getMetadata: async () => metadataRaw,
+              })
+              offlineStoreTx = offlineApi.tx.TransactionStorage
+                .store as OfflineStoreTx
+
+              // Build fast-path signer (bypasses per-tx metadata decode)
+              if (rawSign) {
+                effectiveSigner = await createFastSigner(
+                  rawSign,
+                  signer.publicKey,
+                  signingType,
+                  metadataRaw,
+                )
+              }
+
+              initialized = true
               follower.unpin(hashes).catch(() => {})
             })
             break
@@ -305,42 +347,56 @@ export async function pipelineStore(
           // bestBlockChanged — core submission loop
           // ---------------------------------------------------------------
           case "bestBlockChanged": {
+            const bestBlockHash = (
+              event as { type: "bestBlockChanged"; bestBlockHash: string }
+            ).bestBlockHash
             enqueue(async () => {
               if (!initialized || done) return
 
-              // Query nonce — assigned directly, NOT max (reorgs can lower it)
-              const bestNonce = await monitorClient.request<number>(
-                "system_accountNextIndex",
-                [signerSs58],
-              )
+              // Query nonce and block header in parallel
+              const [bestNonce, header] = await Promise.all([
+                monitorClient.request<number>(
+                  "system_accountNextIndex",
+                  [signerSs58],
+                ),
+                monitorClient.request<{ number: string }>(
+                  "chain_getHeader",
+                  [bestBlockHash],
+                ),
+              ])
+              const bestBlockNumber = parseInt(header.number, 16)
               counters.confirmed = clamp(
                 bestNonce - startNonce,
                 0,
                 items.length,
               )
 
-              // All items acknowledged at best level — wait for finalization
               if (bestNonce >= expectedFinalNonce) return
 
-              // Compute batch that fits in one block
               const fromIndex = Math.max(0, bestNonce - startNonce)
               const toIndex = computeBatchEnd(items, fromIndex, blockLimits)
               if (fromIndex >= toIndex) return
 
-              // Sign the batch — fresh signatures bypass pool bans
+              // Sign the batch (effectiveSigner uses fast path when rawSign provided)
+              const mortality = {
+                mortal: true as const,
+                period: 8,
+                startAtBlock: {
+                  height: bestBlockNumber,
+                  hash: bestBlockHash,
+                },
+              }
               const signed: string[] = []
               for (let i = fromIndex; i < toIndex; i++) {
-                const tx = api.tx.TransactionStorage.store({
+                const offlineTx = offlineStoreTx({
                   data: Binary.fromBytes(items[i] as Uint8Array),
                 })
-                const hex = await (tx as unknown as SignableTransaction).sign(
-                  signer,
-                  {
+                signed.push(
+                  await offlineTx.sign(effectiveSigner, {
                     nonce: startNonce + i,
-                    mortality: { mortal: true, period: 64 },
-                  },
+                    mortality,
+                  }),
                 )
-                signed.push(hex)
               }
 
               // Broadcast every tx to every RPC
@@ -497,7 +553,15 @@ async function readNonceAtBlock(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Decode a SCALE-encoded u32 (4 bytes, little-endian) from a hex string. */
+function hexToBytes(hex: string): Uint8Array {
+  const h = hex.startsWith("0x") ? hex.slice(2) : hex
+  const bytes = new Uint8Array(h.length / 2)
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16)
+  }
+  return bytes
+}
+
 function decodeU32LE(hex: string): number {
   const h = hex.startsWith("0x") ? hex.slice(2) : hex
   return (
@@ -567,6 +631,99 @@ function emitProgress(
     txPerSec: sec > 0 ? counters.finalized / sec : 0,
     throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
   })
+}
+
+// ---------------------------------------------------------------------------
+// Fast-path signer (bypasses per-tx metadata decode)
+// ---------------------------------------------------------------------------
+
+const SIGNER_TYPE_ID: Record<string, number> = {
+  Ed25519: 0,
+  Sr25519: 1,
+  Ecdsa: 2,
+}
+
+/**
+ * Create a PolkadotSigner that pre-decodes metadata once.
+ *
+ * PAPI's standard `getPolkadotSigner` calls `decAnyMetadata(metadata)` on
+ * every `signTx()` invocation (~100ms each for typical chain metadata).
+ * This wrapper decodes once and reuses the result, reducing per-tx overhead
+ * to pure crypto (<5ms).
+ */
+async function createFastSigner(
+  rawSign: (message: Uint8Array) => Promise<Uint8Array>,
+  publicKey: Uint8Array,
+  signingType: string,
+  metadataRaw: Uint8Array,
+): Promise<PolkadotSigner> {
+  const [bindings, utils] = await Promise.all([
+    import("@polkadot-api/substrate-bindings"),
+    import("@polkadot-api/utils"),
+  ])
+
+  const decMeta = bindings.unifyMetadata(bindings.decAnyMetadata(metadataRaw))
+
+  // Extract signed extension identifiers (order matters)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const signedExts = (decMeta.extrinsic as any).signedExtensions
+  const extList: Array<{ identifier: string }> =
+    Array.isArray(signedExts) ? signedExts[0] ?? [] : Object.values(signedExts)[0] ?? []
+  const extIdentifiers: string[] = extList.map((e) => e.identifier)
+
+  // Pre-compute address and signature assembly
+  // For Polkadot/Substrate chains: MultiAddress::Id = [0x00, ...pubkey32]
+  const addressBytes = new Uint8Array([0, ...publicKey])
+  const sigTypeTag = SIGNER_TYPE_ID[signingType] ?? 1
+
+  return {
+    publicKey,
+    signTx: async (
+      callData: Uint8Array,
+      signedExtensions: Record<
+        string,
+        { value: Uint8Array; additionalSigned: Uint8Array }
+      >,
+      _metadata: Uint8Array,
+      _blockNumber?: number,
+      hasher: (input: Uint8Array) => Uint8Array = bindings.Blake2256,
+    ): Promise<Uint8Array> => {
+      // Collect extra and additionalSigned from sign extensions
+      const extra: Uint8Array[] = []
+      const additionalSigned: Uint8Array[] = []
+      for (const id of extIdentifiers) {
+        const ext = signedExtensions[id]
+        if (!ext) throw new Error(`Missing ${id} signed extension`)
+        extra.push(ext.value)
+        additionalSigned.push(ext.additionalSigned)
+      }
+
+      // Sign
+      const toSign = utils.mergeUint8([
+        callData,
+        ...extra,
+        ...additionalSigned,
+      ])
+      const signed = await rawSign(
+        toSign.length > 256 ? hasher(toSign) : toSign,
+      )
+
+      // Assemble V4 signed extrinsic
+      const preResult = utils.mergeUint8([
+        bindings.extrinsicFormat.enc({ version: 4, type: "signed" }),
+        addressBytes,
+        new Uint8Array([sigTypeTag, ...signed]),
+        ...extra,
+        callData,
+      ])
+      return utils.mergeUint8([
+        bindings.compact.enc(preResult.length),
+        preResult,
+      ])
+    },
+    // signBytes not used by the pipeline but required by the interface
+    signBytes: async (data: Uint8Array) => rawSign(data),
+  }
 }
 
 function emptyResult(): PipelineResult {
