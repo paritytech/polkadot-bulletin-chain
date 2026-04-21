@@ -160,7 +160,6 @@ pub(crate) mod dag;
 pub(crate) mod renewal;
 pub(crate) mod storage;
 pub(crate) mod types;
-pub(crate) mod utils;
 
 // Transaction submission client (std-only)
 #[cfg(feature = "std")]
