@@ -52,6 +52,7 @@ use frame_system::{
 	limits::{BlockLength, BlockWeights},
 	EnsureRoot,
 };
+use pallet_bulletin_transaction_storage::AuthorizerBudget;
 use pallet_xcm::{EnsureXcm, IsVoiceOfBody};
 use parachains_common::{
 	impls::DealWithFees,
@@ -161,6 +162,7 @@ pub mod migrations {
 		pallet_bulletin_transaction_storage::migrations::PopulateAllowedAuthorizersIfEmpty<
 			Runtime,
 			LegacyAuthorizers,
+			DefaultAuthorizerBudget,
 		>,
 	);
 
@@ -241,13 +243,19 @@ parameter_types! {
 		})
 		.avg_block_initialization(AVERAGE_ON_INITIALIZE_RATIO)
 		.build_or_panic();
-	  /// Authorizers that previously had access via the hardcoded `TestAccounts`
-	  /// impl (PR #381). Re-seeded into `AllowedAuthorizers` storage by the
-	  /// migration below so live deployments don't lose access at upgrade.
-	  pub LegacyAuthorizers: Vec<AccountId> = alloc::vec![
-		  Sr25519Keyring::Alice.to_account_id(),
-		  EXTRA_AUTHORIZER,
-	  ];
+	/// Authorizers that previously had access via the hardcoded `TestAccounts`
+	/// impl (PR #381). Re-seeded into `AllowedAuthorizers` storage by the
+	/// migration below so live deployments don't lose access at upgrade.
+	pub LegacyAuthorizers: Vec<AccountId> = alloc::vec![
+		Sr25519Keyring::Alice.to_account_id(),
+		EXTRA_AUTHORIZER,
+	];
+	/// Default authorizer budget equivalent to the values set in Westend genesis.
+	pub DefaultAuthorizerBudget: AuthorizerBudget<BlockNumber> = AuthorizerBudget {
+		transactions_budget: 1000,
+		bytes_budget: 10 * 1024 * 1024,
+		authorization_period: None,
+	};
 	pub const SS58Prefix: u8 = 42;
 }
 

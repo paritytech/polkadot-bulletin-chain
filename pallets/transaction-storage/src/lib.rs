@@ -209,6 +209,19 @@ impl CheckContext {
 	}
 }
 
+/// A registered authorizer's budget.
+#[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+pub struct AuthorizerBudget<BlockNumber> {
+	/// Max transactions this authorizer can authorize.
+	pub transactions_budget: u32,
+	/// Max bytes this authorizer can authorize.
+	pub bytes_budget: u64,
+	/// Optional override for the authorization period.
+	pub authorization_period: Option<BlockNumber>,
+}
+
+pub type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
+
 pub struct EnsureAllowedAuthorizers<T>(core::marker::PhantomData<T>);
 
 impl<T: Config> EnsureOrigin<T::RuntimeOrigin> for EnsureAllowedAuthorizers<T>
@@ -232,7 +245,14 @@ where
 			Some(existing) => existing,
 			None => {
 				let new: T::AccountId = frame_benchmarking::account("allowed_authorizer", 0, 0);
-				AllowedAuthorizers::<T>::insert(&new, ());
+				AllowedAuthorizers::<T>::insert(
+					&new,
+					AuthorizerBudget {
+						transactions_budget: 10_000,
+						bytes_budget: 100_000,
+						authorization_period: None,
+					},
+				);
 				new
 			},
 		};
@@ -758,9 +778,18 @@ pub mod pallet {
 		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
 		#[pallet::call_index(10)]
 		#[pallet::weight(T::WeightInfo::add_authorizer())]
-		pub fn add_authorizer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
+		pub fn add_authorizer(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+			transactions_budget: u32,
+			bytes_budget: u64,
+			authorization_period: Option<BlockNumberFor<T>>,
+		) -> DispatchResult {
 			T::ManagerOrigin::ensure_origin(origin)?;
-			AllowedAuthorizers::<T>::insert(&who, ());
+			AllowedAuthorizers::<T>::insert(
+				&who,
+				AuthorizerBudget { transactions_budget, bytes_budget, authorization_period },
+			);
 			Self::deposit_event(Event::AuthorizerAdded { who });
 			Ok(())
 		}
@@ -822,7 +851,7 @@ pub mod pallet {
 	/// List of accounts allowed to give authorizations.
 	#[pallet::storage]
 	pub type AllowedAuthorizers<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, (), OptionQuery>;
+		StorageMap<_, Blake2_128Concat, T::AccountId, AuthorizerBudgetFor<T>, OptionQuery>;
 
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
@@ -865,8 +894,9 @@ pub mod pallet {
 		pub byte_fee: BalanceOf<T>,
 		pub entry_fee: BalanceOf<T>,
 		pub retention_period: BlockNumberFor<T>,
-		/// Initial accounts that are allowed to issue authorizations.
-		pub allowed_authorizers: Vec<T::AccountId>,
+		/// Initial additional accounts that are allowed to issue authorizations and their budgets
+		/// as (account, transaction, bytes) tuples.
+		pub allowed_authorizers: Vec<(T::AccountId, u32, u64)>,
 		/// Initial account authorizations as (account, transactions, bytes) tuples.
 		pub account_authorizations: Vec<(T::AccountId, u32, u64)>,
 		/// Initial preimage authorizations as (content_hash, max_size) tuples.
@@ -914,8 +944,16 @@ pub mod pallet {
 					},
 				);
 			}
-			for who in &self.allowed_authorizers {
-				AllowedAuthorizers::<T>::insert(who, ());
+			for (account, transactions_budget, bytes_budget) in &self.allowed_authorizers {
+				AllowedAuthorizers::<T>::insert(
+					account,
+					AuthorizerBudget {
+						transactions_budget: *transactions_budget,
+						bytes_budget: *bytes_budget,
+						// no override of the pallet default
+						authorization_period: None,
+					},
+				);
 			}
 		}
 	}

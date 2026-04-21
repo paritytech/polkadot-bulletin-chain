@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AllowedAuthorizers, Config, RetentionPeriod, LOG_TARGET};
+use crate::{AllowedAuthorizers, AuthorizerBudgetFor, Config, RetentionPeriod, LOG_TARGET};
 use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::marker::PhantomData;
@@ -27,9 +27,11 @@ use polkadot_sdk_frame::{
 ///
 /// Idempotent: safe to run multiple times. Skips if any authorizers already
 /// exist (e.g., set via genesis on a fresh chain, or by a previous run).
-pub struct PopulateAllowedAuthorizersIfEmpty<T, Accounts>(PhantomData<(T, Accounts)>);
-impl<T: Config, Accounts: Get<Vec<T::AccountId>>> OnRuntimeUpgrade
-	for PopulateAllowedAuthorizersIfEmpty<T, Accounts>
+pub struct PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>(
+	PhantomData<(T, Accounts, Budget)>,
+);
+impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFor<T>>>
+	OnRuntimeUpgrade for PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>
 {
 	fn on_runtime_upgrade() -> Weight {
 		let weight = T::DbWeight::get().reads(1);
@@ -45,7 +47,7 @@ impl<T: Config, Accounts: Get<Vec<T::AccountId>>> OnRuntimeUpgrade
 		let accounts = Accounts::get();
 		let count = accounts.len() as u64;
 		for who in accounts {
-			AllowedAuthorizers::<T>::insert(&who, ());
+			AllowedAuthorizers::<T>::insert(&who, Budget::get());
 		}
 
 		tracing::warn!(
