@@ -2021,6 +2021,7 @@ dependencies = [
  "bytes",
  "cid",
  "clap",
+ "ed25519-dalek",
  "env_logger",
  "futures",
  "hex",
