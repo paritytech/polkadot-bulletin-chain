@@ -280,6 +280,7 @@ fn spawn_pipeline_dual_monitor(
 	cancel: Arc<AtomicBool>,
 	target_blocks: Option<u32>,
 	target_reached: Arc<AtomicBool>,
+	stalled: Arc<AtomicBool>,
 	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	confirmed_count: Arc<AtomicU64>,
 ) -> tokio::task::JoinHandle<()> {
@@ -335,18 +336,29 @@ fn spawn_pipeline_dual_monitor(
 				}
 			};
 
+		const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+		let mut last_progress = Instant::now();
+
 		loop {
 			if cancel.load(Ordering::Relaxed) {
 				break;
 			}
 
-			// Once target is reached, stop processing best blocks and
-			// fall through to the finalization drain below.
 			if target_reached.load(Ordering::Relaxed) {
 				break;
 			}
 
+			let stall_deadline =
+				tokio::time::Instant::from_std(last_progress + STALL_TIMEOUT);
 			tokio::select! {
+				_ = tokio::time::sleep_until(stall_deadline) => {
+					log::warn!(
+						"pipeline monitor: no blocks with txs for {}s, signalling stall",
+						STALL_TIMEOUT.as_secs()
+					);
+					stalled.store(true, Ordering::Relaxed);
+					break;
+				}
 				Some(block) = best_rx.recv() => {
 					let block_number = block.number() as u64;
 					let block_hash = block.hash();
@@ -397,6 +409,7 @@ fn spawn_pipeline_dual_monitor(
 					}
 
 					if store_tx_count > 0 {
+						last_progress = Instant::now();
 						best_measured_blocks += 1;
 						log::info!(
 							"pipeline: [measured] block #{block_number}: \
@@ -679,6 +692,7 @@ pub async fn run_block_capacity_pipeline(
 	let measure_start = Arc::new(Mutex::new(None::<Instant>));
 	let monitor_ready = Arc::new(Notify::new());
 	let target_reached = Arc::new(AtomicBool::new(false));
+	let stalled = Arc::new(AtomicBool::new(false));
 	let counters = Arc::new(SubmitCounters::default());
 	let content_hash_map: Arc<Mutex<ContentHashMap>> =
 		Arc::new(Mutex::new(std::collections::HashMap::new()));
@@ -693,6 +707,7 @@ pub async fn run_block_capacity_pipeline(
 		cancel.clone(),
 		target_blocks,
 		target_reached.clone(),
+		stalled.clone(),
 		content_hash_map.clone(),
 		confirmed_count.clone(),
 	);
@@ -743,6 +758,10 @@ pub async fn run_block_capacity_pipeline(
 		}
 		if target_reached.load(Ordering::Relaxed) {
 			log::info!("pipeline: target block count reached, stopping work loop");
+			break;
+		}
+		if stalled.load(Ordering::Relaxed) {
+			log::warn!("pipeline: stall detected, stopping work loop for restart");
 			break;
 		}
 
@@ -889,9 +908,12 @@ pub async fn run_block_capacity_pipeline(
 		}
 	}
 
+	let is_stalled = stalled.load(Ordering::Relaxed);
+
 	shutdown_pipeline(
 		cancel,
 		&target_reached,
+		&stalled,
 		pending_auth,
 		worker_txs,
 		&mut worker_handles,
@@ -913,13 +935,14 @@ pub async fn run_block_capacity_pipeline(
 		log::warn!("pipeline: monitor did not exit in time, aborting");
 	}
 
-	collect_results(start, &measure_start, &counters, &block_stats, work_error)
+	collect_results(start, &measure_start, &counters, &block_stats, work_error, is_stalled)
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn shutdown_pipeline(
 	cancel: &Arc<AtomicBool>,
 	target_reached: &Arc<AtomicBool>,
+	stalled: &Arc<AtomicBool>,
 	pending_auth: Option<tokio::task::JoinHandle<Result<()>>>,
 	worker_txs: Vec<mpsc::Sender<StoreWorkMsg>>,
 	worker_handles: &mut Vec<tokio::task::JoinHandle<Result<()>>>,
@@ -927,7 +950,9 @@ async fn shutdown_pipeline(
 	confirmed_count: &Arc<AtomicU64>,
 ) {
 	const TX_TIMEOUT_SECS: u64 = 60;
-	let stopping = cancel.load(Ordering::Relaxed) || target_reached.load(Ordering::Relaxed);
+	let stopping = cancel.load(Ordering::Relaxed) ||
+		target_reached.load(Ordering::Relaxed) ||
+		stalled.load(Ordering::Relaxed);
 
 	if stopping {
 		if let Some(handle) = pending_auth {
@@ -988,6 +1013,7 @@ fn collect_results(
 	counters: &Arc<SubmitCounters>,
 	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
 	work_error: Option<anyhow::Error>,
+	stalled: bool,
 ) -> Result<BulkStoreResult> {
 	let duration = measure_start
 		.lock()
@@ -1031,6 +1057,7 @@ fn collect_results(
 		duration,
 		blocks: all_blocks,
 		fork_detections: 0,
+		stalled,
 	})
 }
 

@@ -329,69 +329,106 @@ pub async fn run_block_capacity_sweep(
 			 ≈ {accounts_per_iter} accounts/iter), est. pool demand ~{est_pool_mb} MB ===",
 		);
 
-		let run_id = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.unwrap_or_default()
-			.as_millis();
-		let seed = format!("T2sweep_{label}_{run_id}");
-		let plans: Vec<IterationPlan> =
-			pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
-		let txpool_pause = pipeline::POOL_PENDING_PAUSE_THRESHOLD;
-		log::info!(
-			"{label}: iteration layout ready ({} iterations; interleaved Authorize + Store; \
-			 txpool gate every {txpool_pause} dispatches (pause if pool > {txpool_pause}); \
-			 authorize chunks of {})",
-			plans.len(),
-			crate::authorize::AUTHORIZE_BATCH_SIZE,
-		);
 		let variant_result: Result<ScenarioResult> = async {
-			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
-			let (work_tx, work_rx) =
-				tokio::sync::mpsc::channel::<StressWorkItem>(pipeline::WORK_CHANNEL_CAPACITY);
+			let mut remaining_blocks = target_blocks;
+			let mut all_block_stats = Vec::new();
+			let mut attempt = 0u32;
+			const MAX_STALL_RETRIES: u32 = 3;
 
-			let gen_plans = plans.clone();
-			let gen_store = store_payload.clone();
-			let gen_mix_seed = mix_seed;
-			let gen_client = std::sync::Arc::new(client.clone());
-			let generator = tokio::spawn(async move {
-				pipeline::generate_block_capacity_work(
-					work_tx,
-					&gen_plans,
-					gen_store,
-					gen_mix_seed,
-					gen_client,
+			loop {
+				attempt += 1;
+				if cancel.load(Ordering::Relaxed) {
+					break;
+				}
+
+				// Fresh seed per attempt to avoid nonce collisions.
+				let run_id = std::time::SystemTime::now()
+					.duration_since(std::time::UNIX_EPOCH)
+					.unwrap_or_default()
+					.as_millis();
+				let seed = format!("T2sweep_{label}_{run_id}");
+				let plans: Vec<IterationPlan> =
+					pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
+
+				let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
+				let (work_tx, work_rx) =
+					tokio::sync::mpsc::channel::<StressWorkItem>(pipeline::WORK_CHANNEL_CAPACITY);
+
+				let gen_plans = plans.clone();
+				let gen_store = store_payload.clone();
+				let gen_mix_seed = mix_seed;
+				let gen_client = std::sync::Arc::new(client.clone());
+				let generator = tokio::spawn(async move {
+					pipeline::generate_block_capacity_work(
+						work_tx,
+						&gen_plans,
+						gen_store,
+						gen_mix_seed,
+						gen_client,
+					)
+					.await
+				});
+
+				let pipeline_out = pipeline::run_block_capacity_pipeline(
+					work_rx,
+					dual,
+					ws_urls,
+					submitters,
+					store_payload.clone(),
+					client,
+					authorizer_signer,
+					nonce_tracker,
+					cancel,
+					Some(remaining_blocks),
 				)
-				.await
-			});
+				.await;
 
-			let pipeline_out = pipeline::run_block_capacity_pipeline(
-				work_rx,
-				dual,
-				ws_urls,
-				submitters,
-				store_payload.clone(),
-				client,
-				authorizer_signer,
-				nonce_tracker,
-				cancel,
-				Some(target_blocks),
-			)
-			.await;
+				generator.abort();
+				let _ = generator.await;
 
-			// Always abort the generator — it may still be producing work items
-			// after the pipeline stopped (target reached, cancel, or error).
-			generator.abort();
-			let _ = generator.await;
+				let bulk = match pipeline_out {
+					Ok(b) => b,
+					Err(e) => return Err(e),
+				};
 
-			let bulk = match pipeline_out {
-				Ok(b) => b,
-				Err(e) => return Err(e),
-			};
+				let measured_in_run =
+					bulk.blocks.iter().filter(|b| !b.prefill && b.tx_count > 0).count() as u32;
+				all_block_stats.extend(bulk.blocks);
 
-			let total_accounts: u32 = plans.iter().map(|p| p.account_count).sum();
+				if bulk.stalled && attempt <= MAX_STALL_RETRIES && !cancel.load(Ordering::Relaxed) {
+					remaining_blocks = remaining_blocks.saturating_sub(measured_in_run);
+					if remaining_blocks == 0 {
+						break;
+					}
+					log::warn!(
+						"{label}: stalled after {measured_in_run} blocks, retrying with \
+						 {remaining_blocks} remaining (attempt {attempt}/{MAX_STALL_RETRIES})"
+					);
+					tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+					continue;
+				}
+
+				break;
+			}
+
+			// Build a synthetic BulkStoreResult from all accumulated blocks.
+			let total_confirmed: u64 = all_block_stats.iter().map(|b| b.tx_count).sum();
 			let result = scenario_result_from_bulk(
-				&bulk,
-				total_accounts as usize,
+				&store::BulkStoreResult {
+					total_submitted: total_confirmed, // approximate
+					total_confirmed,
+					total_errors: 0,
+					stale_nonces: 0,
+					pool_full_retries: 0,
+					remaining_in_queue: 0,
+					nonces_initialized: 0,
+					nonces_failed: 0,
+					duration: std::time::Duration::ZERO, // will use on-chain timing
+					blocks: all_block_stats,
+					fork_detections: 0,
+					stalled: false,
+				},
+				accounts_needed as usize,
 				payload_size_report,
 				label,
 				chain_limits,

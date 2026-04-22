@@ -454,6 +454,8 @@ pub struct BulkStoreResult {
 	pub blocks: Vec<BlockStats>,
 	/// Number of fork replacements / fork victims detected.
 	pub fork_detections: u64,
+	/// Pipeline stalled (no blocks with txs for extended period). Caller should retry.
+	pub stalled: bool,
 }
 
 /// Concurrently store data using one-shot accounts (each account submits 1 tx
@@ -486,6 +488,7 @@ pub async fn bulk_store_oneshot(
 			duration: Duration::ZERO,
 			blocks: vec![],
 			fork_detections: 0,
+			stalled: false,
 		});
 	}
 
@@ -948,5 +951,6 @@ pub async fn bulk_store_oneshot(
 		duration,
 		blocks: all_blocks,
 		fork_detections: fork_detections.load(Ordering::Relaxed),
+		stalled: false,
 	})
 }
