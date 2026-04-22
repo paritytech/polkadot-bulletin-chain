@@ -146,7 +146,7 @@ jobs:
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
-            cargo publish -p "$NAME"
+            cargo publish --locked -p "$NAME"
           fi
 
       - name: Publish bulletin-transaction-storage-primitives
@@ -160,10 +160,14 @@ jobs:
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
-            cargo publish -p "$NAME"
+            cargo publish --locked -p "$NAME"
           fi
 
-      - name: Wait for crates.io index update
+      # pallet-bulletin-transaction-storage depends on both bulletin-pallets-common and
+      # bulletin-transaction-storage-primitives, so both must be indexed on crates.io before
+      # it can resolve them. Common was published first (~10s+ ago by now) and primitives
+      # immediately before this sleep — 30s covers both.
+      - name: Wait for crates.io to index common and primitives
         if: ${{ !inputs.dry_run }}
         run: sleep 30
 
@@ -178,13 +182,13 @@ jobs:
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
-            cargo publish -p "$NAME"
+            cargo publish --locked -p "$NAME"
           fi
 
       - name: Dry run - verify packaging
         if: ${{ inputs.dry_run }}
         run: |
-          cargo package -p bulletin-pallets-common --allow-dirty
-          cargo package -p bulletin-transaction-storage-primitives --allow-dirty
-          cargo package -p pallet-bulletin-transaction-storage --allow-dirty
+          cargo package --locked -p bulletin-pallets-common --allow-dirty
+          cargo package --locked -p bulletin-transaction-storage-primitives --allow-dirty
+          cargo package --locked -p pallet-bulletin-transaction-storage --allow-dirty
           echo "Dry run complete - all crates packaged successfully"
