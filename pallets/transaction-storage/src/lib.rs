@@ -1456,8 +1456,40 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash)
 				},
-				Call::<T>::authorize_account { .. } |
-				Call::<T>::authorize_preimage { .. } |
+				Call::<T>::authorize_account { .. } | Call::<T>::authorize_preimage { .. } => {
+					// For authorize_preimage, transactions is always 1
+					let transaction_budget_to_consume = match call {
+						Call::<T>::authorize_account { transactions, .. } => *transactions,
+						_ => 1,
+					};
+					let byte_budget_to_consume = match call {
+						Call::<T>::authorize_account { bytes, .. } => *bytes,
+						Call::<T>::authorize_preimage { max_size, .. } => *max_size,
+						_ => unreachable!(),
+					};
+
+					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
+					T::Authorizer::ensure_origin(origin)
+						.map_err(|_| InvalidTransaction::BadSigner)?;
+
+					// Consume authorizer budget if this is an AllowedAuthorizers signer.
+					// Root/XCM origins won't be in the map — that's fine, they have no budget.
+					Self::check_authorizer_budget(
+						who,
+						transaction_budget_to_consume,
+						byte_budget_to_consume,
+						context.consume_authorization(),
+					)?;
+
+					return Ok((
+						context.want_valid_transaction().then(|| ValidTransaction {
+							priority: T::StoreRenewPriority::get(),
+							longevity: T::StoreRenewLongevity::get(),
+							..Default::default()
+						}),
+						None,
+					));
+				},
 				Call::<T>::refresh_account_authorization { .. } |
 				Call::<T>::refresh_preimage_authorization { .. } => {
 					// Verify that the signer satisfies the Authorizer origin.
@@ -1593,6 +1625,33 @@ pub mod pallet {
 			);
 
 			Ok(())
+		}
+
+		fn check_authorizer_budget(
+			who: &T::AccountId,
+			transactions: u32,
+			bytes: u64,
+			consume: bool,
+		) -> Result<(), TransactionValidityError> {
+			let try_consume = |maybe_budget: &mut Option<AuthorizerBudgetFor<T>>| -> Result<(), TransactionValidityError> {
+                let Some(budget) = maybe_budget else {
+                    return Ok(());
+                };
+                budget.transactions_budget = budget.transactions_budget
+                    .checked_sub(transactions)
+                    .ok_or(InvalidTransaction::Payment)?;
+                budget.bytes_budget = budget.bytes_budget
+                    .checked_sub(bytes)
+                    .ok_or(InvalidTransaction::Payment)?;
+                Ok(())
+            };
+
+			if consume {
+				AllowedAuthorizers::<T>::mutate(who, try_consume)
+			} else {
+				let mut budget = AllowedAuthorizers::<T>::get(who);
+				try_consume(&mut budget)
+			}
 		}
 	}
 }
