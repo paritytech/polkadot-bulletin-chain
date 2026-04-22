@@ -117,7 +117,7 @@ jobs:
           grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage' Cargo.toml
 
           # Regenerate Cargo.lock so the pinned path-dep versions match the bumped Cargo.toml files.
-          cargo check --workspace
+          cargo check -p bulletin-pallets-common -p bulletin-transaction-storage-primitives -p pallet-bulletin-transaction-storage
 
       - name: Commit and push release branch
         if: ${{ !inputs.dry_run }}
@@ -210,5 +210,9 @@ jobs:
         run: |
           cargo package --locked -p bulletin-pallets-common --allow-dirty
           cargo package --locked -p bulletin-transaction-storage-primitives --allow-dirty
-          cargo package --locked -p pallet-bulletin-transaction-storage --allow-dirty
+          # --no-verify skips the isolated verification build. Without it, packaging fails
+          # because the verification build resolves bulletin-* deps from crates.io at the
+          # new (not-yet-published) version. The real publish path handles this via
+          # sequential publish + index wait.
+          cargo package --locked --no-verify -p pallet-bulletin-transaction-storage --allow-dirty
           echo "Dry run complete - all crates packaged successfully"
