@@ -272,3 +272,111 @@ where
 		Ok(())
 	}
 }
+
+/// Maximum priority boost added to a signed `store` / `store_with_cid_config` transaction.
+///
+/// The actual boost scales linearly with the signer's unused allowance:
+/// `BOOST * (bytes_allowance - bytes) / bytes_allowance`. Fresh grant yields the full boost;
+/// at-cap or over-cap yields zero.
+pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = 1_000_000_000;
+
+/// Computes `ALLOWANCE_PRIORITY_BOOST * (bytes_allowance - bytes) / bytes_allowance`.
+///
+/// Returns `0` when `bytes_allowance == 0` (missing / expired auth) or when `bytes >=
+/// bytes_allowance` (over cap). Uses `u128` intermediate because
+/// `ALLOWANCE_PRIORITY_BOOST (1e9) * u64_max_plausible_bytes (~1e12)` exceeds `u64::MAX`.
+fn proportional_boost(bytes: u64, bytes_allowance: u64) -> TransactionPriority {
+	if bytes_allowance == 0 {
+		return 0;
+	}
+	let remaining = bytes_allowance.saturating_sub(bytes);
+	((ALLOWANCE_PRIORITY_BOOST as u128 * remaining as u128) / bytes_allowance as u128) as u64
+}
+
+/// Boosts the priority of signed `store` / `store_with_cid_config` calls proportionally to
+/// the signer's remaining byte allowance. Transactions over allowance still validate
+/// (consumption happens in [`ValidateStorageCalls`]), they just don't get any boost.
+#[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
+#[codec(encode_bound())]
+#[codec(decode_bound())]
+#[codec(mel_bound())]
+#[scale_info(skip_type_params(T))]
+pub struct AllowanceBasedPriority<T>(PhantomData<T>);
+
+impl<T> Default for AllowanceBasedPriority<T> {
+	fn default() -> Self {
+		Self(PhantomData)
+	}
+}
+
+impl<T: Config + Send + Sync> fmt::Debug for AllowanceBasedPriority<T> {
+	#[cfg(feature = "std")]
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "AllowanceBasedPriority")
+	}
+
+	#[cfg(not(feature = "std"))]
+	fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
+		Ok(())
+	}
+}
+
+impl<T: Config + Send + Sync> TransactionExtension<RuntimeCallOf<T>> for AllowanceBasedPriority<T>
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+	T::RuntimeOrigin: OriginTrait + AsSystemOriginSigner<T::AccountId>,
+{
+	const IDENTIFIER: &'static str = "AllowanceBasedPriority";
+
+	type Implicit = ();
+	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
+		Ok(())
+	}
+
+	type Val = ();
+	type Pre = ();
+
+	fn weight(&self, _call: &RuntimeCallOf<T>) -> Weight {
+		<T as frame_system::Config>::DbWeight::get().reads(1)
+	}
+
+	fn validate(
+		&self,
+		origin: T::RuntimeOrigin,
+		call: &RuntimeCallOf<T>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		_len: usize,
+		_self_implicit: Self::Implicit,
+		_inherited_implication: &impl Implication,
+		_source: TransactionSource,
+	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
+		let Some(who) = origin.as_system_origin_signer() else {
+			return Ok((ValidTransaction::default(), (), origin));
+		};
+
+		let Some(inner_call) = call.is_sub_type() else {
+			return Ok((ValidTransaction::default(), (), origin));
+		};
+
+		if !matches!(inner_call, Call::store { .. } | Call::store_with_cid_config { .. }) {
+			return Ok((ValidTransaction::default(), (), origin));
+		}
+
+		let extent = Pallet::<T>::account_authorization_extent(who.clone());
+		let priority = proportional_boost(extent.bytes, extent.bytes_allowance);
+		let valid = ValidTransaction { priority, ..Default::default() };
+
+		Ok((valid, (), origin))
+	}
+
+	fn prepare(
+		self,
+		_val: Self::Val,
+		_origin: &T::RuntimeOrigin,
+		_call: &RuntimeCallOf<T>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		_len: usize,
+	) -> Result<Self::Pre, TransactionValidityError> {
+		Ok(())
+	}
+}
