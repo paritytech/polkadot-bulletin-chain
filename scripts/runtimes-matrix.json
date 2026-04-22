@@ -17,11 +17,12 @@
   },
   {
     "name": "bulletin-paseo",
-    "package": "bulletin-westend-runtime",
-    "path": "runtimes/bulletin-westend",
+    "package": "bulletin-paseo-runtime",
+    "path": "runtimes/bulletin-paseo",
     "uris": [
       "wss://paseo-bulletin-rpc.polkadot.io"
     ],
+    "integration_tests": true,
     "try_runtime": {
         "spec_name_check": "--disable-spec-name-check",
         "extra_flags": "--blocktime 24000 --disable-spec-version-check"

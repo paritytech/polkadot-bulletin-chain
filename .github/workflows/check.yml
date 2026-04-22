@@ -135,6 +135,10 @@ jobs:
         run: |
           cargo test -p bulletin-westend-runtime
 
+      - name: Run (Paseo) runtime tests
+        run: |
+          cargo test -p bulletin-paseo-runtime
+
       - name: Run (Westend) XCM integration tests
         run: |
           unset SKIP_WASM_BUILD
@@ -186,9 +190,17 @@ jobs:
         run: |
           python3 ./scripts/cmd/cmd.py bench --runtime bulletin-westend --steps 2 --repeat 1
 
+      - name: Run benchmarks (Paseo parachain)
+        run: |
+          python3 ./scripts/cmd/cmd.py bench --runtime bulletin-paseo --steps 2 --repeat 1
+
       - name: Run production check for Westend parachain
         run: |
           cargo check --profile production -p bulletin-westend-runtime
+
+      - name: Run production check for Paseo parachain
+        run: |
+          cargo check --profile production -p bulletin-paseo-runtime
 
   all-tests-passed:
     name: All tests passed

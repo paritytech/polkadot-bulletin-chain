@@ -115,10 +115,11 @@ _wait-for-rpc pid log_file port="10000" timeout="30":
         sleep 1
     done
 
-# Start westend parachain with zombienet in background
+# Start a bulletin parachain (westend or paseo) with zombienet in background.
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime" or "bulletin-paseo-runtime"),
+#             taken from ../scripts/runtimes-matrix.json
+bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     #!/usr/bin/env bash
     set -e
 
@@ -149,23 +150,36 @@ bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-ru
         exit 1
     fi
 
+    # Pick spec script + zombienet TOML based on the runtime
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+        SPEC_SCRIPT="create_bulletin_westend_spec.sh"
+        ZOMBIENET_TOML="zombienet/bulletin-westend-local.toml"
+    elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+        SPEC_SCRIPT="create_bulletin_paseo_spec.sh"
+        ZOMBIENET_TOML="zombienet/bulletin-paseo-local.toml"
+    else
+        echo "❌ Unhandled runtime: {{ runtime }}"
+        exit 1
+    fi
+
     # Create chain spec
-    echo "   Creating Westend chain spec..."
+    echo "   Creating chain spec for {{ runtime }}..."
     ROOT_DIR="{{ justfile_directory() }}/.."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/create_bulletin_westend_spec.sh"
+    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/$SPEC_SCRIPT"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
         runtime   : {{ runtime }}
         test_dir  : {{ test_dir }}
         zombienet : $ZOMBIENET_BIN
+        zombienet toml : $ZOMBIENET_TOML
         POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
         POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
     EOF
     # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
     (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-westend-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
+        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
 
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
@@ -272,9 +286,11 @@ ipfs-kubo-start test_dir runtime: ipfs-kubo-install
     $IPFS_CMD config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
     $IPFS_CMD config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
-    # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes
+    # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes.
+    # The bulletin-paseo zombienet reuses the same collator node names as bulletin-westend,
+    # so their derived peer IDs are the same and we can share a single branch.
     echo "   Configuring Peering.Peers for {{ runtime }}..."
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
         PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
@@ -400,10 +416,12 @@ ipfs-start test_dir runtime: _check-docker
     docker exec ipfs-node ipfs $DEFAULT_API config Addresses.API "/ip4/0.0.0.0/tcp/${IPFS_API_PORT}"
     docker exec ipfs-node ipfs $DEFAULT_API config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
-    # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes
-    # (set before restart so the daemon picks up the config on boot)
+    # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes.
+    # The bulletin-paseo zombienet reuses the same collator node names as bulletin-westend,
+    # so their derived peer IDs are the same and we can share a single branch.
+    # (Set before restart so the daemon picks up the config on boot.)
     echo "   Configuring Peering.Peers for {{ runtime }}..."
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
         PEERS="[{\"ID\":\"{{ WESTEND_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ WESTEND_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER2_PORT }}/ws\"]}]"
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
@@ -463,14 +481,14 @@ papi-generate ws_url="ws://127.0.0.1:10000": npm-install
 
 # Setup all services for IPFS
 # Parameters:
-#   runtime - Runtime to build and run (e.g., "bulletin-westend-runtime")
+#   runtime - Runtime to build and run (e.g., "bulletin-westend-runtime" or "bulletin-paseo-runtime")
 #   ipfs_mode - IPFS backend: "kubo-docker" (default) or "kubo-native" (local, no Docker required)
 setup-services test_dir runtime ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-        just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+        just bulletin-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     else
         echo "❌ Unhandled runtime: {{ runtime }} specified!"
         exit 1
@@ -560,6 +578,9 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
         RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
+        # Zombienet names its parachain chainspec by <relay>-<para_id>. Both
+        # bulletin-westend-local.toml and bulletin-paseo-local.toml use the
+        # westend-local relay and para id 2487, so the filename is the same.
         PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
         node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
     else
@@ -711,7 +732,7 @@ run-ts-sdk-vitest runtime ipfs_mode="kubo-docker": npm-install
 # Run authorize and store example
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   runtime - Runtime name (e.g., "bulletin-westend-runtime")
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime" or "bulletin-paseo-runtime")
 run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e

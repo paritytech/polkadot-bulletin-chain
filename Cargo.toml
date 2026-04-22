@@ -33,6 +33,7 @@ westend-runtime-constants = { git = "https://github.com/paritytech/polkadot-sdk.
 
 # Local workspace members
 bulletin-pallets-common = { path = "pallets/common", default-features = false }
+bulletin-paseo-runtime = { path = "runtimes/bulletin-paseo" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
@@ -117,6 +118,7 @@ members = [
 	"pallets/common",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
+	"runtimes/bulletin-paseo",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
