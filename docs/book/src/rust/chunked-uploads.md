@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dag_options = StoreOptions {
         cid_codec: CidCodec::DagPb,
         hash_algorithm: HashingAlgorithm::Blake2b256,
-        wait_for_finalization: true,
+        wait_for: WaitFor::InBlock,
     };
 
     // Prepare chunks using BulletinClient (no network needed)
@@ -54,14 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Submit each chunk
     for (i, chunk_op) in batch_operation.operations.iter().enumerate() {
         info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
-        let receipt = client.store(chunk_op.data.clone(), &signer).await?;
+        let receipt = client.store(chunk_op.data.clone(), &signer, WaitFor::InBlock).await?;
         info!("  Chunk {} stored in block: {}", i + 1, receipt.block_hash);
     }
 
     // Submit the manifest
     if let Some(manifest) = manifest_data {
         info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
-        let receipt = client.store(manifest, &signer).await?;
+        let receipt = client.store(manifest, &signer, WaitFor::InBlock).await?;
         info!("Manifest stored in block: {}", receipt.block_hash);
         info!("Use this manifest CID to retrieve the complete file via IPFS/Bitswap");
     }
@@ -205,11 +205,11 @@ match client.check_authorization_for_store(&account, txs_needed, bytes_needed).a
             "Insufficient authorization"
         );
         // Authorize first
-        client.authorize_account(account, txs_needed, bytes_needed, &signer).await?;
+        client.authorize_account(account, txs_needed, bytes_needed, &signer, WaitFor::InBlock).await?;
     }
     Err(Error::AuthorizationNotFound(_)) => {
         tracing::error!("No authorization found, authorizing...");
-        client.authorize_account(account, txs_needed, bytes_needed, &signer).await?;
+        client.authorize_account(account, txs_needed, bytes_needed, &signer, WaitFor::InBlock).await?;
     }
     Err(e) => return Err(e.into()),
 }
@@ -241,7 +241,7 @@ match sdk_client.prepare_store_chunked(&data, Some(config), options, None) {
 
 // Submission errors (from TransactionClient)
 for (i, chunk_op) in batch.operations.iter().enumerate() {
-    match client.store(chunk_op.data.clone(), &signer).await {
+    match client.store(chunk_op.data.clone(), &signer, WaitFor::InBlock).await {
         Ok(receipt) => {
             tracing::info!("Chunk {} stored in block: {}", i + 1, receipt.block_hash);
         }
