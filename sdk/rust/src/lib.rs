@@ -171,7 +171,7 @@ pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
 	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, Error,
 	ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions, StoreResult,
-	TransactionStatusEvent,
+	TransactionStatusEvent, WaitFor,
 };
 
 // Re-export CID types from pallet

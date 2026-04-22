@@ -35,12 +35,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         10,                    // 10 transactions
         10 * 1024 * 1024,      // 10 MiB
         &signer,
+        WaitFor::InBlock,
     ).await?;
     info!("Account authorized in block: {}", auth_receipt.block_hash);
 
     // Step 2: Store data
     let data = b"Hello, Bulletin!".to_vec();
-    let receipt = client.store(data.clone(), &signer).await?;
+    let receipt = client.store(data.clone(), &signer, WaitFor::InBlock).await?;
 
     info!("Stored {} bytes in block: {}", receipt.data_size, receipt.block_hash);
     info!("Extrinsic hash: {}", receipt.extrinsic_hash);
@@ -59,6 +60,7 @@ use std::sync::Arc;
 let receipt = client.store_with_progress(
     data,
     &signer,
+    WaitFor::InBlock,
     Some(Arc::new(|event| {
         match event {
             ProgressEvent::Transaction(status) => {
@@ -84,7 +86,7 @@ let sdk_client = BulletinClient::new();
 let options = StoreOptions {
     cid_codec: CidCodec::Raw,
     hash_algorithm: HashingAlgorithm::Blake2b256,
-    wait_for_finalization: true,
+    wait_for: WaitFor::InBlock,
 };
 
 let operation = sdk_client.prepare_store(data.clone(), options)?;
@@ -93,7 +95,7 @@ let cid_bytes = cid_to_bytes(&cid_data)?;
 info!("CID: {}", hex::encode(&cid_bytes));
 
 // Then store using TransactionClient
-let receipt = client.store(data, &signer).await?;
+let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 ```
 
 ## Error Handling
@@ -101,7 +103,7 @@ let receipt = client.store(data, &signer).await?;
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-match client.store(data, &signer).await {
+match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         tracing::info!("Stored in block: {}", receipt.block_hash);
     }
