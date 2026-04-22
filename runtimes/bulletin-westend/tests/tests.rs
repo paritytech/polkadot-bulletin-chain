@@ -28,15 +28,18 @@ use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
 use pallet_bulletin_transaction_storage::{
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
+	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
+	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
+	Origin as TxStorageOrigin,
 };
 use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
+	traits::{TransactionExtension, TxBaseImplication},
 	transaction_validity,
-	transaction_validity::{InvalidTransaction, TransactionValidityError},
+	transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidityError},
 	ApplyExtrinsicResult, BuildStorage, Either,
 };
 use std::collections::HashMap;
@@ -312,6 +315,67 @@ fn authorized_storage_transactions_are_for_free() {
 			let res = construct_and_apply_extrinsic(Some(account.pair()), call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
+		});
+}
+
+/// Run `AllowanceBasedPriority::validate` and return the contributed priority.
+fn allowance_based_priority(
+	origin: RuntimeOrigin,
+	call: &RuntimeCall,
+) -> transaction_validity::TransactionPriority {
+	let info = call.get_dispatch_info();
+	AllowanceBasedPriority::<Runtime>::default()
+		.validate(origin, call, &info, 0, (), &TxBaseImplication(()), TransactionSource::External)
+		.expect("validate should not fail")
+		.0
+		.priority
+}
+
+#[test]
+fn allowance_based_priority_works() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let account = Sr25519Keyring::Eve;
+			let who: AccountId = account.to_account_id();
+			let origin: RuntimeOrigin = TxStorageOrigin::<Runtime>::Authorized {
+				who: who.clone(),
+				scope: AuthorizationScope::Account(who.clone()),
+			}
+			.into();
+			let store = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: vec![0u8; 1],
+			});
+
+			// No authorization → no boost.
+			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
+
+			// Fresh 1000-byte grant → full boost.
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				1000,
+			));
+			assert_eq!(allowance_based_priority(origin.clone(), &store), ALLOWANCE_PRIORITY_BOOST,);
+
+			// Consume 750/1000 → 25% remaining → 25% boost.
+			assert_ok_ok(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; 750],
+				}),
+			));
+			advance_block();
+			assert_eq!(
+				allowance_based_priority(origin.clone(), &store),
+				ALLOWANCE_PRIORITY_BOOST / 4,
+			);
+
+			// `renew` carries `Origin::Authorized` too, but must not be boosted.
+			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				block: 1,
+				index: 0,
+			});
+			assert_eq!(allowance_based_priority(origin, &renew), 0);
 		});
 }
 

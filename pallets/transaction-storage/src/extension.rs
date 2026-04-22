@@ -17,7 +17,9 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{pallet::Origin, weights::WeightInfo, Call, Config, Pallet, LOG_TARGET};
+use crate::{
+	pallet::Origin, weights::WeightInfo, AuthorizationScope, Call, Config, Pallet, LOG_TARGET,
+};
 use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
@@ -324,7 +326,8 @@ impl<T: Config + Send + Sync> fmt::Debug for AllowanceBasedPriority<T> {
 impl<T: Config + Send + Sync> TransactionExtension<RuntimeCallOf<T>> for AllowanceBasedPriority<T>
 where
 	RuntimeCallOf<T>: IsSubType<Call<T>>,
-	T::RuntimeOrigin: OriginTrait + AsSystemOriginSigner<T::AccountId>,
+	T::RuntimeOrigin: OriginTrait,
+	<T::RuntimeOrigin as OriginTrait>::PalletsOrigin: Clone + TryInto<Origin<T>>,
 {
 	const IDENTIFIER: &'static str = "AllowanceBasedPriority";
 
@@ -350,23 +353,25 @@ where
 		_inherited_implication: &impl Implication,
 		_source: TransactionSource,
 	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
-		let Some(who) = origin.as_system_origin_signer() else {
-			return Ok((ValidTransaction::default(), (), origin));
-		};
-
 		let Some(inner_call) = call.is_sub_type() else {
 			return Ok((ValidTransaction::default(), (), origin));
 		};
-
+		// Exclude `renew`: it also carries `Origin::Authorized` but doesn't consume allowance.
 		if !matches!(inner_call, Call::store { .. } | Call::store_with_cid_config { .. }) {
 			return Ok((ValidTransaction::default(), (), origin));
 		}
 
-		let extent = Pallet::<T>::account_authorization_extent(who.clone());
-		let priority = proportional_boost(extent.bytes, extent.bytes_allowance);
-		let valid = ValidTransaction { priority, ..Default::default() };
+		// `ValidateStorageCalls` earlier in the pipeline rewrites the origin to
+		// `Origin::Authorized`; only the account-scoped variant consumes the caller's allowance.
+		let priority = match origin.caller().clone().try_into() {
+			Ok(Origin::<T>::Authorized { who, scope: AuthorizationScope::Account(_) }) => {
+				let extent = Pallet::<T>::account_authorization_extent(who);
+				proportional_boost(extent.bytes, extent.bytes_allowance)
+			},
+			_ => 0,
+		};
 
-		Ok((valid, (), origin))
+		Ok((ValidTransaction { priority, ..Default::default() }, (), origin))
 	}
 
 	fn prepare(
