@@ -1,12 +1,17 @@
-# This workflow publishes bulletin-pallets-common, pallet-bulletin-transaction-storage, bulletin-transaction-storage-primitives crates to crates.io.
-# The workflow uses manual tigger.
-# On triggereing the workflow release branch name and the versions of the crates should be provided manually as input parameters.
-# There is a possibility to run the flow in a dry-run mode. In this case crates won't be published, to check if everything compiles well before publishing.
-# The release branch will be cretaed on the first run if it is not exists, if there is branch with such name (let's say we do a patch release) the existing
-# branch will be checked out.
-
+# This workflow publishes bulletin-pallets-common, pallet-bulletin-transaction-storage,
+# bulletin-transaction-storage-primitives crates to crates.io.
+# The workflow uses a manual trigger.
+# On triggering the workflow, the release branch name and the versions of the crates should
+# be provided as input parameters.
+# In dry-run mode, no remote branch is created, no commit is pushed, and no crate is published.
+# The release branch is created on the first run if it does not exist. If a branch with the
+# same name already exists (e.g. for a patch release), it is reused.
 
 name: Publish Crates
+
+concurrency:
+  group: publish-crates-${{ github.event.inputs.release_branch }}
+  cancel-in-progress: false
 
 on:
   workflow_dispatch:
@@ -28,7 +33,7 @@ on:
         type: string
         required: true
       dry_run:
-        description: "Dry run (skip actual publish)"
+        description: "Dry run (skip remote branch / commit / push / publish)"
         type: boolean
         default: true
 
@@ -48,6 +53,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Validate inputs
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          COMMON_VERSION: ${{ inputs.common_version }}
+          PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
+          PALLET_VERSION: ${{ inputs.pallet_version }}
+        run: |
+          for v in "$COMMON_VERSION" "$PRIMITIVES_VERSION" "$PALLET_VERSION"; do
+            echo "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$' || {
+              echo "Invalid semver: $v" >&2; exit 1;
+            }
+          done
+          echo "$RELEASE_BRANCH" | grep -qE '^[A-Za-z0-9._/-]+$' || {
+            echo "Invalid branch name: $RELEASE_BRANCH" >&2; exit 1;
+          }
+          case "$RELEASE_BRANCH" in
+            main|master|HEAD|-*|*..*|*" "*)
+              echo "Disallowed branch name: $RELEASE_BRANCH" >&2; exit 1 ;;
+          esac
+
       - name: Configure git
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -55,14 +80,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Create or checkout release branch
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
         run: |
-          if git ls-remote --exit-code --heads origin "${{ inputs.release_branch }}" > /dev/null 2>&1; then
-            echo "Branch ${{ inputs.release_branch }} already exists, checking out"
-            git fetch origin "${{ inputs.release_branch }}"
-            git checkout "${{ inputs.release_branch }}"
+          if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" > /dev/null 2>&1; then
+            echo "Branch $RELEASE_BRANCH already exists, checking out"
+            git fetch origin "$RELEASE_BRANCH"
+            git checkout "$RELEASE_BRANCH"
           else
-            echo "Creating new branch ${{ inputs.release_branch }}"
-            git checkout -b "${{ inputs.release_branch }}"
+            echo "Creating new branch $RELEASE_BRANCH"
+            git checkout -b "$RELEASE_BRANCH"
           fi
 
       - name: Update crate versions
@@ -88,23 +116,52 @@ jobs:
           echo "--- Updated workspace dependencies ---"
           grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage' Cargo.toml
 
+          # Regenerate Cargo.lock so the pinned path-dep versions match the bumped Cargo.toml files.
+          cargo check --workspace
+
       - name: Commit and push release branch
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          COMMON_VERSION: ${{ inputs.common_version }}
+          PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
+          PALLET_VERSION: ${{ inputs.pallet_version }}
         run: |
-          git add Cargo.toml pallets/common/Cargo.toml pallets/transaction-storage/Cargo.toml pallets/transaction-storage/primitives/Cargo.toml
-          git commit -m "Prepare crates release: common=${{ inputs.common_version }}, primitives=${{ inputs.primitives_version }}, pallet=${{ inputs.pallet_version }}"
-          git push origin "${{ inputs.release_branch }}"
+          git add Cargo.toml Cargo.lock pallets/common/Cargo.toml pallets/transaction-storage/Cargo.toml pallets/transaction-storage/primitives/Cargo.toml
+          if git diff --cached --quiet; then
+            echo "No version changes to commit — branch already at requested versions"
+          else
+            git commit -m "Prepare crates release: common=$COMMON_VERSION, primitives=$PRIMITIVES_VERSION, pallet=$PALLET_VERSION"
+            git push origin "$RELEASE_BRANCH"
+          fi
 
       - name: Publish bulletin-pallets-common
         if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish -p bulletin-pallets-common
+          NAME: bulletin-pallets-common
+          VERSION: ${{ inputs.common_version }}
+        run: |
+          status=$(curl -sfo /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          if [ "$status" = "200" ]; then
+            echo "$NAME $VERSION already on crates.io — skipping"
+          else
+            cargo publish -p "$NAME"
+          fi
 
       - name: Publish bulletin-transaction-storage-primitives
         if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish -p bulletin-transaction-storage-primitives
+          NAME: bulletin-transaction-storage-primitives
+          VERSION: ${{ inputs.primitives_version }}
+        run: |
+          status=$(curl -sfo /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          if [ "$status" = "200" ]; then
+            echo "$NAME $VERSION already on crates.io — skipping"
+          else
+            cargo publish -p "$NAME"
+          fi
 
       - name: Wait for crates.io index update
         if: ${{ !inputs.dry_run }}
@@ -114,7 +171,15 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish -p pallet-bulletin-transaction-storage
+          NAME: pallet-bulletin-transaction-storage
+          VERSION: ${{ inputs.pallet_version }}
+        run: |
+          status=$(curl -sfo /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          if [ "$status" = "200" ]; then
+            echo "$NAME $VERSION already on crates.io — skipping"
+          else
+            cargo publish -p "$NAME"
+          fi
 
       - name: Dry run - verify packaging
         if: ${{ inputs.dry_run }}
