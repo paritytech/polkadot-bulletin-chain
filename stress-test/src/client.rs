@@ -132,6 +132,42 @@ pub async fn reconnect(
 	}
 }
 
+/// Get the best (not finalized) block hash.
+pub async fn best_block_hash(
+	client: &OnlineClient<BulletinConfig>,
+) -> Result<subxt::utils::H256> {
+	let hash = client
+		.blocks()
+		.subscribe_best()
+		.await?
+		.next()
+		.await
+		.ok_or_else(|| anyhow::anyhow!("best block stream ended"))??
+		.hash();
+	Ok(hash)
+}
+
+/// Query account nonce at a specific block hash via the `AccountNonceApi` runtime API.
+pub async fn get_account_nonce_at(
+	client: &OnlineClient<BulletinConfig>,
+	account_id: &subxt::utils::AccountId32,
+	block_hash: subxt::utils::H256,
+) -> Result<u64> {
+	use subxt::ext::codec::{Decode, Encode};
+	let nonce_bytes = client
+		.backend()
+		.call(
+			"AccountNonceApi_account_nonce",
+			Some(&account_id.encode()),
+			block_hash,
+		)
+		.await
+		.context("AccountNonceApi_account_nonce call failed")?;
+	let nonce = u64::decode(&mut &nonce_bytes[..])
+		.map_err(|e| anyhow::anyhow!("Failed to decode nonce: {e}"))?;
+	Ok(nonce)
+}
+
 /// Discover the node's P2P listen addresses and peer ID via a separate RPC call.
 /// Returns (peer_id, listen_addresses).
 pub async fn discover_p2p_info(ws_url: &str) -> Result<(String, Vec<String>)> {

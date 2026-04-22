@@ -20,13 +20,13 @@ impl NonceTracker {
 		Self { nonces: Arc::new(Mutex::new(HashMap::new())) }
 	}
 
-	/// Initialize nonce for an account by querying the chain.
+	/// Initialize nonce for an account by querying the chain at best block.
 	pub async fn init_from_chain(
 		&self,
 		client: &OnlineClient<BulletinConfig>,
 		account_id: &subxt::utils::AccountId32,
 	) -> Result<()> {
-		let nonce = client.tx().account_nonce(account_id).await?;
+		let nonce = account_nonce_at_best(client, account_id).await?;
 		self.nonces.lock().unwrap().insert(account_id.0, nonce);
 		Ok(())
 	}
@@ -48,16 +48,29 @@ impl NonceTracker {
 		}
 	}
 
-	/// Reset nonce for an account by re-querying the chain.
+	/// Reset nonce for an account by re-querying the chain at best block.
 	pub async fn refresh(
 		&self,
 		client: &OnlineClient<BulletinConfig>,
 		account_id: &subxt::utils::AccountId32,
 	) -> Result<()> {
-		let nonce = client.tx().account_nonce(account_id).await?;
+		let nonce = account_nonce_at_best(client, account_id).await?;
 		self.nonces.lock().unwrap().insert(account_id.0, nonce);
 		Ok(())
 	}
+}
+
+/// Query account nonce at the best (not finalized) block.
+///
+/// Subxt's `client.tx().account_nonce()` uses the finalized block, which can
+/// lag behind best by many blocks. This causes stale nonce errors when txs
+/// have been included in best blocks but not yet finalized.
+async fn account_nonce_at_best(
+	client: &OnlineClient<BulletinConfig>,
+	account_id: &subxt::utils::AccountId32,
+) -> Result<u64> {
+	let best_hash = crate::client::best_block_hash(client).await?;
+	crate::client::get_account_nonce_at(client, account_id, best_hash).await
 }
 
 impl Default for NonceTracker {

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::time::Duration;
 use subxt::{
 	dynamic::{tx, Value},
@@ -20,7 +20,6 @@ use crate::{
 /// authorized signers while blocks still have capacity.
 pub const AUTHORIZE_BATCH_SIZE: usize = 2048;
 const AUTHORIZE_TIMEOUT_SECS: u64 = 60;
-const MAX_NONCE_RETRIES: u32 = 10;
 
 /// Authorize a single batch of accounts (at most `AUTHORIZE_BATCH_SIZE` recommended).
 ///
@@ -34,15 +33,26 @@ pub async fn authorize_account_batch(
 	transactions_per_account: u32,
 	bytes_per_account: u64,
 ) -> Result<()> {
+	use std::time::Instant;
+
 	if accounts.is_empty() {
 		return Ok(());
 	}
 
-	let authorizer_id = authorizer.public_key().to_account_id();
-	let mut attempts = 0u32;
-	loop {
-		let call = build_authorize_call(accounts, transactions_per_account, bytes_per_account);
+	const NO_PROGRESS_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 
+	let authorizer_id = authorizer.public_key().to_account_id();
+	let deadline = Instant::now() + NO_PROGRESS_TIMEOUT;
+
+	loop {
+		if Instant::now() > deadline {
+			anyhow::bail!(
+				"authorize_account_batch: no progress for {}s, giving up",
+				NO_PROGRESS_TIMEOUT.as_secs()
+			);
+		}
+
+		let call = build_authorize_call(accounts, transactions_per_account, bytes_per_account);
 		let nonce = nonce_tracker.next_nonce(&authorizer_id);
 		let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
 
@@ -64,18 +74,22 @@ pub async fn authorize_account_batch(
 				);
 				return Ok(());
 			},
-			Ok(Err(e)) if is_nonce_error(&e) && attempts < MAX_NONCE_RETRIES => {
-				attempts += 1;
-				log::warn!(
-					"Authorization failed (attempt {attempts}/{MAX_NONCE_RETRIES}), \
-					 waiting for block then refreshing nonce: {e}"
+			Ok(Err(e)) if is_priority_error(&e) => {
+				log::info!(
+					"Batch of {} accounts: tx already in pool (priority conflict), \
+					 treating as success",
+					accounts.len()
 				);
-				tokio::time::sleep(Duration::from_secs(6)).await;
-				nonce_tracker.refresh(client, &authorizer_id).await?;
-				log::info!("Nonce refreshed from chain after retry delay");
+				return Ok(());
 			},
-			Ok(Err(e)) => return Err(e),
-			Err(_) => return Err(anyhow!("authorize_account_batch timed out")),
+			Ok(Err(e)) => {
+				log::warn!("Authorization failed, refreshing nonce and retrying: {e}");
+				nonce_tracker.refresh(client, &authorizer_id).await?;
+			},
+			Err(_) => {
+				log::warn!("Authorization timed out, refreshing nonce and retrying");
+				nonce_tracker.refresh(client, &authorizer_id).await?;
+			},
 		}
 	}
 }
@@ -153,14 +167,7 @@ fn build_authorize_call(
 ///
 /// Do **not** match the substring `"invalid"` — every `Invalid Transaction (1010)` would qualify,
 /// including bad signer, oversized batch, payment, and exhausts-resources.
-fn is_nonce_error(e: &anyhow::Error) -> bool {
+fn is_priority_error(e: &anyhow::Error) -> bool {
 	let msg = format!("{e:#}").to_lowercase();
-	msg.contains("stale") ||
-		msg.contains("future") ||
-		msg.contains("outdated") ||
-		msg.contains("priority is too low") ||
-		msg.contains("nonce too low") ||
-		msg.contains("nonce too high") ||
-		msg.contains("transaction is outdated") ||
-		msg.contains("1010")
+	msg.contains("priority is too low") || msg.contains("1014")
 }
