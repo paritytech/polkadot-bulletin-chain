@@ -236,7 +236,8 @@ jobs:
 
       - name: Test TypeScript SDK (vitest integration)
         working-directory: examples
-        # TODO: flaky chunked-store tests hit the per-tx timeout under CI load.
+        # TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/443
+        # Flaky chunked-store tests hit the per-tx timeout under CI load.
         # Remove `continue-on-error` once the vitest integration suite is
         # stabilized.
         continue-on-error: true
