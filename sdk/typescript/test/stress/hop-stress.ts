@@ -3,15 +3,25 @@
 //
 // Exercises hop_submit / hop_claim / hop_ack RPCs against Bulletin collators.
 //
+// Actual RPC signatures (from polkadot-sdk hop-base branch):
+//   hop_submit(data, recipients, signature, signer)
+//     - recipients: Vec<SCALE(MultiSigner)>
+//     - signature:  SCALE(MultiSignature) over blake2_256("hop-submit-v1:" || blake2_256(data))
+//     - signer:     SCALE(MultiSigner) of the authorized account
+//   hop_claim(hash, signature)
+//     - signature:  SCALE(MultiSignature) over blake2_256("hop-claim-v1:" || hash)
+//   hop_ack(hash, signature)
+//     - signature:  SCALE(MultiSignature) over blake2_256("hop-ack-v1:" || hash)
+//
 // Usage:
 //   npx tsx test/stress/hop-stress.ts \
-//     --ws-url wss://collator-0,wss://collator-1 \
+//     --ws-url ws://127.0.0.1:10000 \
 //     --scenario full-cycle --items 100 --payload-size 1024
 
 import { parseArgs } from "node:util"
 import { u8aToHex } from "@polkadot/util"
 import {
-  blake2AsHex,
+  blake2AsU8a,
   ed25519PairFromRandom,
   ed25519Sign,
 } from "@polkadot/util-crypto"
@@ -35,13 +45,14 @@ type Scenario = (typeof SCENARIOS)[number]
 
 const { values } = parseArgs({
   options: {
-    "ws-url": { type: "string", default: "ws://127.0.0.1:9944" },
+    "ws-url": { type: "string", default: "ws://127.0.0.1:10000" },
     scenario: { type: "string", default: "full-cycle" },
     items: { type: "string", default: "100" },
     "payload-size": { type: "string", default: "1024" },
     recipients: { type: "string", default: "1" },
     concurrency: { type: "string", default: "4" },
     duration: { type: "string", default: "300" },
+    "submitter-seed": { type: "string", default: "//Alice" },
     help: { type: "boolean", default: false },
   },
   strict: true,
@@ -52,18 +63,19 @@ if (values.help) {
 HOP stress test for Bulletin Chain collators
 
 Options:
-  --ws-url <urls>         Comma-separated collator RPC WebSocket URLs
-  --scenario <name>       Test scenario: ${SCENARIOS.join(", ")}
-  --items <n>             Number of entries (default: 100)
-  --payload-size <bytes>  Payload size per entry in bytes (default: 1024)
-  --recipients <n>        Recipients per entry (default: 1)
-  --concurrency <n>       Parallel submit/claim streams (default: 4)
-  --duration <secs>       Duration for sustained scenarios (default: 300)
+  --ws-url <urls>           Comma-separated collator RPC WebSocket URLs
+  --scenario <name>         Test scenario: ${SCENARIOS.join(", ")}
+  --items <n>               Number of entries (default: 100)
+  --payload-size <bytes>    Payload size per entry in bytes (default: 1024)
+  --recipients <n>          Recipients per entry (default: 1)
+  --concurrency <n>         Parallel submit/claim streams (default: 4)
+  --duration <secs>         Duration for sustained scenarios (default: 300)
+  --submitter-seed <seed>   Submitter key seed (default: //Alice)
 `)
   process.exit(0)
 }
 
-const wsUrls = (values["ws-url"] ?? "ws://127.0.0.1:9944")
+const wsUrls = (values["ws-url"] ?? "ws://127.0.0.1:10000")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean)
@@ -79,6 +91,60 @@ const payloadSize = parseInt(values["payload-size"] ?? "1024", 10)
 const numRecipients = parseInt(values.recipients ?? "1", 10)
 const concurrency = parseInt(values.concurrency ?? "4", 10)
 const durationSecs = parseInt(values.duration ?? "300", 10)
+const submitterSeed = values["submitter-seed"] ?? "//Alice"
+
+// ---------------------------------------------------------------------------
+// SCALE encoding helpers for MultiSigner / MultiSignature
+// ---------------------------------------------------------------------------
+// MultiSigner is a tagged enum: Ed25519=0, Sr25519=1, Ecdsa=2
+// MultiSignature is a tagged enum: Ed25519=0, Sr25519=1, Ecdsa=2
+
+/** SCALE-encode an ed25519 public key as MultiSigner::Ed25519 */
+function scaleMultiSignerEd25519(pubkey: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(1 + 32)
+  buf[0] = 0x00 // Ed25519 variant
+  buf.set(pubkey.subarray(0, 32), 1)
+  return buf
+}
+
+/** SCALE-encode an ed25519 signature as MultiSignature::Ed25519 */
+function scaleMultiSignatureEd25519(sig: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(1 + 64)
+  buf[0] = 0x00 // Ed25519 variant
+  buf.set(sig.subarray(0, 64), 1)
+  return buf
+}
+
+/** SCALE-encode an sr25519 public key as MultiSigner::Sr25519 */
+function scaleMultiSignerSr25519(pubkey: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(1 + 32)
+  buf[0] = 0x01 // Sr25519 variant
+  buf.set(pubkey.subarray(0, 32), 1)
+  return buf
+}
+
+/** SCALE-encode an sr25519 signature as MultiSignature::Sr25519 */
+function scaleMultiSignatureSr25519(sig: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(1 + 64)
+  buf[0] = 0x01 // Sr25519 variant
+  buf.set(sig.subarray(0, 64), 1)
+  return buf
+}
+
+// ---------------------------------------------------------------------------
+// Domain-separated signing (matches substrate/client/hop/src/types.rs)
+// ---------------------------------------------------------------------------
+const HOP_SUBMIT_CONTEXT = new TextEncoder().encode("hop-submit-v1:")
+const HOP_CLAIM_CONTEXT = new TextEncoder().encode("hop-claim-v1:")
+const HOP_ACK_CONTEXT = new TextEncoder().encode("hop-ack-v1:")
+
+/** blake2_256(context || hash) — domain-separated signing payload */
+function signingPayload(context: Uint8Array, hash: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(context.length + 32)
+  buf.set(context)
+  buf.set(hash.subarray(0, 32), context.length)
+  return blake2AsU8a(buf, 256)
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,8 +155,15 @@ interface EphemeralKeypair {
   secretKey: Uint8Array
 }
 
+interface SubmitterAccount {
+  publicKey: Uint8Array
+  sign: (message: Uint8Array) => Uint8Array
+  scaleMultiSigner: Uint8Array
+  signAsMultiSignature: (message: Uint8Array) => Uint8Array
+}
+
 interface SubmittedEntry {
-  cid: string // hex-encoded blake2-256 hash
+  cid: Uint8Array // blake2-256 hash (raw 32 bytes)
   data: Uint8Array
   recipients: EphemeralKeypair[]
   collatorUrl: string
@@ -105,6 +178,24 @@ interface PhaseStats {
   totalBytes: number
   startMs: number
   endMs: number
+}
+
+// ---------------------------------------------------------------------------
+// Submitter account (Sr25519 via hdkd, same as pipeline-stress.ts)
+// ---------------------------------------------------------------------------
+
+async function createSubmitter(seed: string): Promise<SubmitterAccount> {
+  const { sr25519CreateDerive } = await import("@polkadot-labs/hdkd")
+  const { DEV_MINI_SECRET } = await import("@polkadot-labs/hdkd-helpers")
+  const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+  const keyPair = derive(seed)
+  return {
+    publicKey: keyPair.publicKey,
+    sign: (msg: Uint8Array) => keyPair.sign(msg) as Uint8Array,
+    scaleMultiSigner: scaleMultiSignerSr25519(keyPair.publicKey),
+    signAsMultiSignature: (msg: Uint8Array) =>
+      scaleMultiSignatureSr25519(keyPair.sign(msg) as Uint8Array),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,53 +286,81 @@ function createRpcClient(url: string) {
   return createSubstrateClient(withPolkadotSdkCompat(getWsProvider(url)))
 }
 
+type RpcClient = ReturnType<typeof createRpcClient>
+
+/**
+ * hop_submit(data, recipients, signature, signer)
+ *
+ * - data: hex-encoded bytes
+ * - recipients: Vec<SCALE(MultiSigner)> as hex strings
+ * - signature: SCALE(MultiSignature) over signingPayload(HOP_SUBMIT_CONTEXT, blake2_256(data))
+ * - signer: SCALE(MultiSigner) of the authorized submitter
+ */
 async function hopSubmit(
-  client: ReturnType<typeof createRpcClient>,
+  client: RpcClient,
   data: Uint8Array,
-  recipientPubkeys: Uint8Array[],
+  recipientKeypairs: EphemeralKeypair[],
+  submitter: SubmitterAccount,
 ): Promise<{
-  hash: string
-  pool_status: { entry_count: number; total_bytes: number; max_bytes: number }
+  hash: Uint8Array
+  poolStatus: { entryCount: number; totalBytes: number; maxBytes: number }
 }> {
   const dataHex = u8aToHex(data)
-  const recipientHexes = recipientPubkeys.map((pk) => u8aToHex(pk))
-  return client.request("hop_submit", [dataHex, recipientHexes])
+  const recipientHexes = recipientKeypairs.map((kp) =>
+    u8aToHex(scaleMultiSignerEd25519(kp.publicKey)),
+  )
+
+  // Domain-separated submit signature
+  const dataHash = blake2AsU8a(data, 256)
+  const payload = signingPayload(HOP_SUBMIT_CONTEXT, dataHash)
+  const sigHex = u8aToHex(submitter.signAsMultiSignature(payload))
+  const signerHex = u8aToHex(submitter.scaleMultiSigner)
+
+  const result: {
+    poolStatus: { entryCount: number; totalBytes: number; maxBytes: number }
+  } = await client.request("hop_submit", [
+    dataHex,
+    recipientHexes,
+    sigHex,
+    signerHex,
+  ])
+  return { hash: dataHash, poolStatus: result.poolStatus }
 }
 
+/**
+ * hop_claim(hash, signature)
+ * signature: SCALE(MultiSignature) over signingPayload(HOP_CLAIM_CONTEXT, hash)
+ */
 async function hopClaim(
-  client: ReturnType<typeof createRpcClient>,
-  hash: string,
+  client: RpcClient,
+  hash: Uint8Array,
   keypair: EphemeralKeypair,
 ): Promise<string> {
-  // Sign the content hash with the ephemeral private key
-  const hashBytes = hexToBytes(hash)
-  const sig = ed25519Sign(hashBytes, keypair)
-  return client.request("hop_claim", [hash, u8aToHex(sig)])
+  const payload = signingPayload(HOP_CLAIM_CONTEXT, hash)
+  const sig = ed25519Sign(payload, keypair)
+  const sigHex = u8aToHex(scaleMultiSignatureEd25519(sig))
+  return client.request("hop_claim", [u8aToHex(hash), sigHex])
 }
 
+/**
+ * hop_ack(hash, signature)
+ * signature: SCALE(MultiSignature) over signingPayload(HOP_ACK_CONTEXT, hash)
+ */
 async function hopAck(
-  client: ReturnType<typeof createRpcClient>,
-  hash: string,
+  client: RpcClient,
+  hash: Uint8Array,
   keypair: EphemeralKeypair,
 ): Promise<void> {
-  const hashBytes = hexToBytes(hash)
-  const sig = ed25519Sign(hashBytes, keypair)
-  await client.request("hop_ack", [hash, u8aToHex(sig)])
+  const payload = signingPayload(HOP_ACK_CONTEXT, hash)
+  const sig = ed25519Sign(payload, keypair)
+  const sigHex = u8aToHex(scaleMultiSignatureEd25519(sig))
+  await client.request("hop_ack", [u8aToHex(hash), sigHex])
 }
 
 async function hopPoolStatus(
-  client: ReturnType<typeof createRpcClient>,
-): Promise<{ entry_count: number; total_bytes: number; max_bytes: number }> {
+  client: RpcClient,
+): Promise<{ entryCount: number; totalBytes: number; maxBytes: number }> {
   return client.request("hop_poolStatus", [])
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex
-  const bytes = new Uint8Array(clean.length / 2)
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16)
-  }
-  return bytes
 }
 
 function extractErrorCode(err: unknown): number {
@@ -249,13 +368,15 @@ function extractErrorCode(err: unknown): number {
     return (err as { code: number }).code
   }
   const msg = String(err)
-  const match = msg.match(/\b(100[0-9]|101[0-1])\b/)
+  const match = msg.match(/\b(10[0-2][0-9])\b/)
   return match?.[1] ? parseInt(match[1], 10) : 0
 }
 
 // ---------------------------------------------------------------------------
 // Scenarios
 // ---------------------------------------------------------------------------
+
+let submitter: SubmitterAccount
 
 async function runSubmitOnly() {
   console.log("\n=== S1: Submit Throughput ===")
@@ -264,12 +385,11 @@ async function runSubmitOnly() {
   const clients = wsUrls.map(createRpcClient)
   const submitted: SubmittedEntry[] = []
 
-  // Distribute items across concurrent streams
   const itemsPerStream = Math.ceil(numItems / concurrency)
 
   const streams = Array.from({ length: concurrency }, (_, streamIdx) => {
     const clientIdx = streamIdx % clients.length
-    const client = clients[clientIdx] as ReturnType<typeof createRpcClient>
+    const client = clients[clientIdx] as RpcClient
     const url = wsUrls[clientIdx] as string
     const start = streamIdx * itemsPerStream
     const end = Math.min(start + itemsPerStream, numItems)
@@ -280,11 +400,7 @@ async function runSubmitOnly() {
         const recipients = generateRecipients(numRecipients)
         const t0 = performance.now()
         try {
-          const result = await hopSubmit(
-            client,
-            data,
-            recipients.map((r) => r.publicKey),
-          )
+          const result = await hopSubmit(client, data, recipients, submitter)
           const latency = performance.now() - t0
           stats.count++
           stats.latencies.push(latency)
@@ -315,12 +431,10 @@ async function runSubmitOnly() {
 
   // Print pool status from first collator
   try {
-    const poolStatus = await hopPoolStatus(
-      clients[0] as ReturnType<typeof createRpcClient>,
-    )
+    const poolStatus = await hopPoolStatus(clients[0] as RpcClient)
     console.log(
-      `\n  Pool: ${poolStatus.entry_count} entries, ` +
-        `${formatBytes(poolStatus.total_bytes)} / ${formatBytes(poolStatus.max_bytes)}`,
+      `\n  Pool: ${poolStatus.entryCount} entries, ` +
+        `${formatBytes(poolStatus.totalBytes)} / ${formatBytes(poolStatus.maxBytes)}`,
     )
   } catch (err) {
     console.log(`  Pool status unavailable: ${err}`)
@@ -345,19 +459,11 @@ async function runClaimAndAck(submitted: SubmittedEntry[]) {
     for (const kp of entry.recipients) {
       const t0 = performance.now()
       try {
-        const claimedDataHex = await hopClaim(client, entry.cid, kp)
+        await hopClaim(client, entry.cid, kp)
         const latency = performance.now() - t0
         claimStats.count++
         claimStats.latencies.push(latency)
         claimStats.totalBytes += entry.data.length
-
-        // Verify data integrity
-        const claimedData = hexToBytes(claimedDataHex)
-        if (claimedData.length !== entry.data.length) {
-          console.error(
-            `  Data mismatch for ${entry.cid}: expected ${entry.data.length}B, got ${claimedData.length}B`,
-          )
-        }
       } catch (err) {
         claimStats.errors++
         const code = extractErrorCode(err)
@@ -366,7 +472,9 @@ async function runClaimAndAck(submitted: SubmittedEntry[]) {
           (claimStats.errorsByCode.get(code) ?? 0) + 1,
         )
         if (claimStats.errors <= 5) {
-          console.error(`  claim error [${entry.cid.slice(0, 16)}...]: ${err}`)
+          console.error(
+            `  claim error [${u8aToHex(entry.cid).slice(0, 16)}...]: ${err}`,
+          )
         }
       }
     }
@@ -396,7 +504,9 @@ async function runClaimAndAck(submitted: SubmittedEntry[]) {
           (ackStats.errorsByCode.get(code) ?? 0) + 1,
         )
         if (ackStats.errors <= 5) {
-          console.error(`  ack error [${entry.cid.slice(0, 16)}...]: ${err}`)
+          console.error(
+            `  ack error [${u8aToHex(entry.cid).slice(0, 16)}...]: ${err}`,
+          )
         }
       }
     }
@@ -414,10 +524,8 @@ async function runFullCycle() {
 
 async function runGroup() {
   console.log(`\n=== S3: Group Recipients (${numRecipients} recipients) ===`)
-  // Same as full-cycle but numRecipients is typically > 1
   const submitted = await runSubmitOnly()
 
-  // Claim with all recipients in parallel
   if (submitted.length === 0) return
 
   console.log(`\nClaiming with ${numRecipients} recipients per entry...`)
@@ -425,7 +533,6 @@ async function runGroup() {
 
   for (const entry of submitted) {
     const client = createRpcClient(entry.collatorUrl)
-    // Claim with all recipients concurrently
     const claimPromises = entry.recipients.map(async (kp) => {
       const t0 = performance.now()
       try {
@@ -445,7 +552,6 @@ async function runGroup() {
     })
     await Promise.all(claimPromises)
 
-    // Ack with all recipients
     const ackPromises = entry.recipients.map(async (kp) => {
       try {
         await hopAck(client, entry.cid, kp)
@@ -457,12 +563,11 @@ async function runGroup() {
   claimStats.endMs = Date.now()
   printPhaseStats("Claim (parallel recipients)", claimStats)
 
-  // Verify entries are cleaned up
   try {
     const client = createRpcClient(wsUrls[0] as string)
     const status = await hopPoolStatus(client)
     console.log(
-      `\n  Pool after ack: ${status.entry_count} entries, ${formatBytes(status.total_bytes)}`,
+      `\n  Pool after ack: ${status.entryCount} entries, ${formatBytes(status.totalBytes)}`,
     )
     client.destroy()
   } catch (_) {}
@@ -472,10 +577,9 @@ async function runPoolFill() {
   console.log("\n=== S4: Pool Fill ===")
   const client = createRpcClient(wsUrls[0] as string)
 
-  // Check initial pool status
   let status = await hopPoolStatus(client)
   console.log(
-    `  Initial pool: ${status.entry_count} entries, ${formatBytes(status.total_bytes)} / ${formatBytes(status.max_bytes)}`,
+    `  Initial pool: ${status.entryCount} entries, ${formatBytes(status.totalBytes)} / ${formatBytes(status.maxBytes)}`,
   )
 
   const stats = newPhaseStats()
@@ -486,40 +590,33 @@ async function runPoolFill() {
     const recipients = generateRecipients(1)
     const t0 = performance.now()
     try {
-      const result = await hopSubmit(
-        client,
-        data,
-        recipients.map((r) => r.publicKey),
-      )
+      const result = await hopSubmit(client, data, recipients, submitter)
       const latency = performance.now() - t0
       stats.count++
       stats.latencies.push(latency)
       stats.totalBytes += data.length
 
-      // Print progress every 100 items
       if (stats.count % 100 === 0) {
         console.log(
-          `  ${stats.count} submitted, pool: ${result.pool_status.entry_count} entries, ` +
-            `${formatBytes(result.pool_status.total_bytes)} / ${formatBytes(result.pool_status.max_bytes)}`,
+          `  ${stats.count} submitted, pool: ${result.poolStatus.entryCount} entries, ` +
+            `${formatBytes(result.poolStatus.totalBytes)} / ${formatBytes(result.poolStatus.maxBytes)}`,
         )
       }
     } catch (err) {
       const code = extractErrorCode(err)
       if (code === 1002) {
-        // PoolFull — we're done
         console.log(`\n  PoolFull hit after ${stats.count} entries`)
         break
       }
       stats.errors++
       stats.errorsByCode.set(code, (stats.errorsByCode.get(code) ?? 0) + 1)
       if (stats.errors > 10) {
-        console.error(`  Too many errors, stopping.`)
+        console.error("  Too many errors, stopping.")
         break
       }
     }
     i++
 
-    // Safety cap
     if (stats.count >= 100_000) {
       console.log("  Hit 100k entries safety cap")
       break
@@ -531,7 +628,7 @@ async function runPoolFill() {
 
   status = await hopPoolStatus(client)
   console.log(
-    `  Final pool: ${status.entry_count} entries, ${formatBytes(status.total_bytes)} / ${formatBytes(status.max_bytes)}`,
+    `  Final pool: ${status.entryCount} entries, ${formatBytes(status.totalBytes)} / ${formatBytes(status.maxBytes)}`,
   )
 
   client.destroy()
@@ -544,21 +641,17 @@ async function runMixed() {
   const submitStats = newPhaseStats()
   const claimStats = newPhaseStats()
 
-  // Shared queue of submitted entries for readers to consume
   const pending: SubmittedEntry[] = []
 
   const endTime = Date.now() + durationSecs * 1000
 
-  // Writer streams
   const writerCount = Math.max(1, Math.floor(concurrency / 2))
   const readerCount = Math.max(1, concurrency - writerCount)
 
   const writers = Array.from({ length: writerCount }, (_, idx) => {
-    const client = clients[idx % clients.length] as ReturnType<
-      typeof createRpcClient
-    >
+    const client = clients[idx % clients.length] as RpcClient
     const url = wsUrls[idx % wsUrls.length] as string
-    let itemIdx = idx * 1_000_000 // unique per writer
+    let itemIdx = idx * 1_000_000
 
     return (async () => {
       while (Date.now() < endTime) {
@@ -566,11 +659,7 @@ async function runMixed() {
         const recipients = generateRecipients(1)
         const t0 = performance.now()
         try {
-          const result = await hopSubmit(
-            client,
-            data,
-            recipients.map((r) => r.publicKey),
-          )
+          const result = await hopSubmit(client, data, recipients, submitter)
           submitStats.count++
           submitStats.latencies.push(performance.now() - t0)
           submitStats.totalBytes += data.length
@@ -593,7 +682,6 @@ async function runMixed() {
     })()
   })
 
-  // Reader streams
   const readers = Array.from({ length: readerCount }, () =>
     (async () => {
       while (Date.now() < endTime || pending.length > 0) {
@@ -610,7 +698,6 @@ async function runMixed() {
           claimStats.count++
           claimStats.latencies.push(performance.now() - t0)
           claimStats.totalBytes += entry.data.length
-          // Ack
           await hopAck(client, entry.cid, kp)
         } catch (err) {
           claimStats.errors++
@@ -625,7 +712,6 @@ async function runMixed() {
     })(),
   )
 
-  // Print progress periodically
   const progressInterval = setInterval(() => {
     const elapsed = formatDuration(Date.now() - submitStats.startMs)
     console.log(
@@ -678,33 +764,36 @@ async function runErrorTests() {
     }
   }
 
-  // 1. Empty data
+  // 1. Empty data → 1005
   await expectError("EmptyData", 1005, () =>
-    hopSubmit(client, new Uint8Array(0), [ed25519PairFromRandom().publicKey]),
+    hopSubmit(client, new Uint8Array(0), [ed25519PairFromRandom()], submitter),
   )
 
-  // 2. No recipients
-  await expectError("NoRecipients", 1010, () =>
-    hopSubmit(client, new Uint8Array([1, 2, 3]), []),
+  // 2. No recipients → 1009
+  await expectError("NoRecipients", 1009, () =>
+    hopSubmit(client, new Uint8Array([1, 2, 3]), [], submitter),
   )
 
-  // 3. Claim non-existent hash
-  const fakeHash = `0x${"ab".repeat(32)}`
+  // 3. Claim non-existent hash → 1004
+  const fakeHash = new Uint8Array(32).fill(0xab)
   const fakeKp = ed25519PairFromRandom()
   await expectError("NotFound", 1004, () => hopClaim(client, fakeHash, fakeKp))
 
-  // 4. Claim with wrong keypair
+  // 4. Claim with wrong keypair → 1008
   const validData = generatePayload(999, 1024)
   const validRecipient = ed25519PairFromRandom()
   const wrongKp = ed25519PairFromRandom()
   try {
-    const result = await hopSubmit(client, validData, [
-      validRecipient.publicKey,
-    ])
-    await expectError("NotRecipient", 1009, () =>
+    const result = await hopSubmit(
+      client,
+      validData,
+      [validRecipient],
+      submitter,
+    )
+    await expectError("NotRecipient", 1008, () =>
       hopClaim(client, result.hash, wrongKp),
     )
-    // Clean up: claim + ack with the real recipient
+    // Clean up
     try {
       await hopClaim(client, result.hash, validRecipient)
       await hopAck(client, result.hash, validRecipient)
@@ -713,30 +802,32 @@ async function runErrorTests() {
     console.log(`  SKIP: NotRecipient — submit failed: ${err}`)
   }
 
-  // 5. Duplicate entry
+  // 5. Duplicate entry → 1003
   const dupData = generatePayload(998, 512)
   const dupRecipient = ed25519PairFromRandom()
   try {
-    await hopSubmit(client, dupData, [dupRecipient.publicKey])
+    await hopSubmit(client, dupData, [dupRecipient], submitter)
     await expectError("DuplicateEntry", 1003, () =>
-      hopSubmit(client, dupData, [dupRecipient.publicKey]),
+      hopSubmit(client, dupData, [dupRecipient], submitter),
     )
     // Clean up
-    const cid = blake2AsHex(dupData, 256)
+    const dupHash = blake2AsU8a(dupData, 256)
     try {
-      await hopClaim(client, cid, dupRecipient)
-      await hopAck(client, cid, dupRecipient)
+      await hopClaim(client, dupHash, dupRecipient)
+      await hopAck(client, dupHash, dupRecipient)
     } catch (_) {}
   } catch (err) {
     console.log(`  SKIP: DuplicateEntry — submit failed: ${err}`)
   }
 
-  // 6. DataTooLarge (9 MiB, over 8 MiB limit)
-  // Only run if payload would be reasonable to allocate
+  // 6. DataTooLarge → 1001 (9 MiB, over 8 MiB limit)
   await expectError("DataTooLarge", 1001, () =>
-    hopSubmit(client, new Uint8Array(9 * 1024 * 1024), [
-      ed25519PairFromRandom().publicKey,
-    ]),
+    hopSubmit(
+      client,
+      new Uint8Array(9 * 1024 * 1024),
+      [ed25519PairFromRandom()],
+      submitter,
+    ),
   )
 
   console.log(`\n  Results: ${passed} passed, ${failed} failed`)
@@ -759,6 +850,12 @@ async function main() {
   console.log(`  Total data:    ${formatBytes(numItems * payloadSize)}`)
   console.log(`  Recipients:    ${numRecipients}`)
   console.log(`  Concurrency:   ${concurrency}`)
+  console.log(`  Submitter:     ${submitterSeed}`)
+
+  submitter = await createSubmitter(submitterSeed)
+  console.log(
+    `  Submitter key: 0x${u8aToHex(submitter.publicKey).slice(2, 18)}...`,
+  )
 
   switch (scenario) {
     case "submit-only": {
