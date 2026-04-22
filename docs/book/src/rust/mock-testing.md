@@ -256,13 +256,13 @@ mod integration_tests {
         let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
         // Authorize
-        client.authorize_account(account, 10, 10 * 1024 * 1024, &signer)
+        client.authorize_account(account, 10, 10 * 1024 * 1024, &signer, WaitFor::InBlock)
             .await
             .expect("Authorization failed");
 
         // Store
         let data = b"Integration test data".to_vec();
-        let receipt = client.store(data, &signer)
+        let receipt = client.store(data, &signer, WaitFor::InBlock)
             .await
             .expect("Store failed");
 
