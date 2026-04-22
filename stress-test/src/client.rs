@@ -163,8 +163,14 @@ pub async fn get_account_nonce_at(
 		)
 		.await
 		.context("AccountNonceApi_account_nonce call failed")?;
-	let nonce = u64::decode(&mut &nonce_bytes[..])
-		.map_err(|e| anyhow::anyhow!("Failed to decode nonce: {e}"))?;
+	// The nonce type varies by runtime (u32 or u64). Try both.
+	let nonce = match nonce_bytes.len() {
+		8 => u64::decode(&mut &nonce_bytes[..])
+			.map_err(|e| anyhow::anyhow!("Failed to decode u64 nonce: {e}"))?,
+		4 => u32::decode(&mut &nonce_bytes[..])
+			.map_err(|e| anyhow::anyhow!("Failed to decode u32 nonce: {e}"))? as u64,
+		n => anyhow::bail!("Unexpected nonce size: {n} bytes"),
+	};
 	Ok(nonce)
 }
 
