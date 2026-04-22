@@ -146,7 +146,7 @@ jobs:
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
-            cargo publish -p "$NAME"
+            cargo publish --locked -p "$NAME"
           fi
 
       - name: Publish bulletin-transaction-storage-primitives
@@ -160,10 +160,14 @@ jobs:
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
-            cargo publish -p "$NAME"
+            cargo publish --locked -p "$NAME"
           fi
 
-      - name: Wait for crates.io index update
+      # pallet-bulletin-transaction-storage depends on both bulletin-pallets-common and
+      # bulletin-transaction-storage-primitives, so both must be indexed on crates.io before
+      # it can resolve them. Common was published first (~10s+ ago by now) and primitives
+      # immediately before this sleep — 30s covers both.
+      - name: Wait for crates.io to index common and primitives
         if: ${{ !inputs.dry_run }}
         run: sleep 30
 
@@ -178,13 +182,33 @@ jobs:
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
-            cargo publish -p "$NAME"
+            cargo publish --locked -p "$NAME"
           fi
+
+      - name: Tag released versions
+        if: ${{ !inputs.dry_run }}
+        env:
+          COMMON_VERSION: ${{ inputs.common_version }}
+          PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
+          PALLET_VERSION: ${{ inputs.pallet_version }}
+        run: |
+          set -e
+          for tag in \
+            "bulletin-pallets-common-v$COMMON_VERSION" \
+            "bulletin-transaction-storage-primitives-v$PRIMITIVES_VERSION" \
+            "pallet-bulletin-transaction-storage-v$PALLET_VERSION"; do
+            if git ls-remote --exit-code --tags origin "$tag" > /dev/null 2>&1; then
+              echo "Tag $tag already exists on origin — skipping"
+            else
+              git tag -a "$tag" -m "$tag"
+              git push origin "$tag"
+            fi
+          done
 
       - name: Dry run - verify packaging
         if: ${{ inputs.dry_run }}
         run: |
-          cargo package -p bulletin-pallets-common --allow-dirty
-          cargo package -p bulletin-transaction-storage-primitives --allow-dirty
-          cargo package -p pallet-bulletin-transaction-storage --allow-dirty
+          cargo package --locked -p bulletin-pallets-common --allow-dirty
+          cargo package --locked -p bulletin-transaction-storage-primitives --allow-dirty
+          cargo package --locked -p pallet-bulletin-transaction-storage --allow-dirty
           echo "Dry run complete - all crates packaged successfully"
