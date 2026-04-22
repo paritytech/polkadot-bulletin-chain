@@ -280,14 +280,7 @@ async fn main() -> Result<()> {
 				command_error = Some(e);
 			}
 		},
-		Commands::Hop {
-			ref scenario,
-			items,
-			payload_size,
-			concurrency,
-			recipients,
-			duration,
-		} => {
+		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
 			if let Err(e) = scenarios::hop::run_hop_sweep(
 				&ws_url_refs,
 				scenario,
@@ -304,8 +297,7 @@ async fn main() -> Result<()> {
 			{
 				log::error!("HOP command failed: {e}");
 				command_error = Some(e);
-			}
-		},
+			},
 		Commands::Full => {
 			if let Err(e) = run_throughput(
 				&client,

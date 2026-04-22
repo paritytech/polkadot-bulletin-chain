@@ -15,12 +15,8 @@ use crate::{
 };
 
 /// Payload sizes for the submit sweep.
-const SUBMIT_PAYLOAD_SIZES: &[(usize, &str)] = &[
-	(1024, "1KB"),
-	(10 * 1024, "10KB"),
-	(100 * 1024, "100KB"),
-	(1024 * 1024, "1MB"),
-];
+const SUBMIT_PAYLOAD_SIZES: &[(usize, &str)] =
+	&[(1024, "1KB"), (10 * 1024, "10KB"), (100 * 1024, "100KB"), (1024 * 1024, "1MB")];
 
 // ---------------------------------------------------------------------------
 // S1: Submit throughput
@@ -107,11 +103,8 @@ pub async fn run_submit_throughput(
 	let bytes = total_bytes.load(Ordering::Relaxed);
 	let mut lats = latencies.lock().await;
 
-	let tps = if duration.as_secs_f64() > 0.0 {
-		submitted as f64 / duration.as_secs_f64()
-	} else {
-		0.0
-	};
+	let tps =
+		if duration.as_secs_f64() > 0.0 { submitted as f64 / duration.as_secs_f64() } else { 0.0 };
 
 	let result = ScenarioResult {
 		name: format!("HOP submit {}", format_payload_label(payload_size)),
@@ -248,10 +241,7 @@ pub async fn run_full_cycle(
 			match hop::hop_claim(&ws, &entry.hash, kp).await {
 				Ok((data, latency)) => {
 					if data != entry.data {
-						log::error!(
-							"Data mismatch! hash=0x{}",
-							hex::encode(&entry.hash[..8])
-						);
+						log::error!("Data mismatch! hash=0x{}", hex::encode(&entry.hash[..8]));
 					}
 					claim_lats.push(latency);
 					claim_bytes += data.len() as u64;
@@ -437,7 +427,10 @@ pub async fn run_pool_fill(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	log::info!("S4: Pool fill — {} byte payloads until PoolFull or UserQuotaExceeded", payload_size);
+	log::info!(
+		"S4: Pool fill — {} byte payloads until PoolFull or UserQuotaExceeded",
+		payload_size
+	);
 
 	let ws = client::connect_ws(ws_urls[0]).await?;
 
@@ -510,11 +503,8 @@ pub async fn run_pool_fill(
 	}
 
 	let duration = start.elapsed();
-	let tps = if duration.as_secs_f64() > 0.0 {
-		submitted as f64 / duration.as_secs_f64()
-	} else {
-		0.0
-	};
+	let tps =
+		if duration.as_secs_f64() > 0.0 { submitted as f64 / duration.as_secs_f64() } else { 0.0 };
 
 	let result = ScenarioResult {
 		name: format!(
@@ -737,8 +727,7 @@ pub async fn run_mixed(
 		duration,
 		total_submitted: submitted,
 		total_confirmed: claimed,
-		total_errors: submit_errors.load(Ordering::Relaxed) +
-			claim_errors.load(Ordering::Relaxed),
+		total_errors: submit_errors.load(Ordering::Relaxed) + claim_errors.load(Ordering::Relaxed),
 		payload_size,
 		throughput_tps: submit_tps,
 		throughput_bytes_per_sec: submit_bytes.load(Ordering::Relaxed) as f64 /
@@ -918,8 +907,16 @@ pub async fn run_hop_sweep(
 				if cancel.load(Ordering::Relaxed) {
 					break;
 				}
-				run_submit_throughput(ws_urls, items, *size, concurrency, results, on_result, cancel)
-					.await?;
+				run_submit_throughput(
+					ws_urls,
+					items,
+					*size,
+					concurrency,
+					results,
+					on_result,
+					cancel,
+				)
+				.await?;
 			}
 		},
 		"full-cycle" => {
@@ -951,8 +948,16 @@ pub async fn run_hop_sweep(
 				if cancel.load(Ordering::Relaxed) {
 					break;
 				}
-				run_submit_throughput(ws_urls, items, *size, concurrency, results, on_result, cancel)
-					.await?;
+				run_submit_throughput(
+					ws_urls,
+					items,
+					*size,
+					concurrency,
+					results,
+					on_result,
+					cancel,
+				)
+				.await?;
 			}
 			if !cancel.load(Ordering::Relaxed) {
 				let size = payload_size.unwrap_or(100 * 1024);

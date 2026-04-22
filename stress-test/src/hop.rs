@@ -76,15 +76,17 @@ pub async fn hop_submit(
 	recipients: &[RecipientKeypair],
 ) -> Result<([u8; 32], SubmitResult, std::time::Duration)> {
 	let data_hex = format!("0x{}", hex::encode(data));
-	let recipient_hexes: Vec<String> =
-		recipients.iter().map(|r| format!("0x{}", hex::encode(r.scale_multi_signer()))).collect();
+	let recipient_hexes: Vec<String> = recipients
+		.iter()
+		.map(|r| format!("0x{}", hex::encode(r.scale_multi_signer())))
+		.collect();
 	let proof_hex = "0x"; // NoopVerifier accepts empty proof
 
 	let start = Instant::now();
 	let result: SubmitResult = ws
 		.request("hop_submit", rpc_params![data_hex, recipient_hexes, proof_hex])
 		.await
-		.context("hop_submit RPC")?;
+		.map_err(|e| anyhow::anyhow!("hop_submit: {e}"))?;
 	let latency = start.elapsed();
 
 	let hash = client::blake2b_256(data);
@@ -105,7 +107,7 @@ pub async fn hop_claim(
 	let data_hex: String = ws
 		.request("hop_claim", rpc_params![hash_hex, sig_hex])
 		.await
-		.context("hop_claim RPC")?;
+		.map_err(|e| anyhow::anyhow!("hop_claim: {e}"))?;
 	let latency = start.elapsed();
 
 	let data = hex::decode(data_hex.strip_prefix("0x").unwrap_or(&data_hex))
@@ -115,8 +117,10 @@ pub async fn hop_claim(
 
 /// Get pool status.
 pub async fn hop_pool_status(ws: &WsClient) -> Result<PoolStatus> {
-	let status: PoolStatus =
-		ws.request("hop_poolStatus", rpc_params![]).await.context("hop_poolStatus RPC")?;
+	let status: PoolStatus = ws
+		.request("hop_poolStatus", rpc_params![])
+		.await
+		.context("hop_poolStatus RPC")?;
 	Ok(status)
 }
 
@@ -127,8 +131,10 @@ pub async fn try_hop_submit(
 	recipients: &[RecipientKeypair],
 ) -> Option<i32> {
 	let data_hex = format!("0x{}", hex::encode(data));
-	let recipient_hexes: Vec<String> =
-		recipients.iter().map(|r| format!("0x{}", hex::encode(r.scale_multi_signer()))).collect();
+	let recipient_hexes: Vec<String> = recipients
+		.iter()
+		.map(|r| format!("0x{}", hex::encode(r.scale_multi_signer())))
+		.collect();
 
 	let result: Result<SubmitResult, _> =
 		ws.request("hop_submit", rpc_params![data_hex, recipient_hexes, "0x"]).await;
@@ -147,8 +153,7 @@ pub async fn try_hop_claim(
 	let signature = recipient.sign_multi_signature(hash);
 	let sig_hex = format!("0x{}", hex::encode(&signature));
 
-	let result: Result<String, _> =
-		ws.request("hop_claim", rpc_params![hash_hex, sig_hex]).await;
+	let result: Result<String, _> = ws.request("hop_claim", rpc_params![hash_hex, sig_hex]).await;
 	match result {
 		Err(e) => extract_error_code(&e),
 		Ok(_) => None,
