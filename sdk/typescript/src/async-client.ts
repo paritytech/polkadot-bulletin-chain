@@ -74,6 +74,7 @@ interface PapiTransaction {
     subscribe(observer: {
       next: (ev: TxStatusEvent) => void
       error: (err: unknown) => void
+      complete?: () => void
     }): { unsubscribe(): void }
   }
   /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
@@ -732,6 +733,31 @@ export class AsyncBulletinClient implements BulletinClientInterface {
               })
             }
             reject(err)
+          }
+        },
+        complete: () => {
+          // PAPI can complete the Observable without a finalized/in_block
+          // event (e.g. txBestBlocksState fires with found:false after a
+          // reorg or node restart, causing the internal continueWith() to
+          // map to rxjs.EMPTY which completes immediately). Without this
+          // handler the Promise hangs until the defensive timeout fires.
+          if (!resolved) {
+            resolved = true
+            cleanup()
+            progressCallback?.({
+              type: TxStatus.Dropped,
+              error:
+                "Transaction subscription ended before reaching the expected status",
+              chunkIndex,
+            })
+            reject(
+              new BulletinError(
+                "Transaction subscription ended before reaching the expected status. " +
+                  "This usually means the transaction was dropped from the best block " +
+                  "(e.g. due to a chain reorganization or node restart).",
+                ErrorCode.TRANSACTION_FAILED,
+              ),
+            )
           }
         },
       })
