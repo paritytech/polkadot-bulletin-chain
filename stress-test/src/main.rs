@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::{
-	path::PathBuf,
+	path::{Path, PathBuf},
 	sync::{
 		atomic::{AtomicBool, Ordering},
 		Arc,
@@ -65,6 +65,10 @@ struct Cli {
 	/// JSON output file (flushed after every variant so partial results survive crashes)
 	#[arg(long, global = true)]
 	output_file: Option<PathBuf>,
+
+	/// Generate an HTML chart of throughput over time
+	#[arg(long, global = true)]
+	chart: Option<PathBuf>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -98,13 +102,60 @@ enum Commands {
 	},
 	/// Run all test suites (block-capacity + bitswap)
 	Full,
+	/// Run a test plan (YAML file or built-in).
+	Plan {
+		/// Path to a YAML plan file. If omitted, runs the built-in quick performance test
+		/// (1KB 10min, MIXED 10min, 2MB 10min).
+		#[arg(long)]
+		file: Option<PathBuf>,
+	},
+	/// Generate charts from an existing JSON results file.
+	Chart {
+		/// Path to the JSON results file.
+		input: PathBuf,
+		/// Output HTML file. Defaults to the input path with .html extension.
+		#[arg(long)]
+		output: Option<PathBuf>,
+	},
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-	let cli = Cli::parse();
+	let mut cli = Cli::parse();
+
+	// Append timestamp to output filenames (e.g. results.json → results_2026-04-20_15h.json).
+	let ts = {
+		use std::time::SystemTime;
+		let secs = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap_or_default()
+			.as_secs();
+		// Simple UTC formatting without chrono: YYYY-MM-DD_HHh
+		let days = secs / 86400;
+		let h = (secs % 86400) / 3600;
+		// Days since epoch → date (good enough approximation using chrono-free math)
+		let (y, m, d) = days_to_ymd(days);
+		format!("{y:04}-{m:02}-{d:02}_{h:02}h")
+	};
+	if let Some(ref path) = cli.output_file {
+		cli.output_file = Some(append_timestamp(path, &ts));
+	}
+	if let Some(ref path) = cli.chart {
+		cli.chart = Some(append_timestamp(path, &ts));
+	}
+
+	// Handle chart-only command early (no RPC needed).
+	if let Commands::Chart { ref input, ref output } = cli.command {
+		let json = std::fs::read_to_string(input)
+			.map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", input.display()))?;
+		let results: Vec<report::ScenarioResult> = serde_json::from_str(&json)
+			.map_err(|e| anyhow::anyhow!("Failed to parse {}: {e}", input.display()))?;
+		let chart_path = output.clone().unwrap_or_else(|| input.with_extension("html"));
+		bulletin_stress_test::chart::generate_chart(&results, &chart_path)?;
+		return Ok(());
+	}
 
 	// Parse comma-separated WS URLs. First URL is used for control operations
 	// (authorization, chain info, monitoring); all URLs are used for submission.
@@ -212,6 +263,7 @@ async fn main() -> Result<()> {
 				&mut all_results,
 				&flush,
 				&cancel,
+				None,
 			)
 			.await
 			{
@@ -237,6 +289,101 @@ async fn main() -> Result<()> {
 				command_error = Some(e);
 			}
 		},
+		Commands::Plan { ref file } => {
+			let test_plan = match file {
+				Some(path) => {
+					log::info!("Loading plan from {}", path.display());
+					match bulletin_stress_test::plan::load_from_file(path) {
+						Ok(p) => p,
+						Err(e) => {
+							log::error!("Failed to load plan: {e}");
+							command_error = Some(e);
+							bulletin_stress_test::plan::quick_performance_test()
+						},
+					}
+				},
+				None => {
+					log::info!("Running built-in quick performance test plan");
+					bulletin_stress_test::plan::quick_performance_test()
+				},
+			};
+
+			if command_error.is_none() {
+				let total_entries = test_plan.steps.len();
+				for (i, entry) in test_plan.steps.iter().enumerate() {
+					if cancel.load(Ordering::Relaxed) {
+						break;
+					}
+					log::info!(
+						"=== Plan entry {}/{}: {} ===",
+						i + 1,
+						total_entries,
+						entry.description(),
+					);
+
+					let err = match entry {
+						bulletin_stress_test::plan::PlanEntry::Single(step) =>
+							run_plan_step(
+								step,
+								&client,
+								&authorizer_signer,
+								&nonce_tracker,
+								&cli,
+								&chain_limits,
+								&ws_url_refs,
+								control_url,
+								&mut all_results,
+								&flush,
+								&cancel,
+							)
+							.await
+							.err(),
+						bulletin_stress_test::plan::PlanEntry::Parallel { parallel } => {
+							let futs: Vec<_> = parallel
+								.iter()
+								.map(|step| {
+									run_parallel_step(
+										step.scenario,
+										client.clone(),
+										authorizer_signer.clone(),
+										nonce_tracker.clone(),
+										chain_limits.clone(),
+										ws_url_refs.iter().map(|s| s.to_string()).collect(),
+										control_url.to_string(),
+										cancel.clone(),
+										step.submitters.unwrap_or(cli.submitters),
+										step.target_blocks.unwrap_or(cli.target_blocks),
+										step.iteration_blocks.unwrap_or(cli.iteration_blocks),
+										step.mix_seed.or(cli.mix_seed),
+										step.variants.clone(),
+										step.payload_size.unwrap_or(128 * 1024),
+									)
+								})
+								.collect();
+
+							let outcomes = futures::future::join_all(futs).await;
+							let mut first_error = None;
+							for (results, err) in outcomes {
+								all_results.extend(results);
+								flush(&mut all_results);
+								if let Err(e) = err {
+									if first_error.is_none() {
+										first_error = Some(e);
+									}
+								}
+							}
+							first_error
+						},
+					};
+
+					if let Some(e) = err {
+						log::error!("Plan entry {}/{} failed: {e}", i + 1, total_entries);
+						command_error = Some(e);
+						break;
+					}
+				}
+			}
+		},
 		Commands::Full => {
 			if let Err(e) = run_throughput(
 				&client,
@@ -250,6 +397,7 @@ async fn main() -> Result<()> {
 				&mut all_results,
 				&flush,
 				&cancel,
+				None,
 			)
 			.await
 			{
@@ -275,6 +423,7 @@ async fn main() -> Result<()> {
 				}
 			}
 		},
+		Commands::Chart { .. } => unreachable!("handled above"),
 	}
 
 	// Always print results (even partial / aborted) before exiting.
@@ -292,9 +441,21 @@ async fn main() -> Result<()> {
 		report::print_summary_table(&all_results);
 	}
 
+	// Generate chart: explicit --chart path, or derive from --output-file.
+	let chart_path = cli.chart.clone().or_else(|| {
+		cli.output_file.as_ref().map(|p| p.with_extension("html"))
+	});
+	if let Some(ref path) = chart_path {
+		if let Err(e) = bulletin_stress_test::chart::generate_chart(&all_results, path) {
+			log::error!("Failed to generate chart: {e}");
+		}
+	}
+
 	if cancel.load(Ordering::Relaxed) {
-		// Flush to file one last time before exiting.
 		flush(&mut all_results);
+		if let Some(ref path) = chart_path {
+			let _ = bulletin_stress_test::chart::generate_chart(&all_results, path);
+		}
 		std::process::exit(130);
 	}
 
@@ -316,9 +477,15 @@ async fn run_throughput(
 	chain_limits: &ChainLimits,
 	ws_urls: &[&str],
 	results: &mut Vec<report::ScenarioResult>,
-	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	on_result: &(dyn Fn(&mut Vec<report::ScenarioResult>) + Send + Sync),
 	cancel: &Arc<AtomicBool>,
+	overrides: Option<&bulletin_stress_test::plan::PlanStep>,
 ) -> Result<()> {
+	let target_blocks = overrides.and_then(|o| o.target_blocks).unwrap_or(cli.target_blocks);
+	let submitters = overrides.and_then(|o| o.submitters).unwrap_or(cli.submitters);
+	let iteration_blocks = overrides.and_then(|o| o.iteration_blocks).unwrap_or(cli.iteration_blocks);
+	let mix_seed = overrides.and_then(|o| o.mix_seed).or(cli.mix_seed);
+
 	match test {
 		"block-capacity" | "all" => {
 			scenarios::throughput::run_block_capacity_sweep(
@@ -327,11 +494,11 @@ async fn run_throughput(
 				nonce_tracker,
 				ws_urls,
 				chain_limits,
-				cli.submitters,
-				cli.target_blocks,
-				cli.iteration_blocks,
+				submitters,
+				target_blocks,
+				iteration_blocks,
 				variants,
-				cli.mix_seed,
+				mix_seed,
 				results,
 				on_result,
 				cancel,
@@ -353,7 +520,7 @@ async fn run_bitswap(
 	payload_size: usize,
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
-	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	on_result: &(dyn Fn(&mut Vec<report::ScenarioResult>) + Send + Sync),
 ) -> Result<()> {
 	let multiaddr = match resolve_p2p_multiaddr(cli, control_url).await {
 		Ok(r) => r,
@@ -384,6 +551,143 @@ async fn run_bitswap(
 	}
 
 	Ok(())
+}
+
+/// Execute a single plan step (used by sequential plan execution).
+#[allow(clippy::too_many_arguments)]
+async fn run_plan_step(
+	step: &bulletin_stress_test::plan::PlanStep,
+	client: &subxt::OnlineClient<client::BulletinConfig>,
+	authorizer_signer: &Keypair,
+	nonce_tracker: &accounts::NonceTracker,
+	cli: &Cli,
+	chain_limits: &ChainLimits,
+	ws_urls: &[&str],
+	control_url: &str,
+	results: &mut Vec<report::ScenarioResult>,
+	on_result: &(dyn Fn(&mut Vec<report::ScenarioResult>) + Send + Sync),
+	cancel: &Arc<AtomicBool>,
+) -> Result<()> {
+	match step.scenario {
+		bulletin_stress_test::plan::Scenario::Throughput => run_throughput(
+			client,
+			authorizer_signer,
+			nonce_tracker,
+			cli,
+			"block-capacity",
+			step.variants.as_deref(),
+			chain_limits,
+			ws_urls,
+			results,
+			on_result,
+			cancel,
+			Some(step),
+		)
+		.await,
+		bulletin_stress_test::plan::Scenario::Bitswap => run_bitswap(
+			client,
+			authorizer_signer,
+			nonce_tracker,
+			cli,
+			"b2",
+			step.payload_size.unwrap_or(128 * 1024),
+			control_url,
+			results,
+			on_result,
+		)
+		.await,
+	}
+}
+
+/// Bitswap execution without CLI dependency (for parallel plan tasks).
+async fn run_bitswap_inner(
+	client: &subxt::OnlineClient<client::BulletinConfig>,
+	authorizer_signer: &Keypair,
+	nonce_tracker: &accounts::NonceTracker,
+	payload_size: usize,
+	control_url: &str,
+	results: &mut Vec<report::ScenarioResult>,
+) -> Result<()> {
+	let multiaddr_str = {
+		log::info!("Auto-discovering P2P address via RPC...");
+		let (peer_id_str, addresses) = client::discover_p2p_info(control_url).await?;
+		let raw = addresses
+			.iter()
+			.find(|a| a.contains("/ws"))
+			.or_else(|| addresses.first())
+			.map(|a| if a.contains("/p2p/") { a.clone() } else { format!("{a}/p2p/{peer_id_str}") })
+			.ok_or_else(|| anyhow::anyhow!("No P2P addresses discovered"))?;
+		bitswap::clean_multiaddr(&raw)
+	};
+	let multiaddr: litep2p::types::multiaddr::Multiaddr = multiaddr_str.parse()?;
+	bitswap::BitswapClient::peer_id_from_multiaddr(&multiaddr)?;
+
+	let rs = scenarios::bitswap_read::run_b2_concurrent_read_sweep(
+		client,
+		authorizer_signer,
+		nonce_tracker,
+		&multiaddr,
+		512,
+		payload_size,
+		control_url,
+	)
+	.await?;
+	results.extend(rs);
+	Ok(())
+}
+
+/// Execute a single step in a parallel group (owns all data, `'static` safe).
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel_step(
+	scenario: bulletin_stress_test::plan::Scenario,
+	client: subxt::OnlineClient<client::BulletinConfig>,
+	authorizer_signer: Keypair,
+	nonce_tracker: accounts::NonceTracker,
+	chain_limits: ChainLimits,
+	ws_url_refs: Vec<String>,
+	control_url: String,
+	cancel: Arc<AtomicBool>,
+	submitters: usize,
+	target_blocks: u32,
+	iteration_blocks: u32,
+	mix_seed: Option<u64>,
+	variants: Option<String>,
+	payload_size: usize,
+) -> (Vec<report::ScenarioResult>, Result<()>) {
+	fn noop(_: &mut Vec<report::ScenarioResult>) {}
+
+	let mut step_results = Vec::new();
+	let ws_refs: Vec<&str> = ws_url_refs.iter().map(|s| s.as_str()).collect();
+	let err = match scenario {
+		bulletin_stress_test::plan::Scenario::Throughput =>
+			scenarios::throughput::run_block_capacity_sweep(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				&ws_refs,
+				&chain_limits,
+				submitters,
+				target_blocks,
+				iteration_blocks,
+				variants.as_deref(),
+				mix_seed,
+				&mut step_results,
+				&(noop as fn(&mut Vec<report::ScenarioResult>)),
+				&cancel,
+			)
+			.await,
+		bulletin_stress_test::plan::Scenario::Bitswap =>
+			run_bitswap_inner(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				payload_size,
+				&control_url,
+				&mut step_results,
+			)
+			.await,
+	};
+	(step_results, err)
 }
 
 /// Resolve the node's P2P multiaddr from CLI args or RPC auto-discovery.
@@ -422,4 +726,28 @@ async fn resolve_p2p_multiaddr(
 	bitswap::BitswapClient::peer_id_from_multiaddr(&multiaddr)?;
 
 	Ok(multiaddr)
+}
+
+/// Insert a timestamp before the file extension: `foo.json` → `foo_2026-04-20_15h.json`.
+fn append_timestamp(path: &Path, ts: &str) -> PathBuf {
+	let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+	let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("json");
+	let new_name = format!("{stem}_{ts}.{ext}");
+	path.with_file_name(new_name)
+}
+
+/// Convert days since Unix epoch to (year, month, day). No leap-second precision needed.
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+	// Algorithm from http://howardhinnant.github.io/date_algorithms.html
+	let z = days + 719468;
+	let era = z / 146097;
+	let doe = z - era * 146097;
+	let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+	let y = yoe + era * 400;
+	let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+	let mp = (5 * doy + 2) / 153;
+	let d = doy - (153 * mp + 2) / 5 + 1;
+	let m = if mp < 10 { mp + 3 } else { mp - 9 };
+	let y = if m <= 2 { y + 1 } else { y };
+	(y, m, d)
 }

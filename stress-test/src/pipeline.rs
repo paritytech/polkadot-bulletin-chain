@@ -50,6 +50,7 @@ struct SubmitCounters {
 /// Content hash → extrinsic size mapping (separate lock from counters to reduce contention).
 type ContentHashMap = std::collections::HashMap<[u8; 32], u64>;
 
+
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
 
@@ -226,6 +227,7 @@ pub fn auth_batches_from_keypairs(keypairs: &[Keypair]) -> Vec<Vec<subxt::utils:
 		.collect()
 }
 
+
 /// Block until the estimated number of in-flight transactions (submitted − confirmed)
 /// drops to [`POOL_PENDING_PAUSE_THRESHOLD`] or below.
 ///
@@ -315,19 +317,23 @@ fn spawn_pipeline_dual_monitor(
 		};
 
 		// Confirm all pending blocks in [old_max+1..new_max].
-		let drain_finalized = |pending: &mut std::collections::HashMap<u64, PendingBlock>,
-		                       old_max: u64,
-		                       new_max: u64,
-		                       prev_ts: &mut Option<u64>| {
-			let mut nums: Vec<u64> =
-				pending.keys().filter(|&&n| n > old_max && n <= new_max).copied().collect();
-			nums.sort();
-			for n in nums {
-				if let Some(pb) = pending.remove(&n) {
-					push_finalized(&pb, prev_ts);
+		let drain_finalized =
+			|pending: &mut std::collections::HashMap<u64, PendingBlock>,
+			 old_max: u64,
+			 new_max: u64,
+			 prev_ts: &mut Option<u64>| {
+				let mut nums: Vec<u64> = pending
+					.keys()
+					.filter(|&&n| n > old_max && n <= new_max)
+					.copied()
+					.collect();
+				nums.sort();
+				for n in nums {
+					if let Some(pb) = pending.remove(&n) {
+						push_finalized(&pb, prev_ts);
+					}
 				}
-			}
-		};
+			};
 
 		loop {
 			if cancel.load(Ordering::Relaxed) {
@@ -365,23 +371,17 @@ fn spawn_pipeline_dual_monitor(
 					} else {
 						match read_timestamp_at(&monitor_client, block_hash).await {
 							Ok(ts) => Some(ts),
+							Err(e) if crate::client::is_connection_error(&e) => {
+								crate::client::reconnect(
+									&mut monitor_client, &ws_url, "pipeline monitor", 1,
+								).await;
+								read_timestamp_at(&monitor_client, block_hash).await.ok()
+							},
 							Err(e) => {
 								log::warn!(
-									"pipeline: block #{block_number}: timestamp read failed, \
-									 reconnecting: {e}"
+									"pipeline: block #{block_number}: timestamp read failed: {e}"
 								);
-								match crate::client::connect(&ws_url).await {
-									Ok(new_client) => {
-										monitor_client = new_client;
-										read_timestamp_at(&monitor_client, block_hash)
-											.await
-											.ok()
-									},
-									Err(re) => {
-										log::warn!("pipeline: monitor reconnect failed: {re}");
-										None
-									},
-								}
+								None
 							},
 						}
 					};
@@ -406,7 +406,8 @@ fn spawn_pipeline_dual_monitor(
 						if target_blocks.is_some_and(|t| best_measured_blocks >= t) {
 							log::info!(
 								"pipeline monitor: reached {best_measured_blocks} \
-								 measured best blocks (target {target_blocks:?}), signalling stop"
+								 measured best blocks (target {:?}), signalling stop",
+								target_blocks
 							);
 							target_reached.store(true, Ordering::Relaxed);
 						}
@@ -450,12 +451,7 @@ fn spawn_pipeline_dual_monitor(
 					Ok(Some(fin_number)) => {
 						let old_max = max_finalized;
 						max_finalized = max_finalized.max(fin_number);
-						drain_finalized(
-							&mut pending,
-							old_max,
-							max_finalized,
-							&mut prev_confirmed_timestamp_ms,
-						);
+						drain_finalized(&mut pending, old_max, max_finalized, &mut prev_confirmed_timestamp_ms);
 					},
 					Ok(None) => {
 						log::warn!("pipeline monitor: finalized subscription closed");
@@ -553,9 +549,7 @@ impl StoreWorker {
 								},
 								Err(_) =>
 									if self.consecutive_conn_errors >= 60 {
-										log::error!(
-											"pipeline store: worker {id}: giving up reconnect"
-										);
+										log::error!("pipeline store: worker {id}: giving up reconnect");
 										self.counters.errors.fetch_add(1, Ordering::Relaxed);
 										return Err(anyhow::anyhow!(
 											"pipeline store: reconnect failed (worker {id})"
@@ -787,30 +781,57 @@ pub async fn run_block_capacity_pipeline(
 					batches.len(),
 				);
 
-				// Spawn authorization as a background task so the reader can
-				// continue dispatching Store items from the previous batch.
-				let task_client = client.clone();
+				// Spawn authorization as a background task. Reconnects on RPC failure.
+				let mut task_client = client.clone();
 				let task_authorizer = authorizer.clone();
 				let task_nonce = authorizer_nonce_tracker.clone();
+				let task_ws_url = ws_urls[0].to_string();
 				pending_auth = Some(tokio::spawn(async move {
 					let mut failed = 0u32;
 					for account_ids in &batches {
-						if let Err(e) = authorize::authorize_account_batch(
-							&task_client,
-							&task_authorizer,
-							&task_nonce,
-							account_ids,
-							1,
-							authorize_bytes,
-						)
-						.await
-						{
-							failed += 1;
-							log::warn!(
-								"pipeline: auth batch failed ({} accounts), \
-								 continuing with remaining batches: {e:#}",
-								account_ids.len()
-							);
+						let mut attempts = 0u32;
+						loop {
+							match authorize::authorize_account_batch(
+								&task_client,
+								&task_authorizer,
+								&task_nonce,
+								account_ids,
+								1,
+								authorize_bytes,
+							)
+							.await
+							{
+								Ok(()) => break,
+								Err(e) => {
+									attempts += 1;
+									// Always refresh nonce from chain — the failed tx
+									// may have bumped the local counter without landing.
+									let authorizer_id =
+										task_authorizer.public_key().to_account_id();
+									if let Err(re) =
+										task_nonce.refresh(&task_client, &authorizer_id).await
+									{
+										log::warn!("pipeline: nonce refresh failed: {re}");
+									}
+
+									if crate::client::is_connection_error(&e) && attempts <= 5 {
+										crate::client::reconnect(
+											&mut task_client,
+											&task_ws_url,
+											"pipeline auth",
+											attempts,
+										)
+										.await;
+										continue;
+									}
+									failed += 1;
+									log::warn!(
+										"pipeline: auth batch failed ({} accounts): {e:#}",
+										account_ids.len()
+									);
+									break;
+								},
+							}
 						}
 					}
 					if failed > 0 {
@@ -1043,14 +1064,19 @@ async fn build_store_work_items(
 		.map(|(kp, payload_size)| {
 			let client = client.clone();
 			async move {
-				let (account_id, encoded, content_hash) = tokio::task::spawn_blocking(move || {
-					let payload = crate::store::generate_payload(payload_size);
-					let content_hash = crate::client::blake2b_256(&payload);
-					let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
-					Ok::<_, anyhow::Error>((kp.public_key().to_account_id(), encoded, content_hash))
-				})
-				.await
-				.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
+				let (account_id, encoded, content_hash) =
+					tokio::task::spawn_blocking(move || {
+						let payload = crate::store::generate_payload(payload_size);
+						let content_hash = crate::client::blake2b_256(&payload);
+						let encoded = sign_store_extrinsic_blocking(&client, &kp, &payload, 0)?;
+						Ok::<_, anyhow::Error>((
+							kp.public_key().to_account_id(),
+							encoded,
+							content_hash,
+						))
+					})
+					.await
+					.map_err(|e| anyhow::anyhow!("pipeline: spawn_blocking join: {e}"))??;
 				Ok::<_, anyhow::Error>(StressWorkItem::Store {
 					account_id,
 					extrinsic: Arc::new(encoded),

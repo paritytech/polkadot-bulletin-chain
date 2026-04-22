@@ -162,5 +162,5 @@ fn is_nonce_error(e: &anyhow::Error) -> bool {
 		msg.contains("nonce too low") ||
 		msg.contains("nonce too high") ||
 		msg.contains("transaction is outdated") ||
-		(msg.contains("1010") && (msg.contains("stale") || msg.contains("future")))
+		msg.contains("1010")
 }
