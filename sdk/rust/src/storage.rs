@@ -8,7 +8,7 @@
 
 use crate::{
 	cid::{CidConfig, CidData},
-	types::{Chunk, Error, Result, StoreOptions},
+	types::{Chunk, Error, Result, StoreOptions, WaitFor},
 };
 use alloc::vec::Vec;
 
@@ -19,9 +19,9 @@ pub struct StorageOperation {
 	pub data: Vec<u8>,
 	/// CID configuration.
 	pub cid_config: CidConfig,
-	/// Whether to wait for finalization.
+	/// Transaction confirmation level.
 	/// Passed through to callers to decide wait behavior when submitting via subxt.
-	pub wait_finalization: bool,
+	pub wait_for: WaitFor,
 }
 
 impl StorageOperation {
@@ -33,7 +33,7 @@ impl StorageOperation {
 		let cid_config =
 			CidConfig { codec: options.cid_codec.code(), hashing: options.hash_algorithm };
 
-		Ok(Self { data, cid_config, wait_finalization: options.wait_for_finalization })
+		Ok(Self { data, cid_config, wait_for: options.wait_for })
 	}
 
 	/// Calculate the CID for this operation.
@@ -68,9 +68,9 @@ impl StorageOperation {
 pub struct BatchStorageOperation {
 	/// Individual storage operations.
 	pub operations: Vec<StorageOperation>,
-	/// Whether to wait for finalization.
+	/// Transaction confirmation level.
 	/// Passed through to callers to decide wait behavior when submitting via subxt.
-	pub wait_finalization: bool,
+	pub wait_for: WaitFor,
 }
 
 impl BatchStorageOperation {
@@ -93,13 +93,13 @@ impl BatchStorageOperation {
 			let op = StorageOperation {
 				data,
 				cid_config: cid_config.clone(),
-				wait_finalization: options.wait_for_finalization,
+				wait_for: options.wait_for,
 			};
 			op.validate()?;
 			operations.push(op);
 		}
 
-		Ok(Self { operations, wait_finalization: options.wait_for_finalization })
+		Ok(Self { operations, wait_for: options.wait_for })
 	}
 
 	/// Get the number of operations.
@@ -135,7 +135,7 @@ mod tests {
 		let options = StoreOptions {
 			cid_codec: CidCodec::Raw,
 			hash_algorithm: HashingAlgorithm::Blake2b256,
-			wait_for_finalization: false,
+			wait_for: WaitFor::default(),
 		};
 
 		let op = StorageOperation::new(data.clone(), options).unwrap();
