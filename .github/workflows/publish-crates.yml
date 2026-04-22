@@ -185,6 +185,26 @@ jobs:
             cargo publish --locked -p "$NAME"
           fi
 
+      - name: Tag released versions
+        if: ${{ !inputs.dry_run }}
+        env:
+          COMMON_VERSION: ${{ inputs.common_version }}
+          PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
+          PALLET_VERSION: ${{ inputs.pallet_version }}
+        run: |
+          set -e
+          for tag in \
+            "bulletin-pallets-common-v$COMMON_VERSION" \
+            "bulletin-transaction-storage-primitives-v$PRIMITIVES_VERSION" \
+            "pallet-bulletin-transaction-storage-v$PALLET_VERSION"; do
+            if git ls-remote --exit-code --tags origin "$tag" > /dev/null 2>&1; then
+              echo "Tag $tag already exists on origin — skipping"
+            else
+              git tag -a "$tag" -m "$tag"
+              git push origin "$tag"
+            fi
+          done
+
       - name: Dry run - verify packaging
         if: ${{ inputs.dry_run }}
         run: |
