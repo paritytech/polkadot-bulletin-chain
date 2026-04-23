@@ -342,13 +342,17 @@ pub async fn run_block_capacity_sweep(
 				}
 
 				// Fresh seed per attempt to avoid nonce collisions.
+				// Recalculate accounts for remaining blocks (not the full target).
+				let retry_block_slots = (remaining_blocks + 2) as usize * est_block_cap;
+				let retry_accounts =
+					((retry_block_slots + backpressure_buffer) * 3 / 2).max(1) as u32;
 				let run_id = std::time::SystemTime::now()
 					.duration_since(std::time::UNIX_EPOCH)
 					.unwrap_or_default()
 					.as_millis();
 				let seed = format!("T2sweep_{label}_{run_id}");
 				let plans: Vec<IterationPlan> =
-					pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
+					pipeline::build_iteration_plans(retry_accounts, accounts_per_iter, &seed);
 
 				let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
 				let (work_tx, work_rx) =

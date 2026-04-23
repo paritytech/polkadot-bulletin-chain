@@ -239,6 +239,7 @@ async fn wait_until_txpool_can_pull_work(
 	new_block_notify: &Arc<Notify>,
 ) {
 	let mut logged = false;
+	let deadline = Instant::now() + Duration::from_secs(60);
 	loop {
 		let submitted = counters.submitted.load(Ordering::Relaxed);
 		let confirmed = confirmed_count.load(Ordering::Relaxed);
@@ -254,6 +255,14 @@ async fn wait_until_txpool_can_pull_work(
 			return;
 		}
 
+		if Instant::now() > deadline {
+			log::warn!(
+				"pipeline: backpressure wait timed out (pending estimate={estimated_pending}), \
+				 resuming to avoid deadlock"
+			);
+			return;
+		}
+
 		if !logged {
 			log::debug!(
 				"pipeline: estimated pending {estimated_pending} \
@@ -263,7 +272,6 @@ async fn wait_until_txpool_can_pull_work(
 			logged = true;
 		}
 
-		// Wait for the next block (which will confirm more txs) or timeout.
 		tokio::time::timeout(Duration::from_millis(500), new_block_notify.notified())
 			.await
 			.ok();
@@ -357,6 +365,7 @@ fn spawn_pipeline_dual_monitor(
 						STALL_TIMEOUT.as_secs()
 					);
 					stalled.store(true, Ordering::Relaxed);
+					new_block_notify.notify_waiters();
 					break;
 				}
 				Some(block) = best_rx.recv() => {
@@ -602,7 +611,8 @@ impl StoreWorker {
 	}
 }
 
-/// Prefer a worker with spare capacity; otherwise block on `rr`’s channel.
+/// Prefer a worker with spare capacity; otherwise block on `rr`’s channel
+/// with a timeout to avoid deadlocking when all workers are stuck reconnecting.
 async fn dispatch_store_to_workers(
 	mut msg: StoreWorkMsg,
 	txs: &[mpsc::Sender<StoreWorkMsg>],
@@ -621,13 +631,16 @@ async fn dispatch_store_to_workers(
 				return Err(anyhow::anyhow!("store worker {i} input channel closed")),
 		}
 	}
+	// All channels full — wait with a timeout so we don’t deadlock if workers are stuck.
 	let i = *rr % n;
-	txs[i]
-		.send(msg)
-		.await
-		.map_err(|_| anyhow::anyhow!("store worker {i} send failed (channel closed)"))?;
-	*rr = (i + 1) % n;
-	Ok(())
+	match tokio::time::timeout(Duration::from_secs(30), txs[i].send(msg)).await {
+		Ok(Ok(())) => {
+			*rr = (i + 1) % n;
+			Ok(())
+		},
+		Ok(Err(_)) => Err(anyhow::anyhow!("store worker {i} channel closed")),
+		Err(_) => Err(anyhow::anyhow!("dispatch timeout — all workers stalled")),
+	}
 }
 
 fn spawn_store_submit_workers(
@@ -800,11 +813,13 @@ pub async fn run_block_capacity_pipeline(
 					batches.len(),
 				);
 
-				// Spawn authorization as a background task. Reconnects on RPC failure.
+				// Spawn authorization as a background task. Reconnects on RPC failure,
+				// cycling through available URLs.
 				let mut task_client = client.clone();
 				let task_authorizer = authorizer.clone();
 				let task_nonce = authorizer_nonce_tracker.clone();
-				let task_ws_url = ws_urls[0].to_string();
+				let task_ws_urls: Vec<String> =
+					ws_urls.iter().map(|s| s.to_string()).collect();
 				pending_auth = Some(tokio::spawn(async move {
 					let mut failed = 0u32;
 					for account_ids in &batches {
@@ -823,8 +838,6 @@ pub async fn run_block_capacity_pipeline(
 								Ok(()) => break,
 								Err(e) => {
 									attempts += 1;
-									// Always refresh nonce from chain — the failed tx
-									// may have bumped the local counter without landing.
 									let authorizer_id =
 										task_authorizer.public_key().to_account_id();
 									if let Err(re) =
@@ -834,9 +847,12 @@ pub async fn run_block_capacity_pipeline(
 									}
 
 									if crate::client::is_connection_error(&e) && attempts <= 5 {
+										// Cycle through URLs on each reconnect attempt.
+										let url = &task_ws_urls
+											[attempts as usize % task_ws_urls.len()];
 										crate::client::reconnect(
 											&mut task_client,
-											&task_ws_url,
+											url,
 											"pipeline auth",
 											attempts,
 										)
@@ -862,21 +878,28 @@ pub async fn run_block_capacity_pipeline(
 			StressWorkItem::AwaitPendingAuth => {
 				let await_start = Instant::now();
 				if let Some(handle) = pending_auth.take() {
-					match handle.await {
-						Ok(Ok(())) => {
+					// Timeout prevents deadlock if auth is stuck reconnecting.
+					match tokio::time::timeout(Duration::from_secs(120), handle).await {
+						Ok(Ok(Ok(()))) => {
 							log::debug!(
 								"pipeline: AwaitPendingAuth completed in {:.1}s (auth #{dbg_work_auth})",
 								await_start.elapsed().as_secs_f64()
 							);
 						},
-						Ok(Err(e)) => {
+						Ok(Ok(Err(e))) => {
 							log::warn!(
 								"pipeline: auth task failed after {:.1}s (continuing): {e:#}",
 								await_start.elapsed().as_secs_f64()
 							);
 						},
-						Err(e) => {
+						Ok(Err(e)) => {
 							log::warn!("pipeline: auth task join failed (continuing): {e}");
+						},
+						Err(_) => {
+							log::warn!(
+								"pipeline: AwaitPendingAuth timed out after {:.1}s, continuing",
+								await_start.elapsed().as_secs_f64()
+							);
 						},
 					}
 				}
