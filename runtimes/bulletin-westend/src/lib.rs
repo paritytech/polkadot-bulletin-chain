@@ -252,8 +252,8 @@ parameter_types! {
 	];
 	/// Default authorizer budget equivalent to the values set in Westend genesis.
 	pub DefaultAuthorizerBudget: AuthorizerBudget<BlockNumber> = AuthorizerBudget {
-		transactions_budget: 10_000,
-		bytes_budget: 1024 * 1024 * 1024,
+		transactions_budget: 100_000,
+		bytes_budget: 100 * 1024 * 1024 * 1024,
 		authorization_period: None,
 	};
 	pub const SS58Prefix: u8 = 42;
