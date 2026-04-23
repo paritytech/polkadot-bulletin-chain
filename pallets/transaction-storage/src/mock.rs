@@ -18,11 +18,13 @@
 //! Test environment for transaction-storage pallet.
 
 use crate::{
-	self as pallet_bulletin_transaction_storage, TransactionStorageProof,
+	self as pallet_bulletin_transaction_storage, EnsureAllowedAuthorizers, TransactionStorageProof,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
-use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
+use polkadot_sdk_frame::{
+	prelude::*, runtime::prelude::*, testing_prelude::*, traits::EitherOfDiverse,
+};
 
 type Block = MockBlock<Test>;
 
@@ -61,7 +63,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type ManagerOrigin = EnsureRoot<Self::AccountId>;
-	type Authorizer = EnsureRoot<Self::AccountId>;
+	type Authorizer = EitherOfDiverse<EnsureRoot<Self::AccountId>, EnsureAllowedAuthorizers<Self>>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;

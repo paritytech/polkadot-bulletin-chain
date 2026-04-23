@@ -1554,11 +1554,14 @@ fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
 		// Step 1: Alice (sudo) adds Eve as an authorizer.
 		let add_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
 			who: eve.to_account_id(),
+			transactions_budget: 1000,
+			bytes_budget: 100 * 1024 * 1024,
+			authorization_period: None,
 		});
 		let sudo_call =
 			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(add_call) });
 		assert_ok_ok(construct_and_apply_extrinsic(Some(alice.pair()), sudo_call));
-		assert!(pallet_transaction_storage::AllowedAuthorizers::<Runtime>::contains_key(
+		assert!(pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::contains_key(
 			eve.to_account_id()
 		));
 
@@ -1632,6 +1635,9 @@ fn non_sudo_cannot_add_authorizer() {
 
 			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
 				who: Sr25519Keyring::Eve.to_account_id(),
+				transactions_budget: 1000,
+				bytes_budget: 100 * 1024 * 1024,
+				authorization_period: None,
 			});
 
 			// BadOrigin comes back at dispatch (not at validation) — so the

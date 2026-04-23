@@ -1713,7 +1713,7 @@ pub mod pallet {
             };
 
 			if consume {
-				AllowedAuthorizers::<T>::mutate(who, try_consume)
+				AllowedAuthorizers::<T>::try_mutate(who, try_consume)
 			} else {
 				let mut budget = AllowedAuthorizers::<T>::get(who);
 				try_consume(&mut budget)
