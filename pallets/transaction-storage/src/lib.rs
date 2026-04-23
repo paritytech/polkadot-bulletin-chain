@@ -1036,8 +1036,10 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
-					// TODO: Refresh also usage or track TransactionInfo.authorization and when content removed return back?
-					// TODO: Check and align with ZK voucher slots here: https://github.com/paritytech/individuality/pull/785
+					// TODO: Refresh also usage or track TransactionInfo.authorization and when
+					// content removed return back?
+					// TODO: Check and align with ZK voucher slots
+					// here: https://github.com/paritytech/individuality/pull/785
 					authorization.extent.bytes = 0;
 					Ok(())
 				} else {
