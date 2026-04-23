@@ -50,8 +50,8 @@ type BulletinWestendNet = BulletinWestend<WestendMockNet>;
 /// This test verifies that:
 /// 1. Alice on Asset Hub can initiate a teleport to Bulletin.
 /// 2. Alice's balance on Asset Hub decreases (WND burned locally).
-/// 3. Bob's balance on Bulletin increases (WND minted on the receiving chain,
-///    because Bulletin trusts Asset Hub as a system-parachain teleporter).
+/// 3. Bob's balance on Bulletin increases (WND minted on the receiving chain, because Bulletin
+///    trusts Asset Hub as a system-parachain teleporter).
 #[test]
 fn teleport_wnd_from_asset_hub_to_bulletin() {
 	WestendMockNet::reset();
