@@ -35,7 +35,7 @@ tokio = { version = "1", features = ["full"] }
 use bulletin_sdk_rust::prelude::*;
 
 let client = TransactionClient::new("ws://localhost:10000").await?;
-let receipt = client.store(data, &signer).await?;
+let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 ```
 
 ### Option 2: BulletinClient (Prepare Only)

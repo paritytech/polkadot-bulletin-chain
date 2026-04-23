@@ -6,7 +6,6 @@
     "ignoreDeprecations": "6.0",
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["node"],
     "verbatimModuleSyntax": false
   },
   "include": ["src/**/*"],

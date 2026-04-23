@@ -21,16 +21,16 @@ use super::{
 	RuntimeHoldReason,
 };
 use alloc::vec::Vec;
+use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
 	traits::{Contains, EitherOfDiverse},
 };
-use pallet_transaction_storage::{
+use pallet_bulletin_transaction_storage::{
 	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
-use pallets_common::{inspect_utility_wrapper, NoCurrency};
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 
 // 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
@@ -50,8 +50,9 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
-/// Tells [`pallet_transaction_storage::extension::ValidateStorageCalls`] how to find storage
-/// calls inside wrapper extrinsics so it can recursively validate and consume authorization.
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// storage calls inside wrapper extrinsics so it can recursively validate and consume
+/// authorization.
 ///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
 /// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM
@@ -60,7 +61,7 @@ parameter_types! {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct StorageCallInspector;
 
-impl pallet_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
+impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCallInspector {
 	fn inspect_wrapper(call: &RuntimeCall) -> Option<Vec<&RuntimeCall>> {
 		match call {
 			RuntimeCall::Utility(c) => inspect_utility_wrapper(c),
@@ -82,13 +83,13 @@ impl Contains<RuntimeCall> for StorageCallInspector {
 }
 
 /// The main business of the Bulletin chain.
-impl pallet_transaction_storage::Config for Runtime {
+impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type FeeDestination = ();
-	type WeightInfo = crate::weights::pallet_transaction_storage::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bulletin_transaction_storage::WeightInfo<Runtime>;
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
@@ -110,5 +111,6 @@ impl pallet_transaction_storage::Config for Runtime {
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper = pallet_transaction_storage::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper =
+		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }

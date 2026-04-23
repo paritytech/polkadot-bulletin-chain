@@ -75,6 +75,9 @@ use sp_runtime::{
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
+
+/// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
+const SLOT_DURATION: u64 = 24_000;
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
@@ -117,7 +120,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_transaction_storage::extension::ValidateStorageCalls<
+		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
 			Runtime,
 			storage::StorageCallInspector,
 		>,
@@ -144,17 +147,18 @@ pub mod migrations {
 			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-		pallet_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
+		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
 		pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
-		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+		pallet_bulletin_transaction_storage::migrations::SetRetentionPeriodIfZero<
 			Runtime,
-			pallet_transaction_storage::DefaultRetentionPeriod,
+			pallet_bulletin_transaction_storage::DefaultRetentionPeriod,
 		>,
-		pallet_transaction_storage::migrations::PopulateAllowedAuthorizersIfEmpty<
+		pallet_bulletin_transaction_storage::migrations::PopulateAllowedAuthorizersIfEmpty<
 			Runtime,
 			LegacyAuthorizers,
 		>,
@@ -535,7 +539,7 @@ construct_runtime!(
 		SkipFeelessPayment: pallet_skip_feeless_payment = 12,
 
 		// Storage
-		TransactionStorage: pallet_transaction_storage = 40,
+		TransactionStorage: pallet_bulletin_transaction_storage = 40,
 
 		// Collator support. The order of these 5 are important and shall not change.
 		Authorship: pallet_authorship = 20,
@@ -565,7 +569,7 @@ mod benches {
 		[pallet_balances, Balances]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
-		[pallet_transaction_storage, TransactionStorage]
+		[pallet_bulletin_transaction_storage, TransactionStorage]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]

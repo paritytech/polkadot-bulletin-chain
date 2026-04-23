@@ -16,6 +16,7 @@
 
 #![cfg(test)]
 
+use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
@@ -26,7 +27,7 @@ use bulletin_westend_runtime::{
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
-use pallet_transaction_storage::{
+use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
 };
 use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
@@ -40,7 +41,6 @@ use sp_runtime::{
 };
 use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
-use transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -86,7 +86,7 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		pallet_transaction_storage::extension::ValidateStorageCalls::<
+		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
 			Runtime,
 			bulletin_westend_runtime::storage::StorageCallInspector,
 		>::default(),
@@ -158,7 +158,7 @@ fn transaction_storage_runtime_sizes() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				sizes.len() as u32,
-				total_bytes,
+				total_bytes
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -195,7 +195,7 @@ fn transaction_storage_runtime_sizes() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				oversized,
+				oversized
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -210,7 +210,7 @@ fn transaction_storage_runtime_sizes() {
 			// On the Westend, very large extrinsics may be rejected earlier for exhausting
 			// resources (block length/weight) before reaching the pallet's BAD_DATA_SIZE check.
 			assert!(
-				res == Err(pallet_transaction_storage::BAD_DATA_SIZE.into()) ||
+				res == Err(pallet_bulletin_transaction_storage::BAD_DATA_SIZE.into()) ||
 					res == Err(InvalidTransaction::ExhaustsResources.into()),
 				"unexpected error: {res:?}"
 			);
@@ -233,7 +233,7 @@ fn transaction_storage_max_throughput_per_block() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				NUM_TRANSACTIONS + 1,
-				(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
+				(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -302,7 +302,7 @@ fn authorized_storage_transactions_are_for_free() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				24,
+				24
 			));
 			// Now should work.
 			let res = construct_and_apply_extrinsic(Some(account.pair()), call);
@@ -326,7 +326,7 @@ fn store_with_cid_config_works() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			3,
-			3 * total_bytes,
+			3 * total_bytes
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
@@ -561,7 +561,8 @@ fn alice_can_sign_authorize_account_extrinsic() {
 	let mut genesis = RuntimeGenesisConfig::default();
 	genesis.transaction_storage.account_authorizations =
 		vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)];
-	genesis.transaction_storage.allowed_authorizers = vec![Sr25519Keyring::Alice.to_account_id()];
+	genesis.transaction_storage.allowed_authorizers =
+		vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)];
 	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
 		let alice = Sr25519Keyring::Alice;
 		let target = Sr25519Keyring::Eve;
@@ -621,13 +622,13 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 fn people_chain_can_authorize_storage_with_transact() {
 	// Prepare call.
 	let account = Sr25519Keyring::Ferdie;
-	let authorize_call = RuntimeCall::TransactionStorage(pallet_transaction_storage::Call::<
-		Runtime,
-	>::authorize_account {
-		who: account.to_account_id(),
-		transactions: 16,
-		bytes: 1024,
-	});
+	let authorize_call = RuntimeCall::TransactionStorage(
+		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
+			who: account.to_account_id(),
+			transactions: 16,
+			bytes: 1024,
+		},
+	);
 
 	// Execute XCM as People chain origin would do with `Transact -> Origin::Xcm`.
 	ExtBuilder::<Runtime>::default()
@@ -649,7 +650,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 
 			// Check event.
 			System::assert_has_event(RuntimeEvent::TransactionStorage(
-				pallet_transaction_storage::Event::AccountAuthorized {
+				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
 					who: account.to_account_id(),
 					transactions: 16,
 					bytes: 1024,
@@ -665,13 +666,13 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 	let people_next_location = Location::new(1, [Parachain(5140)]);
 
 	let account = Sr25519Keyring::Ferdie;
-	let authorize_call = RuntimeCall::TransactionStorage(pallet_transaction_storage::Call::<
-		Runtime,
-	>::authorize_account {
-		who: account.to_account_id(),
-		transactions: 16,
-		bytes: 1024,
-	});
+	let authorize_call = RuntimeCall::TransactionStorage(
+		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
+			who: account.to_account_id(),
+			transactions: 16,
+			bytes: 1024,
+		},
+	);
 
 	ExtBuilder::<Runtime>::default()
 		.with_collators(vec![AccountId::from(ALICE)])
@@ -692,7 +693,7 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 
 			// Check event.
 			System::assert_has_event(RuntimeEvent::TransactionStorage(
-				pallet_transaction_storage::Event::AccountAuthorized {
+				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
 					who: account.to_account_id(),
 					transactions: 16,
 					bytes: 1024,
@@ -701,10 +702,10 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		})
 }
 
-/// See [`pallet_transaction_storage::ensure_weight_sanity`].
+/// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
-	pallet_transaction_storage::ensure_weight_sanity::<Runtime>(
+	pallet_bulletin_transaction_storage::ensure_weight_sanity::<Runtime>(
 		// Collator-side PoV cap: default 85% of max_pov_size.
 		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
 		Some(85),
@@ -857,7 +858,7 @@ fn authorized_wrapped_store_rejected() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				4,
-				4 * data.len() as u64,
+				4 * data.len() as u64
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -913,7 +914,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				data_b.len() as u64,
+				data_b.len() as u64
 			));
 
 			let store_a =
@@ -1006,7 +1007,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				5,
-				500,
+				500
 			));
 			assert_ok!(TransactionStorage::authorize_preimage(
 				RuntimeOrigin::root(),
@@ -1038,7 +1039,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 #[test]
 fn wrapped_renew_requires_authorization() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
-	pallet_transaction_storage::GenesisConfig::<Runtime> {
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
 		byte_fee: 0,
 		entry_fee: 0,
@@ -1062,7 +1063,7 @@ fn wrapped_renew_requires_authorization() {
 			RuntimeOrigin::root(),
 			who.clone(),
 			1,
-			data.len() as u64,
+			data.len() as u64
 		));
 		assert_ok_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
@@ -1153,7 +1154,8 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 #[test]
 fn wrapped_authorize_account_succeeds() {
 	let mut genesis = RuntimeGenesisConfig::default();
-	genesis.transaction_storage.allowed_authorizers = vec![Sr25519Keyring::Alice.to_account_id()];
+	genesis.transaction_storage.allowed_authorizers =
+		vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)];
 
 	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
 		advance_block();
@@ -1212,7 +1214,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				data.len() as u64,
+				data.len() as u64
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1268,7 +1270,7 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				data.len() as u64,
+				data.len() as u64
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1312,7 +1314,7 @@ fn max_recursion_depth_is_enforced() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				data.len() as u64,
+				data.len() as u64
 			));
 
 			// Nest store inside MAX_WRAPPER_DEPTH+1 batch wrappers.
@@ -1320,7 +1322,7 @@ fn max_recursion_depth_is_enforced() {
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: data.clone(),
 				});
-			for _ in 0..=pallet_transaction_storage::MAX_WRAPPER_DEPTH {
+			for _ in 0..=pallet_bulletin_transaction_storage::MAX_WRAPPER_DEPTH {
 				call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 			}
 
@@ -1390,7 +1392,7 @@ fn xcm_transact_store_is_blocked() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				data.len() as u64,
+				data.len() as u64
 			));
 			assert_ne!(
 				TransactionStorage::account_authorization_extent(who.clone()),
@@ -1448,7 +1450,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 				RuntimeOrigin::root(),
 				who.clone(),
 				1,
-				data.len() as u64,
+				data.len() as u64
 			));
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1579,7 +1581,8 @@ fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
 #[test]
 fn sudo_can_remove_authorizer_and_removed_cannot_authorize() {
 	let mut genesis = RuntimeGenesisConfig::default();
-	genesis.transaction_storage.allowed_authorizers = vec![Sr25519Keyring::Alice.to_account_id()];
+	genesis.transaction_storage.allowed_authorizers =
+		vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)];
 	genesis.sudo.key = Some(Sr25519Keyring::Alice.to_account_id());
 
 	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
