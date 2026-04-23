@@ -127,17 +127,9 @@ jobs:
 
       - name: Run pallets tests
         run: |
-          cargo test -p pallet-relayer-set
-          cargo test -p pallet-relayer-set --features=runtime-benchmarks
-          cargo test -p pallet-validator-set
-          cargo test -p pallet-validator-set --features=runtime-benchmarks
-          cargo test -p pallet-transaction-storage
+          cargo test -p pallet-bulletin-transaction-storage          
           # Bench test is skipped intentionally (running too long and anyway, we are doing fresh weights)
-          cargo test -p pallet-transaction-storage --features=runtime-benchmarks -- --skip bench_check_proof
-
-      - name: Run (Polkadot) runtime tests
-        run: |
-          cargo test -p bulletin-polkadot-runtime
+          cargo test -p pallet-bulletin-transaction-storage --features=runtime-benchmarks
 
       - name: Run (Westend) runtime tests
         run: |

@@ -115,40 +115,9 @@ _wait-for-rpc pid log_file port="10000" timeout="30":
         sleep 1
     done
 
-# Start solo chain or parachain with zombienet in background
-# Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime"), taken from ../scripts/runtimes-matrix.json
-bulletin-solo-zombienet-start test_dir runtime="bulletin-polkadot-runtime":
-    #!/usr/bin/env bash
-    set -e
-
-    ZOMBIENET_BIN="$(just _resolve-zombienet-bin)"
-
-    echo "   Setting up Polkadot runtime..."
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    # Build the node binary (which will build the runtime as a dependency)
-    cargo build --release -p polkadot-bulletin-chain
-    POLKADOT_BULLETIN_BINARY_PATH="$ROOT_DIR/target/release/polkadot-bulletin-chain"
-
-    cat <<EOF
-    ⚡ Starting Bulletin chain with zombienet
-        runtime   : {{ runtime }}
-        test_dir  : {{ test_dir }}
-        zombienet : $ZOMBIENET_BIN
-        POLKADOT_BULLETIN_BINARY_PATH : $POLKADOT_BULLETIN_BINARY_PATH
-    EOF
-    (yes y | POLKADOT_BULLETIN_BINARY_PATH="$POLKADOT_BULLETIN_BINARY_PATH" \
-        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/zombienet/bulletin-polkadot-local.toml" > {{ test_dir }}/zombienet.log 2>&1) &
-
-    ZOMBIENET_PID=$!
-    echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
-    echo "   Zombienet PID: $ZOMBIENET_PID"
-    echo "   Log: {{ test_dir }}/zombienet.log"
-    just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
-
 # Start westend parachain with zombienet in background
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-parachain-runtime", "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime"), taken from ../scripts/runtimes-matrix.json
 bulletin-westend-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     #!/usr/bin/env bash
     set -e
@@ -238,11 +207,6 @@ WESTEND_PEER1_PORT := "10001"
 WESTEND_PEER2_ID := "12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 WESTEND_PEER2_PORT := "12347"
 
-# Polkadot solo chain peer IDs and p2p ports (zombienet binds WS on p2p_port)
-POLKADOT_PEER1_ID := "12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm"
-POLKADOT_PEER1_PORT := "10001"
-POLKADOT_PEER2_ID := "12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby"
-POLKADOT_PEER2_PORT := "12347"
 
 # Download and install Kubo IPFS binary
 ipfs-kubo-install:
@@ -312,8 +276,6 @@ ipfs-kubo-start test_dir runtime: ipfs-kubo-install
     echo "   Configuring Peering.Peers for {{ runtime }}..."
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        PEERS='[{"ID":"{{ POLKADOT_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PEER1_PORT }}/ws"]},{"ID":"{{ POLKADOT_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ POLKADOT_PEER2_PORT }}/ws"]}]'
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
         exit 1
@@ -443,8 +405,6 @@ ipfs-start test_dir runtime: _check-docker
     echo "   Configuring Peering.Peers for {{ runtime }}..."
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         PEERS="[{\"ID\":\"{{ WESTEND_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ WESTEND_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER2_PORT }}/ws\"]}]"
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        PEERS="[{\"ID\":\"{{ POLKADOT_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ POLKADOT_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ POLKADOT_PEER2_PORT }}/ws\"]}]"
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
         exit 1
@@ -503,17 +463,14 @@ papi-generate ws_url="ws://127.0.0.1:10000": npm-install
 
 # Setup all services for IPFS
 # Parameters:
-#   runtime - Runtime to build and run (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   runtime - Runtime to build and run (e.g., "bulletin-westend-runtime")
 #   ipfs_mode - IPFS backend: "kubo-docker" (default) or "kubo-native" (local, no Docker required)
 setup-services test_dir runtime ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    # TODO: improve this for multiple runtimes
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         just bulletin-westend-parachain-zombienet-start "{{ test_dir }}" "{{ runtime }}"
-    elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-        just bulletin-solo-zombienet-start "{{ test_dir }}" "{{ runtime }}"
     else
         echo "❌ Unhandled runtime: {{ runtime }} specified!"
         exit 1
@@ -562,8 +519,8 @@ teardown-services test_dir ipfs_mode="kubo-docker":
     fi
 
 # Start all services for a runtime (use with run-test-* recipes)
-# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime
-# Usage: just start-services /tmp/my-test-dir bulletin-polkadot-runtime kubo-native
+# Usage: just start-services /tmp/my-test-dir bulletin-westend-runtime
+# Usage: just start-services /tmp/my-test-dir bulletin-westend-runtime kubo-native
 start-services test_dir runtime ipfs_mode="kubo-docker":
     #!/usr/bin/env bash
     set -e
@@ -602,14 +559,9 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
 
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
-        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
-            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
-        else
-            CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/bulletin-polkadot-local.json"
-            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "{{ http_ipfs_api }}"
-        fi
+        RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
+        PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
     else
         node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     fi
@@ -731,7 +683,7 @@ test-ts-sdk-vitest ws_url="ws://localhost:10000":
 
 # Run TypeScript SDK vitest integration tests with full setup/teardown
 # Parameters:
-#   runtime - Runtime name (default: bulletin-polkadot-runtime)
+#   runtime - Runtime name (default: bulletin-westend-runtime)
 run-ts-sdk-vitest runtime ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
@@ -759,7 +711,7 @@ run-ts-sdk-vitest runtime ipfs_mode="kubo-docker": npm-install
 # Run authorize and store example
 # Parameters:
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime")
 run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
@@ -781,16 +733,10 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     set +e
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
-        # Set chainspec path based on runtime
-        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            # Parachain: relay chain (required) + parachain spec (optional)
-            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
-            node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
-        else # bulletin-polkadot-runtime (solochain)
-            CHAINSPEC_PATH="$TEST_DIR/bob/cfg/bulletin-polkadot-local.json"
-            node $SCRIPT_NAME "$CHAINSPEC_PATH" "" "http://127.0.0.1:8283"
-        fi
+        # Parachain: relay chain (required) + parachain spec (optional)
+        RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
+        PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
     else
         node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Alice" "http://127.0.0.1:8283"
     fi
@@ -809,7 +755,7 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
 
 # Run store chunked data example
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime")
 #   ws_url - WebSocket URL (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
@@ -839,7 +785,7 @@ run-store-chunked-data runtime ws_url="ws://127.0.0.1:10000" seed="//Alice" http
 
 # Run store big data example.
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime")
 #   ws_url - WebSocket URL (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:5011)
@@ -869,7 +815,7 @@ run-store-big-data runtime ws_url="ws://127.0.0.1:10000" seed="//Alice" http_ipf
 
 # Run authorize preimage and store with PAPI example.
 # Parameters:
-#   runtime - Runtime name (e.g., "bulletin-polkadot-runtime", "bulletin-westend-runtime")
+#   runtime - Runtime name (e.g., "bulletin-westend-runtime")
 #   ws_url - WebSocket URL (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Alice)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)

@@ -77,7 +77,7 @@ use bulletin_sdk_rust::prelude::*;
 
 let client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
 let data = b"Hello, Bulletin!".to_vec();
-let receipt = client.store(data, &signer).await?;
+let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 println!("Stored in block: {}", receipt.block_hash);
 ```
 
@@ -88,7 +88,6 @@ println!("Stored in block: {}", receipt.block_hash);
 | Polkadot | - | Not released yet |
 | Paseo (Testnet) | `wss://paseo-bulletin-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
-| PoP Testnet (stable) | `wss://pop3-testnet.parity-lab.parity.io/bulletin` | Active |
 | Previewnet | `wss://previewnet.substrate.dev/bulletin` | Active |
 | Local Dev | `ws://localhost:10000` | - |
 

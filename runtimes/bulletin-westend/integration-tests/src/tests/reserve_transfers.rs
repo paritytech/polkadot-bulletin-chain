@@ -20,10 +20,10 @@
 //! 2. WND reserve transfers from Bulletin back to Asset Hub (DestinationReserve)
 
 use crate::{
-	AssetHubWestendParaReceiver, AssetHubWestendParaSender, BulletinWestend,
-	BulletinWestendParaReceiver, BulletinWestendParaSender, WestendMockNet, BULLETIN_PARA_ID,
+	chains::AssetHubWestend, AssetHubWestendParaReceiver, AssetHubWestendParaSender,
+	BulletinWestend, BulletinWestendParaReceiver, BulletinWestendParaSender, WestendMockNet,
+	BULLETIN_PARA_ID,
 };
-use asset_hub_westend_emulated_chain::AssetHubWestend;
 use frame_support::{
 	assert_ok,
 	traits::fungible::{Inspect, Mutate},

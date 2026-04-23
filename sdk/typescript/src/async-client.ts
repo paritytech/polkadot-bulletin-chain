@@ -74,6 +74,7 @@ interface PapiTransaction {
     subscribe(observer: {
       next: (ev: TxStatusEvent) => void
       error: (err: unknown) => void
+      complete?: () => void
     }): { unsubscribe(): void }
   }
   /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
@@ -296,6 +297,8 @@ export interface BulletinClientInterface {
     transactions: number
     bytes: number
   }
+  /** Release resources held on behalf of this client (e.g. underlying PAPI client). */
+  destroy(): Promise<void>
 }
 
 /**
@@ -532,6 +535,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
+  /** Optional teardown callback invoked by `destroy()` */
+  private onDestroy?: () => void | Promise<void>
 
   /**
    * Create a new async client with PAPI client and signer
@@ -543,22 +548,40 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param signer - Polkadot signer for transaction signing
    * @param submit - Raw transaction submit function (pass `papiClient.submit`)
    * @param config - Optional client configuration
+   * @param onDestroy - Optional teardown callback. When provided, `destroy()`
+   *   awaits it so callers (e.g. wrappers that own the underlying
+   *   `PolkadotClient`) can route cleanup through this client.
    */
   constructor(
     api: BulletinTypedApi,
     signer: PolkadotSigner,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
+    onDestroy?: () => void | Promise<void>,
   ) {
     this.api = api
     this.signer = signer
     this.submit = submit
     this.config = resolveClientConfig(config)
+    this.onDestroy = onDestroy
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
       chunkingThreshold: this.config.chunkingThreshold,
     })
+  }
+
+  /**
+   * Release resources held on behalf of this client.
+   *
+   * Invokes the optional `onDestroy` callback supplied at construction time.
+   * Without one, this is a no-op — the SDK itself holds no long-lived
+   * resources, so callers that own the underlying `PolkadotClient` (or other
+   * connection) can either tear it down themselves or pass `onDestroy` to
+   * route teardown through here.
+   */
+  async destroy(): Promise<void> {
+    await this.onDestroy?.()
   }
 
   /**
@@ -710,6 +733,31 @@ export class AsyncBulletinClient implements BulletinClientInterface {
               })
             }
             reject(err)
+          }
+        },
+        complete: () => {
+          // PAPI can complete the Observable without a finalized/in_block
+          // event (e.g. txBestBlocksState fires with found:false after a
+          // reorg or node restart, causing the internal continueWith() to
+          // map to rxjs.EMPTY which completes immediately). Without this
+          // handler the Promise hangs until the defensive timeout fires.
+          if (!resolved) {
+            resolved = true
+            cleanup()
+            progressCallback?.({
+              type: TxStatus.Dropped,
+              error:
+                "Transaction subscription ended before reaching the expected status",
+              chunkIndex,
+            })
+            reject(
+              new BulletinError(
+                "Transaction subscription ended before reaching the expected status. " +
+                  "This usually means the transaction was dropped from the best block " +
+                  "(e.g. due to a chain reorganization or node restart).",
+                ErrorCode.TRANSACTION_FAILED,
+              ),
+            )
           }
         },
       })
