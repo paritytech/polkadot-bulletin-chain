@@ -215,11 +215,18 @@ IPFS_SWARM_PORT := "4011"
 IPFS_API_PORT := "5011"
 IPFS_GATEWAY_PORT := "8283"
 
-# Westend parachain peer IDs and p2p ports (zombienet binds WS on p2p_port)
+# Bulletin parachain peer IDs and p2p ports (zombienet binds WS on p2p_port).
+# Peer IDs are derived deterministically from the collator node name by zombienet
+# as sha256(<collator-name>) -> libp2p ed25519 secret key -> peer ID. See
+# `polkadot-omni-node key inspect-node-key --file <hex-key-file>` to reproduce.
 WESTEND_PEER1_ID := "12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
 WESTEND_PEER1_PORT := "10001"
 WESTEND_PEER2_ID := "12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ"
 WESTEND_PEER2_PORT := "12347"
+PASEO_PEER1_ID := "12D3KooWKjTeRJH8nMcFytc7qTTCQy7JrFgiZFr7iUjd1aPEBn8v"
+PASEO_PEER1_PORT := "10001"
+PASEO_PEER2_ID := "12D3KooWM8qgmWsh9ddbdX3kqR7W8tWuh62zhsdpwfs81eSnQuaH"
+PASEO_PEER2_PORT := "12347"
 
 
 # Download and install Kubo IPFS binary
@@ -287,11 +294,11 @@ ipfs-kubo-start test_dir runtime: ipfs-kubo-install
     $IPFS_CMD config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
     # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes.
-    # The bulletin-paseo zombienet reuses the same collator node names as bulletin-westend,
-    # so their derived peer IDs are the same and we can share a single branch.
     echo "   Configuring Peering.Peers for {{ runtime }}..."
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         PEERS='[{"ID":"{{ WESTEND_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER1_PORT }}/ws"]},{"ID":"{{ WESTEND_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ WESTEND_PEER2_PORT }}/ws"]}]'
+    elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+        PEERS='[{"ID":"{{ PASEO_PEER1_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ PASEO_PEER1_PORT }}/ws"]},{"ID":"{{ PASEO_PEER2_ID }}","Addrs":["/ip4/127.0.0.1/tcp/{{ PASEO_PEER2_PORT }}/ws"]}]'
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
         exit 1
@@ -417,12 +424,12 @@ ipfs-start test_dir runtime: _check-docker
     docker exec ipfs-node ipfs $DEFAULT_API config Addresses.Gateway "/ip4/0.0.0.0/tcp/${IPFS_GATEWAY_PORT}"
 
     # Configure Peering.Peers so Kubo automatically connects and reconnects to chain nodes.
-    # The bulletin-paseo zombienet reuses the same collator node names as bulletin-westend,
-    # so their derived peer IDs are the same and we can share a single branch.
     # (Set before restart so the daemon picks up the config on boot.)
     echo "   Configuring Peering.Peers for {{ runtime }}..."
-    if [ "{{ runtime }}" = "bulletin-westend-runtime" ] || [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+    if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         PEERS="[{\"ID\":\"{{ WESTEND_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ WESTEND_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ WESTEND_PEER2_PORT }}/ws\"]}]"
+    elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+        PEERS="[{\"ID\":\"{{ PASEO_PEER1_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ PASEO_PEER1_PORT }}/ws\"]},{\"ID\":\"{{ PASEO_PEER2_ID }}\",\"Addrs\":[\"${PEER_ADDR}/tcp/{{ PASEO_PEER2_PORT }}/ws\"]}]"
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
         exit 1
@@ -578,10 +585,16 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
         RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
-        # Zombienet names its parachain chainspec by <relay>-<para_id>. Both
-        # bulletin-westend-local.toml and bulletin-paseo-local.toml use the
-        # westend-local relay and para id 2487, so the filename is the same.
-        PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+        # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
+        # and the containing directory by the collator name used in each toml.
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1010.json"
+        elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/westend-local-1010.json"
+        else
+            echo "❌ Unhandled runtime: {{ runtime }}"
+            exit 1
+        fi
         node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
     else
         node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
@@ -754,9 +767,18 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     set +e
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
-        # Parachain: relay chain (required) + parachain spec (optional)
+        # Parachain: relay chain (required) + parachain spec (optional).
+        # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
+        # and the containing directory by the collator name used in each toml.
         RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-        PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-2487.json"
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1010.json"
+        elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1010.json"
+        else
+            echo "❌ Unhandled runtime: {{ runtime }}"
+            exit 1
+        fi
         node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
     else
         node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Alice" "http://127.0.0.1:8283"

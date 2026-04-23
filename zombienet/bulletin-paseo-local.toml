@@ -3,10 +3,6 @@
 # cd <root dir>
 # ./scripts/create_bulletin_paseo_spec.sh
 # POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain zombienet -p native spawn ./zombienet/bulletin-paseo-local.toml
-#
-# NOTE: the collator names match bulletin-westend-local.toml on purpose so
-# Kubo's Peering.Peers entries (which key off the derived peer IDs) stay the
-# same across both local setups.
 
 [settings]
 node_spawn_timeout = 240
@@ -36,7 +32,7 @@ chain_spec_path = "./zombienet/bulletin-paseo-spec.json"
 cumulus_based = true
 
 [[parachains.collators]]
-name = "bulletin-westend-collator-1"
+name = "bulletin-paseo-collator-1"
 command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
 validator = true
 p2p_port = 10001
@@ -55,7 +51,7 @@ args = [
 ]
 
 [[parachains.collators]]
-name = "bulletin-westend-collator-2"
+name = "bulletin-paseo-collator-2"
 command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
 validator = true
 p2p_port = 12347
