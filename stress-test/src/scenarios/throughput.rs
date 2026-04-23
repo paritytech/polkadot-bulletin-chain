@@ -289,28 +289,28 @@ pub async fn run_block_capacity_sweep(
 				)
 			},
 			BlockCapacitySweepStep::Mixed { mix } => {
-				// Use the smallest payload in the mix to estimate max accounts needed
-				// per block. This ensures we always generate enough accounts to fill
-				// blocks even when small payloads dominate a given block.
-				let min_b = mix.min_payload_bytes().max(1);
-				let cap =
-					(block_usable_bytes / (min_b + extrinsic_overhead).max(1)).min(max_block_txs);
+				// Estimate block capacity from the weighted mean payload size with a 2x
+				// safety margin. Using the min payload would over-provision by 10-20x.
 				let mean = mix.mean_payload_bytes().round().max(1.0) as usize;
+				let mean_cap =
+					(block_usable_bytes / (mean + extrinsic_overhead).max(1)).min(max_block_txs);
+				let cap = (mean_cap * 2).min(max_block_txs);
 				let max_b = mix.max_payload_bytes();
+				let min_b = mix.min_payload_bytes().max(1);
 				let seed_note = match mix_seed {
 					Some(s) => format!("--mix-seed {s}"),
 					None => "OS entropy (use --mix-seed to reproduce)".to_string(),
 				};
 				log::info!(
 					"mixed: weighted payload mix — mean ≈ {mean} B, min ≈ {min_b} B, \
-					 max ≈ {max_b} B, est ≤ {cap} txs/block (worst case); draws: {seed_note}",
+					 max ≈ {max_b} B, est ~{mean_cap} txs/block (2x → {cap}); draws: {seed_note}",
 				);
 				(
 					"mixed",
 					mean,
 					cap,
 					StorePayloadMode::Mixed(mix.clone()),
-					min_b + extrinsic_overhead,
+					mean + extrinsic_overhead,
 					max_b,
 				)
 			},
