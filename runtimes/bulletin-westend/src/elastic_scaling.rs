@@ -9,7 +9,7 @@
 
 // Re-export unchanged SDK consensus constants.
 pub use testnet_parachains_constants::westend::consensus::{
-	MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS, SLOT_DURATION,
+	MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS,
 };
 
 /// Build blocks with an offset of 1 behind the relay chain (required for elastic scaling).
