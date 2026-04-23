@@ -32,7 +32,7 @@ use pallet_xcm::{AuthorizedAliasers, XcmPassthrough};
 use parachains_common::{
 	xcm_config::{
 		AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
-		ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+		ConcreteAssetFromSystem, ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
 	},
 	TREASURY_PALLET_ID,
 };
@@ -219,8 +219,8 @@ where
 pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
 
 /// Cases where a remote origin is accepted as trusted Teleporter for a given asset.
-/// Non-system parachains should not accept teleports, use reserve transfers instead.
-pub type TrustedTeleporters = ();
+/// Trust the relay chain and other system parachains to teleport the relay chain native token.
+pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
 
 /// Defines origin aliasing rules for this chain.
 ///
@@ -242,10 +242,10 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// As a non-system parachain, Bulletin accepts DOT reserve transfers from Asset Hub.
-	// Teleports are not supported.
+	// Bulletin accepts reserve transfers of the relay chain native token from Asset Hub,
+	// and teleports of the same token from the relay chain and other system parachains.
 	type IsReserve = Reserves;
-	type IsTeleporter = ();
+	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
 	type Weigher = WeightInfoBounds<
