@@ -890,6 +890,11 @@ pub mod pallet {
 	pub type AllowedAuthorizers<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, AuthorizerBudgetFor<T>, OptionQuery>;
 
+	/// Custom authorization period set by one of the additional authorizers. Set pre-dispatch
+	/// and taken on execution, so that different authorizers can set their own values.
+	#[pallet::storage]
+	pub(super) type PendingAuthorizationPeriod<T: Config> = StorageValue<_, BlockNumberFor<T>>;
+
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
 	#[pallet::getter(fn transaction_roots)]
@@ -1162,8 +1167,9 @@ pub mod pallet {
 
 		/// Authorize data storage.
 		fn authorize(scope: AuthorizationScopeFor<T>, transactions: u32, bytes: u64) {
-			let expiration = frame_system::Pallet::<T>::block_number()
-				.saturating_add(T::AuthorizationPeriod::get());
+			let period =
+				PendingAuthorizationPeriod::<T>::take().unwrap_or_else(T::AuthorizationPeriod::get);
+			let expiration = frame_system::Pallet::<T>::block_number().saturating_add(period);
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
@@ -1534,6 +1540,12 @@ pub mod pallet {
 						byte_budget_to_consume,
 						context.consume_authorization(),
 					)?;
+					// Stash the period override for the extrinsic to pick up
+					let period =
+						AllowedAuthorizers::<T>::get(who).and_then(|b| b.authorization_period);
+					if period.is_some() {
+						PendingAuthorizationPeriod::<T>::set(period);
+					}
 
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
