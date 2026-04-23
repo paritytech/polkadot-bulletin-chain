@@ -969,7 +969,10 @@ impl_runtime_apis! {
 			}
 
 			parameter_types! {
-				pub const TrustedTeleporter: Option<(Location, Asset)> = None;
+				pub TrustedTeleporter: Option<(Location, Asset)> = Some((
+					AssetHubLocation::get(),
+					Asset { fun: Fungible(UNITS), id: AssetId(TokenRelayLocation::get()) },
+				));
 				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
 				pub TrustedReserve: Option<(Location, Asset)> = Some((
 					AssetHubLocation::get(),

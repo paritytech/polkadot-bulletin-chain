@@ -16,3 +16,4 @@
 //! Test modules for Bulletin Westend XCM integration tests.
 
 pub mod reserve_transfers;
+pub mod teleports;
