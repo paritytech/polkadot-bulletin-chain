@@ -290,6 +290,9 @@ pub mod v1 {
 /// The transaction-count quota is dropped. The remaining byte quota becomes the
 /// new total allowance (`bytes_allowance = old.bytes`) with zero consumed
 /// (`bytes = 0`), so each authorization keeps its previous remaining capacity.
+/// Entries whose remaining byte quota is already zero are dropped — they can't
+/// be translated to a valid v2 entry (`check_authorizations_integrity` requires
+/// `bytes_allowance > 0`) and they were already unusable on the old chain.
 pub mod v2 {
 	use super::*;
 	use crate::{
@@ -316,10 +319,15 @@ pub mod v2 {
 
 	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
 		fn on_runtime_upgrade() -> Weight {
-			let mut count: u64 = 0;
+			let mut migrated: u64 = 0;
+			let mut dropped: u64 = 0;
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					count = count.saturating_add(1);
+					if old.extent.bytes == 0 {
+						dropped = dropped.saturating_add(1);
+						return None;
+					}
+					migrated = migrated.saturating_add(1);
 					Some(Authorization {
 						extent: AuthorizationExtent { bytes: 0, bytes_allowance: old.extent.bytes },
 						expiration: old.expiration,
@@ -328,10 +336,13 @@ pub mod v2 {
 			);
 			tracing::info!(
 				target: LOG_TARGET,
-				migrated = count,
+				migrated,
+				dropped,
 				"v1->v2 AuthorizationExtent migration complete",
 			);
-			T::DbWeight::get().reads_writes(count, count)
+			// One read + one write per visited entry (translate rewrites or deletes).
+			let touched = migrated.saturating_add(dropped);
+			T::DbWeight::get().reads_writes(touched, touched)
 		}
 	}
 
