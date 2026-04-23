@@ -126,27 +126,27 @@ pub fn load_from_file(path: &Path) -> Result<TestPlan> {
 
 // --- Built-in plans ---
 
-/// Quick performance test: 1KB, MIXED, and 2MB payloads, ~100 minutes each.
-/// 100 min / 6s block time ≈ 1000 blocks per step. Total ~5 hours.
+/// Quick performance test: 1KB, MIXED, and 2MB payloads, ~20 minutes each.
+/// 20 min / 6s block time ≈ 200 blocks per step. Total ~1 hour.
 pub fn quick_performance_test() -> TestPlan {
 	TestPlan {
 		steps: vec![
 			PlanEntry::Single(PlanStep {
 				scenario: Scenario::Throughput,
 				variants: Some("1KB".into()),
-				target_blocks: Some(1000),
+				target_blocks: Some(200),
 				..default_step()
 			}),
 			PlanEntry::Single(PlanStep {
 				scenario: Scenario::Throughput,
 				variants: Some("MIXED".into()),
-				target_blocks: Some(1000),
+				target_blocks: Some(200),
 				..default_step()
 			}),
 			PlanEntry::Single(PlanStep {
 				scenario: Scenario::Throughput,
 				variants: Some("2MB".into()),
-				target_blocks: Some(1000),
+				target_blocks: Some(200),
 				..default_step()
 			}),
 		],
