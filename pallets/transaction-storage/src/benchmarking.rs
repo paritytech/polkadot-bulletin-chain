@@ -215,9 +215,11 @@ mod benchmarks {
 		let origin = T::ManagerOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
+		let transactions = 100;
+		let bytes: u64 = 10 * 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone());
+		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes, None);
 
 		assert_last_event::<T>(Event::AuthorizerAdded { who }.into());
 		Ok(())
@@ -228,9 +230,17 @@ mod benchmarks {
 		let origin = T::ManagerOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
+		let transactions = 100;
+		let bytes: u64 = 10 * 1024 * 1024;
 		let origin2 = origin.clone();
-		TransactionStorage::<T>::add_authorizer(origin2 as T::RuntimeOrigin, who.clone())
-			.map_err(|_| BenchmarkError::Stop("unable to add authorizer"))?;
+		TransactionStorage::<T>::add_authorizer(
+			origin2 as T::RuntimeOrigin,
+			who.clone(),
+			transactions,
+			bytes,
+			None,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to add authorizer"))?;
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, who.clone());
@@ -332,6 +342,25 @@ mod benchmarks {
 		_(RawOrigin::None, content_hash);
 
 		assert_last_event::<T>(Event::ExpiredPreimageAuthorizationRemoved { content_hash }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn remove_exhausted_authorizer() -> Result<(), BenchmarkError> {
+		let who: T::AccountId = whitelisted_caller();
+		AllowedAuthorizers::<T>::insert(
+			&who,
+			AuthorizerBudget {
+				transactions_budget: 0,
+				bytes_budget: 0,
+				authorization_period: None,
+			},
+		);
+
+		#[extrinsic_call]
+		_(RawOrigin::None, who.clone());
+
+		assert_last_event::<T>(Event::ExhaustedAuthorizerRemoved { who }.into());
 		Ok(())
 	}
 

@@ -65,6 +65,7 @@ pub trait WeightInfo {
 	fn validate_renew() -> Weight;
 	fn add_authorizer() -> Weight;
 	fn remove_authorizer() -> Weight;
+	fn remove_exhausted_authorizer() -> Weight;
 }
 
 /// Weights for pallet_bulletin_transaction_storage using the Substrate node and recommended hardware.
@@ -146,6 +147,9 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn remove_authorizer() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
+	fn remove_exhausted_authorizer() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn validate_store(l: u32) -> Weight {
@@ -235,6 +239,9 @@ impl WeightInfo for () {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn remove_authorizer() -> Weight {
+		Weight::from_parts(1_000, 1_000)
+	}
+	fn remove_exhausted_authorizer() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn validate_store(l: u32) -> Weight {

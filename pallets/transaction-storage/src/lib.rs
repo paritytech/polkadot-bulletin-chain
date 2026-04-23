@@ -92,6 +92,10 @@ pub const RENEWED_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(2);
 pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(3);
 /// Authorization has not expired.
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
+/// Authorizer account was not found.
+pub const AUTHORIZER_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(5);
+/// Authorizer budget has not been exhausted.
+pub const AUTHORIZATION_NOT_EXHAUSTED: InvalidTransaction = InvalidTransaction::Custom(6);
 
 /// Number of transactions and bytes covered by an authorization.
 #[derive(PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
@@ -357,6 +361,10 @@ pub mod pallet {
 		AuthorizationNotExpired,
 		/// Content hash was not calculated.
 		InvalidContentHash,
+		/// Authorizer account was not found.
+		AuthorizerNotFound,
+		/// Authorizer had remaining budget.
+		AuthorizerBudgetNotExhausted,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -813,6 +821,33 @@ pub mod pallet {
 			Self::deposit_event(Event::AuthorizerRemoved { who });
 			Ok(())
 		}
+
+		/// TODO:
+		///
+		/// Remove an expired account authorization from storage. Anyone can call this.
+		///
+		/// Parameters:
+		///
+		/// - `who`: The account with an expired authorization to remove.
+		///
+		/// Emits [`ExpiredAccountAuthorizationRemoved`](Event::ExpiredAccountAuthorizationRemoved)
+		/// when successful.
+		#[pallet::call_index(12)]
+		#[pallet::weight(T::WeightInfo::remove_exhausted_authorizer())]
+		pub fn remove_exhausted_authorizer(
+			_origin: OriginFor<T>,
+			who: T::AccountId,
+		) -> DispatchResult {
+			let authorizer_budget =
+				AllowedAuthorizers::<T>::get(&who).ok_or(Error::<T>::AuthorizerNotFound)?;
+			ensure!(
+				authorizer_budget.transactions_budget == 0 || authorizer_budget.bytes_budget == 0,
+				Error::<T>::AuthorizerBudgetNotExhausted
+			);
+			AllowedAuthorizers::<T>::remove(&who);
+			Self::deposit_event(Event::ExhaustedAuthorizerRemoved { who });
+			Ok(())
+		}
 	}
 
 	#[pallet::event]
@@ -839,8 +874,10 @@ pub mod pallet {
 		ExpiredPreimageAuthorizationRemoved { content_hash: ContentHash },
 		/// An authorizer was added to the allowed list.
 		AuthorizerAdded { who: T::AccountId },
-		/// An authorizer was removed from the allowed list.
+		/// An authorizer was removed from the allowed list by the manager.
 		AuthorizerRemoved { who: T::AccountId },
+		/// An authorizer was removed from the allowed list due to budget exhaustion.
+		ExhaustedAuthorizerRemoved { who: T::AccountId },
 	}
 
 	/// Authorizations, keyed by scope.
@@ -1426,6 +1463,23 @@ pub mod pallet {
 							"TransactionStorageRemoveExpiredPreimageAuthorization",
 						)
 						.and_provides(content_hash)
+						.priority(T::RemoveExpiredAuthorizationPriority::get())
+						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
+						.into()
+					}))
+				},
+
+				Call::<T>::remove_exhausted_authorizer { who } => {
+					let budget = AllowedAuthorizers::<T>::get(who).ok_or(AUTHORIZER_NOT_FOUND)?;
+					ensure!(
+						budget.transactions_budget == 0 || budget.bytes_budget == 0,
+						AUTHORIZATION_NOT_EXHAUSTED
+					);
+					Ok(context.want_valid_transaction().then(|| {
+						ValidTransaction::with_tag_prefix(
+							"TransactionStorageRemoveExhaustedAuthorizer",
+						)
+						.and_provides(who)
 						.priority(T::RemoveExpiredAuthorizationPriority::get())
 						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
 						.into()
