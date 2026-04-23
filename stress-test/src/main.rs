@@ -96,7 +96,33 @@ enum Commands {
 		#[arg(long, default_value = "131072")]
 		payload_size: usize,
 	},
-	/// Run all test suites (block-capacity + bitswap)
+	/// Run HOP (Hand-off Protocol) stress tests
+	Hop {
+		/// Scenario: submit-only, full-cycle, group, pool-fill, mixed, errors, all
+		#[arg(default_value = "all")]
+		scenario: String,
+
+		/// Number of items to submit
+		#[arg(long, default_value = "100")]
+		items: u32,
+
+		/// Payload size in bytes (omit to sweep standard sizes for submit-only)
+		#[arg(long)]
+		payload_size: Option<usize>,
+
+		/// Parallel submit/claim streams
+		#[arg(long, default_value = "4")]
+		concurrency: usize,
+
+		/// Recipients per entry (for group scenario)
+		#[arg(long, default_value = "10")]
+		recipients: usize,
+
+		/// Duration in seconds (for mixed scenario)
+		#[arg(long, default_value = "30")]
+		duration: u64,
+	},
+	/// Run all test suites (block-capacity + bitswap + hop)
 	Full,
 }
 
@@ -120,6 +146,25 @@ async fn main() -> Result<()> {
 		ws_urls.len(),
 		if ws_urls.len() > 1 { format!(", submit: {}", ws_urls.join(", ")) } else { String::new() }
 	);
+
+	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
+
+	// HOP command is pure RPC — skip subxt client, authorization, and chain limits.
+	if let Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =
+		cli.command
+	{
+		return run_hop_standalone(
+			&ws_url_refs,
+			scenario,
+			items,
+			payload_size,
+			concurrency,
+			recipients,
+			duration,
+			&cli,
+		)
+		.await;
+	}
 
 	let client = client::connect(control_url).await?;
 
@@ -196,8 +241,6 @@ async fn main() -> Result<()> {
 		}
 	};
 
-	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
-
 	match cli.command {
 		Commands::Throughput { ref test, ref variants } => {
 			if let Err(e) = run_throughput(
@@ -237,6 +280,24 @@ async fn main() -> Result<()> {
 				command_error = Some(e);
 			}
 		},
+		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
+			if let Err(e) = scenarios::hop::run_hop_sweep(
+				&ws_url_refs,
+				scenario,
+				items,
+				payload_size,
+				concurrency,
+				recipients,
+				duration,
+				&mut all_results,
+				&flush,
+				&cancel,
+			)
+			.await
+			{
+				log::error!("HOP command failed: {e}");
+				command_error = Some(e);
+			},
 		Commands::Full => {
 			if let Err(e) = run_throughput(
 				&client,
@@ -271,6 +332,25 @@ async fn main() -> Result<()> {
 				.await
 				{
 					log::error!("Bitswap command failed: {e}");
+					command_error = Some(e);
+				}
+			}
+			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
+				if let Err(e) = scenarios::hop::run_hop_sweep(
+					&ws_url_refs,
+					"all",
+					100,
+					None,
+					4,
+					10,
+					30,
+					&mut all_results,
+					&flush,
+					&cancel,
+				)
+				.await
+				{
+					log::error!("HOP command failed: {e}");
 					command_error = Some(e);
 				}
 			}
@@ -381,6 +461,73 @@ async fn run_bitswap(
 			}
 		},
 		other => anyhow::bail!("Unknown bitswap test: {other} (expected: b2)"),
+	}
+
+	Ok(())
+}
+
+/// Run HOP stress tests without subxt client or chain-limits setup.
+#[allow(clippy::too_many_arguments)]
+async fn run_hop_standalone(
+	ws_urls: &[&str],
+	scenario: &str,
+	items: u32,
+	payload_size: Option<usize>,
+	concurrency: usize,
+	recipients: usize,
+	duration: u64,
+	cli: &Cli,
+) -> Result<()> {
+	let mut all_results = Vec::new();
+	let cancel = Arc::new(AtomicBool::new(false));
+
+	{
+		let cancel = cancel.clone();
+		tokio::spawn(async move {
+			tokio::signal::ctrl_c().await.ok();
+			log::warn!("Ctrl+C received — stopping gracefully");
+			cancel.store(true, Ordering::Relaxed);
+			tokio::signal::ctrl_c().await.ok();
+			std::process::exit(130);
+		});
+	}
+
+	let flush = |results: &mut Vec<report::ScenarioResult>| {
+		if let Some(ref path) = cli.output_file {
+			if let Ok(json) = serde_json::to_string_pretty(results) {
+				if let Err(e) = std::fs::write(path, &json) {
+					log::warn!("Failed to write results to {}: {e}", path.display());
+				}
+			}
+		}
+	};
+
+	scenarios::hop::run_hop_sweep(
+		ws_urls,
+		scenario,
+		items,
+		payload_size,
+		concurrency,
+		recipients,
+		duration,
+		&mut all_results,
+		&flush,
+		&cancel,
+	)
+	.await?;
+
+	match cli.output {
+		OutputFormat::Text =>
+			for result in &all_results {
+				result.print_text();
+			},
+		OutputFormat::Json => {
+			println!("{}", serde_json::to_string_pretty(&all_results)?);
+		},
+	}
+
+	if all_results.len() > 1 && matches!(cli.output, OutputFormat::Text) {
+		report::print_summary_table(&all_results);
 	}
 
 	Ok(())

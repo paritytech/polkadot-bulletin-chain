@@ -44,6 +44,9 @@ serde_json = { workspace = true, features = ["std"] }
 blake2 = "0.10"
 twox-hash = "2"
 
+# Ed25519 (HOP ephemeral recipient keys)
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+
 # Utilities
 anyhow = "1"
 log = { workspace = true, features = ["std"] }
