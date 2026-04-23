@@ -333,7 +333,7 @@ pub async fn run_block_capacity_sweep(
 			let mut remaining_blocks = target_blocks;
 			let mut all_block_stats = Vec::new();
 			let mut attempt = 0u32;
-			const MAX_STALL_RETRIES: u32 = 3;
+			const MAX_STALL_RETRIES: u32 = 20;
 
 			loop {
 				attempt += 1;

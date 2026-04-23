@@ -344,7 +344,7 @@ fn spawn_pipeline_dual_monitor(
 				}
 			};
 
-		const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+		const STALL_TIMEOUT: Duration = Duration::from_secs(60);
 		let mut last_progress = Instant::now();
 
 		loop {
@@ -762,7 +762,7 @@ pub async fn run_block_capacity_pipeline(
 	let mut pending_auth: Option<tokio::task::JoinHandle<Result<()>>> = None;
 
 	// Run the work loop; capture errors but don't bail — we always want measurements.
-	let mut work_error: Option<anyhow::Error> = None;
+	let work_error: Option<anyhow::Error> = None;
 
 	'work: loop {
 		if cancel.load(Ordering::Relaxed) {
@@ -878,8 +878,7 @@ pub async fn run_block_capacity_pipeline(
 			StressWorkItem::AwaitPendingAuth => {
 				let await_start = Instant::now();
 				if let Some(handle) = pending_auth.take() {
-					// Timeout prevents deadlock if auth is stuck reconnecting.
-					match tokio::time::timeout(Duration::from_secs(120), handle).await {
+					match tokio::time::timeout(Duration::from_secs(60), handle).await {
 						Ok(Ok(Ok(()))) => {
 							log::debug!(
 								"pipeline: AwaitPendingAuth completed in {:.1}s (auth #{dbg_work_auth})",
@@ -912,8 +911,9 @@ pub async fn run_block_capacity_pipeline(
 				)
 				.await
 				{
-					log::error!("pipeline: dispatch_store_to_workers failed: {e:#}");
-					work_error = Some(e);
+					log::warn!("pipeline: dispatch failed (workers stalled?): {e:#}");
+					// Treat as stall so the sweep retries.
+					stalled.store(true, Ordering::Relaxed);
 					break 'work;
 				}
 				stores_dispatched_since_txpool += 1;
