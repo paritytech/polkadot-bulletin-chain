@@ -11,7 +11,7 @@ const DEFAULT_RELAY_BINARY: &str = "polkadot";
 const DEFAULT_PARACHAIN_BINARY: &str = "polkadot-parachain";
 const DEFAULT_PARACHAIN_CHAIN_SPEC: &str = "./zombienet/bulletin-westend-spec.json";
 const DEFAULT_RELAY_CHAIN: &str = "westend-local";
-const DEFAULT_PARA_ID: u32 = 2487;
+const DEFAULT_PARA_ID: u32 = 1010;
 
 fn env_or_default(var: &str, default: &str) -> String {
 	std::env::var(var).unwrap_or_else(|_| default.to_string())
