@@ -64,7 +64,7 @@ fn render_comparison_charts(results: &[ScenarioResult]) -> String {
 		.filter(|r| r.latency_ms.is_some() || r.block_tps.is_some())
 		.collect();
 
-	if with_stats.len() < 2 {
+	if with_stats.is_empty() {
 		return String::new();
 	}
 
@@ -131,12 +131,18 @@ fn render_comparison_charts(results: &[ScenarioResult]) -> String {
 }
 
 /// Render a grouped bar chart showing min/avg/P90/P99/max for each variant.
+/// Returns empty string if no stats have data.
 fn render_distribution_bar_chart(
 	id: &str,
 	title: &str,
 	labels_js: &str,
 	stats: &[Option<DistributionStats>],
 ) -> String {
+	// Skip if no scenario has data for this metric.
+	if stats.iter().all(|s| s.is_none()) {
+		return String::new();
+	}
+
 	let extract = |f: fn(&DistributionStats) -> f64| -> String {
 		stats
 			.iter()

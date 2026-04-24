@@ -113,7 +113,7 @@ fn build_sweep_steps(variant_filter: Option<&str>) -> anyhow::Result<Vec<BlockCa
 }
 
 fn scenario_result_from_bulk(
-	result: &store::BulkStoreResult,
+	result: &mut store::BulkStoreResult,
 	account_count: usize,
 	payload_size: usize,
 	label: &str,
@@ -189,19 +189,19 @@ fn scenario_result_from_bulk(
 	);
 
 	// Tx inclusion latency stats.
-	let latency_ms = DistributionStats::from_values(&mut result.tx_latencies_ms.clone());
+	let latency_ms = DistributionStats::from_values(&mut result.tx_latencies_ms);
 
 	// Per-block TPS and throughput stats (from blocks with txs and interval data).
 	let mut block_tps_values: Vec<f64> = steady
 		.iter()
-		.filter(|b| b.tx_count > 0 && b.interval_ms.is_some())
+		.filter(|b| b.tx_count > 0 && b.interval_ms.is_some_and(|i| i > 0))
 		.map(|b| b.tx_count as f64 / (b.interval_ms.unwrap() as f64 / 1000.0))
 		.collect();
 	let block_tps = DistributionStats::from_values(&mut block_tps_values);
 
 	let mut block_mbps_values: Vec<f64> = steady
 		.iter()
-		.filter(|b| b.payload_bytes > 0 && b.interval_ms.is_some())
+		.filter(|b| b.payload_bytes > 0 && b.interval_ms.is_some_and(|i| i > 0))
 		.map(|b| {
 			(b.payload_bytes as f64 / (1024.0 * 1024.0))
 				/ (b.interval_ms.unwrap() as f64 / 1000.0)
@@ -366,7 +366,7 @@ pub async fn run_block_capacity_sweep(
 			// Shared across restarts so leftover pool txs can still be matched.
 			let shared_hash_map: std::sync::Arc<std::sync::Mutex<pipeline::ContentHashMap>> =
 				std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
-			let shared_latencies: std::sync::Arc<std::sync::Mutex<Vec<std::time::Duration>>> =
+			let shared_latencies: std::sync::Arc<std::sync::Mutex<Vec<f64>>> =
 				std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 			let wall_clock_start = std::time::Instant::now();
 			const MAX_STALL_RETRIES: u32 = 20;
@@ -459,7 +459,7 @@ pub async fn run_block_capacity_sweep(
 			// Build a synthetic BulkStoreResult from all accumulated blocks.
 			let total_confirmed: u64 = all_block_stats.iter().map(|b| b.tx_count).sum();
 			let result = scenario_result_from_bulk(
-				&store::BulkStoreResult {
+				&mut store::BulkStoreResult {
 					total_submitted: total_confirmed, // approximate
 					total_confirmed,
 					total_errors: 0,

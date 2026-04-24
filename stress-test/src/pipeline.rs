@@ -47,10 +47,16 @@ struct SubmitCounters {
 	stale_nonces: AtomicU64,
 }
 
-/// Content hash → (extrinsic size, submission time). The monitor uses this to compute
-/// per-tx inclusion latency and per-block byte accounting.
-pub type ContentHashMap = std::collections::HashMap<[u8; 32], (u64, Instant)>;
+/// Content hash → (extrinsic size, submission wall clock ms since epoch).
+/// The monitor computes latency as `block_timestamp_ms - submission_ms`.
+pub type ContentHashMap = std::collections::HashMap<[u8; 32], (u64, u64)>;
 
+fn wall_clock_ms() -> u64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap_or_default()
+		.as_millis() as u64
+}
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
@@ -284,7 +290,7 @@ fn spawn_pipeline_dual_monitor(
 	dual: DualBlockSubscription,
 	new_block_notify: Arc<Notify>,
 	block_stats: Arc<Mutex<Vec<BlockStats>>>,
-	tx_latencies: Arc<Mutex<Vec<Duration>>>,
+	tx_latencies: Arc<Mutex<Vec<f64>>>,
 	measure_start: Arc<Mutex<Option<Instant>>>,
 	monitor_ready: Arc<Notify>,
 	cancel: Arc<AtomicBool>,
@@ -376,27 +382,8 @@ fn spawn_pipeline_dual_monitor(
 					let block_hash = block.hash();
 					new_block_notify.notify_waiters();
 
-					// Lightweight: get content hashes from Stored events (no block body fetch).
 					let hashes = stored_content_hashes(&block).await;
 					let store_tx_count = hashes.len() as u64;
-
-					// Look up extrinsic sizes and compute inclusion latencies.
-					let now = Instant::now();
-					let (store_tx_bytes, block_latencies) = {
-						let mut map = content_hash_map.lock().unwrap();
-						let mut bytes = 0u64;
-						let mut lats = Vec::new();
-						for h in &hashes {
-							if let Some((size, submitted_at)) = map.remove(h) {
-								bytes += size;
-								lats.push(now.duration_since(submitted_at));
-							}
-						}
-						(bytes, lats)
-					};
-					if !block_latencies.is_empty() {
-						tx_latencies.lock().unwrap().extend(block_latencies);
-					}
 
 					// Only read timestamp for blocks with txs (skip empty blocks).
 					let timestamp_ms = if store_tx_count == 0 {
@@ -418,6 +405,27 @@ fn spawn_pipeline_dual_monitor(
 							},
 						}
 					};
+
+					// Look up extrinsic sizes and compute inclusion latencies
+					// using on-chain timestamp.
+					let (store_tx_bytes, block_latencies) = {
+						let mut map = content_hash_map.lock().unwrap();
+						let mut bytes = 0u64;
+						let mut lats = Vec::new();
+						for h in &hashes {
+							if let Some((size, submitted_ms)) = map.remove(h) {
+								bytes += size;
+								if let Some(ts) = timestamp_ms {
+									let latency_ms = ts.saturating_sub(submitted_ms);
+									lats.push(latency_ms as f64);
+								}
+							}
+						}
+						(bytes, lats)
+					};
+					if !block_latencies.is_empty() {
+						tx_latencies.lock().unwrap().extend(block_latencies);
+					}
 
 					{
 						let mut ms = measure_start.lock().unwrap();
@@ -517,7 +525,7 @@ struct StoreWorkMsg {
 struct StoreWorker {
 	worker_id: usize,
 	client: Arc<jsonrpsee::ws_client::WsClient>,
-	reconnect_url: String,
+	ws_urls: Vec<String>,
 	consecutive_conn_errors: u32,
 	counters: Arc<SubmitCounters>,
 	content_hash_map: Arc<Mutex<ContentHashMap>>,
@@ -537,7 +545,7 @@ impl StoreWorker {
 					let ext_len = msg.extrinsic.len() as u64;
 					let n = self.counters.submitted.fetch_add(1, Ordering::Relaxed) + 1;
 					self.counters.submitted_bytes.fetch_add(ext_len, Ordering::Relaxed);
-					self.content_hash_map.lock().unwrap().insert(msg.content_hash, (ext_len, Instant::now()));
+					self.content_hash_map.lock().unwrap().insert(msg.content_hash, (ext_len, wall_clock_ms()));
 					self.consecutive_conn_errors = 0;
 					if n == 1 || n.is_multiple_of(256) {
 						log::debug!("pipeline store: worker {id} accepted total={n} hash={hash:?}");
@@ -577,7 +585,9 @@ impl StoreWorker {
 							let backoff = Duration::from_secs((1u64 << c.min(5)).min(30));
 							tokio::time::sleep(backoff).await;
 
-							match crate::client::connect_ws(&self.reconnect_url).await {
+							let url = &self.ws_urls
+								[c as usize % self.ws_urls.len()];
+							match crate::client::connect_ws(url).await {
 								Ok(new_client) => {
 									self.client = Arc::new(new_client);
 									self.consecutive_conn_errors = 0;
@@ -668,14 +678,14 @@ fn spawn_store_submit_workers(
 	let mut txs = Vec::with_capacity(num_workers);
 	let mut handles = Vec::with_capacity(num_workers);
 
-	for worker_id in 0..num_workers {
+	for (worker_id, worker_client) in pool.iter().enumerate() {
 		let (tx, mut rx) = mpsc::channel::<StoreWorkMsg>(per_worker_cap);
 		txs.push(tx);
 
 		let mut worker = StoreWorker {
 			worker_id,
-			client: pool[worker_id].clone(),
-			reconnect_url: ws_urls_owned[worker_id % ws_urls_owned.len()].clone(),
+			client: worker_client.clone(),
+			ws_urls: ws_urls_owned.to_vec(),
 			consecutive_conn_errors: 0,
 			counters: counters.clone(),
 			content_hash_map: content_hash_map.clone(),
@@ -711,7 +721,7 @@ pub async fn run_block_capacity_pipeline(
 	cancel: &Arc<AtomicBool>,
 	target_blocks: Option<u32>,
 	shared_content_hash_map: Arc<Mutex<ContentHashMap>>,
-	shared_tx_latencies: Arc<Mutex<Vec<Duration>>>,
+	shared_tx_latencies: Arc<Mutex<Vec<f64>>>,
 	block_count_offset: u32,
 ) -> Result<BulkStoreResult> {
 	let authorize_bytes = store_payload.authorize_bytes_per_account();
@@ -1062,7 +1072,7 @@ fn collect_results(
 	measure_start: &Arc<Mutex<Option<Instant>>>,
 	counters: &Arc<SubmitCounters>,
 	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
-	tx_latencies: &Arc<Mutex<Vec<Duration>>>,
+	tx_latencies: &Arc<Mutex<Vec<f64>>>,
 	work_error: Option<anyhow::Error>,
 	stalled: bool,
 ) -> Result<BulkStoreResult> {
@@ -1109,12 +1119,7 @@ fn collect_results(
 		blocks: all_blocks,
 		fork_detections: 0,
 		stalled,
-		tx_latencies_ms: tx_latencies
-			.lock()
-			.unwrap()
-			.iter()
-			.map(|d| d.as_secs_f64() * 1000.0)
-			.collect(),
+		tx_latencies_ms: tx_latencies.lock().unwrap().clone(),
 	})
 }
 

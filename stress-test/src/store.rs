@@ -71,16 +71,17 @@ pub struct DualBlockSubscription {
 pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription> {
 	let client = crate::client::connect(ws_url).await?;
 
-	// Best blocks — reconnects on subscription failure.
+	// Best blocks — reconnects on subscription failure with exponential backoff.
 	let (best_tx, best_rx) = tokio::sync::mpsc::unbounded_channel();
 	{
 		let url = ws_url.to_string();
 		let mut client = client.clone();
-		let best_tx = best_tx.clone();
 		tokio::spawn(async move {
+			let mut attempt = 0u32;
 			loop {
 				match client.blocks().subscribe_best().await {
 					Ok(mut sub) => {
+						attempt = 0; // reset on successful subscribe
 						while let Some(Ok(block)) = sub.next().await {
 							if best_tx.send(block).is_err() {
 								return;
@@ -89,10 +90,13 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 						log::warn!("monitor: best block subscription ended, reconnecting");
 					},
 					Err(e) => {
-						log::warn!("monitor: best block subscribe failed: {e}, retrying in 2s");
+						log::warn!("monitor: best block subscribe failed: {e}");
 					},
 				}
-				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+				attempt += 1;
+				let backoff = std::time::Duration::from_secs((1u64 << attempt.min(5)).min(30));
+				log::warn!("monitor: best blocks reconnecting in {backoff:?}");
+				tokio::time::sleep(backoff).await;
 				match crate::client::connect(&url).await {
 					Ok(new_client) => client = new_client,
 					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
@@ -101,15 +105,17 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 		});
 	}
 
-	// Finalized blocks — reconnects on subscription failure.
+	// Finalized blocks — reconnects on subscription failure with exponential backoff.
 	let (fin_tx, fin_rx) = tokio::sync::mpsc::unbounded_channel();
 	{
 		let url = ws_url.to_string();
 		let mut client = client.clone();
 		tokio::spawn(async move {
+			let mut attempt = 0u32;
 			loop {
 				match client.blocks().subscribe_finalized().await {
 					Ok(mut sub) => {
+						attempt = 0;
 						while let Some(Ok(block)) = sub.next().await {
 							if fin_tx.send(block.number() as u64).is_err() {
 								return;
@@ -118,10 +124,12 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 						log::warn!("monitor: finalized subscription ended, reconnecting");
 					},
 					Err(e) => {
-						log::warn!("monitor: finalized subscribe failed: {e}, retrying in 2s");
+						log::warn!("monitor: finalized subscribe failed: {e}");
 					},
 				}
-				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+				attempt += 1;
+				let backoff = std::time::Duration::from_secs((1u64 << attempt.min(5)).min(30));
+				tokio::time::sleep(backoff).await;
 				match crate::client::connect(&url).await {
 					Ok(new_client) => client = new_client,
 					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),

@@ -88,12 +88,13 @@ impl DistributionStats {
 		values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 		let n = values.len();
 		let sum: f64 = values.iter().sum();
+		let last = n - 1;
 		Some(Self {
 			min: values[0],
 			avg: sum / n as f64,
-			max: values[n - 1],
-			p90: values[(n as f64 * 0.90) as usize],
-			p99: values[((n as f64 * 0.99) as usize).min(n - 1)],
+			max: values[last],
+			p90: values[(last as f64 * 0.90) as usize],
+			p99: values[(last as f64 * 0.99) as usize],
 		})
 	}
 }
