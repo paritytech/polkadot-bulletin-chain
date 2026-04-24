@@ -322,8 +322,8 @@ impl pallet_balances::Config for Runtime {
 }
 
 parameter_types! {
-	/// Relay Chain `TransactionByteFee` / 10
-	pub const TransactionByteFee: Balance = MILLICENTS;
+	/// Relay Chain `TransactionByteFee` / 20 (per Paseo system-parachain convention).
+	pub const TransactionByteFee: Balance = paseo_constants::fee::TRANSACTION_BYTE_FEE;
 }
 
 impl pallet_transaction_payment::Config for Runtime {
