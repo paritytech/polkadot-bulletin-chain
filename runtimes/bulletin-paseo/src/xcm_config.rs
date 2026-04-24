@@ -249,9 +249,7 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Bulletin accepts reserve transfers of the relay chain native token from Asset Hub,
-	// and teleports of the same token from the relay chain and other system parachains.
-	type IsReserve = Reserves;
+	type IsReserve = ();
 	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
