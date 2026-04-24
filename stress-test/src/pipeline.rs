@@ -727,7 +727,7 @@ pub async fn run_block_capacity_pipeline(
 	let confirmed_count = Arc::new(AtomicU64::new(0));
 	let tx_latencies = shared_tx_latencies;
 
-	let monitor_handle = spawn_pipeline_dual_monitor(
+	let mut monitor_handle = spawn_pipeline_dual_monitor(
 		dual,
 		new_block_notify.clone(),
 		block_stats.clone(),
@@ -968,12 +968,13 @@ pub async fn run_block_capacity_pipeline(
 
 	// Wait for the monitor to finalize pending blocks.
 	new_block_notify.notify_waiters();
-	let monitor_timeout = if cancel.load(Ordering::Relaxed) { 1 } else { 35 };
-	if tokio::time::timeout(Duration::from_secs(monitor_timeout), monitor_handle)
+	let monitor_timeout = if cancel.load(Ordering::Relaxed) || is_stalled { 1 } else { 35 };
+	if tokio::time::timeout(Duration::from_secs(monitor_timeout), &mut monitor_handle)
 		.await
 		.is_err()
 	{
 		log::warn!("pipeline: monitor did not exit in time, aborting");
+		monitor_handle.abort();
 	}
 
 	collect_results(
