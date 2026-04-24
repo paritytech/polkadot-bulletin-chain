@@ -21,7 +21,6 @@ cumulus-primitives-utility = { version = "0.26.0", default-features = false }
 futures = { version = "0.3.21" }
 hex = { version = "0.4" }
 jsonrpsee = { version = "0.24.3" }
-log = { version = "0.4.17", default-features = false }
 parachain-info = { version = "0.26.0", package = "staging-parachain-info", default-features = false }
 polkadot-parachain-primitives = { version = "21.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
@@ -29,6 +28,7 @@ serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
 testnet-parachains-constants = { version = "19.0.0", package = "testnet-parachains-constants", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
+tracing-subscriber = { version = "=0.3.19" }
 westend-runtime-constants = { version = "26.0.0", package = "westend-runtime-constants", default-features = false }
 
 # Local workspace members
