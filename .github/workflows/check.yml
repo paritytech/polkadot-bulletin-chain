@@ -43,49 +43,54 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Install nightly rustfmt
+        run: rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
+
       - name: Cargo fmt
-        run: |
-          rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
-          cargo +nightly fmt --all -- --check
+        run: cargo +nightly fmt --all -- --check
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Cache taplo
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        id: cache-taplo
+        with:
+          path: ~/.cargo/bin/taplo
+          key: taplo-${{ runner.os }}-${{ env.TAPLO_VERSION }}
+
+      - name: Install taplo
+        if: steps.cache-taplo.outputs.cache-hit != 'true'
+        run: cargo install taplo-cli --version ${{ env.TAPLO_VERSION }}
+
+      - name: Cache zepter
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        id: cache-zepter
+        with:
+          path: ~/.cargo/bin/zepter
+          key: zepter-${{ runner.os }}-${{ env.ZEPTER_VERSION }}
+
+      - name: Install zepter
+        if: steps.cache-zepter.outputs.cache-hit != 'true'
+        run: cargo install zepter --locked --version ${{ env.ZEPTER_VERSION }}
 
       - name: Check TOML format
         run: |
-          cargo install taplo-cli && taplo --version
+          taplo --version
+          zepter --version
           if ! taplo format --check --config .config/taplo.toml; then
             echo "Please run 'taplo format --config .config/taplo.toml' to fix any TOML formatting issues"
             exit 1
           fi
-          cargo install --locked zepter && zepter --version
           if ! zepter run check --config .config/zepter.yaml; then
             echo "Please run 'zepter run --config .config/zepter.yaml' to fix any TOML formatting issues"
             exit 1
           fi
 
-  check:
-    name: Cargo check
-    runs-on: parity-large
-    needs: [set-image, check-fmt]
-    container:
-      image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          shared-key: "bulletin-cache-check"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Cargo check
-        run: |
-          cargo check --workspace
-          cargo check --workspace --features=runtime-benchmarks
-
   clippy:
     name: Cargo clippy
     runs-on: parity-default
-    needs: [set-image, check]
+    needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
@@ -107,14 +112,32 @@ jobs:
           cargo clippy --all-targets --all-features --locked --workspace --quiet
 
   test:
-    name: Test
+    name: Test (${{ matrix.target.name }})
     runs-on: parity-large
-    timeout-minutes: 60
+    timeout-minutes: 30
     needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: pallets
+            skip-wasm: "1"
+            cmd: |
+              cargo test -p pallet-bulletin-transaction-storage
+              cargo test -p pallet-bulletin-transaction-storage --features=runtime-benchmarks
+          - name: bulletin-westend-runtime
+            skip-wasm: "1"
+            cmd: cargo test -p bulletin-westend-runtime
+          - name: bulletin-paseo-runtime
+            skip-wasm: "1"
+            cmd: cargo test -p bulletin-paseo-runtime
+          - name: xcm-integration
+            skip-wasm: ""
+            cmd: cargo test -p bulletin-westend-integration-tests
     env:
-      SKIP_WASM_BUILD: 1
+      SKIP_WASM_BUILD: ${{ matrix.target.skip-wasm }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -122,26 +145,11 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: "bulletin-cache-tests"
+          shared-key: "bulletin-cache-tests-${{ matrix.target.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run pallets tests
-        run: |
-          cargo test -p pallet-bulletin-transaction-storage          
-          cargo test -p pallet-bulletin-transaction-storage --features=runtime-benchmarks
-
-      - name: Run (Westend) runtime tests
-        run: |
-          cargo test -p bulletin-westend-runtime
-
-      - name: Run (Paseo) runtime tests
-        run: |
-          cargo test -p bulletin-paseo-runtime
-
-      - name: Run (Westend) XCM integration tests
-        run: |
-          unset SKIP_WASM_BUILD
-          cargo test -p bulletin-westend-integration-tests
+      - name: Run tests
+        run: ${{ matrix.target.cmd }}
 
   benchmarks:
     name: Check Benchmarks (${{ matrix.runtime.name }})
@@ -204,7 +212,7 @@ jobs:
   all-tests-passed:
     name: All tests passed
     if: always()
-    needs: [changes, check-fmt, check, clippy, test, benchmarks]
+    needs: [changes, check-fmt, clippy, test, benchmarks]
     runs-on: ubuntu-latest
     steps:
       - name: Decide outcome
