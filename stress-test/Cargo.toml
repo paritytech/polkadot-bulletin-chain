@@ -47,7 +47,7 @@ twox-hash = "2"
 # Utilities
 anyhow = "1"
 tracing = { workspace = true }
-tracing-subscriber = { version = "=0.3.19", features = ["env-filter"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 hex = { workspace = true }
 rand = "0.8"
 
