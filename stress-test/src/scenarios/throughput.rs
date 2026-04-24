@@ -156,9 +156,13 @@ fn scenario_result_from_bulk(
 		None
 	};
 
+	// Use on-chain timestamps from the first and last blocks with txs for throughput.
+	// This is more robust than relying on the trimmed steady window, especially
+	// across stall retries where blocks accumulate from multiple pipeline runs.
+	let blocks_with_txs: Vec<_> = measured.iter().filter(|b| b.tx_count > 0).collect();
 	let onchain_duration_ms = match (
-		steady.first().and_then(|b| b.timestamp_ms),
-		steady.last().and_then(|b| b.timestamp_ms),
+		blocks_with_txs.first().and_then(|b| b.timestamp_ms),
+		blocks_with_txs.last().and_then(|b| b.timestamp_ms),
 	) {
 		(Some(t1), Some(t2)) if t2 > t1 => Some(t2 - t1),
 		_ => None,
@@ -167,7 +171,7 @@ fn scenario_result_from_bulk(
 		let secs = ms as f64 / 1000.0;
 		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, true)
 	} else {
-		let secs = result.duration.as_secs_f64();
+		let secs = result.duration.as_secs_f64().max(0.001); // avoid division by zero
 		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
 	};
 
@@ -333,6 +337,7 @@ pub async fn run_block_capacity_sweep(
 			let mut remaining_blocks = target_blocks;
 			let mut all_block_stats = Vec::new();
 			let mut attempt = 0u32;
+			let wall_clock_start = std::time::Instant::now();
 			const MAX_STALL_RETRIES: u32 = 20;
 
 			loop {
@@ -427,7 +432,7 @@ pub async fn run_block_capacity_sweep(
 					remaining_in_queue: 0,
 					nonces_initialized: 0,
 					nonces_failed: 0,
-					duration: std::time::Duration::ZERO, // will use on-chain timing
+					duration: wall_clock_start.elapsed(),
 					blocks: all_block_stats,
 					fork_detections: 0,
 					stalled: false,
