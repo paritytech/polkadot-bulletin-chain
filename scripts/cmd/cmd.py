@@ -62,6 +62,7 @@ parser_bench.add_argument('--runtime', help='Runtime(s) space separated', choice
 parser_bench.add_argument('--pallet', help='Pallet(s) space separated', nargs='*', default=[])
 parser_bench.add_argument('--steps', help='Select how many samples we should take across the variable components [default: 50]', default=50)
 parser_bench.add_argument('--repeat', help='Select how many repetitions of this benchmark should run from within the wasm [default: 20', default=20)
+parser_bench.add_argument('--profile', help='Cargo profile used to build the runtime wasm [default: production]', default='production')
 
 """
 FMT
@@ -81,9 +82,10 @@ if args.command == 'bench':
     failed_benchmarks = {}
     successful_benchmarks = {}
 
-    profile = "production"
+    profile = args.profile
 
     print(f'Provided runtimes: {args.runtime}')
+    print(f'Cargo profile: {profile}')
     # convert to mapped dict
     runtimesMatrix = list(filter(lambda x: x['name'] in args.runtime, runtimesMatrix))
     runtimesMatrix = {x['name']: x for x in runtimesMatrix}

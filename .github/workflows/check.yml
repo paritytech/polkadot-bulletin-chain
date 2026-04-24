@@ -195,11 +195,11 @@ jobs:
 
       - name: Run benchmarks (${{ matrix.runtime.name }})
         run: |
-          python3 ./scripts/cmd/cmd.py bench --runtime ${{ matrix.runtime.name }} --steps 2 --repeat 1
+          python3 ./scripts/cmd/cmd.py bench --runtime ${{ matrix.runtime.name }} --steps 2 --repeat 1 --profile release
 
-      - name: Run production check (${{ matrix.runtime.name }})
+      - name: Run release check (${{ matrix.runtime.name }})
         run: |
-          cargo check --profile production -p ${{ matrix.runtime.package }}
+          cargo check --profile release -p ${{ matrix.runtime.package }}
 
   all-tests-passed:
     name: All tests passed
