@@ -147,7 +147,7 @@ jobs:
   benchmarks:
     name: Check Benchmarks
     runs-on: parity-large
-    timeout-minutes: 100
+    timeout-minutes: 60
     needs: [set-image, check-fmt]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
