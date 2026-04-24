@@ -192,30 +192,6 @@ pub type WaivedLocations = (
 	Equals<AssetHubLocation>,
 );
 
-/// Helper type to match the relay chain native token from Asset Hub.
-/// Non-system parachains should trust Asset Hub as the reserve location for the relay token.
-pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
-impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
-where
-	Origin: frame_support::traits::Get<Location>,
-{
-	fn contains(asset: &Asset, origin: &Location) -> bool {
-		let loc = Origin::get();
-		&loc == origin &&
-			matches!(
-				asset,
-				Asset {
-					id: AssetId(asset_id_location),
-					fun: Fungible(_),
-				} if *asset_id_location == TokenRelayLocation::get()
-			)
-	}
-}
-
-/// Reserve locations for assets.
-/// Non-system parachains should trust Asset Hub as the reserve for the relay chain native token.
-pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
-
 /// Cases where a remote origin is accepted as trusted Teleporter for a given asset.
 /// Trust the relay chain and other system parachains to teleport the relay chain native token.
 pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
@@ -240,9 +216,7 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// Bulletin accepts reserve transfers of the relay chain native token from Asset Hub,
-	// and teleports of the same token from the relay chain and other system parachains.
-	type IsReserve = Reserves;
+	type IsReserve = ();
 	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
@@ -312,8 +286,8 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type XcmTeleportFilter = Nothing;
-	type XcmReserveTransferFilter = Everything;
+	type XcmTeleportFilter = Everything;
+	type XcmReserveTransferFilter = Nothing;
 	type Weigher = WeightInfoBounds<
 		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
 		RuntimeCall,

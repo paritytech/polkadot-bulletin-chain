@@ -128,21 +128,15 @@ jobs:
       matrix:
         target:
           - name: pallets
-            skip-wasm: "1"
             cmd: |
-              cargo test -p pallet-bulletin-transaction-storage
-              cargo test -p pallet-bulletin-transaction-storage --features=runtime-benchmarks
+              SKIP_WASM_BUILD=1 cargo test -p pallet-bulletin-transaction-storage
+              SKIP_WASM_BUILD=1 cargo test -p pallet-bulletin-transaction-storage --features=runtime-benchmarks
           - name: bulletin-westend-runtime
-            skip-wasm: "1"
-            cmd: cargo test -p bulletin-westend-runtime
+            cmd: SKIP_WASM_BUILD=1 cargo test -p bulletin-westend-runtime
           - name: bulletin-paseo-runtime
-            skip-wasm: "1"
-            cmd: cargo test -p bulletin-paseo-runtime
+            cmd: SKIP_WASM_BUILD=1 cargo test -p bulletin-paseo-runtime
           - name: xcm-integration
-            skip-wasm: ""
             cmd: cargo test -p bulletin-westend-integration-tests
-    env:
-      SKIP_WASM_BUILD: ${{ matrix.target.skip-wasm }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
