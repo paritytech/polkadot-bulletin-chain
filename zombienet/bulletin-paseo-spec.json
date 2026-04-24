@@ -110,7 +110,7 @@
   },
   "id": "bulletin-paseo",
   "name": "Bulletin",
-  "para_id": 1010,
+  "para_id": 1501,
   "properties": {
     "tokenDecimals": 12,
     "tokenSymbol": "UNIT"

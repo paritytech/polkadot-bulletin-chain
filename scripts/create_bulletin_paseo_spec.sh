@@ -12,7 +12,7 @@ cargo build --release -p bulletin-paseo-runtime
 cd "$ROOT_DIR"
 
 chain-spec-builder create \
-        -p 1010 \
+        -p 1501 \
         -c westend \
         -i bulletin-paseo \
         -n Bulletin \

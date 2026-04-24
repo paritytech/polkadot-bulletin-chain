@@ -590,7 +590,7 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
             PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1010.json"
         elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/westend-local-1010.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
         else
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
@@ -774,7 +774,7 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
             PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1010.json"
         elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1010.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
         else
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1

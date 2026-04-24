@@ -27,7 +27,7 @@ rpc_port = 9943
 balance = 2000000000000
 
 [[parachains]]
-id = 1010
+id = 1501
 chain_spec_path = "./zombienet/bulletin-paseo-spec.json"
 cumulus_based = true
 
