@@ -19,6 +19,7 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
+use crate::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 use frame_support::{
 	parameter_types,
 	traits::{
@@ -39,7 +40,6 @@ use parachains_common::{
 use polkadot_parachain_primitives::primitives::Sibling;
 use polkadot_runtime_common::xcm_sender::ExponentialPrice;
 use sp_runtime::traits::AccountIdConversion;
-use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 use xcm::latest::prelude::*;
 use xcm_builder::{
 	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
@@ -55,7 +55,7 @@ use xcm_builder::{
 use xcm_executor::XcmExecutor;
 
 // Re-export
-pub use testnet_parachains_constants::westend::locations::{GovernanceLocation, PeopleLocation};
+pub use crate::paseo_constants::locations::{GovernanceLocation, PeopleLocation};
 
 /// The genesis hash of the Paseo testnet relay chain. Used to identify it over XCM.
 ///
@@ -191,7 +191,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 
 parameter_types! {
 	pub TreasuryAccount: AccountId = TREASURY_PALLET_ID.into_account_truncating();
-	pub RelayTreasuryLocation: Location = (Parent, PalletInstance(westend_runtime_constants::TREASURY_PALLET_ID)).into();
+	pub RelayTreasuryLocation: Location = (Parent, PalletInstance(crate::paseo_constants::TREASURY_PALLET_ID)).into();
 }
 
 /// Locations that will not be charged fees in the executor, neither for execution nor delivery.

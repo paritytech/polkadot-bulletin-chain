@@ -30,12 +30,22 @@ pub mod fast_runtime_binary {
 }
 
 mod genesis_config_presets;
+pub mod paseo_constants;
 pub mod storage;
 mod weights;
 pub mod xcm_config;
 
 extern crate alloc;
 
+use crate::paseo_constants::{
+	consensus::{
+		async_backing::UNINCLUDED_SEGMENT_CAPACITY, BLOCK_PROCESSING_VELOCITY,
+		MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS,
+	},
+	currency::*,
+	fee::WeightToFee,
+	time::*,
+};
 use alloc::{vec, vec::Vec};
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
@@ -73,7 +83,6 @@ use sp_runtime::{
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
-use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
 
 /// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
 const SLOT_DURATION: u64 = 24_000;

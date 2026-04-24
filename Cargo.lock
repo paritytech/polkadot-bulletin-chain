@@ -2061,6 +2061,7 @@ dependencies = [
  "scale-info",
  "serde",
  "serde_json",
+ "smallvec",
  "sp-api",
  "sp-block-builder",
  "sp-consensus-aura",
@@ -2081,9 +2082,7 @@ dependencies = [
  "staging-xcm-builder",
  "staging-xcm-executor",
  "substrate-wasm-builder",
- "testnet-parachains-constants",
  "tracing",
- "westend-runtime-constants",
  "xcm-runtime-apis",
 ]
 

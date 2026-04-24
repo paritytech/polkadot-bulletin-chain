@@ -18,6 +18,7 @@
 
 use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
+	paseo_constants::{fee::WeightToFee, locations::PeopleLocation},
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Balances, Block, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
@@ -40,7 +41,6 @@ use sp_runtime::{
 	ApplyExtrinsicResult, BuildStorage, Either,
 };
 use std::collections::HashMap;
-use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
@@ -501,7 +501,7 @@ fn xcm_payment_api_works() {
 
 #[test]
 fn governance_authorize_upgrade_works() {
-	use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+	use bulletin_paseo_runtime::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 
 	// no - random para (passes barrier since any sibling parachain gets unpaid execution,
 	// but fails at Transact with BadOrigin since it's not a governance origin)

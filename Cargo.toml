@@ -27,6 +27,7 @@ polkadot-parachain-primitives = { version = "21.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
 serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
+smallvec = { version = "1.15.1", default-features = false }
 testnet-parachains-constants = { version = "19.0.0", package = "testnet-parachains-constants", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 westend-runtime-constants = { version = "26.0.0", package = "westend-runtime-constants", default-features = false }
