@@ -301,7 +301,7 @@ impl pallet_authorship::Config for Runtime {
 
 parameter_types! {
 	pub const ExistentialDeposit: Balance = EXISTENTIAL_DEPOSIT;
-	pub const RandomParaId: ParaId = ParaId::new(43211234);
+	pub AssetHubParaId: ParaId = ParaId::new(paseo_constants::system_parachain::ASSET_HUB_ID);
 }
 
 impl pallet_balances::Config for Runtime {
@@ -894,40 +894,38 @@ impl_runtime_apis! {
 
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 			impl pallet_xcm::benchmarking::Config for Runtime {
-				type DeliveryHelper = (
-					cumulus_primitives_utility::ToParentDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						xcm_config::PriceForParentDelivery,
-					>,
-					polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						PriceForSiblingParachainDelivery,
-						RandomParaId,
-						ParachainSystem,
-					>
-				);
+				type DeliveryHelper = polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
+					xcm_config::XcmConfig,
+					ExistentialDepositAsset,
+					PriceForSiblingParachainDelivery,
+					AssetHubParaId,
+					ParachainSystem,
+				>;
 
 				fn reachable_dest() -> Option<Location> {
-					Some(Parent.into())
+					Some(xcm_config::AssetHubLocation::get())
 				}
 
 				fn teleportable_asset_and_dest() -> Option<(Asset, Location)> {
-					// Non-system parachains do not support teleports.
-					None
+					// Relay/native token can be teleported between Bulletin and Asset Hub.
+					Some((
+						Asset { fun: Fungible(ExistentialDeposit::get()), id: AssetId(Parent.into()) },
+						xcm_config::AssetHubLocation::get(),
+					))
 				}
 
 				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
-					// The extrinsic enabled by this benchmark is blocked for the relay token.
-					// See: https://github.com/paritytech/polkadot-sdk/issues/9054
 					None
 				}
 
 				fn set_up_complex_asset_transfer() -> Option<(Assets, u32, Location, alloc::boxed::Box<dyn FnOnce()>)> {
-					// The extrinsic enabled by this benchmark is blocked for the relay token.
-					// See: https://github.com/paritytech/polkadot-sdk/issues/9054
-					None
+					// Only supports native token teleports to system parachain.
+					let native_location = Parent.into();
+					let dest = xcm_config::AssetHubLocation::get();
+					pallet_xcm::benchmarking::helpers::native_teleport_as_asset_transfer::<Runtime>(
+						native_location,
+						dest,
+					)
 				}
 
 				fn get_asset() -> Asset {
@@ -948,24 +946,17 @@ impl_runtime_apis! {
 			impl pallet_xcm_benchmarks::Config for Runtime {
 				type XcmConfig = xcm_config::XcmConfig;
 
-				type DeliveryHelper = (
-					cumulus_primitives_utility::ToParentDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						xcm_config::PriceForParentDelivery,
-					>,
-					polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						PriceForSiblingParachainDelivery,
-						RandomParaId,
-						ParachainSystem,
-					>
-				);
+				type DeliveryHelper = polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
+					xcm_config::XcmConfig,
+					ExistentialDepositAsset,
+					PriceForSiblingParachainDelivery,
+					AssetHubParaId,
+					ParachainSystem,
+				>;
 
 				type AccountIdConverter = xcm_config::LocationToAccountId;
 				fn valid_destination() -> Result<Location, BenchmarkError> {
-					Ok(TokenRelayLocation::get())
+					Ok(xcm_config::AssetHubLocation::get())
 				}
 				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
 					use pallet_xcm_benchmarks::MockCredit;
@@ -983,10 +974,7 @@ impl_runtime_apis! {
 					Asset { fun: Fungible(UNITS), id: AssetId(TokenRelayLocation::get()) },
 				));
 				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
-				pub TrustedReserve: Option<(Location, Asset)> = Some((
-					AssetHubLocation::get(),
-					Asset { fun: Fungible(UNITS), id: AssetId(TokenRelayLocation::get()) },
-				));
+				pub TrustedReserve: Option<(Location, Asset)> = None;
 			}
 
 			impl pallet_xcm_benchmarks::fungible::Config for Runtime {
