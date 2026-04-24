@@ -83,8 +83,8 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 		.and_then(|v| v.parse().ok())
 		.unwrap_or(DEFAULT_PARA_ID);
 
-	log::info!("Multi-node network: relay={relay_binary_str}, para={para_binary_str}");
-	log::info!("Chain spec: {chain_spec_str}, relay: {relay_chain}, para ID: {para_id}");
+	tracing::info!("Multi-node network: relay={relay_binary_str}, para={para_binary_str}");
+	tracing::info!("Chain spec: {chain_spec_str}, relay: {relay_chain}, para ID: {para_id}");
 
 	let relay_args = vec!["-lruntime=debug".into()];
 	let relay_args2 = vec!["-lruntime=debug".into()];
@@ -176,32 +176,32 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 
 	// Wait for relay chain session change
 	let alice = network.get_node("alice")?;
-	log::info!("Waiting for relay chain to reach block 20 (session change)...");
+	tracing::info!("Waiting for relay chain to reach block 20 (session change)...");
 	alice
 		.wait_metric_with_timeout("block_height{status=\"best\"}", |h| h >= 20.0, 300u64)
 		.await?;
-	log::info!("Relay chain session change should have occurred");
+	tracing::info!("Relay chain session change should have occurred");
 
 	// Wait for collator-1 to start producing blocks
 	let collator1 = network.get_node("collator-1")?;
-	log::info!("Waiting for collator-1 to start producing blocks...");
+	tracing::info!("Waiting for collator-1 to start producing blocks...");
 	collator1
 		.wait_metric_with_timeout("block_height{status=\"best\"}", |h| h >= 2.0, 300u64)
 		.await?;
-	log::info!("Collator-1 is producing blocks");
+	tracing::info!("Collator-1 is producing blocks");
 
 	// Wait for RPC nodes to sync (they should follow collator blocks)
 	let rpc1 = network.get_node("rpc-1")?;
-	log::info!("Waiting for rpc-1 to sync...");
+	tracing::info!("Waiting for rpc-1 to sync...");
 	rpc1.wait_metric_with_timeout("block_height{status=\"best\"}", |h| h >= 1.0, 300u64)
 		.await?;
-	log::info!("RPC-1 is synced");
+	tracing::info!("RPC-1 is synced");
 
 	let rpc2 = network.get_node("rpc-2")?;
-	log::info!("Waiting for rpc-2 to sync...");
+	tracing::info!("Waiting for rpc-2 to sync...");
 	rpc2.wait_metric_with_timeout("block_height{status=\"best\"}", |h| h >= 1.0, 300u64)
 		.await?;
-	log::info!("RPC-2 is synced — multi-node network ready");
+	tracing::info!("RPC-2 is synced — multi-node network ready");
 
 	Ok(network)
 }
