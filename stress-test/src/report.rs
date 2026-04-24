@@ -69,6 +69,35 @@ pub struct LatencyStats {
 	pub mean: Duration,
 }
 
+/// Distribution stats: min, avg, max, P90, P99.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DistributionStats {
+	pub min: f64,
+	pub avg: f64,
+	pub max: f64,
+	pub p90: f64,
+	pub p99: f64,
+}
+
+impl DistributionStats {
+	/// Compute stats from a slice of values. Returns `None` if empty.
+	pub fn from_values(values: &mut [f64]) -> Option<Self> {
+		if values.is_empty() {
+			return None;
+		}
+		values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+		let n = values.len();
+		let sum: f64 = values.iter().sum();
+		Some(Self {
+			min: values[0],
+			avg: sum / n as f64,
+			max: values[n - 1],
+			p90: values[(n as f64 * 0.90) as usize],
+			p99: values[((n as f64 * 0.99) as usize).min(n - 1)],
+		})
+	}
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScenarioResult {
 	pub name: String,
@@ -127,6 +156,17 @@ pub struct ScenarioResult {
 	pub read_bytes_per_sec: Option<f64>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub data_verified: Option<bool>,
+
+	// --- Distribution stats ---
+	/// Tx inclusion latency distribution (ms): min, avg, max, P90, P99.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub latency_ms: Option<DistributionStats>,
+	/// Per-block TPS distribution: min, avg, max, P90, P99.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub block_tps: Option<DistributionStats>,
+	/// Per-block throughput (MB/s) distribution: min, avg, max, P90, P99.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub block_mbps: Option<DistributionStats>,
 }
 
 fn is_zero_u64(v: &u64) -> bool {

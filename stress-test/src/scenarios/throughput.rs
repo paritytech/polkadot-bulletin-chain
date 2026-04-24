@@ -11,7 +11,7 @@ use crate::{
 	chain_info::ChainLimits,
 	client::BulletinConfig,
 	pipeline::{self, IterationPlan, PayloadSizeMix, StorePayloadMode, StressWorkItem},
-	report::{ScenarioResult, SubmissionStats},
+	report::{DistributionStats, ScenarioResult, SubmissionStats},
 	store,
 };
 
@@ -188,6 +188,27 @@ fn scenario_result_from_bulk(
 		if onchain_timing { "on-chain" } else { "client" }
 	);
 
+	// Tx inclusion latency stats.
+	let latency_ms = DistributionStats::from_values(&mut result.tx_latencies_ms.clone());
+
+	// Per-block TPS and throughput stats (from blocks with txs and interval data).
+	let mut block_tps_values: Vec<f64> = steady
+		.iter()
+		.filter(|b| b.tx_count > 0 && b.interval_ms.is_some())
+		.map(|b| b.tx_count as f64 / (b.interval_ms.unwrap() as f64 / 1000.0))
+		.collect();
+	let block_tps = DistributionStats::from_values(&mut block_tps_values);
+
+	let mut block_mbps_values: Vec<f64> = steady
+		.iter()
+		.filter(|b| b.payload_bytes > 0 && b.interval_ms.is_some())
+		.map(|b| {
+			(b.payload_bytes as f64 / (1024.0 * 1024.0))
+				/ (b.interval_ms.unwrap() as f64 / 1000.0)
+		})
+		.collect();
+	let block_mbps = DistributionStats::from_values(&mut block_mbps_values);
+
 	ScenarioResult {
 		name: format!("block-cap: Block Capacity ({label}, {account_count} accounts)"),
 		duration: result.duration,
@@ -223,6 +244,9 @@ fn scenario_result_from_bulk(
 		reads_per_sec: None,
 		read_bytes_per_sec: None,
 		data_verified: None,
+		latency_ms,
+		block_tps,
+		block_mbps,
 	}
 }
 
@@ -336,6 +360,7 @@ pub async fn run_block_capacity_sweep(
 		let variant_result: Result<ScenarioResult> = async {
 			let mut remaining_blocks = target_blocks;
 			let mut all_block_stats = Vec::new();
+			let mut all_latencies_ms = Vec::new();
 			let mut attempt = 0u32;
 			let wall_clock_start = std::time::Instant::now();
 			const MAX_STALL_RETRIES: u32 = 20;
@@ -403,6 +428,7 @@ pub async fn run_block_capacity_sweep(
 				let measured_in_run =
 					bulk.blocks.iter().filter(|b| !b.prefill && b.tx_count > 0).count() as u32;
 				all_block_stats.extend(bulk.blocks);
+				all_latencies_ms.extend(bulk.tx_latencies_ms);
 
 				if bulk.stalled && attempt <= MAX_STALL_RETRIES && !cancel.load(Ordering::Relaxed) {
 					remaining_blocks = remaining_blocks.saturating_sub(measured_in_run);
@@ -436,6 +462,7 @@ pub async fn run_block_capacity_sweep(
 					blocks: all_block_stats,
 					fork_detections: 0,
 					stalled: false,
+					tx_latencies_ms: all_latencies_ms,
 				},
 				accounts_needed as usize,
 				payload_size_report,

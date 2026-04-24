@@ -47,8 +47,9 @@ struct SubmitCounters {
 	stale_nonces: AtomicU64,
 }
 
-/// Content hash → extrinsic size mapping (separate lock from counters to reduce contention).
-type ContentHashMap = std::collections::HashMap<[u8; 32], u64>;
+/// Content hash → (extrinsic size, submission time). The monitor uses this to compute
+/// per-tx inclusion latency and per-block byte accounting.
+type ContentHashMap = std::collections::HashMap<[u8; 32], (u64, Instant)>;
 
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
@@ -283,6 +284,7 @@ fn spawn_pipeline_dual_monitor(
 	dual: DualBlockSubscription,
 	new_block_notify: Arc<Notify>,
 	block_stats: Arc<Mutex<Vec<BlockStats>>>,
+	tx_latencies: Arc<Mutex<Vec<Duration>>>,
 	measure_start: Arc<Mutex<Option<Instant>>>,
 	monitor_ready: Arc<Notify>,
 	cancel: Arc<AtomicBool>,
@@ -377,14 +379,23 @@ fn spawn_pipeline_dual_monitor(
 					let hashes = stored_content_hashes(&block).await;
 					let store_tx_count = hashes.len() as u64;
 
-					// Look up actual extrinsic sizes and remove entries.
-					let store_tx_bytes = {
+					// Look up extrinsic sizes and compute inclusion latencies.
+					let now = Instant::now();
+					let (store_tx_bytes, block_latencies) = {
 						let mut map = content_hash_map.lock().unwrap();
-						hashes
-							.iter()
-							.filter_map(|h| map.remove(h))
-							.sum::<u64>()
+						let mut bytes = 0u64;
+						let mut lats = Vec::new();
+						for h in &hashes {
+							if let Some((size, submitted_at)) = map.remove(h) {
+								bytes += size;
+								lats.push(now.duration_since(submitted_at));
+							}
+						}
+						(bytes, lats)
 					};
+					if !block_latencies.is_empty() {
+						tx_latencies.lock().unwrap().extend(block_latencies);
+					}
 
 					// Only read timestamp for blocks with txs (skip empty blocks).
 					let timestamp_ms = if store_tx_count == 0 {
@@ -524,7 +535,7 @@ impl StoreWorker {
 					let ext_len = msg.extrinsic.len() as u64;
 					let n = self.counters.submitted.fetch_add(1, Ordering::Relaxed) + 1;
 					self.counters.submitted_bytes.fetch_add(ext_len, Ordering::Relaxed);
-					self.content_hash_map.lock().unwrap().insert(msg.content_hash, ext_len);
+					self.content_hash_map.lock().unwrap().insert(msg.content_hash, (ext_len, Instant::now()));
 					self.consecutive_conn_errors = 0;
 					if n == 1 || n.is_multiple_of(256) {
 						log::debug!("pipeline store: worker {id} accepted total={n} hash={hash:?}");
@@ -710,11 +721,13 @@ pub async fn run_block_capacity_pipeline(
 	let content_hash_map: Arc<Mutex<ContentHashMap>> =
 		Arc::new(Mutex::new(std::collections::HashMap::new()));
 	let confirmed_count = Arc::new(AtomicU64::new(0));
+	let tx_latencies = Arc::new(Mutex::new(Vec::<Duration>::new()));
 
 	let monitor_handle = spawn_pipeline_dual_monitor(
 		dual,
 		new_block_notify.clone(),
 		block_stats.clone(),
+		tx_latencies.clone(),
 		measure_start.clone(),
 		monitor_ready.clone(),
 		cancel.clone(),
@@ -958,7 +971,15 @@ pub async fn run_block_capacity_pipeline(
 		log::warn!("pipeline: monitor did not exit in time, aborting");
 	}
 
-	collect_results(start, &measure_start, &counters, &block_stats, work_error, is_stalled)
+	collect_results(
+		start,
+		&measure_start,
+		&counters,
+		&block_stats,
+		&tx_latencies,
+		work_error,
+		is_stalled,
+	)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1035,6 +1056,7 @@ fn collect_results(
 	measure_start: &Arc<Mutex<Option<Instant>>>,
 	counters: &Arc<SubmitCounters>,
 	block_stats: &Arc<Mutex<Vec<BlockStats>>>,
+	tx_latencies: &Arc<Mutex<Vec<Duration>>>,
 	work_error: Option<anyhow::Error>,
 	stalled: bool,
 ) -> Result<BulkStoreResult> {
@@ -1081,6 +1103,12 @@ fn collect_results(
 		blocks: all_blocks,
 		fork_detections: 0,
 		stalled,
+		tx_latencies_ms: tx_latencies
+			.lock()
+			.unwrap()
+			.iter()
+			.map(|d| d.as_secs_f64() * 1000.0)
+			.collect(),
 	})
 }
 
