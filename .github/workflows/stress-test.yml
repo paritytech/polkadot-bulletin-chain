@@ -258,7 +258,6 @@ jobs:
             echo "| Payload size | ${ST_PAYLOAD_SIZE} bytes |" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
           python3 -c "
           import json, sys
           try:
@@ -267,29 +266,45 @@ jobs:
           except (json.JSONDecodeError, FileNotFoundError) as e:
               print(f'Failed to parse results: {e}', file=sys.stderr)
               sys.exit(0)
+
+          # Overview table
+          print('### Overview')
+          print()
+          print('| Variant | TPS | MB/s | Confirmed | Errors | Avg tx/blk | Duration |')
+          print('|---------|-----|------|-----------|--------|------------|----------|')
           for r in data:
-              summary = {
-                  'name': r.get('name', ''),
-                  'payload_size': r.get('payload_size', 0),
-                  'throughput_tps': round(r.get('throughput_tps', 0), 2),
-                  'throughput_MB_per_sec': round(r.get('throughput_bytes_per_sec', 0) / 1048576, 2),
-                  'total_confirmed': r.get('total_confirmed', 0),
-                  'total_errors': r.get('total_errors', 0),
-                  'avg_tx_per_block': round(r.get('avg_tx_per_block', 0), 1),
-                  'peak_tx_per_block': r.get('peak_tx_per_block', 0),
-                  'duration_secs': r.get('duration', {}).get('secs', 0),
-              }
-              if r.get('avg_block_interval_ms'):
-                  summary['avg_block_interval_ms'] = round(r['avg_block_interval_ms'], 0)
-              if r.get('fork_detections', 0) > 0:
-                  summary['fork_detections'] = r['fork_detections']
-              if r.get('reads_per_sec'):
-                  summary['reads_per_sec'] = round(r['reads_per_sec'], 1)
-              if r.get('successful_reads'):
-                  summary['successful_reads'] = r['successful_reads']
-              if r.get('failed_reads'):
-                  summary['failed_reads'] = r['failed_reads']
-              print(json.dumps(summary, indent=2))
+              name = r.get('name', '').split('(')[-1].rstrip(')')
+              tps = round(r.get('throughput_tps', 0), 1)
+              mbps = round(r.get('throughput_bytes_per_sec', 0) / 1048576, 2)
+              confirmed = r.get('total_confirmed', 0)
+              errors = r.get('total_errors', 0)
+              avg_blk = round(r.get('avg_tx_per_block', 0), 1)
+              dur = r.get('duration', {}).get('secs', 0)
+              print(f'| {name} | {tps} | {mbps} | {confirmed} | {errors} | {avg_blk} | {dur}s |')
+          print()
+
+          # Distribution stats table
+          has_stats = any(r.get('latency_ms') or r.get('block_tps') or r.get('block_mbps') for r in data)
+          if has_stats:
+              print('### Distribution Stats')
+              print()
+              print('| Variant | Metric | Min | Avg | P90 | P99 | Max |')
+              print('|---------|--------|-----|-----|-----|-----|-----|')
+              for r in data:
+                  name = r.get('name', '').split('(')[-1].rstrip(')').split(',')[0]
+                  for label, key in [('Latency (ms)', 'latency_ms'), ('Block TPS', 'block_tps'), ('Block MB/s', 'block_mbps')]:
+                      s = r.get(key)
+                      if s:
+                          print(f'| {name} | {label} | {s[\"min\"]:.1f} | {s[\"avg\"]:.1f} | {s[\"p90\"]:.1f} | {s[\"p99\"]:.1f} | {s[\"max\"]:.1f} |')
+              print()
+
+          # Read stats (bitswap)
+          has_reads = any(r.get('reads_per_sec') for r in data)
+          if has_reads:
+              print('### Read Stats')
+              print()
+              for r in data:
+                  if r.get('reads_per_sec'):
+                      print(f'- **{r[\"name\"]}**: {round(r[\"reads_per_sec\"], 1)} reads/s, {r.get(\"successful_reads\", 0)} ok, {r.get(\"failed_reads\", 0)} failed')
               print()
           " >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY

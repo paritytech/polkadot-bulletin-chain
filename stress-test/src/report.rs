@@ -214,6 +214,33 @@ impl ScenarioResult {
 			println!();
 		}
 
+		// Distribution stats
+		if self.latency_ms.is_some() || self.block_tps.is_some() || self.block_mbps.is_some() {
+			println!("{}", "-".repeat(72));
+			println!(
+				" DISTRIBUTIONS        {:>8} {:>8} {:>8} {:>8} {:>8}",
+				"Min", "Avg", "P90", "P99", "Max"
+			);
+			if let Some(ref s) = self.latency_ms {
+				println!(
+					"  Latency (ms)       | {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
+					s.min, s.avg, s.p90, s.p99, s.max
+				);
+			}
+			if let Some(ref s) = self.block_tps {
+				println!(
+					"  Block TPS          | {:>8.1} {:>8.1} {:>8.1} {:>8.1} {:>8.1}",
+					s.min, s.avg, s.p90, s.p99, s.max
+				);
+			}
+			if let Some(ref s) = self.block_mbps {
+				println!(
+					"  Block MB/s         | {:>8.2} {:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+					s.min, s.avg, s.p90, s.p99, s.max
+				);
+			}
+		}
+
 		// Read stats
 		if let Some(total) = self.total_reads {
 			println!("{}", "-".repeat(72));
