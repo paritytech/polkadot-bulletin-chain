@@ -49,7 +49,7 @@ struct SubmitCounters {
 
 /// Content hash → (extrinsic size, submission time). The monitor uses this to compute
 /// per-tx inclusion latency and per-block byte accounting.
-type ContentHashMap = std::collections::HashMap<[u8; 32], (u64, Instant)>;
+pub type ContentHashMap = std::collections::HashMap<[u8; 32], (u64, Instant)>;
 
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
@@ -293,6 +293,7 @@ fn spawn_pipeline_dual_monitor(
 	stalled: Arc<AtomicBool>,
 	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	confirmed_count: Arc<AtomicU64>,
+	block_count_offset: u32,
 ) -> tokio::task::JoinHandle<()> {
 	let DualBlockSubscription { mut best_rx, mut finalized_rx, monitor_client, ws_url } = dual;
 
@@ -431,10 +432,11 @@ fn spawn_pipeline_dual_monitor(
 					if store_tx_count > 0 {
 						last_progress = Instant::now();
 						best_measured_blocks += 1;
+						let global_count = block_count_offset + best_measured_blocks;
 						log::info!(
 							"pipeline: [measured] block #{block_number}: \
 							 {store_tx_count} store txs, {store_tx_bytes} bytes \
-							 (best measured #{best_measured_blocks})"
+							 (measured #{global_count})"
 						);
 						if target_blocks.is_some_and(|t| best_measured_blocks >= t) {
 							log::info!(
@@ -708,6 +710,9 @@ pub async fn run_block_capacity_pipeline(
 	authorizer_nonce_tracker: &NonceTracker,
 	cancel: &Arc<AtomicBool>,
 	target_blocks: Option<u32>,
+	shared_content_hash_map: Arc<Mutex<ContentHashMap>>,
+	shared_tx_latencies: Arc<Mutex<Vec<Duration>>>,
+	block_count_offset: u32,
 ) -> Result<BulkStoreResult> {
 	let authorize_bytes = store_payload.authorize_bytes_per_account();
 
@@ -718,10 +723,9 @@ pub async fn run_block_capacity_pipeline(
 	let target_reached = Arc::new(AtomicBool::new(false));
 	let stalled = Arc::new(AtomicBool::new(false));
 	let counters = Arc::new(SubmitCounters::default());
-	let content_hash_map: Arc<Mutex<ContentHashMap>> =
-		Arc::new(Mutex::new(std::collections::HashMap::new()));
+	let content_hash_map = shared_content_hash_map;
 	let confirmed_count = Arc::new(AtomicU64::new(0));
-	let tx_latencies = Arc::new(Mutex::new(Vec::<Duration>::new()));
+	let tx_latencies = shared_tx_latencies;
 
 	let monitor_handle = spawn_pipeline_dual_monitor(
 		dual,
@@ -736,6 +740,7 @@ pub async fn run_block_capacity_pipeline(
 		stalled.clone(),
 		content_hash_map.clone(),
 		confirmed_count.clone(),
+		block_count_offset,
 	);
 
 	monitor_ready.notified().await;

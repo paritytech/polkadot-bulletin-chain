@@ -359,9 +359,15 @@ pub async fn run_block_capacity_sweep(
 
 		let variant_result: Result<ScenarioResult> = async {
 			let mut remaining_blocks = target_blocks;
+			let mut total_measured_so_far = 0u32;
 			let mut all_block_stats = Vec::new();
 			let mut all_latencies_ms = Vec::new();
 			let mut attempt = 0u32;
+			// Shared across restarts so leftover pool txs can still be matched.
+			let shared_hash_map: std::sync::Arc<std::sync::Mutex<pipeline::ContentHashMap>> =
+				std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+			let shared_latencies: std::sync::Arc<std::sync::Mutex<Vec<std::time::Duration>>> =
+				std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 			let wall_clock_start = std::time::Instant::now();
 			const MAX_STALL_RETRIES: u32 = 20;
 
@@ -414,6 +420,9 @@ pub async fn run_block_capacity_sweep(
 					nonce_tracker,
 					cancel,
 					Some(remaining_blocks),
+					shared_hash_map.clone(),
+					shared_latencies.clone(),
+					total_measured_so_far,
 				)
 				.await;
 
@@ -427,6 +436,7 @@ pub async fn run_block_capacity_sweep(
 
 				let measured_in_run =
 					bulk.blocks.iter().filter(|b| !b.prefill && b.tx_count > 0).count() as u32;
+				total_measured_so_far += measured_in_run;
 				all_block_stats.extend(bulk.blocks);
 				all_latencies_ms.extend(bulk.tx_latencies_ms);
 
