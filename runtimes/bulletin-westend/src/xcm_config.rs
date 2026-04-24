@@ -182,7 +182,6 @@ pub type Barrier = TrailingSetTopicAsId<(
 
 parameter_types! {
 	pub TreasuryAccount: AccountId = TREASURY_PALLET_ID.into_account_truncating();
-	pub RelayTreasuryLocation: Location = (Parent, PalletInstance(westend_runtime_constants::TREASURY_PALLET_ID)).into();
 }
 
 /// Locations that will not be charged fees in the executor, neither for execution nor delivery.
@@ -190,7 +189,6 @@ parameter_types! {
 pub type WaivedLocations = (
 	Equals<RootLocation>,
 	RelayOrOtherSystemParachains<AllSiblingSystemParachains, Runtime>,
-	Equals<RelayTreasuryLocation>,
 	Equals<AssetHubLocation>,
 );
 
