@@ -321,8 +321,8 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type XcmTeleportFilter = Nothing;
-	type XcmReserveTransferFilter = Everything;
+	type XcmTeleportFilter = Everything;
+	type XcmReserveTransferFilter = Nothing;
 	type Weigher = WeightInfoBounds<
 		crate::weights::xcm::BulletinPaseoXcmWeight<RuntimeCall>,
 		RuntimeCall,
