@@ -6,6 +6,8 @@
 //     --ws-url wss://bc-3000-rpc-node-0.parity-versi.parity.io,wss://bc-3000-rpc-node-1.parity-versi.parity.io,wss://bc-3000-rpc-node-2.parity-versi.parity.io,wss://bc-3000-rpc-node-3.parity-versi.parity.io \
 //     --items 100 --payload-size 1024 --authorizer-seed "//Alice"
 
+import { mkdirSync, writeFileSync } from "node:fs"
+import { dirname, resolve as resolvePath } from "node:path"
 import { parseArgs } from "node:util"
 import { createClient as createSubstrateClient } from "@polkadot-api/substrate-client"
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
@@ -17,6 +19,7 @@ import { getWsProvider } from "polkadot-api/ws-provider/node"
 import type { BulletinTypedApi } from "../../src/async-client.js"
 import {
   type BlockLimits,
+  type LatencyStats,
   type MultiAccountSigner,
   type PipelineStats,
   pipelineStore,
@@ -37,6 +40,7 @@ const { values } = parseArgs({
     "authorize-budget-mb": { type: "string", default: "50" },
     accounts: { type: "string", default: "1" },
     "skip-authorize": { type: "boolean", default: false },
+    "output-json": { type: "string" },
     help: { type: "boolean", default: false },
   },
   strict: true,
@@ -54,6 +58,7 @@ Options:
   --submitter-seed <seed>   Submitter key URI (default: same as authorizer)
   --accounts <n>            Number of parallel submitter accounts (default: 1)
   --authorize-budget-mb <n> Authorization budget in MB (default: 50)
+  --output-json <path>      Write full result JSON to this path
 `)
   process.exit(0)
 }
@@ -286,14 +291,12 @@ async function main() {
     }
     console.log()
 
-    console.log(
-      JSON.stringify(
-        result,
-        (_k, v) => (typeof v === "bigint" ? v.toString() : v),
-        2,
-      ),
-    )
+    console.log("=== Latency (per-item, broadcast → block, aggregated) ===")
+    printLatency("Inclusion (best)   ", result.inclusionLatency)
+    printLatency("Finalization       ", result.finalizationLatency)
+    console.log()
 
+    writeResultsJson(result)
     papiClient.destroy()
     process.exit(result.finalized === result.totalItems ? 0 : 1)
   } else {
@@ -335,18 +338,61 @@ async function main() {
       `  Nonce range:   ${result.startNonce} -> ${result.expectedFinalNonce}`,
     )
     console.log()
+    console.log("=== Latency (per-item, broadcast → block) ===")
+    printLatency("Inclusion (best)   ", result.inclusionLatency)
+    printLatency("Finalization       ", result.finalizationLatency)
+    console.log()
 
-    console.log(
-      JSON.stringify(
-        result,
-        (_k, v) => (typeof v === "bigint" ? v.toString() : v),
-        2,
-      ),
-    )
-
+    writeResultsJson(result)
     papiClient.destroy()
     process.exit(result.finalized === result.totalItems ? 0 : 1)
   }
+}
+
+function writeResultsJson(result: unknown): void {
+  const outputPath = values["output-json"]
+  if (!outputPath) return
+  const absPath = resolvePath(outputPath)
+  mkdirSync(dirname(absPath), { recursive: true })
+  const payload = {
+    config: {
+      wsUrls,
+      items: numItems,
+      payloadSize,
+      authorizerSeed,
+      submitterSeed,
+      authBudgetMb,
+      accounts: numAccounts,
+    },
+    result,
+    generatedAt: new Date().toISOString(),
+  }
+  writeFileSync(
+    absPath,
+    JSON.stringify(
+      payload,
+      (_k, v) => (typeof v === "bigint" ? v.toString() : v),
+      2,
+    ),
+  )
+  console.log(`Wrote results JSON to ${absPath}`)
+}
+
+function printLatency(label: string, lat: LatencyStats | null): void {
+  if (!lat) {
+    console.log(`  ${label}: n/a (no samples)`)
+    return
+  }
+  console.log(
+    `  ${label}: n=${lat.count} ` +
+      `min=${lat.min.toFixed(0)}ms ` +
+      `p50=${lat.p50.toFixed(0)}ms ` +
+      `p90=${lat.p90.toFixed(0)}ms ` +
+      `p95=${lat.p95.toFixed(0)}ms ` +
+      `p99=${lat.p99.toFixed(0)}ms ` +
+      `max=${lat.max.toFixed(0)}ms ` +
+      `mean=${lat.mean.toFixed(0)}ms`,
+  )
 }
 
 main().catch((e) => {

@@ -106,6 +106,18 @@ export interface PipelineStats {
   throughputBytesPerSec: number
 }
 
+/** Latency distribution in milliseconds. */
+export interface LatencyStats {
+  count: number
+  min: number
+  max: number
+  mean: number
+  p50: number
+  p90: number
+  p95: number
+  p99: number
+}
+
 /** Final result returned by {@link pipelineStore}. */
 export interface PipelineResult extends PipelineStats {
   /** Total data bytes across all items. */
@@ -116,6 +128,22 @@ export interface PipelineResult extends PipelineStats {
   startNonce: number
   /** Expected final nonce (`startNonce + items.length`). */
   expectedFinalNonce: number
+  /**
+   * Per-item inclusion latency: time from first broadcast of an item's tx
+   * to the moment its nonce was observed at a best block. Null if no items
+   * were observed at best block.
+   */
+  inclusionLatency: LatencyStats | null
+  /**
+   * Per-item finalization latency: time from first broadcast of an item's tx
+   * to the moment its nonce was observed at a finalized block. Null if no
+   * items were finalized.
+   */
+  finalizationLatency: LatencyStats | null
+  /** Raw per-item inclusion latencies (ms). Indexed by item offset. */
+  inclusionLatenciesMs: number[]
+  /** Raw per-item finalization latencies (ms). Indexed by item offset. */
+  finalizationLatenciesMs: number[]
 }
 
 /** Signer descriptor for multi-account pipeline. */
@@ -249,6 +277,16 @@ export async function pipelineStore(
     finalized: 0,
   }
 
+  // First-broadcast timestamp per item offset (ms since epoch).
+  // Undefined entries mean the item has not yet been broadcast.
+  const broadcastAtMs: Array<number | undefined> = new Array(items.length)
+  // Latency arrays indexed by item offset (0..items.length).
+  const inclusionLatenciesMs: number[] = []
+  const finalizationLatenciesMs: number[] = []
+  // High-water marks: we have already recorded latency for offsets [0, mark).
+  let inclusionRecordedTo = 0
+  let finalizationRecordedTo = 0
+
   return new Promise<PipelineResult>((resolve, reject) => {
     // -----------------------------------------------------------------
     // Event queue — serializes async processing of chainHead events
@@ -313,6 +351,10 @@ export async function pipelineStore(
         throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
         startNonce,
         expectedFinalNonce,
+        inclusionLatency: computeLatencyStats(inclusionLatenciesMs),
+        finalizationLatency: computeLatencyStats(finalizationLatenciesMs),
+        inclusionLatenciesMs: [...inclusionLatenciesMs],
+        finalizationLatenciesMs: [...finalizationLatenciesMs],
       })
     }
 
@@ -406,6 +448,18 @@ export async function pipelineStore(
                 items.length,
               )
 
+              // Record inclusion latency for newly-confirmed items
+              if (counters.confirmed > inclusionRecordedTo) {
+                const observedAt = Date.now()
+                for (let i = inclusionRecordedTo; i < counters.confirmed; i++) {
+                  const broadcast = broadcastAtMs[i]
+                  if (broadcast !== undefined) {
+                    inclusionLatenciesMs.push(observedAt - broadcast)
+                  }
+                }
+                inclusionRecordedTo = counters.confirmed
+              }
+
               if (bestNonce >= expectedFinalNonce) return
 
               const fromIndex = Math.max(0, bestNonce - startNonce)
@@ -430,6 +484,13 @@ export async function pipelineStore(
                   bestBlockNumber,
                   bestBlockHash,
                 )
+              }
+
+              // Record first-broadcast timestamp for each item in the batch
+              const broadcastNow = Date.now()
+              for (let i = fromIndex; i < toIndex; i++) {
+                if (broadcastAtMs[i] === undefined)
+                  broadcastAtMs[i] = broadcastNow
               }
 
               // Broadcast to all RPCs; pre-sign next batch concurrently
@@ -518,6 +579,22 @@ export async function pipelineStore(
                 lastHash,
               )
               counters.finalized = clamp(finNonce - startNonce, 0, items.length)
+
+              // Record finalization latency for newly-finalized items
+              if (counters.finalized > finalizationRecordedTo) {
+                const observedAt = Date.now()
+                for (
+                  let i = finalizationRecordedTo;
+                  i < counters.finalized;
+                  i++
+                ) {
+                  const broadcast = broadcastAtMs[i]
+                  if (broadcast !== undefined) {
+                    finalizationLatenciesMs.push(observedAt - broadcast)
+                  }
+                }
+                finalizationRecordedTo = counters.finalized
+              }
 
               if (onProgress) {
                 emitProgress(
@@ -1321,5 +1398,41 @@ function emptyResult(): PipelineResult {
     throughputBytesPerSec: 0,
     startNonce: 0,
     expectedFinalNonce: 0,
+    inclusionLatency: null,
+    finalizationLatency: null,
+    inclusionLatenciesMs: [],
+    finalizationLatenciesMs: [],
   }
+}
+
+/**
+ * Compute summary statistics for a latency series.
+ * Uses linear interpolation between adjacent ranks (same convention as
+ * numpy.percentile / NIST). Returns null for an empty series.
+ */
+function computeLatencyStats(latenciesMs: number[]): LatencyStats | null {
+  if (latenciesMs.length === 0) return null
+  const sorted = [...latenciesMs].sort((a, b) => a - b)
+  const sum = sorted.reduce((acc, v) => acc + v, 0)
+  return {
+    count: sorted.length,
+    min: sorted[0] ?? 0,
+    max: sorted[sorted.length - 1] ?? 0,
+    mean: sum / sorted.length,
+    p50: percentile(sorted, 50),
+    p90: percentile(sorted, 90),
+    p95: percentile(sorted, 95),
+    p99: percentile(sorted, 99),
+  }
+}
+
+function percentile(sorted: number[], p: number): number {
+  const n = sorted.length
+  if (n === 0) return 0
+  if (n === 1) return sorted[0] ?? 0
+  const rank = (p / 100) * (n - 1)
+  const lo = Math.floor(rank)
+  const hi = Math.ceil(rank)
+  const frac = rank - lo
+  return (sorted[lo] ?? 0) * (1 - frac) + (sorted[hi] ?? 0) * frac
 }
