@@ -6,18 +6,18 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-cargo build --release -p bulletin-westend-runtime
+cargo build --release -p bulletin-paseo-runtime
 
 # cargo install staging-chain-spec-builder
 cd "$ROOT_DIR"
 
 chain-spec-builder create \
-        -p 1010 \
+        -p 1501 \
         -c westend \
-        -i bulletin-westend \
+        -i bulletin-paseo \
         -n Bulletin \
         -t local \
-        -r ./target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm \
+        -r ./target/release/wbuild/bulletin-paseo-runtime/bulletin_paseo_runtime.compact.compressed.wasm \
         named-preset local_testnet
 
-mv chain_spec.json ./zombienet/bulletin-westend-spec.json
+mv chain_spec.json ./zombienet/bulletin-paseo-spec.json

@@ -19,6 +19,7 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
+use crate::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 use frame_support::{
 	parameter_types,
 	traits::{
@@ -39,8 +40,7 @@ use parachains_common::{
 use polkadot_parachain_primitives::primitives::Sibling;
 use polkadot_runtime_common::xcm_sender::ExponentialPrice;
 use sp_runtime::traits::AccountIdConversion;
-use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
-use xcm::latest::{prelude::*, WESTEND_GENESIS_HASH};
+use xcm::latest::prelude::*;
 use xcm_builder::{
 	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
 	AllowExplicitUnpaidExecutionFrom, AllowHrmpNotificationsFromRelayChain,
@@ -55,13 +55,22 @@ use xcm_builder::{
 use xcm_executor::XcmExecutor;
 
 // Re-export
-pub use testnet_parachains_constants::westend::locations::{GovernanceLocation, PeopleLocation};
+pub use crate::paseo_constants::locations::{GovernanceLocation, PeopleLocation};
+
+/// The genesis hash of the Paseo testnet relay chain. Used to identify it over XCM.
+///
+/// Not yet exposed by the Polkadot SDK, so we define it locally. Matches
+/// `0x77afd6190f1554ad45fd0d31aee62aacc33c6db0ea801129acb813f913e0764f`.
+pub const PASEO_GENESIS_HASH: [u8; 32] = [
+	0x77, 0xaf, 0xd6, 0x19, 0x0f, 0x15, 0x54, 0xad, 0x45, 0xfd, 0x0d, 0x31, 0xae, 0xe6, 0x2a, 0xac,
+	0xc3, 0x3c, 0x6d, 0xb0, 0xea, 0x80, 0x11, 0x29, 0xac, 0xb8, 0x13, 0xf9, 0x13, 0xe0, 0x76, 0x4f,
+];
 
 parameter_types! {
 	pub const RootLocation: Location = Location::here();
 	pub const TokenRelayLocation: Location = Location::parent();
 	pub AssetHubLocation: Location = Location::new(1, [Parachain(ASSET_HUB_ID)]);
-	pub const RelayNetwork: Option<NetworkId> = Some(NetworkId::ByGenesis(WESTEND_GENESIS_HASH));
+	pub const RelayNetwork: Option<NetworkId> = Some(NetworkId::ByGenesis(PASEO_GENESIS_HASH));
 	pub RelayChainOrigin: RuntimeOrigin = cumulus_pallet_xcm::Origin::Relay.into();
 	pub UniversalLocation: InteriorLocation =
 		[GlobalConsensus(RelayNetwork::get().unwrap()), Parachain(ParachainInfo::parachain_id().into())].into();
@@ -221,7 +230,7 @@ impl xcm_executor::Config for XcmConfig {
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
 	type Weigher = WeightInfoBounds<
-		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
+		crate::weights::xcm::BulletinPaseoXcmWeight<RuntimeCall>,
 		RuntimeCall,
 		MaxInstructions,
 	>;
@@ -289,7 +298,7 @@ impl pallet_xcm::Config for Runtime {
 	type XcmTeleportFilter = Everything;
 	type XcmReserveTransferFilter = Nothing;
 	type Weigher = WeightInfoBounds<
-		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
+		crate::weights::xcm::BulletinPaseoXcmWeight<RuntimeCall>,
 		RuntimeCall,
 		MaxInstructions,
 	>;

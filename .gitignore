@@ -40,3 +40,7 @@ console-ui/test-results/
 console-ui/playwright-report/
 console-ui/blob-report/
 console-ui/playwright/.cache/
+
+# Specs for zombienet (need to be fresh)
+zombienet/bulletin-westend-spec.json
+zombienet/bulletin-paseo-spec.json

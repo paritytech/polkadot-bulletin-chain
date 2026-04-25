@@ -59,8 +59,8 @@ impl WeighAssets for Assets {
 	}
 }
 
-pub struct BulletinWestendXcmWeight<Call>(core::marker::PhantomData<Call>);
-impl<Call> XcmWeightInfo<Call> for BulletinWestendXcmWeight<Call> {
+pub struct BulletinPaseoXcmWeight<Call>(core::marker::PhantomData<Call>);
+impl<Call> XcmWeightInfo<Call> for BulletinPaseoXcmWeight<Call> {
 	fn withdraw_asset(assets: &Assets) -> Weight {
 		assets.weigh_assets(XcmFungibleWeight::<Runtime>::withdraw_asset())
 	}

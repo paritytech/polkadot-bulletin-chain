@@ -30,12 +30,22 @@ pub mod fast_runtime_binary {
 }
 
 mod genesis_config_presets;
+pub mod paseo_constants;
 pub mod storage;
 mod weights;
 pub mod xcm_config;
 
 extern crate alloc;
 
+use crate::paseo_constants::{
+	consensus::{
+		async_backing::UNINCLUDED_SEGMENT_CAPACITY, BLOCK_PROCESSING_VELOCITY,
+		MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS,
+	},
+	currency::*,
+	fee::WeightToFee,
+	time::*,
+};
 use alloc::{vec, vec::Vec};
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
@@ -73,7 +83,6 @@ use sp_runtime::{
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
-use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
 
 /// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
 const SLOT_DURATION: u64 = 24_000;
@@ -183,8 +192,8 @@ impl_opaque_keys! {
 
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
-	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
+	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
+	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
 	spec_version: 1_000_010,
 	impl_version: 1,
@@ -234,7 +243,7 @@ parameter_types! {
 		})
 		.avg_block_initialization(AVERAGE_ON_INITIALIZE_RATIO)
 		.build_or_panic();
-	pub const SS58Prefix: u8 = 42;
+	pub const SS58Prefix: u8 = 0;
 }
 
 // Configure FRAME pallets to include in runtime.
@@ -292,7 +301,7 @@ impl pallet_authorship::Config for Runtime {
 
 parameter_types! {
 	pub const ExistentialDeposit: Balance = EXISTENTIAL_DEPOSIT;
-	pub AssetHubParaId: ParaId = ParaId::new(westend_runtime_constants::system_parachain::ASSET_HUB_ID);
+	pub AssetHubParaId: ParaId = ParaId::new(paseo_constants::system_parachain::ASSET_HUB_ID);
 }
 
 impl pallet_balances::Config for Runtime {
@@ -313,8 +322,8 @@ impl pallet_balances::Config for Runtime {
 }
 
 parameter_types! {
-	/// Relay Chain `TransactionByteFee` / 10
-	pub const TransactionByteFee: Balance = MILLICENTS;
+	/// Relay Chain `TransactionByteFee` / 20 (per Paseo system-parachain convention).
+	pub const TransactionByteFee: Balance = paseo_constants::fee::TRANSACTION_BYTE_FEE;
 }
 
 impl pallet_transaction_payment::Config for Runtime {
@@ -377,7 +386,7 @@ impl pallet_message_queue::Config for Runtime {
 	// The XCMP queue pallet is only ever able to handle the `Sibling(ParaId)` origin:
 	type QueueChangeHandler = NarrowOriginToSibling<XcmpQueue>;
 	type QueuePausedQuery = NarrowOriginToSibling<XcmpQueue>;
-	type HeapSize = sp_core::ConstU32<{ 103 * 1024 }>;
+	type HeapSize = sp_core::ConstU32<{ 64 * 1024 }>;
 	type MaxStale = sp_core::ConstU32<8>;
 	type ServiceWeight = MessageQueueServiceWeight;
 	type IdleMaxServiceWeight = MessageQueueServiceWeight;
@@ -945,7 +954,7 @@ impl_runtime_apis! {
 					ParachainSystem,
 				>;
 				fn valid_destination() -> Result<Location, BenchmarkError> {
-					Ok(AssetHubLocation::get())
+					Ok(xcm_config::AssetHubLocation::get())
 				}
 				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
 					use pallet_xcm_benchmarks::MockCredit;
@@ -1001,17 +1010,17 @@ impl_runtime_apis! {
 
 				fn transact_origin_and_runtime_call() -> Result<(Location, RuntimeCall), BenchmarkError> {
 					Ok((
-						AssetHubLocation::get(),
+						xcm_config::AssetHubLocation::get(),
 						frame_system::Call::remark_with_event { remark: vec![] }.into(),
 					))
 				}
 
 				fn subscribe_origin() -> Result<Location, BenchmarkError> {
-					Ok(AssetHubLocation::get())
+					Ok(xcm_config::AssetHubLocation::get())
 				}
 
 				fn claimable_asset() -> Result<(Location, Location, Assets), BenchmarkError> {
-					let origin = AssetHubLocation::get();
+					let origin = xcm_config::AssetHubLocation::get();
 					let assets: Assets = (AssetId(TokenRelayLocation::get()), 1_000 * UNITS).into();
 					let ticket = Location { parents: 0, interior: Here };
 					Ok((origin, ticket, assets))

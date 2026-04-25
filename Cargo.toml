@@ -26,6 +26,7 @@ polkadot-parachain-primitives = { version = "21.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
 serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
+smallvec = { version = "1.15.1", default-features = false }
 testnet-parachains-constants = { version = "19.0.0", package = "testnet-parachains-constants", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "=0.3.19" }
@@ -33,6 +34,7 @@ westend-runtime-constants = { version = "26.0.0", package = "westend-runtime-con
 
 # Local workspace members
 bulletin-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
+bulletin-paseo-runtime = { path = "runtimes/bulletin-paseo" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
@@ -117,6 +119,7 @@ members = [
 	"pallets/common",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
+	"runtimes/bulletin-paseo",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",

@@ -13,23 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Bulletin Westend Runtime genesis config presets
+//! # Bulletin Paseo Runtime genesis config presets
 
-use crate::*;
+use crate::{
+	paseo_constants::{currency::UNITS as PAS, xcm_version::SAFE_XCM_VERSION},
+	*,
+};
 use alloc::{vec, vec::Vec};
 use cumulus_primitives_core::ParaId;
 use frame_support::build_struct_json_patch;
 use parachains_common::{AccountId, AuraId};
 use sp_genesis_builder::PresetId;
 use sp_keyring::Sr25519Keyring;
-use testnet_parachains_constants::westend::{
-	currency::UNITS as WND, xcm_version::SAFE_XCM_VERSION,
-};
 
-const BULLETIN_WESTEND_ED: Balance = ExistentialDeposit::get();
-pub const BULLETIN_PARA_ID: ParaId = ParaId::new(1010);
+const BULLETIN_PASEO_ED: Balance = ExistentialDeposit::get();
+pub const BULLETIN_PARA_ID: ParaId = ParaId::new(1501);
 
-fn bulletin_westend_genesis(
+fn bulletin_paseo_genesis(
 	invulnerables: Vec<(AccountId, AuraId)>,
 	endowed_accounts: Vec<AccountId>,
 	endowment: Balance,
@@ -44,7 +44,7 @@ fn bulletin_westend_genesis(
 		parachain_info: ParachainInfoConfig { parachain_id: id },
 		collator_selection: CollatorSelectionConfig {
 			invulnerables: invulnerables.iter().cloned().map(|(acc, _)| acc).collect(),
-			candidacy_bond: BULLETIN_WESTEND_ED * 16,
+			candidacy_bond: BULLETIN_PASEO_ED * 16,
 		},
 		session: SessionConfig {
 			keys: invulnerables
@@ -70,21 +70,21 @@ fn bulletin_westend_genesis(
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 	let patch = match id.as_ref() {
-		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => bulletin_westend_genesis(
+		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => bulletin_paseo_genesis(
 			// initial collators.
 			vec![
 				(Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Alice.public().into()),
 				(Sr25519Keyring::Bob.to_account_id(), Sr25519Keyring::Bob.public().into()),
 			],
 			Sr25519Keyring::well_known().map(|k| k.to_account_id()).collect(),
-			WND * 1_000_000,
+			PAS * 1_000_000,
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
 			// Account authorizations (account, transactions, bytes).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
 		),
-		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_westend_genesis(
+		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_paseo_genesis(
 			// initial collators.
 			vec![(Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Alice.public().into())],
 			vec![
@@ -93,7 +93,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 				Sr25519Keyring::AliceStash.to_account_id(),
 				Sr25519Keyring::BobStash.to_account_id(),
 			],
-			WND * 1_000_000,
+			PAS * 1_000_000,
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
