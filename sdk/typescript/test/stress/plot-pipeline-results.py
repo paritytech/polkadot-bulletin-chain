@@ -30,6 +30,7 @@ def label_for(payload: dict, fallback: str) -> str:
     cfg = payload.get("config", {})
     items = cfg.get("items")
     size = cfg.get("payloadSize")
+    accounts = cfg.get("accounts", 1)
     if items is None or size is None:
         return fallback
     if size >= 1024 * 1024:
@@ -38,7 +39,11 @@ def label_for(payload: dict, fallback: str) -> str:
         size_label = f"{size // 1024} KB"
     else:
         size_label = f"{size} B"
-    return f"{items} × {size_label}"
+    base = f"{items} × {size_label}"
+    if accounts and accounts >= 1:
+        plural = "acct" if accounts == 1 else "accts"
+        return f"{base}\n{accounts} {plural}"
+    return base
 
 
 def main() -> int:

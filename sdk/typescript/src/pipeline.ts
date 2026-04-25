@@ -172,6 +172,14 @@ export interface MultiPipelineResult {
   txPerSec: number
   /** Aggregate finalized throughput in bytes/s. */
   throughputBytesPerSec: number
+  /** Aggregated per-item inclusion latency (across all accounts). */
+  inclusionLatency: LatencyStats | null
+  /** Aggregated per-item finalization latency (across all accounts). */
+  finalizationLatency: LatencyStats | null
+  /** Raw per-item inclusion latencies (ms) across all accounts (concatenated). */
+  inclusionLatenciesMs: number[]
+  /** Raw per-item finalization latencies (ms) across all accounts (concatenated). */
+  finalizationLatenciesMs: number[]
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +671,10 @@ export async function pipelineStoreMulti(
       finalized: 0,
       txPerSec: 0,
       throughputBytesPerSec: 0,
+      inclusionLatency: null,
+      finalizationLatency: null,
+      inclusionLatenciesMs: [],
+      finalizationLatenciesMs: [],
     }
   }
 
@@ -694,6 +706,11 @@ export async function pipelineStoreMulti(
     txsBroadcast: number
     broadcastErrors: number
     preSigned: { fromNonce: number; hexes: string[] } | null
+    broadcastAtMs: Array<number | undefined>
+    inclusionLatenciesMs: number[]
+    finalizationLatenciesMs: number[]
+    inclusionRecordedTo: number
+    finalizationRecordedTo: number
   }
 
   const accounts: AcctState[] = signers.map((s, i) => {
@@ -717,6 +734,11 @@ export async function pipelineStoreMulti(
       txsBroadcast: 0,
       broadcastErrors: 0,
       preSigned: null,
+      broadcastAtMs: new Array(acctItems.length),
+      inclusionLatenciesMs: [],
+      finalizationLatenciesMs: [],
+      inclusionRecordedTo: 0,
+      finalizationRecordedTo: 0,
     }
   })
 
@@ -818,8 +840,20 @@ export async function pipelineStoreMulti(
           throughputBytesPerSec: sec > 0 ? aBytes / sec : 0,
           startNonce: a.startNonce,
           expectedFinalNonce: a.expectedFinalNonce,
+          inclusionLatency: computeLatencyStats(a.inclusionLatenciesMs),
+          finalizationLatency: computeLatencyStats(a.finalizationLatenciesMs),
+          inclusionLatenciesMs: [...a.inclusionLatenciesMs],
+          finalizationLatenciesMs: [...a.finalizationLatenciesMs],
         }
       })
+
+      // Aggregate latency samples across all accounts
+      const allInclusion: number[] = []
+      const allFinalization: number[] = []
+      for (const a of accounts) {
+        allInclusion.push(...a.inclusionLatenciesMs)
+        allFinalization.push(...a.finalizationLatenciesMs)
+      }
 
       resolve({
         accounts: n,
@@ -830,6 +864,10 @@ export async function pipelineStoreMulti(
         finalized,
         txPerSec: sec > 0 ? finalized / sec : 0,
         throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
+        inclusionLatency: computeLatencyStats(allInclusion),
+        finalizationLatency: computeLatencyStats(allFinalization),
+        inclusionLatenciesMs: allInclusion,
+        finalizationLatenciesMs: allFinalization,
       })
     }
 
@@ -924,6 +962,19 @@ export async function pipelineStoreMulti(
               const acctWork = accounts.map(async (a, idx) => {
                 const bestNonce = bestNonces[idx]!
                 a.confirmed = clamp(bestNonce - a.startNonce, 0, a.items.length)
+
+                // Record inclusion latency for newly-confirmed items
+                if (a.confirmed > a.inclusionRecordedTo) {
+                  const observedAt = Date.now()
+                  for (let i = a.inclusionRecordedTo; i < a.confirmed; i++) {
+                    const broadcast = a.broadcastAtMs[i]
+                    if (broadcast !== undefined) {
+                      a.inclusionLatenciesMs.push(observedAt - broadcast)
+                    }
+                  }
+                  a.inclusionRecordedTo = a.confirmed
+                }
+
                 if (bestNonce >= a.expectedFinalNonce) return
 
                 const fromIndex = Math.max(0, bestNonce - a.startNonce)
@@ -950,6 +1001,13 @@ export async function pipelineStoreMulti(
                     bestBlockNumber,
                     bestBlockHash,
                   )
+                }
+
+                // Record first-broadcast timestamp for each item in the batch
+                const broadcastNow = Date.now()
+                for (let i = fromIndex; i < toIndex; i++) {
+                  if (a.broadcastAtMs[i] === undefined)
+                    a.broadcastAtMs[i] = broadcastNow
                 }
 
                 // Broadcast
@@ -1055,6 +1113,7 @@ export async function pipelineStoreMulti(
                   readNonceAtBlock(monitorClient, a.signerHex, lastHash),
                 ),
               )
+              const finalizedObservedAt = Date.now()
               for (let i = 0; i < accounts.length; i++) {
                 const a = accounts[i]!
                 a.finalized = clamp(
@@ -1062,6 +1121,19 @@ export async function pipelineStoreMulti(
                   0,
                   a.items.length,
                 )
+
+                // Record finalization latency for newly-finalized items
+                if (a.finalized > a.finalizationRecordedTo) {
+                  for (let k = a.finalizationRecordedTo; k < a.finalized; k++) {
+                    const broadcast = a.broadcastAtMs[k]
+                    if (broadcast !== undefined) {
+                      a.finalizationLatenciesMs.push(
+                        finalizedObservedAt - broadcast,
+                      )
+                    }
+                  }
+                  a.finalizationRecordedTo = a.finalized
+                }
               }
 
               if (onProgress) {
