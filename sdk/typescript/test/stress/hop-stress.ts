@@ -19,6 +19,8 @@
 //     --ws-url ws://127.0.0.1:10000 \
 //     --scenario full-cycle --items 100 --payload-size 1024
 
+import { mkdirSync, writeFileSync } from "node:fs"
+import { dirname, resolve as resolvePath } from "node:path"
 import { parseArgs } from "node:util"
 import { u8aToHex } from "@polkadot/util"
 import {
@@ -53,6 +55,7 @@ const { values } = parseArgs({
     recipients: { type: "string", default: "1" },
     concurrency: { type: "string", default: "4" },
     duration: { type: "string", default: "300" },
+    "output-json": { type: "string" },
     help: { type: "boolean", default: false },
   },
   strict: true,
@@ -70,6 +73,7 @@ Options:
   --recipients <n>          Recipients per entry (default: 1)
   --concurrency <n>         Parallel submit/claim streams (default: 4)
   --duration <secs>         Duration for sustained scenarios (default: 300)
+  --output-json <path>      Write a results JSON file with all percentile data
 `)
   process.exit(0)
 }
@@ -192,24 +196,69 @@ function newPhaseStats(): PhaseStats {
   }
 }
 
+interface LatencySummary {
+  count: number
+  min: number
+  max: number
+  mean: number
+  p50: number
+  p90: number
+  p95: number
+  p99: number
+}
+
+function summarizeLatencies(latencies: number[]): LatencySummary | null {
+  if (latencies.length === 0) return null
+  const sorted = [...latencies].sort((a, b) => a - b)
+  const sum = sorted.reduce((a, b) => a + b, 0)
+  return {
+    count: sorted.length,
+    min: sorted[0] ?? 0,
+    max: sorted[sorted.length - 1] ?? 0,
+    mean: sum / sorted.length,
+    p50: percentile(sorted, 50),
+    p90: percentile(sorted, 90),
+    p95: percentile(sorted, 95),
+    p99: percentile(sorted, 99),
+  }
+}
+
+interface PhaseReport {
+  name: string
+  count: number
+  errors: number
+  durationMs: number
+  opsPerSec: number
+  bytesPerSec: number
+  errorsByCode: Record<string, number>
+  latency: LatencySummary | null
+  latenciesMs: number[]
+}
+
+const collectedReports: PhaseReport[] = []
+
 function printPhaseStats(name: string, stats: PhaseStats) {
   stats.endMs = stats.endMs || Date.now()
   const durationMs = stats.endMs - stats.startMs
-  const sorted = [...stats.latencies].sort((a, b) => a - b)
-  const throughput =
-    durationMs > 0 ? (stats.count / (durationMs / 1000)).toFixed(2) : "N/A"
-  const dataRate =
-    durationMs > 0 ? formatBytes(stats.totalBytes / (durationMs / 1000)) : "N/A"
+  const summary = summarizeLatencies(stats.latencies)
+  const opsPerSec = durationMs > 0 ? stats.count / (durationMs / 1000) : 0
+  const bytesPerSec =
+    durationMs > 0 ? stats.totalBytes / (durationMs / 1000) : 0
+  const throughput = durationMs > 0 ? opsPerSec.toFixed(2) : "N/A"
+  const dataRate = durationMs > 0 ? formatBytes(bytesPerSec) : "N/A"
 
   console.log(`\n--- ${name} ---`)
   console.log(`  Count:      ${stats.count} (${stats.errors} errors)`)
   console.log(`  Duration:   ${formatDuration(durationMs)}`)
   console.log(`  Throughput: ${throughput} ops/s, ${dataRate}/s`)
-  if (sorted.length > 0) {
+  if (summary) {
     console.log(
-      `  Latency:    p50=${(sorted[Math.floor(sorted.length * 0.5)] ?? 0).toFixed(0)}ms ` +
-        `p95=${percentile(sorted, 95).toFixed(0)}ms ` +
-        `p99=${percentile(sorted, 99).toFixed(0)}ms`,
+      `  Latency:    p50=${summary.p50.toFixed(0)}ms ` +
+        `p90=${summary.p90.toFixed(0)}ms ` +
+        `p95=${summary.p95.toFixed(0)}ms ` +
+        `p99=${summary.p99.toFixed(0)}ms ` +
+        `min=${summary.min.toFixed(0)}ms ` +
+        `max=${summary.max.toFixed(0)}ms`,
     )
   }
   if (stats.errorsByCode.size > 0) {
@@ -218,6 +267,40 @@ function printPhaseStats(name: string, stats: PhaseStats) {
       .join(", ")
     console.log(`  Errors:     ${codes}`)
   }
+
+  collectedReports.push({
+    name,
+    count: stats.count,
+    errors: stats.errors,
+    durationMs,
+    opsPerSec,
+    bytesPerSec,
+    errorsByCode: Object.fromEntries(stats.errorsByCode),
+    latency: summary,
+    latenciesMs: [...stats.latencies],
+  })
+}
+
+function writeOutputJsonIfRequested() {
+  const out = values["output-json"]
+  if (!out) return
+  const absPath = resolvePath(out)
+  mkdirSync(dirname(absPath), { recursive: true })
+  const payload = {
+    config: {
+      wsUrls,
+      scenario,
+      items: numItems,
+      payloadSize,
+      recipients: numRecipients,
+      concurrency,
+      durationSecs,
+    },
+    reports: collectedReports,
+    generatedAt: new Date().toISOString(),
+  }
+  writeFileSync(absPath, JSON.stringify(payload, null, 2))
+  console.log(`\nWrote results JSON to ${absPath}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -255,11 +338,7 @@ async function hopSubmit(
 
   const result: {
     poolStatus: { entryCount: number; totalBytes: number; maxBytes: number }
-  } = await client.request("hop_submit", [
-    dataHex,
-    recipientHexes,
-    proofHex,
-  ])
+  } = await client.request("hop_submit", [dataHex, recipientHexes, proofHex])
 
   const dataHash = blake2AsU8a(data, 256)
   return { hash: dataHash, poolStatus: result.poolStatus }
@@ -694,7 +773,9 @@ async function runErrorTests() {
   // 6. DataTooLarge -> 1001
   // Note: 64 MiB limit, but sending 65 MiB over WS causes timeouts.
   // Use a smaller size if the pool has a configurable limit, otherwise skip.
-  console.log("  SKIP: DataTooLarge (65 MiB payload too large for WS transport)")
+  console.log(
+    "  SKIP: DataTooLarge (65 MiB payload too large for WS transport)",
+  )
 
   // 7. Invalid hash length
   await expectError("InvalidHashLength", 1008, async () => {
@@ -749,10 +830,12 @@ async function main() {
     }
     case "errors": {
       const ok = await runErrorTests()
+      writeOutputJsonIfRequested()
       process.exit(ok ? 0 : 1)
     }
   }
 
+  writeOutputJsonIfRequested()
   process.exit(0)
 }
 
