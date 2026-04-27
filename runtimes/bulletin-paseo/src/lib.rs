@@ -130,6 +130,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			storage::StorageCallInspector,
 		>,
+		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<Runtime>,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
