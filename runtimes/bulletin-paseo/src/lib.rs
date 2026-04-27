@@ -812,7 +812,7 @@ impl_runtime_apis! {
 	}
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
-		fn can_account_promote(who: AccountId, _data_len: u32) -> bool {
+		fn can_account_promote(_who: AccountId, _data_len: u32) -> bool {
 			// TODO: Tung
 			// let extent = TransactionStorage::account_authorization_extent(who);
 			// extent.expiry > System::blockNumber? or do we have dedicated function?
