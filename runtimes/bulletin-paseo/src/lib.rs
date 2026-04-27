@@ -820,7 +820,7 @@ impl_runtime_apis! {
 		}
 
 		fn create_promotion_extrinsic(_data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
-			todo!("Not yet supported")
+			todo!("Not yet supported: https://github.com/paritytech/polkadot-bulletin-chain/pull/348")
 		}
 
 		fn max_promotion_size() -> u32 {
