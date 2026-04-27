@@ -1028,7 +1028,9 @@ pub mod pallet {
 			});
 		}
 
-		/// Authorize data storage.
+		/// Refresh an existing authorization: extend its expiration and reset `bytes`
+		/// (storage usage) to `0` so the holder regains a fresh `store` allowance for
+		/// the new period.
 		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
@@ -1036,10 +1038,8 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
-					// TODO: Refresh also usage or track TransactionInfo.authorization and when
-					// content removed return back?
-					// TODO: Check and align with ZK voucher slots
-					// here: https://github.com/paritytech/individuality/pull/785
+					// Reset usage so the holder regains a fresh `store` allowance for the
+					// new period.
 					authorization.extent.bytes = 0;
 					Ok(())
 				} else {
