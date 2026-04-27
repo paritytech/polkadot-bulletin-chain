@@ -54,6 +54,7 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn store(l: u32, ) -> Weight;
 	fn renew() -> Weight;
+	fn renew_content_hash() -> Weight;
 	fn check_proof() -> Weight;
 	fn authorize_account() -> Weight;
 	fn refresh_account_authorization() -> Weight;
@@ -61,6 +62,9 @@ pub trait WeightInfo {
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
+	fn process_auto_renewals(n: u32) -> Weight;
+	fn enable_auto_renew() -> Weight;
+	fn disable_auto_renew() -> Weight;
 	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
 }
@@ -103,6 +107,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
+	// TODO: update weights
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(50_939_000, 40351)
+			.saturating_add(T::DbWeight::get().reads(5_u64))
+			.saturating_add(T::DbWeight::get().writes(2_u64))
+	}
 	/// Storage: TransactionStorage ProofChecked (r:1 w:1)
 	/// Proof: TransactionStorage ProofChecked (max_values: Some(1), max_size: Some(1), added: 496, mode: MaxEncodedLen)
 	/// Storage: TransactionStorage StoragePeriod (r:1 w:0)
@@ -139,6 +150,26 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	}
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
+	}
+	// TODO: update weights
+	fn process_auto_renewals(n: u32) -> Weight {
+		// Per-item: 1 read (AutoRenewals) + 1 read (Authorizations) + 1 write (Authorizations)
+		// + 1 write (BlockTransactions) + 1 write (TransactionByContentHash)
+		Weight::from_parts(100_000_000, 40351)
+			.saturating_add(T::DbWeight::get().reads(5_u64).saturating_mul(n as u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64).saturating_mul(n as u64))
+	}
+	// TODO: update weights
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
+	// TODO: update weights
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(1_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
 	fn validate_store(l: u32) -> Weight {
 		T::DbWeight::get().reads_writes(6, 2)
@@ -186,6 +217,12 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(50_939_000, 40351)
+			.saturating_add(RocksDbWeight::get().reads(5_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
+	}
 	/// Storage: TransactionStorage ProofChecked (r:1 w:1)
 	/// Proof: TransactionStorage ProofChecked (max_values: Some(1), max_size: Some(1), added: 496, mode: MaxEncodedLen)
 	/// Storage: TransactionStorage StoragePeriod (r:1 w:0)
@@ -222,6 +259,21 @@ impl WeightInfo for () {
 	}
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
+	}
+	fn process_auto_renewals(n: u32) -> Weight {
+		Weight::from_parts(100_000_000, 40351)
+			.saturating_add(RocksDbWeight::get().reads(5_u64).saturating_mul(n as u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64).saturating_mul(n as u64))
+	}
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(1_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
 	fn validate_store(l: u32) -> Weight {
 		RocksDbWeight::get().reads_writes(6, 2)

@@ -51,6 +51,7 @@ type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
 type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
+type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
@@ -429,6 +430,38 @@ fn stores_various_sizes_with_account_authorization() {
 }
 
 #[test]
+fn renew_content_hash_works() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Renewing a non-existent content hash should fail
+		let bogus_hash = [0u8; 32];
+		assert_noop!(
+			TransactionStorage::renew_content_hash(RuntimeOrigin::none(), bogus_hash),
+			Error::RenewedNotFound,
+		);
+
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+
+		// Verify the content hash map was populated
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((1, 0)));
+
+		run_to_block(6, || None);
+		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+
+		// Map should now point to the new block
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::Renewed {
+			index: 0,
+			content_hash,
+		}));
+	});
+}
+
+#[test]
 fn signed_store_prefers_preimage_authorization_over_account() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -525,6 +558,31 @@ fn signed_store_falls_back_to_account_authorization() {
 }
 
 #[test]
+fn content_hash_map_cleaned_on_expiry() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		assert!(TransactionByContentHash::get(content_hash).is_some());
+
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Advance past storage period; block 1 data expires at block 12
+		run_to_block(12, proof_provider);
+		assert!(TransactionByContentHash::get(content_hash).is_none());
+	});
+}
+
+#[test]
 fn signed_renew_uses_account_authorization() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -562,6 +620,39 @@ fn signed_renew_uses_account_authorization() {
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 			"Account authorization should be consumed for renew when no preimage auth"
 		);
+	});
+}
+
+#[test]
+fn content_hash_map_not_cleaned_if_renewed() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+
+		// Renew at block 6, which updates the map to point to block 6
+		run_to_block(6, || None);
+		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
+
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 || block_num == 16 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Block 1 data expires at block 12, but the map should still point to block 6
+		run_to_block(12, proof_provider);
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
+
+		// Block 6 data expires at block 17
+		run_to_block(17, proof_provider);
+		assert!(TransactionByContentHash::get(content_hash).is_none());
 	});
 }
 
@@ -1295,5 +1386,496 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		// Origin should still be a signed origin (not transformed)
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
+	});
+}
+
+/// Helper: initialize block N with proper extrinsic context for manual on_initialize + dispatch.
+fn init_block(n: u64) {
+	System::set_block_number(n);
+	System::reset_events();
+	// Set extrinsic index so sp_io::transaction_index::renew works
+	unhashed::put::<u32>(b":extrinsic_index", &0);
+	<TransactionStorage as polkadot_sdk_frame::traits::Hooks<u64>>::on_initialize(n);
+}
+
+type AutoRenewals = super::AutoRenewals<Test>;
+type PendingAutoRenewals = super::PendingAutoRenewals<Test>;
+
+#[test]
+fn enable_auto_renew_works() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Authorize and store. Note: store accepts unsigned origin (or the custom
+		// Origin::Authorized set by ValidateStorageCalls extension). Plain signed origin
+		// is rejected by ensure_authorized().
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		// Enable auto-renew
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		// Verify storage
+		let renewal_data = AutoRenewals::get(content_hash).unwrap();
+		assert_eq!(renewal_data.account, who);
+
+		// Verify event
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalEnabled {
+			content_hash,
+			who,
+		}));
+
+		// Enabling again should fail
+		assert_noop!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
+			Error::AutoRenewalAlreadyEnabled,
+		);
+	});
+}
+
+#[test]
+fn enable_auto_renew_rejects_invalid() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+
+		// Enabling for non-existent content hash fails
+		let bogus_hash = blake2_256(&[99u8; 100]);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_noop!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), bogus_hash),
+			Error::RenewedNotFound,
+		);
+
+		// Enabling without account authorization fails
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		let unauthorized_user = 99;
+		assert_noop!(
+			TransactionStorage::enable_auto_renew(
+				RuntimeOrigin::signed(unauthorized_user),
+				content_hash
+			),
+			Error::AuthorizationNotFound,
+		);
+	});
+}
+
+#[test]
+fn disable_auto_renew_works() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let owner = 1;
+		let other = 2;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			owner,
+			10,
+			100_000
+		));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(TransactionStorage::enable_auto_renew(
+			RuntimeOrigin::signed(owner),
+			content_hash,
+		));
+
+		// Another user cannot disable
+		assert_noop!(
+			TransactionStorage::disable_auto_renew(RuntimeOrigin::signed(other), content_hash),
+			Error::NotAutoRenewalOwner,
+		);
+
+		// Owner can disable
+		assert_ok!(TransactionStorage::disable_auto_renew(
+			RuntimeOrigin::signed(owner),
+			content_hash,
+		));
+
+		assert!(AutoRenewals::get(content_hash).is_none());
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalDisabled {
+			content_hash,
+			who: owner,
+		}));
+	});
+}
+
+#[test]
+fn disable_auto_renew_fails_if_not_enabled() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let content_hash = blake2_256(&[99u8; 100]);
+
+		assert_noop!(
+			TransactionStorage::disable_auto_renew(RuntimeOrigin::signed(who), content_hash),
+			Error::AutoRenewalNotEnabled,
+		);
+	});
+}
+
+#[test]
+fn auto_renewal_lifecycle() {
+	new_test_ext().execute_with(|| {
+		// Block 1: store data and enable auto-renew
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		// Verify initial state
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((1, 0)));
+		assert!(Transactions::get(1).is_some());
+
+		// Build proof provider for both the original block and the renewal block
+		let proof_provider = move || {
+			let block_num = System::block_number();
+			let period: u64 = RetentionPeriod::get();
+			let target = block_num.saturating_sub(period);
+			if target > 0 && Transactions::get(target).is_some() {
+				let parent_hash = System::parent_hash();
+				let txs = Transactions::get(target).unwrap();
+				let data_vec: Vec<Vec<u8>> = txs.iter().map(|_| data.clone()).collect();
+				build_proof(parent_hash.as_ref(), data_vec).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Advance to block 11 (retention_period=10, so block 1's data expires at block 12).
+		// At block 12's on_initialize, obsolete = 12 - 10 - 1 = 1, so Transactions(1) is taken.
+		// But we need to provide proof at block 11 for block 1's data.
+		run_to_block(11, proof_provider);
+
+		// Verify data still exists before expiry
+		assert!(Transactions::get(1).is_some());
+
+		// Block 12: on_initialize takes Transactions(1) and populates PendingAutoRenewals.
+		// But run_to_block runs on_initialize + on_finalize. The on_finalize will panic
+		// because PendingAutoRenewals is not empty (no inherent ran).
+		// We need to manually advance and call process_auto_renewals.
+
+		// Advance block number to 12 manually
+		init_block(12);
+
+		// Verify PendingAutoRenewals was populated
+		let pending = PendingAutoRenewals::get();
+		assert_eq!(pending.len(), 1);
+		assert_eq!(pending[0].0, content_hash);
+
+		// Process auto-renewals (simulating the mandatory extrinsic)
+		// Refresh authorization before renewal (AuthorizationPeriod is 10 blocks,
+		// so auth granted at block 1 expired at block 11)
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+
+		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+
+		// Verify PendingAutoRenewals is now empty
+		assert!(PendingAutoRenewals::get().is_empty());
+
+		// Verify data was renewed into the current block
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((12, 0)));
+
+		// Verify event
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: who,
+		}));
+
+		// Verify old Transactions entry was removed and new one exists
+		assert!(Transactions::get(1).is_none());
+
+		// Auto-renewal registration should still exist
+		assert!(AutoRenewals::get(content_hash).is_some());
+	});
+}
+
+#[test]
+fn auto_renewal_consumes_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Authorize with exactly enough for 2 operations (store doesn't consume here,
+		// since it's unsigned, but renew does via process_auto_renewals)
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		let initial_extent = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(initial_extent, AuthorizationExtent { transactions: 3, bytes: 6000 });
+
+		// Trigger expiry at block 12 — refresh auth first (AuthorizationPeriod = 10 blocks)
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
+		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+
+		// Authorization should have been consumed (3-1=2 transactions, 6000-2000=4000 bytes)
+		let after_extent = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(after_extent, AuthorizationExtent { transactions: 2, bytes: 4000 });
+	});
+}
+
+#[test]
+fn auto_renewal_fails_when_authorization_exhausted() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Authorize (needed for enable_auto_renew check)
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		// First renewal at block 12 — refresh with exactly 1 operation worth of auth
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+
+		// Authorization is now fully consumed
+		let extent = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(extent, AuthorizationExtent { transactions: 0, bytes: 0 });
+
+		// Data was renewed to block 12
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((12, 0)));
+
+		// Simulate on_finalize: move BlockTransactions → Transactions(12)
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
+
+		// Second renewal at block 23 (12 + 10 + 1) — should fail
+		// We need block 23 because: obsolete = 23 - 10 - 1 = 12
+		init_block(23);
+		let pending = PendingAutoRenewals::get();
+		assert_eq!(pending.len(), 1, "Should have pending renewal");
+
+		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+
+		// Should have failed — event emitted and auto-renewal removed
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash,
+			account: who,
+		}));
+		assert!(AutoRenewals::get(content_hash).is_none(), "Auto-renewal should be removed");
+	});
+}
+
+#[test]
+fn process_auto_renewals_rejects_signed_origin() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_noop!(
+			TransactionStorage::process_auto_renewals(RuntimeOrigin::signed(1)),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
+fn process_auto_renewals_noop_when_empty() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		// Calling with no pending renewals should succeed (no-op)
+		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert!(PendingAutoRenewals::get().is_empty());
+	});
+}
+
+#[test]
+fn pending_auto_renewals_populated_only_for_registered_items() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data1 = vec![0u8; 2000];
+		let data2 = vec![1u8; 2000];
+		let hash1 = blake2_256(&data1);
+		let _hash2 = blake2_256(&data2);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data1));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data2));
+		run_to_block(2, || None);
+
+		// Only enable auto-renew for hash1, not hash2
+		assert_ok!(TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), hash1,));
+
+		// Trigger expiry
+		init_block(12);
+
+		let pending = PendingAutoRenewals::get();
+		assert_eq!(pending.len(), 1, "Only hash1 should be pending");
+		assert_eq!(pending[0].0, hash1);
+	});
+}
+
+#[test]
+fn auto_renew_permissionless_transfer() {
+	// Alice stores and enables auto-renew, then disables. Bob enables instead.
+	// Anyone can choose to keep data alive on Bulletin, permissionlessly.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let alice = 1;
+		let bob = 2;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Authorize and store as Alice
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000
+		));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		// Alice enables auto-renew
+		assert_ok!(TransactionStorage::enable_auto_renew(
+			RuntimeOrigin::signed(alice),
+			content_hash,
+		));
+		let renewal = AutoRenewals::get(content_hash).unwrap();
+		assert_eq!(renewal.account, alice);
+
+		// Alice disables auto-renew
+		assert_ok!(TransactionStorage::disable_auto_renew(
+			RuntimeOrigin::signed(alice),
+			content_hash,
+		));
+		assert!(AutoRenewals::get(content_hash).is_none());
+
+		// Bob authorizes and enables auto-renew for the same content
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000));
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(bob), content_hash,)
+		);
+
+		let renewal = AutoRenewals::get(content_hash).unwrap();
+		assert_eq!(renewal.account, bob, "Bob should now own the auto-renewal");
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalEnabled {
+			content_hash,
+			who: bob,
+		}));
+	});
+}
+
+#[test]
+fn process_auto_renewals_continues_on_per_item_failure() {
+	// Verify that if one renewal fails (e.g. block full), the remaining items are still processed.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+
+		// Store MaxBlockTransactions items to fill the block later
+		let max_txns = <<Test as crate::Config>::MaxBlockTransactions as Get<u32>>::get();
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			max_txns + 10,
+			100_000_000
+		));
+
+		let mut hashes = Vec::new();
+		for i in 0..3u8 {
+			let data = vec![i; 2000];
+			let content_hash = blake2_256(&data);
+			hashes.push(content_hash);
+			assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		}
+		run_to_block(2, || None);
+
+		// Enable auto-renew for all three
+		for hash in &hashes {
+			assert_ok!(TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), *hash,));
+		}
+
+		// Fill up BlockTransactions so that renewals will hit TooManyTransactions.
+		// We do this by manually inserting items up to (max - 1), leaving room for only 1 renewal.
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			max_txns + 10,
+			100_000_000
+		));
+
+		// Verify PendingAutoRenewals was populated with 3 items
+		let pending = PendingAutoRenewals::get();
+		assert_eq!(pending.len(), 3);
+
+		// Fill block with (max - 1) dummy transactions so only 1 renewal fits
+		BlockTransactions::mutate(|txns| {
+			for _ in 0..(max_txns - 1) {
+				let _ = txns.try_push(TransactionInfo {
+					chunk_root: Default::default(),
+					size: 100,
+					content_hash: [0u8; 32],
+					hashing: crate::HashingAlgorithm::Blake2b256,
+					cid_codec: 0x55,
+					block_chunks: 0,
+				});
+			}
+		});
+
+		// Process auto-renewals — should NOT return an error even though 2 of 3 fail
+		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+
+		// PendingAutoRenewals should be fully consumed
+		assert!(PendingAutoRenewals::get().is_empty());
+
+		// First item should have succeeded (DataAutoRenewed event).
+		// Index is max_txns - 1 because the block already has max_txns - 1 items (0-indexed).
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: max_txns - 1,
+			content_hash: hashes[0],
+			account: who,
+		}));
+
+		// Remaining items should have failed (AutoRenewalFailed events)
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash: hashes[1],
+			account: who,
+		}));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash: hashes[2],
+			account: who,
+		}));
+
+		// Auto-renewal registrations should be removed for failed items
+		assert!(AutoRenewals::get(hashes[1]).is_none());
+		assert!(AutoRenewals::get(hashes[2]).is_none());
 	});
 }
