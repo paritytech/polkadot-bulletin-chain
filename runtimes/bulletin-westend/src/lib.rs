@@ -552,7 +552,7 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_transaction_storage::extension::ValidateStorageCalls::<
+			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
 				Runtime,
 				storage::StorageCallInspector,
 			>::default(),
@@ -580,6 +580,7 @@ construct_runtime!(
 
 		// Storage
 		TransactionStorage: pallet_bulletin_transaction_storage = 40,
+		HopPromotion: pallet_hop_promotion = 41,
 
 		// Collator support. The order of these 5 are important and shall not change.
 		Authorship: pallet_authorship = 20,
@@ -856,7 +857,14 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl sp_hop::HopPromotionApi<Block> for Runtime {
+	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
+		fn can_account_promote(_who: AccountId, _data_len: u32) -> bool {
+			// TODO: Tung
+			// let extent = TransactionStorage::account_authorization_extent(who);
+			// extent.expiry > System::blockNumber? or do we have dedicated function?
+			true
+		}
+
 		fn create_promotion_extrinsic(data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
 			use frame_system::offchain::CreateAuthorizedTransaction;
 			<Runtime as CreateAuthorizedTransaction<pallet_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
@@ -866,7 +874,7 @@ impl_runtime_apis! {
 
 		fn max_promotion_size() -> u32 {
 			use frame_support::traits::Get;
-			<Runtime as pallet_transaction_storage::Config>::MaxTransactionSize::get()
+			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
 		}
 	}
 

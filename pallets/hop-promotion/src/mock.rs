@@ -16,7 +16,7 @@
 //! Test environment for hop-promotion pallet.
 
 use crate as pallet_hop_promotion;
-use pallets_common::NoCurrency;
+use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
 
 type Block = MockBlock<Test>;
@@ -25,7 +25,7 @@ construct_runtime!(
 	pub enum Test
 	{
 		System: frame_system,
-		TransactionStorage: pallet_transaction_storage,
+		TransactionStorage: pallet_bulletin_transaction_storage,
 		HopPromotion: pallet_hop_promotion,
 	}
 );
@@ -48,7 +48,7 @@ parameter_types! {
 /// Use a small max transaction size for test efficiency.
 pub const TEST_MAX_TRANSACTION_SIZE: u32 = 1024;
 
-impl pallet_transaction_storage::Config for Test {
+impl pallet_bulletin_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type Currency = NoCurrency<Self::AccountId, RuntimeHoldReason>;
@@ -63,6 +63,9 @@ impl pallet_transaction_storage::Config for Test {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper =
+		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
 impl pallet_hop_promotion::Config for Test {}
@@ -70,7 +73,7 @@ impl pallet_hop_promotion::Config for Test {}
 pub fn new_test_ext() -> TestExternalities {
 	let t = RuntimeGenesisConfig {
 		system: Default::default(),
-		transaction_storage: pallet_transaction_storage::GenesisConfig::<Test> {
+		transaction_storage: pallet_bulletin_transaction_storage::GenesisConfig::<Test> {
 			retention_period: 10,
 			byte_fee: 0,
 			entry_fee: 0,

@@ -14,45 +14,45 @@ targets = ["x86_64-unknown-linux-gnu"]
 codec = { workspace = true }
 frame-support = { workspace = true }
 frame-system = { workspace = true }
-pallet-transaction-storage = { workspace = true }
+pallet-bulletin-transaction-storage = { workspace = true }
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
 ] }
 scale-info = { features = ["derive"], workspace = true }
 sp-io = { workspace = true }
 sp-runtime = { workspace = true }
-transaction-storage-primitives = { workspace = true }
+bulletin-transaction-storage-primitives = { workspace = true }
 
 [dev-dependencies]
-pallets-common = { workspace = true, features = ["std"] }
+bulletin-pallets-common = { workspace = true, features = ["std"] }
 
 [features]
 default = ["std"]
 std = [
+	"bulletin-pallets-common/std",
+	"bulletin-transaction-storage-primitives/std",
 	"codec/std",
 	"frame-support/std",
 	"frame-system/std",
-	"pallet-transaction-storage/std",
-	"pallets-common/std",
+	"pallet-bulletin-transaction-storage/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
 	"sp-io/std",
 	"sp-runtime/std",
-	"transaction-storage-primitives/std",
 ]
 runtime-benchmarks = [
+	"bulletin-pallets-common/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
-	"pallet-transaction-storage/runtime-benchmarks",
-	"pallets-common/runtime-benchmarks",
+	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 ]
 try-runtime = [
+	"bulletin-pallets-common/try-runtime",
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
-	"pallet-transaction-storage/try-runtime",
-	"pallets-common/try-runtime",
+	"pallet-bulletin-transaction-storage/try-runtime",
 	"polkadot-sdk-frame/try-runtime",
 	"sp-runtime/try-runtime",
 ]

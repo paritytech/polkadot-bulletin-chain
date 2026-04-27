@@ -124,3 +124,5 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
+
+impl pallet_hop_promotion::Config for Runtime {}

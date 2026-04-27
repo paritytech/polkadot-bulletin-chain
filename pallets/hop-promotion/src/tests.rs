@@ -43,7 +43,7 @@ fn promote_rejects_empty_data() {
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 		assert_noop!(
 			HopPromotion::promote(authorized_origin(), vec![]),
-			pallet_transaction_storage::Error::<Test>::BadDataSize,
+			pallet_bulletin_transaction_storage::Error::<Test>::BadDataSize,
 		);
 	});
 }
@@ -58,7 +58,7 @@ fn promote_rejects_oversized_data() {
 				authorized_origin(),
 				vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1]
 			),
-			pallet_transaction_storage::Error::<Test>::BadDataSize,
+			pallet_bulletin_transaction_storage::Error::<Test>::BadDataSize,
 		);
 	});
 }
@@ -168,7 +168,7 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		// Authorize an account for store + renew.
 		let who: u64 = 1;
 		let data = vec![2u8; 100];
-		assert_ok!(pallet_transaction_storage::Pallet::<Test>::authorize_account(
+		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::authorize_account(
 			RuntimeOrigin::root(),
 			who,
 			2,
@@ -176,20 +176,20 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		));
 
 		// Get store priority.
-		let store_call = pallet_transaction_storage::Call::<Test>::store { data: data.clone() };
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
 		let (store_tx, _) =
-			pallet_transaction_storage::Pallet::<Test>::validate_signed(&who, &store_call).unwrap();
+			pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(&who, &store_call).unwrap();
 
 		// Store data so we can renew it.
-		assert_ok!(pallet_transaction_storage::Pallet::<Test>::store(RuntimeOrigin::none(), data,));
+		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::store(RuntimeOrigin::none(), data,));
 
 		// Advance so the stored transaction is available for renew.
 		System::run_to_block::<AllPalletsWithSystem>(3);
 
 		// Get renew priority.
-		let renew_call = pallet_transaction_storage::Call::<Test>::renew { block: 1, index: 0 };
+		let renew_call = pallet_bulletin_transaction_storage::Call::<Test>::renew { block: 1, index: 0 };
 		let (renew_tx, _) =
-			pallet_transaction_storage::Pallet::<Test>::validate_signed(&who, &renew_call).unwrap();
+			pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(&who, &renew_call).unwrap();
 
 		assert!(
 			promote_tx.priority < store_tx.priority,

@@ -516,6 +516,60 @@ impl pallet_utility::Config for Runtime {
 	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
 }
 
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type RuntimeCall = RuntimeCall;
+}
+
+impl<C> frame_system::offchain::CreateBare<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
+		UncheckedExtrinsic::new_bare(call)
+	}
+}
+
+impl<C> frame_system::offchain::CreateTransaction<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extension = TxExtension;
+
+	fn create_transaction(call: RuntimeCall, extension: TxExtension) -> UncheckedExtrinsic {
+		generic::UncheckedExtrinsic::new_transaction(call, extension)
+	}
+}
+
+impl<C> frame_system::offchain::CreateAuthorizedTransaction<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_extension() -> Self::Extension {
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
+			frame_system::AuthorizeCall::<Runtime>::new(),
+			frame_system::CheckNonZeroSender::<Runtime>::new(),
+			frame_system::CheckSpecVersion::<Runtime>::new(),
+			frame_system::CheckTxVersion::<Runtime>::new(),
+			frame_system::CheckGenesis::<Runtime>::new(),
+			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+			frame_system::CheckNonce::<Runtime>::from(0),
+			frame_system::CheckWeight::<Runtime>::new(),
+			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+			),
+			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+				Runtime,
+				storage::StorageCallInspector,
+			>::default(),
+			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		))
+	}
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
 	pub enum Runtime
@@ -535,6 +589,7 @@ construct_runtime!(
 
 		// Storage
 		TransactionStorage: pallet_bulletin_transaction_storage = 40,
+		HopPromotion: pallet_hop_promotion = 41,
 
 		// Collator support. The order of these 5 are important and shall not change.
 		Authorship: pallet_authorship = 20,
@@ -819,8 +874,11 @@ impl_runtime_apis! {
 			true
 		}
 
-		fn create_promotion_extrinsic(_data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
-			todo!("Not yet supported: https://github.com/paritytech/polkadot-bulletin-chain/pull/348")
+		fn create_promotion_extrinsic(data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
+			use frame_system::offchain::CreateAuthorizedTransaction;
+			<Runtime as CreateAuthorizedTransaction<pallet_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
+				pallet_hop_promotion::Call::<Runtime>::promote { data }.into(),
+			)
 		}
 
 		fn max_promotion_size() -> u32 {

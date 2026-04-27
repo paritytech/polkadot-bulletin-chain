@@ -2019,6 +2019,7 @@ dependencies = [
  "pallet-balances",
  "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
+ "pallet-hop-promotion",
  "pallet-message-queue",
  "pallet-session",
  "pallet-skip-feeless-payment",
@@ -8159,16 +8160,16 @@ dependencies = [
 name = "pallet-hop-promotion"
 version = "0.1.0"
 dependencies = [
+ "bulletin-pallets-common",
+ "bulletin-transaction-storage-primitives",
  "frame-support",
  "frame-system",
- "pallet-transaction-storage",
- "pallets-common",
+ "pallet-bulletin-transaction-storage",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
  "sp-io",
  "sp-runtime",
- "transaction-storage-primitives",
 ]
 
 [[package]]

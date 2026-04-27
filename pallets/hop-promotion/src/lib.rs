@@ -33,22 +33,22 @@ mod tests;
 #[frame_support::pallet]
 pub mod pallet {
 	use alloc::vec::Vec;
+	use bulletin_transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_transaction_storage::WeightInfo as _;
-	use transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
+	use pallet_bulletin_transaction_storage::WeightInfo as _;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config + pallet_transaction_storage::Config {}
+	pub trait Config: frame_system::Config + pallet_bulletin_transaction_storage::Config {}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::call_index(0)]
 		#[pallet::weight(
-			<T as pallet_transaction_storage::Config>::WeightInfo::store(data.len() as u32)
+			<T as pallet_bulletin_transaction_storage::Config>::WeightInfo::store(data.len() as u32)
 		)]
 		#[pallet::authorize(|source, data: &Vec<u8>| {
 			if matches!(source, TransactionSource::External) {
@@ -56,7 +56,7 @@ pub mod pallet {
 			}
 			if data.is_empty() ||
 				data.len() >
-					<T as pallet_transaction_storage::Config>::MaxTransactionSize::get() as usize
+					<T as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get() as usize
 			{
 				return Err(InvalidTransaction::Custom(0).into());
 			}
@@ -74,7 +74,7 @@ pub mod pallet {
 		#[pallet::weight_of_authorize(Weight::zero())]
 		pub fn promote(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
 			ensure_authorized(origin)?;
-			pallet_transaction_storage::Pallet::<T>::do_store(
+			pallet_bulletin_transaction_storage::Pallet::<T>::do_store(
 				data,
 				HashingAlgorithm::Blake2b256,
 				RAW_CODEC,

@@ -39,6 +39,7 @@ bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
+pallet-hop-promotion = { path = "pallets/hop-promotion", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "46.0.0", default-features = false }
@@ -120,8 +121,8 @@ members = [
 	"pallets/common",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
-	"runtimes/bulletin-paseo",
 	"primitives/hop",
+	"runtimes/bulletin-paseo",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
