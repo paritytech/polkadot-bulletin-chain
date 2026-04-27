@@ -142,7 +142,7 @@ jobs:
           NAME: bulletin-pallets-common
           VERSION: ${{ inputs.common_version }}
         run: |
-          status=$(curl -sfo /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          status=$(curl -so /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
@@ -156,7 +156,7 @@ jobs:
           NAME: bulletin-transaction-storage-primitives
           VERSION: ${{ inputs.primitives_version }}
         run: |
-          status=$(curl -sfo /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          status=$(curl -so /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
@@ -178,7 +178,7 @@ jobs:
           NAME: pallet-bulletin-transaction-storage
           VERSION: ${{ inputs.pallet_version }}
         run: |
-          status=$(curl -sfo /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          status=$(curl -so /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
           if [ "$status" = "200" ]; then
             echo "$NAME $VERSION already on crates.io — skipping"
           else
