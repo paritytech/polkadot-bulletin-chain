@@ -584,7 +584,7 @@ fn signed_renew_prefers_preimage_authorization() {
 		let content_hash = blake2_256(&data);
 
 		// Setup: store data using account authorization.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2000));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
 		let store_call = Call::store { data };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
@@ -592,24 +592,23 @@ fn signed_renew_prefers_preimage_authorization() {
 		// Account auth now at the cap (still present, just fully used).
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 }
 		);
 
 		run_to_block(3, || None);
 
-		// Authorize preimage and extend account auth for renew.
+		// Authorize preimage.
 		assert_ok!(TransactionStorage::authorize_preimage(
 			RuntimeOrigin::root(),
 			content_hash,
 			2000
 		));
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2000));
 
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
 			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
-		// Account auth was re-granted; `bytes_allowance` grew by 2000, `bytes` (used) preserved.
+		// Account auth was unaffected by the preimage authorize.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 }
@@ -1289,7 +1288,7 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 }
 
 #[test]
-fn authorize_account_does_not_push_expiry() {
+fn re_authorize_account_replaces_allowance_and_keeps_expiry() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
@@ -1297,12 +1296,13 @@ fn authorize_account_does_not_push_expiry() {
 		// Initial authorization at block 1: expires at block 1 + 10 = 11.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2000));
 
-		// Extend at block 5: expiration should stay at 11, not move to 15.
+		// Re-authorize at block 5: expiration should stay at 11, not move to 15. The new
+		// allowance replaces the old one (no addition).
 		run_to_block(5, || None);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 3000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 1000 },
 		);
 
 		// Still valid at block 10.

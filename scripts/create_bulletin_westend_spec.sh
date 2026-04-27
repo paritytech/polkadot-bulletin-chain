@@ -12,7 +12,7 @@ cargo build --release -p bulletin-westend-runtime
 cd "$ROOT_DIR"
 
 chain-spec-builder create \
-        -p 2487 \
+        -p 1010 \
         -c westend \
         -i bulletin-westend \
         -n Bulletin \
