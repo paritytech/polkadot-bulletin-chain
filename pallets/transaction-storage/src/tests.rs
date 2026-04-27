@@ -86,7 +86,7 @@ fn uses_account_authorization() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), caller, 2001));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2001 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2001 }
 		);
 		let call = Call::store { data: vec![0u8; 2000] };
 		// A caller without any Authorization entry is still rejected.
@@ -97,7 +97,7 @@ fn uses_account_authorization() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&caller, &call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2001 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2001 }
 		);
 		// A second store that overshoots the allowance no longer rejects; `bytes` saturates
 		// upward and the entry stays put.
@@ -105,7 +105,7 @@ fn uses_account_authorization() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&caller, &call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
-			AuthorizationExtent { bytes: 2002, bytes_allowance: 2001 }
+			AuthorizationExtent { bytes: 2002, bytes_permanent: 0, bytes_allowance: 2001 }
 		);
 	});
 }
@@ -119,7 +119,7 @@ fn uses_preimage_authorization() {
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2002));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2002 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2002 }
 		);
 		// Data with a non-matching hash has no preimage auth → rejected.
 		let call = Call::store { data: vec![1; 2000] };
@@ -129,17 +129,16 @@ fn uses_preimage_authorization() {
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2002 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2002 }
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
-		// Renew also uses the same preimage auth; it still exists so no rejection even
-		// though the used counter is pushed over the cap.
+		// Renew also uses the same preimage auth; it bumps `bytes_permanent` rather than `bytes`.
 		let call = Call::renew { block: 1, index: 0 };
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { bytes: 4000, bytes_allowance: 2002 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 2000, bytes_allowance: 2002 }
 		);
 	});
 }
@@ -267,7 +266,7 @@ fn authorization_expires() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		let call = Call::store { data: vec![0; 2000] };
 		assert_ok!(TransactionStorage::validate_signed(&who, &call));
@@ -275,14 +274,14 @@ fn authorization_expires() {
 		// validate_signed does not consume — extent unchanged.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		assert_ok!(TransactionStorage::validate_signed(&who, &call));
 		run_to_block(11, || None);
 		// Expired authorizations report as zero extent.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 0 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 0 },
 		);
 		assert_noop!(TransactionStorage::validate_signed(&who, &call), InvalidTransaction::Payment);
 	});
@@ -297,7 +296,7 @@ fn expired_authorization_clears() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		assert!(!System::providers(&who).is_zero());
 
@@ -307,7 +306,7 @@ fn expired_authorization_clears() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 1000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 1000, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 
 		// Can't remove too early
@@ -352,7 +351,7 @@ fn consumed_authorization_stays_over_cap() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		assert!(!System::providers(&who).is_zero());
 
@@ -360,19 +359,19 @@ fn consumed_authorization_stays_over_cap() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 1000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 1000, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		// Second consumption saturates at the cap.
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		// Third consumption pushes `bytes` over the cap but still succeeds.
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 3000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 3000, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 		// Entry is still in storage and the provider reference is still held.
 		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
@@ -398,7 +397,7 @@ fn stores_various_sizes_with_account_authorization() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, total_bytes));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: total_bytes },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: total_bytes },
 		);
 
 		for size in sizes {
@@ -410,7 +409,11 @@ fn stores_various_sizes_with_account_authorization() {
 		// After using exactly the authorized allowance, bytes == bytes_allowance — entry stays.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: total_bytes, bytes_allowance: total_bytes },
+			AuthorizationExtent {
+				bytes: total_bytes,
+				bytes_permanent: 0,
+				bytes_allowance: total_bytes
+			},
 		);
 		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(!System::providers(&who).is_zero());
@@ -455,7 +458,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 4000 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 4000 }
 		);
 
 		// Setup: preimage authorization also exists for the same content
@@ -466,7 +469,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
 
 		// Store the pre-authorized content using a signed transaction
@@ -477,12 +480,12 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		// Preimage auth was used (bytes incremented), account untouched.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2000 },
 			"Preimage authorization should be consumed"
 		);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 4000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 4000 },
 			"Account authorization should remain unchanged"
 		);
 
@@ -492,7 +495,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &other_call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 1000, bytes_allowance: 4000 },
+			AuthorizationExtent { bytes: 1000, bytes_permanent: 0, bytes_allowance: 4000 },
 			"Account authorization should be used for non-pre-authorized content"
 		);
 	});
@@ -510,7 +513,7 @@ fn signed_store_falls_back_to_account_authorization() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 4000 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 4000 }
 		);
 
 		// Setup: preimage authorization exists but for DIFFERENT content
@@ -526,12 +529,12 @@ fn signed_store_falls_back_to_account_authorization() {
 
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 4000 },
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 },
 			"Account authorization should be consumed when no matching preimage auth"
 		);
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(different_hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 1000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 1000 },
 			"Unrelated preimage authorization should remain unchanged"
 		);
 	});
@@ -555,7 +558,7 @@ fn signed_renew_uses_account_authorization() {
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 4000 },
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 },
 		);
 
 		run_to_block(3, || None);
@@ -566,7 +569,7 @@ fn signed_renew_uses_account_authorization() {
 
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 4000, bytes_allowance: 4000 },
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 2000, bytes_allowance: 4000 },
 			"Account authorization should be consumed for renew when no preimage auth"
 		);
 	});
@@ -589,7 +592,7 @@ fn signed_renew_prefers_preimage_authorization() {
 		// Account auth now at the cap (still present, just fully used).
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
 
 		run_to_block(3, || None);
@@ -604,12 +607,12 @@ fn signed_renew_prefers_preimage_authorization() {
 
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
 		// Account auth was re-granted; `bytes_allowance` grew by 2000, `bytes` (used) preserved.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 4000 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 }
 		);
 
 		// Renew using signed transaction - should prefer preimage authorization
@@ -618,12 +621,12 @@ fn signed_renew_prefers_preimage_authorization() {
 
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(content_hash),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 2000, bytes_allowance: 2000 },
 			"Preimage authorization should be consumed for renew"
 		);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 4000 },
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 },
 			"Account authorization should remain unchanged when preimage auth is used"
 		);
 	});
@@ -707,19 +710,19 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(sha2_hash),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 
 		// sha2 preimage consumed to cap; entry stays.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(sha2_hash),
-			AuthorizationExtent { bytes: 2000, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
 		// Blake2 authorization should remain unconsumed.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(blake2_hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 }
 		);
 
 		// Finalize block so Transactions storage is populated.
@@ -732,12 +735,13 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_eq!(txs[0].cid_codec, 0x55);
 		assert_eq!(txs[0].content_hash, sha2_hash);
 
-		// Renew with the sha2 preimage auth still present — succeeds, pushes bytes over cap.
+		// Renew with the sha2 preimage auth still present — succeeds, accumulates on
+		// `bytes_permanent` while leaving `bytes` (store-only) untouched.
 		let renew_call = Call::renew { block: 1, index: 0 };
 		assert_ok!(TransactionStorage::pre_dispatch(&renew_call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(sha2_hash),
-			AuthorizationExtent { bytes: 4000, bytes_allowance: 2000 }
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 2000, bytes_allowance: 2000 }
 		);
 	});
 }
@@ -757,7 +761,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 		}
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 
 		let (vt, _) = TransactionStorage::validate_signed(&who, &call).unwrap();
@@ -773,7 +777,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 4000, bytes_allowance: 2000 },
+			AuthorizationExtent { bytes: 4000, bytes_permanent: 0, bytes_allowance: 2000 },
 		);
 
 		// Now test the preimage-authorized path: signed preimage tags must match unsigned
@@ -1044,8 +1048,8 @@ fn try_state_detects_zero_authorization_allowance() {
 		run_to_block(1, || None);
 
 		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
-		// AuthorizationExtent SCALE layout: bytes(u64), bytes_allowance(u64)
-		let corrupted_auth = (0u64, 0u64, 100u64); // bytes=0, bytes_allowance=0, expiration=100
+		// AuthorizationExtent SCALE layout: bytes(u64), bytes_permanent(u64), bytes_allowance(u64)
+		let corrupted_auth = (0u64, 0u64, 0u64, 100u64); // bytes=0, bytes_permanent=0, bytes_allowance=0, expiration=100
 		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &corrupted_auth.encode());
 
@@ -1189,7 +1193,7 @@ fn authorize_storage_extension_transforms_origin() {
 		// After prepare: 16 bytes used, entry at cap (not removed).
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(caller),
-			AuthorizationExtent { bytes: 16, bytes_allowance: 16 },
+			AuthorizationExtent { bytes: 16, bytes_permanent: 0, bytes_allowance: 16 },
 		);
 	});
 }
@@ -1298,7 +1302,7 @@ fn authorize_account_does_not_push_expiry() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1000));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 3000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 3000 },
 		);
 
 		// Still valid at block 10.
@@ -1309,7 +1313,7 @@ fn authorize_account_does_not_push_expiry() {
 		run_to_block(11, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 0 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 0 },
 		);
 		assert_noop!(TransactionStorage::validate_signed(&who, &call), InvalidTransaction::Payment);
 	});
@@ -1331,7 +1335,7 @@ fn authorize_preimage_does_not_push_expiry() {
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 3000));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 3000 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 3000 },
 		);
 
 		// Still valid at block 10.
@@ -1342,7 +1346,56 @@ fn authorize_preimage_does_not_push_expiry() {
 		run_to_block(11, || None);
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { bytes: 0, bytes_allowance: 0 },
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 0 },
+		);
+	});
+}
+
+/// `refresh_account_authorization` resets the temporary `bytes` counter (so users do not
+/// pay for past usage on the new period) but MUST leave `bytes_permanent` untouched —
+/// permanent storage stays on chain across refresh cycles, so its accounting cannot be
+/// erased. See the comment in `refresh_authorization`.
+#[test]
+fn refresh_resets_bytes_but_not_bytes_permanent() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+
+		// Authorize: both counters start at 0.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 4000 },
+		);
+
+		// Store: only `bytes` advances; `bytes_permanent` untouched.
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 0, bytes_allowance: 4000 },
+			"store must only advance `bytes`"
+		);
+
+		run_to_block(3, || None);
+
+		// Renew: only `bytes_permanent` advances; `bytes` untouched.
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { bytes: 2000, bytes_permanent: 2000, bytes_allowance: 4000 },
+			"renew must only advance `bytes_permanent`"
+		);
+
+		// Refresh: `bytes` resets to 0, `bytes_permanent` stays at 2000.
+		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { bytes: 0, bytes_permanent: 2000, bytes_allowance: 4000 },
+			"refresh must not erase permanent-storage accounting"
 		);
 	});
 }

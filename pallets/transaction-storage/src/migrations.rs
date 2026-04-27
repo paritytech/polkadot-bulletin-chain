@@ -329,7 +329,11 @@ pub mod v2 {
 					}
 					migrated = migrated.saturating_add(1);
 					Some(Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance: old.extent.bytes },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							bytes_allowance: old.extent.bytes,
+						},
 						expiration: old.expiration,
 					})
 				},

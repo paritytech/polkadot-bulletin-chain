@@ -93,14 +93,17 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 /// Authorization has not expired.
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
-/// Byte-usage state of an authorization. `bytes` accumulates upward as data is stored;
-/// `bytes_allowance` is the cap set at grant time.
+/// Byte-usage state of an authorization. `bytes` accumulates as data is stored via `store`
+/// (temporary storage); `bytes_permanent` accumulates as data is renewed via `renew`
+/// (permanent storage). `bytes_allowance` is the cap set at grant time, shared across both.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
 pub struct AuthorizationExtent {
-	/// Bytes consumed so far.
+	/// Bytes consumed by `store` calls (temporary storage).
 	pub bytes: u64,
+	/// Bytes consumed by `renew` calls (permanent storage).
+	pub bytes_permanent: u64,
 	/// Total byte allowance granted.
 	pub bytes_allowance: u64,
 }
@@ -812,7 +815,11 @@ pub mod pallet {
 				Authorizations::<T>::insert(
 					&scope,
 					Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance: *bytes_allowance },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							bytes_allowance: *bytes_allowance,
+						},
 						expiration,
 					},
 				);
@@ -823,7 +830,11 @@ pub mod pallet {
 				Authorizations::<T>::insert(
 					&scope,
 					Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance: *bytes_allowance },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							bytes_allowance: *bytes_allowance,
+						},
 						expiration,
 					},
 				);
@@ -1005,7 +1016,11 @@ pub mod pallet {
 				if let Some(authorization) = maybe_authorization {
 					if Self::expired(authorization.expiration) {
 						*authorization = Authorization {
-							extent: AuthorizationExtent { bytes: 0, bytes_allowance },
+							extent: AuthorizationExtent {
+								bytes: 0,
+								bytes_permanent: 0,
+								bytes_allowance,
+							},
 							expiration,
 						};
 					} else {
@@ -1020,7 +1035,11 @@ pub mod pallet {
 					}
 				} else {
 					*maybe_authorization = Some(Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							bytes_allowance,
+						},
 						expiration,
 					});
 					Self::authorization_added(&scope);
@@ -1028,7 +1047,10 @@ pub mod pallet {
 			});
 		}
 
-		/// Authorize data storage.
+		/// Refresh an existing authorization: extend its expiration and reset `bytes`
+		/// (temporary `store` usage) to `0`. `bytes_permanent` is intentionally NOT reset —
+		/// renewed data stays on chain across refresh cycles, so clearing it would let the
+		/// holder commit unbounded permanent storage by refreshing.
 		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
@@ -1036,11 +1058,11 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
-					// TODO: Refresh also usage or track TransactionInfo.authorization and when
-					// content removed return back?
-					// TODO: Check and align with ZK voucher slots
-					// here: https://github.com/paritytech/individuality/pull/785
+					// Reset temporary-storage usage so the holder regains a fresh `store`
+					// allowance for the new period.
 					authorization.extent.bytes = 0;
+					// IMPORTANT: `bytes_permanent` MUST NOT be reset here. See the
+					// function-level docs above.
 					Ok(())
 				} else {
 					// No previous authorization to refresh.
@@ -1061,10 +1083,10 @@ pub mod pallet {
 
 		fn authorization_extent(scope: AuthorizationScopeFor<T>) -> AuthorizationExtent {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
-				return AuthorizationExtent { bytes: 0, bytes_allowance: 0 };
+				return AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 0 };
 			};
 			if Self::expired(authorization.expiration) {
-				AuthorizationExtent { bytes: 0, bytes_allowance: 0 }
+				AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 0 }
 			} else {
 				authorization.extent
 			}
@@ -1155,13 +1177,15 @@ pub mod pallet {
 		/// Check that authorization exists for data of the given size.
 		///
 		/// Rejects only if the authorization entry is missing or expired — never rejects on
-		/// insufficient allowance. If `consume` is `true`, adds `size` to the consumed `bytes`
-		/// counter (saturating); callers can overshoot `bytes_allowance`, in which case the
-		/// [`extension::AllowanceBasedPriority`] boost no longer applies.
+		/// insufficient allowance. If `consume` is `true`, adds `size` (saturating) to either
+		/// `bytes` (when `is_renew` is `false`, i.e. a `store` call) or `bytes_permanent`
+		/// (when `is_renew` is `true`). Callers can overshoot `bytes_allowance`, in which case
+		/// the [`extension::AllowanceBasedPriority`] boost no longer applies.
 		fn check_authorization(
 			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
+			is_renew: bool,
 		) -> Result<(), TransactionValidityError> {
 			let check = |maybe_authorization: &mut Option<Authorization<_>>|
 			 -> Result<(), TransactionValidityError> {
@@ -1172,8 +1196,15 @@ pub mod pallet {
 					return Err(InvalidTransaction::Payment.into())
 				}
 				if consume {
-					authorization.extent.bytes =
-						authorization.extent.bytes.saturating_add(size.into());
+					if is_renew {
+						authorization.extent.bytes_permanent = authorization
+							.extent
+							.bytes_permanent
+							.saturating_add(size.into());
+					} else {
+						authorization.extent.bytes =
+							authorization.extent.bytes.saturating_add(size.into());
+					}
 				}
 				Ok(())
 			};
@@ -1212,6 +1243,7 @@ pub mod pallet {
 			size: usize,
 			content_hash: impl FnOnce() -> ContentHash,
 			context: CheckContext,
+			is_renew: bool,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
 				return Err(BAD_DATA_SIZE.into());
@@ -1227,6 +1259,7 @@ pub mod pallet {
 				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				context.consume_authorization(),
+				is_renew,
 			)?;
 
 			Ok(context
@@ -1243,15 +1276,21 @@ pub mod pallet {
 					data.len(),
 					|| sp_io::hashing::blake2_256(data),
 					context,
+					false,
 				),
-				Call::<T>::store_with_cid_config { cid, data } =>
-					Self::check_store_renew_unsigned(data.len(), || cid.hashing.hash(data), context),
+				Call::<T>::store_with_cid_config { cid, data } => Self::check_store_renew_unsigned(
+					data.len(),
+					|| cid.hashing.hash(data),
+					context,
+					false,
+				),
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					Self::check_store_renew_unsigned(
 						info.size as usize,
 						|| info.content_hash,
 						context,
+						true,
 					)
 				},
 				Call::<T>::remove_expired_account_authorization { who } => {
@@ -1292,18 +1331,18 @@ pub mod pallet {
 			(Option<ValidTransaction>, Option<AuthorizationScopeFor<T>>),
 			TransactionValidityError,
 		> {
-			let (size, content_hash) = match call {
+			let (size, content_hash, is_renew) = match call {
 				Call::<T>::store { data } => {
 					let content_hash = sp_io::hashing::blake2_256(data);
-					(data.len(), content_hash)
+					(data.len(), content_hash, false)
 				},
 				Call::<T>::store_with_cid_config { cid, data } => {
 					let content_hash = cid.hashing.hash(data);
-					(data.len(), content_hash)
+					(data.len(), content_hash, false)
 				},
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					(info.size as usize, info.content_hash)
+					(info.size as usize, info.content_hash, true)
 				},
 				Call::<T>::authorize_account { .. } |
 				Call::<T>::authorize_preimage { .. } |
@@ -1342,6 +1381,7 @@ pub mod pallet {
 				&AuthorizationScope::Preimage(content_hash),
 				size as u32,
 				consume,
+				is_renew,
 			)
 			.is_ok();
 
@@ -1350,6 +1390,7 @@ pub mod pallet {
 					&AuthorizationScope::Account(who.clone()),
 					size as u32,
 					consume,
+					is_renew,
 				)?;
 			}
 
