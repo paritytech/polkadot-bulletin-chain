@@ -19,10 +19,9 @@
 //!
 //! Contains the runtime API trait for HOP — authorization checks and promotion
 //! of ephemeral pool data to on-chain storage.
-//! 
+//!
 //! TODO: remove this module, when released from Polkadot SDK:
 //! https://github.com/paritytech/polkadot-sdk/pull/11662
-
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
