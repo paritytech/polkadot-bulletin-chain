@@ -256,6 +256,10 @@ pub mod pallet {
 		/// Maximum data set in a single transaction in bytes.
 		#[pallet::constant]
 		type MaxTransactionSize: Get<u32>;
+		/// Cap, in bytes, on total permanent storage (via `renew`) committed across
+		/// all authorizations. Tracks chain-wide capacity for permanent data.
+		#[pallet::constant]
+		type MaxPermanentStorageSize: Get<u64>;
 		/// Authorizations expire after this many blocks.
 		#[pallet::constant]
 		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;

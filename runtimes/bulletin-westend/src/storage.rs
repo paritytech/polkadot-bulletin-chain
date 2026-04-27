@@ -24,7 +24,7 @@ use alloc::vec::Vec;
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
-	traits::{Contains, EitherOfDiverse, SortedMembers},
+	traits::{ConstU64, Contains, EitherOfDiverse, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
@@ -33,6 +33,11 @@ use pallet_bulletin_transaction_storage::{
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+
+/// Cap on the total bytes committed to permanent storage (via `renew`) across all
+/// authorizations on this chain. We decided to go with 1.7 TiB.
+pub const MAX_PERMANENT_STORAGE_SIZE: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
+
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
@@ -105,6 +110,7 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
+	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<

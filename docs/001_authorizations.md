@@ -36,3 +36,4 @@ Track the overall space utilisation for permanent storage and act when it's clos
 ## TODO impl
 
 - track when renewed content is expired and return allowance back to the account and decrease bytes_permanent
+- check accounting allowances
