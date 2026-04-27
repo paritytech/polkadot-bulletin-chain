@@ -812,8 +812,9 @@ impl_runtime_apis! {
 	}
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
-		fn can_account_promote(_who: AccountId, _data_len: u32) -> bool {
-			todo!("Not yet supported")
+		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
+			let extent = TransactionStorage::account_authorization_extent(who);
+			extent.transactions > 0 && extent.bytes >= data_len as u64
 		}
 
 		fn create_promotion_extrinsic(_data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
