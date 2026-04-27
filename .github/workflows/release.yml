@@ -24,13 +24,17 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [[ "$TAG" == *-westend ]]; then
-            echo "name=bulletin-westend" >> "$GITHUB_OUTPUT"
-            echo "package=bulletin-westend-runtime" >> "$GITHUB_OUTPUT"
-            echo "path=runtimes/bulletin-westend" >> "$GITHUB_OUTPUT"
+            {
+              echo "name=bulletin-westend"
+              echo "package=bulletin-westend-runtime"
+              echo "path=runtimes/bulletin-westend"
+            } >> "$GITHUB_OUTPUT"
           elif [[ "$TAG" == *-paseo ]]; then
-            echo "name=bulletin-paseo" >> "$GITHUB_OUTPUT"
-            echo "package=bulletin-paseo-runtime" >> "$GITHUB_OUTPUT"
-            echo "path=runtimes/bulletin-paseo" >> "$GITHUB_OUTPUT"
+            {
+              echo "name=bulletin-paseo"
+              echo "package=bulletin-paseo-runtime"
+              echo "path=runtimes/bulletin-paseo"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "Tag $TAG does not end in -westend or -paseo" >&2
             exit 1
