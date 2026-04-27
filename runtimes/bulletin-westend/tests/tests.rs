@@ -200,12 +200,11 @@ fn transaction_storage_runtime_sizes() {
 				who.clone(),
 				oversized
 			));
+			// Re-authorize replaces the existing allowance (does not add). `bytes` (used) is
+			// preserved across re-authorizations.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent {
-					bytes: total_bytes,
-					bytes_allowance: total_bytes + oversized,
-				},
+				AuthorizationExtent { bytes: total_bytes, bytes_allowance: oversized },
 			);
 			let res = construct_and_apply_extrinsic(
 				Some(account.pair()),
