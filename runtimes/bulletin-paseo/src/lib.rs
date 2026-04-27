@@ -811,6 +811,21 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
+		fn can_account_promote(_who: AccountId, _data_len: u32) -> bool {
+			todo!("Not yet supported")
+		}
+
+		fn create_promotion_extrinsic(_data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
+			todo!("Not yet supported")
+		}
+
+		fn max_promotion_size() -> u32 {
+			use frame_support::traits::Get;
+			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
+		}
+	}
+
 	#[cfg(feature = "try-runtime")]
 	impl frame_try_runtime::TryRuntime<Block> for Runtime {
 		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {

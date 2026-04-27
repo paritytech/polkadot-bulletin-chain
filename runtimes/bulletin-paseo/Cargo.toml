@@ -47,6 +47,7 @@ sp-block-builder = { workspace = true }
 sp-consensus-aura = { workspace = true }
 sp-core = { workspace = true }
 sp-genesis-builder = { workspace = true }
+sp-hop = { workspace = true }
 sp-inherents = { workspace = true }
 sp-keyring = { workspace = true }
 sp-offchain = { workspace = true }
@@ -140,6 +141,7 @@ std = [
 	"sp-consensus-aura/std",
 	"sp-core/std",
 	"sp-genesis-builder/std",
+	"sp-hop/std",
 	"sp-inherents/std",
 	"sp-io/std",
 	"sp-keyring/std",
