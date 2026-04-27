@@ -41,7 +41,7 @@ use xcm_emulator::{
 };
 
 /// Bulletin Westend parachain ID.
-pub const BULLETIN_PARA_ID: u32 = 2487;
+pub const BULLETIN_PARA_ID: u32 = 1010;
 
 /// Initial balance for test accounts.
 pub const INITIAL_BALANCE: Balance = 100_000_000_000_000; // 100 WND

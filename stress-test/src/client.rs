@@ -69,11 +69,11 @@ impl Default for BulletinExtrinsicParamsBuilder {
 const MAX_RPC_MESSAGE_SIZE: u32 = 50 * 1024 * 1024;
 
 pub async fn connect(ws_url: &str) -> Result<OnlineClient<BulletinConfig>> {
-	log::debug!("Connecting to {ws_url}");
+	tracing::debug!("Connecting to {ws_url}");
 
 	let rpc_client = connect_ws(ws_url).await?;
 	let client = OnlineClient::<BulletinConfig>::from_rpc_client(rpc_client).await?;
-	log::debug!("Connected to {ws_url}");
+	tracing::debug!("Connected to {ws_url}");
 	Ok(client)
 }
 
