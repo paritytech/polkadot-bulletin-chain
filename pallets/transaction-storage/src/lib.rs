@@ -1458,6 +1458,14 @@ pub mod pallet {
 
 			Ok(())
 		}
+
+		/// Returns true if the given account has an active account authorization.
+		pub fn has_active_account_authorization(who: T::AccountId) -> bool {
+			match Authorizations::<T>::get(AuthorizationScope::Account(who)) {
+				Some(authorization) => !Self::expired(authorization.expiration),
+				None => false,
+			}
+		}
 	}
 }
 

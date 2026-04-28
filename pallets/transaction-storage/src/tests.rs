@@ -20,8 +20,8 @@
 use super::{
 	extension::ValidateStorageCalls,
 	mock::{
-		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, StoreRenewPriority,
-		System, Test, TransactionStorage,
+		new_test_ext, run_to_block, AuthorizationPeriod, RuntimeCall, RuntimeEvent, RuntimeOrigin,
+		StoreRenewPriority, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
 	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
@@ -277,6 +277,19 @@ fn authorization_expires() {
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 		);
 		assert_noop!(TransactionStorage::validate_signed(&who, &call), InvalidTransaction::Payment);
+	});
+}
+
+#[test]
+fn has_active_account_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let expiration = System::block_number().saturating_add(AuthorizationPeriod::get());
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert!(TransactionStorage::has_active_account_authorization(who));
+		run_to_block(expiration, || None);
+		assert!(!TransactionStorage::has_active_account_authorization(who));
 	});
 }
 
