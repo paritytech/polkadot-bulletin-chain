@@ -348,26 +348,26 @@ fn allowance_based_priority_works() {
 			// No authorization → no boost.
 			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
 
-			// Fresh 1000-byte grant → full boost.
+			// In-budget → flat boost (the strategy unit-tests live in the pallet; this
+			// integration test just confirms the wired-up extension reports a boost while
+			// the signer is authorized).
+			let allowance: u64 = 4_000;
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1000,
+				allowance,
 			));
-			assert_eq!(allowance_based_priority(origin.clone(), &store), ALLOWANCE_PRIORITY_BOOST,);
+			assert_eq!(allowance_based_priority(origin.clone(), &store), ALLOWANCE_PRIORITY_BOOST);
 
-			// Consume 750/1000 → 25% remaining → 25% boost.
+			// Consume the entire allowance → over-budget → no boost.
 			assert_ok_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-					data: vec![0u8; 750],
+					data: vec![0u8; allowance as usize],
 				}),
 			));
 			advance_block();
-			assert_eq!(
-				allowance_based_priority(origin.clone(), &store),
-				ALLOWANCE_PRIORITY_BOOST / 4,
-			);
+			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
 
 			// `renew` carries `Origin::Authorized` too, but must not be boosted.
 			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
