@@ -384,15 +384,20 @@ where
 		// `Origin::Authorized` and does consume allowance, but it operates on
 		// already-stored data and shouldn't compete for the same priority slots as
 		// new submissions.
-		if !matches!(inner_call, Call::store { .. } | Call::store_with_cid_config { .. }) {
-			return Ok((ValidTransaction::default(), (), origin));
-		}
+		let this_tx_bytes = match inner_call {
+			Call::store { data } | Call::store_with_cid_config { data, .. } => data.len() as u64,
+			_ => return Ok((ValidTransaction::default(), (), origin)),
+		};
 
 		// `ValidateStorageCalls` earlier in the pipeline rewrites the origin to
 		// `Origin::Authorized`; only the account-scoped variant consumes the caller's allowance.
+		// Boost against the post-this-tx state so a single oversized tx is demoted on entry.
 		let priority = match origin.caller().clone().try_into() {
-			Ok(Origin::<T>::Authorized { who, scope: AuthorizationScope::Account(_) }) =>
-				B::boost(Pallet::<T>::account_authorization_extent(who)),
+			Ok(Origin::<T>::Authorized { who, scope: AuthorizationScope::Account(_) }) => {
+				let mut extent = Pallet::<T>::account_authorization_extent(who);
+				extent.bytes = extent.bytes.saturating_add(this_tx_bytes);
+				B::boost(extent)
+			},
 			_ => 0,
 		};
 
@@ -416,7 +421,7 @@ mod boost_tests {
 	use super::*;
 
 	fn extent(bytes: u64, allowance: u64) -> AuthorizationExtent {
-		AuthorizationExtent { bytes, bytes_allowance: allowance }
+		AuthorizationExtent { bytes, bytes_permanent: 0, bytes_allowance: allowance }
 	}
 
 	const A: u64 = 1_000;
