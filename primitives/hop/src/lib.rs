@@ -36,7 +36,18 @@ sp_api::decl_runtime_apis! {
 		/// Whether `who` may submit a HOP blob of `data_len` bytes for promotion.
 		fn can_account_promote(who: AccountId, data_len: u32) -> bool;
 		/// Construct a general transaction extrinsic for promoting HOP data.
-		fn create_promotion_extrinsic(data: alloc::vec::Vec<u8>) -> Block::Extrinsic;
+		///
+		/// The submitter's `(signer, signature)` over `signing_payload(data, submit_timestamp)`
+		/// (defined in `pallet-hop-promotion` and mirrored byte-for-byte in `sc-hop`) is carried
+		/// as call arguments so the runtime pallet can verify consent on-chain. `submit_timestamp`
+		/// is the wall-clock time (ms since unix epoch) at which the user signed; the pallet
+		/// rejects promotions whose timestamp is too far from the current block time.
+		fn create_promotion_extrinsic(
+			data: alloc::vec::Vec<u8>,
+			signer: sp_runtime::MultiSigner,
+			signature: sp_runtime::MultiSignature,
+			submit_timestamp: u64,
+		) -> Block::Extrinsic;
 		/// Maximum data size per promotion extrinsic.
 		fn max_promotion_size() -> u32;
 	}

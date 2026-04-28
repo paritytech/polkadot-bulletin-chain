@@ -17,7 +17,14 @@
 //!
 //! Promotes near-expiry HOP pool data to permanent chain storage via
 //! `pallet-transaction-storage`. Uses general transactions with
-//! `#[pallet::authorize]` — no signature, no fees, priority 0.
+//! `#[pallet::authorize]` — no signature, no fees, priority 0, and no
+//! debit of the submitter's Bulletin allowance: promotion only lands in
+//! blockspace that would otherwise be unused, so charging the user
+//! would just leave that space empty for no benefit.
+//!
+//! The authorize closure verifies the user's submit-time signature and the
+//! freshness of the submit timestamp, and refuses promotion for accounts
+//! whose Bulletin authorization is missing or expired.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -30,19 +37,64 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+/// Domain separator for `hop_submit` signatures. Must remain byte-identical
+/// to the constant in `sc-hop` (`substrate/client/hop/src/types.rs`).
+pub const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
+
+/// Reconstructs the signing payload that the user signed at submit time.
+///
+/// The bytes must remain identical to the SDK-side construction in `sc-hop`,
+/// otherwise valid promotions will be rejected on chain.
+pub fn signing_payload(data: &[u8], submit_timestamp: u64) -> [u8; 32] {
+	const CTX_LEN: usize = HOP_SUBMIT_CONTEXT.len();
+	let data_hash = sp_io::hashing::blake2_256(data);
+	let mut buf = [0u8; CTX_LEN + 32 + 8];
+	buf[..CTX_LEN].copy_from_slice(HOP_SUBMIT_CONTEXT);
+	buf[CTX_LEN..CTX_LEN + 32].copy_from_slice(&data_hash);
+	buf[CTX_LEN + 32..].copy_from_slice(&submit_timestamp.to_le_bytes());
+	sp_io::hashing::blake2_256(&buf)
+}
+
 #[frame_support::pallet]
 pub mod pallet {
+	use super::signing_payload;
 	use alloc::vec::Vec;
 	use bulletin_transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 	use pallet_bulletin_transaction_storage::WeightInfo as _;
+	use sp_runtime::{
+		traits::{IdentifyAccount, Verify},
+		AccountId32, MultiSignature, MultiSigner,
+	};
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config + pallet_bulletin_transaction_storage::Config {}
+	pub trait Config:
+		frame_system::Config<AccountId = AccountId32>
+		+ pallet_bulletin_transaction_storage::Config
+		+ pallet_timestamp::Config<Moment = u64>
+	{
+		/// Maximum allowable skew (in milliseconds) between the user's
+		/// submit timestamp and the on-chain time when validating a promotion.
+		#[pallet::constant]
+		type SubmitTimestampTolerance: Get<u64>;
+	}
+
+	impl<T: Config> Pallet<T> {
+		/// Returns whether `who` may have a HOP blob promoted on their behalf.
+		///
+		/// Satisfied when the account has an unexpired authorization entry in
+		/// `pallet-bulletin-transaction-storage`, even if its store/renew
+		/// extent has been fully spent. The storage pallet keeps the entry
+		/// around (with zero extent) until expiration so that promotion stays
+		/// available for the rest of the auth window.
+		pub fn can_account_promote(who: &T::AccountId, _data_len: u32) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<T>::account_has_active_authorization(who)
+		}
+	}
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
@@ -50,7 +102,12 @@ pub mod pallet {
 		#[pallet::weight(
 			<T as pallet_bulletin_transaction_storage::Config>::WeightInfo::store(data.len() as u32)
 		)]
-		#[pallet::authorize(|source, data: &Vec<u8>| {
+		#[pallet::authorize(|source,
+			data: &Vec<u8>,
+			signer: &MultiSigner,
+			signature: &MultiSignature,
+			submit_timestamp: &u64,
+		| {
 			if matches!(source, TransactionSource::External) {
 				return Err(InvalidTransaction::Call.into());
 			}
@@ -60,6 +117,27 @@ pub mod pallet {
 			{
 				return Err(InvalidTransaction::Custom(0).into());
 			}
+
+			// Reject signatures whose submit_timestamp is too far from the current block time.
+			let now_ms = pallet_timestamp::Pallet::<T>::get();
+			let skew = now_ms.abs_diff(*submit_timestamp);
+			if skew > T::SubmitTimestampTolerance::get() {
+				return Err(InvalidTransaction::Stale.into());
+			}
+
+			// Account-level authorization check before the expensive signature verify so
+			// unauthorized accounts can't force sr25519 verifies on garbage signatures.
+			let account_id = signer.clone().into_account();
+			if !Pallet::<T>::can_account_promote(&account_id, data.len() as u32) {
+				return Err(InvalidTransaction::BadSigner.into());
+			}
+
+			// Verify the user's signature over (data, submit_timestamp).
+			let payload = signing_payload(data, *submit_timestamp);
+			if !signature.verify(&payload[..], &account_id) {
+				return Err(InvalidTransaction::BadProof.into());
+			}
+
 			Ok((
 				ValidTransaction::with_tag_prefix("HopPromotion")
 					.priority(0)
@@ -72,7 +150,15 @@ pub mod pallet {
 			))
 		})]
 		#[pallet::weight_of_authorize(Weight::zero())]
-		pub fn promote(origin: OriginFor<T>, data: Vec<u8>) -> DispatchResult {
+		// `signer`/`signature`/`submit_timestamp` are validated by the `#[pallet::authorize]`
+		// closure above; the dispatch body trusts them and only runs after authorization.
+		pub fn promote(
+			origin: OriginFor<T>,
+			data: Vec<u8>,
+			_signer: MultiSigner,
+			_signature: MultiSignature,
+			_submit_timestamp: u64,
+		) -> DispatchResult {
 			ensure_authorized(origin)?;
 			pallet_bulletin_transaction_storage::Pallet::<T>::do_store(
 				data,

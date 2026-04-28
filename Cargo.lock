@@ -8165,10 +8165,12 @@ dependencies = [
  "frame-support",
  "frame-system",
  "pallet-bulletin-transaction-storage",
+ "pallet-timestamp",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
  "sp-io",
+ "sp-keyring",
  "sp-runtime",
 ]
 
@@ -13323,6 +13325,7 @@ version = "0.1.0"
 dependencies = [
  "parity-scale-codec",
  "sp-api",
+ "sp-runtime",
 ]
 
 [[package]]

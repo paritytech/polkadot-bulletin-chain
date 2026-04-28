@@ -125,4 +125,12 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
-impl pallet_hop_promotion::Config for Runtime {}
+parameter_types! {
+	/// Maximum allowable skew between the user's submit timestamp and the on-chain
+	/// time when validating a HOP promotion: 48 hours, in milliseconds.
+	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
+}
+
+impl pallet_hop_promotion::Config for Runtime {
+	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+}

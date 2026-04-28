@@ -18,6 +18,7 @@
 use crate as pallet_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
+use sp_runtime::{traits::IdentityLookup, AccountId32};
 
 type Block = MockBlock<Test>;
 
@@ -25,6 +26,7 @@ construct_runtime!(
 	pub enum Test
 	{
 		System: frame_system,
+		Timestamp: pallet_timestamp,
 		TransactionStorage: pallet_bulletin_transaction_storage,
 		HopPromotion: pallet_hop_promotion,
 	}
@@ -35,6 +37,16 @@ impl frame_system::Config for Test {
 	type Nonce = u64;
 	type Block = Block;
 	type BlockHashCount = ConstU64<250>;
+	// Override the default `u64` so `MultiSigner::into_account()` is compatible.
+	type AccountId = AccountId32;
+	type Lookup = IdentityLookup<Self::AccountId>;
+}
+
+impl pallet_timestamp::Config for Test {
+	type Moment = u64;
+	type OnTimestampSet = ();
+	type MinimumPeriod = ConstU64<0>;
+	type WeightInfo = ();
 }
 
 parameter_types! {
@@ -47,6 +59,13 @@ parameter_types! {
 
 /// Use a small max transaction size for test efficiency.
 pub const TEST_MAX_TRANSACTION_SIZE: u32 = 1024;
+
+/// 48 hours in milliseconds.
+pub const TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS: u64 = 48 * 60 * 60 * 1000;
+
+parameter_types! {
+	pub const SubmitTimestampTolerance: u64 = TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS;
+}
 
 impl pallet_bulletin_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
@@ -68,7 +87,9 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
-impl pallet_hop_promotion::Config for Test {}
+impl pallet_hop_promotion::Config for Test {
+	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+}
 
 pub fn new_test_ext() -> TestExternalities {
 	let t = RuntimeGenesisConfig {
@@ -84,4 +105,18 @@ pub fn new_test_ext() -> TestExternalities {
 	.build_storage()
 	.unwrap();
 	t.into()
+}
+
+/// Run to block `n`, advancing pallet-timestamp by 6 seconds per block. Required
+/// for any test that crosses a block boundary because pallet-timestamp's
+/// `on_finalize` panics if `set_timestamp` wasn't called in the current block.
+pub fn run_to_block(n: BlockNumberFor<Test>) {
+	let mut last_ts = pallet_timestamp::Pallet::<Test>::get();
+	System::run_to_block_with::<AllPalletsWithSystem>(
+		n,
+		RunToBlockHooks::default().after_initialize(move |_bn| {
+			last_ts += 6_000;
+			pallet_timestamp::Pallet::<Test>::set_timestamp(last_ts);
+		}),
+	);
 }

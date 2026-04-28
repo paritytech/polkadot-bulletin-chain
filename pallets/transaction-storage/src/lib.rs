@@ -1080,6 +1080,17 @@ pub mod pallet {
 			Self::authorization_extent(AuthorizationScope::Account(who))
 		}
 
+		/// Returns `true` if `who` has an authorization entry that has not yet expired,
+		/// regardless of how much of the extent remains. The entry is only cleared when
+		/// its expiration is reached and someone calls
+		/// [`remove_expired_account_authorization`], so a fully-consumed-but-in-window
+		/// account still counts as active here. HOP promotion uses this to keep
+		/// promoting blobs for an account that has spent all of its store/renew quota.
+		pub fn account_has_active_authorization(who: &T::AccountId) -> bool {
+			Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
+				.is_some_and(|a| !Self::expired(a.expiration))
+		}
+
 		/// Returns the (unused and unexpired) authorization extent for the given content hash.
 		pub fn preimage_authorization_extent(hash: ContentHash) -> AuthorizationExtent {
 			Self::authorization_extent(AuthorizationScope::Preimage(hash))
@@ -1159,13 +1170,17 @@ pub mod pallet {
 
 		/// Check that authorization exists for data of the given size to be stored in a single
 		/// transaction. If `consume` is `true`, the authorization is consumed.
+		///
+		/// The authorization entry is intentionally never removed here when its extent
+		/// reaches zero: a zero-extent unexpired entry is what `account_has_active_authorization`
+		/// reads to grant HOP promotion access for the rest of the auth window. Cleanup
+		/// happens via [`remove_expired_account_authorization`] once the entry expires.
 		fn check_authorization(
 			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
 		) -> Result<(), TransactionValidityError> {
-			// Returns true if authorization was removed
-			let consume_authorization = |maybe_authorization: &mut Option<Authorization<_>>| -> Result<bool, TransactionValidityError> {
+			let consume_authorization = |maybe_authorization: &mut Option<Authorization<_>>| -> Result<(), TransactionValidityError> {
 				let Some(authorization) = maybe_authorization else {
 					return Err(InvalidTransaction::Payment.into())
 				};
@@ -1184,22 +1199,13 @@ pub mod pallet {
 					.checked_sub(size.into())
 					.ok_or(InvalidTransaction::Payment)?;
 
-				// Authorization is sufficient. Remove if _either_ no transactions left or no bytes
-				// left.
-				if transactions == 0 || bytes == 0 {
-					*maybe_authorization = None;
-					Ok(true)
-				} else {
-					authorization.extent.transactions = transactions;
-					authorization.extent.bytes = bytes;
-					Ok(false)
-				}
+				authorization.extent.transactions = transactions;
+				authorization.extent.bytes = bytes;
+				Ok(())
 			};
 
 			if consume {
-				if Authorizations::<T>::mutate(scope, consume_authorization)? {
-					Self::authorization_removed(scope);
-				}
+				Authorizations::<T>::mutate(scope, consume_authorization)?;
 			} else {
 				// Note we call consume_authorization on a temporary; the authorization in storage
 				// is untouched and doesn't actually get consumed

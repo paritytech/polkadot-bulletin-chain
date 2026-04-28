@@ -121,9 +121,11 @@ fn uses_preimage_authorization() {
 		assert_noop!(TransactionStorage::pre_dispatch(&call), InvalidTransaction::Payment);
 		let call = Call::store { data };
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		// Entry persists with the remainder (2002 - 2000 = 2 bytes); the
+		// transaction count is exhausted so further stores still fail.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
-			AuthorizationExtent { transactions: 0, bytes: 0 }
+			AuthorizationExtent { transactions: 0, bytes: 2 }
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
@@ -333,7 +335,7 @@ fn expired_authorization_clears() {
 }
 
 #[test]
-fn consumed_authorization_clears() {
+fn consumed_authorization_persists_with_zero_extent() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
@@ -354,11 +356,24 @@ fn consumed_authorization_clears() {
 			AuthorizationExtent { transactions: 1, bytes: 1000 },
 		);
 		assert!(!System::providers(&who).is_zero());
-		// Consume the remaining amount
+
+		// Consume the remaining amount.
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
-		// Key should be cleared from Authorizations
-		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
-		assert!(System::providers(&who).is_zero());
+		// The entry persists with zero extent so HOP promotion stays available
+		// for the rest of the auth window. Cleanup happens on expiration.
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+		assert!(TransactionStorage::account_has_active_authorization(&who));
+		assert!(!System::providers(&who).is_zero());
+
+		// A subsequent store call still fails — the extent is exhausted.
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			InvalidTransaction::Payment,
+		);
 	});
 }
 
@@ -394,10 +409,14 @@ fn stores_various_sizes_with_account_authorization() {
 			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		}
 
-		// After consuming the authorized sizes, authorization should be removed and providers
-		// cleared
-		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
-		assert!(System::providers(&who).is_zero());
+		// After consuming the authorized sizes, the entry persists with zero extent
+		// (cleared only on expiration) so HOP promotion stays available.
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+		assert!(!System::providers(&who).is_zero());
 
 		// Zero-size data must be rejected
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1));

@@ -15,13 +15,59 @@
 
 //! Tests for hop-promotion pallet.
 
-use crate::mock::*;
+use crate::{mock::*, signing_payload};
 use codec::Encode;
 use frame_support::{assert_noop, assert_ok, traits::Authorize};
-use sp_runtime::transaction_validity::{InvalidTransaction, TransactionSource};
+use sp_keyring::Sr25519Keyring;
+use sp_runtime::{
+	transaction_validity::{InvalidTransaction, TransactionSource},
+	AccountId32, MultiSignature, MultiSigner,
+};
+
+const TEST_TIMESTAMP_MS: u64 = 1_700_000_000_000;
 
 fn authorized_origin() -> RuntimeOrigin {
 	frame_system::Origin::<Test>::Authorized.into()
+}
+
+/// Build a `(signer, signature)` pair where `keyring` signs `signing_payload(data, ts)`.
+fn signed_by(
+	keyring: Sr25519Keyring,
+	data: &[u8],
+	submit_timestamp: u64,
+) -> (MultiSigner, MultiSignature) {
+	let payload = signing_payload(data, submit_timestamp);
+	let sig = keyring.sign(&payload);
+	(MultiSigner::Sr25519(keyring.public()), MultiSignature::Sr25519(sig))
+}
+
+fn dummy_signer_and_sig() -> (MultiSigner, MultiSignature) {
+	(
+		MultiSigner::Sr25519(Sr25519Keyring::Alice.public()),
+		MultiSignature::Sr25519(Default::default()),
+	)
+}
+
+fn authorize_account(who: AccountId32, transactions: u32, bytes: u64) {
+	assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::authorize_account(
+		RuntimeOrigin::root(),
+		who,
+		transactions,
+		bytes,
+	));
+}
+
+fn set_now(ms: u64) {
+	pallet_timestamp::Pallet::<Test>::set_timestamp(ms);
+}
+
+fn make_promote_call(
+	data: Vec<u8>,
+	signer: MultiSigner,
+	signature: MultiSignature,
+	submit_timestamp: u64,
+) -> RuntimeCall {
+	RuntimeCall::HopPromotion(crate::Call::promote { data, signer, signature, submit_timestamp })
 }
 
 // ---- Dispatch tests ----
@@ -32,7 +78,8 @@ fn promote_succeeds_with_valid_data() {
 		System::run_to_block::<AllPalletsWithSystem>(1);
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 		let data = vec![42u8; 100];
-		assert_ok!(HopPromotion::promote(authorized_origin(), data));
+		let (signer, sig) = dummy_signer_and_sig();
+		assert_ok!(HopPromotion::promote(authorized_origin(), data, signer, sig, 0));
 	});
 }
 
@@ -41,8 +88,9 @@ fn promote_rejects_empty_data() {
 	new_test_ext().execute_with(|| {
 		System::run_to_block::<AllPalletsWithSystem>(1);
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
+		let (signer, sig) = dummy_signer_and_sig();
 		assert_noop!(
-			HopPromotion::promote(authorized_origin(), vec![]),
+			HopPromotion::promote(authorized_origin(), vec![], signer, sig, 0),
 			pallet_bulletin_transaction_storage::Error::<Test>::BadDataSize,
 		);
 	});
@@ -53,10 +101,14 @@ fn promote_rejects_oversized_data() {
 	new_test_ext().execute_with(|| {
 		System::run_to_block::<AllPalletsWithSystem>(1);
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
+		let (signer, sig) = dummy_signer_and_sig();
 		assert_noop!(
 			HopPromotion::promote(
 				authorized_origin(),
-				vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1]
+				vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1],
+				signer,
+				sig,
+				0,
 			),
 			pallet_bulletin_transaction_storage::Error::<Test>::BadDataSize,
 		);
@@ -68,31 +120,43 @@ fn promote_rejects_non_authorized_origins() {
 	new_test_ext().execute_with(|| {
 		System::run_to_block::<AllPalletsWithSystem>(1);
 		let data = vec![42u8; 100];
+		let (signer, sig) = dummy_signer_and_sig();
 		assert_noop!(
-			HopPromotion::promote(RuntimeOrigin::none(), data.clone()),
+			HopPromotion::promote(
+				RuntimeOrigin::none(),
+				data.clone(),
+				signer.clone(),
+				sig.clone(),
+				0
+			),
 			sp_runtime::traits::BadOrigin,
 		);
 		assert_noop!(
-			HopPromotion::promote(RuntimeOrigin::signed(1), data.clone()),
+			HopPromotion::promote(
+				RuntimeOrigin::signed(Sr25519Keyring::Alice.to_account_id()),
+				data.clone(),
+				signer.clone(),
+				sig.clone(),
+				0,
+			),
 			sp_runtime::traits::BadOrigin,
 		);
 		assert_noop!(
-			HopPromotion::promote(RuntimeOrigin::root(), data),
+			HopPromotion::promote(RuntimeOrigin::root(), data, signer, sig, 0),
 			sp_runtime::traits::BadOrigin,
 		);
 	});
 }
 
-// ---- Authorize closure tests ----
-
-fn make_promote_call(data: Vec<u8>) -> RuntimeCall {
-	RuntimeCall::HopPromotion(crate::Call::promote { data })
-}
+// ---- Authorize closure: source / data size ----
 
 #[test]
 fn authorize_rejects_external_source() {
 	new_test_ext().execute_with(|| {
-		let call = make_promote_call(vec![1u8; 100]);
+		set_now(TEST_TIMESTAMP_MS);
+		let data = vec![1u8; 100];
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::External),
 			Some(Err(InvalidTransaction::Call.into())),
@@ -101,25 +165,11 @@ fn authorize_rejects_external_source() {
 }
 
 #[test]
-fn authorize_accepts_local_source() {
-	new_test_ext().execute_with(|| {
-		let call = make_promote_call(vec![1u8; 100]);
-		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
-	});
-}
-
-#[test]
-fn authorize_accepts_in_block_source() {
-	new_test_ext().execute_with(|| {
-		let call = make_promote_call(vec![1u8; 100]);
-		assert!(matches!(call.authorize(TransactionSource::InBlock), Some(Ok(_))));
-	});
-}
-
-#[test]
 fn authorize_rejects_empty_data() {
 	new_test_ext().execute_with(|| {
-		let call = make_promote_call(vec![]);
+		set_now(TEST_TIMESTAMP_MS);
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &[], TEST_TIMESTAMP_MS);
+		let call = make_promote_call(vec![], signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
 			Some(Err(InvalidTransaction::Custom(0).into())),
@@ -130,7 +180,10 @@ fn authorize_rejects_empty_data() {
 #[test]
 fn authorize_rejects_oversized_data() {
 	new_test_ext().execute_with(|| {
-		let call = make_promote_call(vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1]);
+		set_now(TEST_TIMESTAMP_MS);
+		let data = vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1];
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
 			Some(Err(InvalidTransaction::Custom(0).into())),
@@ -138,13 +191,217 @@ fn authorize_rejects_oversized_data() {
 	});
 }
 
+// ---- Authorize closure: signature, account, timestamp ----
+
+#[test]
+fn authorize_accepts_valid_signature_and_active_auth() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
+		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
+	});
+}
+
+#[test]
+fn authorize_rejects_bad_signature() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		// Sign different data, then submit with the original data.
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &[7u8; 50], TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_rejects_signer_mismatch() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		// Bob signs, but the call advertises Alice as the signer.
+		let bob_sig = Sr25519Keyring::Bob.sign(&signing_payload(&data, TEST_TIMESTAMP_MS));
+		let call = make_promote_call(
+			data,
+			MultiSigner::Sr25519(Sr25519Keyring::Alice.public()),
+			MultiSignature::Sr25519(bob_sig),
+			TEST_TIMESTAMP_MS,
+		);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_rejects_unauthorized_account() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		// Note: no authorize_account for Alice.
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadSigner.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_accepts_fully_consumed_unexpired_authorization() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+		frame_system::Pallet::<Test>::set_extrinsic_index(0);
+
+		let alice = Sr25519Keyring::Alice.to_account_id();
+		let data = vec![1u8; 100];
+		// Authorize exactly enough for one store call, then spend it.
+		authorize_account(alice.clone(), 1, data.len() as u64);
+		let store_call =
+			pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
+		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::pre_dispatch_signed(
+			&alice,
+			&store_call,
+		));
+
+		// Allowance is fully spent but the entry is still in storage and unexpired,
+		// so HOP promotion is still permitted.
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
+		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
+	});
+}
+
+#[test]
+fn authorize_rejects_expired_account_authorization() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		// Run past the auth period (10 blocks in mock).
+		run_to_block(20);
+
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadSigner.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_rejects_timestamp_too_old() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let stale_ts = TEST_TIMESTAMP_MS - TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS - 1;
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, stale_ts);
+		let call = make_promote_call(data, signer, sig, stale_ts);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::Stale.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_rejects_timestamp_too_far_in_future() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let future_ts = TEST_TIMESTAMP_MS + TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS + 1;
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, future_ts);
+		let call = make_promote_call(data, signer, sig, future_ts);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::Stale.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_accepts_timestamp_at_window_boundary() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let edge_ts = TEST_TIMESTAMP_MS - TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS;
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, edge_ts);
+		let call = make_promote_call(data, signer, sig, edge_ts);
+		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
+	});
+}
+
+#[test]
+fn authorize_rejects_signature_for_different_timestamp() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		// Sign for one timestamp, submit with another (both within window).
+		let signed_ts = TEST_TIMESTAMP_MS;
+		let claimed_ts = TEST_TIMESTAMP_MS - 1_000;
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, signed_ts);
+		let call = make_promote_call(data, signer, sig, claimed_ts);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
 #[test]
 fn authorize_valid_transaction_properties() {
 	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
 		let data = vec![1u8; 100];
-		let call = make_promote_call(data.clone());
-		let result = call.authorize(TransactionSource::Local);
-		let (valid_tx, weight) = result.unwrap().unwrap();
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
+		let (valid_tx, weight) = call.authorize(TransactionSource::Local).unwrap().unwrap();
 		assert_eq!(valid_tx.priority, 0);
 		assert_eq!(valid_tx.longevity, 5);
 		assert!(!valid_tx.propagate);
@@ -158,38 +415,45 @@ fn authorize_valid_transaction_properties() {
 #[test]
 fn promote_has_lower_priority_than_store_and_renew() {
 	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
 		System::run_to_block::<AllPalletsWithSystem>(1);
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 
+		// Authorize Alice for store + renew + promote.
+		let alice = Sr25519Keyring::Alice.to_account_id();
+		let data = vec![2u8; 100];
+		authorize_account(alice.clone(), 2, 2 * data.len() as u64);
+
 		// Get promote priority.
-		let promote_call = make_promote_call(vec![1u8; 100]);
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let promote_call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
 		let (promote_tx, _) = promote_call.authorize(TransactionSource::Local).unwrap().unwrap();
 
-		// Authorize an account for store + renew.
-		let who: u64 = 1;
-		let data = vec![2u8; 100];
-		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::authorize_account(
-			RuntimeOrigin::root(),
-			who,
-			2,
-			2 * data.len() as u64,
-		));
-
 		// Get store priority.
-		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
-		let (store_tx, _) =
-			pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(&who, &store_call).unwrap();
+		let store_call =
+			pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
+		let (store_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
+			&alice,
+			&store_call,
+		)
+		.unwrap();
 
 		// Store data so we can renew it.
-		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::store(RuntimeOrigin::none(), data,));
+		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::store(
+			RuntimeOrigin::none(),
+			data,
+		));
 
 		// Advance so the stored transaction is available for renew.
-		System::run_to_block::<AllPalletsWithSystem>(3);
+		run_to_block(3);
 
-		// Get renew priority.
-		let renew_call = pallet_bulletin_transaction_storage::Call::<Test>::renew { block: 1, index: 0 };
-		let (renew_tx, _) =
-			pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(&who, &renew_call).unwrap();
+		let renew_call =
+			pallet_bulletin_transaction_storage::Call::<Test>::renew { block: 1, index: 0 };
+		let (renew_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
+			&alice,
+			&renew_call,
+		)
+		.unwrap();
 
 		assert!(
 			promote_tx.priority < store_tx.priority,
