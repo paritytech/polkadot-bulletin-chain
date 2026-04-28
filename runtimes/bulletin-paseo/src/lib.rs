@@ -130,7 +130,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			storage::StorageCallInspector,
 		>,
-		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<Runtime>,
+		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
+			Runtime,
+			pallet_bulletin_transaction_storage::extension::FlatBoost,
+		>,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
@@ -564,6 +567,7 @@ mod benches {
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
+		[pallet_transaction_payment, TransactionPayment]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
@@ -813,6 +817,24 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
+		fn can_account_promote(_who: AccountId, _data_len: u32) -> bool {
+			// TODO: Tung
+			// let extent = TransactionStorage::account_authorization_extent(who);
+			// extent.expiry > System::blockNumber? or do we have dedicated function?
+			true
+		}
+
+		fn create_promotion_extrinsic(_data: alloc::vec::Vec<u8>) -> <Block as BlockT>::Extrinsic {
+			todo!("Not yet supported: https://github.com/paritytech/polkadot-bulletin-chain/pull/348")
+		}
+
+		fn max_promotion_size() -> u32 {
+			use frame_support::traits::Get;
+			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
+		}
+	}
+
 	#[cfg(feature = "try-runtime")]
 	impl frame_try_runtime::TryRuntime<Block> for Runtime {
 		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
@@ -888,6 +910,8 @@ impl_runtime_apis! {
 					(keys.keys, keys.proof.encode())
 				}
 			}
+
+			impl pallet_transaction_payment::BenchmarkConfig for Runtime {}
 
 			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;

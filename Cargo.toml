@@ -57,6 +57,7 @@ sp-consensus-babe = { version = "0.47.0", default-features = false }
 sp-consensus-beefy = { version = "29.0.0", default-features = false }
 sp-core = { version = "40.0.0", default-features = false }
 sp-genesis-builder = { version = "0.22.0", default-features = false }
+sp-hop = { version = "0.1.0", default-features = false, path = "primitives/hop" }
 sp-inherents = { version = "41.0.0", default-features = false }
 sp-io = { version = "45.0.0", default-features = false }
 sp-keyring = { version = "46.0.0", default-features = false }
