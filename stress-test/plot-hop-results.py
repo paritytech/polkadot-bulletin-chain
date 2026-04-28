@@ -4,8 +4,8 @@ Render a 2-panel chart from a stress-test --output-file JSON.
 
 Left panel:  throughput (ops/s + MB/s) per payload size.
 Right panel: latency percentile bars stacked as p50 + (p90 - p50) +
-             (p95 - p90) + (p99 - p95). Each band shows the *additional*
-             latency contributed by tightening the percentile.
+             (p99 - p90). Each band shows the *additional* latency
+             contributed by tightening the percentile.
 
 Usage:
   ./plot-hop-results.py results/hop-all.json -o stress-test/hop-results.png
@@ -99,23 +99,19 @@ def main() -> int:
     # ---------------- Right: stacked latency ----------------
     p50 = np.array([duration_ms(r["inclusion_latency"]["p50"]) for r in submits])
     p90 = np.array([
-        duration_ms(r["inclusion_latency"].get("p90", r["inclusion_latency"]["p95"]))
+        duration_ms(r["inclusion_latency"].get("p90", r["inclusion_latency"]["p99"]))
         for r in submits
     ])
-    p95 = np.array([duration_ms(r["inclusion_latency"]["p95"]) for r in submits])
     p99 = np.array([duration_ms(r["inclusion_latency"]["p99"]) for r in submits])
 
     seg_p90 = np.maximum(p90 - p50, 0)
-    seg_p95 = np.maximum(p95 - p90, 0)
-    seg_p99 = np.maximum(p99 - p95, 0)
+    seg_p99 = np.maximum(p99 - p90, 0)
 
     bar_w = 0.55
-    ax_right.bar(x, p50,    bar_w, label="p50", color="#7ac74f")
+    ax_right.bar(x, p50,     bar_w, label="p50", color="#7ac74f")
     ax_right.bar(x, seg_p90, bar_w, bottom=p50,
-                 label="p90", color="#a8d65c")
-    ax_right.bar(x, seg_p95, bar_w, bottom=p50 + seg_p90,
-                 label="p95", color="#f7c948")
-    ax_right.bar(x, seg_p99, bar_w, bottom=p50 + seg_p90 + seg_p95,
+                 label="p90", color="#f7c948")
+    ax_right.bar(x, seg_p99, bar_w, bottom=p50 + seg_p90,
                  label="p99", color="#e57373")
 
     for i, total in enumerate(p99):
@@ -127,7 +123,7 @@ def main() -> int:
     ax_right.set_xticks(x); ax_right.set_xticklabels(labels)
     ax_right.set_xlabel("Payload Size")
     ax_right.set_ylabel("Latency (ms)")
-    ax_right.set_title("Submit Latency (p50 / p90 / p95 / p99)")
+    ax_right.set_title("Submit Latency (p50 / p90 / p99)")
     ax_right.legend(loc="upper left", fontsize=10)
     ax_right.set_ylim(0, max(p99) * 1.15 if p99.size else 1)
     ax_right.grid(True, alpha=0.3, axis="y")
