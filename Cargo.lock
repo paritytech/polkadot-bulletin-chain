@@ -2043,6 +2043,7 @@ dependencies = [
  "sp-consensus-aura",
  "sp-core 40.0.0",
  "sp-genesis-builder",
+ "sp-hop",
  "sp-inherents",
  "sp-io",
  "sp-keyring",
@@ -13295,6 +13296,14 @@ dependencies = [
  "serde_json",
  "sp-api",
  "sp-runtime",
+]
+
+[[package]]
+name = "sp-hop"
+version = "0.1.0"
+dependencies = [
+ "parity-scale-codec",
+ "sp-api",
 ]
 
 [[package]]
