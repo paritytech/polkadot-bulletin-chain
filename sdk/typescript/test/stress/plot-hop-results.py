@@ -46,7 +46,7 @@ def main() -> int:
 
     payloads = [load(p) for p in args.inputs]
 
-    rows = []  # (payload_size, label, ops/s, MB/s, p50, p90, p95, p99)
+    rows = []  # (payload_size, label, ops/s, MB/s, p50, p90, p99)
     for p in payloads:
         cfg = p.get("config", {})
         size = cfg.get("payloadSize", 0)
@@ -66,8 +66,7 @@ def main() -> int:
             rep.get("opsPerSec", 0.0),
             rep.get("bytesPerSec", 0.0) / (1024 ** 2),
             lat.get("p50", 0.0),
-            lat.get("p90", lat.get("p95", 0.0)),
-            lat.get("p95", 0.0),
+            lat.get("p90", lat.get("p99", 0.0)),
             lat.get("p99", 0.0),
         ))
 
@@ -81,8 +80,7 @@ def main() -> int:
     mbs = [r[3] for r in rows]
     p50 = np.array([r[4] for r in rows])
     p90 = np.array([r[5] for r in rows])
-    p95 = np.array([r[6] for r in rows])
-    p99 = np.array([r[7] for r in rows])
+    p99 = np.array([r[6] for r in rows])
 
     fig, (ax_left, ax_right) = plt.subplots(
         1, 2, figsize=(13, 7), gridspec_kw={"width_ratios": [1, 1.2]}
@@ -114,16 +112,13 @@ def main() -> int:
 
     # ---------------- Right: stacked latency ----------------
     seg_p90 = np.maximum(p90 - p50, 0)
-    seg_p95 = np.maximum(p95 - p90, 0)
-    seg_p99 = np.maximum(p99 - p95, 0)
+    seg_p99 = np.maximum(p99 - p90, 0)
 
     bar_w = 0.55
-    ax_right.bar(x, p50,    bar_w, label="p50", color="#7ac74f")
+    ax_right.bar(x, p50,     bar_w, label="p50", color="#7ac74f")
     ax_right.bar(x, seg_p90, bar_w, bottom=p50,
-                 label="p90", color="#a8d65c")
-    ax_right.bar(x, seg_p95, bar_w, bottom=p50 + seg_p90,
-                 label="p95", color="#f7c948")
-    ax_right.bar(x, seg_p99, bar_w, bottom=p50 + seg_p90 + seg_p95,
+                 label="p90", color="#f7c948")
+    ax_right.bar(x, seg_p99, bar_w, bottom=p50 + seg_p90,
                  label="p99", color="#e57373")
 
     for i, total in enumerate(p99):
@@ -135,7 +130,7 @@ def main() -> int:
     ax_right.set_xticks(x); ax_right.set_xticklabels(labels)
     ax_right.set_xlabel("Payload Size")
     ax_right.set_ylabel("Latency (ms)")
-    ax_right.set_title("Submit Latency (p50 / p90 / p95 / p99)")
+    ax_right.set_title("Submit Latency (p50 / p90 / p99)")
     ax_right.legend(loc="upper left", fontsize=10)
     ax_right.set_ylim(0, max(p99) * 1.15 if p99.size else 1)
     ax_right.grid(True, alpha=0.3, axis="y")

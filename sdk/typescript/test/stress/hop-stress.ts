@@ -203,7 +203,6 @@ interface LatencySummary {
   mean: number
   p50: number
   p90: number
-  p95: number
   p99: number
 }
 
@@ -218,7 +217,6 @@ function summarizeLatencies(latencies: number[]): LatencySummary | null {
     mean: sum / sorted.length,
     p50: percentile(sorted, 50),
     p90: percentile(sorted, 90),
-    p95: percentile(sorted, 95),
     p99: percentile(sorted, 99),
   }
 }
@@ -255,7 +253,6 @@ function printPhaseStats(name: string, stats: PhaseStats) {
     console.log(
       `  Latency:    p50=${summary.p50.toFixed(0)}ms ` +
         `p90=${summary.p90.toFixed(0)}ms ` +
-        `p95=${summary.p95.toFixed(0)}ms ` +
         `p99=${summary.p99.toFixed(0)}ms ` +
         `min=${summary.min.toFixed(0)}ms ` +
         `max=${summary.max.toFixed(0)}ms`,
