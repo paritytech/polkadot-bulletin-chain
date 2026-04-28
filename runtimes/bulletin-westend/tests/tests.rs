@@ -359,6 +359,14 @@ fn allowance_based_priority_works() {
 			));
 			assert_eq!(allowance_based_priority(origin.clone(), &store), ALLOWANCE_PRIORITY_BOOST);
 
+			// Eager-compute: a single tx whose size alone would push the signer over the cap
+			// is demoted to `0` boost on entry, even though current `bytes == 0`.
+			let oversized_store =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; allowance as usize + 1],
+				});
+			assert_eq!(allowance_based_priority(origin.clone(), &oversized_store), 0);
+
 			// Consume the entire allowance → over-budget → no boost.
 			assert_ok_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
