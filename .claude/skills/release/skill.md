@@ -13,34 +13,36 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 /release <network>
 ```
 
-**Networks**: `westend`, `paseo`, `pop`, `polkadot`
+**Networks**: `westend`, `paseo`
+
+Each runtime is released independently — one tag triggers one runtime build.
 
 ## Steps
 
 1. **Pre-checks** (optional): `cargo test && cargo clippy --all-targets --all-features --workspace -- -D warnings`
 
 2. **Bump spec_version** in the appropriate runtime file:
-   - westend/paseo/pop: `runtimes/bulletin-westend/src/lib.rs`
-   - polkadot: `runtimes/bulletin-polkadot/src/lib.rs`
+   - westend: `runtimes/bulletin-westend/src/lib.rs`
+   - paseo: `runtimes/bulletin-paseo/src/lib.rs`
 
 3. **Create a PR** with the version bump:
    ```bash
-   git checkout -b bump-<runtime>-spec-version-<VERSION> origin/main
+   git checkout -b bump-<network>-spec-version-<VERSION> origin/main
    git add runtimes/
-   git commit -m "Bump <runtime> spec_version to <VERSION>"
-   git push -u origin bump-<runtime>-spec-version-<VERSION>
-   gh pr create --title "Bump <runtime> spec_version to <VERSION>"
+   git commit -m "Bump <network> spec_version to <VERSION>"
+   git push -u origin bump-<network>-spec-version-<VERSION>
+   gh pr create --title "Bump <network> spec_version to <VERSION>"
    ```
 
-4. **Merge the PR** and **tag the release** on main — `v0.0.X` for testnets, `v1.x.y` for production (see Versioning below):
+4. **Merge the PR** and **tag the release** on main. Tag must end in `-westend` or `-paseo` — the suffix tells CI which runtime to build:
    ```bash
    gh pr merge <PR_NUMBER> --squash
    git checkout main && git pull
-   git tag -a v<VERSION> -m "Release v<VERSION>"
-   git push origin --tags
+   git tag -a v<VERSION>-<network> -m "Release v<VERSION>-<network>"
+   git push origin v<VERSION>-<network>
    ```
 
-5. **Download WASM**: The [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml) builds the WASM artifact. **Note:** CI takes a long time (15-30+ minutes). Do NOT poll or check CI status repeatedly — tell the user you are waiting and ask them to notify you when the release is ready. Once notified, download with: `gh release download <TAG> -p "*.wasm" -D .`
+5. **Download WASM**: The [Release CI](https://github.com/paritytech/polkadot-bulletin-chain/actions/workflows/release.yml) builds the WASM artifact for the runtime matching the tag suffix. **Note:** CI takes a long time (15-30+ minutes). Do NOT poll or check CI status repeatedly — tell the user you are waiting and ask them to notify you when the release is ready. Once notified, download with: `gh release download <TAG> -p "*.wasm" -D .`
 
 6. **Upgrade**: Use the upgrade script in `examples/`:
    ```bash
@@ -59,22 +61,29 @@ Guide the user through runtime releases. Reference `docs/playbook.md` for full d
 node upgrade_runtime.js <seed> <wasm_path> [options]
 
 Options:
-  --network <name>   westend, paseo, pop, polkadot (default: westend)
+  --network <name>   westend, paseo (default: westend)
   --rpc <url>        Custom RPC endpoint
   --verify-only      Only check current version
 ```
 
 ## Versioning Scheme
 
-Two separate version tracks for git tags:
+Each runtime has its own independent tag track, distinguished by suffix:
 
-| Track | Networks | Format | Examples |
-|-------|----------|--------|----------|
-| **Testnet** | westend, paseo | `v0.0.X` | v0.0.4 → v0.0.5 → v0.0.6 |
-| **Production** | polkadot, pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
+| Network  | Format             | Examples                                  |
+|----------|--------------------|-------------------------------------------|
+| westend  | `v0.0.X-westend`   | v0.0.10-westend → v0.0.11-westend         |
+| paseo    | `v0.0.X-paseo`     | v0.0.1-paseo → v0.0.2-paseo               |
 
-- Testnet: increment patch only (`v0.0.X` → `v0.0.X+1`)
-- Production: semver — minor for features, patch for fixes
-- Never mix tracks: no `v0.0.X` for production, no `v1.x.y` for testnets
+- Westend and paseo bump independently — bumping westend does not bump paseo.
+- Bare `vX.Y.Z` tags (no suffix) are not picked up by Release CI and will not produce artifacts.
 
-When determining the next version, check `git tag --sort=-v:refname` to find the latest tag in the appropriate track.
+When determining the next version for a network, filter tags by suffix:
+
+```bash
+# next westend version
+git tag --list 'v*-westend' --sort=-v:refname | head -1
+
+# next paseo version
+git tag --list 'v*-paseo' --sort=-v:refname | head -1
+```

@@ -3,58 +3,74 @@ name: Release
 on:
   push:
     tags:
-      - v[0-9]*
+      - 'v[0-9]*-westend'
+      - 'v[0-9]*-paseo'
 
 permissions: {}
 
 jobs:
-  build-runtimes:
+  build-runtime:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      matrix:
-        include:
-          - name: bulletin-westend
-            package: bulletin-westend-runtime
-            path: runtimes/bulletin-westend
-          - name: bulletin-paseo
-            package: bulletin-paseo-runtime
-            path: runtimes/bulletin-paseo
+    outputs:
+      name: ${{ steps.config.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Build ${{ matrix.name }} runtime
+      - name: Determine runtime from tag
+        id: config
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *-westend ]]; then
+            {
+              echo "name=bulletin-westend"
+              echo "package=bulletin-westend-runtime"
+              echo "path=runtimes/bulletin-westend"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *-paseo ]]; then
+            {
+              echo "name=bulletin-paseo"
+              echo "package=bulletin-paseo-runtime"
+              echo "path=runtimes/bulletin-paseo"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $TAG does not end in -westend or -paseo" >&2
+            exit 1
+          fi
+
+      - name: Build ${{ steps.config.outputs.name }} runtime
         id: srtool_build
         uses: chevdor/srtool-actions@48e9baed50ca414936dfac59d34d8b9bbe581abd # v0.9.2
         env:
           BUILD_OPTS: "--features on-chain-release-build"
         with:
-          chain: ${{ matrix.name }}
-          package: ${{ matrix.package }}
-          runtime_dir: ${{ matrix.path }}
+          chain: ${{ steps.config.outputs.name }}
+          package: ${{ steps.config.outputs.package }}
+          runtime_dir: ${{ steps.config.outputs.path }}
           profile: production
 
       - name: Store srtool digest
         env:
           SRTOOL_JSON: ${{ steps.srtool_build.outputs.json }}
+          NAME: ${{ steps.config.outputs.name }}
         run: |
-          echo "$SRTOOL_JSON" | jq > ${{ matrix.name }}_srtool_output.json
+          echo "$SRTOOL_JSON" | jq > "${NAME}_srtool_output.json"
 
-      - name: Upload ${{ matrix.name }} wasm
+      - name: Upload ${{ steps.config.outputs.name }} wasm
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.name }}-runtime
+          name: ${{ steps.config.outputs.name }}-runtime
           path: |
             ${{ steps.srtool_build.outputs.wasm_compressed }}
-            ${{ matrix.name }}_srtool_output.json
+            ${{ steps.config.outputs.name }}_srtool_output.json
 
   publish-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [build-runtimes]
+    needs: [build-runtime]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -103,6 +119,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
+          name: ${{ needs.build-runtime.outputs.name }} ${{ github.ref_name }}
           files: |
             release-assets/*.wasm
           body_path: RELEASE_NOTES.md
