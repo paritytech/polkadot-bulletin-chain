@@ -380,7 +380,10 @@ where
 		let Some(inner_call) = call.is_sub_type() else {
 			return Ok((ValidTransaction::default(), (), origin));
 		};
-		// Exclude `renew`: it also carries `Origin::Authorized` but doesn't consume allowance.
+		// Only `store` / `store_with_cid_config` get the boost. `renew` also carries
+		// `Origin::Authorized` and does consume allowance, but it operates on
+		// already-stored data and shouldn't compete for the same priority slots as
+		// new submissions.
 		if !matches!(inner_call, Call::store { .. } | Call::store_with_cid_config { .. }) {
 			return Ok((ValidTransaction::default(), (), origin));
 		}
