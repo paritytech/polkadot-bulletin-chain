@@ -3,7 +3,7 @@ import { getWsProvider } from 'polkadot-api/ws-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
-import { authorizeAccount, store, storeChunkedFile, fetchCid } from './api.js';
+import { authorizeAccount, store, storeChunkedFile, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
@@ -47,7 +47,7 @@ async function main() {
         console.log(`💳 Using account: ${whoAddress}`)
 
         // Make sure an account can store data.
-        await authorizeAccount(typedApi, authorizationSigner, whoAddress, 128, BigInt(64 * 1024 * 1024));
+        await authorizeAccount(typedApi, authorizationSigner, whoAddress, 128, BigInt(64 * 1024 * 1024), TX_MODE_FINALIZED_BLOCK);
 
         // Read the file, chunk it, store in Bulletin and return CIDs.
         let { chunks } = await storeChunkedFile(typedApi, whoSigner, filePath, CHUNK_SIZE);
