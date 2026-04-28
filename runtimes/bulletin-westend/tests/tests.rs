@@ -1089,9 +1089,10 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		});
 }
 
-/// Renew calls wrapped in utility/sudo require authorization, same as store.
+/// `renew` is allowed as a direct extrinsic (consuming the caller's account allowance)
+/// but rejected when nested inside utility/sudo wrappers.
 #[test]
-fn wrapped_renew_requires_authorization() {
+fn renew_must_be_direct_extrinsic() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,

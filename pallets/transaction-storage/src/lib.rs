@@ -563,10 +563,13 @@ pub mod pallet {
 		/// Authorize an account to store up to `bytes` of arbitrary data. The authorization
 		/// will expire after a configured number of blocks.
 		///
-		/// If the account is already authorized to store data, this will increase the allowance
-		/// (the cap grows; bytes already consumed are preserved). The expiration block is **not**
-		/// pushed back; use [`refresh_account_authorization`](Self::refresh_account_authorization)
-		/// to extend expiry.
+		/// If the account is already authorized to store data, this **replaces** the allowance
+		/// with `bytes` — it does not add to the existing cap. Bytes already consumed (`bytes`
+		/// and `bytes_permanent`) are preserved, so re-authorizing with a value below current
+		/// usage leaves the holder over-cap until the next refresh. The expiration block is
+		/// **not** pushed back; use
+		/// [`refresh_account_authorization`](Self::refresh_account_authorization) to extend
+		/// expiry.
 		///
 		/// Parameters:
 		///
