@@ -562,6 +562,7 @@ mod benches {
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
+		[pallet_transaction_payment, TransactionPayment]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
@@ -904,6 +905,8 @@ impl_runtime_apis! {
 					(keys.keys, keys.proof.encode())
 				}
 			}
+
+			impl pallet_transaction_payment::BenchmarkConfig for Runtime {}
 
 			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
