@@ -175,7 +175,6 @@ jobs:
         env:
           CMD: ${{ needs.get-pr-info.outputs.CMD }} # to avoid "" around the command
         run: |
-          python3 -m pip install -r scripts/generate-prdoc.requirements.txt
           echo 'help<<EOF' >> $GITHUB_OUTPUT
           python3 scripts/cmd/cmd.py $CMD >> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
@@ -227,26 +226,28 @@ jobs:
   set-image:
     needs: [clean, get-pr-info]
     if: ${{ startsWith(github.event.comment.body, '/cmd') && !contains(github.event.comment.body, '--help') }}
+    uses: ./.github/workflows/set-image.yml
+
+  set-runner:
+    needs: [get-pr-info, set-image]
+    if: ${{ startsWith(github.event.comment.body, '/cmd') && !contains(github.event.comment.body, '--help') }}
     runs-on: ubuntu-latest
     env:
       CMD: ${{ needs.get-pr-info.outputs.CMD }}
+      DEFAULT_IMAGE: ${{ needs.set-image.outputs.CI_IMAGE }}
     outputs:
-      IMAGE: ${{ steps.set-image.outputs.IMAGE }}
-      RUNNER: ${{ steps.set-image.outputs.RUNNER }}
+      IMAGE: ${{ steps.set.outputs.IMAGE }}
+      RUNNER: ${{ steps.set.outputs.RUNNER }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
       - id: set-image
         run: |
           BODY=$(echo "$CMD" | xargs) # remove whitespace
-          IMAGE_OVERRIDE=$(echo $BODY | grep -oe 'docker.io/paritytech/ci-unified:.*\s' | xargs)
-
-          cat .github/env >> $GITHUB_OUTPUT
+          IMAGE_OVERRIDE=$(echo "$BODY" | grep -oe 'docker.io/paritytech/ci-unified:[^[:space:]]*' || true)
 
           if [ -n "$IMAGE_OVERRIDE" ]; then
-              IMAGE=$IMAGE_OVERRIDE
-              echo "IMAGE=$IMAGE" >> $GITHUB_OUTPUT
+              echo "IMAGE=$IMAGE_OVERRIDE" >> $GITHUB_OUTPUT
+          else
+              echo "IMAGE=$DEFAULT_IMAGE" >> $GITHUB_OUTPUT
           fi
 
           if [[ $BODY == "bench"* ]]; then
@@ -256,10 +257,11 @@ jobs:
           else
               echo "RUNNER=ubuntu-latest" >> $GITHUB_OUTPUT
           fi
+
       - name: Print outputs
         run: |
-          echo "RUNNER=${{ steps.set-image.outputs.RUNNER }}"
-          echo "IMAGE=${{ steps.set-image.outputs.IMAGE }}"
+          echo "RUNNER=${{ steps.set.outputs.RUNNER }}"
+          echo "IMAGE=${{ steps.set.outputs.IMAGE }}"
 
   check-pr-author:
     runs-on: ubuntu-latest
@@ -298,10 +300,10 @@ jobs:
             }
 
   run-cmd-workflow:
-    needs: [set-image, get-pr-info, is-org-member, check-pr-author]
+    needs: [set-runner, get-pr-info, is-org-member, check-pr-author]
     runs-on: ubuntu-latest
-    # don't run on help command
-    if: ${{ startsWith(github.event.comment.body, '/cmd') && !contains(github.event.comment.body, '--help') }}
+    # don't run on help; require commenter to be an org member or the PR author
+    if: ${{ startsWith(github.event.comment.body, '/cmd') && !contains(github.event.comment.body, '--help') && (needs.is-org-member.outputs.member == 'true' || needs.check-pr-author.outputs.is_author == 'true') }}
     permissions: # run workflow
       contents: read
       issues: write
@@ -310,8 +312,8 @@ jobs:
     env:
       CMD: ${{ needs.get-pr-info.outputs.CMD }}
       PR_BRANCH: ${{ needs.get-pr-info.outputs.pr-branch }}
-      RUNNER: ${{ needs.set-image.outputs.RUNNER }}
-      IMAGE: ${{ needs.set-image.outputs.IMAGE }}
+      RUNNER: ${{ needs.set-runner.outputs.RUNNER }}
+      IMAGE: ${{ needs.set-runner.outputs.IMAGE }}
       REPO: ${{ needs.get-pr-info.outputs.repo }}
       IS_ORG_MEMBER: ${{ needs.is-org-member.outputs.member }}
       IS_PR_AUTHOR: ${{ needs.check-pr-author.outputs.is_author }}
