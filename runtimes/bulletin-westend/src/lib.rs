@@ -37,6 +37,7 @@ pub mod xcm_config;
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
+use bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo;
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
 use frame_support::{
@@ -806,9 +807,7 @@ impl_runtime_apis! {
 		fn indexed_transactions(
 			block: u32,
 		) -> Option<Vec<bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo>> {
-			use bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo;
-
-			let txs = pallet_bulletin_transaction_storage::Transactions::<Runtime>::get(block)?;
+			let txs = TransactionStorage::transaction_roots(block)?;
 
 			Some(
 				txs.into_iter()

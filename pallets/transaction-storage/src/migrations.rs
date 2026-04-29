@@ -278,4 +278,3 @@ pub mod v1 {
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }
-

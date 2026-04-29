@@ -744,7 +744,7 @@ pub mod pallet {
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
 	#[pallet::getter(fn transaction_roots)]
-	pub type Transactions<T: Config> = StorageMap<
+	pub(super) type Transactions<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		BlockNumberFor<T>,
@@ -944,10 +944,10 @@ pub mod pallet {
 				transactions
 					.try_push(TransactionInfo {
 						chunk_root: root,
+						size: data_len,
 						content_hash: cid.content_hash,
 						hashing,
 						cid_codec,
-						size: data_len,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)

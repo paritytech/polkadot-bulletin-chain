@@ -28,11 +28,9 @@ use super::{
 	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use crate::migrations::{
-	v1::{OldTransactionInfo, V1TransactionInfo},
-};
+use crate::migrations::v1::OldTransactionInfo;
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
-use codec::{Decode, Encode};
+use codec::Encode;
 use polkadot_sdk_frame::{
 	deps::frame_support::{
 		storage::unhashed,
@@ -832,17 +830,6 @@ fn insert_old_format_transactions(block_num: u64, count: u32) {
 	unhashed::put_raw(&key, &bounded.encode());
 }
 
-fn decode_v1_transactions(
-	block_num: u64,
-) -> BoundedVec<V1TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> {
-	let key = Transactions::hashed_key_for(block_num);
-	let raw = unhashed::get_raw(&key).expect("raw bytes exist");
-	BoundedVec::<V1TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>>::decode(
-		&mut &raw[..],
-	)
-	.expect("should decode as v1 transactions")
-}
-
 #[test]
 fn migration_v1_old_entries_only() {
 	new_test_ext().execute_with(|| {
@@ -869,7 +856,8 @@ fn migration_v1_old_entries_only() {
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 
-		let txs1 = decode_v1_transactions(1);
+		// Entries are now directly decodable after v0→v1 (v1 layout matches TransactionInfo)
+		let txs1 = Transactions::get(1).expect("should decode after v1 migration");
 		assert_eq!(txs1.len(), 2);
 		for tx in txs1.iter() {
 			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
@@ -877,10 +865,10 @@ fn migration_v1_old_entries_only() {
 			assert_eq!(tx.size, 2000);
 		}
 
-		let txs2 = decode_v1_transactions(2);
+		let txs2 = Transactions::get(2).expect("should decode");
 		assert_eq!(txs2.len(), 1);
 
-		let txs3 = decode_v1_transactions(3);
+		let txs3 = Transactions::get(3).expect("should decode");
 		assert_eq!(txs3.len(), 3);
 	});
 }
@@ -917,24 +905,16 @@ fn migration_v1_mixed_entries() {
 		assert!(Transactions::get(5).is_none());
 
 		// New-format entry at block 10
-		let new_entry_before = BoundedVec::<
-			TransactionInfo,
-			ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>,
-		>::try_from(vec![TransactionInfo {
-			chunk_root: Default::default(),
-			content_hash: blake2_256(&[42u8; 500]),
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: 500,
-			block_chunks: 1,
-		}])
-		.expect("within bounds");
-		Transactions::insert(10, new_entry_before.clone());
+		run_to_block(10, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![42u8; 500]));
+		run_to_block(11, || None);
+		let new_entry_before = Transactions::get(10).expect("new format decodes");
 
 		// Run migration
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
-		let old_entry_after = decode_v1_transactions(5);
+		// Old entry transformed to v1 format — now directly decodable
+		let old_entry_after = Transactions::get(5).expect("should decode after v1 migration");
 		assert_eq!(old_entry_after.len(), 2);
 
 		// New entry preserved exactly
