@@ -196,7 +196,7 @@ mod benchmarks {
 		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();
 
 		#[extrinsic_call]
-		_(RawOrigin::None, proof);
+		apply_block_inherents(RawOrigin::None, Some(proof));
 
 		assert_last_event::<T>(Event::ProofChecked.into());
 		Ok(())
@@ -493,7 +493,7 @@ mod benchmarks {
 		PendingAutoRenewals::<T>::put(&pending);
 
 		#[extrinsic_call]
-		_(RawOrigin::None);
+		apply_block_inherents(RawOrigin::None, None);
 
 		assert!(PendingAutoRenewals::<T>::get().is_empty());
 		Ok(())
