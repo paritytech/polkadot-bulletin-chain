@@ -38,6 +38,13 @@ use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority
 /// authorizations on this chain. We decided to go with 1.7 TiB.
 pub const MAX_PERMANENT_STORAGE_SIZE: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
 
+/// Length of an authorization period, in seconds.
+///
+/// MUST agree with the People Chain's `LongTermStoragePeriodDuration` (currently 14 days
+/// on next-people-paseo). TODO: replace with a shared primitives constant once the
+/// `bp-bulletin-people` crate lands; for now they are kept in sync by convention.
+pub const PERIOD_DURATION_SECS: u64 = 14 * 24 * 60 * 60;
+
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
@@ -57,7 +64,6 @@ impl SortedMembers<AccountId> for TestAccounts {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 90 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
@@ -111,7 +117,8 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type TimeProvider = pallet_timestamp::Pallet<Runtime>;
+	type PeriodDuration = ConstU64<{ PERIOD_DURATION_SECS }>;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
 			// Root can do whatever.

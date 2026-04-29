@@ -42,8 +42,27 @@ impl frame_system::Config for Test {
 	type BlockHashCount = ConstU64<250>;
 }
 
+/// One period is 10 seconds in tests; small enough that period rollover can be
+/// driven by a single `set_period` jump in any test that cares.
+pub const PERIOD_DURATION: u64 = 10;
+
+std::thread_local! {
+	/// Thread-local mock clock, in seconds since the unix epoch. Tests advance it via
+	/// [`set_period`]; `MockUnixTime` reads it to satisfy the pallet's `TimeProvider`.
+	/// Defaults to 0 so a test that never sets a period still sees `current_period() == 0`.
+	pub(crate) static MOCK_NOW_SECS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `UnixTime` impl backed by [`MOCK_NOW_SECS`]. Avoids pulling in `pallet_timestamp`,
+/// which would require driving the timestamp extrinsic from `run_to_block`.
+pub struct MockUnixTime;
+impl polkadot_sdk_frame::traits::UnixTime for MockUnixTime {
+	fn now() -> core::time::Duration {
+		core::time::Duration::from_secs(MOCK_NOW_SECS.with(|c| c.get()))
+	}
+}
+
 parameter_types! {
-	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
@@ -60,7 +79,8 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type TimeProvider = MockUnixTime;
+	type PeriodDuration = ConstU64<PERIOD_DURATION>;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
@@ -68,6 +88,12 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper = crate::benchmarking::DefaultCheckProofHelper;
+}
+
+/// Set the mock unix-time clock to the start of `period` (i.e., `period * PERIOD_DURATION`
+/// seconds). Tests use this to drive period rollover without churning blocks.
+pub fn set_period(period: u32) {
+	MOCK_NOW_SECS.with(|c| c.set((period as u64) * PERIOD_DURATION));
 }
 
 pub fn new_test_ext() -> TestExternalities {

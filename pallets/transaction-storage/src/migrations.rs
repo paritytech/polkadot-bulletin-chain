@@ -279,28 +279,33 @@ pub mod v1 {
 	}
 }
 
-/// Migration v1→v2: replaces the `AuthorizationExtent` schema.
+/// Migration v1→v2: convert single-grant block-expiry `Authorization` to the two-slot
+/// period-aligned model with the new `AuthorizationExtent` shape.
 ///
-/// Old: `{ transactions: u32, bytes: u64 }` — transaction count and remaining
-/// byte quota.
+/// **Old (v1)**: `{ extent: { transactions: u32, bytes: u64 }, expiration: BlockNumber }`
+/// — the byte quota is "remaining" and `transactions` is "remaining call count".
 ///
-/// New: `{ bytes: u64, bytes_allowance: u64 }` — bytes consumed so far and total
-/// bytes granted.
+/// **New (v2)**: `{ current: Some(PeriodGrant { period, extent: { bytes: 0,
+/// bytes_permanent: 0, bytes_allowance: old.extent.bytes, transactions_used: 0,
+/// transactions_allowance: old.extent.transactions } }), next: None }`. The remaining
+/// byte quota becomes the new period budget; the remaining call count becomes the new
+/// transaction budget. `current.period` is computed from the current timestamp at
+/// upgrade time. `expiration` is dropped — period rollover replaces it.
 ///
-/// The transaction-count quota is dropped. The remaining byte quota becomes the
-/// new total allowance (`bytes_allowance = old.bytes`) with zero consumed
-/// (`bytes = 0`), so each authorization keeps its previous remaining capacity.
-/// Entries whose remaining byte quota is already zero are dropped — they can't
-/// be translated to a valid v2 entry (`check_authorizations_integrity` requires
-/// `bytes_allowance > 0`) and they were already unusable on the old chain.
+/// Entries whose remaining byte quota or remaining call count is zero are dropped:
+/// they were already unusable on v1 and cannot satisfy `check_authorizations_integrity`
+/// on v2 (which requires both allowances to be positive).
 pub mod v2 {
 	use super::*;
 	use crate::{
 		pallet::{Authorizations, Pallet},
-		Authorization, AuthorizationExtent,
+		Authorization, AuthorizationExtent, PeriodGrant,
 	};
-	use polkadot_sdk_frame::deps::frame_support::{
-		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+	use polkadot_sdk_frame::{
+		deps::frame_support::{
+			migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+		},
+		traits::UnixTime,
 	};
 
 	#[derive(Encode, Decode)]
@@ -319,22 +324,40 @@ pub mod v2 {
 
 	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
 		fn on_runtime_upgrade() -> Weight {
+			// Resolve the current period once at upgrade time; every translated entry
+			// inherits this as its `current.period`.
+			let now_secs = T::TimeProvider::now().as_secs();
+			let period_duration = <T as Config>::PeriodDuration::get();
+			let current_period = if period_duration == 0 {
+				// Defensive: integrity_test asserts non-zero, but during a try-runtime
+				// upgrade against pre-config state we want to fall back to 0 rather than
+				// panic.
+				0u32
+			} else {
+				(now_secs / period_duration) as u32
+			};
+
 			let mut migrated: u64 = 0;
 			let mut dropped: u64 = 0;
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					if old.extent.bytes == 0 {
+					if old.extent.bytes == 0 || old.extent.transactions == 0 {
 						dropped = dropped.saturating_add(1);
 						return None;
 					}
 					migrated = migrated.saturating_add(1);
 					Some(Authorization {
-						extent: AuthorizationExtent {
-							bytes: 0,
-							bytes_permanent: 0,
-							bytes_allowance: old.extent.bytes,
-						},
-						expiration: old.expiration,
+						current: Some(PeriodGrant {
+							period: current_period,
+							extent: AuthorizationExtent {
+								bytes: 0,
+								bytes_permanent: 0,
+								bytes_allowance: old.extent.bytes,
+								transactions_used: 0,
+								transactions_allowance: old.extent.transactions,
+							},
+						}),
+						next: None,
 					})
 				},
 			);
@@ -342,7 +365,8 @@ pub mod v2 {
 				target: LOG_TARGET,
 				migrated,
 				dropped,
-				"v1->v2 AuthorizationExtent migration complete",
+				current_period,
+				"v1->v2 Authorization migration complete (two-slot + tx counter)",
 			);
 			// One read + one write per visited entry (translate rewrites or deletes).
 			let touched = migrated.saturating_add(dropped);
@@ -350,7 +374,7 @@ pub mod v2 {
 		}
 	}
 
-	/// Versioned migration v1→v2: replaces `AuthorizationExtent` schema.
+	/// Versioned migration v1→v2: two-slot Authorization with transactions counter.
 	pub type MigrateV1ToV2<T> = VersionedMigration<
 		1,
 		2,

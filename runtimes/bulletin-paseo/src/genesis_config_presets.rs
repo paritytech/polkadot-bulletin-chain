@@ -35,7 +35,7 @@ fn bulletin_paseo_genesis(
 	endowment: Balance,
 	id: ParaId,
 	sudo_account: Option<AccountId>,
-	account_authorizations: Vec<(AccountId, u64)>,
+	account_authorizations: Vec<(AccountId, u32, u64)>,
 ) -> serde_json::Value {
 	build_struct_json_patch!(RuntimeGenesisConfig {
 		balances: BalancesConfig {
@@ -81,8 +81,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
-			// Account authorizations (account, bytes_allowance).
-			vec![(Sr25519Keyring::Alice.to_account_id(), 10 * 1024 * 1024)],
+			// Account authorizations (account, transactions_allowance, bytes_allowance).
+			vec![(Sr25519Keyring::Alice.to_account_id(), 10_000, 10 * 1024 * 1024)],
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_paseo_genesis(
 			// initial collators.
@@ -97,8 +97,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
-			// Account authorizations (account, bytes_allowance).
-			vec![(Sr25519Keyring::Alice.to_account_id(), 10 * 1024 * 1024)],
+			// Account authorizations (account, transactions_allowance, bytes_allowance).
+			vec![(Sr25519Keyring::Alice.to_account_id(), 10_000, 10 * 1024 * 1024)],
 		),
 		_ => return None,
 	};
