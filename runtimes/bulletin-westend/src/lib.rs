@@ -802,6 +802,27 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionsApi<Block> for Runtime {
+		fn indexed_transactions(
+			block: u32,
+		) -> Option<Vec<bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo>> {
+			use bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo;
+
+			let txs = pallet_bulletin_transaction_storage::Transactions::<Runtime>::get(block)?;
+
+			Some(
+				txs.into_iter()
+					.map(|tx| IndexedTransactionInfo {
+						content_hash: tx.content_hash,
+						size: tx.size,
+						hashing: tx.hashing,
+						cid_codec: tx.cid_codec,
+					})
+					.collect(),
+			)
+		}
+	}
+
 	#[cfg(feature = "try-runtime")]
 	impl frame_try_runtime::TryRuntime<Block> for Runtime {
 		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {

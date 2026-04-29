@@ -812,6 +812,27 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionsApi<Block> for Runtime {
+		fn indexed_transactions(
+			block: u32,
+		) -> Option<Vec<bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo>> {
+			use bulletin_transaction_storage_primitives::runtime_api::IndexedTransactionInfo;
+
+			let txs = pallet_bulletin_transaction_storage::Transactions::<Runtime>::get(block)?;
+
+			Some(
+				txs.into_iter()
+					.map(|tx| IndexedTransactionInfo {
+						content_hash: tx.content_hash,
+						size: tx.size,
+						hashing: tx.hashing,
+						cid_codec: tx.cid_codec,
+					})
+					.collect(),
+			)
+		}
+	}
+
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
 		fn can_account_promote(_who: AccountId, _data_len: u32) -> bool {
 			// TODO: Tung
