@@ -565,19 +565,21 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Authorize an account to store up to `bytes` of arbitrary data. The authorization
-		/// will expire after a configured number of blocks.
+		/// Authorize an account to store up to `bytes` of arbitrary data in `transactions`
+		/// boost-tier transactions. The authorization will expire after a configured number
+		/// of blocks.
 		///
 		/// If the account already has an unexpired authorization, this call **adds** `bytes`
-		/// to the existing `bytes_allowance` cap (saturating); the expiration block is **not**
-		/// pushed back, and the consumed `bytes` counter is preserved. Once the authorization
-		/// has expired, the next call replaces it with a fresh one (`bytes` reset to `0`,
-		/// `bytes_allowance = bytes`, expiry = `now + AuthorizationPeriod`).
+		/// and `transactions` to the existing `bytes_allowance` and `transactions_allowance`
+		/// caps (both saturating); the expiration block is **not** pushed back, and the
+		/// consumed counters are preserved. Once the authorization has expired, the next call
+		/// replaces it with a fresh entry (consumed counters reset to `0`, allowances set to
+		/// the new values, expiry = `now + AuthorizationPeriod`).
 		///
 		/// Parameters:
 		///
 		/// - `who`: The account to be credited with an authorization to store data.
-		/// - `_transactions`: The number of transactions that `who` may submit to supply that data.
+		/// - `transactions`: The number of boost-tier transactions that `who` may submit.
 		/// - `bytes`: The number of bytes that `who` may submit.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -677,6 +679,11 @@ pub mod pallet {
 
 		/// Refresh the expiration of an existing authorization for an account.
 		///
+		/// Only the expiration block is updated — consumed counters (`bytes`,
+		/// `transactions`) and the granted caps (`bytes_allowance`,
+		/// `transactions_allowance`) are left untouched. To extend the caps, call
+		/// `authorize_account` instead (additive on the unexpired path).
+		///
 		/// If the account does not have an authorization, the call will fail.
 		///
 		/// Parameters:
@@ -698,6 +705,11 @@ pub mod pallet {
 		}
 
 		/// Refresh the expiration of an existing authorization for a preimage of a BLAKE2b hash.
+		///
+		/// Only the expiration block is updated — consumed counters (`bytes`,
+		/// `transactions`) and the granted caps (`bytes_allowance`,
+		/// `transactions_allowance`) are left untouched. To raise the cap, call
+		/// `authorize_preimage` instead.
 		///
 		/// If the preimage does not have an authorization, the call will fail.
 		///
@@ -1078,8 +1090,10 @@ pub mod pallet {
 			});
 		}
 
-		/// Refresh an existing authorization: extend its expiration and reset the consumed
-		/// counters (`bytes`, `transactions`) to `0` so the holder regains a fresh allowance.
+		/// Refresh an existing authorization by extending its expiration. Consumed counters
+		/// (`bytes`, `transactions`) are left untouched — refresh does not grant additional
+		/// capacity. To extend the caps, call `authorize_account` (additive on the unexpired
+		/// path).
 		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
@@ -1087,9 +1101,6 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
-					// Reset usage so the holder regains a fresh allowance.
-					authorization.extent.bytes = 0;
-					authorization.extent.transactions = 0;
 					Ok(())
 				} else {
 					// No previous authorization to refresh.
