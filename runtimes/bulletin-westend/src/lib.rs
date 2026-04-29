@@ -52,6 +52,7 @@ use frame_system::{
 	limits::{BlockLength, BlockWeights},
 	EnsureRoot,
 };
+use pallet_bulletin_transaction_storage::AuthorizerBudget;
 use pallet_xcm::{EnsureXcm, IsVoiceOfBody};
 use parachains_common::{
 	impls::DealWithFees,
@@ -62,6 +63,7 @@ use parachains_common::{
 use polkadot_runtime_common::{BlockHashCount, SlowAdjustingFeeUpdate};
 use sp_api::impl_runtime_apis;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
+use sp_keyring::Sr25519Keyring;
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 use sp_runtime::{
@@ -88,6 +90,8 @@ use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
 	fees::Error as XcmPaymentApiError,
 };
+
+use crate::storage::EXTRA_AUTHORIZER;
 
 /// The address format for describing accounts.
 pub type Address = MultiAddress<AccountId, ()>;
@@ -154,6 +158,11 @@ pub mod migrations {
 		pallet_bulletin_transaction_storage::migrations::SetRetentionPeriodIfZero<
 			Runtime,
 			pallet_bulletin_transaction_storage::DefaultRetentionPeriod,
+		>,
+		pallet_bulletin_transaction_storage::migrations::PopulateAllowedAuthorizersIfEmpty<
+			Runtime,
+			LegacyAuthorizers,
+			DefaultAuthorizerBudget,
 		>,
 	);
 
@@ -234,6 +243,19 @@ parameter_types! {
 		})
 		.avg_block_initialization(AVERAGE_ON_INITIALIZE_RATIO)
 		.build_or_panic();
+	/// Authorizers that previously had access via the hardcoded `TestAccounts`
+	/// impl (PR #381). Re-seeded into `AllowedAuthorizers` storage by the
+	/// migration below so live deployments don't lose access at upgrade.
+	pub LegacyAuthorizers: Vec<AccountId> = alloc::vec![
+		Sr25519Keyring::Alice.to_account_id(),
+		EXTRA_AUTHORIZER,
+	];
+	/// Default authorizer budget equivalent to the values set in Westend genesis.
+	pub DefaultAuthorizerBudget: AuthorizerBudget<BlockNumber> = AuthorizerBudget {
+		transactions_budget: 100_000,
+		bytes_budget: 100 * 1024 * 1024 * 1024,
+		authorization_period: None,
+	};
 	pub const SS58Prefix: u8 = 42;
 }
 

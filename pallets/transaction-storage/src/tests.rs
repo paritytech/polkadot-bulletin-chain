@@ -24,11 +24,16 @@ use super::{
 		System, Test, TransactionStorage,
 	},
 	pallet::Origin,
-	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
+	AuthorizerBudget, EnsureAllowedAuthorizers, Event, TransactionInfo,
+	AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use crate::migrations::v1::OldTransactionInfo;
+
+use crate::{
+	migrations::{v1::OldTransactionInfo, PopulateAllowedAuthorizersIfEmpty},
+	mock::RuntimeGenesisConfig,
+};
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 use codec::Encode;
 use polkadot_sdk_frame::{
@@ -51,6 +56,14 @@ type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
 type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
+
+fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
+	AuthorizerBudget {
+		transactions_budget: transactions,
+		bytes_budget: bytes,
+		authorization_period: None,
+	}
+}
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
@@ -1299,6 +1312,202 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 }
 
 #[test]
+fn add_authorizer_inserts_into_storage_and_emits_event() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			100,
+			1024 * 1024,
+			None
+		));
+
+		assert!(AllowedAuthorizers::<Test>::contains_key(who));
+		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
+		assert_eq!(budget.transactions_budget, 100);
+		assert_eq!(budget.bytes_budget, 1024 * 1024);
+		assert!(budget.authorization_period.is_none());
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AuthorizerAdded { who }));
+	});
+}
+
+#[test]
+fn remove_authorizer_removes_from_storage_and_emits_event() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(100, 1024));
+
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AuthorizerRemoved {
+			who,
+		}));
+	});
+}
+
+#[test]
+fn add_authorizer_rejects_non_manager_origin() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			TransactionStorage::add_authorizer(RuntimeOrigin::signed(1), 42, 100, 1024, None),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
+fn remove_authorizer_rejects_non_manager_origin() {
+	new_test_ext().execute_with(|| {
+		AllowedAuthorizers::<Test>::insert(42u64, test_budget(100, 1024));
+		assert_noop!(
+			TransactionStorage::remove_authorizer(RuntimeOrigin::signed(1), 42),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
+fn add_authorizer_is_idempotent() {
+	new_test_ext().execute_with(|| {
+		let who = 42u64;
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, 100, 1024, None));
+		// Second call overwrites with same value, still Ok.
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, 200, 2048, None));
+		assert!(AllowedAuthorizers::<Test>::contains_key(who));
+		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
+		assert_eq!(budget.transactions_budget, 200);
+		assert_eq!(budget.bytes_budget, 2048);
+	});
+}
+
+#[test]
+fn remove_authorizer_on_absent_entry_is_ok() {
+	new_test_ext().execute_with(|| {
+		// Not present; remove is still a successful no-op write.
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), 42));
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_accepts_signed_account_in_storage() {
+	new_test_ext().execute_with(|| {
+		let who = 7u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(100, 1024));
+		let origin = RuntimeOrigin::signed(who);
+		assert_eq!(EnsureAllowedAuthorizers::<Test>::try_origin(origin).ok(), Some(who));
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_rejects_signed_account_not_in_storage() {
+	new_test_ext().execute_with(|| {
+		let origin = RuntimeOrigin::signed(99);
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(origin).is_err());
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_rejects_root() {
+	new_test_ext().execute_with(|| {
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::root()).is_err());
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizer_rejects_none() {
+	new_test_ext().execute_with(|| {
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::none()).is_err());
+	});
+}
+
+#[test]
+fn genesis_populates_allowed_authorizers() {
+	let t = RuntimeGenesisConfig {
+		system: Default::default(),
+		transaction_storage: crate::GenesisConfig::<Test> {
+			retention_period: 10,
+			byte_fee: 2,
+			entry_fee: 200,
+			account_authorizations: vec![],
+			preimage_authorizations: vec![],
+			allowed_authorizers: vec![(1, 100, 1024), (2, 200, 2048), (3, 300, 4096)],
+		},
+	}
+	.build_storage()
+	.unwrap();
+
+	TestExternalities::new(t).execute_with(|| {
+		assert!(AllowedAuthorizers::<Test>::contains_key(1));
+		assert!(AllowedAuthorizers::<Test>::contains_key(2));
+		assert!(AllowedAuthorizers::<Test>::contains_key(3));
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 3);
+		let budget = AllowedAuthorizers::<Test>::get(1).unwrap();
+		assert_eq!(budget.transactions_budget, 100);
+		assert_eq!(budget.bytes_budget, 1024);
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_seeds_empty_storage() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 0);
+
+		parameter_types! {
+			pub Seed: Vec<u64> = vec![10, 20];
+			pub MigrationBudget: AuthorizerBudget<u64> = test_budget(500, 5000);
+		}
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+
+		assert!(AllowedAuthorizers::<Test>::contains_key(10));
+		assert!(AllowedAuthorizers::<Test>::contains_key(20));
+		let budget = AllowedAuthorizers::<Test>::get(10).unwrap();
+		assert_eq!(budget.transactions_budget, 500);
+		assert_eq!(budget.bytes_budget, 5000);
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_skips_non_empty_storage() {
+	new_test_ext().execute_with(|| {
+		AllowedAuthorizers::<Test>::insert(99u64, test_budget(100, 1024));
+
+		parameter_types! {
+			pub Seed: Vec<u64> = vec![10, 20];
+			pub MigrationBudget: AuthorizerBudget<u64> = test_budget(500, 5000);
+		}
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+
+		// Only the pre-existing entry; seed not applied.
+		assert!(AllowedAuthorizers::<Test>::contains_key(99));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(10));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(20));
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_is_idempotent() {
+	new_test_ext().execute_with(|| {
+		parameter_types! {
+			pub Seed: Vec<u64> = vec![10];
+			pub MigrationBudget: AuthorizerBudget<u64> = test_budget(500, 5000);
+		}
+		// First run: seeds.
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+		assert!(AllowedAuthorizers::<Test>::contains_key(10));
+
+		// Second run: non-empty, no-op.
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 1);
+	});
+}
+
+#[test]
 fn authorize_account_does_not_push_expiry() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -1355,6 +1564,227 @@ fn authorize_preimage_does_not_push_expiry() {
 		run_to_block(11, || None);
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent { transactions: 0, bytes: 0 },
+		);
+	});
+}
+
+// ---- Authorizer budget tests ----
+
+#[test]
+fn remove_exhausted_authorizer_works_when_both_zero() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(0, 0));
+
+		// check_unsigned should pass
+		let call = Call::remove_exhausted_authorizer { who };
+		assert_ok!(TransactionStorage::pre_dispatch(&call));
+
+		// Dispatch should succeed
+		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::ExhaustedAuthorizerRemoved { who },
+		));
+	});
+}
+
+#[test]
+fn remove_exhausted_authorizer_works_when_transactions_zero() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(0, 1000));
+
+		let call = Call::remove_exhausted_authorizer { who };
+		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+	});
+}
+
+#[test]
+fn remove_exhausted_authorizer_works_when_bytes_zero() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(100, 0));
+
+		let call = Call::remove_exhausted_authorizer { who };
+		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+	});
+}
+
+#[test]
+fn remove_exhausted_authorizer_fails_with_remaining_budget() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(10, 1000));
+
+		let call = Call::remove_exhausted_authorizer { who };
+		assert_noop!(TransactionStorage::pre_dispatch(&call), AUTHORIZATION_NOT_EXHAUSTED);
+		assert_noop!(
+			TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who),
+			Error::AuthorizerBudgetNotExhausted,
+		);
+		assert!(AllowedAuthorizers::<Test>::contains_key(who));
+	});
+}
+
+#[test]
+fn remove_exhausted_authorizer_fails_for_missing_authorizer() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 99u64;
+
+		let call = Call::remove_exhausted_authorizer { who };
+		assert_noop!(TransactionStorage::pre_dispatch(&call), AUTHORIZER_NOT_FOUND);
+		assert_noop!(
+			TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who),
+			Error::AuthorizerNotFound,
+		);
+	});
+}
+
+#[test]
+fn add_authorizer_with_period_override() {
+	new_test_ext().execute_with(|| {
+		let who = 42u64;
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			100,
+			1024,
+			Some(5)
+		));
+		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
+		assert_eq!(budget.authorization_period, Some(5));
+	});
+}
+
+#[test]
+fn authorizer_budget_consumed_on_authorize_account() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(5, 10_000));
+
+		// Simulate check_signed PreDispatch for authorize_account
+		let call = Call::authorize_account { who: 1, transactions: 2, bytes: 4000 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&authorizer, &call));
+
+		let budget = AllowedAuthorizers::<Test>::get(authorizer).unwrap();
+		assert_eq!(budget.transactions_budget, 3);
+		assert_eq!(budget.bytes_budget, 6000);
+	});
+}
+
+#[test]
+fn authorizer_budget_consumed_on_authorize_preimage() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(5, 10_000));
+
+		let hash = [0u8; 32];
+		let call = Call::authorize_preimage { content_hash: hash, max_size: 3000 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&authorizer, &call));
+
+		let budget = AllowedAuthorizers::<Test>::get(authorizer).unwrap();
+		// authorize_preimage consumes 1 transaction, max_size bytes
+		assert_eq!(budget.transactions_budget, 4);
+		assert_eq!(budget.bytes_budget, 7000);
+	});
+}
+
+#[test]
+fn authorizer_budget_insufficient_transactions_rejected() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(1, 10_000));
+
+		let call = Call::authorize_account { who: 1, transactions: 5, bytes: 1000 };
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&authorizer, &call),
+			InvalidTransaction::Payment,
+		);
+		// Budget unchanged
+		let budget = AllowedAuthorizers::<Test>::get(authorizer).unwrap();
+		assert_eq!(budget.transactions_budget, 1);
+	});
+}
+
+#[test]
+fn authorizer_budget_insufficient_bytes_rejected() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(100, 500));
+
+		let call = Call::authorize_account { who: 1, transactions: 1, bytes: 1000 };
+		assert_err!(
+			TransactionStorage::pre_dispatch_signed(&authorizer, &call),
+			TransactionValidityError::Invalid(InvalidTransaction::Payment),
+		);
+		// Budget unchanged — try_consume failed before writing
+		let budget = AllowedAuthorizers::<Test>::get(authorizer).unwrap();
+		assert_eq!(budget.bytes_budget, 500);
+	});
+}
+
+#[test]
+fn root_bypasses_authorizer_budget() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		// Root can authorize without being in AllowedAuthorizers
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), 1, 10, 10_000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(1),
+			AuthorizationExtent { transactions: 10, bytes: 10_000 },
+		);
+	});
+}
+
+#[test]
+fn authorization_period_override_via_pending_storage() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		// Authorizer with custom 5-block period (default is 10)
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget {
+				transactions_budget: 100,
+				bytes_budget: 100_000,
+				authorization_period: Some(5),
+			},
+		);
+
+		let who = 1u64;
+		let call = Call::authorize_account { who, transactions: 1, bytes: 1000 };
+		// pre_dispatch_signed stashes the period override and consumes budget
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&authorizer, &call));
+
+		// Now dispatch — authorize() should pick up the pending period
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1000));
+
+		// The authorization should expire at block 1 + 5 = 6 (not 1 + 10 = 11)
+		// Check: at block 5, authorization still valid
+		run_to_block(5, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { transactions: 1, bytes: 1000 },
+		);
+		// At block 6, authorization expired
+		run_to_block(6, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent { transactions: 0, bytes: 0 },
 		);
 	});
