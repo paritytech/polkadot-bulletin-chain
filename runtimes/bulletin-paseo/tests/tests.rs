@@ -162,6 +162,7 @@ fn transaction_storage_runtime_sizes() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				total_bytes
 			));
 			assert_eq!(
@@ -198,13 +199,17 @@ fn transaction_storage_runtime_sizes() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				oversized
 			));
-			// Re-authorize replaces the existing allowance (does not add). `bytes` (used) is
-			// preserved across re-authorizations.
+			// Re-authorize within the unexpired window adds to the existing allowance;
+			// `bytes` (used) is preserved and expiry is unchanged.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent { bytes: total_bytes, bytes_allowance: oversized },
+				AuthorizationExtent {
+					bytes: total_bytes,
+					bytes_allowance: total_bytes + oversized
+				},
 			);
 			let res = construct_and_apply_extrinsic(
 				Some(account.pair()),
@@ -237,6 +242,7 @@ fn transaction_storage_max_throughput_per_block() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE
 			));
 			assert_eq!(
@@ -308,6 +314,7 @@ fn authorized_storage_transactions_are_for_free() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				24
 			));
 			// Now should work.
@@ -355,6 +362,7 @@ fn allowance_based_priority_works() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				allowance,
 			));
 			assert_eq!(allowance_based_priority(origin.clone(), &store), ALLOWANCE_PRIORITY_BOOST);
@@ -400,6 +408,7 @@ fn store_with_cid_config_works() {
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
+			0,
 			3 * total_bytes
 		));
 		assert_eq!(
@@ -641,6 +650,7 @@ fn alice_can_sign_authorize_account_extrinsic() {
 
 		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 			who: target.to_account_id(),
+			transactions: 0,
 			bytes: 1024,
 		});
 
@@ -672,6 +682,7 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 			let call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.to_account_id(),
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -691,6 +702,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
 			who: account.to_account_id(),
+			transactions: 0,
 			bytes: 1024,
 		},
 	);
@@ -733,6 +745,7 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
 			who: account.to_account_id(),
+			transactions: 0,
 			bytes: 1024,
 		},
 	);
@@ -919,6 +932,7 @@ fn authorized_wrapped_store_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				4 * data.len() as u64
 			));
 
@@ -977,6 +991,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				data_b.len() as u64
 			));
 
@@ -1069,6 +1084,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				500
 			));
 			assert_ok!(TransactionStorage::authorize_preimage(
@@ -1124,6 +1140,7 @@ fn renew_must_be_direct_extrinsic() {
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
+			0,
 			data.len() as u64
 		));
 		assert_ok_ok(construct_and_apply_extrinsic(
@@ -1186,6 +1203,7 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 			let call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: who.clone(),
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -1229,6 +1247,7 @@ fn wrapped_authorize_account_succeeds() {
 			let authorize_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.clone(),
+					transactions: 0,
 					bytes: 10 * 1024,
 				});
 			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch_all {
@@ -1274,6 +1293,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				data.len() as u64
 			));
 
@@ -1283,6 +1303,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 			let authorize_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.clone(),
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -1328,6 +1349,7 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				data.len() as u64
 			));
 
@@ -1371,6 +1393,7 @@ fn max_recursion_depth_is_enforced() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				data.len() as u64
 			));
 
@@ -1448,6 +1471,7 @@ fn xcm_transact_store_is_blocked() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				data.len() as u64
 			));
 			assert_ne!(
@@ -1505,6 +1529,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
+				0,
 				data.len() as u64
 			));
 
@@ -1558,6 +1583,7 @@ fn xcm_transact_authorize_account_works() {
 			let authorize_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.clone(),
+					transactions: 0,
 					bytes: 1024,
 				});
 

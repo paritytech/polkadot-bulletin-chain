@@ -563,29 +563,29 @@ pub mod pallet {
 		/// Authorize an account to store up to `bytes` of arbitrary data. The authorization
 		/// will expire after a configured number of blocks.
 		///
-		/// If the account is already authorized to store data, this **replaces** the allowance
-		/// with `bytes` — it does not add to the existing cap. Bytes already consumed (`bytes`
-		/// and `bytes_permanent`) are preserved, so re-authorizing with a value below current
-		/// usage leaves the holder over-cap until the next refresh. The expiration block is
-		/// **not** pushed back; use
-		/// [`refresh_account_authorization`](Self::refresh_account_authorization) to extend
-		/// expiry.
+		/// If the account already has an unexpired authorization, this call **adds** `bytes`
+		/// to the existing `bytes_allowance` cap (saturating); the expiration block is **not**
+		/// pushed back, and the consumed `bytes` counter is preserved. Once the authorization
+		/// has expired, the next call replaces it with a fresh one (`bytes` reset to `0`,
+		/// `bytes_allowance = bytes`, expiry = `now + AuthorizationPeriod`).
 		///
 		/// Parameters:
 		///
 		/// - `who`: The account to be credited with an authorization to store data.
+		/// - `_transactions`: The number of transactions that `who` may submit to supply that data.
 		/// - `bytes`: The number of bytes that `who` may submit.
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _bytes: &u64| -> bool {
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
 			T::Authorizer::try_origin(origin.clone()).is_ok()
 		})]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
+			_transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
@@ -1013,8 +1013,16 @@ pub mod pallet {
 						};
 					} else {
 						match scope {
+							// Account grants are additive within an unexpired window:
+							// `claim_long_term_storage` (and similar flows on caller chains)
+							// calls this once per claim and expects each to extend the cap.
+							// Expiry is left untouched until the authorization expires, at
+							// which point the next call (above) creates a fresh entry.
 							AuthorizationScope::Account(_) => {
-								authorization.extent.bytes_allowance = bytes_allowance;
+								authorization.extent.bytes_allowance = authorization
+									.extent
+									.bytes_allowance
+									.saturating_add(bytes_allowance);
 							},
 							AuthorizationScope::Preimage(_) => {
 								authorization.extent.bytes_allowance = bytes_allowance;
