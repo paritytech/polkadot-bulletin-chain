@@ -211,10 +211,16 @@ impl TransactionClient {
 		}
 	}
 
-	/// Query the current authorization for an account.
+	/// Query the current authorization for an account and return the remaining boost-tier
+	/// capacity as `(transactions_remaining, bytes_remaining)`.
 	///
-	/// Returns `Some((transactions, bytes))` if authorization exists and is not expired,
-	/// `None` if no authorization exists or it has expired.
+	/// `bytes` and `transactions` on `AuthorizationExtent` are *consumed* counters; this
+	/// helper subtracts them from the granted caps (saturating to `0` if the holder is
+	/// already over-cap on either axis). Note that overshooting the caps no longer rejects
+	/// the transaction — it only forfeits the priority boost — so the returned remaining
+	/// values are a soft-budget preflight, not a hard precondition.
+	///
+	/// Returns `None` if no authorization exists or it has expired.
 	pub async fn query_account_authorization(
 		&self,
 		who: &AccountId32,
@@ -240,8 +246,12 @@ impl TransactionClient {
 			})?;
 
 		match maybe_auth {
-			Some(auth) if auth.expiration > current_block_number =>
-				Ok(Some((auth.extent.transactions, auth.extent.bytes))),
+			Some(auth) if auth.expiration > current_block_number => {
+				let transactions_remaining =
+					auth.extent.transactions_allowance.saturating_sub(auth.extent.transactions);
+				let bytes_remaining = auth.extent.bytes_allowance.saturating_sub(auth.extent.bytes);
+				Ok(Some((transactions_remaining, bytes_remaining)))
+			},
 			Some(_) => Ok(None), // expired
 			None => Ok(None),
 		}
@@ -250,10 +260,16 @@ impl TransactionClient {
 	/// Check that sufficient authorization exists for a store operation.
 	///
 	/// Queries the chain for the account's current authorization and validates
-	/// that it has enough transactions and bytes remaining.
+	/// that it has enough transactions and bytes remaining for the boost tier.
 	///
-	/// This is a best-effort check — if the query fails (e.g., network error),
-	/// the error is returned so the caller can decide whether to proceed.
+	/// This is a soft preflight: under the soft-cap design, on-chain validation
+	/// no longer rejects a `store` for being over-budget — it only drops the
+	/// priority boost. Use this check to decide whether to send (likely-boosted)
+	/// or to top up the authorization first; do not treat a failure here as
+	/// "the chain will reject this tx".
+	///
+	/// If the query itself fails (e.g., network error), the error is returned
+	/// so the caller can decide whether to proceed.
 	pub async fn check_authorization_for_store(
 		&self,
 		who: &AccountId32,
