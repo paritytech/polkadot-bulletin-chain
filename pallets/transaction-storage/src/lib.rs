@@ -93,16 +93,21 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 /// Authorization has not expired.
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
-/// Byte-usage state of an authorization. `bytes` accumulates upward as data is stored;
-/// `bytes_allowance` is the cap set at grant time.
+/// Usage state of an authorization. `bytes` / `transactions_used` accumulate upward as
+/// data is stored; `bytes_allowance` / `transactions_allowance` are the caps set at
+/// grant time.
 #[derive(
-	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
+	Copy, Clone, PartialEq, Eq, Debug, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
 pub struct AuthorizationExtent {
 	/// Bytes consumed so far.
 	pub bytes: u64,
 	/// Total byte allowance granted.
 	pub bytes_allowance: u64,
+	/// Boost-tier call count this period (in-budget store + renew).
+	pub transactions_used: u32,
+	/// Per-period boost-tier transaction budget.
+	pub transactions_allowance: u32,
 }
 
 /// The scope of an authorization.
@@ -585,13 +590,13 @@ pub mod pallet {
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
-			_transactions: u32,
+			transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), bytes);
-			Self::deposit_event(Event::AccountAuthorized { who, bytes });
+			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
+			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
 
@@ -625,7 +630,8 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Preimage(content_hash), max_size);
+			// Preimage scope is single-use, so the per-grant tx budget is `1`.
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -724,8 +730,9 @@ pub mod pallet {
 		Renewed { index: u32, content_hash: ContentHash },
 		/// Storage proof was successfully checked.
 		ProofChecked,
-		/// An account `who` was authorized to store `bytes` bytes.
-		AccountAuthorized { who: T::AccountId, bytes: u64 },
+		/// An account `who` was authorized to store `bytes` bytes in `transactions` boost-tier
+		/// transactions.
+		AccountAuthorized { who: T::AccountId, transactions: u32, bytes: u64 },
 		/// An authorization for account `who` was refreshed.
 		AccountAuthorizationRefreshed { who: T::AccountId },
 		/// Authorization was given for a preimage of `content_hash` (not exceeding `max_size`) to
@@ -785,9 +792,11 @@ pub mod pallet {
 		pub byte_fee: BalanceOf<T>,
 		pub entry_fee: BalanceOf<T>,
 		pub retention_period: BlockNumberFor<T>,
-		/// Initial account authorizations as (account, bytes_allowance) tuples.
-		pub account_authorizations: Vec<(T::AccountId, u64)>,
-		/// Initial preimage authorizations as (content_hash, max_size) tuples.
+		/// Initial account authorizations as (account, transactions_allowance, bytes_allowance)
+		/// tuples.
+		pub account_authorizations: Vec<(T::AccountId, u32, u64)>,
+		/// Initial preimage authorizations as (content_hash, max_size) tuples. Each preimage
+		/// gets `transactions_allowance = 1`.
 		pub preimage_authorizations: Vec<(ContentHash, u64)>,
 	}
 
@@ -810,23 +819,33 @@ pub mod pallet {
 			EntryFee::<T>::put(self.entry_fee);
 			RetentionPeriod::<T>::put(self.retention_period);
 			let expiration = T::AuthorizationPeriod::get();
-			for (who, bytes_allowance) in &self.account_authorizations {
+			for (who, transactions_allowance, bytes_allowance) in &self.account_authorizations {
 				let scope = AuthorizationScope::Account(who.clone());
 				Authorizations::<T>::insert(
 					&scope,
 					Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance: *bytes_allowance },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_allowance: *bytes_allowance,
+							transactions_used: 0,
+							transactions_allowance: *transactions_allowance,
+						},
 						expiration,
 					},
 				);
 				Pallet::<T>::authorization_added(&scope);
 			}
-			for (content_hash, bytes_allowance) in &self.preimage_authorizations {
+			for (content_hash, max_size) in &self.preimage_authorizations {
 				let scope = AuthorizationScope::Preimage(*content_hash);
 				Authorizations::<T>::insert(
 					&scope,
 					Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance: *bytes_allowance },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_allowance: *max_size,
+							transactions_used: 0,
+							transactions_allowance: 1,
+						},
 						expiration,
 					},
 				);
@@ -1000,7 +1019,11 @@ pub mod pallet {
 		}
 
 		/// Authorize data storage.
-		fn authorize(scope: AuthorizationScopeFor<T>, bytes_allowance: u64) {
+		fn authorize(
+			scope: AuthorizationScopeFor<T>,
+			transactions_allowance: u32,
+			bytes_allowance: u64,
+		) {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
 
@@ -1008,14 +1031,19 @@ pub mod pallet {
 				if let Some(authorization) = maybe_authorization {
 					if Self::expired(authorization.expiration) {
 						*authorization = Authorization {
-							extent: AuthorizationExtent { bytes: 0, bytes_allowance },
+							extent: AuthorizationExtent {
+								bytes: 0,
+								bytes_allowance,
+								transactions_used: 0,
+								transactions_allowance,
+							},
 							expiration,
 						};
 					} else {
 						match scope {
 							// Account grants are additive within an unexpired window:
 							// `claim_long_term_storage` (and similar flows on caller chains)
-							// calls this once per claim and expects each to extend the cap.
+							// calls this once per claim and expects each to extend the caps.
 							// Expiry is left untouched until the authorization expires, at
 							// which point the next call (above) creates a fresh entry.
 							AuthorizationScope::Account(_) => {
@@ -1023,15 +1051,26 @@ pub mod pallet {
 									.extent
 									.bytes_allowance
 									.saturating_add(bytes_allowance);
+								authorization.extent.transactions_allowance = authorization
+									.extent
+									.transactions_allowance
+									.saturating_add(transactions_allowance);
 							},
 							AuthorizationScope::Preimage(_) => {
 								authorization.extent.bytes_allowance = bytes_allowance;
+								authorization.extent.transactions_allowance =
+									transactions_allowance;
 							},
 						}
 					}
 				} else {
 					*maybe_authorization = Some(Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_allowance,
+							transactions_used: 0,
+							transactions_allowance,
+						},
 						expiration,
 					});
 					Self::authorization_added(&scope);
@@ -1039,9 +1078,9 @@ pub mod pallet {
 			});
 		}
 
-		/// Refresh an existing authorization: extend its expiration and reset `bytes`
-		/// (storage usage) to `0` so the holder regains a fresh `store` allowance for
-		/// the new period.
+		/// Refresh an existing authorization: extend its expiration and reset the consumed
+		/// counters (`bytes`, `transactions_used`) to `0` so the holder regains a fresh
+		/// allowance for the new period.
 		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
@@ -1049,9 +1088,9 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
-					// Reset usage so the holder regains a fresh `store` allowance for the
-					// new period.
+					// Reset usage so the holder regains a fresh allowance for the new period.
 					authorization.extent.bytes = 0;
+					authorization.extent.transactions_used = 0;
 					Ok(())
 				} else {
 					// No previous authorization to refresh.
@@ -1072,10 +1111,10 @@ pub mod pallet {
 
 		fn authorization_extent(scope: AuthorizationScopeFor<T>) -> AuthorizationExtent {
 			let Some(authorization) = Authorizations::<T>::get(&scope) else {
-				return AuthorizationExtent { bytes: 0, bytes_allowance: 0 };
+				return AuthorizationExtent::default();
 			};
 			if Self::expired(authorization.expiration) {
-				AuthorizationExtent { bytes: 0, bytes_allowance: 0 }
+				AuthorizationExtent::default()
 			} else {
 				authorization.extent
 			}
@@ -1167,8 +1206,9 @@ pub mod pallet {
 		///
 		/// Rejects only if the authorization entry is missing or expired — never rejects on
 		/// insufficient allowance. If `consume` is `true`, adds `size` to the consumed `bytes`
-		/// counter (saturating); callers can overshoot `bytes_allowance`, in which case the
-		/// [`extension::AllowanceBasedPriority`] boost no longer applies.
+		/// counter and increments `transactions_used` by 1 (both saturating); callers can
+		/// overshoot the caps, in which case the [`extension::AllowanceBasedPriority`]
+		/// boost no longer applies.
 		fn check_authorization(
 			scope: &AuthorizationScopeFor<T>,
 			size: u32,
@@ -1185,6 +1225,8 @@ pub mod pallet {
 				if consume {
 					authorization.extent.bytes =
 						authorization.extent.bytes.saturating_add(size.into());
+					authorization.extent.transactions_used =
+						authorization.extent.transactions_used.saturating_add(1);
 				}
 				Ok(())
 			};

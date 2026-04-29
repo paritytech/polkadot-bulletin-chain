@@ -284,15 +284,17 @@ pub mod v1 {
 /// Old: `{ transactions: u32, bytes: u64 }` — transaction count and remaining
 /// byte quota.
 ///
-/// New: `{ bytes: u64, bytes_allowance: u64 }` — bytes consumed so far and total
-/// bytes granted.
+/// New: `{ bytes: u64, bytes_allowance: u64, transactions_used: u32,
+/// transactions_allowance: u32 }` — bytes consumed so far and total bytes granted,
+/// plus a parallel boost-tier transaction counter and budget.
 ///
-/// The transaction-count quota is dropped. The remaining byte quota becomes the
-/// new total allowance (`bytes_allowance = old.bytes`) with zero consumed
-/// (`bytes = 0`), so each authorization keeps its previous remaining capacity.
-/// Entries whose remaining byte quota is already zero are dropped — they can't
-/// be translated to a valid v2 entry (`check_authorizations_integrity` requires
-/// `bytes_allowance > 0`) and they were already unusable on the old chain.
+/// The remaining byte quota becomes the new total allowance
+/// (`bytes_allowance = old.bytes`, `bytes = 0`); the remaining transaction count
+/// becomes `transactions_allowance` (`transactions_used = 0`), so each authorization
+/// keeps its previous remaining capacity on both axes. Entries whose remaining byte
+/// quota is already zero are dropped — they can't be translated to a valid v2 entry
+/// (`check_authorizations_integrity` requires `bytes_allowance > 0`) and they were
+/// already unusable on the old chain.
 pub mod v2 {
 	use super::*;
 	use crate::{
@@ -329,7 +331,12 @@ pub mod v2 {
 					}
 					migrated = migrated.saturating_add(1);
 					Some(Authorization {
-						extent: AuthorizationExtent { bytes: 0, bytes_allowance: old.extent.bytes },
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_allowance: old.extent.bytes,
+							transactions_used: 0,
+							transactions_allowance: old.extent.transactions,
+						},
 						expiration: old.expiration,
 					})
 				},

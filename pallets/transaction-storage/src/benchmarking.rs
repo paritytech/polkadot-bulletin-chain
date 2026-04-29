@@ -200,12 +200,13 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
+		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone(), 0u32, bytes);
+		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes);
 
-		assert_last_event::<T>(Event::AccountAuthorized { who, bytes }.into());
+		assert_last_event::<T>(Event::AccountAuthorized { who, transactions, bytes }.into());
 		Ok(())
 	}
 
