@@ -225,7 +225,7 @@ impl TransactionClient {
 		&self,
 		who: &AccountId32,
 	) -> Result<Option<(u32, u64)>> {
-		use bulletin::runtime_types::pallet_transaction_storage::AuthorizationScope as OnChainScope;
+		use bulletin::runtime_types::pallet_bulletin_transaction_storage::AuthorizationScope as OnChainScope;
 
 		let storage_query = bulletin::storage()
 			.transaction_storage()
