@@ -47,6 +47,7 @@ use core::fmt::Debug;
 use polkadot_sdk_frame::{
 	deps::*,
 	prelude::*,
+	runtime::prelude::weights::WeightMeter,
 	traits::{
 		fungible::{hold::Balanced, Credit, Inspect, Mutate, MutateHold},
 		parameter_types, OriginTrait,
@@ -92,6 +93,12 @@ pub const RENEWED_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(2);
 pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(3);
 /// Authorization has not expired.
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
+/// Renew rejected: would push the signer's `bytes_permanent` past their `bytes_allowance`
+/// (per-account hard cap).
+pub const PERMANENT_ALLOWANCE_EXCEEDED: InvalidTransaction = InvalidTransaction::Custom(5);
+/// Renew rejected: would push `PermanentStorageUsed` past `MaxPermanentStorageSize`
+/// (chain-wide hard cap).
+pub const CHAIN_PERMANENT_CAP_REACHED: InvalidTransaction = InvalidTransaction::Custom(6);
 
 /// Byte-usage state of an authorization. `bytes` accumulates as data is stored via `store`
 /// (temporary storage); `bytes_permanent` accumulates as data is renewed via `renew`
@@ -315,6 +322,12 @@ pub mod pallet {
 		/// Authorization still has permanent storage outstanding (`bytes_permanent > 0`)
 		/// and cannot be removed yet — wait for the lazy ledger drain to clear it.
 		AuthorizationHasPermanentStorage,
+		/// Renew rejected: would push the signer's `bytes_permanent` past their
+		/// `bytes_allowance` (per-account hard cap).
+		PermanentAllowanceExceeded,
+		/// Renew rejected: would push `PermanentStorageUsed` past
+		/// `MaxPermanentStorageSize` (chain-wide hard cap).
+		ChainPermanentCapReached,
 		/// Content hash was not calculated.
 		InvalidContentHash,
 	}
@@ -378,7 +391,30 @@ pub mod pallet {
 			// For `on_finalize`
 			weight.saturating_accrue(db_weight.reads_writes(2, 2));
 
+			// Liveness fallback: if `on_poll` has been skipped long enough that the ledger
+			// cursor is now more than one `RetentionPeriod` behind drainable, run a bounded
+			// mandatory drain here. Caps drift of `PermanentStorageUsed` at one retention
+			// window worth of decrements. Bounded weight (the meter), so the mandatory
+			// portion can't overflow the block.
+			weight.saturating_accrue(db_weight.reads(1));
+			let cursor = PermanentStorageLedgerCursor::<T>::get();
+			if n.saturating_sub(cursor) > period {
+				let mut meter = WeightMeter::with_limit(
+					db_weight
+						.reads_writes(2, 3)
+						.saturating_mul(T::MaxBlockTransactions::get().into()),
+				);
+				Self::drain_permanent_storage_ledger(&mut meter);
+				weight.saturating_accrue(meter.consumed());
+			}
+
 			weight
+		}
+
+		fn on_poll(_n: BlockNumberFor<T>, weight_meter: &mut WeightMeter) {
+			// Lazy decrement: drain `PermanentStorageLedger` for blocks whose retention has
+			// elapsed. Best-effort — uses the spare weight available in this block.
+			Self::drain_permanent_storage_ledger(weight_meter);
 		}
 
 		fn on_finalize(n: BlockNumberFor<T>) {
@@ -790,6 +826,33 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
 
+	/// Chain-wide sum of all `AuthorizationExtent::bytes_permanent` across every scope.
+	/// Bumped on each successful `renew`; decremented (saturating) by the lazy ledger drain
+	/// in `on_poll` (or by the mandatory fallback in `on_initialize`).
+	#[pallet::storage]
+	pub type PermanentStorageUsed<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+	/// For each block, the list of `(scope, size)` pairs that were renewed in that block.
+	/// Drained lazily once retention has elapsed; the scope routes the decrement to the
+	/// right `Authorizations` entry (account- or preimage-keyed). Bounded per block by
+	/// `MaxBlockTransactions` (the same cap that limits how many renewals can land in
+	/// one block).
+	#[pallet::storage]
+	pub(super) type PermanentStorageLedger<T: Config> = StorageMap<
+		_,
+		Twox64Concat,
+		BlockNumberFor<T>,
+		BoundedVec<(AuthorizationScopeFor<T>, u64), T::MaxBlockTransactions>,
+		ValueQuery,
+	>;
+
+	/// Oldest block whose ledger entry has not been fully drained yet. Advanced by the
+	/// lazy drain in `on_poll`. The `on_initialize` mandatory fallback fires when this
+	/// cursor falls more than one `RetentionPeriod` behind the current block.
+	#[pallet::storage]
+	pub(super) type PermanentStorageLedgerCursor<T: Config> =
+		StorageValue<_, BlockNumberFor<T>, ValueQuery>;
+
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
 		pub byte_fee: BalanceOf<T>,
@@ -893,6 +956,78 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// Drain ready entries from `PermanentStorageLedger` until the supplied
+		/// `weight_meter` is exhausted or no more entries are due.
+		///
+		/// "Due" means `current_block - cursor >= RetentionPeriod` — the data covered by
+		/// the cursor's ledger entry has had its retention window elapse on chain. For
+		/// each `(scope, size)` drained, decrement the per-account `bytes_permanent` and
+		/// the chain-wide `PermanentStorageUsed` (saturating).
+		///
+		/// Used by both the lazy `on_poll` path and the mandatory `on_initialize`
+		/// liveness fallback. Returns the total weight consumed (also reflected in the
+		/// `weight_meter`).
+		pub(crate) fn drain_permanent_storage_ledger(weight_meter: &mut WeightMeter) {
+			let retention = Self::retention_period();
+			let current_block = frame_system::Pallet::<T>::block_number();
+			let db_weight = T::DbWeight::get();
+			// One drained `(scope, size)` pair: read+write the cursor bucket, read+write
+			// the corresponding `Authorizations` entry, write `PermanentStorageUsed`.
+			let per_entry = db_weight.reads_writes(2, 3);
+
+			loop {
+				let cursor = PermanentStorageLedgerCursor::<T>::get();
+				// `cursor + retention > current_block` flags both "cursor's entry not yet
+				// drainable" and "cursor has overshot current block". The latter happens
+				// when retention is 0 (e.g. genesis not initialized in tests): the naive
+				// `current_block - cursor < retention` saturates to 0 and stays `false`
+				// forever, looping until the weight meter is exhausted. Phrasing the
+				// check on the additive side avoids that trap.
+				if cursor.saturating_add(retention) > current_block {
+					break;
+				}
+				if weight_meter.try_consume(per_entry).is_err() {
+					// Out of weight budget for this round.
+					break;
+				}
+
+				let popped = PermanentStorageLedger::<T>::mutate_exists(cursor, |maybe| {
+					let entries = maybe.as_mut()?;
+					let entry = entries.pop();
+					if entries.is_empty() {
+						*maybe = None;
+					}
+					entry
+				});
+
+				match popped {
+					Some((scope, size)) => {
+						Authorizations::<T>::mutate(&scope, |maybe_auth| {
+							if let Some(auth) = maybe_auth.as_mut() {
+								auth.extent.bytes_permanent =
+									auth.extent.bytes_permanent.saturating_sub(size);
+							}
+						});
+						PermanentStorageUsed::<T>::mutate(|used| {
+							*used = used.saturating_sub(size);
+						});
+
+						// If the bucket is now empty (mutate_exists set it to None above),
+						// advance the cursor for next iteration.
+						if !PermanentStorageLedger::<T>::contains_key(cursor) {
+							PermanentStorageLedgerCursor::<T>::put(
+								cursor.saturating_add(One::one()),
+							);
+						}
+					},
+					None => {
+						// Bucket was empty/missing. Advance over the gap.
+						PermanentStorageLedgerCursor::<T>::put(cursor.saturating_add(One::one()));
+					},
+				}
+			}
+		}
+
 		/// Validate that `origin` is one of the accepted caller types for store/renew
 		/// extrinsics, and return a typed description of the caller.
 		///
@@ -1193,17 +1328,32 @@ pub mod pallet {
 
 		/// Check that authorization exists for data of the given size.
 		///
-		/// Rejects only if the authorization entry is missing or expired — never rejects on
-		/// insufficient allowance. If `consume` is `true`, adds `size` (saturating) to either
-		/// `bytes` (when `is_renew` is `false`, i.e. a `store` call) or `bytes_permanent`
-		/// (when `is_renew` is `true`). Callers can overshoot `bytes_allowance`, in which case
-		/// the [`extension::AllowanceBasedPriority`] boost no longer applies.
+		/// Always rejects if the authorization entry is missing or expired.
+		///
+		/// For `store` (`is_renew == false`): never rejects on insufficient allowance —
+		/// `bytes` saturates upward and the [`extension::AllowanceBasedPriority`] boost is
+		/// what handles the overshoot (soft limit).
+		///
+		/// For `renew` (`is_renew == true`): hard cap. Rejects with
+		/// [`PERMANENT_ALLOWANCE_EXCEEDED`] if the per-account check fails
+		/// (`bytes_permanent + size > bytes_allowance`) or with
+		/// [`CHAIN_PERMANENT_CAP_REACHED`] if the chain-wide check fails
+		/// (`PermanentStorageUsed + size > MaxPermanentStorageSize`).
+		///
+		/// If `consume` is `true` and the checks pass, increments either `bytes` (store) or
+		/// `bytes_permanent` (renew) by `size` (saturating). For renew, the chain-wide
+		/// `PermanentStorageUsed` counter and `PermanentStorageLedger` are also updated by
+		/// the caller's renew flow.
 		fn check_authorization(
 			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
 			is_renew: bool,
 		) -> Result<(), TransactionValidityError> {
+			let chain_used = PermanentStorageUsed::<T>::get();
+			let chain_cap = T::MaxPermanentStorageSize::get();
+			let size_u64: u64 = size.into();
+
 			let check = |maybe_authorization: &mut Option<Authorization<_>>|
 			 -> Result<(), TransactionValidityError> {
 				let Some(authorization) = maybe_authorization else {
@@ -1212,26 +1362,55 @@ pub mod pallet {
 				if Self::expired(authorization.expiration) {
 					return Err(InvalidTransaction::Payment.into())
 				}
+				if is_renew {
+					// Per-account hard cap.
+					if authorization.extent.bytes_permanent.saturating_add(size_u64) >
+						authorization.extent.bytes_allowance
+					{
+						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into())
+					}
+					// Chain-wide hard cap.
+					if chain_used.saturating_add(size_u64) > chain_cap {
+						return Err(CHAIN_PERMANENT_CAP_REACHED.into())
+					}
+				}
 				if consume {
 					if is_renew {
 						authorization.extent.bytes_permanent = authorization
 							.extent
 							.bytes_permanent
-							.saturating_add(size.into());
+							.saturating_add(size_u64);
 					} else {
 						authorization.extent.bytes =
-							authorization.extent.bytes.saturating_add(size.into());
+							authorization.extent.bytes.saturating_add(size_u64);
 					}
 				}
 				Ok(())
 			};
 
-			if consume {
+			let result = if consume {
 				Authorizations::<T>::mutate(scope, check)
 			} else {
 				let mut authorization = Authorizations::<T>::get(scope);
 				check(&mut authorization)
+			};
+
+			// On a successful renew consume: bump the chain-wide counter and append to the
+			// ledger so the lazy drain can later decrement when retention has elapsed.
+			if result.is_ok() && consume && is_renew {
+				PermanentStorageUsed::<T>::mutate(|used| {
+					*used = used.saturating_add(size_u64);
+				});
+				let current_block = frame_system::Pallet::<T>::block_number();
+				PermanentStorageLedger::<T>::mutate(current_block, |entries| {
+					// Bound matches `MaxBlockTransactions`. `block_transactions_full()`
+					// guards the upstream call sites, so this push always succeeds in
+					// practice; defensive in case of future changes.
+					let _ = entries.try_push((scope.clone(), size_u64));
+				});
 			}
+
+			result
 		}
 
 		/// Check that authorization with the given scope exists in storage but has expired.

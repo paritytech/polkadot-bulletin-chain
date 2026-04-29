@@ -20,13 +20,13 @@
 use super::{
 	extension::ValidateStorageCalls,
 	mock::{
-		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, StoreRenewPriority,
-		System, Test, TransactionStorage,
+		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeCall, RuntimeEvent,
+		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
 	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED,
 };
 use crate::migrations::v1::OldTransactionInfo;
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
@@ -34,11 +34,12 @@ use codec::Encode;
 use polkadot_sdk_frame::{
 	deps::frame_support::{
 		storage::unhashed,
-		traits::{GetStorageVersion, OnRuntimeUpgrade},
+		traits::{GetStorageVersion, Hooks, OnRuntimeUpgrade},
 		BoundedVec,
 	},
 	hashing::blake2_256,
 	prelude::*,
+	runtime::prelude::weights::WeightMeter,
 	testing_prelude::*,
 	traits::StorageVersion,
 };
@@ -49,6 +50,9 @@ type Error = super::Error<Test>;
 
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
+type PermanentStorageLedger = super::PermanentStorageLedger<Test>;
+type PermanentStorageLedgerCursor = super::PermanentStorageLedgerCursor<Test>;
+type PermanentStorageUsed = super::PermanentStorageUsed<Test>;
 type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
 
@@ -1468,5 +1472,233 @@ fn remove_expired_account_authorization_refuses_while_bytes_permanent_outstandin
 			who,
 		));
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
+	});
+}
+
+/// A successful renew bumps the chain-wide `PermanentStorageUsed` counter and appends a
+/// `(scope, size)` entry to `PermanentStorageLedger` keyed by the current block, so the
+/// lazy drain has something to decrement once retention elapses.
+#[test]
+fn renew_bumps_permanent_used_and_appends_to_ledger() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		assert_eq!(PermanentStorageUsed::get(), 0, "store must not bump permanent counter");
+		assert!(PermanentStorageLedger::iter().next().is_none(), "store must not append to ledger");
+
+		run_to_block(3, || None);
+
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RuntimeOrigin::none()));
+
+		assert_eq!(
+			PermanentStorageUsed::get(),
+			2000,
+			"renew must bump the chain-wide permanent counter",
+		);
+		let entries = PermanentStorageLedger::get(3);
+		assert_eq!(
+			entries.into_inner(),
+			vec![(AuthorizationScope::Account(who), 2000)],
+			"renew must append (scope, size) to the ledger at the current block",
+		);
+	});
+}
+
+/// `renew` rejects with [`PERMANENT_ALLOWANCE_EXCEEDED`] when the per-account hard cap is
+/// reached: `bytes_permanent + size > bytes_allowance`. The chain-wide counter and ledger
+/// must remain untouched.
+#[test]
+fn renew_rejects_when_per_account_allowance_exceeded() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+
+		// Allowance is below `size`, so renew must reject. Store still succeeds because the
+		// non-renew path is the soft side — overshoot is allowed (and demoted in priority by
+		// `AllowanceBasedPriority`).
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1500));
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		run_to_block(3, || None);
+
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &renew_call),
+			PERMANENT_ALLOWANCE_EXCEEDED,
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).bytes_permanent,
+			0,
+			"rejected renew must not bump bytes_permanent",
+		);
+		assert_eq!(PermanentStorageUsed::get(), 0, "rejected renew must not bump chain counter");
+		assert!(
+			PermanentStorageLedger::iter().next().is_none(),
+			"rejected renew must not append to ledger"
+		);
+	});
+}
+
+/// `renew` rejects with [`CHAIN_PERMANENT_CAP_REACHED`] when the chain-wide hard cap is
+/// reached: `PermanentStorageUsed + size > MaxPermanentStorageSize`. Per-account state
+/// must remain untouched.
+#[test]
+fn renew_rejects_when_chain_wide_cap_reached() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		// Lower the chain-wide cap below what a renewal would require.
+		MaxPermanentStorageSize::set(&1000);
+
+		run_to_block(3, || None);
+
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &renew_call),
+			CHAIN_PERMANENT_CAP_REACHED,
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).bytes_permanent,
+			0,
+			"rejected renew must not bump bytes_permanent",
+		);
+		assert_eq!(PermanentStorageUsed::get(), 0, "rejected renew must not bump chain counter");
+		assert!(
+			PermanentStorageLedger::iter().next().is_none(),
+			"rejected renew must not append to ledger"
+		);
+	});
+}
+
+/// Lazy drain via `on_poll`: once `RetentionPeriod` blocks have elapsed since the renew,
+/// the ledger entry is consumed and both `bytes_permanent` and `PermanentStorageUsed` are
+/// decremented. `on_poll` is invoked directly here because `frame_system::run_to_block`
+/// only fires `on_initialize`/`on_finalize`.
+#[test]
+fn on_poll_drains_ledger_after_retention_elapses() {
+	new_test_ext().execute_with(|| {
+		// Seed accounting as if a renew of 2000 bytes had landed at block 3, with retention
+		// already elapsed by the current block. Avoids dispatching real store/renew (which
+		// would require providing storage proofs in `on_finalize` past block 11).
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+		});
+		PermanentStorageUsed::put(2000);
+		PermanentStorageLedger::mutate(3u64, |entries| {
+			entries.try_push((AuthorizationScope::Account(who), 2000)).unwrap();
+		});
+
+		// Retention is 10. At block 13, ledger bucket 3 is drainable (`13 - 3 = 10 >= 10`).
+		System::set_block_number(13);
+		let mut meter = WeightMeter::new();
+		TransactionStorage::on_poll(13, &mut meter);
+
+		assert_eq!(
+			PermanentStorageUsed::get(),
+			0,
+			"on_poll must decrement chain-wide counter once retention elapses",
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).bytes_permanent,
+			0,
+			"on_poll must decrement per-account bytes_permanent",
+		);
+		assert!(
+			PermanentStorageLedger::iter().next().is_none(),
+			"on_poll must clear drained ledger entries"
+		);
+		assert!(
+			PermanentStorageLedgerCursor::get() >= 3,
+			"cursor must have advanced past the drained block",
+		);
+	});
+}
+
+/// Mandatory `on_initialize` fallback: if the lazy `on_poll` drain has been skipped long
+/// enough that the cursor is more than one `RetentionPeriod` behind, `on_initialize` runs
+/// a bounded mandatory drain. Simulated here by stuffing the ledger directly and
+/// rewinding the cursor.
+#[test]
+fn on_initialize_mandatory_drain_fires_when_cursor_lags() {
+	new_test_ext().execute_with(|| {
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+
+		// Seed accounting as if a renew of 2000 bytes had landed at block 1.
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+		});
+		PermanentStorageUsed::put(2000);
+		PermanentStorageLedger::mutate(1u64, |entries| {
+			entries.try_push((AuthorizationScope::Account(who), 2000)).unwrap();
+		});
+		PermanentStorageLedgerCursor::put(1u64);
+
+		// Retention is 10 blocks. Cursor at 1, threshold is `> RetentionPeriod`, so it must
+		// advance to a block where `n - cursor > 10`, i.e. block 12 or later. Run to block 12
+		// with cursor still at 1: `12 - 1 = 11 > 10` → mandatory fallback fires.
+		run_to_block(12, || None);
+
+		assert_eq!(
+			PermanentStorageUsed::get(),
+			0,
+			"on_initialize fallback must drain when cursor lags by more than RetentionPeriod",
+		);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).bytes_permanent,
+			0,
+			"on_initialize fallback must decrement bytes_permanent",
+		);
+		assert!(
+			PermanentStorageLedger::iter().next().is_none(),
+			"on_initialize fallback must clear drained ledger entries",
+		);
+	});
+}
+
+/// Regression: when `RetentionPeriod` is 0 (e.g. the pallet's genesis didn't run, as in the
+/// runtime-level `ExtBuilder` tests), the drain loop must terminate. The naive
+/// `current_block - cursor < retention` saturates to 0 and stays `false` forever, burning
+/// the entire weight meter on no-op cursor advances — and via `Executive::inherents_applied`,
+/// that meter is the whole remaining block weight, so subsequent extrinsics end up
+/// rejected with `ExhaustsResources`.
+#[test]
+fn drain_terminates_when_retention_period_is_zero() {
+	new_test_ext().execute_with(|| {
+		System::set_block_number(1);
+		RetentionPeriod::put(0);
+
+		let mut meter = WeightMeter::new();
+		TransactionStorage::on_poll(1, &mut meter);
+
+		// Tiny budget consumed (only a couple of cursor-advance iterations), nowhere close
+		// to the meter limit. If the loop hadn't terminated, this would hit the limit.
+		assert!(
+			meter.consumed().all_lt(meter.limit()),
+			"drain must terminate without exhausting the weight meter when retention is 0",
+		);
 	});
 }
