@@ -52,7 +52,7 @@ impl SortedMembers<AccountId> for TestAccounts {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 90 * crate::DAYS;
+	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
