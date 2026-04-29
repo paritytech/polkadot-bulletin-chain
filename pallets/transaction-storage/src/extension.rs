@@ -284,7 +284,7 @@ pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = 1_000_000_000;
 /// `TxExtension` tuple.
 ///
 /// Callers must pre-apply the call's effect to `extent` before calling `boost`:
-/// `extent.bytes += size` and `extent.transactions_used += 1`. The boost decision
+/// `extent.bytes += size` and `extent.transactions += 1`. The boost decision
 /// then reduces to "would this leave the holder in-budget on both axes?".
 pub trait BoostStrategy: Clone + PartialEq + Eq {
 	fn boost(extent: AuthorizationExtent) -> TransactionPriority;
@@ -297,8 +297,7 @@ fn in_budget(extent: &AuthorizationExtent) -> bool {
 	if extent.bytes_allowance == 0 {
 		return false;
 	}
-	extent.bytes <= extent.bytes_allowance &&
-		extent.transactions_used <= extent.transactions_allowance
+	extent.bytes <= extent.bytes_allowance && extent.transactions <= extent.transactions_allowance
 }
 
 /// Boost scales linearly with the tighter of the byte-budget and tx-budget remainders.
@@ -318,7 +317,7 @@ impl BoostStrategy for ProportionalBoost {
 		let tx_share = if extent.transactions_allowance == 0 {
 			0
 		} else {
-			let tx_rem = extent.transactions_allowance.saturating_sub(extent.transactions_used);
+			let tx_rem = extent.transactions_allowance.saturating_sub(extent.transactions);
 			(ALLOWANCE_PRIORITY_BOOST as u128 * tx_rem as u128) /
 				extent.transactions_allowance as u128
 		};
@@ -416,7 +415,7 @@ where
 			Ok(Origin::<T>::Authorized { who, scope: AuthorizationScope::Account(_) }) => {
 				let mut extent = Pallet::<T>::account_authorization_extent(who);
 				extent.bytes = extent.bytes.saturating_add(this_tx_bytes);
-				extent.transactions_used = extent.transactions_used.saturating_add(1);
+				extent.transactions = extent.transactions.saturating_add(1);
 				B::boost(extent)
 			},
 			_ => 0,
@@ -448,7 +447,7 @@ mod boost_tests {
 		AuthorizationExtent {
 			bytes,
 			bytes_allowance: allowance,
-			transactions_used: 0,
+			transactions: 0,
 			transactions_allowance: u32::MAX,
 		}
 	}
@@ -490,7 +489,7 @@ mod boost_tests {
 		let over_tx = AuthorizationExtent {
 			bytes: 0,
 			bytes_allowance: A,
-			transactions_used: 11,
+			transactions: 11,
 			transactions_allowance: 10,
 		};
 		assert_eq!(FlatBoost::boost(over_tx), 0);
@@ -500,7 +499,7 @@ mod boost_tests {
 		let tight_tx = AuthorizationExtent {
 			bytes: 0,
 			bytes_allowance: A,
-			transactions_used: 9,
+			transactions: 9,
 			transactions_allowance: 10,
 		};
 		assert_eq!(FlatBoost::boost(tight_tx), BOOST);

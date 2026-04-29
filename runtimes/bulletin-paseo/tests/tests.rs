@@ -170,7 +170,7 @@ fn transaction_storage_runtime_sizes() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: total_bytes,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -195,7 +195,7 @@ fn transaction_storage_runtime_sizes() {
 				AuthorizationExtent {
 					bytes: total_bytes,
 					bytes_allowance: total_bytes,
-					transactions_used: 6,
+					transactions: 6,
 					transactions_allowance: 0
 				},
 			);
@@ -219,7 +219,7 @@ fn transaction_storage_runtime_sizes() {
 				AuthorizationExtent {
 					bytes: total_bytes,
 					bytes_allowance: total_bytes + oversized,
-					transactions_used: 6,
+					transactions: 6,
 					transactions_allowance: 0
 				},
 			);
@@ -262,7 +262,7 @@ fn transaction_storage_max_throughput_per_block() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -301,7 +301,7 @@ fn transaction_storage_max_throughput_per_block() {
 				AuthorizationExtent {
 					bytes: NUM_TRANSACTIONS as u64 * TRANSACTION_SIZE,
 					bytes_allowance: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
-					transactions_used: NUM_TRANSACTIONS,
+					transactions: NUM_TRANSACTIONS,
 					transactions_allowance: 0
 				},
 			);
@@ -433,7 +433,7 @@ fn store_with_cid_config_works() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 3 * total_bytes,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -686,7 +686,7 @@ fn alice_can_sign_authorize_account_extrinsic() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 1024,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -987,7 +987,7 @@ fn authorized_wrapped_store_rejected() {
 				AuthorizationExtent {
 					bytes: data.len() as u64,
 					bytes_allowance: 4 * data.len() as u64,
-					transactions_used: 1,
+					transactions: 1,
 					transactions_allowance: 0
 				},
 			);
@@ -1046,7 +1046,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 100,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 1,
 				},
 				"Preimage authorization should not be consumed",
@@ -1056,7 +1056,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 200,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 				"Account authorization should not be consumed",
@@ -1108,7 +1108,7 @@ fn preimage_authorized_storage_transactions_work() {
 				AuthorizationExtent {
 					bytes: 24,
 					bytes_allowance: 24,
-					transactions_used: 1,
+					transactions: 1,
 					transactions_allowance: 1,
 				},
 			);
@@ -1151,7 +1151,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 				AuthorizationExtent {
 					bytes: 100,
 					bytes_allowance: 100,
-					transactions_used: 1,
+					transactions: 1,
 					transactions_allowance: 1,
 				},
 				"Preimage authorization should be consumed"
@@ -1161,7 +1161,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 500,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 				"Account authorization should remain unchanged when preimage auth is used"
@@ -1219,7 +1219,7 @@ fn renew_must_be_direct_extrinsic() {
 			AuthorizationExtent {
 				bytes: 200,
 				bytes_allowance: 100,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 0
 			},
 		);
@@ -1284,7 +1284,7 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 0,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 				"authorize_account via batch must not succeed for non-Authorizer",
@@ -1328,7 +1328,7 @@ fn wrapped_authorize_account_succeeds() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 10 * 1024,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -1402,7 +1402,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: data.len() as u64,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -1450,7 +1450,7 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: data.len() as u64,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -1527,7 +1527,7 @@ fn sudo_store_works_for_sudo_key_holder() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 0,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -1565,7 +1565,7 @@ fn xcm_transact_store_is_blocked() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 0,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -1602,7 +1602,7 @@ fn xcm_transact_store_is_blocked() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 0,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 				"Authorization should remain unconsumed since XCM was blocked",
@@ -1658,7 +1658,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 0,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -1681,7 +1681,7 @@ fn xcm_transact_authorize_account_works() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 0,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);
@@ -1716,7 +1716,7 @@ fn xcm_transact_authorize_account_works() {
 				AuthorizationExtent {
 					bytes: 0,
 					bytes_allowance: 1024,
-					transactions_used: 0,
+					transactions: 0,
 					transactions_allowance: 0
 				},
 			);

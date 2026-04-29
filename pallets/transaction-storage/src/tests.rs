@@ -89,7 +89,7 @@ fn uses_account_authorization() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2001,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			}
 		);
@@ -105,7 +105,7 @@ fn uses_account_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2001,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			}
 		);
@@ -118,7 +118,7 @@ fn uses_account_authorization() {
 			AuthorizationExtent {
 				bytes: 2002,
 				bytes_allowance: 2001,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 0
 			}
 		);
@@ -137,7 +137,7 @@ fn uses_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2002,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 1
 			}
 		);
@@ -152,7 +152,7 @@ fn uses_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2002,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 1
 			}
 		);
@@ -167,7 +167,7 @@ fn uses_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 4000,
 				bytes_allowance: 2002,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 1
 			}
 		);
@@ -300,7 +300,7 @@ fn authorization_expires() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -313,7 +313,7 @@ fn authorization_expires() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -325,7 +325,7 @@ fn authorization_expires() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 0,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -345,7 +345,7 @@ fn expired_authorization_clears() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -360,7 +360,7 @@ fn expired_authorization_clears() {
 			AuthorizationExtent {
 				bytes: 1000,
 				bytes_allowance: 2000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 		);
@@ -410,7 +410,7 @@ fn consumed_authorization_stays_over_cap() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -423,7 +423,7 @@ fn consumed_authorization_stays_over_cap() {
 			AuthorizationExtent {
 				bytes: 1000,
 				bytes_allowance: 2000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 		);
@@ -434,7 +434,7 @@ fn consumed_authorization_stays_over_cap() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2000,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 0
 			},
 		);
@@ -445,7 +445,7 @@ fn consumed_authorization_stays_over_cap() {
 			AuthorizationExtent {
 				bytes: 3000,
 				bytes_allowance: 2000,
-				transactions_used: 3,
+				transactions: 3,
 				transactions_allowance: 0
 			},
 		);
@@ -481,7 +481,7 @@ fn stores_various_sizes_with_account_authorization() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: total_bytes,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -498,7 +498,7 @@ fn stores_various_sizes_with_account_authorization() {
 			AuthorizationExtent {
 				bytes: total_bytes,
 				bytes_allowance: total_bytes,
-				transactions_used: 6,
+				transactions: 6,
 				transactions_allowance: 0
 			},
 		);
@@ -549,7 +549,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 4000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			}
 		);
@@ -565,7 +565,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 1
 			}
 		);
@@ -581,7 +581,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 1
 			},
 			"Preimage authorization should be consumed"
@@ -591,7 +591,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 4000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 			"Account authorization should remain unchanged"
@@ -606,7 +606,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			AuthorizationExtent {
 				bytes: 1000,
 				bytes_allowance: 4000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 			"Account authorization should be used for non-pre-authorized content"
@@ -629,7 +629,7 @@ fn signed_store_falls_back_to_account_authorization() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 4000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			}
 		);
@@ -650,7 +650,7 @@ fn signed_store_falls_back_to_account_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 4000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 			"Account authorization should be consumed when no matching preimage auth"
@@ -660,7 +660,7 @@ fn signed_store_falls_back_to_account_authorization() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 1000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 1
 			},
 			"Unrelated preimage authorization should remain unchanged"
@@ -689,7 +689,7 @@ fn signed_renew_uses_account_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 4000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 		);
@@ -705,7 +705,7 @@ fn signed_renew_uses_account_authorization() {
 			AuthorizationExtent {
 				bytes: 4000,
 				bytes_allowance: 4000,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 0
 			},
 			"Account authorization should be consumed for renew when no preimage auth"
@@ -733,7 +733,7 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 4000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			}
 		);
@@ -752,7 +752,7 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 1
 			}
 		);
@@ -762,7 +762,7 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 4000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			}
 		);
@@ -776,7 +776,7 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 1
 			},
 			"Preimage authorization should be consumed for renew"
@@ -786,7 +786,7 @@ fn signed_renew_prefers_preimage_authorization() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 4000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 			"Account authorization should remain unchanged when preimage auth is used"
@@ -875,7 +875,7 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 1
 			}
 		);
@@ -887,7 +887,7 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 2000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 1
 			}
 		);
@@ -897,7 +897,7 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 1
 			}
 		);
@@ -920,7 +920,7 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 			AuthorizationExtent {
 				bytes: 4000,
 				bytes_allowance: 2000,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 1
 			}
 		);
@@ -945,7 +945,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 2000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -966,7 +966,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			AuthorizationExtent {
 				bytes: 4000,
 				bytes_allowance: 2000,
-				transactions_used: 2,
+				transactions: 2,
 				transactions_allowance: 0
 			},
 		);
@@ -1239,9 +1239,9 @@ fn try_state_detects_zero_authorization_allowance() {
 		run_to_block(1, || None);
 
 		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
-		// AuthorizationExtent SCALE layout: bytes(u64), bytes_allowance(u64),
-		// transactions_used(u32), transactions_allowance(u32)
-		let corrupted_auth = (0u64, 0u64, 0u32, 0u32, 100u64); // bytes_allowance=0, expiration=100
+		// AuthorizationExtent SCALE layout: transactions(u32), transactions_allowance(u32),
+		// bytes(u64), bytes_allowance(u64)
+		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 100u64); // bytes_allowance=0, expiration=100
 		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &corrupted_auth.encode());
 
@@ -1388,7 +1388,7 @@ fn authorize_storage_extension_transforms_origin() {
 			AuthorizationExtent {
 				bytes: 16,
 				bytes_allowance: 16,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 		);
@@ -1503,7 +1503,7 @@ fn re_authorize_account_adds_to_allowance_and_keeps_expiry() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 3000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -1519,7 +1519,7 @@ fn re_authorize_account_adds_to_allowance_and_keeps_expiry() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 0,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -1544,7 +1544,7 @@ fn re_authorize_account_preserves_used_bytes() {
 			AuthorizationExtent {
 				bytes: 2000,
 				bytes_allowance: 5000,
-				transactions_used: 1,
+				transactions: 1,
 				transactions_allowance: 0
 			},
 		);
@@ -1569,7 +1569,7 @@ fn re_authorize_account_after_expiry_resets() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 1500,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);
@@ -1595,7 +1595,7 @@ fn authorize_preimage_does_not_push_expiry() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 3000,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 1
 			},
 		);
@@ -1611,7 +1611,7 @@ fn authorize_preimage_does_not_push_expiry() {
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 0,
-				transactions_used: 0,
+				transactions: 0,
 				transactions_allowance: 0
 			},
 		);

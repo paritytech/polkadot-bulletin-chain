@@ -93,21 +93,21 @@ pub const AUTHORIZATION_NOT_FOUND: InvalidTransaction = InvalidTransaction::Cust
 /// Authorization has not expired.
 pub const AUTHORIZATION_NOT_EXPIRED: InvalidTransaction = InvalidTransaction::Custom(4);
 
-/// Usage state of an authorization. `bytes` / `transactions_used` accumulate upward as
+/// Usage state of an authorization. `bytes` / `transactions` accumulate upward as
 /// data is stored; `bytes_allowance` / `transactions_allowance` are the caps set at
 /// grant time.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
 pub struct AuthorizationExtent {
+	/// Transactions consumed so far.
+	pub transactions: u32,
+	/// Total transaction allowance granted.
+	pub transactions_allowance: u32,
 	/// Bytes consumed so far.
 	pub bytes: u64,
 	/// Total byte allowance granted.
 	pub bytes_allowance: u64,
-	/// Boost-tier call count this period (in-budget store + renew).
-	pub transactions_used: u32,
-	/// Per-period boost-tier transaction budget.
-	pub transactions_allowance: u32,
 }
 
 /// The scope of an authorization.
@@ -827,7 +827,7 @@ pub mod pallet {
 						extent: AuthorizationExtent {
 							bytes: 0,
 							bytes_allowance: *bytes_allowance,
-							transactions_used: 0,
+							transactions: 0,
 							transactions_allowance: *transactions_allowance,
 						},
 						expiration,
@@ -843,7 +843,7 @@ pub mod pallet {
 						extent: AuthorizationExtent {
 							bytes: 0,
 							bytes_allowance: *max_size,
-							transactions_used: 0,
+							transactions: 0,
 							transactions_allowance: 1,
 						},
 						expiration,
@@ -1034,7 +1034,7 @@ pub mod pallet {
 							extent: AuthorizationExtent {
 								bytes: 0,
 								bytes_allowance,
-								transactions_used: 0,
+								transactions: 0,
 								transactions_allowance,
 							},
 							expiration,
@@ -1068,7 +1068,7 @@ pub mod pallet {
 						extent: AuthorizationExtent {
 							bytes: 0,
 							bytes_allowance,
-							transactions_used: 0,
+							transactions: 0,
 							transactions_allowance,
 						},
 						expiration,
@@ -1079,8 +1079,7 @@ pub mod pallet {
 		}
 
 		/// Refresh an existing authorization: extend its expiration and reset the consumed
-		/// counters (`bytes`, `transactions_used`) to `0` so the holder regains a fresh
-		/// allowance for the new period.
+		/// counters (`bytes`, `transactions`) to `0` so the holder regains a fresh allowance.
 		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
@@ -1088,9 +1087,9 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
-					// Reset usage so the holder regains a fresh allowance for the new period.
+					// Reset usage so the holder regains a fresh allowance.
 					authorization.extent.bytes = 0;
-					authorization.extent.transactions_used = 0;
+					authorization.extent.transactions = 0;
 					Ok(())
 				} else {
 					// No previous authorization to refresh.
@@ -1206,7 +1205,7 @@ pub mod pallet {
 		///
 		/// Rejects only if the authorization entry is missing or expired — never rejects on
 		/// insufficient allowance. If `consume` is `true`, adds `size` to the consumed `bytes`
-		/// counter and increments `transactions_used` by 1 (both saturating); callers can
+		/// counter and increments `transactions` by 1 (both saturating); callers can
 		/// overshoot the caps, in which case the [`extension::AllowanceBasedPriority`]
 		/// boost no longer applies.
 		fn check_authorization(
@@ -1225,8 +1224,8 @@ pub mod pallet {
 				if consume {
 					authorization.extent.bytes =
 						authorization.extent.bytes.saturating_add(size.into());
-					authorization.extent.transactions_used =
-						authorization.extent.transactions_used.saturating_add(1);
+					authorization.extent.transactions =
+						authorization.extent.transactions.saturating_add(1);
 				}
 				Ok(())
 			};
