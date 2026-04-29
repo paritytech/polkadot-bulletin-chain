@@ -1399,3 +1399,74 @@ fn refresh_resets_bytes_but_not_bytes_permanent() {
 		);
 	});
 }
+
+/// `authorize_account` on an expired-but-present entry must preserve `bytes_permanent`.
+/// Resetting it would let a holder commit unbounded permanent storage by letting the
+/// authorization expire and getting re-granted. Pairs with the
+/// `remove_expired_account_authorization` guard.
+#[test]
+fn authorize_account_after_expiry_preserves_bytes_permanent() {
+	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		let who = 1;
+
+		// Authorize and seed `bytes_permanent = 2000` directly (simulates a past renew).
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+			// Force expiry without advancing blocks.
+			auth.expiration = 1;
+		});
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { bytes: 0, bytes_permanent: 0, bytes_allowance: 0 },
+			"expired authorization reports zero extent",
+		);
+
+		// Re-authorize: cap is re-granted, `bytes` resets to 0, `bytes_permanent` is preserved.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent { bytes: 0, bytes_permanent: 2000, bytes_allowance: 1000 },
+			"re-authorize after expiry must not zero `bytes_permanent`",
+		);
+	});
+}
+
+/// `remove_expired_account_authorization` must refuse while `bytes_permanent > 0`.
+/// Removing the entry would orphan the (lazy) ledger drain — its decrement would have
+/// nowhere to go.
+#[test]
+fn remove_expired_account_authorization_refuses_while_bytes_permanent_outstanding() {
+	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		let who = 1;
+
+		// Authorize, seed `bytes_permanent > 0`, force expiry.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+			auth.expiration = 1;
+		});
+
+		// Cannot be removed while permanent state is outstanding.
+		assert_noop!(
+			TransactionStorage::remove_expired_account_authorization(RuntimeOrigin::none(), who),
+			Error::AuthorizationHasPermanentStorage,
+		);
+
+		// Once `bytes_permanent` is cleared (simulating a successful ledger drain),
+		// removal succeeds.
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 0;
+		});
+		assert_ok!(TransactionStorage::remove_expired_account_authorization(
+			RuntimeOrigin::none(),
+			who,
+		));
+		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
+	});
+}

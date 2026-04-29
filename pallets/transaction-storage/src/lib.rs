@@ -312,6 +312,9 @@ pub mod pallet {
 		AuthorizationNotFound,
 		/// Authorization has not expired.
 		AuthorizationNotExpired,
+		/// Authorization still has permanent storage outstanding (`bytes_permanent > 0`)
+		/// and cannot be removed yet — wait for the lazy ledger drain to clear it.
+		AuthorizationHasPermanentStorage,
 		/// Content hash was not calculated.
 		InvalidContentHash,
 	}
@@ -1015,6 +1018,15 @@ pub mod pallet {
 		}
 
 		/// Authorize data storage.
+		/// Authorize data storage for a scope. Behaviour for an existing entry:
+		/// - **Unexpired**: re-grant the cap (`bytes_allowance = bytes_allowance`); preserve
+		///   `bytes` and `bytes_permanent`. Re-authorize never grants extra by accident; it may
+		///   lower the effective remaining capacity.
+		/// - **Expired-but-present**: re-grant the cap, reset `bytes` to `0` (the soft window
+		///   restarts), but **leave `bytes_permanent` as-is** — permanent state reflects in-flight
+		///   on-chain commitments and is only ever decremented by the lazy ledger drain. Pairs with
+		///   `remove_expired_authorization`'s guard.
+		/// - **Missing**: create a fresh entry with both counters at `0`.
 		fn authorize(scope: AuthorizationScopeFor<T>, bytes_allowance: u64) {
 			let expiration = frame_system::Pallet::<T>::block_number()
 				.saturating_add(T::AuthorizationPeriod::get());
@@ -1022,23 +1034,13 @@ pub mod pallet {
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					if Self::expired(authorization.expiration) {
-						*authorization = Authorization {
-							extent: AuthorizationExtent {
-								bytes: 0,
-								bytes_permanent: 0,
-								bytes_allowance,
-							},
-							expiration,
-						};
+						// Expired-but-present: re-grant the cap, reset only `bytes`.
+						// `bytes_permanent` is intentionally preserved (see fn doc).
+						authorization.expiration = expiration;
+						authorization.extent.bytes = 0;
+						authorization.extent.bytes_allowance = bytes_allowance;
 					} else {
-						match scope {
-							AuthorizationScope::Account(_) => {
-								authorization.extent.bytes_allowance = bytes_allowance;
-							},
-							AuthorizationScope::Preimage(_) => {
-								authorization.extent.bytes_allowance = bytes_allowance;
-							},
-						}
+						authorization.extent.bytes_allowance = bytes_allowance;
 					}
 				} else {
 					*maybe_authorization = Some(Authorization {
@@ -1083,6 +1085,14 @@ pub mod pallet {
 			let authorization =
 				Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(Self::expired(authorization.expiration), Error::<T>::AuthorizationNotExpired);
+			// Refuse to remove while permanent state is outstanding — removing would orphan
+			// the lazy ledger drain (it would have nowhere to decrement). The entry becomes
+			// removable once `bytes_permanent` has dropped back to `0` naturally via the
+			// drain. Pairs with the `authorize` expired-but-present rule.
+			ensure!(
+				authorization.extent.bytes_permanent == 0,
+				Error::<T>::AuthorizationHasPermanentStorage,
+			);
 			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
