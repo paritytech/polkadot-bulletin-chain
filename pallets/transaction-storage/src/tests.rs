@@ -1841,3 +1841,61 @@ fn store_records_extrinsic_index_in_transaction_info() {
 		assert_eq!(txs[0].size, 500);
 	});
 }
+
+/// Test to make sure we can actually access everything we need for build the
+/// output times for the runtime API.
+#[test]
+fn transaction_info_projects_into_upstream_runtime_api_type() {
+	use bulletin_transaction_storage_primitives::cids::HashingAlgorithm as PalletHashingAlgorithm;
+	use codec::{Decode, Encode};
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+
+	type ContentHash = [u8; 32];
+	type CidCodec = u64;
+	const RAW_CID_CODEC: CidCodec = 0x55;
+
+	#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo)]
+	enum HashingAlgorithm {
+		Blake2b256,
+		Sha2_256,
+		Keccak256,
+	}
+
+	#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo)]
+	struct IndexedTransactionInfo {
+		pub content_hash: ContentHash,
+		pub size: u32,
+		pub hashing: HashingAlgorithm,
+		pub cid_codec: CidCodec,
+		pub extrinsic_index: u32,
+	}
+
+	let tx = TransactionInfo {
+		chunk_root: BlakeTwo256::hash(&[1]),
+		content_hash: BlakeTwo256::hash(&[2]).into(),
+		hashing: PalletHashingAlgorithm::Blake2b256,
+		cid_codec: RAW_CID_CODEC,
+		size: 500,
+		extrinsic_index: 7,
+		block_chunks: 4,
+	};
+
+	let projected = IndexedTransactionInfo {
+		content_hash: tx.content_hash,
+		size: tx.size,
+		hashing: match tx.hashing {
+			PalletHashingAlgorithm::Blake2b256 => HashingAlgorithm::Blake2b256,
+			PalletHashingAlgorithm::Sha2_256 => HashingAlgorithm::Sha2_256,
+			PalletHashingAlgorithm::Keccak256 => HashingAlgorithm::Keccak256,
+			_ => panic!("unknown bulletin HashingAlgorithm variant"),
+		},
+		cid_codec: tx.cid_codec,
+		extrinsic_index: tx.extrinsic_index,
+	};
+
+	assert_eq!(projected.content_hash, tx.content_hash);
+	assert_eq!(projected.size, 500);
+	assert_eq!(projected.hashing, HashingAlgorithm::Blake2b256);
+	assert_eq!(projected.cid_codec, RAW_CID_CODEC);
+	assert_eq!(projected.extrinsic_index, 7);
+}

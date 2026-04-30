@@ -20,8 +20,6 @@
 extern crate alloc;
 
 pub mod cids;
-// TEMPORARY: see temp_runtime_api.rs.
-pub mod temp_runtime_api;
 
 /// 32-byte hash of a stored blob of data.
 pub type ContentHash = [u8; 32];

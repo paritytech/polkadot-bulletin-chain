@@ -2114,9 +2114,7 @@ dependencies = [
  "cid",
  "parity-scale-codec",
  "scale-info",
- "sp-api",
  "sp-io",
- "sp-runtime",
  "tracing",
 ]
 

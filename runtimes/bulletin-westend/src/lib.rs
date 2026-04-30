@@ -828,56 +828,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	// TEMPORARY: mirrors the upstream polkadot-sdk PR #11939's TransactionStorageApi v2.
-	// Delete this block when bulletin upgrades to a published `sp-transaction-storage-proof`
-	// release containing `IndexedTransactionInfo` + `indexed_transactions`, and merge the
-	// `indexed_transactions` method into the original block above.
-	impl bulletin_transaction_storage_primitives::temp_runtime_api::BulletinTransactionStorageApiTemp<Block>
-		for Runtime
-	{
-		fn retention_period() -> NumberFor<Block> {
-			TransactionStorage::retention_period()
-		}
-
-		fn indexed_transactions(
-			block: NumberFor<Block>,
-		) -> alloc::vec::Vec<
-			bulletin_transaction_storage_primitives::temp_runtime_api::IndexedTransactionInfo,
-		> {
-			use bulletin_transaction_storage_primitives::{
-				cids::HashingAlgorithm as PalletHashingAlgorithm,
-				temp_runtime_api::{HashingAlgorithm as ApiHashingAlgorithm, IndexedTransactionInfo},
-			};
-
-			TransactionStorage::transactions_at(block)
-				.map(|txs| {
-					txs.into_iter()
-						.filter_map(|tx| {
-							let hashing = match tx.hashing {
-								PalletHashingAlgorithm::Blake2b256 =>
-									ApiHashingAlgorithm::Blake2b256,
-								PalletHashingAlgorithm::Sha2_256 => ApiHashingAlgorithm::Sha2_256,
-								PalletHashingAlgorithm::Keccak256 => ApiHashingAlgorithm::Keccak256,
-								// Bulletin's `HashingAlgorithm` is `#[non_exhaustive]`. If a new
-								// pallet-side variant is ever added without a corresponding
-								// API-side variant, drop the entry rather than panicking or
-								// silently mis-projecting.
-								_ => return None,
-							};
-							Some(IndexedTransactionInfo {
-								content_hash: tx.content_hash,
-								size: tx.size,
-								hashing,
-								cid_codec: tx.cid_codec,
-								extrinsic_index: tx.extrinsic_index,
-							})
-						})
-						.collect()
-				})
-				.unwrap_or_default()
-		}
-	}
-
 	#[cfg(feature = "try-runtime")]
 	impl frame_try_runtime::TryRuntime<Block> for Runtime {
 		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
