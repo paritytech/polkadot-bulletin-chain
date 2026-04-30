@@ -101,7 +101,7 @@ Steps 1–2 ride normal high priority. From step 3 onward Alice's `store` calls 
 
 ## Hard Limit
 
-Proposed; not yet wired. The hard cap is enforced at two levels and a renewal that would breach **either** is **rejected** (no leftover-space fallback — permanent storage doesn't have one).
+Implemented in [PR #457](https://github.com/paritytech/polkadot-bulletin-chain/pull/457). The hard cap is enforced at two levels and a renewal that would breach **either** is **rejected** (no leftover-space fallback — permanent storage doesn't have one).
 
 ### Caps
 

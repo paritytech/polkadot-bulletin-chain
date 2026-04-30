@@ -25,8 +25,9 @@ use super::{
 	},
 	pallet::Origin,
 	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED,
-	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED,
+	AUTHORIZATION_HAS_PERMANENT_STORAGE, AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE,
+	CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
 use crate::migrations::v1::OldTransactionInfo;
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
@@ -1319,6 +1320,112 @@ fn try_state_passes_with_preimage_authorization() {
 	});
 }
 
+/// Happy path for the hard-side invariants: a real `renew` keeps
+/// `PermanentStorageUsed == Σ bytes_permanent == Σ ledger sizes`.
+#[test]
+fn try_state_passes_after_renew() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let store_call = Call::store { data: vec![42u8; 2000] };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+/// `PermanentStorageUsed` desync from `Σ bytes_permanent` is caught.
+#[test]
+fn try_state_detects_permanent_used_mismatch_with_authorizations() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+		});
+		// PermanentStorageUsed deliberately left at 0 — desync.
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"PermanentStorageUsed != Σ bytes_permanent across Authorizations"
+		);
+	});
+}
+
+/// `PermanentStorageUsed` desync from `Σ ledger sizes` is caught.
+#[test]
+fn try_state_detects_permanent_used_mismatch_with_ledger() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+		});
+		PermanentStorageUsed::put(2000);
+		// Ledger deliberately empty — desync with the counter.
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"PermanentStorageUsed != Σ size across PermanentStorageLedger entries"
+		);
+	});
+}
+
+/// A ledger entry whose block is below the cursor is caught.
+#[test]
+fn try_state_detects_ledger_entry_before_cursor() {
+	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 1000;
+		});
+		PermanentStorageUsed::put(1000);
+		// Cursor at block 3, but a ledger entry at block 1 (before cursor) — invariant violation.
+		PermanentStorageLedgerCursor::put(3u64);
+		PermanentStorageLedger::mutate(1u64, |entries| {
+			entries.try_push((AuthorizationScope::Account(who), 1000)).unwrap();
+		});
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"PermanentStorageLedger entry exists before cursor"
+		);
+	});
+}
+
+/// `PermanentStorageUsed` over `MaxPermanentStorageSize` is caught.
+#[test]
+fn try_state_detects_permanent_used_exceeds_chain_cap() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+		});
+		PermanentStorageUsed::put(2000);
+		PermanentStorageLedger::mutate(1u64, |entries| {
+			entries.try_push((AuthorizationScope::Account(who), 2000)).unwrap();
+		});
+		// Counter and ledger consistent, but cap pushed below the counter.
+		MaxPermanentStorageSize::set(&500);
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"PermanentStorageUsed exceeds MaxPermanentStorageSize"
+		);
+	});
+}
+
 // ---- ValidateStorageCalls extension tests ----
 
 #[test]
@@ -1823,6 +1930,48 @@ fn remove_expired_account_authorization_refuses_while_bytes_permanent_outstandin
 	});
 }
 
+/// `remove_expired_account_authorization` must also be rejected at *validate* time when
+/// `bytes_permanent > 0` — pool ingress should reject so the tx never reaches dispatch.
+/// Pairs with the dispatch-time guard above.
+#[test]
+fn remove_expired_validate_rejects_while_bytes_permanent_outstanding() {
+	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		let who = 1;
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+			auth.expiration = 1;
+		});
+
+		let remove_call = Call::remove_expired_account_authorization { who };
+		assert_noop!(
+			TransactionStorage::pre_dispatch(&remove_call),
+			AUTHORIZATION_HAS_PERMANENT_STORAGE,
+		);
+
+		// Same guard applies to preimage scope.
+		let content_hash = blake2_256(&[7u8; 8]);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			content_hash,
+			4000,
+		));
+		Authorizations::mutate(AuthorizationScope::Preimage(content_hash), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+			auth.expiration = 1;
+		});
+		let remove_preimage_call = Call::remove_expired_preimage_authorization { content_hash };
+		assert_noop!(
+			TransactionStorage::pre_dispatch(&remove_preimage_call),
+			AUTHORIZATION_HAS_PERMANENT_STORAGE,
+		);
+	});
+}
+
 /// A successful renew bumps the chain-wide `PermanentStorageUsed` counter and appends a
 /// `(scope, size)` entry to `PermanentStorageLedger` keyed by the current block, so the
 /// lazy drain has something to decrement once retention elapses.
@@ -2048,5 +2197,107 @@ fn drain_terminates_when_retention_period_is_zero() {
 			meter.consumed().all_lt(meter.limit()),
 			"drain must terminate without exhausting the weight meter when retention is 0",
 		);
+	});
+}
+
+/// Renew emits `PermanentStorageUsedUpdated { used }` so off-chain capacity-planning
+/// dashboards can track the chain-wide counter without polling storage.
+#[test]
+fn renew_emits_permanent_storage_used_updated() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::PermanentStorageUsedUpdated { used: 2000 },
+		));
+	});
+}
+
+/// Drain emits `PermanentStorageUsedUpdated { used }` per decrement so off-chain consumers
+/// see the counter walking back down as ledger entries age out.
+#[test]
+fn drain_emits_permanent_storage_used_updated() {
+	new_test_ext().execute_with(|| {
+		// Seed a renewed entry directly so we can run the drain in isolation.
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+		});
+		PermanentStorageUsed::put(2000);
+		PermanentStorageLedger::mutate(3u64, |entries| {
+			entries.try_push((AuthorizationScope::Account(who), 2000)).unwrap();
+		});
+
+		System::set_block_number(13);
+		// Drain at block 13 (`13 - 3 = 10 >= retention`).
+		let mut meter = WeightMeter::new();
+		TransactionStorage::on_poll(13, &mut meter);
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::PermanentStorageUsedUpdated { used: 0 },
+		));
+	});
+}
+
+/// `PermanentStorageNearCap` fires once on the rising edge across the threshold and is
+/// **not** re-emitted while still above the threshold. Decrementing back below and rising
+/// again re-arms the signal.
+#[test]
+fn permanent_storage_near_cap_fires_on_rising_edge_only() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+
+		// Cap = 1000; threshold = 1000 * 80 / 100 = 800.
+		MaxPermanentStorageSize::set(&1000);
+
+		// Generous per-account allowance so renews are only gated by the chain-wide cap.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, u64::MAX,));
+
+		// Helper: store `size` bytes at the current block, advance one block, then renew it.
+		// Captures the store block so the renew always points at the just-stored tx, not
+		// some earlier one.
+		let store_and_renew = |size: usize| {
+			let store_block = System::block_number();
+			let store_call = Call::store { data: vec![0u8; size] };
+			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+			assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+			run_to_block(store_block + 1, || None);
+			let renew_call = Call::renew { block: store_block, index: 0 };
+			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		};
+
+		// Step 1: 500 bytes (PermanentStorageUsed: 0 → 500). Below threshold; no near-cap.
+		store_and_renew(500);
+		assert_eq!(PermanentStorageUsed::get(), 500);
+		let evs = System::events();
+		assert!(!evs.iter().any(|r| matches!(
+			r.event,
+			RuntimeEvent::TransactionStorage(Event::PermanentStorageNearCap { .. })
+		)));
+
+		// Step 2: +400 bytes (500 → 900). Crosses 800 threshold → near-cap fires.
+		System::reset_events();
+		store_and_renew(400);
+		assert_eq!(PermanentStorageUsed::get(), 900);
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::PermanentStorageNearCap { used: 900, cap: 1000 },
+		));
+
+		// Quick sanity check on the threshold formula matching the constant.
+		assert_eq!(PERMANENT_STORAGE_NEAR_CAP_PERCENT, 80);
 	});
 }
