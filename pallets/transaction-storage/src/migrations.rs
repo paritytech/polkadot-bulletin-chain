@@ -278,3 +278,87 @@ pub mod v1 {
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }
+
+/// Migration v1→v2: replaces the `AuthorizationExtent` schema.
+///
+/// Old: `{ transactions: u32, bytes: u64 }` — transaction count and remaining
+/// byte quota.
+///
+/// New: `{ bytes: u64, bytes_allowance: u64, transactions: u32,
+/// transactions_allowance: u32 }` — bytes consumed so far and total bytes granted,
+/// plus a parallel boost-tier transaction counter and budget.
+///
+/// The remaining byte quota becomes the new total allowance
+/// (`bytes_allowance = old.bytes`, `bytes = 0`); the remaining transaction count
+/// becomes `transactions_allowance` (`transactions = 0`), so each authorization
+/// keeps its previous remaining capacity on both axes. Entries whose remaining byte
+/// quota is already zero are dropped — they can't be translated to a valid v2 entry
+/// (`check_authorizations_integrity` requires `bytes_allowance > 0`) and they were
+/// already unusable on the old chain.
+pub mod v2 {
+	use super::*;
+	use crate::{
+		pallet::{Authorizations, Pallet},
+		Authorization, AuthorizationExtent,
+	};
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+	};
+
+	#[derive(Encode, Decode)]
+	pub(crate) struct V1AuthorizationExtent {
+		pub transactions: u32,
+		pub bytes: u64,
+	}
+
+	#[derive(Encode, Decode)]
+	pub(crate) struct V1Authorization<BlockNumber> {
+		pub extent: V1AuthorizationExtent,
+		pub expiration: BlockNumber,
+	}
+
+	pub struct VersionUncheckedMigrateV1ToV2<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let mut migrated: u64 = 0;
+			let mut dropped: u64 = 0;
+			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
+				|_scope, old| {
+					if old.extent.bytes == 0 {
+						dropped = dropped.saturating_add(1);
+						return None;
+					}
+					migrated = migrated.saturating_add(1);
+					Some(Authorization {
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_allowance: old.extent.bytes,
+							transactions: 0,
+							transactions_allowance: old.extent.transactions,
+						},
+						expiration: old.expiration,
+					})
+				},
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				migrated,
+				dropped,
+				"v1->v2 AuthorizationExtent migration complete",
+			);
+			// One read + one write per visited entry (translate rewrites or deletes).
+			let touched = migrated.saturating_add(dropped);
+			T::DbWeight::get().reads_writes(touched, touched)
+		}
+	}
+
+	/// Versioned migration v1→v2: replaces `AuthorizationExtent` schema.
+	pub type MigrateV1ToV2<T> = VersionedMigration<
+		1,
+		2,
+		VersionUncheckedMigrateV1ToV2<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
+}
