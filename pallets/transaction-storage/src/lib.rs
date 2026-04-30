@@ -1215,12 +1215,6 @@ pub mod pallet {
 		/// All transactions stored at the given block, in the current `TransactionInfo` layout.
 		///
 		/// Shape-tolerant against entries that are still in the pre-v3 layout.
-		/// This matters only for read-only RPC consumers calling `state_call`
-		/// against a chain state captured mid-MBM, before the v2→v3 migration
-		/// finished for that key. On-chain pallet logic does not need this
-		/// because user extrinsics are blocked while the MBM is in flight.
-		///
-		/// Pre-v3 entries are returned with `extrinsic_index = u32::MAX` as a sentinel.
 		pub fn transactions_at(
 			block: BlockNumberFor<T>,
 		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {

@@ -1809,13 +1809,11 @@ fn transactions_at_decodes_v2_entry_with_sentinel() {
 	new_test_ext().execute_with(|| {
 		insert_v2_format_transactions(5, 2);
 
-		// Direct `Transactions::get` cannot decode v1 bytes as v2.
+		// Direct `Transactions::get` cannot decode v2-shape bytes as the live (v3) layout.
 		assert!(Transactions::get(5).is_none());
 
-		// `transactions_at` is shape-tolerant for read-only RPC consumers
-		// who may query mid-MBM state via `state_call`.
 		let txs = TransactionStorage::transactions_at(5)
-			.expect("v1 entries decode through transactions_at");
+			.expect("v2 entries decode through transactions_at");
 		assert_eq!(txs.len(), 2);
 		for tx in txs.iter() {
 			assert_eq!(tx.extrinsic_index, u32::MAX);
@@ -1824,6 +1822,59 @@ fn transactions_at_decodes_v2_entry_with_sentinel() {
 
 		// The on-chain storage MUST be untouched: read-only API path does not write.
 		assert!(Transactions::get(5).is_none());
+	});
+}
+
+#[test]
+fn transactions_at_handles_mixed_v2_and_v3_entries() {
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+	new_test_ext().execute_with(|| {
+		// Block 1: pre-migration v2-shape (no `extrinsic_index`).
+		insert_v2_format_transactions(1, 2);
+		assert!(Transactions::get(1).is_none(), "v2 bytes do not decode as v3");
+
+		// Block 2: live v3-shape entry — written by current code paths.
+		let v3_tx = TransactionInfo {
+			chunk_root: BlakeTwo256::hash(&[42]),
+			content_hash: BlakeTwo256::hash(&[43]).into(),
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 999,
+			extrinsic_index: 7,
+			block_chunks: 4,
+		};
+		let v3_bounded: BoundedVec<TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+			vec![v3_tx.clone()].try_into().unwrap();
+		Transactions::insert(2u64, v3_bounded);
+
+		// Empty: a block with no entry returns None.
+		assert!(TransactionStorage::transactions_at(99).is_none());
+
+		// Slow path: v2 entry promoted to v3 with sentinel.
+		let txs1 = TransactionStorage::transactions_at(1).expect("v2 entry decodes");
+		assert_eq!(txs1.len(), 2);
+		for tx in txs1.iter() {
+			assert_eq!(tx.extrinsic_index, u32::MAX);
+			assert_eq!(tx.size, 2000);
+		}
+
+		// Fast path: v3 entry returned verbatim, real `extrinsic_index` preserved.
+		let txs2 = TransactionStorage::transactions_at(2).expect("v3 entry decodes");
+		assert_eq!(txs2.len(), 1);
+		assert_eq!(txs2[0].extrinsic_index, 7);
+		assert_eq!(txs2[0].size, 999);
+
+		// Read-only contract: storage shapes are unchanged after the read.
+		assert!(Transactions::get(1).is_none(), "v2 entry must remain v2-shape on disk");
+		assert_eq!(
+			Transactions::get(2)
+				.expect("v3 entry still decodes")
+				.into_iter()
+				.next()
+				.unwrap(),
+			v3_tx,
+			"v3 entry must be byte-identical pre/post read",
+		);
 	});
 }
 
