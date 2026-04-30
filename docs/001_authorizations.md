@@ -77,9 +77,10 @@ A signer can therefore consume up to `bytes_allowance` of temp usage *and* up to
 Implemented in [PR #448](https://github.com/paritytech/polkadot-bulletin-chain/pull/448).
 
 - `check_authorization` does **not** reject `store` calls over the soft limit; it saturates `bytes` and `transactions` upward and lets the tx validate.
-- The `AllowanceBasedPriority` transaction extension adds a priority boost via a runtime-selected `BoostStrategy`. The strategy is fed the **post-this-tx** extent (caller pre-applies `bytes += size` and `transactions += 1`), so the boost decision reduces to "would this leave the holder in-budget on both axes?".
+- The `AllowanceBasedPriority` transaction extension adds a priority boost via a runtime-selected `BoostStrategy`. The boost only applies to **signed account-scoped `store` / `store_with_cid_config`** — `renew` consumes allowance but is excluded (it operates on already-stored data and shouldn't compete for the same priority slots as new submissions); preimage-scoped stores also get `0` (only account-scoped variants consume the caller's per-account allowance).
+- The strategy is fed the **post-this-tx** extent (caller pre-applies `bytes += size` and `transactions += 1`), so the boost decision reduces to "would this leave the holder in-budget on both axes?".
 - `in_budget(extent)` is `true` iff `bytes_allowance != 0 && bytes <= bytes_allowance && transactions <= transactions_allowance`.
-- `FlatBoost` (default): `ALLOWANCE_PRIORITY_BOOST` while in-budget on both axes, `0` once either axis is over cap.
+- `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while in-budget on both axes, `0` once either axis is over cap.
 - `ProportionalBoost` (alternative): boost scales with the **tighter** of the byte-budget and tx-budget remainders — `min(BOOST × bytes_rem / bytes_allowance, BOOST × tx_rem / transactions_allowance)`. Fresh grant yields the full boost; at-cap on either axis yields zero.
 - Net effect: in-budget `store` txs sort strictly above over-budget ones; over-budget txs ride leftover block space (no rejection, just demotion). Pool nonce/arrival ordering breaks ties among in-budget signers.
 
