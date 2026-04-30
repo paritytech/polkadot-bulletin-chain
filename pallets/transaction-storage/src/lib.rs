@@ -1211,6 +1211,11 @@ pub mod pallet {
 						authorization.extent.transactions_allowance = transactions_allowance;
 					} else {
 						match scope {
+							// Account grants are additive within an unexpired window:
+							// `claim_long_term_storage` (and similar flows on caller chains)
+							// calls this once per claim and expects each to extend the caps.
+							// Expiry is left untouched until the authorization expires, at
+							// which point the next call (above) creates a fresh entry.
 							AuthorizationScope::Account(_) => {
 								authorization.extent.bytes_allowance = authorization
 									.extent
