@@ -177,7 +177,12 @@ pub struct TransactionInfo {
 	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
-	size: u32,
+	pub size: u32,
+	/// Extrinsic index within the block that originally indexed this data
+	/// (via `sp_io::transaction_index::index` / `renew`). For renewed entries
+	/// this is the renewer's extrinsic index, not the original. Entries created
+	/// before storage version 2 have `u32::MAX` as a sentinel.
+	pub extrinsic_index: u32,
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
 	///
@@ -525,6 +530,7 @@ pub mod pallet {
 						content_hash: info.content_hash,
 						hashing: info.hashing,
 						cid_codec: info.cid_codec,
+						extrinsic_index,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -982,6 +988,7 @@ pub mod pallet {
 						content_hash: cid.content_hash,
 						hashing,
 						cid_codec,
+						extrinsic_index,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -1203,6 +1210,48 @@ pub mod pallet {
 		) -> Option<TransactionInfo> {
 			let transactions = Transactions::<T>::get(block_number)?;
 			transactions.into_iter().nth(index as usize)
+		}
+
+		/// All transactions stored at the given block, in the current `TransactionInfo` layout.
+		///
+		/// Shape-tolerant against entries that are still in the pre-v2 layout.
+		/// This matters only for read-only RPC consumers calling `state_call`
+		/// against a chain state captured mid-MBM, before the v1→v2 migration
+		/// finished for that key. On-chain pallet logic does not need this
+		/// because user extrinsics are blocked while the MBM is in flight.
+		///
+		/// Pre-v2 entries are returned with `extrinsic_index = u32::MAX` as a sentinel.
+		pub fn transactions_at(
+			block: BlockNumberFor<T>,
+		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
+			let raw = sp_io::storage::get(&Transactions::<T>::hashed_key_for(block))?;
+
+			if let Ok(v2) =
+				BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+			{
+				return Some(v2);
+			}
+
+			let v1 = BoundedVec::<
+				crate::migrations::v2::V1TransactionInfo,
+				T::MaxBlockTransactions,
+			>::decode(&mut &raw[..])
+			.ok()?;
+
+			let materialized: Vec<TransactionInfo> = v1
+				.into_iter()
+				.map(|tx| TransactionInfo {
+					chunk_root: tx.chunk_root,
+					content_hash: tx.content_hash,
+					hashing: tx.hashing,
+					cid_codec: tx.cid_codec,
+					size: tx.size,
+					extrinsic_index: u32::MAX,
+					block_chunks: tx.block_chunks,
+				})
+				.collect();
+
+			BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(materialized).ok()
 		}
 
 		/// Returns `true` if no more store/renew transactions can be included in the current

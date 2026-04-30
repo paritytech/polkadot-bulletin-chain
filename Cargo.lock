@@ -2114,7 +2114,9 @@ dependencies = [
  "cid",
  "parity-scale-codec",
  "scale-info",
+ "sp-api",
  "sp-io",
+ "sp-runtime",
  "tracing",
 ]
 
@@ -2173,6 +2175,7 @@ dependencies = [
  "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
  "pallet-message-queue",
+ "pallet-migrations",
  "pallet-session",
  "pallet-skip-feeless-payment",
  "pallet-sudo",

@@ -362,3 +362,160 @@ pub mod v2 {
 		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
 	>;
 }
+
+/// Migration v1→v2: Adds `extrinsic_index` to `TransactionInfo`.
+///
+/// Multi-block migration driven by `pallet-migrations` because the storage map
+/// can hold up to `RetentionPeriod × MaxBlockTransactions` entries and decoding
+/// + re-encoding all in a single block would blow the block weight budget.
+///
+/// The migration is shape-tolerant: each step tries the current (v2) decode
+/// first and skips already-migrated entries. Pre-migration entries get
+/// `extrinsic_index = u32::MAX` as a sentinel.
+///
+/// The pallet's on-chain storage version is bumped from 1 to 2 atomically in
+/// the final step, when iteration finishes.
+pub mod v2 {
+	use super::*;
+	use crate::{
+		pallet::{Pallet, Transactions},
+		TransactionInfo,
+	};
+	use bulletin_transaction_storage_primitives::{
+		cids::{CidCodec, HashingAlgorithm},
+		ContentHash,
+	};
+	use polkadot_sdk_frame::deps::{
+		frame_support::{
+			migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
+			weights::WeightMeter,
+			BoundedVec,
+		},
+		sp_io,
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
+	use sp_transaction_storage_proof::ChunkIndex;
+
+	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
+	/// `TransactionInfo` layout at v1 (no `extrinsic_index`). Used only for
+	/// decoding pre-migration entries; never written.
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V1TransactionInfo {
+		pub chunk_root: <BlakeTwo256 as Hash>::Output,
+		pub content_hash: ContentHash,
+		pub hashing: HashingAlgorithm,
+		pub cid_codec: CidCodec,
+		pub size: u32,
+		pub block_chunks: ChunkIndex,
+	}
+
+	/// Stepped migration from storage version 1 to 2.
+	pub struct MigrateV1ToV2<T: Config>(PhantomData<T>);
+
+	impl<T: Config> SteppedMigration for MigrateV1ToV2<T> {
+		type Cursor = polkadot_sdk_frame::prelude::BlockNumberFor<T>;
+		type Identifier = MigrationId<24>;
+
+		fn id() -> Self::Identifier {
+			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 1, version_to: 2 }
+		}
+
+		fn step(
+			mut cursor: Option<Self::Cursor>,
+			meter: &mut WeightMeter,
+		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			let required = T::DbWeight::get().reads_writes(1, 1);
+			if meter.remaining().any_lt(required) {
+				return Err(SteppedMigrationError::InsufficientWeight { required });
+			}
+
+			loop {
+				if meter.try_consume(required).is_err() {
+					break;
+				}
+
+				let mut iter = match cursor.as_ref() {
+					None => Transactions::<T>::iter_keys(),
+					Some(last) =>
+						Transactions::<T>::iter_keys_from(Transactions::<T>::hashed_key_for(last)),
+				};
+
+				let Some(block_number) = iter.next() else {
+					use polkadot_sdk_frame::prelude::GetStorageVersion;
+					Pallet::<T>::in_code_storage_version().put::<Pallet<T>>();
+					cursor = None;
+					break;
+				};
+
+				let raw_key = Transactions::<T>::hashed_key_for(block_number);
+				let Some(raw) = sp_io::storage::get(&raw_key) else {
+					cursor = Some(block_number);
+					continue;
+				};
+
+				if BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+					.is_ok()
+				{
+					cursor = Some(block_number);
+					continue;
+				}
+
+				let v1 =
+					BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+						.map_err(|_| SteppedMigrationError::Failed)?;
+
+				let v2: BoundedVec<TransactionInfo, T::MaxBlockTransactions> = v1
+					.into_iter()
+					.map(|old| TransactionInfo {
+						chunk_root: old.chunk_root,
+						content_hash: old.content_hash,
+						hashing: old.hashing,
+						cid_codec: old.cid_codec,
+						size: old.size,
+						extrinsic_index: u32::MAX,
+						block_chunks: old.block_chunks,
+					})
+					.collect::<Vec<_>>()
+					.try_into()
+					.map_err(|_| SteppedMigrationError::Failed)?;
+
+				Transactions::<T>::insert(block_number, v2);
+				cursor = Some(block_number);
+			}
+
+			Ok(cursor)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+			let prefix = Transactions::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
+				count += 1;
+			}
+			tracing::info!(target: LOG_TARGET, count, "v1->v2 pre_upgrade: Transactions entries");
+			Ok(count.encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let old_count =
+				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			let new_count = Transactions::<T>::iter().count() as u64;
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count == old_count,
+				"v1->v2 post_upgrade: entry count mismatch"
+			);
+			tracing::info!(target: LOG_TARGET, old_count, new_count, "v1->v2 post_upgrade: valid");
+			Ok(())
+		}
+	}
+}

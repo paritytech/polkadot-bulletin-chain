@@ -166,7 +166,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = ();
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -275,7 +276,7 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = ConstU32<16>;
 
 	type SingleBlockMigrations = migrations::SingleBlockMigrations;
-	type MultiBlockMigrator = migrations::MbmMigrations;
+	type MultiBlockMigrator = MultiBlockMigrations;
 }
 
 impl cumulus_pallet_weight_reclaim::Config for Runtime {
@@ -391,6 +392,25 @@ impl pallet_message_queue::Config for Runtime {
 impl parachain_info::Config for Runtime {}
 
 impl cumulus_pallet_aura_ext::Config for Runtime {}
+
+parameter_types! {
+	pub MbmServiceWeight: Weight =
+		Perbill::from_percent(50) * RuntimeBlockWeights::get().max_block;
+}
+
+impl pallet_migrations::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	#[cfg(not(feature = "runtime-benchmarks"))]
+	type Migrations = migrations::MbmMigrations;
+	#[cfg(feature = "runtime-benchmarks")]
+	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
+	type CursorMaxLen = ConstU32<65_536>;
+	type IdentifierMaxLen = ConstU32<256>;
+	type MigrationStatusHandler = ();
+	type FailedMigrationHandler = frame_support::migrations::FreezeChainOnFailedMigration;
+	type MaxServiceWeight = MbmServiceWeight;
+	type WeightInfo = pallet_migrations::weights::SubstrateWeight<Runtime>;
+}
 
 parameter_types! {
 	/// Fellows pluralistic body.
@@ -531,6 +551,7 @@ construct_runtime!(
 
 		// Storage
 		TransactionStorage: pallet_bulletin_transaction_storage = 40,
+		MultiBlockMigrations: pallet_migrations = 41,
 
 		// Collator support. The order of these 5 are important and shall not change.
 		Authorship: pallet_authorship = 20,
@@ -804,6 +825,56 @@ impl_runtime_apis! {
 	impl sp_transaction_storage_proof::runtime_api::TransactionStorageApi<Block> for Runtime {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
+		}
+	}
+
+	// TEMPORARY: mirrors the upstream polkadot-sdk PR #11939's TransactionStorageApi v2.
+	// Delete this block when bulletin upgrades to a published `sp-transaction-storage-proof`
+	// release containing `IndexedTransactionInfo` + `indexed_transactions`, and merge the
+	// `indexed_transactions` method into the original block above.
+	impl bulletin_transaction_storage_primitives::temp_runtime_api::BulletinTransactionStorageApiTemp<Block>
+		for Runtime
+	{
+		fn retention_period() -> NumberFor<Block> {
+			TransactionStorage::retention_period()
+		}
+
+		fn indexed_transactions(
+			block: NumberFor<Block>,
+		) -> alloc::vec::Vec<
+			bulletin_transaction_storage_primitives::temp_runtime_api::IndexedTransactionInfo,
+		> {
+			use bulletin_transaction_storage_primitives::{
+				cids::HashingAlgorithm as PalletHashingAlgorithm,
+				temp_runtime_api::{HashingAlgorithm as ApiHashingAlgorithm, IndexedTransactionInfo},
+			};
+
+			TransactionStorage::transactions_at(block)
+				.map(|txs| {
+					txs.into_iter()
+						.filter_map(|tx| {
+							let hashing = match tx.hashing {
+								PalletHashingAlgorithm::Blake2b256 =>
+									ApiHashingAlgorithm::Blake2b256,
+								PalletHashingAlgorithm::Sha2_256 => ApiHashingAlgorithm::Sha2_256,
+								PalletHashingAlgorithm::Keccak256 => ApiHashingAlgorithm::Keccak256,
+								// Bulletin's `HashingAlgorithm` is `#[non_exhaustive]`. If a new
+								// pallet-side variant is ever added without a corresponding
+								// API-side variant, drop the entry rather than panicking or
+								// silently mis-projecting.
+								_ => return None,
+							};
+							Some(IndexedTransactionInfo {
+								content_hash: tx.content_hash,
+								size: tx.size,
+								hashing,
+								cid_codec: tx.cid_codec,
+								extrinsic_index: tx.extrinsic_index,
+							})
+						})
+						.collect()
+				})
+				.unwrap_or_default()
 		}
 	}
 
