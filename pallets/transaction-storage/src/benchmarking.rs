@@ -200,12 +200,13 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
+		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone(), bytes);
+		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes);
 
-		assert_last_event::<T>(Event::AccountAuthorized { who, bytes }.into());
+		assert_last_event::<T>(Event::AccountAuthorized { who, transactions, bytes }.into());
 		Ok(())
 	}
 
@@ -216,8 +217,13 @@ mod benchmarks {
 		let who: T::AccountId = whitelisted_caller();
 		let bytes: u64 = 1024 * 1024;
 		let origin2 = origin.clone();
-		TransactionStorage::<T>::authorize_account(origin2 as T::RuntimeOrigin, who.clone(), bytes)
-			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+		TransactionStorage::<T>::authorize_account(
+			origin2 as T::RuntimeOrigin,
+			who.clone(),
+			0,
+			bytes,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, who.clone());
@@ -266,7 +272,7 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		TransactionStorage::<T>::authorize_account(origin, who.clone(), 1)
+		TransactionStorage::<T>::authorize_account(origin, who.clone(), 0, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		let period = T::AuthorizationPeriod::get();
@@ -311,6 +317,7 @@ mod benchmarks {
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
+			0,
 			bytes_allowance,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
@@ -351,6 +358,7 @@ mod benchmarks {
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
+			0,
 			bytes_allowance,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
