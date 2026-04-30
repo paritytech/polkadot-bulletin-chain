@@ -128,7 +128,14 @@ export interface BulletinTypedApi {
       Authorizations: {
         getValue(scope: { type: string; value: unknown }): Promise<
           | {
-              extent: { transactions: number; bytes: bigint }
+              extent: {
+                transactions: number
+                /** Newer chains expose the cap separately from consumed counters. */
+                transactions_allowance?: number
+                bytes: bigint
+                /** Newer chains expose the cap separately from consumed counters. */
+                bytes_allowance?: bigint
+              }
               expiration: number
             }
           | undefined
