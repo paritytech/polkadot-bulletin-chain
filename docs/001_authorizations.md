@@ -46,53 +46,57 @@ There are 2 limits on allowances:
 
 Once the soft limit is crossed, the `store` calls post this for that account will be on lower priority — meant to utilise the block space when available.
 
-**Both limits share a single `bytes_allowance`** per account. `bytes_allowance` is the only number PoP grants; the soft and hard caps reuse it with different semantics:
+PoP grants two numbers per account: `bytes_allowance` (size budget) and `transactions_allowance` (count budget). The soft and hard caps reuse `bytes_allowance` with different semantics; `transactions_allowance` is only relevant on the soft side.
 
-- **Soft (temp)** — `bytes_allowance` is used **only as a priority threshold**. Once `bytes >= bytes_allowance` the boost drops to `0` (`store` calls aren't rejected; they just queue behind in-budget signers). It is *not* a rejection threshold.
-- **Hard (permanent)** — `bytes_allowance` is the real cap. `renew` is **rejected** when `bytes_permanent + size > bytes_allowance`.
+- **Soft (temp)** — `bytes_allowance` and `transactions_allowance` are used **only as priority thresholds**. The boost drops to `0` once *either* axis is at-or-over cap (`bytes >= bytes_allowance` or `transactions >= transactions_allowance`). `store` calls aren't rejected; they just queue behind in-budget signers. Neither axis is a rejection threshold.
+- **Hard (permanent)** — `bytes_allowance` is the real cap. `renew` is **rejected** when `bytes_permanent + size > bytes_allowance`. The transaction-count axis does not gate renew.
 
 A signer can therefore consume up to `bytes_allowance` of temp usage *and* up to `bytes_allowance` of permanent usage off the same grant; only the permanent side is rejected at the cap. Splitting into two independent allowances is deferred (see [Hard Limit § Open questions](#open-questions)).
 
 ### Allowance storage and `authorize_account`
 
 - One `AuthorizationExtent` per account is kept in the `Authorizations` storage map, keyed by `AuthorizationScope::Account(AccountId)`.
-- `AuthorizationExtent` carries `{ bytes, bytes_permanent, bytes_allowance }`: store/renew usage counters and the cap.
-- `authorize_account(who, bytes)` **sets** `bytes_allowance = bytes` on an unexpired entry — it does **not** add to the existing cap. Used (`bytes` / `bytes_permanent`) counters are preserved, so a re-authorize can lower the effective remaining capacity but never grants extra by accident. Expiration is not pushed back; use `refresh_account_authorization` for that.
-- If the entry is missing, `authorize_account` creates a fresh one with `bytes = 0`, `bytes_permanent = 0`.
-- If the entry is expired but still in storage, `authorize_account` treats it as a re-grant of the cap: set `bytes_allowance = bytes`, reset `bytes = 0`, and **leave `bytes_permanent` as-is**. The lazy ledger drain remains the only path that ever decrements `bytes_permanent`, so in-flight on-chain commitments aren't clobbered by re-authorize. (Pairs with the rule below: `remove_expired_account_authorization` refuses to remove the entry while `bytes_permanent > 0`.)
+- `AuthorizationExtent` carries `{ transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }`: store/renew usage counters and the caps. Both `store` and `renew` bump `transactions += 1`; `store` bumps `bytes += size`; `renew` bumps `bytes_permanent += size`.
+- `authorize_account(who, transactions, bytes)` behaves differently per state of the existing entry:
+    - **Unexpired**: caps are **additive** — `bytes_allowance += bytes`, `transactions_allowance += transactions`. This matches the PoP `claim_long_term_storage` flow, where each successful claim is expected to extend the caps. Consumed counters (`bytes`, `bytes_permanent`, `transactions`) are preserved. Expiry is left untouched; use `refresh_account_authorization` to push it back.
+    - **Expired-but-present**: re-grant the caps (`bytes_allowance = bytes`, `transactions_allowance = transactions`), reset the soft counters to `0` (`bytes = 0`, `transactions = 0`), and **leave `bytes_permanent` as-is**. The lazy ledger drain remains the only path that ever decrements `bytes_permanent`, so in-flight on-chain commitments aren't clobbered by re-authorize. (Pairs with the rule below: `remove_expired_account_authorization` refuses to remove the entry while `bytes_permanent > 0`.)
+    - **Missing**: create a fresh entry with all counters at `0`.
+- `authorize_preimage(content_hash, max_size)` follows the same shape but with `transactions_allowance = 1` baked in (a preimage grant is a single-shot store right). Unexpired re-authorize **replaces** the cap (preimage grants are point-in-time, not additive).
 
 ### Refresh authorization
 
-`refresh_account_authorization(who)` is how a soft-limit-exhausted account gets back below the limit:
+`refresh_account_authorization(who)` extends an authorization's lifetime:
 
-- Resets `bytes` to `0` — the user is in-budget again and regains the full priority boost on subsequent `store` calls.
-- Does **not** reset `bytes_permanent` — renewed data stays on chain across refresh cycles, so the permanent-storage accounting survives. Resetting it would let a holder commit unbounded permanent storage by repeatedly refreshing.
-- Extends `expiration` by another `AuthorizationPeriod`. `bytes_allowance` is unchanged.
-- Origin: only `T::Authorizer` (e.g. PoP) can call it. Users cannot self-refresh; PoP controls the cadence at which a user's soft limit clears.
+- Extends `expiration` by another `AuthorizationPeriod`. Caps and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) are left untouched. Refresh does not grant additional capacity.
+- To grant more capacity within an unexpired window, call `authorize_account` (additive on the unexpired path); to fully reset the soft counters, let the authorization expire and re-authorize.
+- `bytes_permanent` survival across refresh is load-bearing: clearing it would let a holder commit unbounded permanent storage by refreshing repeatedly.
+- Origin: only `T::Authorizer` (e.g. PoP) can call it. Users cannot self-refresh; PoP controls the cadence at which a user's authorization is renewed.
 
 ## Soft Limit
 
 Implemented in [PR #448](https://github.com/paritytech/polkadot-bulletin-chain/pull/448).
 
-- `check_authorization` does **not** reject `store` calls over the soft limit; it saturates `extent.bytes` upward and lets the tx validate.
-- The `AllowanceBasedPriority` transaction extension adds a priority boost via a runtime-selected `BoostStrategy`.
-- `FlatBoost`: `ALLOWANCE_PRIORITY_BOOST` while `bytes < bytes_allowance`, `0` once over.
+- `check_authorization` does **not** reject `store` calls over the soft limit; it saturates `bytes` and `transactions` upward and lets the tx validate.
+- The `AllowanceBasedPriority` transaction extension adds a priority boost via a runtime-selected `BoostStrategy`. The strategy is fed the **post-this-tx** extent (caller pre-applies `bytes += size` and `transactions += 1`), so the boost decision reduces to "would this leave the holder in-budget on both axes?".
+- `in_budget(extent)` is `true` iff `bytes_allowance != 0 && bytes <= bytes_allowance && transactions <= transactions_allowance`.
+- `FlatBoost` (default): `ALLOWANCE_PRIORITY_BOOST` while in-budget on both axes, `0` once either axis is over cap.
+- `ProportionalBoost` (alternative): boost scales with the **tighter** of the byte-budget and tx-budget remainders — `min(BOOST × bytes_rem / bytes_allowance, BOOST × tx_rem / transactions_allowance)`. Fresh grant yields the full boost; at-cap on either axis yields zero.
 - Net effect: in-budget `store` txs sort strictly above over-budget ones; over-budget txs ride leftover block space (no rejection, just demotion). Pool nonce/arrival ordering breaks ties among in-budget signers.
 
 ### Example
 
-PoP authorizes Alice for 64 MiB (`bytes_allowance = 64 MiB`, `bytes = 0`).
+PoP authorizes Alice for 64 MiB and 4 transactions (`bytes_allowance = 64 MiB`, `transactions_allowance = 4`, `bytes = 0`, `transactions = 0`). Bulletin runtime uses `FlatBoost`.
 
 | Step | Call | After | Boost |
 |---|---|---|---|
-| 1 | `store(30 MiB)` | `bytes = 30 MiB` | `ALLOWANCE_PRIORITY_BOOST` (in-budget) |
-| 2 | `store(30 MiB)` | `bytes = 60 MiB` | `ALLOWANCE_PRIORITY_BOOST` (still in-budget) |
-| 3 | `store(10 MiB)` | `bytes = 70 MiB` (saturates over 64 MiB) | `0` (over soft limit) |
-| 4 | `store(1 MiB)` | `bytes = 71 MiB` | `0` (still over) |
-| 5 | PoP calls `refresh_account_authorization(Alice)` | `bytes = 0`, `bytes_allowance = 64 MiB` (unchanged), expiration extended | — |
-| 6 | `store(20 MiB)` | `bytes = 20 MiB` | `ALLOWANCE_PRIORITY_BOOST` (in-budget again) |
+| 1 | `store(30 MiB)` | `bytes = 30 MiB`, `transactions = 1` | `ALLOWANCE_PRIORITY_BOOST` (in-budget on both axes) |
+| 2 | `store(30 MiB)` | `bytes = 60 MiB`, `transactions = 2` | `ALLOWANCE_PRIORITY_BOOST` (still in-budget) |
+| 3 | `store(10 MiB)` | `bytes = 70 MiB` (over byte cap), `transactions = 3` | `0` (over byte axis) |
+| 4 | `store(1 MiB)` | `bytes = 71 MiB`, `transactions = 4` | `0` (still over byte axis; tx axis exactly at cap) |
+| 5 | PoP calls `authorize_account(Alice, 4, 64 MiB)` | unexpired → additive: `bytes_allowance = 128 MiB`, `transactions_allowance = 8`; `bytes` / `transactions` preserved | — |
+| 6 | `store(20 MiB)` | `bytes = 91 MiB`, `transactions = 5` | `ALLOWANCE_PRIORITY_BOOST` (in-budget on both axes again: `91 ≤ 128` and `5 ≤ 8`) |
 
-Steps 1–2 ride normal high priority. From step 3 onward Alice's `store` calls still validate and consume `bytes`, but the `AllowanceBasedPriority` extension contributes `0`, so they queue behind every in-budget signer and only land in blocks with leftover space. Step 5 (refresh by PoP) clears `bytes` and Alice is back in-budget for step 6.
+Steps 1–2 ride normal high priority. From step 3 onward Alice's `store` calls still validate and consume both axes, but the `AllowanceBasedPriority` extension contributes `0`, so they queue behind every in-budget signer and only land in blocks with leftover space. Step 5 shows PoP topping up both axes via additive re-authorize within the unexpired window — `refresh_account_authorization` would only push expiry back without restoring soft headroom, so it's not the right tool here.
 
 ## Hard Limit
 
@@ -102,11 +106,11 @@ Proposed; not yet wired. The hard cap is enforced at two levels and a renewal th
 
 - **Per-account** (`Error::PermanentAllowanceExceeded`): a `renew` of `size` bytes for account `A` is rejected if
   `A.bytes_permanent + size > A.bytes_allowance`.
-  Re-uses the existing `bytes_allowance` field; PoP grants one number per account that bounds both soft (temp) and hard (permanent) usage.
+  Re-uses the same `bytes_allowance` field that the soft side reads; PoP's byte grant per account bounds both temp and permanent usage. (`transactions_allowance` plays no role on the hard side.)
 - **Chain-wide** (`Error::ChainPermanentCapReached`): rejected if `PermanentStorageUsed + size > T::MaxPermanentStorageSize::get()`.
   `MaxPermanentStorageSize` is a `Config` trait constant (e.g. `1.7 TiB`). See [Capacity Planning](#capacity-planning) for how the runtime can make it adjustable at runtime.
 
-`bytes_permanent` may transiently exceed `bytes_allowance` if PoP lowers the cap (via `authorize_account`) below the account's current usage. New renews reject; ledger drains will bring it back below the cap eventually. Existing on-chain data is unaffected.
+`bytes_permanent` may transiently exceed `bytes_allowance` if the cap is lowered below the account's current usage — via the expired re-grant path of `authorize_account` (where `bytes_allowance = bytes` replaces the old cap), or via governance overriding `MaxPermanentStorageSize`. (Within an unexpired window, `authorize_account` is additive and can never lower the cap.) New renews reject; ledger drains will bring it back below the cap eventually. Existing on-chain data is unaffected.
 
 ### New storage items
 
@@ -164,7 +168,7 @@ During the overlap (block 200 through block 100 + retention) both copies of X ar
 
 ### Authorization expiry / refresh interactions
 
-- `refresh_account_authorization` resets `bytes` only; `bytes_permanent` survives (existing rule). No global counter changes — the data is still on chain.
+- `refresh_account_authorization` only extends expiration; all consumed counters (`bytes`, `bytes_permanent`, `transactions`) are preserved (see [Refresh authorization](#refresh-authorization)). No global counter changes — the data is still on chain.
 - An authorization expiring (no refresh) does **not** free `bytes_permanent` or decrement `PermanentStorageUsed`. The data still lives on chain until its own renewal record expires; the per-account counter drops only at that point.
 - `remove_expired_account_authorization` **refuses** to remove the entry while `bytes_permanent > 0`. Removing it would orphan the lazy ledger drain (it has nowhere to decrement). The entry becomes removable once the ledger has fully drained the account's pending decrements (i.e. once `bytes_permanent` has dropped back to `0` naturally).
 
