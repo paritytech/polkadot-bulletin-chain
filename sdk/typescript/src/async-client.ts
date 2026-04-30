@@ -599,7 +599,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   ): Promise<void> {
     if (!this.api.query) return
 
-    let auth: { extent: { transactions: number; bytes: bigint } } | undefined
+    let auth:
+      | {
+          extent: {
+            transactions: number
+            transactions_allowance?: number
+            bytes: bigint
+            bytes_allowance?: bigint
+          }
+        }
+      | undefined
     try {
       const { encodeAddress } = await import("@polkadot/util-crypto")
       const address = encodeAddress(this.signer.publicKey)
@@ -617,8 +626,24 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     // so proceed and let the chain validate rather than blocking
     if (!auth) return
 
-    const availableTransactions = auth.extent.transactions
-    const availableBytes = Number(auth.extent.bytes)
+    // Newer chains expose `*_allowance` (caps) alongside `transactions`/`bytes`
+    // (consumed counters); older chains expose only the cap fields. Available
+    // = allowance - consumed; falling back to the raw field when allowance
+    // is absent keeps the SDK compatible with both shapes.
+    const txAllowance = auth.extent.transactions_allowance
+    const availableTransactions =
+      txAllowance != null
+        ? Math.max(0, txAllowance - auth.extent.transactions)
+        : auth.extent.transactions
+    const bytesAllowance = auth.extent.bytes_allowance
+    const availableBytes =
+      bytesAllowance != null
+        ? Number(
+            bytesAllowance > auth.extent.bytes
+              ? bytesAllowance - auth.extent.bytes
+              : 0n,
+          )
+        : Number(auth.extent.bytes)
 
     if (availableTransactions < requiredTransactions) {
       throw new BulletinError(
