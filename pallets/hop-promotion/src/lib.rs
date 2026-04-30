@@ -111,10 +111,7 @@ pub mod pallet {
 			if matches!(source, TransactionSource::External) {
 				return Err(InvalidTransaction::Call.into());
 			}
-			if data.is_empty() ||
-				data.len() >
-					<T as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get() as usize
-			{
+			if !pallet_bulletin_transaction_storage::Pallet::<T>::data_size_ok(data.len()) {
 				return Err(InvalidTransaction::Custom(0).into());
 			}
 
