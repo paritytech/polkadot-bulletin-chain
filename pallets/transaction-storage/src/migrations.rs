@@ -363,19 +363,19 @@ pub mod v2 {
 	>;
 }
 
-/// Migration v1→v2: Adds `extrinsic_index` to `TransactionInfo`.
+/// Migration v2→v3: Adds `extrinsic_index` to `TransactionInfo`.
 ///
 /// Multi-block migration driven by `pallet-migrations` because the storage map
 /// can hold up to `RetentionPeriod × MaxBlockTransactions` entries and decoding
 /// + re-encoding all in a single block would blow the block weight budget.
 ///
-/// The migration is shape-tolerant: each step tries the current (v2) decode
+/// The migration is shape-tolerant: each step tries the current (v3) decode
 /// first and skips already-migrated entries. Pre-migration entries get
 /// `extrinsic_index = u32::MAX` as a sentinel.
 ///
-/// The pallet's on-chain storage version is bumped from 1 to 2 atomically in
+/// The pallet's on-chain storage version is bumped from 2 to 3 atomically in
 /// the final step, when iteration finishes.
-pub mod v2 {
+pub mod v3 {
 	use super::*;
 	use crate::{
 		pallet::{Pallet, Transactions},
@@ -398,10 +398,10 @@ pub mod v2 {
 
 	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
 
-	/// `TransactionInfo` layout at v1 (no `extrinsic_index`). Used only for
+	/// `TransactionInfo` layout at v2 (no `extrinsic_index`). Used only for
 	/// decoding pre-migration entries; never written.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
-	pub(crate) struct V1TransactionInfo {
+	pub(crate) struct V2TransactionInfo {
 		pub chunk_root: <BlakeTwo256 as Hash>::Output,
 		pub content_hash: ContentHash,
 		pub hashing: HashingAlgorithm,
@@ -410,15 +410,15 @@ pub mod v2 {
 		pub block_chunks: ChunkIndex,
 	}
 
-	/// Stepped migration from storage version 1 to 2.
-	pub struct MigrateV1ToV2<T: Config>(PhantomData<T>);
+	/// Stepped migration from storage version 2 to 3.
+	pub struct MigrateV2ToV3<T: Config>(PhantomData<T>);
 
-	impl<T: Config> SteppedMigration for MigrateV1ToV2<T> {
+	impl<T: Config> SteppedMigration for MigrateV2ToV3<T> {
 		type Cursor = polkadot_sdk_frame::prelude::BlockNumberFor<T>;
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 1, version_to: 2 }
+			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 2, version_to: 3 }
 		}
 
 		fn step(
@@ -461,11 +461,11 @@ pub mod v2 {
 					continue;
 				}
 
-				let v1 =
-					BoundedVec::<V1TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+				let v2 =
+					BoundedVec::<V2TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
 						.map_err(|_| SteppedMigrationError::Failed)?;
 
-				let v2: BoundedVec<TransactionInfo, T::MaxBlockTransactions> = v1
+				let v3: BoundedVec<TransactionInfo, T::MaxBlockTransactions> = v2
 					.into_iter()
 					.map(|old| TransactionInfo {
 						chunk_root: old.chunk_root,
@@ -480,7 +480,7 @@ pub mod v2 {
 					.try_into()
 					.map_err(|_| SteppedMigrationError::Failed)?;
 
-				Transactions::<T>::insert(block_number, v2);
+				Transactions::<T>::insert(block_number, v3);
 				cursor = Some(block_number);
 			}
 
@@ -499,7 +499,7 @@ pub mod v2 {
 				previous_key = key;
 				count += 1;
 			}
-			tracing::info!(target: LOG_TARGET, count, "v1->v2 pre_upgrade: Transactions entries");
+			tracing::info!(target: LOG_TARGET, count, "v2->v3 pre_upgrade: Transactions entries");
 			Ok(count.encode())
 		}
 
@@ -512,9 +512,9 @@ pub mod v2 {
 			let new_count = Transactions::<T>::iter().count() as u64;
 			polkadot_sdk_frame::prelude::ensure!(
 				new_count == old_count,
-				"v1->v2 post_upgrade: entry count mismatch"
+				"v2->v3 post_upgrade: entry count mismatch"
 			);
-			tracing::info!(target: LOG_TARGET, old_count, new_count, "v1->v2 post_upgrade: valid");
+			tracing::info!(target: LOG_TARGET, old_count, new_count, "v2->v3 post_upgrade: valid");
 			Ok(())
 		}
 	}

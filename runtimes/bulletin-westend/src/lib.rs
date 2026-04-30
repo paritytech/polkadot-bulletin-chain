@@ -167,7 +167,7 @@ pub mod migrations {
 
 	/// MBM migrations to apply on runtime upgrade.
 	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,);
+		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.

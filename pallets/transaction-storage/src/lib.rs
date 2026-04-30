@@ -319,7 +319,7 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -1214,31 +1214,31 @@ pub mod pallet {
 
 		/// All transactions stored at the given block, in the current `TransactionInfo` layout.
 		///
-		/// Shape-tolerant against entries that are still in the pre-v2 layout.
+		/// Shape-tolerant against entries that are still in the pre-v3 layout.
 		/// This matters only for read-only RPC consumers calling `state_call`
-		/// against a chain state captured mid-MBM, before the v1→v2 migration
+		/// against a chain state captured mid-MBM, before the v2→v3 migration
 		/// finished for that key. On-chain pallet logic does not need this
 		/// because user extrinsics are blocked while the MBM is in flight.
 		///
-		/// Pre-v2 entries are returned with `extrinsic_index = u32::MAX` as a sentinel.
+		/// Pre-v3 entries are returned with `extrinsic_index = u32::MAX` as a sentinel.
 		pub fn transactions_at(
 			block: BlockNumberFor<T>,
 		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
 			let raw = sp_io::storage::get(&Transactions::<T>::hashed_key_for(block))?;
 
-			if let Ok(v2) =
+			if let Ok(v3) =
 				BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
 			{
-				return Some(v2);
+				return Some(v3);
 			}
 
-			let v1 = BoundedVec::<
-				crate::migrations::v2::V1TransactionInfo,
+			let v2 = BoundedVec::<
+				crate::migrations::v3::V2TransactionInfo,
 				T::MaxBlockTransactions,
 			>::decode(&mut &raw[..])
 			.ok()?;
 
-			let materialized: Vec<TransactionInfo> = v1
+			let materialized: Vec<TransactionInfo> = v2
 				.into_iter()
 				.map(|tx| TransactionInfo {
 					chunk_root: tx.chunk_root,

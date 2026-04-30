@@ -1049,13 +1049,15 @@ fn migration_v1_old_entries_only() {
 		assert!(Transactions::contains_key(2));
 		assert!(Transactions::contains_key(3));
 
-		// Run v0→v1 (single-block) and v1→v2 (multi-block) migrations in sequence
+		// Run v0→v1 (single-block) and v2→v3 (multi-block) migrations in sequence
 		// to fully promote storage to the current `TransactionInfo` layout.
+		// (The v1→v2 Authorization migration is unrelated to `Transactions` and
+		// is skipped here.)
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-		drive_v1_to_v2_migration();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		drive_v2_to_v3_migration();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 
-		let txs1 = Transactions::get(1).expect("should decode after v0→v2 chain");
+		let txs1 = Transactions::get(1).expect("should decode after v0→v3 chain");
 		assert_eq!(txs1.len(), 2);
 		for tx in txs1.iter() {
 			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
@@ -1111,7 +1113,7 @@ fn migration_v1_mixed_entries() {
 
 		// Run v0→v1 then v1→v2 to bring storage fully up to date.
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-		drive_v1_to_v2_migration();
+		drive_v2_to_v3_migration();
 
 		// Old entry promoted v0 → v1 → v2 (extrinsic_index = u32::MAX sentinel).
 		let old_entry_after = Transactions::get(5).expect("should decode after v0→v2 chain");
@@ -1131,7 +1133,7 @@ fn migration_v1_version_updated() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(2));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(3));
 
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
@@ -1627,30 +1629,30 @@ fn authorize_preimage_does_not_push_expiry() {
 // ---- v1 → v2 multi-block migration tests ----
 
 /// Drive the v1→v2 stepped migration to completion against the test externalities.
-fn drive_v1_to_v2_migration() {
-	use crate::migrations::v2::MigrateV1ToV2;
+fn drive_v2_to_v3_migration() {
+	use crate::migrations::v3::MigrateV2ToV3;
 	use polkadot_sdk_frame::deps::frame_support::{
 		migrations::SteppedMigration, weights::WeightMeter,
 	};
 
 	let mut meter = WeightMeter::new();
-	let mut cursor: Option<<MigrateV1ToV2<Test> as SteppedMigration>::Cursor> = None;
+	let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
 	loop {
-		cursor = MigrateV1ToV2::<Test>::step(cursor, &mut meter).expect("MBM step must not fail");
+		cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("MBM step must not fail");
 		if cursor.is_none() {
 			break;
 		}
 	}
 }
 
-/// Insert a `BoundedVec<V1TransactionInfo, _>` raw blob under
+/// Insert a `BoundedVec<V2TransactionInfo, _>` raw blob under
 /// `Transactions::hashed_key_for(block)`. `count` items are produced with synthetic field values.
-fn insert_v1_format_transactions(block: u64, count: u32) {
-	use crate::migrations::v2::V1TransactionInfo;
+fn insert_v2_format_transactions(block: u64, count: u32) {
+	use crate::migrations::v3::V2TransactionInfo;
 	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
 
-	let v1_txs: Vec<V1TransactionInfo> = (0..count)
-		.map(|i| V1TransactionInfo {
+	let v2_txs: Vec<V2TransactionInfo> = (0..count)
+		.map(|i| V2TransactionInfo {
 			chunk_root: BlakeTwo256::hash(&[i as u8]),
 			content_hash: BlakeTwo256::hash(&[i as u8 + 100]).into(),
 			hashing: HashingAlgorithm::Blake2b256,
@@ -1659,26 +1661,26 @@ fn insert_v1_format_transactions(block: u64, count: u32) {
 			block_chunks: (i + 1) * 8,
 		})
 		.collect();
-	let bounded: BoundedVec<V1TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
-		v1_txs.try_into().expect("within bounds");
+	let bounded: BoundedVec<V2TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+		v2_txs.try_into().expect("within bounds");
 	let key = Transactions::hashed_key_for(block);
 	unhashed::put_raw(&key, &bounded.encode());
 }
 
 #[test]
-fn migrate_v1_to_v2_sets_sentinel_for_existing_entries() {
-	use crate::migrations::v2::MigrateV1ToV2;
+fn migrate_v2_to_v3_sets_sentinel_for_existing_entries() {
+	use crate::migrations::v3::MigrateV2ToV3;
 	use polkadot_sdk_frame::deps::frame_support::{
 		migrations::SteppedMigration, weights::WeightMeter,
 	};
 	new_test_ext().execute_with(|| {
-		StorageVersion::new(1).put::<TransactionStorage>();
-		insert_v1_format_transactions(1, 3);
+		StorageVersion::new(2).put::<TransactionStorage>();
+		insert_v2_format_transactions(1, 3);
 
 		let mut meter = WeightMeter::new();
-		let mut cursor: Option<<MigrateV1ToV2<Test> as SteppedMigration>::Cursor> = None;
+		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
 		loop {
-			cursor = MigrateV1ToV2::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("step should not fail");
 			if cursor.is_none() {
 				break;
 			}
@@ -1693,28 +1695,28 @@ fn migrate_v1_to_v2_sets_sentinel_for_existing_entries() {
 			assert_eq!(tx.cid_codec, 0x55);
 		}
 
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 	});
 }
 
 #[test]
-fn migrate_v1_to_v2_resumes_across_steps() {
-	use crate::migrations::v2::MigrateV1ToV2;
+fn migrate_v2_to_v3_resumes_across_steps() {
+	use crate::migrations::v3::MigrateV2ToV3;
 	use polkadot_sdk_frame::deps::frame_support::{
 		migrations::SteppedMigration, weights::WeightMeter,
 	};
 	new_test_ext().execute_with(|| {
-		StorageVersion::new(1).put::<TransactionStorage>();
+		StorageVersion::new(2).put::<TransactionStorage>();
 		for block in 1..=20u64 {
-			insert_v1_format_transactions(block, 1);
+			insert_v2_format_transactions(block, 1);
 		}
 
 		let per_entry_weight = crate::mock::TestDbWeight::get().reads_writes(1, 1);
 		let mut total_steps = 0u32;
-		let mut cursor: Option<<MigrateV1ToV2<Test> as SteppedMigration>::Cursor> = None;
+		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
 		loop {
 			let mut meter = WeightMeter::with_limit(per_entry_weight.saturating_mul(5));
-			cursor = MigrateV1ToV2::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("step should not fail");
 			total_steps += 1;
 			if cursor.is_none() {
 				break;
@@ -1728,23 +1730,23 @@ fn migrate_v1_to_v2_resumes_across_steps() {
 			assert_eq!(txs.len(), 1);
 			assert_eq!(txs[0].extrinsic_index, u32::MAX);
 		}
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 	});
 }
 
 #[test]
-fn migrate_v1_to_v2_insufficient_weight_returns_err() {
-	use crate::migrations::v2::MigrateV1ToV2;
+fn migrate_v2_to_v3_insufficient_weight_returns_err() {
+	use crate::migrations::v3::MigrateV2ToV3;
 	use polkadot_sdk_frame::deps::frame_support::{
 		migrations::{SteppedMigration, SteppedMigrationError},
 		weights::WeightMeter,
 	};
 	new_test_ext().execute_with(|| {
-		StorageVersion::new(1).put::<TransactionStorage>();
-		insert_v1_format_transactions(1, 1);
+		StorageVersion::new(2).put::<TransactionStorage>();
+		insert_v2_format_transactions(1, 1);
 
 		let mut meter = WeightMeter::with_limit(Weight::zero());
-		let res = MigrateV1ToV2::<Test>::step(None, &mut meter);
+		let res = MigrateV2ToV3::<Test>::step(None, &mut meter);
 		assert!(
 			matches!(res, Err(SteppedMigrationError::InsufficientWeight { .. })),
 			"expected InsufficientWeight, got {:?}",
@@ -1754,17 +1756,17 @@ fn migrate_v1_to_v2_insufficient_weight_returns_err() {
 }
 
 #[test]
-fn migrate_v1_to_v2_skips_already_v2_entries() {
-	use crate::migrations::v2::MigrateV1ToV2;
+fn migrate_v2_to_v3_skips_already_v3_entries() {
+	use crate::migrations::v3::MigrateV2ToV3;
 	use polkadot_sdk_frame::deps::{
 		frame_support::{migrations::SteppedMigration, weights::WeightMeter},
 		sp_runtime::traits::{BlakeTwo256, Hash},
 	};
 	new_test_ext().execute_with(|| {
-		StorageVersion::new(1).put::<TransactionStorage>();
+		StorageVersion::new(2).put::<TransactionStorage>();
 
 		// Block 1: pre-migration v1 layout.
-		insert_v1_format_transactions(1, 1);
+		insert_v2_format_transactions(1, 1);
 		// Block 2: already-v2 layout, written by current code paths.
 		let v2_tx = TransactionInfo {
 			chunk_root: BlakeTwo256::hash(&[42]),
@@ -1781,9 +1783,9 @@ fn migrate_v1_to_v2_skips_already_v2_entries() {
 
 		// Drive migration to completion.
 		let mut meter = WeightMeter::new();
-		let mut cursor: Option<<MigrateV1ToV2<Test> as SteppedMigration>::Cursor> = None;
+		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
 		loop {
-			cursor = MigrateV1ToV2::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("step should not fail");
 			if cursor.is_none() {
 				break;
 			}
@@ -1798,14 +1800,14 @@ fn migrate_v1_to_v2_skips_already_v2_entries() {
 		assert_eq!(txs2[0].extrinsic_index, 7);
 		assert_eq!(txs2[0].size, 999);
 
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 	});
 }
 
 #[test]
-fn transactions_at_decodes_v1_entry_with_sentinel() {
+fn transactions_at_decodes_v2_entry_with_sentinel() {
 	new_test_ext().execute_with(|| {
-		insert_v1_format_transactions(5, 2);
+		insert_v2_format_transactions(5, 2);
 
 		// Direct `Transactions::get` cannot decode v1 bytes as v2.
 		assert!(Transactions::get(5).is_none());
