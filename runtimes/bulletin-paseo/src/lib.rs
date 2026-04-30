@@ -195,7 +195,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_010,
+	spec_version: 1_000_011,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -617,6 +617,7 @@ mod benches {
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
+		[pallet_transaction_payment, TransactionPayment]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
@@ -970,6 +971,8 @@ impl_runtime_apis! {
 					(keys.keys, keys.proof.encode())
 				}
 			}
+
+			impl pallet_transaction_payment::BenchmarkConfig for Runtime {}
 
 			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
