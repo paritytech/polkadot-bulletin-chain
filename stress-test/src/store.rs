@@ -995,8 +995,7 @@ pub async fn sign_sequential_txs(
 	start_nonce: u64,
 	mortality_block: Option<(u64, H256)>,
 ) -> Result<Vec<PreSignedTx>> {
-	use subxt::config::Hasher;
-	use subxt::config::transaction_extensions::Params;
+	use subxt::config::{transaction_extensions::Params, Hasher};
 
 	// Use the provided block for the mortal era anchor (typically the
 	// best block we just received), or fall back to finalized.
@@ -1060,11 +1059,7 @@ pub async fn submit_sequential_wave(
 	// Build one jsonrpsee WS client per URL for raw RPC calls.
 	let mut rpc_clients = Vec::new();
 	for url in ws_urls {
-		match WsClientBuilder::default()
-			.max_request_size(50 * 1024 * 1024)
-			.build(url)
-			.await
-		{
+		match WsClientBuilder::default().max_request_size(50 * 1024 * 1024).build(url).await {
 			Ok(c) => rpc_clients.push(std::sync::Arc::new(c)),
 			Err(e) => tracing::warn!("submit_wave: failed to connect to {url}: {e}"),
 		}
@@ -1079,43 +1074,39 @@ pub async fn submit_sequential_wave(
 	// Collect raw error strings for the first few failures for debugging.
 	let raw_errors = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 	// Broadcast: send every tx to every RPC endpoint so all pools get it.
-	let results: Vec<_> = stream::iter(
-		txs.iter().flat_map(|pre| {
-			let hex = format!("0x{}", hex::encode(&pre.encoded));
-			(0..num_clients).map(move |rpc_idx| (pre.nonce, hex.clone(), rpc_idx))
-		}),
-	)
-		.map(|(nonce, hex, rpc_idx)| {
-			let rpc = rpc_clients[rpc_idx].clone();
-			let raw_errs = raw_errors.clone();
-			async move {
-				let result: Result<String, _> =
-					rpc.request("author_submitExtrinsic", rpc_params![hex]).await;
-				match result {
-					Ok(hash) => {
-						tracing::trace!("submit nonce {nonce} (RPC {rpc_idx}): accepted (hash={hash})");
-						Ok(nonce)
-					},
-					Err(e) => {
-						let msg = format!("{e}");
-						let class = classify_tx_error(&anyhow::anyhow!("{}", &msg));
-						// Keep first 5 raw errors for log output.
-						{
-							let mut errs = raw_errs.lock().unwrap();
-							if errs.len() < 5 {
-								errs.push(format!(
-									"nonce {nonce} (RPC {rpc_idx}): {class:?} — {msg}"
-								));
-							}
+	let results: Vec<_> = stream::iter(txs.iter().flat_map(|pre| {
+		let hex = format!("0x{}", hex::encode(&pre.encoded));
+		(0..num_clients).map(move |rpc_idx| (pre.nonce, hex.clone(), rpc_idx))
+	}))
+	.map(|(nonce, hex, rpc_idx)| {
+		let rpc = rpc_clients[rpc_idx].clone();
+		let raw_errs = raw_errors.clone();
+		async move {
+			let result: Result<String, _> =
+				rpc.request("author_submitExtrinsic", rpc_params![hex]).await;
+			match result {
+				Ok(hash) => {
+					tracing::trace!("submit nonce {nonce} (RPC {rpc_idx}): accepted (hash={hash})");
+					Ok(nonce)
+				},
+				Err(e) => {
+					let msg = format!("{e}");
+					let class = classify_tx_error(&anyhow::anyhow!("{}", &msg));
+					// Keep first 5 raw errors for log output.
+					{
+						let mut errs = raw_errs.lock().unwrap();
+						if errs.len() < 5 {
+							errs.push(format!("nonce {nonce} (RPC {rpc_idx}): {class:?} — {msg}"));
 						}
-						Err((nonce, class))
-					},
-				}
+					}
+					Err((nonce, class))
+				},
 			}
-		})
-		.buffer_unordered(num_clients * 16)
-		.collect()
-		.await;
+		}
+	})
+	.buffer_unordered(num_clients * 16)
+	.collect()
+	.await;
 
 	let elapsed = submit_start.elapsed();
 	// Count per-nonce: accepted if ANY RPC accepted it.
@@ -1123,7 +1114,9 @@ pub async fn submit_sequential_wave(
 	let mut errors = Vec::new();
 	for r in results {
 		match r {
-			Ok(nonce) => { accepted_nonces.insert(nonce); },
+			Ok(nonce) => {
+				accepted_nonces.insert(nonce);
+			},
 			Err(e) => errors.push(e),
 		}
 	}
@@ -1131,10 +1124,7 @@ pub async fn submit_sequential_wave(
 
 	// Log summary.
 	if errors.is_empty() {
-		tracing::info!(
-			"submit_wave: all {} accepted in {:.1}s",
-			ok, elapsed.as_secs_f64()
-		);
+		tracing::info!("submit_wave: all {} accepted in {:.1}s", ok, elapsed.as_secs_f64());
 	} else {
 		let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 		for (_, class) in &errors {
@@ -1173,8 +1163,7 @@ fn compute_batch_end(
 
 	while idx < payloads.len() {
 		let payload_len = payloads[idx].len() as u64;
-		let tx_weight =
-			limits.store_weight_base + limits.store_weight_per_byte * payload_len;
+		let tx_weight = limits.store_weight_base + limits.store_weight_per_byte * payload_len;
 		let tx_length = payload_len + limits.extrinsic_length_overhead;
 
 		if weight + tx_weight > limits.max_normal_weight {
@@ -1245,7 +1234,10 @@ pub async fn sequential_nonce_upload(
 	// Record the finalized block at start — we'll scan from here after.
 	let start_finalized_block = {
 		let fin_ref = monitor_client.backend().latest_finalized_block_ref().await?;
-		let header = monitor_client.backend().block_header(fin_ref.hash()).await?
+		let header = monitor_client
+			.backend()
+			.block_header(fin_ref.hash())
+			.await?
 			.ok_or_else(|| anyhow!("cannot fetch finalized header"))?;
 		let num: u64 = header.number.into();
 		tracing::info!("Start finalized block: #{num}");
@@ -1265,7 +1257,6 @@ pub async fn sequential_nonce_upload(
 	let mut measure_end: Option<Instant> = None;
 	let mut end_finalized_block: u64 = 0;
 
-
 	// Helper: sign and submit a batch.
 	async fn sign_and_submit(
 		client: &OnlineClient<BulletinConfig>,
@@ -1280,8 +1271,13 @@ pub async fn sequential_nonce_upload(
 		let from_idx = (from_nonce - start_nonce) as usize;
 		let to_idx = (to_nonce - start_nonce) as usize;
 		let batch = sign_sequential_txs(
-			client, signer, &payloads[from_idx..to_idx], from_nonce, mortality_block,
-		).await?;
+			client,
+			signer,
+			&payloads[from_idx..to_idx],
+			from_nonce,
+			mortality_block,
+		)
+		.await?;
 		let (ok, errs) = submit_sequential_wave(ws_urls, &batch).await;
 		Ok((ok, errs.len() as u64))
 	}
@@ -1296,7 +1292,14 @@ pub async fn sequential_nonce_upload(
 		initial_to - start_nonce
 	);
 	let (ok, err_count) = sign_and_submit(
-		client, signer, &payloads, start_nonce, start_nonce, initial_to, &ws_urls, None,
+		client,
+		signer,
+		&payloads,
+		start_nonce,
+		start_nonce,
+		initial_to,
+		&ws_urls,
+		None,
 	)
 	.await?;
 	total_submitted += ok;
@@ -1484,11 +1487,8 @@ pub async fn sequential_nonce_upload(
 		);
 		let mut final_blocks = Vec::<BlockStats>::new();
 		let storage = monitor_client.storage().at_latest().await?;
-		let nonce_addr = subxt::dynamic::storage(
-			"System",
-			"Account",
-			vec![Value::from_bytes(account_id.0)],
-		);
+		let nonce_addr =
+			subxt::dynamic::storage("System", "Account", vec![Value::from_bytes(account_id.0)]);
 		let mut prev_nonce = start_nonce;
 
 		for block_num in start_finalized_block..=end_finalized_block {
@@ -1522,11 +1522,7 @@ pub async fn sequential_nonce_upload(
 				.ok()
 				.flatten()
 				.and_then(|v| v.to_value().ok())
-				.and_then(|v| {
-					v.at("nonce")
-						.and_then(|n| n.as_u128())
-						.map(|n| n as u64)
-				})
+				.and_then(|v| v.at("nonce").and_then(|n| n.as_u128()).map(|n| n as u64))
 				.unwrap_or(prev_nonce);
 
 			// Delta = how many of our txs were included in this block.
@@ -1544,9 +1540,7 @@ pub async fn sequential_nonce_upload(
 				0
 			};
 
-			let timestamp_ms = read_timestamp_at(&monitor_client, block_hash)
-				.await
-				.ok();
+			let timestamp_ms = read_timestamp_at(&monitor_client, block_hash).await.ok();
 
 			if our_tx_count > 0 {
 				tracing::info!(
@@ -1578,9 +1572,7 @@ pub async fn sequential_nonce_upload(
 
 		let our_total: u64 = final_blocks.iter().map(|b| b.tx_count).sum();
 		let blocks_with_txs = final_blocks.iter().filter(|b| b.tx_count > 0).count();
-		tracing::info!(
-			"Finalized scan: {our_total} txs across {blocks_with_txs} blocks"
-		);
+		tracing::info!("Finalized scan: {our_total} txs across {blocks_with_txs} blocks");
 		final_blocks
 	} else {
 		tracing::warn!("No finalized block range to scan, using best-block stats");

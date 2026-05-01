@@ -140,9 +140,9 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"--ipfs-server".into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=196608".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 				// Collator 2: authors blocks (slot-based for elastic scaling)
@@ -157,9 +157,9 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"--ipfs-server".into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=196608".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 				// RPC 1: full node, syncs but does not collate
@@ -172,9 +172,9 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 								.into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=196608".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 				// RPC 2: full node, syncs but does not collate
@@ -187,9 +187,9 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 								.into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=196608".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 		})
@@ -311,9 +311,9 @@ pub async fn spawn_single_core_network() -> Result<zombienet_sdk::Network<LocalF
 							"--ipfs-server".into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=20480".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 				// Collator 2
@@ -327,9 +327,9 @@ pub async fn spawn_single_core_network() -> Result<zombienet_sdk::Network<LocalF
 							"--ipfs-server".into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=20480".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 				// RPC 1: non-collating full node
@@ -342,9 +342,9 @@ pub async fn spawn_single_core_network() -> Result<zombienet_sdk::Network<LocalF
 								.into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=20480".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 				// RPC 2: non-collating full node
@@ -357,9 +357,9 @@ pub async fn spawn_single_core_network() -> Result<zombienet_sdk::Network<LocalF
 								.into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
-							"--pool-kbytes=20480".into(),
+							"--pool-kbytes=65536".into(),
 							"--".into(),
-							"--network-backend=libp2p".into(),
+
 						])
 				})
 		})
@@ -409,7 +409,9 @@ pub async fn spawn_single_core_network() -> Result<zombienet_sdk::Network<LocalF
 /// additional cores. Must be called after the relay chain is running and
 /// Alice has sudo.
 async fn assign_cores(relay_ws_url: &str, para_id: u32, num_extra_cores: u32) -> Result<()> {
-	tracing::info!("Assigning {num_extra_cores} extra cores to para {para_id} on {relay_ws_url}...");
+	tracing::info!(
+		"Assigning {num_extra_cores} extra cores to para {para_id} on {relay_ws_url}..."
+	);
 
 	let client = OnlineClient::<SubstrateConfig>::from_url(relay_ws_url).await?;
 	let alice = subxt_signer::sr25519::dev::alice();

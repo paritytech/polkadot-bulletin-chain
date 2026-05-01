@@ -550,7 +550,9 @@ pub async fn run_sequential_upload(
 			"Instance {i}: generating {num_txs_per_instance} payloads ({chunk_size} bytes each)..."
 		);
 		let payloads: Vec<Vec<u8>> = (0..num_txs_per_instance)
-			.map(|j| store::generate_indexed_payload(chunk_size, (i * num_txs_per_instance + j) as u32))
+			.map(|j| {
+				store::generate_indexed_payload(chunk_size, (i * num_txs_per_instance + j) as u32)
+			})
 			.collect();
 		all_payloads.push(payloads);
 	}
@@ -579,7 +581,11 @@ pub async fn run_sequential_upload(
 	for (i, result) in outcomes {
 		match result {
 			Ok(r) => {
-				tracing::info!("Instance {i}: confirmed {}/{}", r.total_confirmed, num_txs_per_instance);
+				tracing::info!(
+					"Instance {i}: confirmed {}/{}",
+					r.total_confirmed,
+					num_txs_per_instance
+				);
 				upload_results.push(r);
 			},
 			Err(e) => {

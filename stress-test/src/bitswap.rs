@@ -88,7 +88,11 @@ impl UserProtocol for BitswapProtocol {
 			litep2p::types::SubstreamId,
 			(Vec<Vec<u8>>, oneshot::Sender<Result<Vec<Vec<u8>>>>),
 		> = HashMap::new();
-		let mut waiting_responses: std::collections::VecDeque<(PeerId, usize, oneshot::Sender<Result<Vec<Vec<u8>>>>)> = std::collections::VecDeque::new();
+		let mut waiting_responses: std::collections::VecDeque<(
+			PeerId,
+			usize,
+			oneshot::Sender<Result<Vec<Vec<u8>>>>,
+		)> = std::collections::VecDeque::new();
 
 		loop {
 			tokio::select! {

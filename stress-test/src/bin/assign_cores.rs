@@ -8,10 +8,12 @@ use subxt::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	tracing_subscriber::fmt().with_env_filter(
-		tracing_subscriber::EnvFilter::try_from_default_env()
-			.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-	).init();
+	tracing_subscriber::fmt()
+		.with_env_filter(
+			tracing_subscriber::EnvFilter::try_from_default_env()
+				.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+		)
+		.init();
 
 	let args: Vec<String> = std::env::args().collect();
 	let relay_url = args.get(1).map(|s| s.as_str()).unwrap_or("ws://127.0.0.1:9942");

@@ -12,15 +12,6 @@ default_command = "{{POLKADOT_BINARY_PATH}}"
 default_args = ["-lruntime=debug,xcm=trace"]
 chain = "westend-local"
 
-# 2 extra cores + 1 auto-assigned per parachain = 3 total for elastic scaling
-[relaychain.genesis.runtimeGenesis.patch.configuration.config.scheduler_params]
-num_cores = 2
-max_validators_per_core = 1
-
-[relaychain.genesis.runtimeGenesis.patch.configuration.config.async_backing_params]
-max_candidate_depth = 12
-allowed_ancestry_len = 2
-
 [[relaychain.nodes]]
 name = "alice"
 validator = true
@@ -35,18 +26,10 @@ p2p_port = 30433
 rpc_port = 9943
 balance = 2000000000000
 
-[[relaychain.nodes]]
-name = "charlie"
-validator = true
-p2p_port = 30533
-rpc_port = 9944
-balance = 2000000000000
-
 [[parachains]]
 id = 1010
 chain_spec_path = "./zombienet/bulletin-westend-spec.json"
 cumulus_based = true
-num_cores = 3
 
 [[parachains.collators]]
 name = "bulletin-westend-collator-1"
@@ -55,11 +38,8 @@ validator = true
 p2p_port = 10001
 rpc_port = 10000
 args = [
-	"--authoring=slot-based",
 	"--ipfs-server",
-	"--pool-kbytes=196608",
-	"--rpc-max-request-size=20",
-	"--rpc-max-response-size=20",
+	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# Embedded relay chain args (after "--"):
 	# Use -:--port to exclude zombienet's auto-generated --port flag,
@@ -77,33 +57,11 @@ validator = true
 p2p_port = 12347
 rpc_port = 12346
 args = [
-	"--authoring=slot-based",
 	"--ipfs-server",
-	"--pool-kbytes=196608",
-	"--rpc-max-request-size=20",
-	"--rpc-max-response-size=20",
+	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# Embedded relay chain args (after "--"):
 	"--",
 	"--listen-addr=/ip4/127.0.0.1/tcp/12349/ws",
-	"-:--port",
-]
-
-[[parachains.collators]]
-name = "bulletin-westend-collator-3"
-command = "{{POLKADOT_PARACHAIN_BINARY_PATH}}"
-validator = true
-p2p_port = 14001
-rpc_port = 14000
-args = [
-	"--authoring=slot-based",
-	"--ipfs-server",
-	"--pool-kbytes=196608",
-	"--rpc-max-request-size=20",
-	"--rpc-max-response-size=20",
-	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
-	# Embedded relay chain args (after "--"):
-	"--",
-	"--listen-addr=/ip4/127.0.0.1/tcp/14003/ws",
 	"-:--port",
 ]

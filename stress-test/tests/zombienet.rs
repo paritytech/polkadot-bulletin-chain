@@ -295,11 +295,14 @@ async fn test_parachain_bitswap_bulk_read() -> Result<()> {
 	let upload_output = zombienet_common::cli_runner::run_stress_test(
 		&ws_urls,
 		&[
-			"--submitters", "8",
-			"--target-blocks", "15",
+			"--submitters",
+			"8",
+			"--target-blocks",
+			"15",
 			"throughput",
 			"block-capacity",
-			"--variants", "32KB,128KB,1MB",
+			"--variants",
+			"32KB,128KB,1MB",
 		],
 	)
 	.await?;
@@ -320,7 +323,10 @@ async fn test_parachain_bitswap_bulk_read() -> Result<()> {
 		.find_map(|a| {
 			// Parse "/ip4/.../tcp/PORT/ws" and extract PORT
 			let parts: Vec<&str> = a.split('/').collect();
-			parts.iter().position(|&p| p == "tcp").and_then(|i| parts.get(i + 1))
+			parts
+				.iter()
+				.position(|&p| p == "tcp")
+				.and_then(|i| parts.get(i + 1))
 				.and_then(|p| p.parse::<u16>().ok())
 		})
 		.ok_or_else(|| anyhow::anyhow!("No TCP port in collator P2P addresses: {addresses:?}"))?;
@@ -335,7 +341,7 @@ async fn test_parachain_bitswap_bulk_read() -> Result<()> {
 			"bitswap",
 			"bulk-read",
 			"--read-size",
-			"1073741824",  // 1 GB round-robin
+			"1073741824", // 1 GB round-robin
 			"--read-concurrency",
 			"16",
 		],
@@ -362,10 +368,7 @@ async fn test_parachain_bitswap_bulk_read() -> Result<()> {
 		result.duration.as_secs_f64(),
 	);
 
-	assert_eq!(
-		successful, total,
-		"All reads must succeed: {successful}/{total}"
-	);
+	assert_eq!(successful, total, "All reads must succeed: {successful}/{total}");
 
 	Ok(())
 }
@@ -389,20 +392,11 @@ async fn test_parachain_renew_stress() -> Result<()> {
 	// Upload 520 items (32KB each), then renew for 5 blocks.
 	let output = zombienet_common::cli_runner::run_stress_test(
 		&rpc1_url,
-		&[
-			"renew",
-			"--store-count", "520",
-			"--chunk-size", "32768",
-			"--target-blocks", "5",
-		],
+		&["renew", "--store-count", "520", "--chunk-size", "32768", "--target-blocks", "5"],
 	)
 	.await?;
 
-	assert_eq!(
-		output.exit_code, 0,
-		"Renew stress should succeed (exit code {})",
-		output.exit_code
-	);
+	assert_eq!(output.exit_code, 0, "Renew stress should succeed (exit code {})", output.exit_code);
 	assert!(!output.results.is_empty(), "Should have at least 1 result");
 
 	let result = &output.results[0];
@@ -416,10 +410,7 @@ async fn test_parachain_renew_stress() -> Result<()> {
 	);
 
 	// At least some renewals should succeed.
-	assert!(
-		result.total_confirmed > 0,
-		"Should have confirmed renewals"
-	);
+	assert!(result.total_confirmed > 0, "Should have confirmed renewals");
 
 	Ok(())
 }

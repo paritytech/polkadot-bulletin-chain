@@ -255,7 +255,7 @@ async fn main() -> Result<()> {
 	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
 
 	match cli.command {
-		Commands::Throughput { ref test, ref variants, total_size, chunk_size, instances } => {
+		Commands::Throughput { ref test, ref variants, total_size, chunk_size, instances } =>
 			if let Err(e) = run_throughput(
 				&client,
 				&authorizer_signer,
@@ -276,9 +276,16 @@ async fn main() -> Result<()> {
 			{
 				tracing::error!("Throughput command failed: {e}");
 				command_error = Some(e);
-			}
-		},
-		Commands::Bitswap { ref test, payload_size, read_size, read_concurrency, min_size, max_size, batch_size } => {
+			},
+		Commands::Bitswap {
+			ref test,
+			payload_size,
+			read_size,
+			read_concurrency,
+			min_size,
+			max_size,
+			batch_size,
+		} => {
 			if let Err(e) = run_bitswap(
 				&client,
 				&authorizer_signer,
@@ -542,13 +549,7 @@ async fn resolve_p2p_multiaddrs(
 			.iter()
 			.find(|a| a.contains("/ws"))
 			.or_else(|| addresses.first())
-			.map(|a| {
-				if a.contains("/p2p/") {
-					a.clone()
-				} else {
-					format!("{a}/p2p/{peer_id_str}")
-				}
-			})
+			.map(|a| if a.contains("/p2p/") { a.clone() } else { format!("{a}/p2p/{peer_id_str}") })
 			.ok_or_else(|| anyhow::anyhow!("No P2P addresses discovered"))?;
 		let cleaned = bitswap::clean_multiaddr(&raw);
 		let ma: litep2p::types::multiaddr::Multiaddr = cleaned.parse()?;

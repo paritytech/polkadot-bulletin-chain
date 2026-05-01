@@ -34,29 +34,33 @@ pub async fn run_renew_stress(
 	);
 
 	// Phase 1: Upload items.
-	let signer = subxt_signer::sr25519::Keypair::from_secret_key(rand::random())
-		.expect("valid keypair");
+	let signer =
+		subxt_signer::sr25519::Keypair::from_secret_key(rand::random()).expect("valid keypair");
 	let account_id = signer.public_key().to_account_id();
 	let total_bytes = num_store_txs * chunk_size;
 
 	// Authorize for stores + all renewals.
 	let total_txs_needed = num_store_txs as u32 + max_block_txs as u32 * (target_renew_blocks + 5);
-	let total_bytes_needed = (total_bytes as u64) + (chunk_size as u64 * max_block_txs as u64 * (target_renew_blocks as u64 + 5));
+	let total_bytes_needed = (total_bytes as u64) +
+		(chunk_size as u64 * max_block_txs as u64 * (target_renew_blocks as u64 + 5));
 	crate::authorize::authorize_accounts(
-		client, authorizer_signer, nonce_tracker,
+		client,
+		authorizer_signer,
+		nonce_tracker,
 		&[account_id.clone()],
 		total_txs_needed,
 		total_bytes_needed,
-	).await?;
+	)
+	.await?;
 
 	tracing::info!("Phase 1: uploading {num_store_txs} items...");
 	let payloads: Vec<Vec<u8>> = (0..num_store_txs)
 		.map(|i| store::generate_indexed_payload(chunk_size, i as u32))
 		.collect();
 	let ws_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
-	let upload = store::sequential_nonce_upload(
-		client, &signer, payloads, ws_owned.clone(), chain_limits,
-	).await?;
+	let upload =
+		store::sequential_nonce_upload(client, &signer, payloads, ws_owned.clone(), chain_limits)
+			.await?;
 	tracing::info!("Phase 1 done: {}/{} confirmed", upload.total_confirmed, num_store_txs);
 
 	if upload.total_confirmed == 0 {
@@ -78,8 +82,7 @@ pub async fn run_renew_stress(
 	);
 
 	let mut best_sub = client.blocks().subscribe_best().await?;
-	let rpc_client = jsonrpsee::ws_client::WsClientBuilder::default()
-		.build(&ws_owned[0]).await?;
+	let rpc_client = jsonrpsee::ws_client::WsClientBuilder::default().build(&ws_owned[0]).await?;
 
 	let start = Instant::now();
 	let deadline = start + Duration::from_secs(600);
@@ -87,10 +90,13 @@ pub async fn run_renew_stress(
 	let mut total_renewed: u64 = 0;
 	let mut best_nonce = {
 		use jsonrpsee::core::client::ClientT;
-		rpc_client.request::<u64, _>(
-			"system_accountNextIndex",
-			jsonrpsee::rpc_params![account_id.to_string()],
-		).await.unwrap_or(0)
+		rpc_client
+			.request::<u64, _>(
+				"system_accountNextIndex",
+				jsonrpsee::rpc_params![account_id.to_string()],
+			)
+			.await
+			.unwrap_or(0)
 	};
 	let items_per_wave = stored.len().min(max_block_txs);
 
@@ -106,10 +112,13 @@ pub async fn run_renew_stress(
 		// Read nonce.
 		{
 			use jsonrpsee::core::client::ClientT;
-			if let Ok(n) = rpc_client.request::<u64, _>(
-				"system_accountNextIndex",
-				jsonrpsee::rpc_params![account_id.to_string()],
-			).await {
+			if let Ok(n) = rpc_client
+				.request::<u64, _>(
+					"system_accountNextIndex",
+					jsonrpsee::rpc_params![account_id.to_string()],
+				)
+				.await
+			{
 				best_nonce = n;
 			}
 		}
@@ -120,14 +129,11 @@ pub async fn run_renew_stress(
 			let (ref_block, ref_index) = &stored[i];
 			let nonce = best_nonce + i as u64;
 			let call = subxt::dynamic::tx(
-				"TransactionStorage", "renew",
-				vec![
-					Value::u128(*ref_block as u128),
-					Value::u128(*ref_index as u128),
-				],
+				"TransactionStorage",
+				"renew",
+				vec![Value::u128(*ref_block as u128), Value::u128(*ref_index as u128)],
 			);
-			let mut params = BulletinExtrinsicParamsBuilder::new()
-				.nonce(nonce).mortal(16).build();
+			let mut params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).mortal(16).build();
 			use subxt::config::transaction_extensions::Params;
 			params.inject_block(block_number, block_hash);
 			if let Ok(mut partial) = client.tx().create_partial_offline(&call, params) {
@@ -144,7 +150,10 @@ pub async fn run_renew_stress(
 		let (ok, errs) = store::submit_sequential_wave(&ws_owned, &signed_txs).await;
 		tracing::info!(
 			"Block #{block_number}: submitted {} renew txs (nonce {}..{}), {ok} ok, {} errors",
-			signed_txs.len(), best_nonce, best_nonce + signed_txs.len() as u64 - 1, errs.len(),
+			signed_txs.len(),
+			best_nonce,
+			best_nonce + signed_txs.len() as u64 - 1,
+			errs.len(),
 		);
 
 		// Wait for next block and check nonce + BlockWeight.
@@ -153,10 +162,13 @@ pub async fn run_renew_stress(
 			let nh = next_block.hash();
 			{
 				use jsonrpsee::core::client::ClientT;
-				if let Ok(n) = rpc_client.request::<u64, _>(
-					"system_accountNextIndex",
-					jsonrpsee::rpc_params![account_id.to_string()],
-				).await {
+				if let Ok(n) = rpc_client
+					.request::<u64, _>(
+						"system_accountNextIndex",
+						jsonrpsee::rpc_params![account_id.to_string()],
+					)
+					.await
+				{
 					let included = n.saturating_sub(best_nonce);
 					if included > 0 {
 						confirmed_blocks += 1;
@@ -164,9 +176,13 @@ pub async fn run_renew_stress(
 
 						// Read BlockWeight.
 						let bw_addr = subxt::dynamic::storage("System", "BlockWeight", ());
-						let bw_str = client.storage().at(nh)
-							.fetch(&bw_addr).await
-							.ok().flatten()
+						let bw_str = client
+							.storage()
+							.at(nh)
+							.fetch(&bw_addr)
+							.await
+							.ok()
+							.flatten()
 							.and_then(|v| v.to_value().ok().map(|v| format!("{v}")));
 
 						tracing::info!(
@@ -199,7 +215,11 @@ pub async fn run_renew_stress(
 		total_confirmed: total_renewed,
 		total_errors: 0,
 		throughput_tps: tps,
-		avg_tx_per_block: if confirmed_blocks > 0 { total_renewed as f64 / confirmed_blocks as f64 } else { 0.0 },
+		avg_tx_per_block: if confirmed_blocks > 0 {
+			total_renewed as f64 / confirmed_blocks as f64
+		} else {
+			0.0
+		},
 		peak_tx_per_block: items_per_wave as u64,
 		..Default::default()
 	});
@@ -223,7 +243,9 @@ async fn discover_stored_items(
 		let block_number = if key_bytes.len() >= 36 {
 			let offset = key_bytes.len() - 4;
 			u32::from_le_bytes(key_bytes[offset..].try_into().unwrap_or([0; 4])) as u64
-		} else { continue };
+		} else {
+			continue
+		};
 
 		let encoded = entry.value.encoded();
 		let count = match encoded.first() {
@@ -235,7 +257,9 @@ async fn discover_stored_items(
 		for idx in 0..count {
 			items.push((block_number, idx));
 		}
-		if items.len() >= needed { break }
+		if items.len() >= needed {
+			break
+		}
 	}
 	Ok(items)
 }

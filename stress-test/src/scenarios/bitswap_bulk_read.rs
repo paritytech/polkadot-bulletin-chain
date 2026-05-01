@@ -147,7 +147,9 @@ async fn discover_cids(
 
 	tracing::info!(
 		"Discovering CIDs (size {}..{} bytes, target {} MB, block #{current_block})...",
-		min_size, max_size, target_bytes / (1024 * 1024),
+		min_size,
+		max_size,
+		target_bytes / (1024 * 1024),
 	);
 
 	let storage = client.storage().at(fin_ref.hash());
@@ -171,9 +173,7 @@ async fn discover_cids(
 		let key_bytes = entry.key_bytes;
 		let block_number = if key_bytes.len() >= 36 {
 			let offset = key_bytes.len() - 4;
-			u32::from_le_bytes(
-				key_bytes[offset..].try_into().unwrap_or([0; 4]),
-			) as u64
+			u32::from_le_bytes(key_bytes[offset..].try_into().unwrap_or([0; 4])) as u64
 		} else {
 			0
 		};
@@ -207,7 +207,8 @@ async fn discover_cids(
 	if items.is_empty() {
 		anyhow::bail!(
 			"No CIDs found matching size {}..{} bytes ({skipped} skipped)",
-			min_size, max_size,
+			min_size,
+			max_size,
 		);
 	}
 
@@ -255,10 +256,7 @@ pub async fn run_bulk_read(
 		let peer_id = BitswapClient::peer_id_from_multiaddr(addr)?;
 		match bitswap::create_connected_client(addr).await {
 			Ok(c) => {
-				tracing::info!(
-					"Worker {i}: connected to peer {peer_id} ({})",
-					addr
-				);
+				tracing::info!("Worker {i}: connected to peer {peer_id} ({})", addr);
 				workers.push((c, peer_id));
 			},
 			Err(e) => tracing::warn!("Worker {i}: failed to connect to {addr}: {e}"),
@@ -283,17 +281,19 @@ pub async fn run_bulk_read(
 	// Async progress logger — receives (item, data_len, elapsed) and
 	// logs without blocking the download tasks.
 	let (log_tx, mut log_rx) = tokio::sync::mpsc::unbounded_channel::<(
-		usize,           // first item index
-		DiscoveredItem,  // first item info
-		usize,           // total bytes in batch
-		usize,           // blocks in batch
-		Duration,        // fetch elapsed
-		u64,             // total downloaded so far
-		u64,             // reads ok so far
+		usize,          // first item index
+		DiscoveredItem, // first item info
+		usize,          // total bytes in batch
+		usize,          // blocks in batch
+		Duration,       // fetch elapsed
+		u64,            // total downloaded so far
+		u64,            // reads ok so far
 	)>();
 	let log_target = target;
 	tokio::spawn(async move {
-		while let Some((idx, item, batch_bytes, num_blocks, elapsed, downloaded, ok_count)) = log_rx.recv().await {
+		while let Some((idx, item, batch_bytes, num_blocks, elapsed, downloaded, ok_count)) =
+			log_rx.recv().await
+		{
 			let wall_secs = wall_start.elapsed().as_secs_f64().max(0.001);
 			let speed_mb = downloaded as f64 / wall_secs / 1048576.0;
 			let pct = (downloaded as f64 / log_target as f64 * 100.0).min(100.0);
@@ -354,15 +354,26 @@ pub async fn run_bulk_read(
 					Ok(blocks) => {
 						let elapsed = start.elapsed();
 						let batch_bytes: usize = blocks.iter().map(|b| b.len()).sum();
-						let downloaded = bytes_downloaded.fetch_add(batch_bytes as u64, Ordering::Relaxed) + batch_bytes as u64;
-						let ok_count = reads_ok.fetch_add(blocks.len() as u64, Ordering::Relaxed) + blocks.len() as u64;
+						let downloaded = bytes_downloaded
+							.fetch_add(batch_bytes as u64, Ordering::Relaxed) +
+							batch_bytes as u64;
+						let ok_count = reads_ok.fetch_add(blocks.len() as u64, Ordering::Relaxed) +
+							blocks.len() as u64;
 						for _ in 0..blocks.len() {
 							timings.push((elapsed / blocks.len() as u32, true));
 						}
 						consecutive_failures = 0;
 
 						let (idx, item) = &batch_items[0];
-						let _ = log_tx.send((*idx, (*item).clone(), batch_bytes, blocks.len(), elapsed, downloaded, ok_count));
+						let _ = log_tx.send((
+							*idx,
+							(*item).clone(),
+							batch_bytes,
+							blocks.len(),
+							elapsed,
+							downloaded,
+							ok_count,
+						));
 					},
 					Err(e) => {
 						let elapsed = start.elapsed();
