@@ -804,8 +804,7 @@ pub mod pallet {
 		/// have populated `PendingAutoRenewals`.
 		#[pallet::call_index(14)]
 		#[pallet::weight((
-			T::WeightInfo::check_proof()
-				.saturating_add(T::WeightInfo::process_auto_renewals(T::MaxBlockTransactions::get())),
+			T::WeightInfo::apply_block_inherents(T::MaxBlockTransactions::get()),
 			DispatchClass::Mandatory,
 		))]
 		pub fn apply_block_inherents(
@@ -813,11 +812,16 @@ pub mod pallet {
 			proof: Option<TransactionStorageProof>,
 		) -> DispatchResultWithPostInfo {
 			ensure_none(origin)?;
+			// Snapshot pending count BEFORE draining so we can refund the unused
+			// per-item drain capacity. The dispatchable always declares
+			// `apply_block_inherents(MaxBlockTransactions)` so block builders reserve
+			// the worst case; we refund here based on what actually ran.
+			let n_actual = PendingAutoRenewals::<T>::get().len() as u32;
 			if let Some(proof) = proof {
 				Self::do_check_proof(proof)?;
 			}
 			Self::do_process_auto_renewals();
-			Ok(().into())
+			Ok(Some(T::WeightInfo::apply_block_inherents(n_actual)).into())
 		}
 	}
 
@@ -1916,11 +1920,11 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 		effective_normal.ref_time(),
 	);
 
-	// 5. check_proof (DispatchClass::Mandatory, once per block) must fit in max block.
-	let check_proof_weight = T::WeightInfo::check_proof();
+	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit in max block.
+	let apply_inherents_weight = T::WeightInfo::apply_block_inherents(max_block_txs);
 	assert!(
-		check_proof_weight.all_lte(block_weights.max_block),
-		"check_proof weight {check_proof_weight:?} exceeds max block {:?}",
+		apply_inherents_weight.all_lte(block_weights.max_block),
+		"apply_block_inherents weight {apply_inherents_weight:?} exceeds max block {:?}",
 		block_weights.max_block,
 	);
 
@@ -1950,7 +1954,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	println!("  store(max_size) weight:     {max_store_dispatch:?}");
 	println!("  store(even_split) weight:   {store_weight:?} (at {per_tx_size} bytes)");
 	println!("  renew weight:               {renew_weight:?}");
-	println!("  check_proof weight:         {check_proof_weight:?}");
+	println!("  apply_block_inherents wt:   {apply_inherents_weight:?}");
 	println!("  Max store txs by weight:    {max_txs_by_weight}");
 	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
 }
