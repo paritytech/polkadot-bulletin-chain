@@ -2015,7 +2015,7 @@ dependencies = [
  "env_logger",
  "futures",
  "hex",
- "litep2p 0.12.3",
+ "litep2p",
  "log",
  "multihash 0.19.3",
  "prost 0.13.5",
@@ -2139,7 +2139,7 @@ dependencies = [
  "futures",
  "hex",
  "jsonrpsee",
- "litep2p 0.13.3",
+ "litep2p",
  "multihash 0.19.3",
  "prost 0.13.5",
  "prost-build 0.13.5",
@@ -6747,54 +6747,6 @@ name = "litemap"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
-
-[[package]]
-name = "litep2p"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d903b21d57fae0e8d184c6ea0107fb5303fcab7cd2acaf5d2d9beb2807194b4a"
-dependencies = [
- "async-trait",
- "bs58",
- "bytes",
- "cid",
- "ed25519-dalek",
- "enum-display",
- "futures",
- "futures-timer",
- "hickory-resolver 0.25.2",
- "indexmap 2.13.0",
- "libc",
- "mockall",
- "multiaddr 0.17.1",
- "multihash 0.17.0",
- "network-interface",
- "parking_lot 0.12.5",
- "pin-project",
- "prost 0.13.5",
- "prost-build 0.14.3",
- "rand 0.8.5",
- "serde",
- "sha2 0.10.9",
- "simple-dns",
- "smallvec",
- "snow",
- "socket2 0.5.10",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite 0.27.0",
- "tokio-util",
- "tracing",
- "uint 0.10.0",
- "unsigned-varint 0.8.0",
- "url",
- "x25519-dalek",
- "x509-parser 0.17.0",
- "yamux 0.13.10",
- "yasna",
- "zeroize",
-]
 
 [[package]]
 name = "litep2p"
@@ -11804,7 +11756,7 @@ dependencies = [
  "ip_network",
  "libp2p",
  "linked_hash_set",
- "litep2p 0.13.3",
+ "litep2p",
  "log",
  "mockall",
  "parity-scale-codec",
@@ -11913,7 +11865,7 @@ dependencies = [
  "ed25519-dalek",
  "libp2p-identity",
  "libp2p-kad",
- "litep2p 0.13.3",
+ "litep2p",
  "log",
  "multiaddr 0.18.2",
  "multihash 0.19.3",
