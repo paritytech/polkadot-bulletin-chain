@@ -492,6 +492,7 @@ pub mod pallet {
 		/// O(1).
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::renew())]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _block: &BlockNumberFor<T>, _index: &u32| -> bool { true })]
 		pub fn renew(
 			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
