@@ -310,6 +310,7 @@ fn spawn_pipeline_dual_monitor(
 				timestamp_ms: pb.timestamp_ms,
 				hash: Some(format!("{:?}", pb.hash)),
 				finalized: true,
+				received_at_ms: None,
 				interval_ms,
 			});
 		};
