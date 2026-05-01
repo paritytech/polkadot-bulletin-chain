@@ -35,14 +35,14 @@ async fn run_b2_concurrent_read_level(
 	for i in 0..concurrency {
 		match bitswap::create_connected_client(multiaddr).await {
 			Ok(c) => clients.push(c),
-			Err(e) => log::warn!("B2: failed to create client {i}: {e}"),
+			Err(e) => tracing::warn!("B2: failed to create client {i}: {e}"),
 		}
 	}
 	if clients.is_empty() {
 		anyhow::bail!("B2: no clients connected (concurrency={concurrency})");
 	}
 	let actual_concurrency = clients.len();
-	log::info!(
+	tracing::info!(
 		"B2: {actual_concurrency}/{concurrency} clients connected, reading {} items each",
 		items.len()
 	);
@@ -74,7 +74,7 @@ async fn run_b2_concurrent_read_level(
 						let elapsed = start.elapsed();
 						let verified = data == *expected;
 						if !verified {
-							log::warn!(
+							tracing::warn!(
 								"B2 client-{idx}: data mismatch (got {} bytes, expected {})",
 								data.len(),
 								expected.len()
@@ -85,11 +85,11 @@ async fn run_b2_concurrent_read_level(
 					},
 					Err(e) => {
 						let elapsed = start.elapsed();
-						log::warn!("B2 client-{idx}: fetch failed: {e}");
+						tracing::warn!("B2 client-{idx}: fetch failed: {e}");
 						timings.push((elapsed, false, false));
 						my_consecutive_failures += 1;
 						if my_consecutive_failures >= ABORT_AFTER_CONSECUTIVE_FAILURES {
-							log::warn!(
+							tracing::warn!(
 								"B2 client-{idx}: {my_consecutive_failures} consecutive \
 								 failures, aborting all clients"
 							);
@@ -129,7 +129,7 @@ async fn run_b2_concurrent_read_level(
 	let reads_per_sec = successful as f64 / wall_time.as_secs_f64();
 	let read_bytes_per_sec = (successful * payload_size as u64) as f64 / wall_time.as_secs_f64();
 
-	log::info!(
+	tracing::info!(
 		"B2: concurrency={concurrency} — {successful}/{total_reads} reads OK, \
 		 {reads_per_sec:.1} reads/s, wall={:.1}s",
 		wall_time.as_secs_f64()
@@ -161,7 +161,10 @@ pub async fn run_b2_concurrent_read_sweep(
 	payload_size: usize,
 	ws_url: &str,
 ) -> Result<Vec<ScenarioResult>> {
-	log::info!("B2: Concurrent read sweep ({item_count} items, {}KB payload)", payload_size / 1024);
+	tracing::info!(
+		"B2: Concurrent read sweep ({item_count} items, {}KB payload)",
+		payload_size / 1024
+	);
 
 	// --- Generate unique payloads and compute CIDs ---
 	let mut items: Vec<(cid::Cid, Vec<u8>)> = Vec::with_capacity(item_count as usize);
@@ -190,17 +193,10 @@ pub async fn run_b2_concurrent_read_sweep(
 	.await?;
 
 	// --- Store phase ---
-	log::info!("B2: storing {item_count} items via bulk_store_oneshot...");
+	tracing::info!("B2: storing {item_count} items via bulk_store_oneshot...");
 	let blocks_rx = store::subscribe_blocks(ws_url).await?;
-	let store_result = store::bulk_store_oneshot(
-		work_items,
-		&[ws_url],
-		None,
-		4,
-		store::BlockInput::BestOnly(blocks_rx),
-	)
-	.await?;
-	log::info!(
+	let store_result = store::bulk_store_oneshot(work_items, &[ws_url], None, 4, blocks_rx).await?;
+	tracing::info!(
 		"B2: store complete — {}/{} confirmed in {:.1}s",
 		store_result.total_confirmed,
 		store_result.total_submitted,
@@ -216,13 +212,13 @@ pub async fn run_b2_concurrent_read_sweep(
 	let items = Arc::new(items);
 
 	for &concurrency in B2_CONCURRENCY_LEVELS {
-		log::info!("=== B2 sweep: concurrency={concurrency} ===");
+		tracing::info!("=== B2 sweep: concurrency={concurrency} ===");
 		match run_b2_concurrent_read_level(multiaddr, Arc::clone(&items), payload_size, concurrency)
 			.await
 		{
 			Ok(result) => results.push(result),
 			Err(e) => {
-				log::warn!("B2 sweep: concurrency={concurrency} failed: {e}");
+				tracing::warn!("B2 sweep: concurrency={concurrency} failed: {e}");
 				results.push(ScenarioResult {
 					name: format!(
 						"B2: Concurrent Read ({}KB, concurrency={concurrency} - FAILED)",

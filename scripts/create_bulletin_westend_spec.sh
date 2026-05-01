@@ -6,7 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PARA_ID="${PARACHAIN_ID:-2487}"
+PARA_ID="${PARACHAIN_ID:-1010}"
 
 cargo build --release -p bulletin-westend-runtime
 

@@ -1,6 +1,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use std::{
+	path::PathBuf,
+	sync::{
+		atomic::{AtomicBool, Ordering},
+		Arc,
+	},
+};
 use subxt_signer::sr25519::Keypair;
 
 use bulletin_stress_test::{
@@ -33,13 +39,24 @@ struct Cli {
 	#[arg(long, default_value = "512", global = true)]
 	iterations: u32,
 
-	/// Number of concurrent submitter tasks (increase for remote RPCs)
+	/// WebSocket RPC connections for store submission (one async worker per connection, fed by
+	/// bounded channels from the work reader; increase for remote RPCs)
 	#[arg(long, default_value = "4", global = true)]
 	submitters: usize,
 
 	/// Number of steady-state blocks to measure per variant (excludes ramp-up/down)
 	#[arg(long, default_value = "5", global = true)]
 	target_blocks: u32,
+
+	/// Block-capacity only: measured blocks worth of transactions per pipeline iteration (chunk
+	/// size)
+	#[arg(long, default_value = "20", global = true)]
+	iteration_blocks: u32,
+
+	/// Block-capacity `--variants mixed` only: seed for random payload-size draws (reproducible
+	/// runs)
+	#[arg(long, global = true)]
+	mix_seed: Option<u64>,
 
 	/// Output format
 	#[arg(long, default_value = "text", global = true)]
@@ -64,8 +81,8 @@ enum Commands {
 		#[arg(default_value = "block-capacity")]
 		test: String,
 
-		/// Comma-separated payload size labels (e.g. "1KB,128KB,1MB").
-		/// Omit to run all.
+		/// Comma-separated payload size labels (e.g. "1KB,128KB,1MB") or **MIXED** for a weighted
+		/// real-world size mix. Omit to run all fixed sizes (no mixed).
 		#[arg(long)]
 		variants: Option<String>,
 	},
@@ -85,7 +102,12 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+	tracing_subscriber::fmt()
+		.with_env_filter(
+			tracing_subscriber::EnvFilter::try_from_default_env()
+				.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+		)
+		.init();
 
 	let cli = Cli::parse();
 
@@ -98,7 +120,7 @@ async fn main() -> Result<()> {
 		.filter(|s| !s.is_empty())
 		.collect();
 	let control_url = &ws_urls[0];
-	log::info!(
+	tracing::info!(
 		"WS URLs: {} total (control: {control_url}{})",
 		ws_urls.len(),
 		if ws_urls.len() > 1 { format!(", submit: {}", ws_urls.join(", ")) } else { String::new() }
@@ -117,26 +139,43 @@ async fn main() -> Result<()> {
 
 	// Initialize authorizer nonce
 	let authorizer_account_id = authorizer_signer.public_key().to_account_id();
-	log::info!("Initializing authorizer nonce from chain...");
+	tracing::info!("Initializing authorizer nonce from chain...");
 	nonce_tracker.init_from_chain(&client, &authorizer_account_id).await?;
-	log::info!("Authorizer nonce initialized");
+	tracing::info!("Authorizer nonce initialized");
 
 	// Query environment info and chain limits
-	log::info!("Querying environment info from RPC...");
+	tracing::info!("Querying environment info from RPC...");
 	let env_info = EnvironmentInfo::query(&client, control_url).await?;
-	log::info!("Environment info OK");
+	tracing::info!("Environment info OK");
 	if matches!(cli.output, OutputFormat::Text) {
 		env_info.print_text();
 	}
-	log::info!("Querying chain limits (block weights, storage limits, store weight regression)...");
+	tracing::info!(
+		"Querying chain limits (block weights, storage limits, store weight regression)..."
+	);
 	let chain_limits = ChainLimits::query(&client, &authorizer_signer, &nonce_tracker).await?;
-	log::info!("Chain limits OK");
+	tracing::info!("Chain limits OK");
 	if matches!(cli.output, OutputFormat::Text) {
 		chain_limits.print_text();
 	}
 
 	let mut all_results = Vec::new();
 	let mut command_error = None;
+	let cancel = Arc::new(AtomicBool::new(false));
+
+	// Spawn Ctrl+C handler that sets the cancel flag instead of killing the process.
+	// This lets the pipeline finish gracefully and produce partial results.
+	{
+		let cancel = cancel.clone();
+		tokio::spawn(async move {
+			tokio::signal::ctrl_c().await.ok();
+			tracing::warn!("Ctrl+C received — stopping gracefully to collect partial results");
+			cancel.store(true, Ordering::Relaxed);
+			tokio::signal::ctrl_c().await.ok();
+			tracing::warn!("Second Ctrl+C — force exit");
+			std::process::exit(130);
+		});
+	}
 
 	// Closure that stamps metadata and flushes results to --output-file after each variant.
 	let flush = |results: &mut Vec<report::ScenarioResult>| {
@@ -152,9 +191,9 @@ async fn main() -> Result<()> {
 		if let Some(ref path) = cli.output_file {
 			if let Ok(json) = serde_json::to_string_pretty(results) {
 				if let Err(e) = std::fs::write(path, &json) {
-					log::warn!("Failed to write results to {}: {e}", path.display());
+					tracing::warn!("Failed to write results to {}: {e}", path.display());
 				} else {
-					log::info!(
+					tracing::info!(
 						"Results flushed to {} ({} variants)",
 						path.display(),
 						results.len()
@@ -179,10 +218,11 @@ async fn main() -> Result<()> {
 				&ws_url_refs,
 				&mut all_results,
 				&flush,
+				&cancel,
 			)
 			.await
 			{
-				log::error!("Throughput command failed: {e}");
+				tracing::error!("Throughput command failed: {e}");
 				command_error = Some(e);
 			}
 		},
@@ -200,7 +240,7 @@ async fn main() -> Result<()> {
 			)
 			.await
 			{
-				log::error!("Bitswap command failed: {e}");
+				tracing::error!("Bitswap command failed: {e}");
 				command_error = Some(e);
 			}
 		},
@@ -216,13 +256,14 @@ async fn main() -> Result<()> {
 				&ws_url_refs,
 				&mut all_results,
 				&flush,
+				&cancel,
 			)
 			.await
 			{
-				log::error!("Throughput command failed: {e}");
+				tracing::error!("Throughput command failed: {e}");
 				command_error = Some(e);
 			}
-			if command_error.is_none() {
+			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
 				if let Err(e) = run_bitswap(
 					&client,
 					&authorizer_signer,
@@ -236,14 +277,14 @@ async fn main() -> Result<()> {
 				)
 				.await
 				{
-					log::error!("Bitswap command failed: {e}");
+					tracing::error!("Bitswap command failed: {e}");
 					command_error = Some(e);
 				}
 			}
 		},
 	}
 
-	// Always print results (even partial) before propagating errors
+	// Always print results (even partial / aborted) before exiting.
 	match cli.output {
 		OutputFormat::Text =>
 			for result in &all_results {
@@ -256,6 +297,12 @@ async fn main() -> Result<()> {
 
 	if all_results.len() > 1 && matches!(cli.output, OutputFormat::Text) {
 		report::print_summary_table(&all_results);
+	}
+
+	if cancel.load(Ordering::Relaxed) {
+		// Flush to file one last time before exiting.
+		flush(&mut all_results);
+		std::process::exit(130);
 	}
 
 	if let Some(e) = command_error {
@@ -277,6 +324,7 @@ async fn run_throughput(
 	ws_urls: &[&str],
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
 	match test {
 		"block-capacity" | "all" => {
@@ -288,9 +336,12 @@ async fn run_throughput(
 				chain_limits,
 				cli.submitters,
 				cli.target_blocks,
+				cli.iteration_blocks,
 				variants,
+				cli.mix_seed,
 				results,
 				on_result,
+				cancel,
 			)
 			.await?;
 		},
@@ -314,7 +365,7 @@ async fn run_bitswap(
 	let multiaddr = match resolve_p2p_multiaddr(cli, control_url).await {
 		Ok(r) => r,
 		Err(e) => {
-			log::warn!("Bitswap tests skipped: could not resolve P2P address: {e}");
+			tracing::warn!("Bitswap tests skipped: could not resolve P2P address: {e}");
 			return Ok(());
 		},
 	};
@@ -350,10 +401,10 @@ async fn resolve_p2p_multiaddr(
 	let multiaddr_str = match &cli.p2p_multiaddr {
 		Some(addr) => bitswap::clean_multiaddr(addr),
 		None => {
-			log::info!("Auto-discovering P2P address via RPC...");
+			tracing::info!("Auto-discovering P2P address via RPC...");
 			let (peer_id_str, addresses) = client::discover_p2p_info(control_url).await?;
-			log::info!("Node peer ID: {peer_id_str}");
-			log::info!("Node listen addresses: {addresses:?}");
+			tracing::info!("Node peer ID: {peer_id_str}");
+			tracing::info!("Node listen addresses: {addresses:?}");
 
 			let raw =
 				addresses
@@ -372,7 +423,7 @@ async fn resolve_p2p_multiaddr(
 		},
 	};
 
-	log::info!("Resolved P2P multiaddr: {multiaddr_str}");
+	tracing::info!("Resolved P2P multiaddr: {multiaddr_str}");
 	let multiaddr: litep2p::types::multiaddr::Multiaddr = multiaddr_str.parse()?;
 	// Validate that the multiaddr contains a peer ID
 	bitswap::BitswapClient::peer_id_from_multiaddr(&multiaddr)?;

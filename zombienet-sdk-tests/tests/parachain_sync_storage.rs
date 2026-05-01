@@ -87,7 +87,7 @@
 //! - `PARACHAIN_CHAIN_SPEC_PATH`: Path to the parachain chain spec (default:
 //!   "./zombienet/bulletin-westend-spec.json")
 //! - `RELAY_CHAIN`: Relay chain spec name (default: "westend-local")
-//! - `PARACHAIN_ID`: Parachain ID (default: 2487)
+//! - `PARACHAIN_ID`: Parachain ID (default: 1010)
 //! - `PARACHAIN_CHAIN_ID`: Chain ID for parachain DB path (default: "bulletin-westend")
 //!
 //! ## Running Tests

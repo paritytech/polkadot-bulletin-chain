@@ -81,7 +81,7 @@ jobs:
           cargo build --release -p bulletin-westend-runtime
           mkdir -p ./zombienet
           chain-spec-builder create \
-            -p 2487 \
+            -p 1010 \
             -c westend \
             -i bulletin-westend \
             -n Bulletin \
