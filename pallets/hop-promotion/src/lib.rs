@@ -106,9 +106,6 @@ pub mod pallet {
 		/// Authorizes a [`Call::promote`] dispatch in the tx pool: validates the
 		/// source, data size, block fullness, submit-timestamp freshness, account
 		/// authorization, and the user's sr25519 signature over `(data, ts)`.
-		///
-		/// Wired in via `#[pallet::authorize]` on the call below; extracted as a
-		/// named function so it can be benchmarked directly.
 		// Signature must match the `Call::promote` variant (`Vec<u8>`), so the
 		// reference is `&Vec<u8>` rather than `&[u8]`.
 		#[allow(clippy::ptr_arg)]
