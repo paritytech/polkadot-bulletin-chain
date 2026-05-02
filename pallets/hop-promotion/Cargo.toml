@@ -27,6 +27,7 @@ bulletin-transaction-storage-primitives = { workspace = true }
 [dev-dependencies]
 bulletin-pallets-common = { workspace = true, features = ["std"] }
 sp-keyring = { workspace = true, features = ["std"] }
+sp-keystore = { workspace = true, features = ["std"] }
 
 [features]
 default = ["std"]
@@ -42,6 +43,7 @@ std = [
 	"scale-info/std",
 	"sp-io/std",
 	"sp-keyring/std",
+	"sp-keystore/std",
 	"sp-runtime/std",
 ]
 runtime-benchmarks = [

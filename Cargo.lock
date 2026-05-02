@@ -8171,6 +8171,7 @@ dependencies = [
  "scale-info",
  "sp-io",
  "sp-keyring",
+ "sp-keystore",
  "sp-runtime",
 ]
 

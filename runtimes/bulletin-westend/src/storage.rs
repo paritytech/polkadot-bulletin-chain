@@ -137,4 +137,5 @@ parameter_types! {
 
 impl pallet_hop_promotion::Config for Runtime {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+	type WeightInfo = crate::weights::pallet_hop_promotion::WeightInfo<Runtime>;
 }

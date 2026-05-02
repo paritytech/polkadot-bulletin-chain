@@ -89,6 +89,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 
 impl pallet_hop_promotion::Config for Test {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+	type WeightInfo = ();
 }
 
 pub fn new_test_ext() -> TestExternalities {
@@ -104,7 +105,13 @@ pub fn new_test_ext() -> TestExternalities {
 	}
 	.build_storage()
 	.unwrap();
-	t.into()
+	#[allow(unused_mut)]
+	let mut ext: TestExternalities = t.into();
+	#[cfg(feature = "runtime-benchmarks")]
+	ext.register_extension(sp_keystore::KeystoreExt::new(
+		sp_keystore::testing::MemoryKeystore::new(),
+	));
+	ext
 }
 
 /// Run to block `n`, advancing pallet-timestamp by 6 seconds per block. Required

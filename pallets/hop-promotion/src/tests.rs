@@ -18,6 +18,7 @@
 use crate::{mock::*, signing_payload};
 use codec::Encode;
 use frame_support::{assert_noop, assert_ok, traits::Authorize};
+use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
 	transaction_validity::{InvalidTransaction, TransactionSource},
@@ -30,13 +31,13 @@ fn authorized_origin() -> RuntimeOrigin {
 	frame_system::Origin::<Test>::Authorized.into()
 }
 
-/// Build a `(signer, signature)` pair where `keyring` signs `signing_payload(data, ts)`.
+/// Build a `(signer, signature)` pair where `keyring` signs the payload for `(data, ts)`.
 fn signed_by(
 	keyring: Sr25519Keyring,
 	data: &[u8],
 	submit_timestamp: u64,
 ) -> (MultiSigner, MultiSignature) {
-	let payload = signing_payload(data, submit_timestamp);
+	let payload = signing_payload(&blake2_256(data), submit_timestamp);
 	let sig = keyring.sign(&payload);
 	(MultiSigner::Sr25519(keyring.public()), MultiSignature::Sr25519(sig))
 }
@@ -237,7 +238,8 @@ fn authorize_rejects_signer_mismatch() {
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
 		// Bob signs, but the call advertises Alice as the signer.
-		let bob_sig = Sr25519Keyring::Bob.sign(&signing_payload(&data, TEST_TIMESTAMP_MS));
+		let bob_sig =
+			Sr25519Keyring::Bob.sign(&signing_payload(&blake2_256(&data), TEST_TIMESTAMP_MS));
 		let call = make_promote_call(
 			data,
 			MultiSigner::Sr25519(Sr25519Keyring::Alice.public()),
