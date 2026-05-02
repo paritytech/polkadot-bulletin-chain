@@ -200,7 +200,7 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		let transactions = 10;
+		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
 
 		#[extrinsic_call]
@@ -215,13 +215,12 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		let transactions = 10;
 		let bytes: u64 = 1024 * 1024;
 		let origin2 = origin.clone();
 		TransactionStorage::<T>::authorize_account(
 			origin2 as T::RuntimeOrigin,
 			who.clone(),
-			transactions,
+			0,
 			bytes,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
@@ -273,7 +272,7 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		TransactionStorage::<T>::authorize_account(origin, who.clone(), 1, 1)
+		TransactionStorage::<T>::authorize_account(origin, who.clone(), 0, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		let period = T::AuthorizationPeriod::get();
@@ -314,13 +313,12 @@ mod benchmarks {
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
 		let data = vec![0u8; l as usize];
-		let transactions = 10;
-		let bytes = l as u64 * 10;
+		let bytes_allowance = l as u64 * 10;
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
-			transactions,
-			bytes,
+			0,
+			bytes_allowance,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
@@ -340,9 +338,10 @@ mod benchmarks {
 			.unwrap();
 		}
 
-		// prepare consumed one transaction worth of authorization
+		// prepare added `l` bytes to the used counter
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
-		assert_eq!(extent.transactions, transactions - 1);
+		assert_eq!(extent.bytes, l as u64);
+		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
 
@@ -355,13 +354,12 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
-		let transactions = 10;
-		let bytes = T::MaxTransactionSize::get() as u64 * 10;
+		let bytes_allowance = T::MaxTransactionSize::get() as u64 * 10;
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
-			transactions,
-			bytes,
+			0,
+			bytes_allowance,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
@@ -382,9 +380,10 @@ mod benchmarks {
 			.unwrap();
 		}
 
-		// prepare consumed one transaction worth of authorization
+		// prepare added `MaxTransactionSize` bytes to the used counter
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
-		assert_eq!(extent.transactions, transactions - 1);
+		assert_eq!(extent.bytes, T::MaxTransactionSize::get() as u64);
+		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
 

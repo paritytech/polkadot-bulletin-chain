@@ -121,6 +121,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			storage::StorageCallInspector,
 		>,
+		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
+			Runtime,
+			pallet_bulletin_transaction_storage::extension::FlatBoost,
+		>,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
@@ -146,6 +150,7 @@ pub mod migrations {
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -555,6 +560,10 @@ where
 			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
 				Runtime,
 				storage::StorageCallInspector,
+			>::default(),
+			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+				Runtime,
+				pallet_bulletin_transaction_storage::extension::FlatBoost,
 			>::default(),
 			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 		))
