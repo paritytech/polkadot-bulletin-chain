@@ -38,9 +38,11 @@ mod benchmarks {
 	fn authorize_promote(
 		d: Linear<1, { <T as TxStorageConfig>::MaxTransactionSize::get() }>,
 	) -> Result<(), BenchmarkError> {
-		// Pin a non-zero `now` so the freshness check passes.
+		// Pin a non-zero `now` so the freshness check passes. Write `Now` directly
+		// to avoid `OnTimestampSet`, which would route into Aura and panic because
+		// `CurrentSlot` is unset in the benchmark environment.
 		let ts: u64 = 1_700_000_000_000;
-		pallet_timestamp::Pallet::<T>::set_timestamp(ts);
+		pallet_timestamp::Now::<T>::put(ts);
 
 		// Sr25519 key in the bench keystore; the matching public seeds the signer.
 		let public = sr25519_generate(0.into(), None);
