@@ -544,5 +544,85 @@ mod benchmarks {
 		Ok(())
 	}
 
+	/// Worst-case benchmark for the `Hooks::on_initialize` expiry sweep.
+	///
+	/// Each iteration of the per-tx loop reads `TransactionByContentHash` and
+	/// `AutoRenewals` once; on the cleanup path it also writes
+	/// `TransactionByContentHash`. Half of the prepared items have auto-renewal
+	/// registered so both branches of the discriminator are exercised across `n`.
+	///
+	/// Setup uses the same store-once-clone-rest trick as `apply_block_inherents`:
+	/// one real `store()` to populate column TRANSACTION + capture the canonical
+	/// `TransactionInfo`, then `n - 1` direct clones into `BlockTransactions`. The
+	/// hot path being measured is on_initialize, not the setup, so this is sound.
+	#[benchmark]
+	fn on_initialize_with_expiry(
+		n: Linear<0, { T::MaxBlockTransactions::get() }>,
+	) -> Result<(), BenchmarkError> {
+		// Override retention period so the obsolete-target arithmetic is small and
+		// `run_to_block` doesn't iterate ~200K block hooks per benchmark step.
+		const BENCH_RETENTION: u32 = 10;
+		RetentionPeriod::<T>::put(BlockNumberFor::<T>::from(BENCH_RETENTION));
+
+		// Block 1: prime BlockTransactions with `n` entries via the
+		// store-once-clone-rest pattern. (No-op when `n == 0`.)
+		run_to_block::<T>(1u32.into());
+		if n > 0 {
+			TransactionStorage::<T>::store(
+				RawOrigin::None.into(),
+				vec![0u8; T::MaxTransactionSize::get() as usize],
+			)?;
+			let template = BlockTransactions::<T>::get()
+				.first()
+				.cloned()
+				.ok_or(BenchmarkError::Stop("first store did not populate BlockTransactions"))?;
+			let chunks_per_tx = template.block_chunks;
+			BlockTransactions::<T>::mutate(|txns| -> Result<(), BenchmarkError> {
+				for i in 1..n {
+					let mut next = template.clone();
+					next.block_chunks = chunks_per_tx.saturating_mul(i + 1);
+					txns.try_push(next)
+						.map_err(|_| BenchmarkError::Stop("BlockTransactions overflow"))?;
+				}
+				Ok(())
+			})?;
+
+			// Half of the items get an `AutoRenewals` entry so both branches of the
+			// discriminator (push to pending vs not) are exercised.
+			let caller: T::AccountId = whitelisted_caller();
+			let renewal_data = AutoRenewalData { account: caller };
+			let half = n / 2;
+			for i in 0..half {
+				let _ = i;
+				AutoRenewals::<T>::insert(template.content_hash, renewal_data.clone());
+			}
+		}
+
+		// Finalize block 1 → BlockTransactions becomes Transactions[1].
+		run_to_block::<T>(2u32.into());
+
+		// Jump to the block AFTER the obsolete target so on_initialize takes
+		// `Transactions[1]` on the next call. The hook reads `obsolete = n - RP - 1`,
+		// so we pre-set the block number to `RP + 2` (= 12 with BENCH_RETENTION=10),
+		// because the harness's `#[block]` invocation will run on_initialize for
+		// `System::block_number()`.
+		System::<T>::set_block_number(BlockNumberFor::<T>::from(BENCH_RETENTION + 2u32));
+
+		// The block under measurement.
+		#[block]
+		{
+			TransactionStorage::<T>::on_initialize(System::<T>::block_number());
+		}
+
+		// Sanity: Transactions[1] was taken (no longer in storage) iff n > 0.
+		if n > 0 {
+			assert!(
+				Transactions::<T>::get(BlockNumberFor::<T>::from(1u32)).is_none(),
+				"on_initialize should have taken Transactions[1]",
+			);
+		}
+		Ok(())
+	}
+
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
 }

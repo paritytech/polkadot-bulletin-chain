@@ -343,9 +343,7 @@ pub mod pallet {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
-			// TODO: https://github.com/paritytech/polkadot-sdk/issues/10203 - Replace this with benchmarked weights.
 			let mut weight = Weight::zero();
-			let db_weight = T::DbWeight::get();
 
 			// Run v0→v1 migration if it hasn't been applied yet.
 			// This handles the case where `codeSubstitutes` loaded the fix runtime
@@ -359,49 +357,44 @@ pub mod pallet {
 
 			// Drop obsolete roots. The proof for `obsolete` will be checked later
 			// in this block, so we drop `obsolete` - 1.
-			weight.saturating_accrue(db_weight.reads(1));
 			let period = Self::retention_period();
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
+			let mut num_expiring: u32 = 0;
 			if obsolete > Zero::zero() {
-				weight.saturating_accrue(db_weight.writes(1));
 				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
+					num_expiring = transactions.len() as u32;
 					// Before removing, collect any transactions that are registered for
 					// auto-renewal and schedule them for processing this block.
 					let mut pending = PendingAutoRenewals::<T>::get();
 					for tx_info in transactions.iter() {
 						let hash: ContentHash = tx_info.content_hash;
-						// Only remove TransactionByContentHash if this entry still points to the
-						// obsolete block
+						// Only remove TransactionByContentHash if this entry still points to
+						// the obsolete block (otherwise the entry has been re-stored or
+						// renewed elsewhere and points at a different block).
 						if let Some((block, _)) = TransactionByContentHash::<T>::get(hash) {
 							if block == obsolete {
 								TransactionByContentHash::<T>::remove(hash);
-								weight.saturating_accrue(db_weight.reads_writes(1, 1));
-							} else {
-								weight.saturating_accrue(db_weight.reads(1));
 							}
-						} else {
-							weight.saturating_accrue(db_weight.reads(1));
 						}
-						// Check if auto-renewal is registered for this content hash.
+						// If auto-renewal is registered for this hash, schedule it for the
+						// inherent to drain. `try_push` silently drops items beyond
+						// MaxBlockTransactions — auto-renewal is best-effort; excess items
+						// simply won't be renewed this block.
 						if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
-							weight.saturating_accrue(db_weight.reads(1));
-							// try_push silently drops items beyond MaxBlockTransactions —
-							// auto-renewal is best-effort; excess items simply won't be
-							// renewed this block.
 							let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
-						} else {
-							weight.saturating_accrue(db_weight.reads(1));
 						}
 					}
 					if !pending.is_empty() {
 						PendingAutoRenewals::<T>::put(&pending);
-						weight.saturating_accrue(db_weight.writes(1));
 					}
 				}
 			}
 
-			// For `on_finalize`
-			weight.saturating_accrue(db_weight.reads_writes(2, 2));
+			// Charge the expiry-sweep cost via the benchmarked weight. `n = 0` covers the
+			// no-expiry path (early blocks, blocks where obsolete had no transactions);
+			// the constant component captures the RetentionPeriod read and the
+			// reservation for `on_finalize`.
+			weight.saturating_accrue(T::WeightInfo::on_initialize_with_expiry(num_expiring));
 
 			weight
 		}
@@ -1920,11 +1913,28 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 		effective_normal.ref_time(),
 	);
 
-	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit in max block.
+	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit
+	// in max block at worst case (proof check + draining MaxBlockTransactions
+	// auto-renewals).
 	let apply_inherents_weight = T::WeightInfo::apply_block_inherents(max_block_txs);
 	assert!(
 		apply_inherents_weight.all_lte(block_weights.max_block),
 		"apply_block_inherents weight {apply_inherents_weight:?} exceeds max block {:?}",
+		block_weights.max_block,
+	);
+
+	// 6. on_initialize at the worst-case expiry block (taking
+	// `MaxBlockTransactions` items out of `Transactions[obsolete]` and looking up
+	// `TransactionByContentHash` + `AutoRenewals` for each) must fit alongside
+	// `apply_block_inherents` within `max_block`. Both run on the same block in
+	// the mandatory class; their sum is the floor of the mandatory budget for
+	// that block.
+	let on_init_with_expiry_weight = T::WeightInfo::on_initialize_with_expiry(max_block_txs);
+	let mandatory_floor = on_init_with_expiry_weight.saturating_add(apply_inherents_weight);
+	assert!(
+		mandatory_floor.all_lte(block_weights.max_block),
+		"on_initialize_with_expiry({max_block_txs}) + apply_block_inherents({max_block_txs}) \
+		 = {mandatory_floor:?} exceeds max block {:?}",
 		block_weights.max_block,
 	);
 
@@ -1954,7 +1964,10 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	println!("  store(max_size) weight:     {max_store_dispatch:?}");
 	println!("  store(even_split) weight:   {store_weight:?} (at {per_tx_size} bytes)");
 	println!("  renew weight:               {renew_weight:?}");
+	println!("  block_weights.max_block:    {:?}", block_weights.max_block);
 	println!("  apply_block_inherents wt:   {apply_inherents_weight:?}");
+	println!("  on_initialize_with_expiry:  {on_init_with_expiry_weight:?}");
+	println!("  Mandatory floor (sum):      {mandatory_floor:?}");
 	println!("  Max store txs by weight:    {max_txs_by_weight}");
 	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
 }
