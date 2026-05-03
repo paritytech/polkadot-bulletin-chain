@@ -21,8 +21,10 @@
 #[cfg(test)]
 mod tests;
 
-use asset_hub_westend_emulated_chain::AssetHubWestend;
+mod chains;
+
 use bulletin_westend_runtime::SessionKeys;
+use chains::{AssetHubWestend, Westend};
 use cumulus_primitives_core::ParaId;
 use emulated_integration_tests_common::{
 	accounts::{self, ALICE, BOB},
@@ -34,13 +36,12 @@ use frame_support::traits::OnInitialize;
 use parachains_common::{AuraId, Balance};
 use sp_core::sr25519;
 use sp_keyring::Sr25519Keyring;
-use westend_emulated_chain::Westend;
 use xcm_emulator::{
 	decl_test_networks, decl_test_sender_receiver_accounts_parameter_types, Parachain,
 };
 
 /// Bulletin Westend parachain ID.
-pub const BULLETIN_PARA_ID: u32 = 2487;
+pub const BULLETIN_PARA_ID: u32 = 1010;
 
 /// Initial balance for test accounts.
 pub const INITIAL_BALANCE: Balance = 100_000_000_000_000; // 100 WND
