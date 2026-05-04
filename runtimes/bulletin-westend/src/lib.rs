@@ -192,7 +192,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_010,
+	spec_version: 1_000_011,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -886,6 +886,12 @@ impl_runtime_apis! {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
 		}
+
+		fn indexed_transactions(
+			_block: NumberFor<Block>,
+		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
+			todo!("indexed_transactions runtime API not yet implemented — see https://github.com/paritytech/polkadot-bulletin-chain/pull/471")
+		}
 	}
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
@@ -914,6 +920,10 @@ impl_runtime_apis! {
 		fn max_promotion_size() -> u32 {
 			use frame_support::traits::Get;
 			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
+		}
+
+		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
+			pallet_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
 		}
 	}
 

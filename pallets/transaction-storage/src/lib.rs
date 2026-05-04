@@ -497,6 +497,7 @@ pub mod pallet {
 		/// O(1).
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::renew())]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _block: &BlockNumberFor<T>, _index: &u32| -> bool { true })]
 		pub fn renew(
 			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
@@ -893,6 +894,10 @@ pub mod pallet {
 		}
 	}
 
+	// `ValidateUnsigned` is deprecated upstream (will be removed after April 2027) in favour of
+	// `#[pallet::authorize]` + `frame_system::AuthorizeCall`. Migration is tracked separately;
+	// silence the deprecation here so `-D warnings` in CI does not block the SDK bump.
+	#[allow(deprecated)]
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T> {
 		type Call = Call<T>;
@@ -1201,6 +1206,13 @@ pub mod pallet {
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
+		}
+
+		/// All transactions stored at the given block.
+		pub fn transactions_at(
+			block: BlockNumberFor<T>,
+		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
+			Transactions::<T>::get(block)
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.
