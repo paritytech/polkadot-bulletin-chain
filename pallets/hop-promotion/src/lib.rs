@@ -116,8 +116,7 @@ pub mod pallet {
 		/// TODO(optimisation): https://github.com/paritytech/polkadot-bulletin-chain/issues/477
 		pub fn is_promoted_on_chain(content_hash: ContentHash) -> bool {
 			let current = frame_system::Pallet::<T>::block_number();
-			let retention =
-				pallet_bulletin_transaction_storage::Pallet::<T>::retention_period();
+			let retention = pallet_bulletin_transaction_storage::Pallet::<T>::retention_period();
 			let oldest = current.saturating_sub(retention);
 			let mut block = current;
 			while block >= oldest {
