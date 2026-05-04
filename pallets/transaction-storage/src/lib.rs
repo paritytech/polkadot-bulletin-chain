@@ -549,6 +549,7 @@ pub mod pallet {
 		/// O(1).
 		#[pallet::call_index(1)]
 		#[pallet::weight((T::WeightInfo::renew(), DispatchClass::Operational))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _block: &BlockNumberFor<T>, _index: &u32| -> bool { true })]
 		pub fn renew(
 			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
@@ -848,8 +849,7 @@ pub mod pallet {
 			if let Some(proof) = proof {
 				Self::do_check_proof(proof)?;
 			}
-			// `do_process_auto_renewals` returns the actual count drained so we can refund
-			// from the worst-case `apply_block_inherents(MaxBlockTransactions)` declaration.
+			// Refund from the worst-case declaration to the count actually drained.
 			let n_actual = Self::do_process_auto_renewals();
 			Ok(Some(T::WeightInfo::apply_block_inherents(n_actual)).into())
 		}
@@ -1052,6 +1052,10 @@ pub mod pallet {
 		}
 	}
 
+	// `ValidateUnsigned` is deprecated upstream (will be removed after April 2027) in favour of
+	// `#[pallet::authorize]` + `frame_system::AuthorizeCall`. Migration is tracked separately;
+	// silence the deprecation here so `-D warnings` in CI does not block the SDK bump.
+	#[allow(deprecated)]
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T> {
 		type Call = Call<T>;
@@ -1096,10 +1100,8 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Drain [`PendingAutoRenewals`], invoking `do_renew` for each entry whose owner still
-		/// has sufficient authorization. Invoked by the [`Self::apply_block_inherents`]
-		/// mandatory inherent. Returns the number of entries drained (the size of
-		/// `PendingAutoRenewals` before the drain), used by the caller for weight refunding.
+		/// Drain [`PendingAutoRenewals`], invoking `do_renew` per entry. Returns the count
+		/// drained (used by [`Self::apply_block_inherents`] to refund unused weight).
 		pub(super) fn do_process_auto_renewals() -> u32 {
 			let pending = PendingAutoRenewals::<T>::take();
 			let n_actual = pending.len() as u32;
@@ -1193,9 +1195,7 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
-			debug_assert_eq!(num_chunks(data_len), chunk_count);
 			let index = Self::append_to_block_transactions(
 				root,
 				data_len,
@@ -1203,6 +1203,8 @@ pub mod pallet {
 				hashing,
 				cid_codec,
 			)?;
+			// Index after the runtime mutation — index ops aren't rolled back on dispatch error.
+			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			Self::deposit_event(Event::Stored {
 				index,
@@ -1213,30 +1215,26 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Common implementation for [`renew`](Self::renew),
-		/// [`renew_content_hash`](Self::renew_content_hash), and the auto-renewal path driven
-		/// by the [`Self::apply_block_inherents`] mandatory inherent.
-		///
-		/// Indexes the renewal via `sp_io::transaction_index::renew` and appends to
-		/// [`BlockTransactions`]. Returns the new transaction index on success.
+		/// Shared `renew` / `renew_content_hash` / auto-renewal entry point.
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
-			Self::append_to_block_transactions(
+			let content_hash = info.content_hash;
+			let new_index = Self::append_to_block_transactions(
 				info.chunk_root,
 				info.size,
 				info.content_hash,
 				info.hashing,
 				info.cid_codec,
-			)
+			)?;
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
+			Ok(new_index)
 		}
 
-		/// Build a [`TransactionInfo`] for the new block-local entry, append it to
-		/// [`BlockTransactions`], and update [`TransactionByContentHash`] to point at the new
-		/// index. `block_chunks` is computed from the current cumulative total. The caller is
-		/// responsible for the corresponding `transaction_index::index` or
-		/// `transaction_index::renew` host call.
+		/// Push a new entry into [`BlockTransactions`] (computing the cumulative
+		/// `block_chunks`) and update [`TransactionByContentHash`]. The caller must invoke
+		/// `transaction_index::index` / `renew` only AFTER this returns `Ok` — those host
+		/// calls are not rolled back on dispatch error.
 		fn append_to_block_transactions(
 			chunk_root: <BlakeTwo256 as Hash>::Output,
 			size: u32,
@@ -1463,6 +1461,13 @@ pub mod pallet {
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
+		}
+
+		/// All transactions stored at the given block.
+		pub fn transactions_at(
+			block: BlockNumberFor<T>,
+		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
+			Transactions::<T>::get(block)
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.

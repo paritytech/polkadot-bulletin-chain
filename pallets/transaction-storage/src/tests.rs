@@ -17,6 +17,11 @@
 
 //! Tests for transaction-storage pallet.
 
+// Tests still call the deprecated `ValidateUnsigned::{validate_unsigned, pre_dispatch}` directly.
+// Migration to `#[pallet::authorize]` is tracked separately; silence here so `-D warnings` in CI
+// does not block the SDK bump.
+#![allow(deprecated)]
+
 use super::{
 	extension::ValidateStorageCalls,
 	mock::{
