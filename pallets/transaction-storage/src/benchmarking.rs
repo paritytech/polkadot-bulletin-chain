@@ -515,9 +515,21 @@ mod benchmarks {
 			PendingAutoRenewals::<T>::put(&pending);
 		}
 
-		// Step 4: build the proof for block 1's payload and run the inherent.
-		let encoded_proof = proof();
-		let proof = TransactionStorageProof::decode(&mut &*encoded_proof).unwrap();
+		// Step 4: pin ParentHash to T::Hash::default() — the proof returned by
+		// `T::BenchmarkHelper::encoded_check_proof` was built against random_hash =
+		// `T::Hash::default()`. The runtime's `random_chunk(parent_hash, total_chunks)`
+		// must use the same value to pick the chunk the proof was built for.
+		let random_hash = T::Hash::default();
+		frame_support::storage::unhashed::put(
+			&sp_io::hashing::twox_128(b"System")
+				.iter()
+				.chain(sp_io::hashing::twox_128(b"ParentHash").iter())
+				.copied()
+				.collect::<alloc::vec::Vec<u8>>(),
+			&random_hash,
+		);
+		let encoded = T::BenchmarkHelper::encoded_check_proof(random_hash.as_ref());
+		let proof = TransactionStorageProof::decode(&mut encoded.as_slice()).unwrap();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, Some(proof));
