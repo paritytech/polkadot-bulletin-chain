@@ -547,6 +547,7 @@ pub mod pallet {
 		/// O(1).
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::WeightInfo::renew())]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _block: &BlockNumberFor<T>, _index: &u32| -> bool { true })]
 		pub fn renew(
 			origin: OriginFor<T>,
 			block: BlockNumberFor<T>,
@@ -1120,7 +1121,7 @@ pub mod pallet {
 
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
-		fn do_store(
+		pub fn do_store(
 			data: Vec<u8>,
 			hashing: HashingAlgorithm,
 			cid_codec: CidCodec,
@@ -1337,6 +1338,17 @@ pub mod pallet {
 			Self::authorization_extent(AuthorizationScope::Account(who))
 		}
 
+		/// Returns `true` if `who` has an authorization entry that has not yet expired,
+		/// regardless of how much of the extent remains. The entry is only cleared when
+		/// its expiration is reached and someone calls
+		/// [`remove_expired_account_authorization`], so a fully-consumed-but-in-window
+		/// account still counts as active here. HOP promotion uses this to keep
+		/// promoting blobs for an account that has spent all of its store/renew quota.
+		pub fn account_has_active_authorization(who: &T::AccountId) -> bool {
+			Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
+				.is_some_and(|a| !Self::expired(a.expiration))
+		}
+
 		/// Returns the (unused and unexpired) authorization extent for the given content hash.
 		pub fn preimage_authorization_extent(hash: ContentHash) -> AuthorizationExtent {
 			Self::authorization_extent(AuthorizationScope::Preimage(hash))
@@ -1388,7 +1400,7 @@ pub mod pallet {
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.
-		fn data_size_ok(size: usize) -> bool {
+		pub fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)
 		}
 
@@ -1409,7 +1421,7 @@ pub mod pallet {
 
 		/// Returns `true` if no more store/renew transactions can be included in the current
 		/// block.
-		fn block_transactions_full() -> bool {
+		pub fn block_transactions_full() -> bool {
 			BlockTransactions::<T>::decode_len()
 				.is_some_and(|len| len >= T::MaxBlockTransactions::get() as usize)
 		}

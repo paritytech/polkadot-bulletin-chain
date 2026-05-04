@@ -1,4 +1,4 @@
-CI_IMAGE=paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050
+CI_IMAGE=docker.io/paritytech/ci-unified:bullseye-1.93.0-2026-01-27-v202603042356
 RUST_STABLE_VERSION=1.88.0
 NODE_VERSION=22
 POLKADOT_SDK_VERSION=polkadot-stable2603

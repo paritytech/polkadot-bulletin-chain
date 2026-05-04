@@ -331,15 +331,27 @@ fn authorized_storage_transactions_are_for_free() {
 					InvalidTransaction::Payment
 				)
 			);
-			// Authorize user.
+			// Authorize user for two transactions (store + renew).
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
 				0,
-				24
+				48
 			));
-			// Now should work.
+			// Store should now work without funding (feeless).
+			let stored_block = System::block_number();
 			let res = construct_and_apply_extrinsic(Some(account.pair()), call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+
+			advance_block();
+
+			// Renew should also work without funding (feeless).
+			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				block: stored_block,
+				index: 0,
+			});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
 		});
@@ -1203,7 +1215,9 @@ fn renew_must_be_direct_extrinsic() {
 		let who: AccountId = account.to_account_id();
 		let data = vec![42u8; 100];
 
-		// Fund for fees and authorize a store.
+		// Fund Alice so utility::batch wrappers (not feeless) reach the wrapper rejection
+		// in ValidateStorageCalls instead of failing earlier on payment. Direct store and
+		// renew are themselves feeless, so the funding is irrelevant for those calls.
 		use frame_support::traits::fungible::Mutate;
 		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
 		assert_ok!(TransactionStorage::authorize_account(

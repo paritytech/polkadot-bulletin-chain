@@ -156,6 +156,8 @@ fn uses_preimage_authorization() {
 		// Matching data consumes allowance but the entry stays (new behaviour).
 		let call = Call::store { data };
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
+		// Entry persists with the remainder (2002 - 2000 = 2 bytes); the
+		// transaction count is exhausted so further stores still fail.
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent {
