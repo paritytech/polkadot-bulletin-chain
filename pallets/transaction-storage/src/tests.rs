@@ -211,6 +211,51 @@ fn checks_proof() {
 }
 
 #[test]
+fn checks_proof_with_v2_shaped_transactions_entry() {
+	use crate::migrations::v3::V2TransactionInfo;
+
+	new_test_ext().execute_with(|| {
+		let data = vec![0u8; 2000];
+
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(2, || None);
+
+		// Rewrite the freshly-written v3 entry at block 1 into the old v2 shape to
+		// simulate the MBM window where historical `Transactions` entries have not yet
+		// been rewritten by `MigrateV2ToV3`, while `check_proof` still executes every block.
+		let txs_v3 = Transactions::get(1).expect("block 1 entry stored in v3 shape");
+		let txs_v2: Vec<V2TransactionInfo> = txs_v3
+			.into_iter()
+			.map(|tx| V2TransactionInfo {
+				chunk_root: tx.chunk_root,
+				content_hash: tx.content_hash,
+				hashing: tx.hashing,
+				cid_codec: tx.cid_codec,
+				size: tx.size,
+				block_chunks: tx.block_chunks,
+			})
+			.collect();
+		let bounded: BoundedVec<V2TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+			txs_v2.try_into().expect("within bounds");
+		unhashed::put_raw(&Transactions::hashed_key_for(1u64), &bounded.encode());
+
+		// Direct decode as the live v3 type now fails.
+		assert!(Transactions::get(1).is_none());
+
+		run_to_block(11, || None);
+		let parent_hash = System::parent_hash();
+		let proof = build_proof(parent_hash.as_ref(), vec![data]).unwrap().unwrap();
+
+		assert_ok!(TransactionStorage::check_proof(RuntimeOrigin::none(), proof));
+		assert!(
+			<super::ProofChecked<Test>>::get(),
+			"check_proof should succeed by using transactions_at() on the v2-shaped entry",
+		);
+	});
+}
+
+#[test]
 fn verify_chunk_proof_works() {
 	new_test_ext().execute_with(|| {
 		// Prepare a bunch of transactions with variable chunk sizes.
