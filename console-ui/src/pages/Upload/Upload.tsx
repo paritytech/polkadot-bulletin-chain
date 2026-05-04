@@ -191,8 +191,7 @@ export function Upload() {
 
         setTxStatus("Submitting unsigned transaction...");
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const bareTx = await (tx as any).getBareTx();
+        const bareTx = await tx.getBareTx();
 
         const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
           let resolved = false;

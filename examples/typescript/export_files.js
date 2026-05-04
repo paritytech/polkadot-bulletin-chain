@@ -14,7 +14,7 @@
 
 import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 import { writeFileSync } from 'node:fs';
 import * as dagPB from '@ipld/dag-pb';
 import { UnixFS } from 'ipfs-unixfs';

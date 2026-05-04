@@ -12,7 +12,7 @@
 
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 import { writeFileSync } from 'node:fs';
 
 const NODE_WS = process.argv[2] || 'wss://paseo-bulletin-rpc.polkadot.io';

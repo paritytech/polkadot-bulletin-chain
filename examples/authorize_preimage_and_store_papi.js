@@ -6,7 +6,7 @@ import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK,
 import { setupKeyringAndSigners, getContentHash, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);

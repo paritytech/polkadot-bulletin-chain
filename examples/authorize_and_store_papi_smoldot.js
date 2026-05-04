@@ -8,7 +8,7 @@ import { authorizeAccount, fetchCid, store } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para

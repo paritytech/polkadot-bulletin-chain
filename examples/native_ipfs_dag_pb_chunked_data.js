@@ -4,7 +4,7 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 import assert from "assert";
 
 import fs from 'fs'
