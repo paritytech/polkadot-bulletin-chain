@@ -588,12 +588,10 @@ mod benchmarks {
 				Ok(())
 			})?;
 
-			// All cloned entries share `template.content_hash`, so a single `AutoRenewals`
-			// insert makes every iteration of the on_initialize loop take the push-to-pending
-			// branch — the worst case we want to measure.
+			// One insert is enough: every cloned entry shares `template.content_hash`,
+			// so the on_initialize loop takes the push-to-pending branch for all `n`.
 			let caller: T::AccountId = whitelisted_caller();
-			let renewal_data = AutoRenewalData { account: caller };
-			AutoRenewals::<T>::insert(template.content_hash, renewal_data);
+			AutoRenewals::<T>::insert(template.content_hash, AutoRenewalData { account: caller });
 		}
 
 		// Finalize block 1 → BlockTransactions becomes Transactions[1].
