@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         10,                   // transactions
         10 * 1024 * 1024,     // bytes
         &signer,              // must have authorizer privileges
+        WaitFor::InBlock,
     ).await?;
 
     info!("Authorization granted in block: {}", receipt.block_hash);
@@ -43,6 +44,7 @@ let receipt = client.authorize_preimage(
     content_hash,     // ContentHash of the data
     max_size,         // Maximum size in bytes
     &signer,
+    WaitFor::InBlock,
 ).await?;
 ```
 
@@ -79,10 +81,10 @@ Extend the expiry of an existing authorization:
 
 ```rust
 // Refresh account authorization
-client.refresh_account_authorization(account, &signer).await?;
+client.refresh_account_authorization(account, &signer, WaitFor::InBlock).await?;
 
 // Refresh preimage authorization
-client.refresh_preimage_authorization(content_hash, &signer).await?;
+client.refresh_preimage_authorization(content_hash, &signer, WaitFor::InBlock).await?;
 ```
 
 ### Remove Expired Authorization
@@ -90,8 +92,8 @@ client.refresh_preimage_authorization(content_hash, &signer).await?;
 Clean up expired authorizations:
 
 ```rust
-client.remove_expired_account_authorization(account, &signer).await?;
-client.remove_expired_preimage_authorization(content_hash, &signer).await?;
+client.remove_expired_account_authorization(account, &signer, WaitFor::InBlock).await?;
+client.remove_expired_preimage_authorization(content_hash, &signer, WaitFor::InBlock).await?;
 ```
 
 ## Estimating Authorization
@@ -115,7 +117,7 @@ tracing::info!(transactions = txs, bytes = bytes, "Authorization needed");
 `TransactionClient.store()` automatically checks authorization before submitting a transaction. If the account lacks sufficient authorization, it returns an `InsufficientAuthorization` or `AuthorizationNotFound` error immediately — without submitting or paying for a transaction.
 
 ```rust
-match client.store(data, &signer).await {
+match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         tracing::info!("Stored in block: {}", receipt.block_hash);
     }

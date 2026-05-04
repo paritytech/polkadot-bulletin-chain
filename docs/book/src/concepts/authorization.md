@@ -45,8 +45,8 @@ If you're building an application that needs authorization:
 For local development, you have sudo access:
 
 ```bash
-# Start a local dev node
-./polkadot-bulletin-chain --dev
+# Start a local dev parachain node (requires polkadot-omni-node)
+polkadot-omni-node --dev
 
 # The //Alice account has sudo privileges
 # Use it to authorize other accounts

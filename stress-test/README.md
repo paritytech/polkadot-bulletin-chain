@@ -102,8 +102,10 @@ bulletin-stress-test [OPTIONS] <COMMAND>
 | `--p2p-multiaddr <ADDR>` | auto-discovered | Node's P2P multiaddr for Bitswap (discovered via RPC if omitted) |
 | `--authorizer-seed <SEED>` | `//Alice` | Seed for the authorizer account (must be in runtime's Authorizer origin) |
 | `--iterations <N>` | `512` | Number of unique items for Bitswap read tests |
-| `--submitters <N>` | `4` | Number of concurrent submitter tasks (increase for remote RPCs) |
-| `--target-blocks <N>` | `5` | Number of steady-state blocks to measure per variant (excludes ramp-up/down) |
+| `--submitters <N>` | `4` | WebSocket RPC connections for store submission (one worker per connection). Actual count is `max(N, 8)`. Increase for remote RPCs. |
+| `--target-blocks <N>` | `5` | Number of measured blocks with transactions per variant. The monitor counts best blocks and stops when the target is reached. |
+| `--iteration-blocks <N>` | `20` | Measured blocks worth of transactions per pipeline iteration (chunk size) |
+| `--mix-seed <N>` | OS entropy | Seed for random payload-size draws in MIXED mode (reproducible runs) |
 | `--output <FORMAT>` | `text` | Output format: `text` or `json` |
 | `--output-file <PATH>` | none | JSON output file, flushed after every variant so partial results survive crashes |
 
@@ -111,26 +113,37 @@ bulletin-stress-test [OPTIONS] <COMMAND>
 
 #### `throughput [block-capacity]`
 
-Measures write throughput by filling blocks with storage transactions across payload sizes from 1KB to 10MB.
+Measures write throughput by filling blocks with storage transactions across payload sizes.
 
 ```bash
-# Run all payload sizes against a local dev node
+# Run all fixed payload sizes against a local dev node
 ./target/release/bulletin-stress-test --ws-url ws://127.0.0.1:9944 throughput
 
 # Run specific variants only
 ./target/release/bulletin-stress-test throughput --variants "1KB,128KB,1MB"
+
+# Run weighted mixed-size workload (real-world distribution)
+./target/release/bulletin-stress-test throughput --variants MIXED
+
+# Reproducible mixed run
+./target/release/bulletin-stress-test throughput --variants MIXED --mix-seed 42
 ```
 
-Payload sizes tested: 1KB, 4KB, 32KB, 128KB, 512KB, 1MB, 2MB, 4MB, 5MB, 7MB, 7.5MB, 2050KB, 8MB, 10MB.
+**Fixed variants**: 1KB, 4KB, 32KB, 128KB, 512KB, 1MB, 2MB.
 
-For each size, the tool:
-1. Calculates how many transactions are needed to fill `--target-blocks` steady-state blocks
-2. Creates the required number of one-shot accounts (dynamically calculated from chain limits and target blocks)
-3. Subscribes to blocks, then submits transactions concurrently across all WS URLs
-4. Measures avg/peak transactions per block and throughput in bytes/s over steady-state blocks
-5. Drains the transaction pool before proceeding to the next variant
+**MIXED mode**: weighted distribution simulating real-world traffic (1KB 23%, 4KB 15%, 32KB 12%, 128KB 17.5%, 512KB 15.5%, 1MB 9%, 2MB 8%). Each account draws a random payload size from this distribution.
 
-The `--variants` flag accepts a comma-separated list of size labels to run a subset (e.g. `"1KB,128KB,1MB"`).
+For each variant, the tool:
+1. Queries chain limits (block weight, length, max transactions) to calculate capacity
+2. Creates unique one-shot accounts (fresh derivation per run to avoid nonce collisions)
+3. Signs store extrinsics with look-ahead (batch N+1 signed concurrently while batch N is dispatched)
+4. Authorizes accounts on-chain, then submits via fire-and-forget RPC (`author_submitExtrinsic`)
+5. Monitors blocks via events (lightweight, no block body fetch) and tracks per-block bytes via content hash mapping
+6. Stops after `--target-blocks` measured blocks with transactions
+7. Waits for finalization of measured blocks before computing results
+8. Drains the transaction pool before proceeding to the next variant
+
+The `--variants` flag accepts a comma-separated list of size labels (e.g. `"1KB,128KB,1MB"`) or `MIXED`.
 
 #### `bitswap [b2]`
 
@@ -174,9 +187,10 @@ The stress test can target any live Bulletin Chain node via its public WebSocket
 ```
 
 Key considerations for remote endpoints:
-- **Increase `--submitters`**: Remote RPCs have higher latency; use 8-16 submitters to keep the pool saturated.
-- **Increase `--target-blocks`**: More blocks give more statistically significant results. The tool automatically calculates accounts and per-account transaction quotas so you won't run out.
+- **Increase `--submitters`**: Remote RPCs have higher latency; use 8-32 submitters to keep the pool saturated. Workers use fire-and-forget RPC for maximum throughput.
+- **Increase `--target-blocks`**: More blocks give more statistically significant results. The tool automatically calculates accounts needed.
 - **Use `--output-file`**: Results are flushed after each variant, so partial results survive crashes or network interruptions.
+- **Ctrl+C**: First signal stops gracefully (finishes current variant, prints results). Second signal force-exits.
 - **Bitswap tests require P2P access**: The `bitswap` command needs a direct P2P connection to the node, which is usually not available through public RPC endpoints.
 
 ### Multi-Node Submission

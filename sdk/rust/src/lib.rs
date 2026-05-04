@@ -160,7 +160,6 @@ pub(crate) mod dag;
 pub(crate) mod renewal;
 pub(crate) mod storage;
 pub(crate) mod types;
-pub(crate) mod utils;
 
 // Transaction submission client (std-only)
 #[cfg(feature = "std")]
@@ -172,7 +171,7 @@ pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
 pub use types::{
 	AuthorizationScope, Chunk, ChunkProgressEvent, ChunkedStoreResult, ChunkerConfig, Error,
 	ProgressCallback, ProgressEvent, RenewalResult, Result, StorageRef, StoreOptions, StoreResult,
-	TransactionStatusEvent,
+	TransactionStatusEvent, WaitFor,
 };
 
 // Re-export CID types from pallet

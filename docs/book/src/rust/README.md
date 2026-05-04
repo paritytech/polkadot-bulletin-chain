@@ -108,13 +108,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
     // Authorize account (requires sudo)
-    client.authorize_account(account.clone(), 10, 10 * 1024 * 1024, &signer).await?;
+    client.authorize_account(account.clone(), 10, 10 * 1024 * 1024, &signer, WaitFor::InBlock).await?;
 
     // Store data with progress tracking
     let data = b"Hello, Bulletin!".to_vec();
     let receipt = client.store_with_progress(
         data,
         &signer,
+        WaitFor::InBlock,
         Some(std::sync::Arc::new(|event| {
             println!("Progress: {:?}", event);
         })),

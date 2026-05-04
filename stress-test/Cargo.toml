@@ -19,7 +19,7 @@ path = "tests/zombienet.rs"
 clap = { workspace = true, features = ["derive"] }
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 futures = { workspace = true }
 
 # Subxt (must match zombienet-sdk 0.3.13)
@@ -46,8 +46,8 @@ twox-hash = "2"
 
 # Utilities
 anyhow = "1"
-log = { workspace = true, features = ["std"] }
-env_logger = "0.11"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 hex = { workspace = true }
 rand = "0.8"
 

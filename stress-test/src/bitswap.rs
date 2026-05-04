@@ -89,20 +89,20 @@ impl UserProtocol for BitswapProtocol {
 				cmd = self.cmd_rx.recv() => {
 					match cmd {
 						Some(BitswapCommand::Fetch { peer, cid_bytes, response_tx }) => {
-							log::debug!("bitswap: fetch command for peer {peer}");
+							tracing::debug!("bitswap: fetch command for peer {peer}");
 							if connected_peers.contains(&peer) {
 								match service.open_substream(peer) {
 									Ok(substream_id) => {
-										log::debug!("bitswap: opened outbound substream {substream_id:?}");
+										tracing::debug!("bitswap: opened outbound substream {substream_id:?}");
 										pending_outbound.insert(substream_id, (cid_bytes, response_tx));
 									}
 									Err(e) => {
-										log::warn!("bitswap: failed to open substream: {e:?}");
+										tracing::warn!("bitswap: failed to open substream: {e:?}");
 										let _ = response_tx.send(Err(anyhow!("Failed to open substream: {e:?}")));
 									}
 								}
 							} else {
-								log::debug!("bitswap: peer not connected, queuing");
+								tracing::debug!("bitswap: peer not connected, queuing");
 								pending_connection.push(PendingRequest { peer, cid_bytes, response_tx });
 							}
 						}
@@ -115,82 +115,82 @@ impl UserProtocol for BitswapProtocol {
 						Some(TransportEvent::SubstreamOpened { peer, direction, mut substream, .. }) => {
 							match direction {
 								Direction::Outbound(substream_id) => {
-									log::debug!("bitswap: outbound substream opened {substream_id:?}");
+									tracing::debug!("bitswap: outbound substream opened {substream_id:?}");
 									if let Some((cid_bytes, response_tx)) = pending_outbound.remove(&substream_id) {
 										let wantlist = Self::build_wantlist(&cid_bytes);
-										log::debug!("bitswap: sending wantlist ({} bytes)", wantlist.len());
+										tracing::debug!("bitswap: sending wantlist ({} bytes)", wantlist.len());
 										match substream.send_framed(Bytes::from(wantlist)).await {
 											Ok(()) => {
-												log::debug!("bitswap: wantlist sent, waiting for inbound response");
+												tracing::debug!("bitswap: wantlist sent, waiting for inbound response");
 												waiting_response = Some((peer, response_tx));
 											}
 											Err(e) => {
-												log::warn!("bitswap: failed to send wantlist: {e:?}");
+												tracing::warn!("bitswap: failed to send wantlist: {e:?}");
 												let _ = response_tx.send(Err(anyhow!("Failed to send wantlist: {e:?}")));
 											}
 										}
 									}
 								}
 								Direction::Inbound => {
-									log::debug!("bitswap: inbound substream from {peer}, waiting_response={}", waiting_response.is_some());
+									tracing::debug!("bitswap: inbound substream from {peer}, waiting_response={}", waiting_response.is_some());
 									if let Some((waiting_peer, response_tx)) = waiting_response.take() {
 										if waiting_peer == peer {
-											log::debug!("bitswap: reading response from inbound substream...");
+											tracing::debug!("bitswap: reading response from inbound substream...");
 											match substream.next().await {
 												Some(Ok(data)) => {
-													log::debug!("bitswap: received {} bytes on inbound substream", data.len());
+													tracing::debug!("bitswap: received {} bytes on inbound substream", data.len());
 													match bitswap_schema::Message::decode(data.as_ref()) {
 														Ok(msg) => {
 															if let Some(block) = msg.payload.first() {
-																log::debug!("bitswap: got block payload ({} bytes)", block.data.len());
+																tracing::debug!("bitswap: got block payload ({} bytes)", block.data.len());
 																let _ = response_tx.send(Ok(block.data.clone()));
 															} else if !msg.block_presences.is_empty() {
 																let presence = &msg.block_presences[0];
 																if presence.r#type == bitswap_schema::message::BlockPresenceType::DontHave as i32 {
-																	log::warn!("bitswap: peer responded DontHave");
+																	tracing::warn!("bitswap: peer responded DontHave");
 																	let _ = response_tx.send(Err(anyhow!("Peer does not have the block")));
 																} else {
-																	log::warn!("bitswap: peer has block but didn't send it");
+																	tracing::warn!("bitswap: peer has block but didn't send it");
 																	let _ = response_tx.send(Err(anyhow!("Peer has block but didn't send it")));
 																}
 															} else {
-																log::warn!("bitswap: empty response (no payload, no presences)");
+																tracing::warn!("bitswap: empty response (no payload, no presences)");
 																let _ = response_tx.send(Err(anyhow!("Empty bitswap response")));
 															}
 														}
 														Err(e) => {
-															log::warn!("bitswap: failed to decode response: {e:?}");
+															tracing::warn!("bitswap: failed to decode response: {e:?}");
 															let _ = response_tx.send(Err(anyhow!("Failed to decode response: {e:?}")));
 														}
 													}
 												}
 												Some(Err(e)) => {
-													log::warn!("bitswap: substream error: {e:?}");
+													tracing::warn!("bitswap: substream error: {e:?}");
 													let _ = response_tx.send(Err(anyhow!("Substream error: {e:?}")));
 												}
 												None => {
-													log::warn!("bitswap: substream closed without data");
+													tracing::warn!("bitswap: substream closed without data");
 													let _ = response_tx.send(Err(anyhow!("Substream closed without data")));
 												}
 											}
 										} else {
-											log::debug!("bitswap: inbound from wrong peer {peer}, expected {waiting_peer}");
+											tracing::debug!("bitswap: inbound from wrong peer {peer}, expected {waiting_peer}");
 											waiting_response = Some((waiting_peer, response_tx));
 										}
 									} else {
-										log::debug!("bitswap: unexpected inbound substream (no waiting response)");
+										tracing::debug!("bitswap: unexpected inbound substream (no waiting response)");
 									}
 								}
 							}
 						}
 						Some(TransportEvent::SubstreamOpenFailure { substream, error }) => {
-							log::warn!("bitswap: substream open failure {substream:?}: {error:?}");
+							tracing::warn!("bitswap: substream open failure {substream:?}: {error:?}");
 							if let Some((_, response_tx)) = pending_outbound.remove(&substream) {
 								let _ = response_tx.send(Err(anyhow!("Substream open failed: {error:?}")));
 							}
 						}
 						Some(TransportEvent::ConnectionEstablished { peer, .. }) => {
-							log::debug!("bitswap: connection established to {peer}");
+							tracing::debug!("bitswap: connection established to {peer}");
 							connected_peers.insert(peer);
 							let mut remaining = Vec::new();
 							for req in pending_connection.drain(..) {
@@ -210,7 +210,7 @@ impl UserProtocol for BitswapProtocol {
 							pending_connection = remaining;
 						}
 						Some(TransportEvent::ConnectionClosed { peer }) => {
-							log::warn!("bitswap: connection closed to {peer}");
+							tracing::warn!("bitswap: connection closed to {peer}");
 							connected_peers.remove(&peer);
 							if let Some((waiting_peer, response_tx)) = waiting_response.take() {
 								if waiting_peer == peer {
@@ -274,10 +274,10 @@ impl BitswapClient {
 			loop {
 				match litep2p.next_event().await {
 					Some(event) => {
-						log::trace!("litep2p event: {event:?}");
+						tracing::trace!("litep2p event: {event:?}");
 					},
 					None => {
-						log::debug!("litep2p event stream ended");
+						tracing::debug!("litep2p event stream ended");
 						break;
 					},
 				}
@@ -300,7 +300,7 @@ impl BitswapClient {
 		// Actually, looking at PR #241 more carefully, each fetch_via_bitswap call creates
 		// a fresh litep2p instance and dials. For our stress test client, we need a persistent
 		// connection. Let's use the approach of dialing during construction.
-		log::info!("Bitswap client dialing {multiaddr}...");
+		tracing::info!("Bitswap client dialing {multiaddr}...");
 		// The dial is handled via the litep2p handle in the event task.
 		// We'll restructure to keep litep2p accessible.
 		Ok(())
@@ -374,11 +374,11 @@ pub async fn create_connected_client(multiaddr: &Multiaddr) -> Result<BitswapCli
 		loop {
 			match litep2p.next_event().await {
 				Some(Litep2pEvent::ConnectionEstablished { peer, .. }) if peer == peer_id => {
-					log::info!("Bitswap connection established to {peer}");
+					tracing::info!("Bitswap connection established to {peer}");
 					return true;
 				},
 				Some(Litep2pEvent::DialFailure { address, .. }) => {
-					log::error!("Bitswap dial failed to {address}");
+					tracing::error!("Bitswap dial failed to {address}");
 					return false;
 				},
 				Some(_) => continue,
@@ -398,10 +398,10 @@ pub async fn create_connected_client(multiaddr: &Multiaddr) -> Result<BitswapCli
 		loop {
 			match litep2p.next_event().await {
 				Some(event) => {
-					log::trace!("litep2p event: {event:?}");
+					tracing::trace!("litep2p event: {event:?}");
 				},
 				None => {
-					log::debug!("litep2p event stream ended");
+					tracing::debug!("litep2p event stream ended");
 					break;
 				},
 			}
@@ -409,11 +409,6 @@ pub async fn create_connected_client(multiaddr: &Multiaddr) -> Result<BitswapCli
 	});
 
 	Ok(BitswapClient { cmd_tx, _event_task: event_task })
-}
-
-/// Parse CID bytes (as emitted by the Stored event) into a `cid::Cid`.
-pub fn parse_cid_bytes(bytes: &[u8]) -> Result<cid::Cid> {
-	cid::Cid::try_from(bytes).map_err(|e| anyhow!("Failed to parse CID: {e}"))
 }
 
 /// Clean a multiaddr string by removing duplicate `/p2p/` segments.

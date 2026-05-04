@@ -65,7 +65,7 @@ error.code === 'EMPTY_DATA'          // still works
 | Error Code | Retryable | Description | Recovery Hint |
 |---|---|---|---|
 | `TRANSACTION_FAILED` | Yes | On-chain transaction failed | Verify transaction parameters and account nonce |
-| `TIMEOUT` | Yes | Operation timed out | Increase timeout or retry |
+| `TIMEOUT` | Yes | Transaction not included in a block (best or finalized) within timeout window | Retry the transaction |
 | `CHUNK_FAILED` | No | Individual chunk upload failed | Verify data integrity and chunker configuration |
 | `MISSING_CHUNK` | No | Chunk missing during reassembly | Ensure all chunks are present with contiguous indices starting from 0 |
 | `UNSUPPORTED_OPERATION` | No | Operation not supported | This operation is not supported in this context |

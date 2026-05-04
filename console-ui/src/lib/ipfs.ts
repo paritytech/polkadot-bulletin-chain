@@ -9,7 +9,6 @@ export const DEFAULT_IPFS_GATEWAY = "http://127.0.0.1:8283";
 export const IPFS_GATEWAYS: Record<string, string> = {
   local: "http://127.0.0.1:8283",
   paseo: "https://paseo-ipfs.polkadot.io",
-  stable: "https://pop3-testnet.parity-lab.parity.io/ipfs",
   previewnet: "https://previewnet.substrate.dev",
 };
 
@@ -22,7 +21,6 @@ export const PREFERRED_DOWNLOAD_METHOD: Record<string, "p2p" | "gateway"> = {
   local: "p2p",
   westend: "p2p",
   paseo: "gateway",
-  stable: "gateway",
   previewnet: "gateway",
 };
 

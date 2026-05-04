@@ -107,7 +107,7 @@ let operation = sdk_client.prepare_store(data, options)?;
 let cid = operation.calculate_cid()?;
 
 // Store with progress tracking
-let receipt = client.store_with_progress(data, &signer, Some(callback)).await?;
+let receipt = client.store_with_progress(data, &signer, WaitFor::InBlock, Some(callback)).await?;
 ```
 
 ### Chunked Storage with DAG-PB Manifest
@@ -125,7 +125,7 @@ let chunker_config = ChunkerConfig {
 let options = StoreOptions {
     cid_codec: CidCodec::DagPb,
     hash_algorithm: HashAlgorithm::Blake2b256,
-    wait_for_finalization: true,
+    wait_for: WaitFor::InBlock,
 };
 
 // Prepare chunked storage
@@ -138,12 +138,12 @@ let (batch, manifest) = sdk_client.prepare_store_chunked(
 
 // Submit each chunk
 for chunk_op in batch.operations.iter() {
-    client.store(chunk_op.data.clone(), &signer).await?;
+    client.store(chunk_op.data.clone(), &signer, WaitFor::InBlock).await?;
 }
 
 // Submit the manifest
 if let Some(manifest_data) = manifest {
-    client.store(manifest_data, &signer).await?;
+    client.store(manifest_data, &signer, WaitFor::InBlock).await?;
 }
 ```
 

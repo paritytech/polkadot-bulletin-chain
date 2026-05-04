@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Store data (requires authorization - use Faucet first!)
     let data = b"Hello, Bulletin Chain!".to_vec();
-    let receipt = client.store(data, &signer).await?;
+    let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 
     println!("Stored {} bytes in block: {}", receipt.data_size, receipt.block_hash);
     Ok(())

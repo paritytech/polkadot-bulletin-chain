@@ -12,7 +12,7 @@ use codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
 // Re-export CID types from transaction-storage-primitives
-pub use transaction_storage_primitives::{
+pub use bulletin_transaction_storage_primitives::{
 	cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
 	ContentHash,
 };

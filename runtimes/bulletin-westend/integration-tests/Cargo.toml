@@ -19,16 +19,23 @@ xcm-executor = { workspace = true, default-features = true }
 xcm-emulator = { workspace = true }
 emulated-integration-tests-common = { workspace = true }
 
-# Emulated chains from Polkadot SDK
-westend-emulated-chain = { workspace = true }
+# Runtimes used in emulated chains (defined locally in src/chains/)
 westend-runtime = { workspace = true }
-asset-hub-westend-emulated-chain = { workspace = true }
 asset-hub-westend-runtime = { workspace = true }
+
+# Dependencies for local chain definitions
+sc-consensus-grandpa = { workspace = true }
+sp-consensus-babe = { workspace = true, default-features = true }
+sp-consensus-beefy = { workspace = true, default-features = true }
+sp-authority-discovery = { workspace = true, default-features = true }
+polkadot-primitives = { workspace = true, default-features = true }
+westend-runtime-constants = { workspace = true, default-features = true }
+testnet-parachains-constants = { workspace = true, default-features = true }
+parachains-common = { workspace = true, default-features = true }
 
 # Local runtime
 bulletin-westend-runtime = { workspace = true, default-features = true }
 cumulus-primitives-core = { workspace = true, default-features = true }
-parachains-common = { workspace = true, default-features = true }
 
 [features]
 runtime-benchmarks = [
@@ -37,7 +44,9 @@ runtime-benchmarks = [
 	"cumulus-primitives-core/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
+	"polkadot-primitives/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
+	"westend-runtime-constants/runtime-benchmarks",
 	"westend-runtime/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
 	"xcm/runtime-benchmarks",

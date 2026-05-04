@@ -15,23 +15,14 @@
 
 Polkadot Bulletin Chain is a specialized blockchain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It serves as a storage solution primarily for the People/Proof-of-Personhood chain, functioning as a bridge-connected parachain with integrated IPFS support.
 
-**Deployment Modes**:
-- **Solochain**: Run with the custom `node/` binary which includes BABE + GRANDPA consensus and integrated IPFS support
-- **Parachain**: Run with Polkadot SDK's `polkadot-omni-node` for parachain deployments
+**Deployment**: Run as a parachain with Polkadot SDK's `polkadot-omni-node`.
 
 **Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable `RetentionPeriod`.
 
 ## Build Commands
 
 ```bash
-# Build the node (debug)
-cargo build
-
-# Build the node (release)
-cargo build --release
-
 # Build production runtime (with optimizations, strips logs)
-cargo build --profile production -p bulletin-polkadot-runtime --features on-chain-release-build
 cargo build --profile production -p bulletin-westend-runtime --features on-chain-release-build
 
 # Build with runtime benchmarks enabled
@@ -46,28 +37,12 @@ cargo test
 
 # Run pallet tests
 cargo test -p pallet-transaction-storage
-cargo test -p pallet-validator-set
-cargo test -p pallet-relayer-set
 
 # Run runtime tests
-cargo test -p bulletin-polkadot-runtime
 cargo test -p bulletin-westend-runtime
 ```
 
 For formatting, linting, and clippy checks, run `/format`.
-
-## Run Commands
-
-```bash
-# Run local dev node
-./target/release/polkadot-bulletin-chain --dev
-
-# Run with IPFS server enabled
-./target/release/polkadot-bulletin-chain --ipfs-server --validator --chain bulletin-polkadot
-
-# Generate chain spec
-./target/release/polkadot-bulletin-chain build-spec --chain bulletin-polkadot > spec.json
-```
 
 ## Architecture
 
@@ -75,15 +50,11 @@ For formatting, linting, and clippy checks, run `/format`.
 
 ```
 polkadot-bulletin-chain/
-├── node/                     # Off-chain solochain node implementation (CLI, service, RPC)
 ├── runtimes/
-│   ├── bulletin-polkadot/    # Production Polkadot runtime
-│   └── bulletin-westend/     # Westend testnet runtime
+│   └── bulletin-westend/     # Parachain runtime (used for Westend, Paseo, and other deployments)
 ├── pallets/
 │   ├── common/               # Shared pallet utilities
-│   ├── transaction-storage/  # Core storage pallet
-│   ├── validator-set/        # PoA validator management
-│   └── relayer-set/          # Bridge relayer management
+│   └── transaction-storage/  # Core storage pallet
 ├── examples/                 # JavaScript integration examples
 ├── scripts/                  # Build and deployment scripts
 └── zombienet/                # Network testing configurations
@@ -91,30 +62,16 @@ polkadot-bulletin-chain/
 
 ### Key Components
 
-**Node (`node/`)**: Off-chain validator/full-node binary with BABE + GRANDPA consensus and integrated IPFS (Bitswap/Kademlia).
-
-**Runtimes**: Two WASM runtimes targeting different networks:
-- `runtimes/bulletin-polkadot/` - Production Polkadot (bridges to People Chain)
-- `runtimes/bulletin-westend/` - Westend testnet
+**Runtime**: A single WASM parachain runtime (`runtimes/bulletin-westend/`) used across all deployments (Westend, Paseo, etc.). Run with `polkadot-omni-node`.
 
 **Core Pallets**:
 - `pallet-transaction-storage` - Stores data, manages retention, provides storage proofs
-- `pallet-validator-set` - Dynamic validator set management (PoA)
-- `pallet-relayer-set` - Manages bridge relayers between Bulletin and PoP chain
 
 ## Development Workflow
 
 1. **Format and lint**: Run `/format`
 2. **Run tests**: `cargo test`
 3. **Build**: `cargo build --release`
-
-### Zombienet Testing
-
-Local network spawning for integration tests:
-```bash
-# Requires zombienet binary and polkadot binaries
-zombienet spawn zombienet/bulletin-polkadot-local.toml
-```
 
 ### Benchmarking
 
@@ -132,9 +89,7 @@ This project is built on the **Polkadot SDK** (formerly Substrate/Polkadot/Cumul
 
 The Polkadot SDK provides:
 - FRAME pallet system and runtime macros
-- Consensus engines (BABE, GRANDPA)
 - Networking (libp2p, litep2p)
-- Bridge pallets for cross-chain messaging
 - XCM (Cross-Consensus Messaging) infrastructure
 
 ## Dependencies
@@ -155,7 +110,6 @@ The Polkadot SDK provides:
 - Maximum storage requirement: 1.5-2TB
 - IPFS idle connection timeout: 1 hour
 - Node supports litep2p/Bitswap
-- Solochain validators need BABE and GRANDPA session keys
 
 ## Code Review Guidelines
 

@@ -29,19 +29,19 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store(data, signer)` | `Result<StoreReceipt>` | Store data (auto-chunks if > 2 MiB) |
-| `store_with_progress(data, signer, callback)` | `Result<StoreReceipt>` | Store with progress tracking |
+| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data (auto-chunks if > 2 MiB) |
+| `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store with progress tracking |
 
 **Authorization:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `authorize_account(who, transactions, bytes, signer)` | `Result<AuthorizationReceipt>` | Authorize an account (requires sudo) |
-| `authorize_preimage(content_hash, max_size, signer)` | `Result<PreimageAuthorizationReceipt>` | Authorize a content hash |
-| `refresh_account_authorization(who, signer)` | `Result<()>` | Refresh account authorization expiry |
-| `refresh_preimage_authorization(content_hash, signer)` | `Result<()>` | Refresh preimage authorization expiry |
-| `remove_expired_account_authorization(who, signer)` | `Result<()>` | Remove expired account authorization |
-| `remove_expired_preimage_authorization(content_hash, signer)` | `Result<()>` | Remove expired preimage authorization |
+| `authorize_account(who, transactions, bytes, signer, wait_for)` | `Result<AuthorizationReceipt>` | Authorize an account (requires sudo) |
+| `authorize_preimage(content_hash, max_size, signer, wait_for)` | `Result<PreimageAuthorizationReceipt>` | Authorize a content hash |
+| `refresh_account_authorization(who, signer, wait_for)` | `Result<()>` | Refresh account authorization expiry |
+| `refresh_preimage_authorization(content_hash, signer, wait_for)` | `Result<()>` | Refresh preimage authorization expiry |
+| `remove_expired_account_authorization(who, signer, wait_for)` | `Result<()>` | Remove expired account authorization |
+| `remove_expired_preimage_authorization(content_hash, signer, wait_for)` | `Result<()>` | Remove expired preimage authorization |
 
 **Queries:**
 
@@ -54,7 +54,7 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `renew(block, index, signer)` | `Result<RenewReceipt>` | Renew storage at block/index |
+| `renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Renew storage at block/index |
 
 ---
 
@@ -104,7 +104,7 @@ Represents a single prepared store operation with data and CID configuration.
 pub struct StorageOperation {
     pub data: Vec<u8>,
     pub cid_config: CidConfig,
-    pub wait_finalization: bool,
+    pub wait_for: WaitFor,
 }
 
 impl StorageOperation {
@@ -122,7 +122,7 @@ A collection of storage operations for chunked uploads.
 ```rust
 pub struct BatchStorageOperation {
     pub operations: Vec<StorageOperation>,
-    pub wait_finalization: bool,
+    pub wait_for: WaitFor,
 }
 
 impl BatchStorageOperation {
@@ -141,7 +141,7 @@ impl BatchStorageOperation {
 pub struct StoreOptions {
     pub cid_codec: CidCodec,                // default: CidCodec::Raw
     pub hash_algorithm: HashingAlgorithm,    // default: HashingAlgorithm::Blake2b256
-    pub wait_for_finalization: bool,         // default: false
+    pub wait_for: WaitFor,                   // default: WaitFor::InBlock
 }
 ```
 
@@ -378,6 +378,19 @@ pub use transaction_storage_primitives::ContentHash;
 ---
 
 ## Enums
+
+### WaitFor
+
+Transaction confirmation level. Controls when submission methods resolve.
+
+```rust
+pub enum WaitFor {
+    InBlock,      // Return when tx is in a best block (faster, may reorg)
+    Finalized,    // Return when tx is finalized (safer, slower)
+}
+```
+
+Default: `WaitFor::InBlock`
 
 ### CidCodec
 

@@ -19,6 +19,7 @@ import {
   ErrorCode,
   HashAlgorithm,
   type ProgressCallback,
+  resolveClientConfig,
   type StoreOptions,
   type StoreResult,
   TxStatus,
@@ -73,6 +74,7 @@ interface PapiTransaction {
     subscribe(observer: {
       next: (ev: TxStatusEvent) => void
       error: (err: unknown) => void
+      complete?: () => void
     }): { unsubscribe(): void }
   }
   /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
@@ -126,7 +128,14 @@ export interface BulletinTypedApi {
       Authorizations: {
         getValue(scope: { type: string; value: unknown }): Promise<
           | {
-              extent: { transactions: number; bytes: bigint }
+              extent: {
+                transactions: number
+                /** Newer chains expose the cap separately from consumed counters. */
+                transactions_allowance?: number
+                bytes: bigint
+                /** Newer chains expose the cap separately from consumed counters. */
+                bytes_allowance?: bigint
+              }
               expiration: number
             }
           | undefined
@@ -180,13 +189,12 @@ export interface AuthCallOptions extends CallOptions {
 }
 
 /**
- * Result of mapping a single PAPI event to SDK progress events.
+ * Transaction status extracted from a PAPI event by `mapPapiEventToProgress`.
  *
- * `txHash` is set when the event carries a new transaction hash.
- * `finish` is set when the event signals the transaction has reached
- * the caller's desired confirmation level (in-block or finalized).
+ * `txHash` - set when the event carries a new transaction hash.
+ * `finish` - set when the transaction reached the desired confirmation level.
  */
-interface PapiEventMappingResult {
+interface MappedTxStatus {
   txHash?: string
   finish?: {
     block: { hash: string; number: number }
@@ -207,8 +215,8 @@ function mapPapiEventToProgress(
   progressCallback: ProgressCallback | undefined,
   chunkIndex: number | undefined,
   waitFor: "in_block" | "finalized" = "finalized",
-): PapiEventMappingResult {
-  const result: PapiEventMappingResult = {}
+): MappedTxStatus {
+  const result: MappedTxStatus = {}
 
   // Capture the transaction hash on the first event that carries it
   if (ev.txHash && !currentTxHash) {
@@ -296,6 +304,8 @@ export interface BulletinClientInterface {
     transactions: number
     bytes: number
   }
+  /** Release resources held on behalf of this client (e.g. underlying PAPI client). */
+  destroy(): Promise<void>
 }
 
 /**
@@ -532,6 +542,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
+  /** Optional teardown callback invoked by `destroy()` */
+  private onDestroy?: () => void | Promise<void>
 
   /**
    * Create a new async client with PAPI client and signer
@@ -543,26 +555,40 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param signer - Polkadot signer for transaction signing
    * @param submit - Raw transaction submit function (pass `papiClient.submit`)
    * @param config - Optional client configuration
+   * @param onDestroy - Optional teardown callback. When provided, `destroy()`
+   *   awaits it so callers (e.g. wrappers that own the underlying
+   *   `PolkadotClient`) can route cleanup through this client.
    */
   constructor(
     api: BulletinTypedApi,
     signer: PolkadotSigner,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
+    onDestroy?: () => void | Promise<void>,
   ) {
     this.api = api
     this.signer = signer
     this.submit = submit
-    this.config = {
-      defaultChunkSize: config?.defaultChunkSize ?? 1024 * 1024, // 1 MiB
-      createManifest: config?.createManifest ?? true,
-      chunkingThreshold: config?.chunkingThreshold ?? 2 * 1024 * 1024, // 2 MiB
-    }
+    this.config = resolveClientConfig(config)
+    this.onDestroy = onDestroy
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
       chunkingThreshold: this.config.chunkingThreshold,
     })
+  }
+
+  /**
+   * Release resources held on behalf of this client.
+   *
+   * Invokes the optional `onDestroy` callback supplied at construction time.
+   * Without one, this is a no-op — the SDK itself holds no long-lived
+   * resources, so callers that own the underlying `PolkadotClient` (or other
+   * connection) can either tear it down themselves or pass `onDestroy` to
+   * route teardown through here.
+   */
+  async destroy(): Promise<void> {
+    await this.onDestroy?.()
   }
 
   /**
@@ -580,7 +606,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   ): Promise<void> {
     if (!this.api.query) return
 
-    let auth: { extent: { transactions: number; bytes: bigint } } | undefined
+    let auth:
+      | {
+          extent: {
+            transactions: number
+            transactions_allowance?: number
+            bytes: bigint
+            bytes_allowance?: bigint
+          }
+        }
+      | undefined
     try {
       const { encodeAddress } = await import("@polkadot/util-crypto")
       const address = encodeAddress(this.signer.publicKey)
@@ -598,8 +633,24 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     // so proceed and let the chain validate rather than blocking
     if (!auth) return
 
-    const availableTransactions = auth.extent.transactions
-    const availableBytes = Number(auth.extent.bytes)
+    // Newer chains expose `*_allowance` (caps) alongside `transactions`/`bytes`
+    // (consumed counters); older chains expose only the cap fields. Available
+    // = allowance - consumed; falling back to the raw field when allowance
+    // is absent keeps the SDK compatible with both shapes.
+    const txAllowance = auth.extent.transactions_allowance
+    const availableTransactions =
+      txAllowance != null
+        ? Math.max(0, txAllowance - auth.extent.transactions)
+        : auth.extent.transactions
+    const bytesAllowance = auth.extent.bytes_allowance
+    const availableBytes =
+      bytesAllowance != null
+        ? Number(
+            bytesAllowance > auth.extent.bytes
+              ? bytesAllowance - auth.extent.bytes
+              : 0n,
+          )
+        : Number(auth.extent.bytes)
 
     if (availableTransactions < requiredTransactions) {
       throw new BulletinError(
@@ -665,14 +716,18 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       let resolved = false
       let txHash: string | undefined
 
+      const cleanup = () => {
+        clearTimeout(timerId)
+        subscription.unsubscribe()
+      }
+
       const finish = (
         block: { hash: string; number: number },
         events?: RuntimeEvent[],
       ) => {
         if (resolved) return
         resolved = true
-        clearTimeout(timerId)
-        subscription.unsubscribe()
+        cleanup()
         resolve({
           blockHash: block.hash,
           txHash: txHash || "",
@@ -697,7 +752,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         error: (err: unknown) => {
           if (!resolved) {
             resolved = true
-            clearTimeout(timerId)
+            cleanup()
             if (progressCallback) {
               const errorMsg = err instanceof Error ? err.message : String(err)
               // Distinguish pool-related drops from other transaction errors
@@ -712,16 +767,42 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             reject(err)
           }
         },
+        complete: () => {
+          // PAPI can complete the Observable without a finalized/in_block
+          // event (e.g. txBestBlocksState fires with found:false after a
+          // reorg or node restart, causing the internal continueWith() to
+          // map to rxjs.EMPTY which completes immediately). Without this
+          // handler the Promise hangs until the defensive timeout fires.
+          if (!resolved) {
+            resolved = true
+            cleanup()
+            progressCallback?.({
+              type: TxStatus.Dropped,
+              error:
+                "Transaction subscription ended before reaching the expected status",
+              chunkIndex,
+            })
+            reject(
+              new BulletinError(
+                "Transaction subscription ended before reaching the expected status. " +
+                  "This usually means the transaction was dropped from the best block " +
+                  "(e.g. due to a chain reorganization or node restart).",
+                ErrorCode.TRANSACTION_FAILED,
+              ),
+            )
+          }
+        },
       })
 
-      // Timeout after 2 minutes
+      // Defensive timeout: PAPI handles reconnects and mortality, so this
+      // should rarely fire. If it does, it likely indicates a bug. Default:
+      // 7 min (above PAPI's 64-block mortality window).
       const timerId = setTimeout(() => {
-        if (!resolved) {
-          resolved = true
-          subscription.unsubscribe()
-          reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
-        }
-      }, 120000)
+        if (resolved) return
+        resolved = true
+        cleanup()
+        reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
+      }, this.config.txTimeout)
     })
   }
 

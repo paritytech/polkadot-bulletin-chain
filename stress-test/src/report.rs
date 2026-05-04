@@ -348,43 +348,6 @@ fn format_bytes(bytes: usize) -> String {
 	}
 }
 
-/// Print sustained load analysis: compare first-quarter vs last-quarter throughput.
-pub fn print_sustained_analysis(result: &ScenarioResult) {
-	let blocks = &result.blocks;
-	if blocks.len() < 4 {
-		println!();
-		println!("{}", "-".repeat(72));
-		println!(" SUSTAINED ANALYSIS: Not enough blocks ({}) for analysis", blocks.len());
-		println!("{}", "-".repeat(72));
-		return;
-	}
-
-	let quarter = blocks.len() / 4;
-	let first_quarter = &blocks[..quarter];
-	let last_quarter = &blocks[blocks.len() - quarter..];
-
-	let first_avg =
-		first_quarter.iter().map(|b| b.tx_count).sum::<u64>() as f64 / first_quarter.len() as f64;
-	let last_avg =
-		last_quarter.iter().map(|b| b.tx_count).sum::<u64>() as f64 / last_quarter.len() as f64;
-
-	let degradation =
-		if first_avg > 0.0 { (last_avg - first_avg) / first_avg * 100.0 } else { 0.0 };
-
-	println!();
-	println!("{}", "-".repeat(72));
-	println!(" SUSTAINED ANALYSIS ({} blocks total)", blocks.len());
-	println!("{}", "-".repeat(72));
-	println!(" First 25% avg tx/block  | {:.1} ({} blocks)", first_avg, first_quarter.len());
-	println!(" Last 25% avg tx/block   | {:.1} ({} blocks)", last_avg, last_quarter.len());
-	println!(
-		" Degradation             | {}{:.1}%",
-		if degradation >= 0.0 { "+" } else { "" },
-		degradation
-	);
-	println!("{}", "-".repeat(72));
-}
-
 /// Print a final summary table comparing multiple scenario results.
 pub fn print_summary_table(results: &[ScenarioResult]) {
 	println!();
