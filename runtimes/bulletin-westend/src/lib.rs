@@ -865,6 +865,12 @@ impl_runtime_apis! {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
 		}
+
+		fn indexed_transactions(
+			_block: NumberFor<Block>,
+		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
+			todo!("indexed_transactions runtime API not yet implemented — see https://github.com/paritytech/polkadot-bulletin-chain/pull/471")
+		}
 	}
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
