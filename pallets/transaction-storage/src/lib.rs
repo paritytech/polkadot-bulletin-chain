@@ -767,7 +767,7 @@ pub mod pallet {
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
 	#[pallet::getter(fn transaction_roots)]
-	pub type Transactions<T: Config> = StorageMap<
+	pub(super) type Transactions<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		BlockNumberFor<T>,
@@ -1199,6 +1199,13 @@ pub mod pallet {
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
+		}
+
+		/// All transactions stored at the given block.
+		pub fn transactions_at(
+			block: BlockNumberFor<T>,
+		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
+			Transactions::<T>::get(block)
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.
