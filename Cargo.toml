@@ -120,6 +120,7 @@ substrate-wasm-builder = { version = "33.0.0" }
 resolver = "2"
 members = [
 	"pallets/common",
+	"pallets/hop-promotion",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",
 	"runtimes/bulletin-paseo",
