@@ -845,15 +845,12 @@ pub mod pallet {
 			proof: Option<TransactionStorageProof>,
 		) -> DispatchResultWithPostInfo {
 			ensure_none(origin)?;
-			// Snapshot pending count BEFORE draining so we can refund the unused
-			// per-item drain capacity. The dispatchable always declares
-			// `apply_block_inherents(MaxBlockTransactions)` so block builders reserve
-			// the worst case; we refund here based on what actually ran.
-			let n_actual = PendingAutoRenewals::<T>::get().len() as u32;
 			if let Some(proof) = proof {
 				Self::do_check_proof(proof)?;
 			}
-			Self::do_process_auto_renewals();
+			// `do_process_auto_renewals` returns the actual count drained so we can refund
+			// from the worst-case `apply_block_inherents(MaxBlockTransactions)` declaration.
+			let n_actual = Self::do_process_auto_renewals();
 			Ok(Some(T::WeightInfo::apply_block_inherents(n_actual)).into())
 		}
 	}
@@ -1101,31 +1098,27 @@ pub mod pallet {
 
 		/// Drain [`PendingAutoRenewals`], invoking `do_renew` for each entry whose owner still
 		/// has sufficient authorization. Invoked by the [`Self::apply_block_inherents`]
-		/// mandatory inherent.
-		pub(super) fn do_process_auto_renewals() {
+		/// mandatory inherent. Returns the number of entries drained (the size of
+		/// `PendingAutoRenewals` before the drain), used by the caller for weight refunding.
+		pub(super) fn do_process_auto_renewals() -> u32 {
 			let pending = PendingAutoRenewals::<T>::take();
+			let n_actual = pending.len() as u32;
 
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 				let scope = AuthorizationScope::Account(renewal_data.account.clone());
-				let can_renew = Self::check_authorization(&scope, tx_info.size, true).is_ok();
+				let renew_result = if Self::check_authorization(&scope, tx_info.size, true).is_ok()
+				{
+					Self::do_renew(tx_info).ok()
+				} else {
+					None
+				};
 
-				if can_renew {
-					match Self::do_renew(tx_info) {
-						Ok(new_index) => {
-							Self::deposit_event(Event::DataAutoRenewed {
-								index: new_index,
-								content_hash,
-								account: renewal_data.account,
-							});
-						},
-						Err(_) => {
-							AutoRenewals::<T>::remove(content_hash);
-							Self::deposit_event(Event::AutoRenewalFailed {
-								content_hash,
-								account: renewal_data.account,
-							});
-						},
-					}
+				if let Some(new_index) = renew_result {
+					Self::deposit_event(Event::DataAutoRenewed {
+						index: new_index,
+						content_hash,
+						account: renewal_data.account,
+					});
 				} else {
 					AutoRenewals::<T>::remove(content_hash);
 					Self::deposit_event(Event::AutoRenewalFailed {
@@ -1134,6 +1127,8 @@ pub mod pallet {
 					});
 				}
 			}
+
+			n_actual
 		}
 	}
 
@@ -1200,28 +1195,14 @@ pub mod pallet {
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
-					return Err(Error::<T>::TooManyTransactions);
-				}
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: root,
-						size: data_len,
-						content_hash: cid.content_hash,
-						hashing,
-						cid_codec,
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-			TransactionByContentHash::<T>::insert(
+			debug_assert_eq!(num_chunks(data_len), chunk_count);
+			let index = Self::append_to_block_transactions(
+				root,
+				data_len,
 				cid.content_hash,
-				(frame_system::Pallet::<T>::block_number(), index),
-			);
+				hashing,
+				cid_codec,
+			)?;
 
 			Self::deposit_event(Event::Stored {
 				index,
@@ -1236,37 +1217,51 @@ pub mod pallet {
 		/// [`renew_content_hash`](Self::renew_content_hash), and the auto-renewal path driven
 		/// by the [`Self::apply_block_inherents`] mandatory inherent.
 		///
-		/// Indexes the renewal via `sp_io::transaction_index::renew`, pushes a new
-		/// `TransactionInfo` into [`BlockTransactions`], and updates
-		/// [`TransactionByContentHash`]. Returns the new transaction index on success.
+		/// Indexes the renewal via `sp_io::transaction_index::renew` and appends to
+		/// [`BlockTransactions`]. Returns the new transaction index on success.
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = info.content_hash;
-			sp_io::transaction_index::renew(extrinsic_index, content_hash);
+			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
+			Self::append_to_block_transactions(
+				info.chunk_root,
+				info.size,
+				info.content_hash,
+				info.hashing,
+				info.cid_codec,
+			)
+		}
 
-			let mut new_index = 0u32;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				let chunks = num_chunks(info.size);
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
-				new_index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: info.chunk_root,
-						size: info.size,
-						content_hash: info.content_hash,
-						hashing: info.hashing,
-						cid_codec: info.cid_codec,
-						block_chunks: total_chunks,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-
+		/// Build a [`TransactionInfo`] for the new block-local entry, append it to
+		/// [`BlockTransactions`], and update [`TransactionByContentHash`] to point at the new
+		/// index. `block_chunks` is computed from the current cumulative total. The caller is
+		/// responsible for the corresponding `transaction_index::index` or
+		/// `transaction_index::renew` host call.
+		fn append_to_block_transactions(
+			chunk_root: <BlakeTwo256 as Hash>::Output,
+			size: u32,
+			content_hash: ContentHash,
+			hashing: HashingAlgorithm,
+			cid_codec: CidCodec,
+		) -> Result<u32, Error<T>> {
+			let mut transactions = <BlockTransactions<T>>::get();
+			let block_chunks = TransactionInfo::total_chunks(&transactions) + num_chunks(size);
+			let new_index = transactions.len() as u32;
+			transactions
+				.try_push(TransactionInfo {
+					chunk_root,
+					size,
+					content_hash,
+					hashing,
+					cid_codec,
+					block_chunks,
+				})
+				.map_err(|_| Error::<T>::TooManyTransactions)?;
+			<BlockTransactions<T>>::put(transactions);
 			TransactionByContentHash::<T>::insert(
 				content_hash,
 				(frame_system::Pallet::<T>::block_number(), new_index),
 			);
-
 			Ok(new_index)
 		}
 
