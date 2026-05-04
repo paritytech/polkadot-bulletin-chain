@@ -2019,6 +2019,7 @@ dependencies = [
  "pallet-balances",
  "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
+ "pallet-hop-promotion",
  "pallet-message-queue",
  "pallet-session",
  "pallet-skip-feeless-payment",
@@ -2172,6 +2173,7 @@ dependencies = [
  "pallet-balances",
  "pallet-bulletin-transaction-storage",
  "pallet-collator-selection",
+ "pallet-hop-promotion",
  "pallet-message-queue",
  "pallet-migrations",
  "pallet-session",
@@ -2196,6 +2198,7 @@ dependencies = [
  "sp-consensus-aura",
  "sp-core 40.0.0",
  "sp-genesis-builder",
+ "sp-hop",
  "sp-inherents",
  "sp-io",
  "sp-keyring",
@@ -8155,6 +8158,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-hop-promotion"
+version = "0.1.0"
+dependencies = [
+ "bulletin-pallets-common",
+ "bulletin-transaction-storage-primitives",
+ "frame-support",
+ "frame-system",
+ "pallet-bulletin-transaction-storage",
+ "pallet-timestamp",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+ "sp-io",
+ "sp-keyring",
+ "sp-keystore",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-identity"
 version = "46.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13305,6 +13327,7 @@ version = "0.1.0"
 dependencies = [
  "parity-scale-codec",
  "sp-api",
+ "sp-runtime",
 ]
 
 [[package]]

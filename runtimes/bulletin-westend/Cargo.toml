@@ -38,6 +38,7 @@ pallet-skip-feeless-payment = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-utility = { workspace = true }
+pallet-hop-promotion = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-bulletin-transaction-storage = { workspace = true }
@@ -47,6 +48,7 @@ sp-block-builder = { workspace = true }
 sp-consensus-aura = { workspace = true }
 sp-core = { workspace = true }
 sp-genesis-builder = { workspace = true }
+sp-hop = { workspace = true }
 sp-inherents = { workspace = true }
 sp-keyring = { workspace = true }
 sp-offchain = { workspace = true }
@@ -120,6 +122,7 @@ std = [
 	"pallet-balances/std",
 	"pallet-bulletin-transaction-storage/std",
 	"pallet-collator-selection/std",
+	"pallet-hop-promotion/std",
 	"pallet-message-queue/std",
 	"pallet-migrations/std",
 	"pallet-session/std",
@@ -143,6 +146,7 @@ std = [
 	"sp-consensus-aura/std",
 	"sp-core/std",
 	"sp-genesis-builder/std",
+	"sp-hop/std",
 	"sp-inherents/std",
 	"sp-io/std",
 	"sp-keyring/std",
@@ -177,6 +181,7 @@ runtime-benchmarks = [
 	"pallet-balances/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-collator-selection/runtime-benchmarks",
+	"pallet-hop-promotion/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
 	"pallet-migrations/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
@@ -213,6 +218,7 @@ try-runtime = [
 	"pallet-balances/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-collator-selection/try-runtime",
+	"pallet-hop-promotion/try-runtime",
 	"pallet-message-queue/try-runtime",
 	"pallet-migrations/try-runtime",
 	"pallet-session/try-runtime",
