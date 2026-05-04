@@ -1013,7 +1013,9 @@ pub mod pallet {
 			PermanentStorageUsed::<T>::put(new);
 			Self::deposit_event(Event::PermanentStorageUsedUpdated { used: new });
 			let cap = T::MaxPermanentStorageSize::get();
-			let threshold = cap.saturating_mul(PERMANENT_STORAGE_NEAR_CAP_PERCENT) / 100;
+			// Divide-first to avoid u64 overflow on extreme caps (`cap * 80` saturates
+			// above ~230 EiB). Loses ≤`pct` bytes of precision; harmless for the rising-edge.
+			let threshold = (cap / 100).saturating_mul(PERMANENT_STORAGE_NEAR_CAP_PERCENT);
 			if old < threshold && new >= threshold {
 				Self::deposit_event(Event::PermanentStorageNearCap { used: new, cap });
 			}
@@ -1504,10 +1506,14 @@ pub mod pallet {
 				Self::update_permanent_storage_used(|used| used.saturating_add(size_u64));
 				let current_block = frame_system::Pallet::<T>::block_number();
 				PermanentStorageLedger::<T>::mutate(current_block, |entries| {
-					// Bound matches `MaxBlockTransactions`. `block_transactions_full()`
-					// guards the upstream call sites, so this push always succeeds in
-					// practice; defensive in case of future changes.
-					let _ = entries.try_push((scope.clone(), size_u64));
+					// `block_transactions_full()` upstream keeps this push within bounds.
+					// If that ever diverges, the counter is already bumped — dropping the
+					// ledger entry would orphan the drain.
+					if entries.try_push((scope.clone(), size_u64)).is_err() {
+						frame_support::defensive!(
+							"PermanentStorageLedger push failed; chain-wide counter drift",
+						);
+					}
 				});
 			}
 
