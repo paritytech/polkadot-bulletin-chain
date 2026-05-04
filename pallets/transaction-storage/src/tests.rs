@@ -191,7 +191,7 @@ fn checks_proof() {
 			.unwrap()
 			.unwrap();
 		assert_noop!(
-			TransactionStorage::check_proof(RuntimeOrigin::none(), proof),
+			TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), Some(proof)),
 			Error::UnexpectedProof,
 		);
 		run_to_block(11, || None);
@@ -200,14 +200,14 @@ fn checks_proof() {
 		let invalid_proof =
 			build_proof(parent_hash.as_ref(), vec![vec![0u8; 1000]]).unwrap().unwrap();
 		assert_noop!(
-			TransactionStorage::check_proof(RuntimeOrigin::none(), invalid_proof),
+			TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), Some(invalid_proof)),
 			Error::InvalidProof,
 		);
 
 		let proof = build_proof(parent_hash.as_ref(), vec![vec![0u8; MAX_DATA_SIZE as usize]])
 			.unwrap()
 			.unwrap();
-		assert_ok!(TransactionStorage::check_proof(RuntimeOrigin::none(), proof));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), Some(proof)));
 	});
 }
 
@@ -1776,7 +1776,7 @@ fn auto_renewal_lifecycle() {
 		// so auth granted at block 1 expired at block 11)
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 
-		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
 		// Verify PendingAutoRenewals is now empty
 		assert!(PendingAutoRenewals::get().is_empty());
@@ -1831,7 +1831,7 @@ fn auto_renewal_consumes_authorization() {
 		// The block-1 authorization expired at block 11, so this creates a fresh entry.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
-		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
 		// Authorization should have been consumed (1 transaction, 2000 bytes)
 		let after_extent = TransactionStorage::account_authorization_extent(who);
@@ -1866,7 +1866,7 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		// First renewal at block 12 — refresh with exactly 1 operation worth of auth
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
-		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
 		// Authorization is now fully consumed (used == allowance)
 		let extent = TransactionStorage::account_authorization_extent(who);
@@ -1895,7 +1895,7 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		let pending = PendingAutoRenewals::get();
 		assert_eq!(pending.len(), 1, "Should have pending renewal");
 
-		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
 		// Should have failed — event emitted and auto-renewal removed
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
@@ -1911,7 +1911,7 @@ fn process_auto_renewals_rejects_signed_origin() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		assert_noop!(
-			TransactionStorage::process_auto_renewals(RuntimeOrigin::signed(1)),
+			TransactionStorage::apply_block_inherents(RuntimeOrigin::signed(1), None),
 			DispatchError::BadOrigin,
 		);
 	});
@@ -1922,7 +1922,7 @@ fn process_auto_renewals_noop_when_empty() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		// Calling with no pending renewals should succeed (no-op)
-		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 		assert!(PendingAutoRenewals::get().is_empty());
 	});
 }
@@ -2065,7 +2065,7 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 		});
 
 		// Process auto-renewals — should NOT return an error even though 2 of 3 fail
-		assert_ok!(TransactionStorage::process_auto_renewals(RuntimeOrigin::none()));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
 		// PendingAutoRenewals should be fully consumed
 		assert!(PendingAutoRenewals::get().is_empty());
@@ -2093,6 +2093,109 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 		assert!(AutoRenewals::get(hashes[2]).is_none());
 	});
 }
+
+/// Run a normal block lifecycle past expiry without invoking `apply_block_inherents`.
+///
+/// `on_initialize` populates `PendingAutoRenewals`; `on_finalize` then enforces that the
+/// inherent ran, asserting that the storage is empty. The mock's `run_to_block` always
+/// invokes the inherent, hiding this safeguard. This test bypasses the helper to confirm
+/// the assert actually fires when an auto-renewal is pending and the inherent is missing.
+#[test]
+#[should_panic(expected = "All pending auto-renewals must be processed by apply_block_inherents")]
+fn on_finalize_panics_when_inherent_missing() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(2, || None);
+		assert_ok!(TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash));
+
+		let proof_provider = move || {
+			let block_num = System::block_number();
+			let period: u64 = RetentionPeriod::get();
+			let target = block_num.saturating_sub(period);
+			if target > 0 && Transactions::get(target).is_some() {
+				let parent_hash = System::parent_hash();
+				let txs = Transactions::get(target).unwrap();
+				let data_vec: Vec<Vec<u8>> = txs.iter().map(|_| data.clone()).collect();
+				build_proof(parent_hash.as_ref(), data_vec).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Run normally up to (and including) block 11 — proofs supplied via the inherent.
+		run_to_block(11, proof_provider);
+
+		// Manually advance to block 12 and run only on_initialize, which populates
+		// PendingAutoRenewals as Transactions(1) expires. We deliberately do NOT call
+		// apply_block_inherents, simulating an inherent that was lost or never built.
+		init_block(12);
+		assert_eq!(
+			PendingAutoRenewals::get().len(),
+			1,
+			"on_initialize should have populated pending"
+		);
+
+		// on_finalize must panic on the PendingAutoRenewals invariant. The proof check passes
+		// here because target_block (12 - 10 = 2) has no transactions stored.
+		<TransactionStorage as polkadot_sdk_frame::traits::Hooks<u64>>::on_finalize(12);
+	});
+}
+
+/// Verify that `ProvideInherent::create_inherent` actually emits the composite inherent call
+/// when `PendingAutoRenewals` is non-empty, even with no storage proof in `InherentData`.
+///
+/// This is the direct test for "the block author will inject the inherent that drains pending
+/// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no
+/// proof) are pending, the chain would panic at on_finalize without any test catching it.
+#[test]
+fn create_inherent_emits_call_when_pending_renewals_present() {
+	use polkadot_sdk_frame::{deps::sp_inherents::InherentData, runtime::prelude::ProvideInherent};
+
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Baseline: no proof, no pending renewals → no inherent emitted.
+		let empty = InherentData::new();
+		assert!(
+			<TransactionStorage as ProvideInherent>::create_inherent(&empty).is_none(),
+			"no inherent should be emitted when neither proof nor pending renewals are present",
+		);
+
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash));
+
+		// Advance to block 12 with on_initialize only — Transactions(1) expires and
+		// PendingAutoRenewals gains one entry.
+		run_to_block(11, || None);
+		init_block(12);
+		assert_eq!(PendingAutoRenewals::get().len(), 1);
+
+		// `InherentData` carries no proof. The provider must still emit the composite call so
+		// that the inherent-driven drain runs in this block.
+		let result = <TransactionStorage as ProvideInherent>::create_inherent(&empty);
+		match result {
+			Some(Call::apply_block_inherents { proof: None }) => {},
+			other => panic!(
+				"expected Some(apply_block_inherents {{ proof: None }}) when only pending renewals \
+				 are present, got {:?}",
+				other
+			),
+		}
+	});
+}
+
 #[test]
 fn re_authorize_account_adds_to_allowance_and_keeps_expiry() {
 	new_test_ext().execute_with(|| {
