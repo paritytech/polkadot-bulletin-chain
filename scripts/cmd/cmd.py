@@ -194,8 +194,7 @@ if args.command == 'bench':
     tempdir.cleanup()
 
 elif args.command == 'fmt':
-    nightly_version = os.getenv('RUST_NIGHTLY_VERSION')
-    command = f"cargo +nightly-{nightly_version} fmt"
+    command = f"cargo +nightly fmt"
     print('Formatting with `{command}`')
     nightly_status = os.system(f'{command}')
     taplo_status = os.system('taplo format --config .config/taplo.toml')

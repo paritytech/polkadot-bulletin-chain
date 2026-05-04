@@ -617,8 +617,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         }
       | undefined
     try {
-      const { encodeAddress } = await import("@polkadot/util-crypto")
-      const address = encodeAddress(this.signer.publicKey)
+      const { ss58Address } = await import("@polkadot-labs/hdkd-helpers")
+      const address = ss58Address(this.signer.publicKey)
 
       auth = await this.api.query.TransactionStorage.Authorizations.getValue({
         type: "Account",
