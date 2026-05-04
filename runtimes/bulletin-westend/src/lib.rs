@@ -894,6 +894,10 @@ impl_runtime_apis! {
 			use frame_support::traits::Get;
 			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
 		}
+
+		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
+			pallet_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+		}
 	}
 
 	#[cfg(feature = "try-runtime")]
