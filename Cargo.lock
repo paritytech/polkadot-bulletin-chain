@@ -11610,9 +11610,9 @@ dependencies = [
 
 [[package]]
 name = "sc-client-db"
-version = "0.53.0"
+version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db31231e477d4260bd0e785a4ffacd7c4313cdcb39ae809a50d6cd34c9a59acd"
+checksum = "4a46b1aea43a7c62d245519681afb8001cedceb02e0e133b2ef13a27bda89704"
 dependencies = [
  "hash-db",
  "kvdb",
@@ -13833,9 +13833,9 @@ dependencies = [
 
 [[package]]
 name = "sp-transaction-storage-proof"
-version = "42.0.0"
+version = "42.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb9be6ae13498cd2eb8c4cb4157dde4360d9c18c585c7165caa2d4d46095cbe"
+checksum = "ce86ffe8a02bf8363dea6836438f96dfd0812ef0dc35324fef1827592b921f1f"
 dependencies = [
  "async-trait",
  "parity-scale-codec",

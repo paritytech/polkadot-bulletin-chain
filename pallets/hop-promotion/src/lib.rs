@@ -121,7 +121,7 @@ pub mod pallet {
 			let mut block = current;
 			while block >= oldest {
 				if let Some(txs) =
-					pallet_bulletin_transaction_storage::Transactions::<T>::get(block)
+					pallet_bulletin_transaction_storage::Pallet::<T>::transactions_at(block)
 				{
 					if txs.iter().any(|t| t.content_hash == content_hash) {
 						return true;
