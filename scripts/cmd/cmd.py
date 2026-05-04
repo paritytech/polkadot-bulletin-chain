@@ -164,7 +164,9 @@ if args.command == 'bench':
                                f"--steps={args.steps} "
                                f"--repeat={args.repeat} "
                                f"--heap-pages=4096 "
-                               f"--min-duration 1 "
+                               f"--no-storage-info "
+                               f"--no-min-squares "
+                               f"--no-median-slopes "
                                f"{f'--template={template} ' if template else ''}"
                                f"{f'--exclude-extrinsics={excluded_string} ' if excluded_string else ''}"
                                )
