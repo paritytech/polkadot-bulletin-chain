@@ -9,6 +9,21 @@ import _help
 
 _HelpAction = _help._HelpAction
 
+
+def print_and_log(message, output_file='/tmp/cmd/command_output.log'):
+    print(message)
+    with open(output_file, 'a') as f:
+        f.write(message + '\n')
+
+
+def setup_logging():
+    if not os.path.exists('/tmp/cmd'):
+        os.makedirs('/tmp/cmd')
+    open('/tmp/cmd/command_output.log', 'w').close()
+
+
+setup_logging()
+
 f = open('scripts/runtimes-matrix.json', 'r')
 runtimesMatrix = json.load(f)
 
@@ -73,34 +88,34 @@ for arg, config in common_args.items():
 
 args, unknown = parser.parse_known_args()
 
-print(f'args: {args}')
+print_and_log(f'args: {args}')
 
 if args.command == 'bench':
     tempdir = tempfile.TemporaryDirectory()
-    print(f'Created temp dir: {tempdir.name}')
+    print_and_log(f'Created temp dir: {tempdir.name}')
     runtime_pallets_map = {}
     failed_benchmarks = {}
     successful_benchmarks = {}
 
     profile = args.profile
 
-    print(f'Provided runtimes: {args.runtime}')
-    print(f'Cargo profile: {profile}')
+    print_and_log(f'Provided runtimes: {args.runtime}')
+    print_and_log(f'Cargo profile: {profile}')
     # convert to mapped dict
     runtimesMatrix = list(filter(lambda x: x['name'] in args.runtime, runtimesMatrix))
     runtimesMatrix = {x['name']: x for x in runtimesMatrix}
-    print(f'Filtered out runtimes: {runtimesMatrix}')
+    print_and_log(f'Filtered out runtimes: {runtimesMatrix}')
 
     # loop over remaining runtimes to collect available pallets
     for runtime in runtimesMatrix.values():
-        print(f'-- compiling the runtime {runtime["name"]}')
+        print_and_log(f'-- compiling the runtime {runtime["name"]}')
         os.system(f"cargo build -p {runtime['package']} --profile {profile} --features runtime-benchmarks")
-        print(f'-- listing pallets for benchmark for {runtime["name"]}')
+        print_and_log(f'-- listing pallets for benchmark for {runtime["name"]}')
         wasm_file = f"target/{profile}/wbuild/{runtime['package']}/{runtime['package'].replace('-', '_')}.wasm"
         output = os.popen(
             f"frame-omni-bencher v1 benchmark pallet --no-csv-header --all --list --runtime={wasm_file}").read()
         if output == "":
-            print(f'frame-omni-bencher not found')
+            print_and_log(f'frame-omni-bencher not found')
             sys.exit(1)
         raw_pallets = output.split('\n')
 
@@ -110,12 +125,12 @@ if args.command == 'bench':
                 all_pallets.add(pallet.split(',')[0].strip())
 
         pallets = list(all_pallets)
-        print(f'Pallets in {runtime}: {pallets}')
+        print_and_log(f'Pallets in {runtime}: {pallets}')
         runtime_pallets_map[runtime['name']] = pallets
 
     # filter out only the specified pallets from collected runtimes/pallets
     if args.pallet:
-        print(f'Pallet: {args.pallet}')
+        print_and_log(f'Pallet: {args.pallet}')
         new_pallets_map = {}
         # keep only specified pallets if they exist in the runtime
         for runtime in runtime_pallets_map:
@@ -124,17 +139,17 @@ if args.command == 'bench':
 
         runtime_pallets_map = new_pallets_map
 
-    print(f'Filtered out runtimes & pallets: {runtime_pallets_map}')
+    print_and_log(f'Filtered out runtimes & pallets: {runtime_pallets_map}')
 
     if not runtime_pallets_map:
         if args.pallet and not args.runtime:
-            print(f"No pallets [{args.pallet}] found in any runtime")
+            print_and_log(f"No pallets [{args.pallet}] found in any runtime")
         elif args.runtime and not args.pallet:
-            print(f"{args.runtime} runtime does not have any pallets")
+            print_and_log(f"{args.runtime} runtime does not have any pallets")
         elif args.runtime and args.pallet:
-            print(f"No pallets [{args.pallet}] found in {args.runtime}")
+            print_and_log(f"No pallets [{args.pallet}] found in {args.runtime}")
         else:
-            print('No runtimes found')
+            print_and_log('No runtimes found')
         sys.exit(1)
 
     header_path = os.path.abspath('./scripts/cmd/file_header.txt')
@@ -142,7 +157,7 @@ if args.command == 'bench':
     for runtime in runtime_pallets_map:
         for pallet in runtime_pallets_map[runtime]:
             config = runtimesMatrix[runtime]
-            print(f'-- config: {config}')
+            print_and_log(f'-- config: {config}')
             default_path = f"./{config['path']}/src/weights"
             xcm_path = f"./{config['path']}/src/weights/xcm"
             output_path = default_path if not pallet.startswith("pallet_xcm_benchmarks") else xcm_path
@@ -152,7 +167,7 @@ if args.command == 'bench':
             excluded = excluded_extrinsics.get(pallet, [])
             excluded_string = ",".join(f"{pallet}::{e}" for e in excluded)
 
-            print(f'-- benchmarking {pallet} in {runtime} into {output_path} using template {template}')
+            print_and_log(f'-- benchmarking {pallet} in {runtime} into {output_path} using template {template}')
 
             status = os.system(f"frame-omni-bencher v1 benchmark pallet "
                                f"--extrinsic=* "
@@ -170,7 +185,7 @@ if args.command == 'bench':
                                f"{f'--exclude-extrinsics={excluded_string} ' if excluded_string else ''}"
                                )
             if status != 0 and not args.continue_on_fail:
-                print(f'Failed to benchmark {pallet} in {runtime}')
+                print_and_log(f'Failed to benchmark {pallet} in {runtime}')
                 sys.exit(1)
 
             # Otherwise collect failed benchmarks and print them at the end
@@ -181,25 +196,25 @@ if args.command == 'bench':
                 successful_benchmarks[f'{runtime}'] = successful_benchmarks.get(f'{runtime}', []) + [pallet]
 
     if failed_benchmarks:
-        print('❌ Failed benchmarks of runtimes/pallets:')
+        print_and_log('❌ Failed benchmarks of runtimes/pallets:')
         for runtime, pallets in failed_benchmarks.items():
-            print(f'-- {runtime}: {pallets}')
+            print_and_log(f'-- {runtime}: {pallets}')
 
     if successful_benchmarks:
-        print('✅ Successful benchmarks of runtimes/pallets:')
+        print_and_log('✅ Successful benchmarks of runtimes/pallets:')
         for runtime, pallets in successful_benchmarks.items():
-            print(f'-- {runtime}: {pallets}')
+            print_and_log(f'-- {runtime}: {pallets}')
 
     tempdir.cleanup()
 
 elif args.command == 'fmt':
     command = f"cargo +nightly fmt"
-    print('Formatting with `{command}`')
+    print_and_log(f'Formatting with `{command}`...')
     nightly_status = os.system(f'{command}')
     taplo_status = os.system('taplo format --config .config/taplo.toml')
 
     if (nightly_status != 0 or taplo_status != 0) and not args.continue_on_fail:
-        print('❌ Failed to format code')
+        print_and_log('❌ Failed to format code')
         sys.exit(1)
 
-print('🚀 Done')
+print_and_log('🚀 Done')
