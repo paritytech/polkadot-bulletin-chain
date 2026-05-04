@@ -70,10 +70,10 @@ where
 		if let Some(inner_call) = call.is_sub_type() {
 			return matches!(
 				inner_call,
-				Call::store { .. }
-					| Call::store_with_cid_config { .. }
-					| Call::renew { .. }
-					| Call::renew_content_hash { .. }
+				Call::store { .. } |
+					Call::store_with_cid_config { .. } |
+					Call::renew { .. } |
+					Call::renew_content_hash { .. }
 			);
 		}
 		if depth >= MAX_WRAPPER_DEPTH {
@@ -211,8 +211,7 @@ where
 		match inner_call {
 			Call::store { data, .. } | Call::store_with_cid_config { data, .. } =>
 				T::WeightInfo::validate_store(data.len() as u32),
-			Call::renew { .. } | Call::renew_content_hash { .. } =>
-				T::WeightInfo::validate_renew(),
+			Call::renew { .. } | Call::renew_content_hash { .. } => T::WeightInfo::validate_renew(),
 			_ => Weight::zero(),
 		}
 	}
