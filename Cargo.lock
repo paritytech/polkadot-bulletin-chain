@@ -13454,7 +13454,9 @@ dependencies = [
 
 [[package]]
 name = "sp-hop"
-version = "0.1.0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fca325b1970c01a8ba3b085cba67f6cb507dbb128e11a8ed248d6684edcd162a"
 dependencies = [
  "parity-scale-codec",
  "sp-api",
