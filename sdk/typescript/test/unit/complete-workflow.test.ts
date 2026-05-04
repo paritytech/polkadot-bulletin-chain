@@ -8,7 +8,7 @@
  * called with correct argument types and produce the expected results.
  */
 
-import { blake2AsU8a } from "@polkadot/util-crypto"
+import { blake2b } from "@noble/hashes/blake2.js"
 import { Binary } from "polkadot-api"
 import { describe, expect, it } from "vitest"
 import { MockBulletinClient, type MockOperation } from "../../src/mock-client"
@@ -44,7 +44,7 @@ describe("Complete workflow (MockBulletinClient)", () => {
 
     // 3. Authorize preimage
     const specificData = Binary.fromText("Preimage-authorized content")
-    const contentHash = blake2AsU8a(specificData.asBytes())
+    const contentHash = blake2b(specificData.asBytes(), { dkLen: 32 })
 
     const preimageReceipt = await client
       .authorizePreimage(contentHash, BigInt(specificData.asBytes().length))
