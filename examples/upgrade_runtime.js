@@ -17,7 +17,7 @@
 import { cryptoWaitReady, blake2AsU8a } from '@polkadot/util-crypto';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
-import { newSigner } from './common.js';
+import { newSigner, toHex } from './common.js';
 import fs from 'fs';
 
 // --- Network configs ---
@@ -130,10 +130,10 @@ async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
 
 async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAddress) {
     const unsafeApi = client.getUnsafeApi();
-    const hashHex = `0x${Buffer.from(codeHash).toString('hex')}`;
+    const hashHex = toHex(codeHash);
 
     const authorizeCall = unsafeApi.tx.System.authorize_upgrade({
-        code_hash: codeHash,
+        code_hash: hashHex,
     }).decodedCall;
 
     let authorizeTx;
@@ -142,7 +142,7 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
         console.log('  via sudo.sudo(system.authorize_upgrade)');
     } catch (_) {
         authorizeTx = unsafeApi.tx.System.authorize_upgrade({
-            code_hash: codeHash,
+            code_hash: hashHex,
         });
         console.log('  via system.authorize_upgrade (requires governance origin)');
     }
@@ -233,7 +233,7 @@ async function main() {
 
     console.log(`Signer:   ${address}`);
     console.log(`WASM:     ${opts.wasmPath} (${(wasmCode.length / 1024 / 1024).toFixed(2)} MB)`);
-    console.log(`Hash:     0x${Buffer.from(codeHash).toString('hex')}`);
+    console.log(`Hash:     ${toHex(codeHash)}`);
     console.log(`Network:  ${opts.network} (${method})`);
 
     // -- Connect & upgrade --

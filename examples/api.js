@@ -89,7 +89,7 @@ export async function authorizePreimage(
 
         const authorizeCalls = batch.map(contentHash =>
             typedApi.tx.TransactionStorage.authorize_preimage({
-                content_hash: toBytes(contentHash),
+                content_hash: toHex(contentHash),
                 max_size: BigInt(maxSize)
             }).decodedCall
         );

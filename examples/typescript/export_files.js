@@ -26,10 +26,6 @@ const CONCURRENCY = 5; // keep low for public RPCs
 
 const HASH_CODES = { Blake2b256: 0xb220, Sha2_256: 0x12, Keccak256: 0x1b };
 
-function toHex(bytes) {
-    return '0x' + [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 function hexToBytes(hex) {
     const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
     const bytes = new Uint8Array(clean.length / 2);
@@ -145,7 +141,7 @@ async function main() {
                 const entry = {
                     blockNumber,
                     indexInBlock: i,
-                    contentHash: toHex(info.content_hash),
+                    contentHash: info.content_hash,
                     hashingType: info.hashing.type,
                     cidCodec: Number(info.cid_codec),
                     size: info.size,
