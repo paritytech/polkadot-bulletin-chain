@@ -236,10 +236,10 @@ jobs:
       CMD: ${{ needs.get-pr-info.outputs.CMD }}
       DEFAULT_IMAGE: ${{ needs.set-image.outputs.CI_IMAGE }}
     outputs:
-      IMAGE: ${{ steps.set.outputs.IMAGE }}
-      RUNNER: ${{ steps.set.outputs.RUNNER }}
+      IMAGE: ${{ steps.set-runner-image.outputs.IMAGE }}
+      RUNNER: ${{ steps.set-runner-image.outputs.RUNNER }}
     steps:
-      - id: set
+      - id: set-runner-image
         run: |
           BODY=$(echo "$CMD" | xargs) # remove whitespace
           IMAGE_OVERRIDE=$(echo "$BODY" | grep -oe 'docker.io/paritytech/ci-unified:[^[:space:]]*' || true)
@@ -260,8 +260,8 @@ jobs:
 
       - name: Print outputs
         run: |
-          echo "RUNNER=${{ steps.set.outputs.RUNNER }}"
-          echo "IMAGE=${{ steps.set.outputs.IMAGE }}"
+          echo "RUNNER=${{ steps.set-runner-image.outputs.RUNNER }}"
+          echo "IMAGE=${{ steps.set-runner-image.outputs.IMAGE }}"
 
   check-pr-author:
     runs-on: ubuntu-latest
