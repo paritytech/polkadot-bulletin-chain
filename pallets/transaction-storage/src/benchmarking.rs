@@ -252,7 +252,7 @@ mod benchmarks {
 		TransactionStorage::<T>::authorize_account(origin, who.clone(), 0, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
-		// `AuthorizationPeriod` is ~90 days of blocks on real runtimes; iterating
+		// `AuthorizationPeriod` is ~14 days of blocks on real runtimes; iterating
 		// `on_initialize`/`on_finalize` for each is ~1.3M no-op iterations per step.
 		// The dispatchable only compares `block_number >= expiration`, so we can jump
 		// the system block number directly without running intermediate block hooks.
