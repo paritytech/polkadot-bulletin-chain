@@ -2021,6 +2021,7 @@ dependencies = [
  "pallet-collator-selection",
  "pallet-hop-promotion",
  "pallet-message-queue",
+ "pallet-migrations",
  "pallet-session",
  "pallet-skip-feeless-payment",
  "pallet-sudo",
