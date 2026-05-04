@@ -183,7 +183,6 @@ jobs:
           PR_STATUS: ${{ needs.before-cmd.outputs.pr_status }}
         run: |
           echo "Running command: "${CMD}" on "${RUNNER}" runner, container: "${IMAGE}
-          echo "RUST_NIGHTLY_VERSION: ${RUST_NIGHTLY_VERSION}"
           echo "IS_ORG_MEMBER: ${IS_ORG_MEMBER}"
 
           git config --global --add safe.directory $GITHUB_WORKSPACE
