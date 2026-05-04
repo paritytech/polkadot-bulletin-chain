@@ -18,12 +18,12 @@
     "fs": "^0.0.1-security",
     "ipfs-unixfs": "^12.0.0",
     "multiformats": "^13.4.1",
-    "polkadot-api": "^2.1.1",
+    "polkadot-api": "^2.1.2",
     "smoldot": "^3.1.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@polkadot-api/cli": "0.21.1-canary.9d0f859",
+    "@polkadot-api/cli": "^0.21.0",
     "@types/bun": "latest"
   }
 }

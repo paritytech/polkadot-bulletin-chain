@@ -55,7 +55,7 @@
   },
   "peerDependencies": {
     "multiformats": "^13.4.1",
-    "polkadot-api": "^2.1.1"
+    "polkadot-api": "^2.1.2"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
@@ -65,7 +65,7 @@
     "@vitest/coverage-v8": "^4.1.2",
     "happy-dom": "^20.8.9",
     "multiformats": "^13.4.1",
-    "polkadot-api": "^2.1.1",
+    "polkadot-api": "^2.1.2",
     "tsup": "^8.3.5",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
