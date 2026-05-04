@@ -20,7 +20,7 @@ use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
 	paseo_constants::{fee::WeightToFee, locations::PeopleLocation},
 	xcm_config::{GovernanceLocation, LocationToAccountId},
-	AllPalletsWithoutSystem, Balances, Block, Runtime, RuntimeCall, RuntimeEvent,
+	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
 	UncheckedExtrinsic,
 };
@@ -494,6 +494,42 @@ fn store_with_cid_config_works() {
 		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
 		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
 	});
+}
+
+#[test]
+fn is_promoted_on_chain_works() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+			let data = b"some-promoted-blob".to_vec();
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			// Nothing stored yet — unknown hash returns false.
+			assert!(!HopPromotion::is_promoted_on_chain(content_hash));
+
+			// Authorize Alice and store the blob via `TransactionStorage::store`. Default
+			// hashing is `Blake2b256`, which matches `content_hash` above.
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				0,
+				data.len() as u64,
+			));
+			advance_block();
+			assert_ok_ok(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: data.clone(),
+				}),
+			));
+			// `BlockTransactions` is moved into `Transactions[block]` in `on_finalize`.
+			advance_block();
+
+			// Stored hash is now visible; an unrelated hash is not.
+			assert!(HopPromotion::is_promoted_on_chain(content_hash));
+			assert!(!HopPromotion::is_promoted_on_chain([0xAB; 32]));
+		});
 }
 
 #[test]
