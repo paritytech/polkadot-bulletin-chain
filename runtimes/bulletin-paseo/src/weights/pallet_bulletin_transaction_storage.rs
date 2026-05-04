@@ -88,23 +88,9 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
-	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
-	/// Proof: `TransactionStorage::ProofChecked` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
-	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(41494), added: 43969, mode: `MaxEncodedLen`)
-	/// Storage: `System::ParentHash` (r:1 w:0)
-	/// Proof: `System::ParentHash` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
-	fn check_proof() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `41707`
-		//  Estimated: `44959`
-		// Minimum execution time: 79_480_000 picoseconds.
-		Weight::from_parts(90_800_000, 0)
-			.saturating_add(Weight::from_parts(0, 44959))
-			.saturating_add(T::DbWeight::get().reads(4))
-			.saturating_add(T::DbWeight::get().writes(1))
+	// TODO: benchmark on reference hardware. `Weight::zero()` placeholder.
+	fn apply_block_inherents(_n: u32) -> Weight {
+		Weight::zero()
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
@@ -178,12 +164,9 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		.saturating_add(T::DbWeight::get().reads(1))
 		.saturating_add(T::DbWeight::get().writes(1))
 	}
-	// TODO: update weights
-	fn process_auto_renewals(n: u32) -> Weight {
-		Weight::from_parts(100_000_000, 0)
-			.saturating_add(Weight::from_parts(0, 40351))
-			.saturating_add(T::DbWeight::get().reads(5).saturating_mul(n as u64))
-			.saturating_add(T::DbWeight::get().writes(3).saturating_mul(n as u64))
+	// TODO: benchmark on reference hardware. `Weight::zero()` placeholder.
+	fn on_initialize_with_expiry(_n: u32) -> Weight {
+		Weight::zero()
 	}
 	// TODO: update weights
 	fn enable_auto_renew() -> Weight {
