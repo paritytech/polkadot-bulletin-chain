@@ -19,6 +19,8 @@ Polkadot Bulletin Chain is a specialized blockchain providing distributed data s
 
 **Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable `RetentionPeriod`.
 
+**Note**: The previous solochain version has been removed and is no longer maintained. Only the parachain runtime is supported.
+
 ## Build Commands
 
 ```bash
