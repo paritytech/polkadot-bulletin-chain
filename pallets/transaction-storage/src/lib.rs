@@ -888,6 +888,10 @@ pub mod pallet {
 		}
 	}
 
+	// `ValidateUnsigned` is deprecated upstream (will be removed after April 2027) in favour of
+	// `#[pallet::authorize]` + `frame_system::AuthorizeCall`. Migration is tracked separately;
+	// silence the deprecation here so `-D warnings` in CI does not block the SDK bump.
+	#[allow(deprecated)]
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T> {
 		type Call = Call<T>;
