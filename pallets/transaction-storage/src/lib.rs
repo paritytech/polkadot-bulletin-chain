@@ -1208,13 +1208,6 @@ pub mod pallet {
 			RetentionPeriod::<T>::get()
 		}
 
-		/// All transactions stored at the given block.
-		pub fn transactions_at(
-			block: BlockNumberFor<T>,
-		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
-			Transactions::<T>::get(block)
-		}
-
 		/// Returns `true` if a blob of the given size can be stored.
 		pub fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)

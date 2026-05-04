@@ -888,9 +888,25 @@ impl_runtime_apis! {
 		}
 
 		fn indexed_transactions(
-			_block: NumberFor<Block>,
+			block: NumberFor<Block>,
 		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
-			todo!("indexed_transactions runtime API not yet implemented — see https://github.com/paritytech/polkadot-bulletin-chain/pull/471")
+			use sp_transaction_storage_proof::IndexedTransactionInfo;
+
+			TransactionStorage::transactions_at(block)
+				.map(|txs| {
+					txs.into_iter()
+						.map(|tx| {
+							IndexedTransactionInfo {
+								content_hash: tx.content_hash,
+								size: tx.size,
+								hashing: tx.hashing.into(),
+								cid_codec: tx.cid_codec,
+								extrinsic_index: tx.extrinsic_index,
+							}
+						})
+						.collect()
+				})
+				.unwrap_or_default()
 		}
 	}
 

@@ -364,17 +364,6 @@ pub mod v2 {
 }
 
 /// Migration v2→v3: Adds `extrinsic_index` to `TransactionInfo`.
-///
-/// Multi-block migration driven by `pallet-migrations` because the storage map
-/// can hold up to `RetentionPeriod × MaxBlockTransactions` entries and decoding
-/// + re-encoding all in a single block would blow the block weight budget.
-///
-/// The migration is shape-tolerant: each step tries the current (v3) decode
-/// first and skips already-migrated entries. Pre-migration entries get
-/// `extrinsic_index = u32::MAX` as a sentinel.
-///
-/// The pallet's on-chain storage version is bumped from 2 to 3 atomically in
-/// the final step, when iteration finishes.
 pub mod v3 {
 	use super::*;
 	use crate::{
