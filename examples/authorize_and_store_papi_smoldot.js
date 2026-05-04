@@ -89,7 +89,7 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
         console.log(`✅ Added parachain: ${parachainSpecPath}`);
     }
 
-    return { client: createClient(getSmProvider(targetChain)), sd };
+    return { client: createClient(getSmProvider(() => targetChain)), sd };
 }
 
 async function main() {

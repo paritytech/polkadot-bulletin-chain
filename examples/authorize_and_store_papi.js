@@ -1,6 +1,6 @@
 import assert from "assert";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';

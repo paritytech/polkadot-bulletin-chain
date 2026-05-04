@@ -13,7 +13,7 @@
  */
 
 import { createClient, Binary } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 import { writeFileSync } from 'node:fs';
 import * as dagPB from '@ipld/dag-pb';
@@ -26,8 +26,7 @@ const CONCURRENCY = 5; // keep low for public RPCs
 
 const HASH_CODES = { Blake2b256: 0xb220, Sha2_256: 0x12, Keccak256: 0x1b };
 
-function toHex(fixedBinary) {
-    const bytes = fixedBinary.asBytes();
+function toHex(bytes) {
     return '0x' + [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 

@@ -24,7 +24,7 @@ import {
     logTestResult,
 } from "./logger.js";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
@@ -162,10 +162,9 @@ async function printStatistics(dataSize, typedApi) {
             if (!blockHash) {
                 blockHash = await typedApi.query.System.BlockHash.getValue(blockNum, { at: lastKnownBlockHash });
             }
-            // Convert Binary/Uint8Array to hex string for PAPI's at parameter
             const blockHashHex = typeof blockHash === 'string'
                 ? blockHash
-                : (blockHash?.asHex?.() || blockHash?.toHex?.() || '0x' + Buffer.from(blockHash).toString('hex'));
+                : '0x' + Buffer.from(blockHash).toString('hex');
             // Skip blocks with zero hash (pruned)
             if (blockHashHex.match(/^(0x)?0+$/)) {
                 continue;

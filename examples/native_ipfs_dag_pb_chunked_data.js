@@ -1,11 +1,10 @@
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.mjs';
-import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
 import assert from "assert";
 
 import fs from 'fs'
@@ -34,7 +33,7 @@ async function main() {
         generateTextImage(filePath, "Hello, Bulletin dag - " + new Date().toString());
 
         // Create PAPI client with WebSocket provider
-        client = createClient(withPolkadotSdkCompat(getWsProvider(NODE_WS)));
+        client = createClient(getWsProvider(NODE_WS));
         // Get typed API with generated descriptors
         const typedApi = client.getTypedApi(bulletin);
         await waitForBlockProduction(typedApi);
