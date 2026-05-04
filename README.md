@@ -2,6 +2,8 @@
 
 The Bulletin chain is a parachain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It is run using Polkadot SDK’s `polkadot-omni-node`.
 
+> Note: the previous solochain version has been removed and is no longer maintained. Only the parachain runtime is supported.
+
 ## Runtime functionality
 
 The Bulletin chain runtime functions to store transactions for a given period of time (currently set at 2 weeks) and provide proof of storage.
