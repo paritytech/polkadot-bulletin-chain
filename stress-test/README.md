@@ -74,7 +74,7 @@ export POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni
 
 ### Parachain Chain Spec
 
-The chain spec at `zombienet/bulletin-westend-spec.json` (Para ID 2487, westend-local relay) embeds the runtime WASM blob. **You must regenerate it after any runtime changes**, otherwise zombienet tests will run with a stale runtime:
+The chain spec at `zombienet/bulletin-westend-spec.json` (Para ID 1010, westend-local relay) embeds the runtime WASM blob. **You must regenerate it after any runtime changes**, otherwise zombienet tests will run with a stale runtime:
 
 ```bash
 ./scripts/create_bulletin_westend_spec.sh
@@ -237,7 +237,7 @@ Before running zombienet tests, ensure you have:
 | `POLKADOT_PARACHAIN_BINARY_PATH` | `polkadot-parachain` (on PATH) | Path to the parachain omni-node binary |
 | `PARACHAIN_CHAIN_SPEC_PATH` | `./zombienet/bulletin-westend-spec.json` | Path to the parachain chain spec |
 | `RELAY_CHAIN` | `westend-local` | Relay chain identifier |
-| `PARACHAIN_ID` | `2487` | Parachain ID |
+| `PARACHAIN_ID` | `1010` | Parachain ID |
 
 ### Running Tests
 

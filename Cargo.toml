@@ -21,6 +21,7 @@ cumulus-primitives-utility = { version = "0.26.0", default-features = false }
 futures = { version = "0.3.21" }
 hex = { version = "0.4" }
 jsonrpsee = { version = "0.24.3" }
+litep2p = { version = "0.13" }
 parachain-info = { version = "0.26.0", package = "staging-parachain-info", default-features = false }
 polkadot-parachain-primitives = { version = "21.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
@@ -128,6 +129,7 @@ members = [
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
 	"stress-test",
+	"zombienet-sdk-tests",
 ]
 # Exclude rust/authorize-and-store example - it uses subxt directly with metadata codegen
 # and is not part of the main workspace build. Build it separately:
