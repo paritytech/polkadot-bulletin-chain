@@ -37,6 +37,8 @@ Conceptually there will be 2 types of storage:
 - **Temporary storage** — happens through the `store` call.
 - **Permanent storage** — happens through the `renew` call (this can also be initiated through the auto-renewal flow).
 
+All three storage extrinsics — `store`, `store_with_cid_config`, and `renew` — are unconditionally feeless via `#[pallet::feeless_if(|...| true)]`. Authorization is the sole economic gate; every limit and rejection in the rest of this document is allowance-driven, not fee-driven. Wrapper calls (e.g. `utility::batch`) are not feeless and are rejected by `ValidateStorageCalls` regardless — see [Soft Limit](#soft-limit).
+
 ## Allowance Limits
 
 There are 2 limits on allowances:
