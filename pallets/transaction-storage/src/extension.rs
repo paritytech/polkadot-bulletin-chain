@@ -17,7 +17,10 @@
 
 //! Custom transaction extension for the transaction storage pallet.
 
-use crate::{pallet::Origin, weights::WeightInfo, Call, Config, Pallet, LOG_TARGET};
+use crate::{
+	pallet::Origin, weights::WeightInfo, AuthorizationExtent, AuthorizationScope, Call, Config,
+	Pallet, LOG_TARGET,
+};
 use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
@@ -270,5 +273,236 @@ where
 		})?;
 
 		Ok(())
+	}
+}
+
+/// Priority bonus given to an in-budget signer. Over-budget signers get `0`.
+pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = 1_000_000_000;
+
+/// Maps the prospective post-this-tx [`AuthorizationExtent`] to the priority bonus
+/// added by [`AllowanceBasedPriority`]. Pick a concrete impl in the runtime's
+/// `TxExtension` tuple.
+///
+/// Callers must pre-apply the call's effect to `extent` before calling `boost`:
+/// `extent.bytes += size` and `extent.transactions += 1`. The boost decision
+/// then reduces to "would this leave the holder in-budget on both axes?".
+pub trait BoostStrategy: Clone + PartialEq + Eq {
+	fn boost(extent: AuthorizationExtent) -> TransactionPriority;
+}
+
+/// Returns whether `extent` (already post-this-tx) is in-budget on both the byte
+/// counter and the transaction counter. The `bytes_allowance == 0` guard catches the
+/// "missing or empty grant" case.
+fn in_budget(extent: &AuthorizationExtent) -> bool {
+	if extent.bytes_allowance == 0 {
+		return false;
+	}
+	extent.bytes <= extent.bytes_allowance && extent.transactions <= extent.transactions_allowance
+}
+
+/// Boost scales linearly with the tighter of the byte-budget and tx-budget remainders.
+/// Fresh grant yields the full boost; at-cap on either axis yields zero.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProportionalBoost;
+impl BoostStrategy for ProportionalBoost {
+	fn boost(extent: AuthorizationExtent) -> TransactionPriority {
+		if !in_budget(&extent) {
+			return 0;
+		}
+		// Byte remainder: `bytes_allowance` is non-zero by `in_budget`.
+		let bytes_rem = extent.bytes_allowance.saturating_sub(extent.bytes);
+		let bytes_share =
+			(ALLOWANCE_PRIORITY_BOOST as u128 * bytes_rem as u128) / extent.bytes_allowance as u128;
+		// Tx remainder: when `transactions_allowance == 0`, treat as no boost.
+		let tx_share = if extent.transactions_allowance == 0 {
+			0
+		} else {
+			let tx_rem = extent.transactions_allowance.saturating_sub(extent.transactions);
+			(ALLOWANCE_PRIORITY_BOOST as u128 * tx_rem as u128) /
+				extent.transactions_allowance as u128
+		};
+		bytes_share.min(tx_share) as u64
+	}
+}
+
+/// Flat boost while in-budget on both byte and tx axes, `0` otherwise.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FlatBoost;
+impl BoostStrategy for FlatBoost {
+	fn boost(extent: AuthorizationExtent) -> TransactionPriority {
+		if in_budget(&extent) {
+			ALLOWANCE_PRIORITY_BOOST
+		} else {
+			0
+		}
+	}
+}
+
+/// Boosts signed `store` / `store_with_cid_config` priority via a runtime-selected
+/// [`BoostStrategy`]. Over-allowance txs still validate; they just don't get the boost.
+#[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
+#[codec(encode_bound())]
+#[codec(decode_bound())]
+#[codec(mel_bound())]
+#[scale_info(skip_type_params(T, B))]
+pub struct AllowanceBasedPriority<T, B = FlatBoost>(PhantomData<(T, B)>);
+
+impl<T, B> Default for AllowanceBasedPriority<T, B> {
+	fn default() -> Self {
+		Self(PhantomData)
+	}
+}
+
+impl<T: Config + Send + Sync, B: BoostStrategy> fmt::Debug for AllowanceBasedPriority<T, B> {
+	#[cfg(feature = "std")]
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "AllowanceBasedPriority")
+	}
+
+	#[cfg(not(feature = "std"))]
+	fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
+		Ok(())
+	}
+}
+
+impl<T: Config + Send + Sync, B: BoostStrategy + Send + Sync + 'static>
+	TransactionExtension<RuntimeCallOf<T>> for AllowanceBasedPriority<T, B>
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+	T::RuntimeOrigin: OriginTrait,
+	<T::RuntimeOrigin as OriginTrait>::PalletsOrigin: Clone + TryInto<Origin<T>>,
+{
+	const IDENTIFIER: &'static str = "AllowanceBasedPriority";
+
+	type Implicit = ();
+	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
+		Ok(())
+	}
+
+	type Val = ();
+	type Pre = ();
+
+	fn weight(&self, _call: &RuntimeCallOf<T>) -> Weight {
+		<T as frame_system::Config>::DbWeight::get().reads(1)
+	}
+
+	fn validate(
+		&self,
+		origin: T::RuntimeOrigin,
+		call: &RuntimeCallOf<T>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		_len: usize,
+		_self_implicit: Self::Implicit,
+		_inherited_implication: &impl Implication,
+		_source: TransactionSource,
+	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
+		let Some(inner_call) = call.is_sub_type() else {
+			return Ok((ValidTransaction::default(), (), origin));
+		};
+		// Only `store` / `store_with_cid_config` get the boost. `renew` also carries
+		// `Origin::Authorized` and does consume allowance, but it operates on
+		// already-stored data and shouldn't compete for the same priority slots as
+		// new submissions.
+		let this_tx_bytes = match inner_call {
+			Call::store { data } | Call::store_with_cid_config { data, .. } => data.len() as u64,
+			_ => return Ok((ValidTransaction::default(), (), origin)),
+		};
+
+		// `ValidateStorageCalls` earlier in the pipeline rewrites the origin to
+		// `Origin::Authorized`; only the account-scoped variant consumes the caller's allowance.
+		// Boost against the post-this-tx state so a single oversized tx is demoted on entry.
+		let priority = match origin.caller().clone().try_into() {
+			Ok(Origin::<T>::Authorized { who, scope: AuthorizationScope::Account(_) }) => {
+				let mut extent = Pallet::<T>::account_authorization_extent(who);
+				extent.bytes = extent.bytes.saturating_add(this_tx_bytes);
+				extent.transactions = extent.transactions.saturating_add(1);
+				B::boost(extent)
+			},
+			_ => 0,
+		};
+
+		Ok((ValidTransaction { priority, ..Default::default() }, (), origin))
+	}
+
+	fn prepare(
+		self,
+		_val: Self::Val,
+		_origin: &T::RuntimeOrigin,
+		_call: &RuntimeCallOf<T>,
+		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		_len: usize,
+	) -> Result<Self::Pre, TransactionValidityError> {
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod boost_tests {
+	use super::*;
+
+	/// Build a post-this-tx extent on the byte axis. The tx counter is parked at
+	/// `(0, u32::MAX)` so the tx axis is never the binding constraint in byte-focused
+	/// tests; tx-axis behaviour is covered by the dedicated test below.
+	fn extent(bytes: u64, allowance: u64) -> AuthorizationExtent {
+		AuthorizationExtent {
+			bytes,
+			bytes_allowance: allowance,
+			transactions: 0,
+			transactions_allowance: u32::MAX,
+		}
+	}
+
+	const A: u64 = 1_000;
+	const BOOST: u64 = ALLOWANCE_PRIORITY_BOOST;
+
+	#[test]
+	fn proportional_scales_with_remaining_allowance() {
+		assert_eq!(ProportionalBoost::boost(extent(0, 0)), 0); // no auth
+		assert_eq!(ProportionalBoost::boost(extent(A, A)), 0); // at cap (post-tx)
+		assert_eq!(ProportionalBoost::boost(extent(A + 1, A)), 0); // over cap
+		assert_eq!(ProportionalBoost::boost(extent(0, A)), BOOST); // unused
+		assert_eq!(ProportionalBoost::boost(extent(A / 2, A)), BOOST / 2); // half
+		assert_eq!(ProportionalBoost::boost(extent(A * 3 / 4, A)), BOOST / 4); // three-quarters
+	}
+
+	#[test]
+	fn flat_is_constant_while_in_budget() {
+		assert_eq!(FlatBoost::boost(extent(0, 0)), 0); // no auth
+		assert_eq!(FlatBoost::boost(extent(A, A)), BOOST); // at cap (still in-budget)
+		assert_eq!(FlatBoost::boost(extent(A + 1, A)), 0); // over cap
+		assert_eq!(FlatBoost::boost(extent(0, A)), BOOST); // unused
+		assert_eq!(FlatBoost::boost(extent(A / 2, A)), BOOST); // half
+		assert_eq!(FlatBoost::boost(extent(A - 1, A)), BOOST); // just below cap
+	}
+
+	#[test]
+	fn flat_does_not_let_fresh_outrank_partly_used() {
+		let fresh = extent(0, A);
+		let partly_used = extent(A / 2, A);
+		assert!(ProportionalBoost::boost(fresh) > ProportionalBoost::boost(partly_used));
+		assert_eq!(FlatBoost::boost(fresh), FlatBoost::boost(partly_used));
+	}
+
+	#[test]
+	fn tx_axis_gates_boost_independently() {
+		// In-budget on bytes, over on transactions → no boost.
+		let over_tx = AuthorizationExtent {
+			bytes: 0,
+			bytes_allowance: A,
+			transactions: 11,
+			transactions_allowance: 10,
+		};
+		assert_eq!(FlatBoost::boost(over_tx), 0);
+		assert_eq!(ProportionalBoost::boost(over_tx), 0);
+
+		// In-budget on both axes; the tighter remainder caps the proportional share.
+		let tight_tx = AuthorizationExtent {
+			bytes: 0,
+			bytes_allowance: A,
+			transactions: 9,
+			transactions_allowance: 10,
+		};
+		assert_eq!(FlatBoost::boost(tight_tx), BOOST);
+		assert_eq!(ProportionalBoost::boost(tight_tx), BOOST / 10);
 	}
 }

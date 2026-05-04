@@ -8,6 +8,10 @@ import { Spinner } from "@/components/ui/Spinner";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
 import { useChainState, useApi, StorageType } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
+import {
+  extentAllowanceBytes,
+  extentAllowanceTransactions,
+} from "@/state/storage.state";
 import { formatAddress, formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
 function QuickActions() {
@@ -294,12 +298,14 @@ function UsageCard() {
 
         for (const { keyArgs, value } of authEntries) {
           const extent = value.extent;
+          const txAllowance = Number(extentAllowanceTransactions(extent));
+          const bytesAllowance = extentAllowanceBytes(extent);
           if (keyArgs[0].type === "Account") {
-            userAuths.count += Number(extent.transactions);
-            userAuths.bytes += BigInt(extent.bytes);
+            userAuths.count += txAllowance;
+            userAuths.bytes += bytesAllowance;
           } else if (keyArgs[0].type === "Preimage") {
-            preimageAuths.count += Number(extent.transactions);
-            preimageAuths.bytes += BigInt(extent.bytes);
+            preimageAuths.count += txAllowance;
+            preimageAuths.bytes += bytesAllowance;
           }
         }
 
