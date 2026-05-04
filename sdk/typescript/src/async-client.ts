@@ -58,6 +58,18 @@ interface TxStatusEvent {
 }
 
 /**
+ * Subset of PAPI's transaction options used by the SDK.
+ *
+ * `nonce` lets callers override PAPI's internal nonce resolution (which can
+ * race when several transactions are submitted back-to-back without waiting
+ * for finalization). `at` selects the block the tx is built against.
+ */
+interface PapiTxOptions {
+  nonce?: number
+  at?: "best" | "finalized"
+}
+
+/**
  * Minimal interface for a PAPI transaction.
  *
  * Describes the subset of PAPI's `Transaction` type that the SDK uses.
@@ -65,12 +77,18 @@ interface TxStatusEvent {
  * requiring generated chain types as a dependency.
  */
 interface PapiTransaction {
-  signAndSubmit(signer: PolkadotSigner): Promise<{
+  signAndSubmit(
+    signer: PolkadotSigner,
+    options?: PapiTxOptions,
+  ): Promise<{
     block?: { hash: string; number: number }
     txHash: string
     events?: RuntimeEvent[]
   }>
-  signSubmitAndWatch(signer: PolkadotSigner): {
+  signSubmitAndWatch(
+    signer: PolkadotSigner,
+    options?: PapiTxOptions,
+  ): {
     subscribe(observer: {
       next: (ev: TxStatusEvent) => void
       error: (err: unknown) => void
@@ -141,6 +159,20 @@ export interface BulletinTypedApi {
           | undefined
         >
       }
+    }
+  }
+  /**
+   * Optional runtime API surface. Used to resolve the signer's starting nonce
+   * from the best block before chunked submissions, so sequential InBlock
+   * transactions don't race with PAPI's internal (and less predictable)
+   * nonce discovery.
+   */
+  apis?: {
+    AccountNonceApi?: {
+      account_nonce(
+        address: string,
+        options?: { at?: "best" | "finalized" | string },
+      ): Promise<number | bigint>
     }
   }
 }
@@ -214,7 +246,7 @@ function mapPapiEventToProgress(
   currentTxHash: string | undefined,
   progressCallback: ProgressCallback | undefined,
   chunkIndex: number | undefined,
-  waitFor: "in_block" | "finalized" = "finalized",
+  waitFor: WaitFor = "finalized",
 ): MappedTxStatus {
   const result: MappedTxStatus = {}
 
@@ -484,8 +516,11 @@ export class AuthCallBuilder {
   }
 }
 
-/** Resolve store options with defaults */
-function resolveStoreOptions(options?: StoreOptions): {
+/** Resolve store options with defaults. `defaultWaitFor` comes from client config. */
+function resolveStoreOptions(
+  options: StoreOptions | undefined,
+  defaultWaitFor: WaitFor,
+): {
   cidCodec: CidCodec | number
   hashAlgorithm: HashAlgorithm
   waitFor: WaitFor
@@ -494,7 +529,7 @@ function resolveStoreOptions(options?: StoreOptions): {
   return {
     cidCodec: opts.cidCodec ?? CidCodec.Raw,
     hashAlgorithm: opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
-    waitFor: opts.waitFor ?? "in_block",
+    waitFor: opts.waitFor ?? defaultWaitFor,
   }
 }
 
@@ -668,6 +703,35 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * Resolve the signer's nonce from the best block via the AccountNonceApi
+   * runtime call.
+   *
+   * Sequential chunked submissions return on `InBlock`, not `Finalized`, so
+   * PAPI's internal nonce discovery can read a stale (pre-submission) nonce
+   * if the best block hasn't propagated yet, causing later chunks to reuse
+   * an earlier chunk's nonce and time out in the pool. Querying from the
+   * best block and manually incrementing eliminates that race.
+   *
+   * Returns `undefined` when the runtime API isn't available on the chain
+   * (e.g. `getUnsafeApi()` without the descriptor, or a node that omits the
+   * call) — the caller falls back to PAPI's default nonce resolution.
+   */
+  private async resolveStartingNonce(): Promise<number | undefined> {
+    const accountNonceApi = this.api.apis?.AccountNonceApi
+    if (!accountNonceApi) return undefined
+
+    try {
+      const { encodeAddress } = await import("@polkadot/util-crypto")
+      const address = encodeAddress(this.signer.publicKey)
+      const raw = await accountNonceApi.account_nonce(address, { at: "best" })
+      const n = typeof raw === "bigint" ? Number(raw) : raw
+      return Number.isFinite(n) ? n : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * Create a store transaction.
    *
    * The chain defaults to Raw (0x55) codec + Blake2b-256 hashing, so the plain
@@ -699,12 +763,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param tx - The transaction to submit
    * @param progressCallback - Optional callback to receive transaction status events
    * @param waitFor - What to wait for: "in_block" (faster) or "finalized" (safer, default)
+   * @param chunkIndex - Chunk index to tag progress events with (chunked uploads)
+   * @param txOptions - PAPI tx options (explicit nonce / target block)
    */
   private async signAndSubmitWithProgress(
     tx: PapiTransaction,
     progressCallback?: ProgressCallback,
-    waitFor: "in_block" | "finalized" = "finalized",
+    waitFor: WaitFor = "finalized",
     chunkIndex?: number,
+    txOptions?: PapiTxOptions,
   ): Promise<{
     blockHash: string
     txHash: string
@@ -737,62 +804,65 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         })
       }
 
-      const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
-        next: (ev: TxStatusEvent) => {
-          const result = mapPapiEventToProgress(
-            ev,
-            txHash,
-            progressCallback,
-            chunkIndex,
-            waitFor,
-          )
-          if (result.txHash) txHash = result.txHash
-          if (result.finish) finish(result.finish.block, result.finish.events)
-        },
-        error: (err: unknown) => {
-          if (!resolved) {
-            resolved = true
-            cleanup()
-            if (progressCallback) {
-              const errorMsg = err instanceof Error ? err.message : String(err)
-              // Distinguish pool-related drops from other transaction errors
-              const isDropped =
-                errorMsg.includes("dropped") || errorMsg.includes("pool")
-              progressCallback({
-                type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
-                error: errorMsg,
+      const subscription = tx
+        .signSubmitAndWatch(this.signer, txOptions)
+        .subscribe({
+          next: (ev: TxStatusEvent) => {
+            const result = mapPapiEventToProgress(
+              ev,
+              txHash,
+              progressCallback,
+              chunkIndex,
+              waitFor,
+            )
+            if (result.txHash) txHash = result.txHash
+            if (result.finish) finish(result.finish.block, result.finish.events)
+          },
+          error: (err: unknown) => {
+            if (!resolved) {
+              resolved = true
+              cleanup()
+              if (progressCallback) {
+                const errorMsg =
+                  err instanceof Error ? err.message : String(err)
+                // Distinguish pool-related drops from other transaction errors
+                const isDropped =
+                  errorMsg.includes("dropped") || errorMsg.includes("pool")
+                progressCallback({
+                  type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
+                  error: errorMsg,
+                  chunkIndex,
+                })
+              }
+              reject(err)
+            }
+          },
+          complete: () => {
+            // PAPI can complete the Observable without a finalized/in_block
+            // event (e.g. txBestBlocksState fires with found:false after a
+            // reorg or node restart, causing the internal continueWith() to
+            // map to rxjs.EMPTY which completes immediately). Without this
+            // handler the Promise hangs until the defensive timeout fires.
+            if (!resolved) {
+              resolved = true
+              cleanup()
+              progressCallback?.({
+                type: TxStatus.Dropped,
+                error:
+                  "Transaction subscription ended before reaching the expected status",
                 chunkIndex,
               })
+              reject(
+                new BulletinError(
+                  "Transaction subscription ended before reaching the expected status. " +
+                    "This usually means the transaction was dropped from the best block " +
+                    "(e.g. due to a chain reorganization or node restart).",
+                  ErrorCode.TRANSACTION_FAILED,
+                ),
+              )
             }
-            reject(err)
-          }
-        },
-        complete: () => {
-          // PAPI can complete the Observable without a finalized/in_block
-          // event (e.g. txBestBlocksState fires with found:false after a
-          // reorg or node restart, causing the internal continueWith() to
-          // map to rxjs.EMPTY which completes immediately). Without this
-          // handler the Promise hangs until the defensive timeout fires.
-          if (!resolved) {
-            resolved = true
-            cleanup()
-            progressCallback?.({
-              type: TxStatus.Dropped,
-              error:
-                "Transaction subscription ended before reaching the expected status",
-              chunkIndex,
-            })
-            reject(
-              new BulletinError(
-                "Transaction subscription ended before reaching the expected status. " +
-                  "This usually means the transaction was dropped from the best block " +
-                  "(e.g. due to a chain reorganization or node restart).",
-                ErrorCode.TRANSACTION_FAILED,
-              ),
-            )
-          }
-        },
-      })
+          },
+        })
 
       // Defensive timeout: PAPI handles reconnects and mortality, so this
       // should rarely fire. If it does, it likely indicates a bug. Default:
@@ -830,7 +900,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     options?: CallOptions,
   ): Promise<TransactionReceipt> {
     try {
-      const waitFor = options?.waitFor ?? "in_block"
+      const waitFor = options?.waitFor ?? this.config.defaultWaitFor
       const result = await this.signAndSubmitWithProgress(
         tx,
         options?.onProgress,
@@ -960,7 +1030,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
+    const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(
+      options,
+      this.config.defaultWaitFor,
+    )
     const { cid } = await this.preparer.prepareStore(data, options)
 
     try {
@@ -1020,7 +1093,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    const { hashAlgorithm, waitFor } = resolveStoreOptions(options)
+    const { hashAlgorithm, waitFor } = resolveStoreOptions(
+      options,
+      this.config.defaultWaitFor,
+    )
 
     // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
     const prepared = await this.preparer.prepareStoreChunked(
@@ -1031,6 +1107,17 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
     const chunkCids: CID[] = []
     const totalChunks = prepared.chunks.length
+
+    // Resolve the starting nonce from the best block so sequential chunk
+    // submissions can use explicit incrementing nonces. Falls back to PAPI's
+    // default nonce resolution if the runtime API isn't available.
+    const startingNonce = await this.resolveStartingNonce()
+    let nextNonce = startingNonce
+
+    const nonceOpts = (): PapiTxOptions | undefined =>
+      nextNonce === undefined
+        ? undefined
+        : { nonce: nextNonce, at: "best" as const }
 
     // Submit each chunk transaction
     for (const chunk of prepared.chunks) {
@@ -1050,7 +1137,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           progressCallback,
           waitFor,
           chunk.index,
+          nonceOpts(),
         )
+        if (nextNonce !== undefined) nextNonce++
         const cid = chunk.cid
         if (cid) chunkCids.push(cid)
 
@@ -1100,7 +1189,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         manifestTx,
         progressCallback,
         waitFor,
+        undefined,
+        nonceOpts(),
       )
+      if (nextNonce !== undefined) nextNonce++
       manifestCid = prepared.manifest.cid
 
       if (progressCallback) {
@@ -1314,7 +1406,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       )
     }
 
-    const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
+    const { cidCodec, hashAlgorithm } = resolveStoreOptions(
+      options,
+      this.config.defaultWaitFor,
+    )
     const { cid } = await this.preparer.prepareStore(dataBytes, options)
 
     try {

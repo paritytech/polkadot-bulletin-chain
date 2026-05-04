@@ -89,7 +89,8 @@ export interface StoreOptions {
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm
   /**
-   * What to wait for before returning (default: "in_block")
+   * What to wait for before returning. When omitted, falls back to the
+   * client's `defaultWaitFor` (which defaults to `"finalized"`).
    * - "in_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    */
@@ -98,11 +99,14 @@ export interface StoreOptions {
 
 /**
  * Default store options
+ *
+ * Note: `waitFor` is intentionally unset here — the client fills it from
+ * `ClientConfig.defaultWaitFor` so a per-client override can take effect
+ * (e.g. CI tests defaulting to `"in_block"`).
  */
 export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
-  waitFor: "in_block",
 }
 
 /**
@@ -341,6 +345,10 @@ export interface ClientConfig {
    * PAPI handles reconnects and mortality, so this should rarely fire.
    * Set above PAPI's default mortality window (64 blocks ~ 6.4 min at 6s blocks). */
   txTimeout?: number
+  /** Default confirmation level for transactions (default: "finalized").
+   * Used when a call doesn't set `waitFor` explicitly. CI pipelines typically
+   * override this to `"in_block"` so chunked flows don't block on finalization. */
+  defaultWaitFor?: WaitFor
 }
 
 /**
@@ -354,6 +362,7 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
+  defaultWaitFor: "finalized",
 }
 
 /** Merge caller-supplied config with defaults, ignoring undefined values. */
