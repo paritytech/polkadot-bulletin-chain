@@ -15,6 +15,43 @@ export interface PreimageAuthorization {
   maxSize: bigint;
 }
 
+/**
+ * Backwards-compatible read of an `AuthorizationExtent`: newer chains track
+ * consumption separately (`*_allowance` for the cap, `transactions`/`bytes` for
+ * usage); older chains expose only the cap. The UI surfaces "remaining"
+ * everywhere, so we compute `allowance - consumed` when both are present and
+ * fall back to the raw value otherwise.
+ */
+export function extentRemainingTransactions(extent: any): bigint {
+  const allowance = extent?.transactions_allowance;
+  if (allowance != null) {
+    const used = BigInt(extent.transactions ?? 0);
+    const cap = BigInt(allowance);
+    return cap > used ? cap - used : 0n;
+  }
+  return BigInt(extent?.transactions ?? 0);
+}
+
+export function extentRemainingBytes(extent: any): bigint {
+  const allowance = extent?.bytes_allowance;
+  if (allowance != null) {
+    const used = BigInt(extent.bytes ?? 0n);
+    const cap = BigInt(allowance);
+    return cap > used ? cap - used : 0n;
+  }
+  return BigInt(extent?.bytes ?? 0n);
+}
+
+export function extentAllowanceBytes(extent: any): bigint {
+  const allowance = extent?.bytes_allowance;
+  return BigInt(allowance ?? extent?.bytes ?? 0n);
+}
+
+export function extentAllowanceTransactions(extent: any): bigint {
+  const allowance = extent?.transactions_allowance;
+  return BigInt(allowance ?? extent?.transactions ?? 0);
+}
+
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
   contentHash: Uint8Array;
@@ -45,8 +82,8 @@ export async function fetchAccountAuthorization(
     }
 
     const authorization: Authorization = {
-      transactions: BigInt(auth.extent.transactions),
-      bytes: auth.extent.bytes,
+      transactions: extentRemainingTransactions(auth.extent),
+      bytes: extentRemainingBytes(auth.extent),
       expiresAt: auth.expiration ?? undefined,
     };
 
@@ -83,8 +120,8 @@ export async function checkPreimageAuthorization(
     }
 
     const authorization: Authorization = {
-      transactions: BigInt(auth.extent.transactions),
-      bytes: auth.extent.bytes,
+      transactions: extentRemainingTransactions(auth.extent),
+      bytes: extentRemainingBytes(auth.extent),
       expiresAt: auth.expiration ?? undefined,
     };
 
@@ -131,7 +168,7 @@ export async function fetchPreimageAuthorizations(
         }
         return {
           contentHash,
-          maxSize: value.extent.bytes,
+          maxSize: extentAllowanceBytes(value.extent),
         };
       });
 

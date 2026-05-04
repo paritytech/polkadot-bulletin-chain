@@ -52,13 +52,17 @@ impl SortedMembers<AccountId> for TestAccounts {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 90 * crate::DAYS;
+	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
-	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
+	//
+	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
+	// runs before stores compete for blockspace.
+	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
+	// Base priority for `store` / `renew`. Picked well below `TransactionPriority::MAX` so
+	// `AllowanceBasedPriority` can add its boost without saturating `u64`, while still
+	// leaving plenty of headroom above generic transactions.
+	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX / 4;
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
@@ -123,4 +127,15 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+parameter_types! {
+	/// Maximum allowable skew between the user's submit timestamp and the on-chain
+	/// time when validating a HOP promotion: 48 hours, in milliseconds.
+	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
+}
+
+impl pallet_hop_promotion::Config for Runtime {
+	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+	type WeightInfo = crate::weights::pallet_hop_promotion::WeightInfo<Runtime>;
 }
