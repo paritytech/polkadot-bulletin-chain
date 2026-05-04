@@ -49,7 +49,6 @@ struct SubmitCounters {
 
 /// Content hash → extrinsic size mapping (separate lock from counters to reduce contention).
 type ContentHashMap = std::collections::HashMap<[u8; 32], u64>;
-
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
 pub const WORK_CHANNEL_CAPACITY: usize = 1000;
 
