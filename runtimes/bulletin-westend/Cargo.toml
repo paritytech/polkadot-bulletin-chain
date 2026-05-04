@@ -96,6 +96,7 @@ substrate-wasm-builder = { optional = true, workspace = true, default-features =
 default = ["std"]
 std = [
 	"bulletin-pallets-common/std",
+	"bulletin-transaction-storage-primitives/std",
 	"codec/std",
 	"cumulus-pallet-aura-ext/std",
 	"cumulus-pallet-parachain-system/std",
@@ -160,7 +161,6 @@ std = [
 	"xcm-executor/std",
 	"xcm-runtime-apis/std",
 	"xcm/std",
-	"bulletin-transaction-storage-primitives/std"
 ]
 runtime-benchmarks = [
 	"bulletin-pallets-common/runtime-benchmarks",

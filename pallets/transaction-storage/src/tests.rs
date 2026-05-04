@@ -1701,7 +1701,7 @@ fn migrate_v2_to_v3_sets_sentinel_for_existing_entries() {
 
 #[test]
 fn migrate_v2_to_v3_resumes_across_steps() {
-	use crate::migrations::v3::MigrateV2ToV3;
+	use crate::{migrations::v3::MigrateV2ToV3, weights::WeightInfo};
 	use polkadot_sdk_frame::deps::frame_support::{
 		migrations::SteppedMigration, weights::WeightMeter,
 	};
@@ -1711,7 +1711,7 @@ fn migrate_v2_to_v3_resumes_across_steps() {
 			insert_v2_format_transactions(block, 1);
 		}
 
-		let per_entry_weight = crate::mock::TestDbWeight::get().reads_writes(1, 1);
+		let per_entry_weight = <Test as crate::Config>::WeightInfo::migrate_v2_to_v3_step();
 		let mut total_steps = 0u32;
 		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
 		loop {

@@ -379,7 +379,7 @@ pub mod v3 {
 	use super::*;
 	use crate::{
 		pallet::{Pallet, Transactions},
-		TransactionInfo,
+		TransactionInfo, WeightInfo,
 	};
 	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm},
@@ -425,7 +425,7 @@ pub mod v3 {
 			mut cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-			let required = T::DbWeight::get().reads_writes(1, 1);
+			let required = T::WeightInfo::migrate_v2_to_v3_step();
 			if meter.remaining().any_lt(required) {
 				return Err(SteppedMigrationError::InsufficientWeight { required });
 			}
