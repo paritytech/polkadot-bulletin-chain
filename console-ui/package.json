@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@polkadot-api/cli": "^0.21.0",
+    "@polkadot-api/cli": "0.21.1-canary.9d0f859",
     "@tailwindcss/vite": "^4.2.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

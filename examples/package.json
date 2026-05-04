@@ -23,7 +23,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@polkadot-api/cli": "^0.21.0",
+    "@polkadot-api/cli": "0.21.1-canary.9d0f859",
     "@types/bun": "latest"
   }
 }
