@@ -620,7 +620,7 @@ mod runtime {
 	#[runtime::pallet_index(6)]
 	pub type Utility = pallet_utility;
 	#[runtime::pallet_index(7)]
-    pub type MultiBlockMigrations = pallet_migrations;
+	pub type MultiBlockMigrations = pallet_migrations;
 
 	// Monetary stuff.
 	#[runtime::pallet_index(10)]
