@@ -361,9 +361,10 @@ mod benchmarks {
 			.unwrap();
 		}
 
-		// prepare added `MaxTransactionSize` bytes to the used counter
+		// prepare added `data.len()` bytes to the permanent-usage counter
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
-		assert_eq!(extent.bytes, T::MaxTransactionSize::get() as u64);
+		assert_eq!(extent.bytes, 0);
+		assert_eq!(extent.bytes_permanent, data.len() as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
@@ -507,7 +508,9 @@ mod benchmarks {
 					content_hash,
 					hashing: HashingAlgorithm::Blake2b256,
 					cid_codec: RAW_CODEC,
+					extrinsic_index: 0,
 					block_chunks: 0,
+					kind: TransactionKind::Store,
 				};
 				let renewal_data = AutoRenewalData { account: caller };
 				pending
@@ -592,6 +595,11 @@ mod benchmarks {
 			// Distinct `content_hash` per entry so the on_initialize loop's
 			// `TransactionByContentHash::get` and `AutoRenewals::get` each hit a unique
 			// storage key — sharing a hash collapses into cache hits and undercharges PoV.
+			//
+			// Mark the synthetic entries as `TransactionKind::Renew` so on_initialize's
+			// `renewed_sum` aggregation runs and `update_permanent_storage_used` fires —
+			// this is the path that decrements the chain-wide permanent-byte counter when
+			// renewed entries age out. With kind=Store the path is skipped entirely.
 			let obsolete_block = BlockNumberFor::<T>::from(1u32);
 			BlockTransactions::<T>::mutate(|txns| -> Result<(), BenchmarkError> {
 				for i in 1..n {
@@ -599,6 +607,7 @@ mod benchmarks {
 					let mut next = template.clone();
 					next.content_hash = unique_hash;
 					next.block_chunks = chunks_per_tx.saturating_mul(i + 1);
+					next.kind = TransactionKind::Renew;
 					txns.try_push(next)
 						.map_err(|_| BenchmarkError::Stop("BlockTransactions overflow"))?;
 					// Mirror the storage state a real `store()` would have produced.
@@ -639,6 +648,51 @@ mod benchmarks {
 				"on_initialize should have taken Transactions[1]",
 			);
 		}
+		Ok(())
+	}
+
+	/// Benchmarks one outer-loop iteration of the v2→v3 multi-block migration:
+	/// fetch one v2-shape `Transactions` entry holding the maximum number of
+	/// items, decode, transform each item to v3, and re-insert. Worst case
+	/// per-step cost; multiplied by the number of entries inside `step()`.
+	#[benchmark]
+	fn migrate_v2_to_v3_step() -> Result<(), BenchmarkError> {
+		use crate::migrations::v3::{MigrateV2ToV3, V2TransactionInfo};
+		use bulletin_transaction_storage_primitives::cids::HashingAlgorithm;
+		use polkadot_sdk_frame::deps::{
+			frame_support::{migrations::SteppedMigration, weights::WeightMeter, BoundedVec},
+			sp_runtime::traits::{BlakeTwo256, Hash},
+		};
+
+		let max = T::MaxBlockTransactions::get();
+		let v2_items: Vec<V2TransactionInfo> = (0..max)
+			.map(|i| V2TransactionInfo {
+				chunk_root: BlakeTwo256::hash(&[i as u8]),
+				content_hash: BlakeTwo256::hash(&[(i as u8).wrapping_add(100)]).into(),
+				hashing: HashingAlgorithm::Blake2b256,
+				cid_codec: 0x55,
+				size: 2_000_000,
+				block_chunks: (i + 1) * 8,
+			})
+			.collect();
+		let bounded: BoundedVec<V2TransactionInfo, T::MaxBlockTransactions> =
+			v2_items.try_into().expect("within bounds");
+		let block: BlockNumberFor<T> = 1u32.into();
+		let key = Transactions::<T>::hashed_key_for(block);
+		sp_io::storage::set(&key, &bounded.encode());
+
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			MigrateV2ToV3::<T>::step(None, &mut meter).expect("step must succeed");
+		}
+
+		// The entry now decodes as the live (v3) `TransactionInfo` shape.
+		let v3 = Transactions::<T>::get(block).expect("entry exists");
+		assert_eq!(v3.len(), max as usize);
+		assert_eq!(v3[0].extrinsic_index, u32::MAX);
+
 		Ok(())
 	}
 

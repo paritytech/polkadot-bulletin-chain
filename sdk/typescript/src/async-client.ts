@@ -30,7 +30,6 @@ import {
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
-  toBytes,
 } from "./utils.js"
 
 /**
@@ -78,7 +77,7 @@ interface PapiTransaction {
     }): { unsubscribe(): void }
   }
   /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
-  getBareTx(): Promise<string>
+  getBareTx(): Promise<Uint8Array>
   decodedCall: unknown
 }
 
@@ -92,10 +91,10 @@ interface PapiTransaction {
 export interface BulletinTypedApi {
   tx: {
     TransactionStorage: {
-      store(args: { data: Binary | Uint8Array }): PapiTransaction
+      store(args: { data: Uint8Array }): PapiTransaction
       store_with_cid_config(args: {
         cid: { codec: bigint; hashing: ScaleHashingAlgorithm }
-        data: Binary | Uint8Array
+        data: Uint8Array
       }): PapiTransaction
       authorize_account(args: {
         who: string
@@ -103,7 +102,7 @@ export interface BulletinTypedApi {
         bytes: bigint
       }): PapiTransaction
       authorize_preimage(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
         max_size: bigint
       }): PapiTransaction
       renew(args: { block: number; index: number }): PapiTransaction
@@ -111,11 +110,11 @@ export interface BulletinTypedApi {
         who: string
       }): PapiTransaction
       remove_expired_preimage_authorization(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
       }): PapiTransaction
       refresh_account_authorization(args: { who: string }): PapiTransaction
       refresh_preimage_authorization(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
       }): PapiTransaction
     }
     Sudo?: {
@@ -152,7 +151,7 @@ export interface BulletinTypedApi {
  * Pass `papiClient.submit` directly when constructing the client.
  */
 export type SubmitFn = (
-  transaction: string,
+  transaction: Uint8Array,
   at?: string,
 ) => Promise<{
   ok: boolean
@@ -278,17 +277,17 @@ function mapPapiEventToProgress(
 export interface BulletinClientInterface {
   /** Store data with options (used internally by StoreBuilder) */
   storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult>
   /** Store preimage-authorized content as unsigned transaction */
   storeWithPreimageAuth?(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult>
-  store(data: Binary | Uint8Array): StoreBuilder
+  store(data: Uint8Array): StoreBuilder
   authorizeAccount(
     who: string,
     transactions: number,
@@ -313,10 +312,8 @@ export interface BulletinClientInterface {
  *
  * @example
  * ```typescript
- * import { Binary } from 'polkadot-api';
- *
  * const result = await client
- *   .store(Binary.fromText('Hello'))
+ *   .store(new TextEncoder().encode('Hello'))
  *   .withCodec(CidCodec.DagPb)
  *   .withHashAlgorithm('blake2b-256')
  *   .withCallback((event) => console.log('Progress:', event))
@@ -331,9 +328,9 @@ export class StoreBuilder {
 
   constructor(
     private executor: BulletinClientInterface,
-    data: Binary | Uint8Array,
+    data: Uint8Array,
   ) {
-    this.data = toBytes(data)
+    this.data = data
   }
 
   /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
@@ -516,7 +513,7 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
  * @example
  * ```typescript
  * import { createClient } from 'polkadot-api';
- * import { getWsProvider } from 'polkadot-api/ws-provider/web';
+ * import { getWsProvider } from 'polkadot-api/ws';
  * import { AsyncBulletinClient } from '@parity/bulletin-sdk';
  *
  * // User sets up PAPI client
@@ -685,9 +682,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             codec: BigInt(cidCodec),
             hashing: hashAlgorithmCodecToEnum(hashAlgorithm),
           },
-          data: new Binary(data),
+          data,
         })
-      : this.api.tx.TransactionStorage.store({ data: new Binary(data) })
+      : this.api.tx.TransactionStorage.store({ data })
   }
 
   /**
@@ -853,29 +850,19 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * Returns a builder that allows fluent configuration of store options.
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store as `Uint8Array`
    *
    * @example
    * ```typescript
-   * import { Binary } from 'polkadot-api';
-   *
-   * // Using PAPI's Binary class (recommended)
    * const result = await client
-   *   .store(Binary.fromText('Hello, Bulletin!'))
+   *   .store(new TextEncoder().encode('Hello, Bulletin!'))
    *   .withCodec(CidCodec.DagPb)
    *   .withHashAlgorithm('blake2b-256')
-   *   .withCallback((event) => {
-   *     console.log('Progress:', event);
-   *   })
-   *   .send();
-   *
-   * // Or with Uint8Array
-   * const result = await client
-   *   .store(new Uint8Array([1, 2, 3]))
+   *   .withCallback((event) => console.log('Progress:', event))
    *   .send();
    * ```
    */
-  store(data: Binary | Uint8Array): StoreBuilder {
+  store(data: Uint8Array): StoreBuilder {
     return new StoreBuilder(this, data)
   }
 
@@ -888,26 +875,25 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Automatically chunks data if it exceeds the configured threshold.
    */
   async storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     // Best-effort authorization check before submission
     {
       const willChunk =
-        !!chunkerConfig || dataBytes.length > this.config.chunkingThreshold
+        !!chunkerConfig || data.length > this.config.chunkingThreshold
       const chunkSize = chunkerConfig?.chunkSize ?? this.config.defaultChunkSize
       const createManifest =
         chunkerConfig?.createManifest ?? this.config.createManifest
       const required = willChunk
-        ? estimateAuthorization(dataBytes.length, chunkSize, createManifest)
-        : { transactions: 1, bytes: dataBytes.length }
+        ? estimateAuthorization(data.length, chunkSize, createManifest)
+        : { transactions: 1, bytes: data.length }
       await this.checkAccountAuthorization(
         required.transactions,
         required.bytes,
@@ -915,7 +901,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     // Decide whether to chunk based on threshold or explicit chunkerConfig
-    if (chunkerConfig || dataBytes.length > this.config.chunkingThreshold) {
+    if (chunkerConfig || data.length > this.config.chunkingThreshold) {
       // Chunked uploads use structurally fixed codecs (Raw for chunks, DagPb for manifest).
       // Reject if the user explicitly set a non-default codec — it would be silently ignored.
       const userCodec = options?.cidCodec
@@ -928,14 +914,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       }
 
       const chunked = await this.storeChunked(
-        dataBytes,
+        data,
         chunkerConfig,
         options,
         progressCallback,
       )
       return {
         cid: chunked.manifestCid,
-        size: dataBytes.length,
+        size: data.length,
         blockNumber: undefined,
         extrinsicIndex: undefined,
         chunks: {
@@ -944,7 +930,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       }
     } else {
-      return this.storeInternalSingle(dataBytes, options, progressCallback)
+      return this.storeInternalSingle(data, options, progressCallback)
     }
   }
 
@@ -1006,17 +992,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * check the error and `chunkCids` in the thrown error's context to understand
    * what was partially uploaded.
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store as `Uint8Array`
    */
   private async storeChunked(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     config?: Partial<ChunkerConfig>,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<ChunkedStoreResult> {
-    const dataBytes = toBytes(data)
-
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
@@ -1024,7 +1008,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
     // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
     const prepared = await this.preparer.prepareStoreChunked(
-      dataBytes,
+      data,
       config,
       options,
     )
@@ -1118,7 +1102,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return {
       chunkCids,
       manifestCid,
-      totalSize: dataBytes.length,
+      totalSize: data.length,
       numChunks: prepared.chunks.length,
     }
   }
@@ -1159,7 +1143,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
       const authTx = this.api.tx.TransactionStorage.authorize_preimage({
-        content_hash: new Binary(contentHash),
+        content_hash: Binary.toHex(contentHash),
         max_size: maxSize,
       })
       return this.submitTx(
@@ -1220,7 +1204,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new AuthCallBuilder((options) => {
       const authTx =
         this.api.tx.TransactionStorage.refresh_preimage_authorization({
-          content_hash: new Binary(contentHash),
+          content_hash: Binary.toHex(contentHash),
         })
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
@@ -1264,7 +1248,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new CallBuilder((options) => {
       const tx =
         this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
-          content_hash: new Binary(contentHash),
+          content_hash: Binary.toHex(contentHash),
         })
       return this.submitTx(
         tx,
@@ -1290,24 +1274,23 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * import { blake2b256 } from '@polkadot-labs/hdkd-helpers';
    *
    * // First, authorize the content hash (requires sudo)
-   * const data = Binary.fromText('Hello, Bulletin!');
-   * const hash = blake2b256(data.asBytes());
-   * await sudoClient.authorizePreimage(hash, BigInt(data.asBytes().length));
+   * const data = new TextEncoder().encode('Hello, Bulletin!');
+   * const hash = blake2b256(data);
+   * await sudoClient.authorizePreimage(hash, BigInt(data.length));
    *
    * // Anyone can now submit without fees
    * const result = await client.store(data).sendUnsigned();
    * ```
    */
   async storeWithPreimageAuth(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    if (dataBytes.length > this.config.chunkingThreshold) {
+    if (data.length > this.config.chunkingThreshold) {
       throw new BulletinError(
         "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
         ErrorCode.UNSUPPORTED_OPERATION,
@@ -1315,12 +1298,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
-    const { cid } = await this.preparer.prepareStore(dataBytes, options)
+    const { cid } = await this.preparer.prepareStore(data, options)
 
     try {
-      const tx = this.createStoreTx(dataBytes, cidCodec, hashAlgorithm)
-      const bareTxHex = await tx.getBareTx()
-      const finalized = await this.submit(bareTxHex)
+      const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
+      const bareTx = await tx.getBareTx()
+      const finalized = await this.submit(bareTx)
 
       if (!finalized.ok) {
         throw new BulletinError(
@@ -1342,7 +1325,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       return {
         cid,
-        size: dataBytes.length,
+        size: data.length,
         blockNumber: finalized.block.number,
         extrinsicIndex,
         chunks: undefined,

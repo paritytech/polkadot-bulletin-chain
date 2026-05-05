@@ -16,11 +16,9 @@
 
 import { cryptoWaitReady, blake2AsU8a } from '@polkadot/util-crypto';
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
-import { withPolkadotSdkCompat } from 'polkadot-api/polkadot-sdk-compat';
-import { newSigner } from './common.js';
+import { getWsProvider } from 'polkadot-api/ws';
+import { newSigner, toHex } from './common.js';
 import fs from 'fs';
-import { Binary } from 'polkadot-api';
 
 // --- Network configs ---
 
@@ -105,14 +103,11 @@ function printChainInfo({ runtimeVersion, lastUpgrade }) {
 
 // --- Upgrade methods ---
 
-// Binary.fromBytes wraps raw bytes; polkadot-api handles SCALE encoding
-// (including compact length prefix) internally when serializing the transaction.
-
 async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
     const unsafeApi = client.getUnsafeApi();
 
     const setCodeCall = unsafeApi.tx.System.set_code({
-        code: Binary.fromBytes(wasmCode),
+        code: wasmCode,
     }).decodedCall;
 
     const tx = unsafeApi.tx.Sudo.sudo({ call: setCodeCall });
@@ -135,10 +130,10 @@ async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
 
 async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAddress) {
     const unsafeApi = client.getUnsafeApi();
-    const hashHex = `0x${Buffer.from(codeHash).toString('hex')}`;
+    const hashHex = toHex(codeHash);
 
     const authorizeCall = unsafeApi.tx.System.authorize_upgrade({
-        code_hash: Binary.fromBytes(codeHash),
+        code_hash: hashHex,
     }).decodedCall;
 
     let authorizeTx;
@@ -147,7 +142,7 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
         console.log('  via sudo.sudo(system.authorize_upgrade)');
     } catch (_) {
         authorizeTx = unsafeApi.tx.System.authorize_upgrade({
-            code_hash: Binary.fromBytes(codeHash),
+            code_hash: hashHex,
         });
         console.log('  via system.authorize_upgrade (requires governance origin)');
     }
@@ -171,7 +166,7 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
     // apply_authorized_upgrade supports ValidateUnsigned in the runtime.
     console.log('\nStep 3: Applying authorized upgrade (unsigned)...');
     const applyTx = unsafeApi.tx.System.apply_authorized_upgrade({
-        code: Binary.fromBytes(wasmCode),
+        code: wasmCode,
     });
     const bareExtrinsic = await applyTx.getBareTx();
     const result2 = await client.submit(bareExtrinsic);
@@ -210,7 +205,7 @@ async function main() {
     // -- Verify-only mode --
     if (opts.verifyOnly) {
         console.log(`Connecting to ${rpc}...`);
-        const client = createClient(withPolkadotSdkCompat(getWsProvider(rpc)));
+        const client = createClient(getWsProvider(rpc));
         try {
             printChainInfo(await getChainInfo(client));
         } finally {
@@ -238,12 +233,12 @@ async function main() {
 
     console.log(`Signer:   ${address}`);
     console.log(`WASM:     ${opts.wasmPath} (${(wasmCode.length / 1024 / 1024).toFixed(2)} MB)`);
-    console.log(`Hash:     0x${Buffer.from(codeHash).toString('hex')}`);
+    console.log(`Hash:     ${toHex(codeHash)}`);
     console.log(`Network:  ${opts.network} (${method})`);
 
     // -- Connect & upgrade --
     console.log(`\nConnecting to ${rpc}...`);
-    const client = createClient(withPolkadotSdkCompat(getWsProvider(rpc)));
+    const client = createClient(getWsProvider(rpc));
 
     try {
         const { runtimeVersion: current } = await getChainInfo(client);

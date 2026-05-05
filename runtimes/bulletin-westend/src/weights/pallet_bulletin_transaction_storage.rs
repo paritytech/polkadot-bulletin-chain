@@ -294,4 +294,20 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2555).saturating_mul(n.into()))
 	}
+	/// Storage: `TransactionStorage::Transactions` (r:2 w:1)
+	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(43542), added: 46017, mode: `MaxEncodedLen`)
+	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
+	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
+	fn migrate_v2_to_v3_step() -> Weight {
+		// Placeholder weight ported from origin/main (pre-merge). Re-bench after merge to
+		// reflect the rs-data-renewal `TransactionInfo` shape (incl. extrinsic_index, kind).
+		// Proof Size summary in bytes:
+		//  Measured:  `41726`
+		//  Estimated: `93024`
+		// Minimum execution time: 127_440_000 picoseconds.
+		Weight::from_parts(132_048_000, 0)
+			.saturating_add(Weight::from_parts(0, 93024))
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(2))
+	}
 }

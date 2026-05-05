@@ -15,8 +15,8 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
-import { bulletin } from '../.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from 'polkadot-api/ws';
+import { bulletin } from '../.papi/descriptors/dist/index.js';
 import { AsyncBulletinClient } from '../../sdk/typescript/dist/index.mjs';
 
 // Command line arguments

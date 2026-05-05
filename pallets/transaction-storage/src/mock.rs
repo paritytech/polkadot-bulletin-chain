@@ -35,11 +35,20 @@ construct_runtime!(
 	}
 );
 
+parameter_types! {
+	pub const TestDbWeight: polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight =
+		polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight {
+			read: 1_000_000,
+			write: 5_000_000,
+		};
+}
+
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
 	type Nonce = u64;
 	type Block = Block;
 	type BlockHashCount = ConstU64<250>;
+	type DbWeight = TestDbWeight;
 }
 
 parameter_types! {
@@ -48,6 +57,7 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -59,6 +69,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
+	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;

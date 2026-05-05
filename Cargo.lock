@@ -2091,6 +2091,7 @@ dependencies = [
  "pallet-collator-selection",
  "pallet-hop-promotion",
  "pallet-message-queue",
+ "pallet-migrations",
  "pallet-session",
  "pallet-skip-feeless-payment",
  "pallet-sudo",
@@ -2186,6 +2187,7 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-io",
+ "sp-transaction-storage-proof",
  "tracing",
 ]
 
@@ -2245,6 +2247,7 @@ dependencies = [
  "pallet-collator-selection",
  "pallet-hop-promotion",
  "pallet-message-queue",
+ "pallet-migrations",
  "pallet-session",
  "pallet-skip-feeless-payment",
  "pallet-sudo",
