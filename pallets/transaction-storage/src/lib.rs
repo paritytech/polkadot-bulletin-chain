@@ -180,8 +180,7 @@ pub struct TransactionInfo {
 	pub size: u32,
 	/// Extrinsic index within the block that originally indexed this data
 	/// (via `sp_io::transaction_index::index` / `renew`). For renewed entries
-	/// this is the renewer's extrinsic index, not the original. Entries created
-	/// before storage version 2 have `u32::MAX` as a sentinel.
+	/// this is the renewer's extrinsic index, not the original.
 	pub extrinsic_index: u32,
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
