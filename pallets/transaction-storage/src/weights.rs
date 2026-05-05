@@ -63,6 +63,7 @@ pub trait WeightInfo {
 	fn remove_expired_preimage_authorization() -> Weight;
 	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
+	fn migrate_v2_to_v3_step() -> Weight;
 }
 
 /// Weights for pallet_bulletin_transaction_storage using the Substrate node and recommended hardware.
@@ -147,6 +148,18 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn validate_renew() -> Weight {
 		T::DbWeight::get().reads_writes(8, 2)
 	}
+	/// Worst-case weight for one outer-loop iteration of the v2→v3 multi-block
+	/// migration: 2 reads (iterator step + raw fetch), 1 write (re-insert), plus
+	/// CPU work to decode/transform/encode a `BoundedVec<TransactionInfo, 512>`
+	/// and the corresponding ~43.5 KB of proof_size on the trie.
+	///
+	/// Placeholder until benchmarks are run; will be overwritten by
+	/// `frame-omni-bencher`'s output.
+	fn migrate_v2_to_v3_step() -> Weight {
+		Weight::from_parts(50_000_000, 43_500)
+			.saturating_add(T::DbWeight::get().reads(2_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
 }
 
 // For backwards compatibility and tests
@@ -229,5 +242,10 @@ impl WeightInfo for () {
 	}
 	fn validate_renew() -> Weight {
 		RocksDbWeight::get().reads_writes(8, 2)
+	}
+	fn migrate_v2_to_v3_step() -> Weight {
+		Weight::from_parts(50_000_000, 43_500)
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
 }

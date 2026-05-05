@@ -196,7 +196,11 @@ pub struct TransactionInfo {
 	pub cid_codec: CidCodec,
 
 	/// Size of indexed data in bytes.
-	size: u32,
+	pub size: u32,
+	/// Extrinsic index within the block that originally indexed this data
+	/// (via `sp_io::transaction_index::index` / `renew`). For renewed entries
+	/// this is the renewer's extrinsic index, not the original.
+	pub extrinsic_index: u32,
 	/// Total number of chunks added in the block with this transaction. This
 	/// is used to find transaction info by block chunk index using binary search.
 	///
@@ -346,7 +350,7 @@ pub mod pallet {
 		InvalidContentHash,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -581,6 +585,7 @@ pub mod pallet {
 						content_hash: info.content_hash,
 						hashing: info.hashing,
 						cid_codec: info.cid_codec,
+						extrinsic_index,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -611,7 +616,7 @@ pub mod pallet {
 			let target_number = number.saturating_sub(period);
 			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
 			let transactions =
-				Transactions::<T>::get(target_number).ok_or(Error::<T>::MissingStateData)?;
+				Self::transactions_at(target_number).ok_or(Error::<T>::MissingStateData)?;
 
 			// Verify the proof with a "random" chunk (randomness is based on the parent hash).
 			let parent_hash = frame_system::Pallet::<T>::parent_hash();
@@ -830,7 +835,7 @@ pub mod pallet {
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
 	#[pallet::getter(fn transaction_roots)]
-	pub(super) type Transactions<T: Config> = StorageMap<
+	pub type Transactions<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		BlockNumberFor<T>,
@@ -1171,6 +1176,7 @@ pub mod pallet {
 						content_hash: cid.content_hash,
 						hashing,
 						cid_codec,
+						extrinsic_index,
 						block_chunks: total_chunks,
 					})
 					.map_err(|_| Error::<T>::TooManyTransactions)
@@ -1405,13 +1411,6 @@ pub mod pallet {
 			RetentionPeriod::<T>::get()
 		}
 
-		/// All transactions stored at the given block.
-		pub fn transactions_at(
-			block: BlockNumberFor<T>,
-		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
-			Transactions::<T>::get(block)
-		}
-
 		/// Returns `true` if a blob of the given size can be stored.
 		pub fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)
@@ -1430,6 +1429,42 @@ pub mod pallet {
 		) -> Option<TransactionInfo> {
 			let transactions = Transactions::<T>::get(block_number)?;
 			transactions.into_iter().nth(index as usize)
+		}
+
+		/// All transactions stored at the given block, in the current `TransactionInfo` layout.
+		///
+		/// Shape-tolerant against entries that are still in the pre-v3 layout.
+		pub fn transactions_at(
+			block: BlockNumberFor<T>,
+		) -> Option<BoundedVec<TransactionInfo, T::MaxBlockTransactions>> {
+			let raw = sp_io::storage::get(&Transactions::<T>::hashed_key_for(block))?;
+
+			if let Ok(v3) =
+				BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+			{
+				return Some(v3);
+			}
+
+			let v2 = BoundedVec::<
+				crate::migrations::v3::V2TransactionInfo,
+				T::MaxBlockTransactions,
+			>::decode(&mut &raw[..])
+			.ok()?;
+
+			let materialized: Vec<TransactionInfo> = v2
+				.into_iter()
+				.map(|tx| TransactionInfo {
+					chunk_root: tx.chunk_root,
+					content_hash: tx.content_hash,
+					hashing: tx.hashing,
+					cid_codec: tx.cid_codec,
+					size: tx.size,
+					extrinsic_index: u32::MAX,
+					block_chunks: tx.block_chunks,
+				})
+				.collect();
+
+			BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(materialized).ok()
 		}
 
 		/// Returns `true` if no more store/renew transactions can be included in the current

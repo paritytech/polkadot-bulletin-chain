@@ -388,6 +388,51 @@ mod benchmarks {
 		Ok(())
 	}
 
+	/// Benchmarks one outer-loop iteration of the v2→v3 multi-block migration:
+	/// fetch one v2-shape `Transactions` entry holding the maximum number of
+	/// items, decode, transform each item to v3, and re-insert. Worst case
+	/// per-step cost; multiplied by the number of entries inside `step()`.
+	#[benchmark]
+	fn migrate_v2_to_v3_step() -> Result<(), BenchmarkError> {
+		use crate::migrations::v3::{MigrateV2ToV3, V2TransactionInfo};
+		use bulletin_transaction_storage_primitives::cids::HashingAlgorithm;
+		use polkadot_sdk_frame::deps::{
+			frame_support::{migrations::SteppedMigration, weights::WeightMeter, BoundedVec},
+			sp_runtime::traits::{BlakeTwo256, Hash},
+		};
+
+		let max = T::MaxBlockTransactions::get();
+		let v2_items: Vec<V2TransactionInfo> = (0..max)
+			.map(|i| V2TransactionInfo {
+				chunk_root: BlakeTwo256::hash(&[i as u8]),
+				content_hash: BlakeTwo256::hash(&[(i as u8).wrapping_add(100)]).into(),
+				hashing: HashingAlgorithm::Blake2b256,
+				cid_codec: 0x55,
+				size: 2_000_000,
+				block_chunks: (i + 1) * 8,
+			})
+			.collect();
+		let bounded: BoundedVec<V2TransactionInfo, T::MaxBlockTransactions> =
+			v2_items.try_into().expect("within bounds");
+		let block: BlockNumberFor<T> = 1u32.into();
+		let key = Transactions::<T>::hashed_key_for(block);
+		sp_io::storage::set(&key, &bounded.encode());
+
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			MigrateV2ToV3::<T>::step(None, &mut meter).expect("step must succeed");
+		}
+
+		// The entry now decodes as the live (v3) `TransactionInfo` shape.
+		let v3 = Transactions::<T>::get(block).expect("entry exists");
+		assert_eq!(v3.len(), max as usize);
+		assert_eq!(v3[0].extrinsic_index, u32::MAX);
+
+		Ok(())
+	}
+
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
 }
 
