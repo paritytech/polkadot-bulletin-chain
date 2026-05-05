@@ -204,6 +204,11 @@ jobs:
           chmod +x "${POLKADOT_SDK_BIN_DIR}/polkadot-omni-node"
           "${POLKADOT_SDK_BIN_DIR}/polkadot-omni-node" --version
 
+      # Print the version banner in its own step so it is easy to spot in the
+      # Actions UI and confirm CI is running against the bulletin binary.
+      - name: Confirm polkadot-omni-node is the bulletin binary
+        run: "${POLKADOT_SDK_BIN_DIR}/polkadot-omni-node" --version
+
       - name: Start services
         working-directory: examples
         env:
