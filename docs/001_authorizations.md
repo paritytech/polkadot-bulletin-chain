@@ -157,7 +157,7 @@ Worst case for per-account on-chain footprint: renew right at the end of one win
 | 27 | day 13's batch ages out (cleanup decrements) | 10 MiB | 10 MiB |
 | 28 | day 14's batch ages out; re-claim; new renew | … | … |
 
-Peak on-chain bytes per account: `2 × bytes_allowance`. Generalising, with `RetentionPeriod / AuthorizationPeriod = K`, the bound is `K × bytes_allowance`. Aligned periods (Westend / Paseo) give `K = 1`, so peak = `2 × bytes_allowance` (during overlap windows).
+Peak on-chain bytes per account: `2 × bytes_allowance`. Generalising, with `RetentionPeriod / AuthorizationPeriod = K`, the bound is `(K + 1) × bytes_allowance`: at any moment up to `K + 1` consecutive windows can overlap on chain (the current window's renew plus up to `K` earlier windows still inside their `RetentionPeriod`). Aligned periods (Westend / Paseo) give `K = 1`, so peak = `2 × bytes_allowance` (during overlap windows).
 
 ### Example 4 — chain-wide cap at scale
 
@@ -173,19 +173,13 @@ The chain-wide cap is a hard ceiling on `PermanentStorageUsed`; the on-chain ren
 
 ### Example 5 — adversarial single-user renew spam
 
-A user with maximum claim rate and full `bytes_allowance` every period contributes at most `K × bytes_allowance` on-chain bytes simultaneously (Example 3). To exceed that, they would need to renew **more** in a single window than their `bytes_allowance` permits — exactly what `Error::PermanentAllowanceExceeded` rejects.
+A user with maximum claim rate and full `bytes_allowance` every period contributes at most `(K + 1) × bytes_allowance` on-chain bytes simultaneously (Example 3). To exceed that, they would need to renew **more** in a single window than their `bytes_allowance` permits — exactly what `Error::PermanentAllowanceExceeded` rejects.
 
 A user across many accounts (Sybil-like) is bounded by the chain-wide cap (Example 4), regardless of how many accounts they control.
 
 ## Migration
 
-`STORAGE_VERSION` stays at **2**. The existing `v2::MigrateV1ToV2` is rewritten in place to produce the simpler-design v2 layout — v2 was never shipped from this branch.
-
-The migration:
-
-1. Translates `Authorizations`: `V1AuthorizationExtent { transactions, bytes }` → new `AuthorizationExtent { transactions: 0, transactions_allowance: old.transactions, bytes: 0, bytes_permanent: 0, bytes_allowance: old.bytes }`. Drops entries with `bytes == 0` (already unusable on the old chain).
-2. Translates `Transactions`: tail-extends every `TransactionInfo` with `kind = TransactionKind::Store`. Pre-migration renewed bytes age out without affecting the chain counter — `PermanentStorageUsed` starts at 0 and converges to accurate within one `RetentionPeriod` post-deployment.
-3. Translates `BlockTransactions` defensively (transient — usually empty between blocks).
+`STORAGE_VERSION = 3`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3}` modules for the wiring.
 
 ## Capacity planning operational steps
 
