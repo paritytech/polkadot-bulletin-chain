@@ -225,6 +225,51 @@ fn checks_proof() {
 }
 
 #[test]
+fn checks_proof_with_v2_shaped_transactions_entry() {
+	use crate::migrations::v3::V2TransactionInfo;
+
+	new_test_ext().execute_with(|| {
+		let data = vec![0u8; 2000];
+
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(2, || None);
+
+		// Rewrite the freshly-written v3 entry at block 1 into the old v2 shape to
+		// simulate the MBM window where historical `Transactions` entries have not yet
+		// been rewritten by `MigrateV2ToV3`, while `check_proof` still executes every block.
+		let txs_v3 = Transactions::get(1).expect("block 1 entry stored in v3 shape");
+		let txs_v2: Vec<V2TransactionInfo> = txs_v3
+			.into_iter()
+			.map(|tx| V2TransactionInfo {
+				chunk_root: tx.chunk_root,
+				content_hash: tx.content_hash,
+				hashing: tx.hashing,
+				cid_codec: tx.cid_codec,
+				size: tx.size,
+				block_chunks: tx.block_chunks,
+			})
+			.collect();
+		let bounded: BoundedVec<V2TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+			txs_v2.try_into().expect("within bounds");
+		unhashed::put_raw(&Transactions::hashed_key_for(1u64), &bounded.encode());
+
+		// Direct decode as the live v3 type now fails.
+		assert!(Transactions::get(1).is_none());
+
+		run_to_block(11, || None);
+		let parent_hash = System::parent_hash();
+		let proof = build_proof(parent_hash.as_ref(), vec![data]).unwrap().unwrap();
+
+		assert_ok!(TransactionStorage::check_proof(RuntimeOrigin::none(), proof));
+		assert!(
+			<super::ProofChecked<Test>>::get(),
+			"check_proof should succeed by using transactions_at() on the v2-shaped entry",
+		);
+	});
+}
+
+#[test]
 fn verify_chunk_proof_works() {
 	new_test_ext().execute_with(|| {
 		// Prepare a bunch of transactions with variable chunk sizes.
@@ -1104,20 +1149,24 @@ fn migration_v1_old_entries_only() {
 		assert!(Transactions::contains_key(2));
 		assert!(Transactions::contains_key(3));
 
-		// Run v0→v1 then v1→v2: v0→v1 rewrites the (no-CID) layout into the v1 layout,
-		// v1→v2 tail-extends every entry with `kind = Store`.
+		// Chain v0→v1 → v1→v2 → v2→v3 to bring entries to the current layout:
+		// v1→v2 stamps `kind = Store` and `extrinsic_index = u32::MAX`; v2→v3 then
+		// observes the final layout and is a version-bump no-op for these entries.
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
 		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+		drive_v2_to_v3_migration();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 
-		let txs1 = Transactions::get(1).expect("should decode after both migrations");
+		let txs1 = Transactions::get(1).expect("should decode after v0→v3 chain");
 		assert_eq!(txs1.len(), 2);
 		for tx in txs1.iter() {
 			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
 			assert_eq!(tx.cid_codec, 0x55);
 			assert_eq!(tx.size, 2000);
 			assert_eq!(tx.kind, TransactionKind::Store, "pre-v2 entries default to Store");
+			assert_eq!(tx.extrinsic_index, u32::MAX);
 		}
 
 		let txs2 = Transactions::get(2).expect("should decode");
@@ -1165,15 +1214,19 @@ fn migration_v1_mixed_entries() {
 		run_to_block(11, || None);
 		let new_entry_before = Transactions::get(10).expect("new format decodes");
 
-		// Chain v0→v1→v2 so all entries (old and new) reach the current TransactionInfo
-		// layout.
+		// Chain v0→v1 → v1→v2 → v2→v3 so all entries (old and new) reach the current
+		// `TransactionInfo` layout (kind + extrinsic_index sentinels).
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
+		drive_v2_to_v3_migration();
 
-		// Old entry transformed all the way to v2 — decodable as the new TransactionInfo.
-		let old_entry_after = Transactions::get(5).expect("should decode after both migrations");
+		// Old entry transformed all the way to current layout — decodable as `TransactionInfo`.
+		let old_entry_after = Transactions::get(5).expect("should decode after v0→v3 chain");
 		assert_eq!(old_entry_after.len(), 2);
-		assert_eq!(old_entry_after[0].kind, TransactionKind::Store);
+		for tx in old_entry_after.iter() {
+			assert_eq!(tx.kind, TransactionKind::Store);
+			assert_eq!(tx.extrinsic_index, u32::MAX);
+		}
 
 		// New entry was already in v1 layout (it was just stored); v1→v2 tail-extended it
 		// with `kind = Store`. Field-by-field equality with the pre-migration v1 entry
@@ -1192,7 +1245,7 @@ fn migration_v1_version_updated() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(2));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(3));
 
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
@@ -1396,6 +1449,7 @@ fn try_state_detects_permanent_used_exceeds_chain_cap() {
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size: 2000,
+			extrinsic_index: u32::MAX,
 			block_chunks: num_chunks(2000),
 			kind: TransactionKind::Renew,
 		};
@@ -1966,6 +2020,135 @@ fn renew_rejects_when_per_account_allowance_exceeded() {
 	});
 }
 
+// ---- v1 → v2 multi-block migration tests ----
+
+/// Drive the v1→v2 stepped migration to completion against the test externalities.
+fn drive_v2_to_v3_migration() {
+	use crate::migrations::v3::MigrateV2ToV3;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+
+	let mut meter = WeightMeter::new();
+	let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
+	loop {
+		cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("MBM step must not fail");
+		if cursor.is_none() {
+			break;
+		}
+	}
+}
+
+/// Insert a `BoundedVec<V2TransactionInfo, _>` raw blob under
+/// `Transactions::hashed_key_for(block)`. `count` items are produced with synthetic field values.
+fn insert_v2_format_transactions(block: u64, count: u32) {
+	use crate::migrations::v3::V2TransactionInfo;
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+
+	let v2_txs: Vec<V2TransactionInfo> = (0..count)
+		.map(|i| V2TransactionInfo {
+			chunk_root: BlakeTwo256::hash(&[i as u8]),
+			content_hash: BlakeTwo256::hash(&[i as u8 + 100]).into(),
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 2000,
+			block_chunks: (i + 1) * 8,
+		})
+		.collect();
+	let bounded: BoundedVec<V2TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+		v2_txs.try_into().expect("within bounds");
+	let key = Transactions::hashed_key_for(block);
+	unhashed::put_raw(&key, &bounded.encode());
+}
+
+#[test]
+fn migrate_v2_to_v3_sets_sentinel_for_existing_entries() {
+	use crate::migrations::v3::MigrateV2ToV3;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+		insert_v2_format_transactions(1, 3);
+
+		let mut meter = WeightMeter::new();
+		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			if cursor.is_none() {
+				break;
+			}
+		}
+
+		let txs = Transactions::get(1).expect("entry decodes as v2 after migration");
+		assert_eq!(txs.len(), 3);
+		for tx in txs.iter() {
+			assert_eq!(tx.extrinsic_index, u32::MAX);
+			assert_eq!(tx.size, 2000);
+			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
+			assert_eq!(tx.cid_codec, 0x55);
+		}
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+	});
+}
+
+#[test]
+fn migrate_v2_to_v3_resumes_across_steps() {
+	use crate::{migrations::v3::MigrateV2ToV3, weights::WeightInfo};
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+		for block in 1..=20u64 {
+			insert_v2_format_transactions(block, 1);
+		}
+
+		let per_entry_weight = <Test as crate::Config>::WeightInfo::migrate_v2_to_v3_step();
+		let mut total_steps = 0u32;
+		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			let mut meter = WeightMeter::with_limit(per_entry_weight.saturating_mul(5));
+			cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			total_steps += 1;
+			if cursor.is_none() {
+				break;
+			}
+			assert!(total_steps < 100, "migration must converge");
+		}
+		assert!(total_steps >= 2, "expected ≥2 step calls; got {total_steps}");
+
+		for block in 1..=20u64 {
+			let txs = Transactions::get(block).expect("entry decodes as v2");
+			assert_eq!(txs.len(), 1);
+			assert_eq!(txs[0].extrinsic_index, u32::MAX);
+		}
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+	});
+}
+
+#[test]
+fn migrate_v2_to_v3_insufficient_weight_returns_err() {
+	use crate::migrations::v3::MigrateV2ToV3;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::{SteppedMigration, SteppedMigrationError},
+		weights::WeightMeter,
+	};
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+		insert_v2_format_transactions(1, 1);
+
+		let mut meter = WeightMeter::with_limit(Weight::zero());
+		let res = MigrateV2ToV3::<Test>::step(None, &mut meter);
+		assert!(
+			matches!(res, Err(SteppedMigrationError::InsufficientWeight { .. })),
+			"expected InsufficientWeight, got {:?}",
+			res,
+		);
+	});
+}
+
 /// `renew` rejects with [`CHAIN_PERMANENT_CAP_REACHED`] when the chain-wide hard cap is
 /// reached: `PermanentStorageUsed + size > MaxPermanentStorageSize`. Per-account state
 /// must remain untouched.
@@ -2016,6 +2199,7 @@ fn on_initialize_decrements_permanent_used_when_block_obsoletes() {
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size: store_size,
+			extrinsic_index: u32::MAX,
 			block_chunks: store_chunks,
 			kind: TransactionKind::Store,
 		};
@@ -2025,6 +2209,7 @@ fn on_initialize_decrements_permanent_used_when_block_obsoletes() {
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size: renew_size,
+			extrinsic_index: u32::MAX,
 			block_chunks: store_chunks + num_chunks(renew_size),
 			kind: TransactionKind::Renew,
 		};
@@ -2055,6 +2240,7 @@ fn renews_across_multiple_blocks_decrement_independently() {
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size,
+			extrinsic_index: u32::MAX,
 			block_chunks: num_chunks(size),
 			kind: TransactionKind::Renew,
 		};
@@ -2181,6 +2367,7 @@ fn on_initialize_emits_single_used_updated_event_per_obsolete_block() {
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size,
+			extrinsic_index: u32::MAX,
 			block_chunks,
 			kind: TransactionKind::Renew,
 		};
@@ -2261,4 +2448,224 @@ fn permanent_storage_near_cap_fires_on_rising_edge_only() {
 		// Quick sanity check on the threshold formula matching the constant.
 		assert_eq!(PERMANENT_STORAGE_NEAR_CAP_PERCENT, 80);
 	});
+}
+
+#[cfg(feature = "try-runtime")]
+#[test]
+fn migrate_v2_to_v3_post_upgrade_allows_pruned_entries() {
+	use crate::migrations::v3::MigrateV2ToV3;
+	use polkadot_sdk_frame::deps::frame_support::migrations::SteppedMigration;
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+		insert_v2_format_transactions(1, 1);
+		insert_v2_format_transactions(2, 1);
+		insert_v2_format_transactions(3, 1);
+
+		let state = MigrateV2ToV3::<Test>::pre_upgrade().expect("pre_upgrade succeeds");
+
+		Transactions::remove(2u64);
+		drive_v2_to_v3_migration();
+
+		MigrateV2ToV3::<Test>::post_upgrade(state).expect("pruned entries are allowed");
+	});
+}
+
+#[test]
+fn migrate_v2_to_v3_skips_already_v3_entries() {
+	use crate::migrations::v3::MigrateV2ToV3;
+	use polkadot_sdk_frame::deps::{
+		frame_support::{migrations::SteppedMigration, weights::WeightMeter},
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+
+		// Block 1: pre-migration v1 layout.
+		insert_v2_format_transactions(1, 1);
+		// Block 2: already-v2 layout, written by current code paths.
+		let v2_tx = TransactionInfo {
+			chunk_root: BlakeTwo256::hash(&[42]),
+			content_hash: BlakeTwo256::hash(&[43]).into(),
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 999,
+			extrinsic_index: 7, // distinct from u32::MAX so we can detect corruption
+			block_chunks: 4,
+			kind: TransactionKind::Store,
+		};
+		let v2_bounded: BoundedVec<TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+			vec![v2_tx.clone()].try_into().unwrap();
+		Transactions::insert(2u64, v2_bounded);
+
+		// Drive migration to completion.
+		let mut meter = WeightMeter::new();
+		let mut cursor: Option<<MigrateV2ToV3<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			cursor = MigrateV2ToV3::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			if cursor.is_none() {
+				break;
+			}
+		}
+
+		// Block 1: migrated v1 → v2 with sentinel.
+		let txs1 = Transactions::get(1).expect("decodes as v2");
+		assert_eq!(txs1[0].extrinsic_index, u32::MAX);
+
+		// Block 2: untouched — original `extrinsic_index = 7` preserved.
+		let txs2 = Transactions::get(2).expect("decodes as v2");
+		assert_eq!(txs2[0].extrinsic_index, 7);
+		assert_eq!(txs2[0].size, 999);
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+	});
+}
+
+#[test]
+fn transactions_at_decodes_v2_entry_with_sentinel() {
+	new_test_ext().execute_with(|| {
+		insert_v2_format_transactions(5, 2);
+
+		// Direct `Transactions::get` cannot decode v2-shape bytes as the live (v3) layout.
+		assert!(Transactions::get(5).is_none());
+
+		let txs = TransactionStorage::transactions_at(5)
+			.expect("v2 entries decode through transactions_at");
+		assert_eq!(txs.len(), 2);
+		for tx in txs.iter() {
+			assert_eq!(tx.extrinsic_index, u32::MAX);
+			assert_eq!(tx.size, 2000);
+		}
+
+		// The on-chain storage MUST be untouched: read-only API path does not write.
+		assert!(Transactions::get(5).is_none());
+	});
+}
+
+#[test]
+fn transactions_at_handles_mixed_v2_and_v3_entries() {
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+	new_test_ext().execute_with(|| {
+		// Block 1: pre-migration v2-shape (no `extrinsic_index`).
+		insert_v2_format_transactions(1, 2);
+		assert!(Transactions::get(1).is_none(), "v2 bytes do not decode as v3");
+
+		// Block 2: live v3-shape entry — written by current code paths.
+		let v3_tx = TransactionInfo {
+			chunk_root: BlakeTwo256::hash(&[42]),
+			content_hash: BlakeTwo256::hash(&[43]).into(),
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 999,
+			extrinsic_index: 7,
+			block_chunks: 4,
+			kind: TransactionKind::Store,
+		};
+		let v3_bounded: BoundedVec<TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+			vec![v3_tx.clone()].try_into().unwrap();
+		Transactions::insert(2u64, v3_bounded);
+
+		// Empty: a block with no entry returns None.
+		assert!(TransactionStorage::transactions_at(99).is_none());
+
+		// Slow path: v2 entry promoted to v3 with sentinel.
+		let txs1 = TransactionStorage::transactions_at(1).expect("v2 entry decodes");
+		assert_eq!(txs1.len(), 2);
+		for tx in txs1.iter() {
+			assert_eq!(tx.extrinsic_index, u32::MAX);
+			assert_eq!(tx.size, 2000);
+		}
+
+		// Fast path: v3 entry returned verbatim, real `extrinsic_index` preserved.
+		let txs2 = TransactionStorage::transactions_at(2).expect("v3 entry decodes");
+		assert_eq!(txs2.len(), 1);
+		assert_eq!(txs2[0].extrinsic_index, 7);
+		assert_eq!(txs2[0].size, 999);
+
+		// Read-only contract: storage shapes are unchanged after the read.
+		assert!(Transactions::get(1).is_none(), "v2 entry must remain v2-shape on disk");
+		assert_eq!(
+			Transactions::get(2)
+				.expect("v3 entry still decodes")
+				.into_iter()
+				.next()
+				.unwrap(),
+			v3_tx,
+			"v3 entry must be byte-identical pre/post read",
+		);
+	});
+}
+
+#[test]
+fn store_records_extrinsic_index_in_transaction_info() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![7u8; 500]));
+		run_to_block(2, || None);
+
+		let txs = TransactionStorage::transactions_at(1).expect("block 1 has transactions");
+		assert_eq!(txs.len(), 1);
+		// The store call ran at extrinsic_index 0 in block 1 (it's the only call).
+		assert_eq!(txs[0].extrinsic_index, 0);
+		assert_eq!(txs[0].size, 500);
+	});
+}
+
+/// Test to make sure we can actually access everything we need for build the
+/// output times for the runtime API.
+#[test]
+fn transaction_info_projects_into_upstream_runtime_api_type() {
+	use bulletin_transaction_storage_primitives::cids::HashingAlgorithm as PalletHashingAlgorithm;
+	use codec::{Decode, Encode};
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+
+	type ContentHash = [u8; 32];
+	type CidCodec = u64;
+	const RAW_CID_CODEC: CidCodec = 0x55;
+
+	#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo)]
+	enum HashingAlgorithm {
+		Blake2b256,
+		Sha2_256,
+		Keccak256,
+	}
+
+	#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo)]
+	struct IndexedTransactionInfo {
+		pub content_hash: ContentHash,
+		pub size: u32,
+		pub hashing: HashingAlgorithm,
+		pub cid_codec: CidCodec,
+		pub extrinsic_index: u32,
+	}
+
+	let tx = TransactionInfo {
+		chunk_root: BlakeTwo256::hash(&[1]),
+		content_hash: BlakeTwo256::hash(&[2]).into(),
+		hashing: PalletHashingAlgorithm::Blake2b256,
+		cid_codec: RAW_CID_CODEC,
+		size: 500,
+		extrinsic_index: 7,
+		block_chunks: 4,
+		kind: TransactionKind::Store,
+	};
+
+	let projected = IndexedTransactionInfo {
+		content_hash: tx.content_hash,
+		size: tx.size,
+		hashing: match tx.hashing {
+			PalletHashingAlgorithm::Blake2b256 => HashingAlgorithm::Blake2b256,
+			PalletHashingAlgorithm::Sha2_256 => HashingAlgorithm::Sha2_256,
+			PalletHashingAlgorithm::Keccak256 => HashingAlgorithm::Keccak256,
+			_ => panic!("unknown bulletin HashingAlgorithm variant"),
+		},
+		cid_codec: tx.cid_codec,
+		extrinsic_index: tx.extrinsic_index,
+	};
+
+	assert_eq!(projected.content_hash, tx.content_hash);
+	assert_eq!(projected.size, 500);
+	assert_eq!(projected.hashing, HashingAlgorithm::Blake2b256);
+	assert_eq!(projected.cid_codec, RAW_CID_CODEC);
+	assert_eq!(projected.extrinsic_index, 7);
 }
