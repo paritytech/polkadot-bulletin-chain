@@ -41,6 +41,7 @@ pallet-utility = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-bulletin-transaction-storage = { workspace = true }
+pallet-bulletin-transaction-storage-runtime-api = { workspace = true }
 pallet-hop-promotion = { workspace = true }
 bulletin-pallets-common = { workspace = true }
 sp-api = { workspace = true }
@@ -118,6 +119,7 @@ std = [
 	"pallet-aura/std",
 	"pallet-authorship/std",
 	"pallet-balances/std",
+	"pallet-bulletin-transaction-storage-runtime-api/std",
 	"pallet-bulletin-transaction-storage/std",
 	"pallet-collator-selection/std",
 	"pallet-hop-promotion/std",

@@ -906,6 +906,18 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl pallet_bulletin_transaction_storage_runtime_api::TransactionStorageAuthorizationApi<Block, AccountId> for Runtime {
+		fn account_authorization(
+			account: AccountId,
+		) -> pallet_bulletin_transaction_storage_runtime_api::AccountStorageAuthorization {
+			let extent = pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization_extent(account);
+			pallet_bulletin_transaction_storage_runtime_api::AccountStorageAuthorization {
+				transactions: extent.transactions_allowance.saturating_sub(extent.transactions),
+				bytes: extent.bytes_allowance.saturating_sub(extent.bytes),
+			}
+		}
+	}
+
 	#[cfg(feature = "try-runtime")]
 	impl frame_try_runtime::TryRuntime<Block> for Runtime {
 		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
