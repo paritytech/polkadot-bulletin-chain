@@ -192,6 +192,7 @@ jobs:
       # bulletin binary without changes to justfiles or test scripts.
       # Tracking: https://github.com/paritytech/polkadot-bulletin-chain/issues/479
       - name: Build polkadot-bulletin-parachain (override polkadot-omni-node)
+        shell: bash
         run: |
           set -euo pipefail
           git clone --depth 1 --branch ndk/bulletin-parachain-poc \
