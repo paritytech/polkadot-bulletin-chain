@@ -2521,6 +2521,37 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 	});
 }
 
+/// Stale `Transactions[block]` leftovers (block < current - RetentionPeriod) — e.g. from
+/// a chain whose `RetentionPeriod` was previously longer — must be pruned by the v2→v3
+/// migration rather than carried forward, otherwise `try_state` rejects them.
+#[test]
+fn migrate_v2_to_v3_prunes_stale_entries() {
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+		// Default `RetentionPeriod` in mock is 10. Run to block 50 so blocks 1..=39 are
+		// "stale" (block < 50 - 10 = 40) and blocks 40..=50 are still in retention.
+		System::set_block_number(50);
+
+		insert_v2_format_transactions(1, 1); // stale
+		insert_v2_format_transactions(20, 1); // stale
+		insert_v2_format_transactions(40, 1); // in retention
+		insert_v2_format_transactions(45, 1); // in retention
+
+		drive_v2_to_v3_migration();
+
+		assert!(Transactions::get(1).is_none(), "stale entry must be pruned");
+		assert!(Transactions::get(20).is_none(), "stale entry must be pruned");
+		assert!(Transactions::get(40).is_some(), "in-retention entry must be migrated");
+		assert!(Transactions::get(45).is_some(), "in-retention entry must be migrated");
+		assert_eq!(Transactions::get(40).unwrap()[0].extrinsic_index, u32::MAX);
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+
+		// `do_try_state` must accept the post-migration state (no stale entries left).
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
 #[test]
 fn transactions_at_decodes_v2_entry_with_sentinel() {
 	new_test_ext().execute_with(|| {

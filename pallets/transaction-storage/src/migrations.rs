@@ -421,11 +421,17 @@ pub mod v2 {
 }
 
 /// Migration v2→v3: Adds `extrinsic_index` to `TransactionInfo`.
+///
+/// Also opportunistically prunes any `Transactions[block]` entries with
+/// `block < current_block - RetentionPeriod` — stale leftovers from chains where the
+/// retention window was previously longer than it is now (`on_initialize`'s aging-out
+/// hook only drops one entry per block going forward; it does not catch up on
+/// historical entries that became stale across a retention-period change).
 pub mod v3 {
 	use super::*;
 	use crate::{
 		pallet::{Pallet, Transactions},
-		TransactionInfo, TransactionKind, WeightInfo,
+		RetentionPeriod, TransactionInfo, TransactionKind, WeightInfo,
 	};
 	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm},
@@ -471,10 +477,15 @@ pub mod v3 {
 			mut cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			use polkadot_sdk_frame::prelude::{frame_system, Saturating};
+
 			let required = T::WeightInfo::migrate_v2_to_v3_step();
 			if meter.remaining().any_lt(required) {
 				return Err(SteppedMigrationError::InsufficientWeight { required });
 			}
+
+			let oldest_valid = frame_system::Pallet::<T>::block_number()
+				.saturating_sub(RetentionPeriod::<T>::get());
 
 			loop {
 				if meter.try_consume(required).is_err() {
@@ -495,6 +506,17 @@ pub mod v3 {
 				};
 
 				let raw_key = Transactions::<T>::hashed_key_for(block_number);
+
+				// Stale leftovers from a previously-longer retention window: drop
+				// instead of converting. `on_initialize`'s aging-out only catches
+				// up one block at a time, so historical stale entries linger
+				// forever otherwise.
+				if block_number < oldest_valid {
+					sp_io::storage::clear(&raw_key);
+					cursor = Some(block_number);
+					continue;
+				}
+
 				let Some(raw) = sp_io::storage::get(&raw_key) else {
 					cursor = Some(block_number);
 					continue;
