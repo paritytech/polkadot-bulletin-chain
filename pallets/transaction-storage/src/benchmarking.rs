@@ -484,20 +484,22 @@ mod benchmarks {
 		// via `transaction_index::renew`. Synthetic content hashes are sufficient — none
 		// of those operations validate against existing storage.
 		if n > 0 {
-			let origin = T::Authorizer::try_successful_origin()
-				.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-			let caller: T::AccountId = whitelisted_caller();
-
-			TransactionStorage::<T>::authorize_account(
-				origin as T::RuntimeOrigin,
-				caller.clone(),
-				n * 10,
-				T::MaxTransactionSize::get() as u64 * n as u64 * 10,
-			)
-			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
-
 			let mut pending = PendingAutoRenewals::<T>::get();
 			for i in 0..n {
+				// Unique caller per item so each `check_authorization` hits a distinct
+				// `Authorizations` key — shared callers collapse into a single cache hit
+				// and undercharge the per-item write.
+				let caller: T::AccountId = account("rn_caller", i, 0);
+				let origin = T::Authorizer::try_successful_origin()
+					.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+				TransactionStorage::<T>::authorize_account(
+					origin,
+					caller.clone(),
+					10,
+					T::MaxTransactionSize::get() as u64 * 10,
+				)
+				.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
 				let content_hash = sp_io::hashing::blake2_256(&i.to_le_bytes());
 				let tx_info = TransactionInfo {
 					chunk_root: Default::default(),
@@ -507,7 +509,7 @@ mod benchmarks {
 					cid_codec: RAW_CODEC,
 					block_chunks: 0,
 				};
-				let renewal_data = AutoRenewalData { account: caller.clone() };
+				let renewal_data = AutoRenewalData { account: caller };
 				pending
 					.try_push((content_hash, tx_info, renewal_data))
 					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
@@ -578,31 +580,51 @@ mod benchmarks {
 				.cloned()
 				.ok_or(BenchmarkError::Stop("first store did not populate BlockTransactions"))?;
 			let chunks_per_tx = template.block_chunks;
+			let caller: T::AccountId = whitelisted_caller();
+
+			// Register the first entry's auto-renewal (its `TransactionByContentHash` was
+			// populated by the real `store()` call above).
+			AutoRenewals::<T>::insert(
+				template.content_hash,
+				AutoRenewalData { account: caller.clone() },
+			);
+
+			// Distinct `content_hash` per entry so the on_initialize loop's
+			// `TransactionByContentHash::get` and `AutoRenewals::get` each hit a unique
+			// storage key — sharing a hash collapses into cache hits and undercharges PoV.
+			let obsolete_block = BlockNumberFor::<T>::from(1u32);
 			BlockTransactions::<T>::mutate(|txns| -> Result<(), BenchmarkError> {
 				for i in 1..n {
+					let unique_hash: ContentHash = sp_io::hashing::blake2_256(&i.to_le_bytes());
 					let mut next = template.clone();
+					next.content_hash = unique_hash;
 					next.block_chunks = chunks_per_tx.saturating_mul(i + 1);
 					txns.try_push(next)
 						.map_err(|_| BenchmarkError::Stop("BlockTransactions overflow"))?;
+					// Mirror the storage state a real `store()` would have produced.
+					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));
+					AutoRenewals::<T>::insert(
+						unique_hash,
+						AutoRenewalData { account: caller.clone() },
+					);
 				}
 				Ok(())
 			})?;
-
-			// One insert is enough: every cloned entry shares `template.content_hash`,
-			// so the on_initialize loop takes the push-to-pending branch for all `n`.
-			let caller: T::AccountId = whitelisted_caller();
-			AutoRenewals::<T>::insert(template.content_hash, AutoRenewalData { account: caller });
 		}
 
-		// Finalize block 1 → BlockTransactions becomes Transactions[1].
-		run_to_block::<T>(2u32.into());
+		// We measure `on_initialize` at block `RP + 2` where `obsolete = 1` finds our `n`
+		// entries. Step there with real block hooks so the proof-size meter sees a fully
+		// populated trie (synthetic `set_block_number` jumps inflate readings under low
+		// sample counts). `run_to_block` already runs `on_initialize` of its target, so we
+		// stop one block early at `RP + 1` and open block `RP + 2` manually. The pallet's
+		// `on_finalize(RP + 1)` would panic (Transactions[1] exists but no inherent ran),
+		// so we skip it — `frame_system::on_finalize` alone sets the parent hash.
+		run_to_block::<T>(BlockNumberFor::<T>::from(BENCH_RETENTION + 1u32));
 
-		// Jump to the block AFTER the obsolete target so on_initialize takes
-		// `Transactions[1]` on the next call. The hook reads `obsolete = n - RP - 1`,
-		// so we pre-set the block number to `RP + 2` (= 12 with BENCH_RETENTION=10),
-		// because the harness's `#[block]` invocation will run on_initialize for
-		// `System::block_number()`.
-		System::<T>::set_block_number(BlockNumberFor::<T>::from(BENCH_RETENTION + 2u32));
+		// Open block 12. None of this is measured.
+		System::<T>::on_finalize(System::<T>::block_number());
+		System::<T>::set_block_number(System::<T>::block_number() + One::one());
+		System::<T>::on_initialize(System::<T>::block_number());
 
 		// The block under measurement.
 		#[block]
