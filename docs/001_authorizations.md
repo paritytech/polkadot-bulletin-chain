@@ -102,18 +102,18 @@ PermanentStorageUsed + size > T::MaxPermanentStorageSize::get()
 
 `PermanentStorageUsed` is bumped on every successful `renew`. It is decremented in `on_initialize` (mandatory weight, bounded by `MaxBlockTransactions`) when an obsolete block is removed: each `Transactions[obsolete][i]` with `kind == Renew` contributes its `size` to a single saturating decrement, then `Transactions[obsolete]` is removed.
 
-That obsolete-block cleanup is the only path that ever decrements `PermanentStorageUsed`. There is no lazy ledger, no cursor, no `on_poll` drain. `Transactions` is itself the authoritative record of which renewed bytes are still on chain; any other accounting structure would be redundant.
+That obsolete-block cleanup is the only path that ever decrements `PermanentStorageUsed`. `Transactions` is the authoritative record of which renewed bytes are still on chain; the counter is just a precomputed sum maintained alongside it.
 
 `MaxPermanentStorageSize` is a `Config` trait constant. The runtime picks the backing — `parameter_types! { pub const … }` (runtime-upgrade only) or `parameter_types! { pub storage … }` (storage-backed; mutable at runtime via `system.set_storage`).
 
 ### Capacity planning signals
 
-- `Event::PermanentStorageUsedUpdated { used }` fires once per change to `PermanentStorageUsed` (one per renew, one per obsolete-block cleanup).
+- `Event::PermanentStorageUsedUpdated { used }` fires once per change to `PermanentStorageUsed`: once per successful `renew` (increment), and once per obsolete-block cleanup that ages out at least one `kind == Renew` entry (decrement).
 - `Event::PermanentStorageNearCap { used, cap }` fires on the rising edge across `PERMANENT_STORAGE_NEAR_CAP_PERCENT` (80%) of `MaxPermanentStorageSize`. Off-chain consumers can use this as a "raise the cap or coordinate another bulletin chain" trigger.
 
 ## Why renewed bytes can't grow unboundedly
 
-Stated up front: at any block `n`, total renewed bytes on chain are bounded by `MaxPermanentStorageSize` (chain-wide cap) and a single account's renewed bytes are bounded by `2 × bytes_allowance` for `RetentionPeriod = AuthorizationPeriod` configurations.
+Stated up front: at any block `n`, total renewed bytes on chain are bounded by `MaxPermanentStorageSize` (chain-wide cap) and a single account's renewed bytes are bounded by `(K + 1) × bytes_allowance` where `K = RetentionPeriod / AuthorizationPeriod` (so `2 × bytes_allowance` for the aligned Westend / Paseo configs where `K = 1`).
 
 Why: every renewed byte ages out exactly `RetentionPeriod` blocks after its renew block (the obsolete-block cleanup in `on_initialize`). New renews are gated by the chain-wide cap, so the counter can only enter the in-bounds region. As old data ages out, the cap recovers.
 
@@ -131,19 +131,27 @@ PoP authorizes Alice for `bytes_allowance = 10 MiB`. Alice does:
 
 The per-account cap holds: at most `bytes_allowance` bytes renewed per window.
 
-### Example 2 — single user, aligned periods (steady state)
+### Example 2 — single user, lifecycle across one `AuthorizationPeriod`
 
-`AuthorizationPeriod = RetentionPeriod = 14 days`. Alice claims at day 0, renews 10 MiB at day 0, re-claims at day 14, renews 10 MiB at day 14, …
+`AuthorizationPeriod = RetentionPeriod = 14 days`. PoP authorizes Alice with `bytes_allowance = 10 MiB` at block `0`. Alice stores 10 MiB and renews it at block `1`. The authorization is `expired` from block `14 days` onward (`now >= expiration`); the renewed entry was indexed at block `1`, so its `RetentionPeriod` clock fires at block `1 + 14 days + 1` (the `on_initialize` cleanup once `obsolete` reaches `1`).
 
-| Day | Authorization state | `bytes_permanent` | On-chain renewed bytes |
-|---:|---|---:|---:|
-| 0 | window 1 begins; renew 10 MiB | 10 MiB | 10 MiB |
-| 1–13 | window 1 in progress; no further action | 10 MiB | 10 MiB |
-| 14 | window 1 expired; obsolete cleanup decrements; re-claim → `bytes_permanent = 0`; renew 10 MiB | 10 MiB | 10 MiB |
-| 28 | window 2 expired; re-claim; renew 10 MiB | 10 MiB | 10 MiB |
-| … | … | 10 MiB | 10 MiB |
+| Block | Authorization state | `bytes_permanent` | Alice's on-chain renewed bytes | `PermanentStorageUsed` |
+|---:|---|---:|---:|---:|
+| 0 | unexpired (expires `14 days`) | 0 | 0 | 0 |
+| 1 | unexpired; Alice: `store(10 MiB)` + `renew` | 10 MiB | 10 MiB | 10 MiB |
+| 1 → `14 days − 1` | unexpired, idle | 10 MiB | 10 MiB | 10 MiB |
+| `14 days` | **expired-but-present**; Alice's further `store` / `renew` reject with `InvalidTransaction::Payment` | 10 MiB | 10 MiB | 10 MiB |
+| `14 days + 2` | expired-but-present; `on_initialize` ages out the renew (`obsolete = 1`) | 10 MiB *(stale)* | 0 | 0 |
 
-Steady-state on-chain footprint per account = `bytes_allowance` (= 10 MiB).
+From here Alice's path branches:
+
+- **PoP re-authorizes** (`authorize_account` on the expired-but-present path) — the caps are re-granted and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) reset to `0`. Alice gets a fresh window and can `store` / `renew` again. Repeating the pattern every window gives steady-state on-chain footprint = `bytes_allowance` per account (= 10 MiB).
+- **PoP does not re-authorize** — the authorization sits expired-but-present until anyone calls `remove_expired_account_authorization`. Alice cannot `store` or `renew`. Her renewed data has already aged out.
+
+Two things worth noting:
+
+1. `bytes_permanent` is **not** decremented when the renewed data ages out — that is the chain-wide `PermanentStorageUsed`'s job. The per-account counter only resets on re-authorize (expired-but-present path). While the authorization is expired, `check_authorization` rejects on the expiration check before reading `bytes_permanent`, so the staleness is unobservable.
+2. `Transactions` is the source of truth for on-chain renewed bytes. The chain-wide counter mirrors that same total via increments at renew time and decrements at obsolete-block cleanup; the per-account counter does not need to.
 
 ### Example 3 — single user, end-of-window renew (worst case)
 
