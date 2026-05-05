@@ -11,16 +11,11 @@
  */
 
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from 'polkadot-api/ws';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 import { writeFileSync } from 'node:fs';
 
 const NODE_WS = process.argv[2] || 'wss://paseo-bulletin-rpc.polkadot.io';
-
-function toHex(fixedBinary) {
-    const bytes = fixedBinary.asBytes();
-    return '0x' + [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 function escapeCsv(value) {
     const str = String(value);
@@ -53,9 +48,7 @@ async function main() {
         const authRows = authEntries.map(({ keyArgs, value }) => {
             const scope = keyArgs[0];
             const scopeType = scope.type;           // "Account" or "Preimage"
-            const scopeValue = scopeType === 'Account'
-                ? scope.value                        // SS58 address string
-                : toHex(scope.value);                // content hash hex
+            const scopeValue = scope.value;          // SS58 string for Account, SizedHex<32> for Preimage
             return [
                 scopeType,
                 scopeValue,
@@ -85,12 +78,12 @@ async function main() {
                 txRows.push([
                     blockNumber,
                     i,
-                    toHex(info.content_hash),
+                    info.content_hash,
                     info.hashing.type,               // "Blake2b256", "Sha2_256", or "Keccak256"
                     info.cid_codec.toString(),
                     info.size,
                     info.block_chunks,
-                    toHex(info.chunk_root),
+                    info.chunk_root,
                 ]);
             }
         }

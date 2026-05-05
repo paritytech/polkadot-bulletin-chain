@@ -450,6 +450,7 @@ mod boost_tests {
 	fn extent(bytes: u64, allowance: u64) -> AuthorizationExtent {
 		AuthorizationExtent {
 			bytes,
+			bytes_permanent: 0,
 			bytes_allowance: allowance,
 			transactions: 0,
 			transactions_allowance: u32::MAX,
@@ -492,6 +493,7 @@ mod boost_tests {
 		// In-budget on bytes, over on transactions → no boost.
 		let over_tx = AuthorizationExtent {
 			bytes: 0,
+			bytes_permanent: 0,
 			bytes_allowance: A,
 			transactions: 11,
 			transactions_allowance: 10,
@@ -502,6 +504,7 @@ mod boost_tests {
 		// In-budget on both axes; the tighter remainder caps the proportional share.
 		let tight_tx = AuthorizationExtent {
 			bytes: 0,
+			bytes_permanent: 0,
 			bytes_allowance: A,
 			transactions: 9,
 			transactions_allowance: 10,

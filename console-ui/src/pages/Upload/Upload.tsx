@@ -31,7 +31,6 @@ import { formatBytes } from "@/utils/format";
 import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex } from "@/utils/format";
-import { Binary } from "polkadot-api";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
   { value: HashAlgorithm.Blake2b256, label: "Blake2b-256 (default)" },
@@ -184,16 +183,15 @@ export function Upload() {
                 codec: BigInt(cidCodec),
                 hashing: toHashingEnum(hashAlgorithm),
               },
-              data: Binary.fromBytes(data),
+              data,
             })
           : api.tx.TransactionStorage.store({
-              data: Binary.fromBytes(data),
+              data,
             });
 
         setTxStatus("Submitting unsigned transaction...");
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const bareTx = await (tx as any).getBareTx();
+        const bareTx = await tx.getBareTx();
 
         const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
           let resolved = false;
