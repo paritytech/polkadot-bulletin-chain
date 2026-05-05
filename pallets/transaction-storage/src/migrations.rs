@@ -279,34 +279,20 @@ pub mod v1 {
 	}
 }
 
-/// Migration v1→v2: rewrites the `AuthorizationExtent` schema and tail-extends
-/// `TransactionInfo` with a `kind` discriminator.
+/// Migration v1→v2: rewrites `AuthorizationExtent` from `{ transactions, bytes }` to
+/// `{ transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }`.
+/// The old remaining quota becomes the new allowance; consumed counters reset to `0`.
+/// Entries with `bytes == 0` are dropped (already unusable; `bytes_allowance > 0` is a
+/// v2 invariant).
 ///
-/// Old `AuthorizationExtent`: `{ transactions: u32, bytes: u64 }` — transaction count
-/// and remaining byte quota.
-///
-/// New `AuthorizationExtent`: `{ transactions, transactions_allowance, bytes,
-/// bytes_permanent, bytes_allowance }` — bytes consumed so far (split into store-side
-/// and renew-side), total bytes granted, plus a parallel boost-tier transaction
-/// counter and budget.
-///
-/// Each authorization's remaining byte quota becomes the new total allowance
-/// (`bytes_allowance = old.bytes`, `bytes = bytes_permanent = 0`); the remaining
-/// transaction count becomes `transactions_allowance` (`transactions = 0`), so each
-/// authorization keeps its previous remaining capacity on both axes. Entries whose
-/// remaining byte quota is already zero are dropped — they can't be translated to a
-/// valid v2 entry (`check_authorizations_integrity` requires `bytes_allowance > 0`)
-/// and they were already unusable on the old chain.
-///
-/// `TransactionInfo` gains a new `kind: TransactionKind { Store, Renew }` field
-/// appended at the end so existing entries can be tail-extended. Pre-migration entries
-/// are translated with `kind = Store`: they age out without affecting the chain-wide
-/// `PermanentStorageUsed` counter, which starts at 0 and converges to accurate within
-/// one `RetentionPeriod`.
+/// `Transactions` is intentionally left at the v1 shape — the stepped `v2→v3` migration
+/// decodes it via `V2TransactionInfo` (byte-identical) and converts entries to the
+/// current layout in bounded per-block steps. `BlockTransactions` is still translated
+/// here defensively (single transient `StorageValue`).
 pub mod v2 {
 	use super::*;
 	use crate::{
-		pallet::{Authorizations, BlockTransactions, Pallet, Transactions},
+		pallet::{Authorizations, BlockTransactions, Pallet},
 		Authorization, AuthorizationExtent, TransactionInfo, TransactionKind,
 	};
 	use bulletin_transaction_storage_primitives::{
@@ -377,32 +363,9 @@ pub mod v2 {
 				"v1->v2 AuthorizationExtent migration complete",
 			);
 
-			// Tail-extend every TransactionInfo with `kind = Store`. Pre-migration
-			// renewed bytes age out without bumping/decrementing the chain counter,
-			// which starts at 0 and converges within one RetentionPeriod.
-			let mut tx_blocks_migrated: u64 = 0;
-			Transactions::<T>::translate::<BoundedVec<V1TransactionInfo, T::MaxBlockTransactions>, _>(
-				|_block, old_vec| {
-					tx_blocks_migrated = tx_blocks_migrated.saturating_add(1);
-					let new_vec: alloc::vec::Vec<TransactionInfo> = old_vec
-						.into_iter()
-						.map(|old| TransactionInfo {
-							chunk_root: old.chunk_root,
-							content_hash: old.content_hash,
-							hashing: old.hashing,
-							cid_codec: old.cid_codec,
-							size: old.size,
-							extrinsic_index: u32::MAX,
-							block_chunks: old.block_chunks,
-							kind: TransactionKind::Store,
-						})
-						.collect();
-					let bounded =
-						BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(new_vec)
-							.expect("v1->v2: vec re-bounded with same size; qed");
-					Some(bounded)
-				},
-			);
+			// `Transactions` is intentionally not rewritten here — `v2→v3` decodes v1
+			// entries via its `V2TransactionInfo` path (same SCALE shape) and converts
+			// them in bounded per-block steps. See the module-level doc comment.
 
 			// `BlockTransactions` is transient (cleared in `on_finalize`) so it's
 			// almost always empty between blocks, but translate defensively in case
@@ -435,16 +398,14 @@ pub mod v2 {
 
 			tracing::info!(
 				target: LOG_TARGET,
-				blocks = tx_blocks_migrated,
 				block_transactions_present = block_tx_present,
-				"v1->v2 TransactionInfo migration complete",
+				"v1->v2 BlockTransactions migration complete",
 			);
 
 			let auth_touched = auth_migrated.saturating_add(auth_dropped);
-			let tx_touched = tx_blocks_migrated.saturating_add(block_tx_present);
 			T::DbWeight::get().reads_writes(
-				auth_touched.saturating_add(tx_touched),
-				auth_touched.saturating_add(tx_touched),
+				auth_touched.saturating_add(block_tx_present),
+				auth_touched.saturating_add(block_tx_present),
 			)
 		}
 	}
