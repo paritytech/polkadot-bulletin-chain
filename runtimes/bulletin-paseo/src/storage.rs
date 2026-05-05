@@ -33,6 +33,14 @@ use pallet_bulletin_transaction_storage::{
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+
+parameter_types! {
+	/// Cap on the total bytes committed to permanent storage (via `renew`) across all
+	/// authorizations on this chain. Seeded at 1.7 TiB; storage-backed so governance
+	/// (root) can raise/lower it via `system.set_storage` without a runtime upgrade.
+	pub storage MaxPermanentStorageSize: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
+}
+
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
@@ -109,6 +117,7 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
+	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<

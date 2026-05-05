@@ -380,9 +380,10 @@ mod benchmarks {
 			.unwrap();
 		}
 
-		// prepare added `MaxTransactionSize` bytes to the used counter
+		// prepare added `data.len()` bytes to the permanent-usage counter
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
-		assert_eq!(extent.bytes, T::MaxTransactionSize::get() as u64);
+		assert_eq!(extent.bytes, 0);
+		assert_eq!(extent.bytes_permanent, data.len() as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
