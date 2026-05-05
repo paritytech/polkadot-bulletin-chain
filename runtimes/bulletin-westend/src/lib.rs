@@ -164,7 +164,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = ();
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -273,7 +274,7 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = ConstU32<16>;
 
 	type SingleBlockMigrations = migrations::SingleBlockMigrations;
-	type MultiBlockMigrator = migrations::MbmMigrations;
+	type MultiBlockMigrator = MultiBlockMigrations;
 }
 
 impl cumulus_pallet_weight_reclaim::Config for Runtime {
@@ -389,6 +390,25 @@ impl pallet_message_queue::Config for Runtime {
 impl parachain_info::Config for Runtime {}
 
 impl cumulus_pallet_aura_ext::Config for Runtime {}
+
+parameter_types! {
+	pub MbmServiceWeight: Weight =
+		Perbill::from_percent(50) * RuntimeBlockWeights::get().max_block;
+}
+
+impl pallet_migrations::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	#[cfg(not(feature = "runtime-benchmarks"))]
+	type Migrations = migrations::MbmMigrations;
+	#[cfg(feature = "runtime-benchmarks")]
+	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
+	type CursorMaxLen = ConstU32<65_536>;
+	type IdentifierMaxLen = ConstU32<256>;
+	type MigrationStatusHandler = ();
+	type FailedMigrationHandler = frame_support::migrations::FreezeChainOnFailedMigration;
+	type MaxServiceWeight = MbmServiceWeight;
+	type WeightInfo = pallet_migrations::weights::SubstrateWeight<Runtime>;
+}
 
 parameter_types! {
 	/// Fellows pluralistic body.
@@ -599,6 +619,8 @@ mod runtime {
 	pub type WeightReclaim = cumulus_pallet_weight_reclaim;
 	#[runtime::pallet_index(6)]
 	pub type Utility = pallet_utility;
+	#[runtime::pallet_index(7)]
+	pub type MultiBlockMigrations = pallet_migrations;
 
 	// Monetary stuff.
 	#[runtime::pallet_index(10)]
@@ -899,9 +921,25 @@ impl_runtime_apis! {
 		}
 
 		fn indexed_transactions(
-			_block: NumberFor<Block>,
+			block: NumberFor<Block>,
 		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
-			todo!("indexed_transactions runtime API not yet implemented — see https://github.com/paritytech/polkadot-bulletin-chain/pull/471")
+			use sp_transaction_storage_proof::IndexedTransactionInfo;
+
+			TransactionStorage::transactions_at(block)
+				.map(|txs| {
+					txs.into_iter()
+						.map(|tx| {
+							IndexedTransactionInfo {
+								content_hash: tx.content_hash,
+								size: tx.size,
+								hashing: tx.hashing.into(),
+								cid_codec: tx.cid_codec,
+								extrinsic_index: tx.extrinsic_index,
+							}
+						})
+						.collect()
+				})
+				.unwrap_or_default()
 		}
 	}
 
