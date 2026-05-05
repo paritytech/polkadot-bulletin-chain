@@ -1140,6 +1140,13 @@ pub mod pallet {
 			Self::authorization_extent(AuthorizationScope::Account(who))
 		}
 
+		/// Returns the expiration block of the account's authorization, or `None` if
+		/// the account has no authorization or its only authorization has expired.
+		pub fn account_authorization_expires_at(who: T::AccountId) -> Option<BlockNumberFor<T>> {
+			let authorization = Authorizations::<T>::get(AuthorizationScope::Account(who))?;
+			(!Self::expired(authorization.expiration)).then_some(authorization.expiration)
+		}
+
 		/// Returns `true` if `who` has an authorization entry that has not yet expired,
 		/// regardless of how much of the extent remains. The entry is only cleared when
 		/// its expiration is reached and someone calls
