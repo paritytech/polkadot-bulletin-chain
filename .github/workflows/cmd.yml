@@ -236,8 +236,8 @@ jobs:
       CMD: ${{ needs.get-pr-info.outputs.CMD }}
       DEFAULT_IMAGE: ${{ needs.set-image.outputs.CI_IMAGE }}
     outputs:
-      IMAGE: ${{ steps.set.outputs.IMAGE }}
-      RUNNER: ${{ steps.set.outputs.RUNNER }}
+      IMAGE: ${{ steps.set-image.outputs.IMAGE }}
+      RUNNER: ${{ steps.set-image.outputs.RUNNER }}
     steps:
       - id: set-image
         run: |
@@ -260,8 +260,8 @@ jobs:
 
       - name: Print outputs
         run: |
-          echo "RUNNER=${{ steps.set.outputs.RUNNER }}"
-          echo "IMAGE=${{ steps.set.outputs.IMAGE }}"
+          echo "RUNNER=${{ steps.set-image.outputs.RUNNER }}"
+          echo "IMAGE=${{ steps.set-image.outputs.IMAGE }}"
 
   check-pr-author:
     runs-on: ubuntu-latest

@@ -575,6 +575,35 @@ fn renew_content_hash_works() {
 }
 
 #[test]
+fn storage_calls_reject_plain_signed_origin() {
+	// Storage-mutating calls must gate on `ensure_authorized` (accepts `Authorized` /
+	// `Root` / `None` only). A plain `Signed` origin bypasses the extension pipeline and
+	// must be rejected. Catches the class of bug where the gate is dropped on a refactor
+	// (as happened for `renew_content_hash` before this fix).
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let signed = RuntimeOrigin::signed(42);
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		let cid_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
+
+		assert_noop!(
+			TransactionStorage::store(signed.clone(), data.clone()),
+			DispatchError::BadOrigin,
+		);
+		assert_noop!(
+			TransactionStorage::store_with_cid_config(signed.clone(), cid_config, data),
+			DispatchError::BadOrigin,
+		);
+		assert_noop!(TransactionStorage::renew(signed.clone(), 1, 0), DispatchError::BadOrigin,);
+		assert_noop!(
+			TransactionStorage::renew_content_hash(signed, content_hash),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
 fn signed_store_prefers_preimage_authorization_over_account() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
