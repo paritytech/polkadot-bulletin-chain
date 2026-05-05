@@ -4,11 +4,11 @@ import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store } from './api.js';
+import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
@@ -77,19 +77,24 @@ function initSmoldot() {
 async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
 
-    const mainChain = await sd.addChain({ chainSpec: readChainSpec(chainSpecPath) });
-    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    const mainChainSpec = readChainSpec(chainSpecPath);
+    const parachainSpec = parachainSpecPath ? readChainSpec(parachainSpecPath) : null;
 
-    let targetChain = mainChain;
-    if (parachainSpecPath) {
-        targetChain = await sd.addChain({
-            chainSpec: readChainSpec(parachainSpecPath),
-            potentialRelayChains: [mainChain]
-        });
-        console.log(`✅ Added parachain: ${parachainSpecPath}`);
-    }
+    const provider = getSmProvider(async () => {
+        const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
+        console.log(`✅ Added main chain: ${chainSpecPath}`);
+        if (parachainSpec) {
+            const parachain = await sd.addChain({
+                chainSpec: parachainSpec,
+                potentialRelayChains: [mainChain]
+            });
+            console.log(`✅ Added parachain: ${parachainSpecPath}`);
+            return parachain;
+        }
+        return mainChain;
+    });
 
-    return { client: createClient(getSmProvider(targetChain)), sd };
+    return { client: createClient(provider), sd };
 }
 
 async function main() {
@@ -147,6 +152,7 @@ async function main() {
             whoAddress,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK,
         );
 
         // Store data.

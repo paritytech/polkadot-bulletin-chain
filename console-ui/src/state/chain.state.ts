@@ -1,5 +1,5 @@
 import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
-import { getWsProvider } from "@polkadot-api/ws-provider";
+import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
@@ -164,9 +164,8 @@ async function createSmoldotProvider(network: Network) {
 
   const smoldot = startFromWorker(smoldotWorker);
   const chainSpec = await fetch(`/chain-specs/${network.id}.json`).then(r => r.text());
-  const chain = await smoldot.addChain({ chainSpec });
 
-  return getSmProvider(chain);
+  return getSmProvider(() => smoldot.addChain({ chainSpec }));
 }
 
 export function switchStorageType(type: StorageType): void {
