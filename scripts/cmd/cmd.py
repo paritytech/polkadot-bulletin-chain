@@ -22,6 +22,17 @@ def setup_logging():
     open('/tmp/cmd/command_output.log', 'w').close()
 
 
+def load_github_env(env_file='.github/env'):
+    if not os.path.exists(env_file):
+        return
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, _, value = line.partition('=')
+                os.environ.setdefault(key.strip(), value.strip())
+
+
 def install_frame_omni_bencher():
     version = os.environ.get('POLKADOT_SDK_VERSION')
     sha256 = os.environ.get('FRAME_OMNI_BENCHER_SHA256')
@@ -50,6 +61,7 @@ def install_frame_omni_bencher():
 
 
 setup_logging()
+load_github_env()
 
 f = open('scripts/runtimes-matrix.json', 'r')
 runtimesMatrix = json.load(f)
