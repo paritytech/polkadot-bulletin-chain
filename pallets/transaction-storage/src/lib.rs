@@ -767,7 +767,7 @@ pub mod pallet {
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
 	#[pallet::getter(fn transaction_roots)]
-	pub(super) type Transactions<T: Config> = StorageMap<
+	pub type Transactions<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		BlockNumberFor<T>,
