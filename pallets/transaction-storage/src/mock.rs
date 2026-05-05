@@ -100,9 +100,8 @@ pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 's
 	System::run_to_block_with::<AllPalletsWithSystem>(
 		n,
 		RunToBlockHooks::default().before_finalize(|_| {
-			if let Some(proof) = f() {
-				TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-			}
+			let proof = f();
+			TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof).unwrap();
 		}),
 	);
 }
