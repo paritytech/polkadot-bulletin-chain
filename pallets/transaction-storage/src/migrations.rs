@@ -279,31 +279,33 @@ pub mod v1 {
 	}
 }
 
-/// Migration v1→v2: replaces the `AuthorizationExtent` schema.
+/// Migration v1→v2: rewrites `AuthorizationExtent` from `{ transactions, bytes }` to
+/// `{ transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }`.
+/// The old remaining quota becomes the new allowance; consumed counters reset to `0`.
+/// Entries with `bytes == 0` are dropped (already unusable; `bytes_allowance > 0` is a
+/// v2 invariant).
 ///
-/// Old: `{ transactions: u32, bytes: u64 }` — transaction count and remaining
-/// byte quota.
-///
-/// New: `{ bytes: u64, bytes_allowance: u64, transactions: u32,
-/// transactions_allowance: u32 }` — bytes consumed so far and total bytes granted,
-/// plus a parallel boost-tier transaction counter and budget.
-///
-/// The remaining byte quota becomes the new total allowance
-/// (`bytes_allowance = old.bytes`, `bytes = 0`); the remaining transaction count
-/// becomes `transactions_allowance` (`transactions = 0`), so each authorization
-/// keeps its previous remaining capacity on both axes. Entries whose remaining byte
-/// quota is already zero are dropped — they can't be translated to a valid v2 entry
-/// (`check_authorizations_integrity` requires `bytes_allowance > 0`) and they were
-/// already unusable on the old chain.
+/// `Transactions` is intentionally left at the v1 shape — the stepped `v2→v3` migration
+/// decodes it via `V2TransactionInfo` (byte-identical) and converts entries to the
+/// current layout in bounded per-block steps. `BlockTransactions` is still translated
+/// here defensively (single transient `StorageValue`).
 pub mod v2 {
 	use super::*;
 	use crate::{
-		pallet::{Authorizations, Pallet},
-		Authorization, AuthorizationExtent,
+		pallet::{Authorizations, BlockTransactions, Pallet},
+		Authorization, AuthorizationExtent, TransactionInfo, TransactionKind,
 	};
-	use polkadot_sdk_frame::deps::frame_support::{
-		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+	use bulletin_transaction_storage_primitives::{
+		cids::{CidCodec, HashingAlgorithm},
+		ContentHash,
 	};
+	use polkadot_sdk_frame::deps::{
+		frame_support::{
+			migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade, BoundedVec,
+		},
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
+	use sp_transaction_storage_proof::ChunkIndex;
 
 	#[derive(Encode, Decode)]
 	pub(crate) struct V1AuthorizationExtent {
@@ -317,19 +319,31 @@ pub mod v2 {
 		pub expiration: BlockNumber,
 	}
 
+	/// `TransactionInfo` layout at v1 — same shape as v2 minus the trailing `kind`
+	/// field. Used here to decode existing entries during translation.
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V1TransactionInfo {
+		pub chunk_root: <BlakeTwo256 as Hash>::Output,
+		pub content_hash: ContentHash,
+		pub hashing: HashingAlgorithm,
+		pub cid_codec: CidCodec,
+		pub size: u32,
+		pub block_chunks: ChunkIndex,
+	}
+
 	pub struct VersionUncheckedMigrateV1ToV2<T>(PhantomData<T>);
 
 	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
 		fn on_runtime_upgrade() -> Weight {
-			let mut migrated: u64 = 0;
-			let mut dropped: u64 = 0;
+			let mut auth_migrated: u64 = 0;
+			let mut auth_dropped: u64 = 0;
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					if old.extent.bytes == 0 {
-						dropped = dropped.saturating_add(1);
+					if old.extent.bytes == 0 || Pallet::<T>::expired(old.expiration) {
+						auth_dropped = auth_dropped.saturating_add(1);
 						return None;
 					}
-					migrated = migrated.saturating_add(1);
+					auth_migrated = auth_migrated.saturating_add(1);
 					Some(Authorization {
 						extent: AuthorizationExtent {
 							bytes: 0,
@@ -344,17 +358,59 @@ pub mod v2 {
 			);
 			tracing::info!(
 				target: LOG_TARGET,
-				migrated,
-				dropped,
+				migrated = auth_migrated,
+				dropped = auth_dropped,
 				"v1->v2 AuthorizationExtent migration complete",
 			);
-			// One read + one write per visited entry (translate rewrites or deletes).
-			let touched = migrated.saturating_add(dropped);
-			T::DbWeight::get().reads_writes(touched, touched)
+
+			// `Transactions` is intentionally not rewritten here — `v2→v3` decodes v1
+			// entries via its `V2TransactionInfo` path (same SCALE shape) and converts
+			// them in bounded per-block steps. See the module-level doc comment.
+
+			// `BlockTransactions` is transient (cleared in `on_finalize`) so it's
+			// almost always empty between blocks, but translate defensively in case
+			// the upgrade lands mid-block.
+			let mut block_tx_present = 0u64;
+			let _ = BlockTransactions::<T>::translate::<
+				BoundedVec<V1TransactionInfo, T::MaxBlockTransactions>,
+				_,
+			>(|maybe_old| {
+				let old_vec = maybe_old?;
+				block_tx_present = 1;
+				let new_vec: alloc::vec::Vec<TransactionInfo> = old_vec
+					.into_iter()
+					.map(|old| TransactionInfo {
+						chunk_root: old.chunk_root,
+						content_hash: old.content_hash,
+						hashing: old.hashing,
+						cid_codec: old.cid_codec,
+						size: old.size,
+						extrinsic_index: u32::MAX,
+						block_chunks: old.block_chunks,
+						kind: TransactionKind::Store,
+					})
+					.collect();
+				Some(
+					BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::try_from(new_vec)
+						.expect("v1->v2: vec re-bounded with same size; qed"),
+				)
+			});
+
+			tracing::info!(
+				target: LOG_TARGET,
+				block_transactions_present = block_tx_present,
+				"v1->v2 BlockTransactions migration complete",
+			);
+
+			let auth_touched = auth_migrated.saturating_add(auth_dropped);
+			T::DbWeight::get().reads_writes(
+				auth_touched.saturating_add(block_tx_present),
+				auth_touched.saturating_add(block_tx_present),
+			)
 		}
 	}
 
-	/// Versioned migration v1→v2: replaces `AuthorizationExtent` schema.
+	/// Versioned migration v1→v2: rewrites `AuthorizationExtent` and `TransactionInfo`.
 	pub type MigrateV1ToV2<T> = VersionedMigration<
 		1,
 		2,
@@ -369,7 +425,7 @@ pub mod v3 {
 	use super::*;
 	use crate::{
 		pallet::{Pallet, Transactions},
-		TransactionInfo, WeightInfo,
+		TransactionInfo, TransactionKind, WeightInfo,
 	};
 	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm},
@@ -465,6 +521,7 @@ pub mod v3 {
 						size: old.size,
 						extrinsic_index: u32::MAX,
 						block_chunks: old.block_chunks,
+						kind: TransactionKind::Store,
 					})
 					.collect::<Vec<_>>()
 					.try_into()
