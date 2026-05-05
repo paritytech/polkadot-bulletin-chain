@@ -186,6 +186,23 @@ jobs:
           echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
           echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
 
+      # Build the Bulletin-specific parachain node from
+      # paritytech/polkadot-sdk#11976 and override `polkadot-omni-node` in the
+      # cached SDK bin dir, so the existing integration tests run against the
+      # bulletin binary without changes to justfiles or test scripts.
+      # Tracking: https://github.com/paritytech/polkadot-bulletin-chain/issues/479
+      - name: Build polkadot-bulletin-parachain (override polkadot-omni-node)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch ndk/bulletin-parachain-poc \
+            https://github.com/paritytech/polkadot-sdk.git /tmp/polkadot-sdk-bulletin
+          cd /tmp/polkadot-sdk-bulletin
+          SKIP_WASM_BUILD=1 cargo build --release -p polkadot-bulletin-parachain
+          cp target/release/polkadot-bulletin-parachain \
+            "${POLKADOT_SDK_BIN_DIR}/polkadot-omni-node"
+          chmod +x "${POLKADOT_SDK_BIN_DIR}/polkadot-omni-node"
+          "${POLKADOT_SDK_BIN_DIR}/polkadot-omni-node" --version
+
       - name: Start services
         working-directory: examples
         env:
