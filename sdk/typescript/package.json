@@ -50,7 +50,7 @@
   "dependencies": {
     "@ipld/dag-pb": "^4.1.3",
     "@noble/hashes": "^2.2.0",
-    "@polkadot-labs/hdkd-helpers": "^0.0.29",
+    "@polkadot-labs/hdkd-helpers": "^0.0.30",
     "ipfs-unixfs": "^12.0.0"
   },
   "peerDependencies": {
