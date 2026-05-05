@@ -77,19 +77,24 @@ function initSmoldot() {
 async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
 
-    const mainChain = await sd.addChain({ chainSpec: readChainSpec(chainSpecPath) });
-    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    const mainChainSpec = readChainSpec(chainSpecPath);
+    const parachainSpec = parachainSpecPath ? readChainSpec(parachainSpecPath) : null;
 
-    let targetChain = mainChain;
-    if (parachainSpecPath) {
-        targetChain = await sd.addChain({
-            chainSpec: readChainSpec(parachainSpecPath),
-            potentialRelayChains: [mainChain]
-        });
-        console.log(`✅ Added parachain: ${parachainSpecPath}`);
-    }
+    const provider = getSmProvider(async () => {
+        const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
+        console.log(`✅ Added main chain: ${chainSpecPath}`);
+        if (parachainSpec) {
+            const parachain = await sd.addChain({
+                chainSpec: parachainSpec,
+                potentialRelayChains: [mainChain]
+            });
+            console.log(`✅ Added parachain: ${parachainSpecPath}`);
+            return parachain;
+        }
+        return mainChain;
+    });
 
-    return { client: createClient(getSmProvider(() => targetChain)), sd };
+    return { client: createClient(provider), sd };
 }
 
 async function main() {
