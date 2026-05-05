@@ -339,7 +339,7 @@ pub mod v2 {
 			let mut auth_dropped: u64 = 0;
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					if old.extent.bytes == 0 {
+					if old.extent.bytes == 0 || Pallet::<T>::expired(old.expiration) {
 						auth_dropped = auth_dropped.saturating_add(1);
 						return None;
 					}

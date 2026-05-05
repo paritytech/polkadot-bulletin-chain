@@ -1113,7 +1113,7 @@ pub mod pallet {
 		}
 
 		/// Returns `true` if the system is beyond the given expiration point.
-		fn expired(expiration: BlockNumberFor<T>) -> bool {
+		pub(crate) fn expired(expiration: BlockNumberFor<T>) -> bool {
 			let now = frame_system::Pallet::<T>::block_number();
 			now >= expiration
 		}
