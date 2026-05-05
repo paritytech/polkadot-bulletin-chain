@@ -365,6 +365,12 @@ pub mod pallet {
 		ChainPermanentCapReached,
 		/// Content hash was not calculated.
 		InvalidContentHash,
+		/// Auto-renewal is already enabled for this content hash.
+		AutoRenewalAlreadyEnabled,
+		/// Auto-renewal is not enabled for this content hash.
+		AutoRenewalNotEnabled,
+		/// Caller is not the owner of the auto-renewal registration.
+		NotAutoRenewalOwner,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
@@ -372,6 +378,13 @@ pub mod pallet {
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
+
+	/// Data associated with an auto-renewal registration.
+	#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+	pub struct AutoRenewalData<AccountId> {
+		/// Account whose authorization will be consumed each time data is auto-renewed.
+		pub account: AccountId,
+	}
 
 	/// Custom origin for authorized signed transaction storage operations.
 	///
@@ -399,9 +412,7 @@ pub mod pallet {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
-			// TODO: https://github.com/paritytech/polkadot-sdk/issues/10203 - Replace this with benchmarked weights.
 			let mut weight = Weight::zero();
-			let db_weight = T::DbWeight::get();
 
 			// Run v0→v1 migration if it hasn't been applied yet.
 			// This handles the case where `codeSubstitutes` loaded the fix runtime
@@ -416,27 +427,55 @@ pub mod pallet {
 			// Drop obsolete roots and decrement the chain-wide permanent counter for any
 			// renewed bytes that just aged out. The proof for `obsolete` will be checked
 			// later in this block, so we drop `obsolete` - 1.
-			weight.saturating_accrue(db_weight.reads(1));
 			let period = Self::retention_period();
 			let obsolete = n.saturating_sub(period.saturating_add(One::one()));
+			let mut num_expiring: u32 = 0;
 			if obsolete > Zero::zero() {
-				weight.saturating_accrue(db_weight.reads_writes(1, 1));
-				if let Some(removed) = <Transactions<T>>::take(obsolete) {
-					let renewed_sum: u64 = removed
+				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
+					num_expiring = transactions.len() as u32;
+
+					// Decrement the chain-wide permanent counter for any renewed bytes that
+					// just aged out (covers entries flagged `TransactionKind::Renew`).
+					let renewed_sum: u64 = transactions
 						.iter()
 						.filter(|t| matches!(t.kind, TransactionKind::Renew))
 						.fold(0u64, |acc, t| acc.saturating_add(t.size as u64));
 					if renewed_sum > 0 {
-						weight.saturating_accrue(db_weight.reads_writes(1, 1));
 						Self::update_permanent_storage_used(|used| {
 							used.saturating_sub(renewed_sum)
 						});
 					}
+
+					// Before removing, collect any transactions that are registered for
+					// auto-renewal and schedule them for processing this block.
+					let mut pending = PendingAutoRenewals::<T>::get();
+					for tx_info in transactions.iter() {
+						let hash: ContentHash = tx_info.content_hash;
+						// Only remove TransactionByContentHash if this entry still points to
+						// the obsolete block (otherwise the entry has been re-stored or
+						// renewed elsewhere and points at a different block).
+						if let Some((block, _)) = TransactionByContentHash::<T>::get(hash) {
+							if block == obsolete {
+								TransactionByContentHash::<T>::remove(hash);
+							}
+						}
+						// `try_push` cannot overflow: `pending` is empty per `on_finalize`'s
+						// drain invariant, and `transactions.len() <= MaxBlockTransactions`.
+						if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
+							let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
+						}
+					}
+					if !pending.is_empty() {
+						PendingAutoRenewals::<T>::put(&pending);
+					}
 				}
 			}
 
-			// For `on_finalize`
-			weight.saturating_accrue(db_weight.reads_writes(2, 2));
+			// Charge the expiry-sweep cost via the benchmarked weight. `n = 0` covers the
+			// no-expiry path (early blocks, blocks where obsolete had no transactions);
+			// the constant component captures the RetentionPeriod read and the
+			// reservation for `on_finalize`.
+			weight.saturating_accrue(T::WeightInfo::on_initialize_with_expiry(num_expiring));
 
 			weight
 		}
@@ -465,6 +504,24 @@ pub mod pallet {
 			}
 			#[cfg(not(feature = "try-runtime"))]
 			assert!(proof_ok, "Storage proof must be checked once in the block");
+
+			// All pending auto-renewals must have been processed by the
+			// `apply_block_inherents` inherent.
+			#[cfg(feature = "try-runtime")]
+			if !PendingAutoRenewals::<T>::get().is_empty() {
+				tracing::warn!(
+					target: LOG_TARGET,
+					"Pending auto-renewals were not processed (expected during try-runtime)"
+				);
+				// Clear pending renewals so try-runtime doesn't leave stale state.
+				PendingAutoRenewals::<T>::kill();
+			}
+
+			#[cfg(not(feature = "try-runtime"))]
+			assert!(
+				PendingAutoRenewals::<T>::get().is_empty(),
+				"All pending auto-renewals must be processed by apply_block_inherents"
+			);
 
 			// Insert new transactions, iff they have chunks.
 			let transactions = <BlockTransactions<T>>::take();
@@ -556,7 +613,7 @@ pub mod pallet {
 		///
 		/// O(1).
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::WeightInfo::renew())]
+		#[pallet::weight((T::WeightInfo::renew(), DispatchClass::Operational))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _block: &BlockNumberFor<T>, _index: &u32| -> bool { true })]
 		pub fn renew(
 			origin: OriginFor<T>,
@@ -571,65 +628,9 @@ pub mod pallet {
 			// checked by pre_dispatch_signed.
 			Self::ensure_data_size_ok(info.size as usize)?;
 
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 			let content_hash = info.content_hash;
-			sp_io::transaction_index::renew(extrinsic_index, content_hash);
-
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
-					return Err(Error::<T>::TooManyTransactions);
-				}
-				let chunks = num_chunks(info.size);
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunks;
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: info.chunk_root,
-						size: info.size,
-						content_hash: info.content_hash,
-						hashing: info.hashing,
-						cid_codec: info.cid_codec,
-						extrinsic_index,
-						block_chunks: total_chunks,
-						kind: TransactionKind::Renew,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
-			Self::deposit_event(Event::Renewed { index, content_hash });
-			Ok(().into())
-		}
-
-		/// Check storage proof for block number `block_number() - RetentionPeriod`. If such a block
-		/// does not exist, the proof is expected to be `None`.
-		///
-		/// ## Complexity
-		///
-		/// Linear w.r.t the number of indexed transactions in the proved block for random probing.
-		/// There's a DB read for each transaction.
-		#[pallet::call_index(2)]
-		#[pallet::weight((T::WeightInfo::check_proof(), DispatchClass::Mandatory))]
-		pub fn check_proof(
-			origin: OriginFor<T>,
-			proof: TransactionStorageProof,
-		) -> DispatchResultWithPostInfo {
-			ensure_none(origin)?;
-			ensure!(!ProofChecked::<T>::get(), Error::<T>::DoubleCheck);
-
-			// Get the target block metadata.
-			let number = <frame_system::Pallet<T>>::block_number();
-			let period = Self::retention_period();
-			let target_number = number.saturating_sub(period);
-			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
-			let transactions =
-				Self::transactions_at(target_number).ok_or(Error::<T>::MissingStateData)?;
-
-			// Verify the proof with a "random" chunk (randomness is based on the parent hash).
-			let parent_hash = frame_system::Pallet::<T>::parent_hash();
-			Self::verify_chunk_proof(proof, parent_hash.as_ref(), transactions.to_vec())?;
-			ProofChecked::<T>::put(true);
-			Self::deposit_event(Event::ProofChecked);
+			let new_index = Self::do_renew(info)?;
+			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
 			Ok(().into())
 		}
 
@@ -799,6 +800,127 @@ pub mod pallet {
 			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
+
+		/// Renew previously stored data by content hash. The content hash is the BLAKE2b hash
+		/// of the original data, as emitted in the [`Stored`](Event::Stored) or
+		/// [`Renewed`](Event::Renewed) event.
+		///
+		/// This is a convenience alternative to [`renew`](Self::renew) that does not require
+		/// knowing the exact `(block_number, tx_index)` pair.
+		///
+		/// Emits [`Renewed`](Event::Renewed) when successful.
+		#[pallet::call_index(10)]
+		#[pallet::weight((T::WeightInfo::renew_content_hash(), DispatchClass::Operational))]
+		pub fn renew_content_hash(
+			origin: OriginFor<T>,
+			content_hash: ContentHash,
+		) -> DispatchResultWithPostInfo {
+			let _caller = Self::ensure_authorized(origin)?;
+
+			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
+				.ok_or(Error::<T>::RenewedNotFound)?;
+
+			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
+
+			ensure!(Self::data_size_ok(info.size as usize), Error::<T>::BadDataSize);
+
+			let new_index = Self::do_renew(info)?;
+			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
+			Ok(().into())
+		}
+
+		/// Enable automatic renewal for a previously stored piece of data.
+		///
+		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
+		/// data size). The authorization is **not** consumed here; it is consumed each time
+		/// the data is auto-renewed (every `StoragePeriod` blocks).
+		/// Authorization is checked here but might still be missing when actually renewed.
+		///
+		/// Emits [`AutoRenewalEnabled`](Event::AutoRenewalEnabled) when successful.
+		#[pallet::call_index(12)]
+		#[pallet::weight(T::WeightInfo::enable_auto_renew())]
+		pub fn enable_auto_renew(
+			origin: OriginFor<T>,
+			content_hash: ContentHash,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+
+			ensure!(
+				!AutoRenewals::<T>::contains_key(content_hash),
+				Error::<T>::AutoRenewalAlreadyEnabled
+			);
+
+			// Verify the content hash exists and the account has sufficient authorization.
+			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
+				.ok_or(Error::<T>::RenewedNotFound)?;
+			let tx_info =
+				Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
+			let extent = Self::authorization_extent(AuthorizationScope::Account(who.clone()));
+			let bytes_remaining = extent.bytes_allowance.saturating_sub(extent.bytes);
+			ensure!(
+				extent.transactions_allowance > extent.transactions &&
+					bytes_remaining >= tx_info.size as u64,
+				Error::<T>::AuthorizationNotFound
+			);
+
+			AutoRenewals::<T>::insert(content_hash, AutoRenewalData { account: who.clone() });
+			Self::deposit_event(Event::AutoRenewalEnabled { content_hash, who });
+			Ok(())
+		}
+
+		/// Disable automatic renewal for a piece of data.
+		///
+		/// Can only be called by the account that originally enabled auto-renewal.
+		///
+		/// Emits [`AutoRenewalDisabled`](Event::AutoRenewalDisabled) when successful.
+		#[pallet::call_index(13)]
+		#[pallet::weight(T::WeightInfo::disable_auto_renew())]
+		pub fn disable_auto_renew(
+			origin: OriginFor<T>,
+			content_hash: ContentHash,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+
+			let renewal_data =
+				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
+			ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
+
+			AutoRenewals::<T>::remove(content_hash);
+			Self::deposit_event(Event::AutoRenewalDisabled { content_hash, who });
+			Ok(())
+		}
+
+		/// Composite block-level inherent: optionally validates a transaction storage proof and
+		/// always drains [`PendingAutoRenewals`].
+		///
+		/// `ProvideInherent::create_inherent` only returns a single `Call`, but this pallet
+		/// has two block-end concerns — verifying the storage proof for the block at
+		/// `n - RetentionPeriod`, and renewing entries flagged via [`AutoRenewals`] before
+		/// they expire at `n - RetentionPeriod - 1`. Both effects collapse into this single
+		/// mandatory inherent so that block authors emit one extrinsic that satisfies both
+		/// `on_finalize` invariants (`ProofChecked` and "PendingAutoRenewals empty").
+		///
+		/// `proof` is `Some` when the inherent data provider supplied one; otherwise the
+		/// proof step is skipped (early or empty blocks). The auto-renewal drain runs
+		/// unconditionally — emitting an inherent at all implies that `on_initialize` may
+		/// have populated `PendingAutoRenewals`.
+		#[pallet::call_index(14)]
+		#[pallet::weight((
+			T::WeightInfo::apply_block_inherents(T::MaxBlockTransactions::get()),
+			DispatchClass::Mandatory,
+		))]
+		pub fn apply_block_inherents(
+			origin: OriginFor<T>,
+			proof: Option<TransactionStorageProof>,
+		) -> DispatchResultWithPostInfo {
+			ensure_none(origin)?;
+			if let Some(proof) = proof {
+				Self::do_check_proof(proof)?;
+			}
+			// Refund from the worst-case declaration to the count actually drained.
+			let n_actual = Self::do_process_auto_renewals();
+			Ok(Some(T::WeightInfo::apply_block_inherents(n_actual)).into())
+		}
 	}
 
 	#[pallet::event]
@@ -824,6 +946,14 @@ pub mod pallet {
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
 		/// An expired preimage authorization was removed.
 		ExpiredPreimageAuthorizationRemoved { content_hash: ContentHash },
+		/// Auto-renewal was enabled for `content_hash` by `who`.
+		AutoRenewalEnabled { content_hash: ContentHash, who: T::AccountId },
+		/// Auto-renewal was disabled for `content_hash` by `who`.
+		AutoRenewalDisabled { content_hash: ContentHash, who: T::AccountId },
+		/// Data was automatically renewed at `index` with `content_hash` for `account`.
+		DataAutoRenewed { index: u32, content_hash: ContentHash, account: T::AccountId },
+		/// Auto-renewal failed for `content_hash` (insufficient authorization for `account`).
+		AutoRenewalFailed { content_hash: ContentHash, account: T::AccountId },
 		/// `PermanentStorageUsed` changed (a `renew` bumped it, or the lazy drain
 		/// decremented it). Off-chain capacity-planning consumers can drive their dashboards
 		/// from these.
@@ -870,6 +1000,30 @@ pub mod pallet {
 	#[pallet::storage]
 	pub(super) type BlockTransactions<T: Config> =
 		StorageValue<_, BoundedVec<TransactionInfo, T::MaxBlockTransactions>, ValueQuery>;
+
+	/// Maps content hash to its most recent (block_number, tx_index) location.
+	#[pallet::storage]
+	pub(super) type TransactionByContentHash<T: Config> =
+		StorageMap<_, Blake2_128Concat, ContentHash, (BlockNumberFor<T>, u32), OptionQuery>;
+
+	/// Maps content hash to the account that registered it for auto-renewal.
+	#[pallet::storage]
+	pub type AutoRenewals<T: Config> =
+		StorageMap<_, Blake2_128Concat, ContentHash, AutoRenewalData<T::AccountId>, OptionQuery>;
+
+	/// Transactions that must be auto-renewed in the current block.
+	///
+	/// Populated by `on_initialize` when a block's data is about to expire.
+	/// Cleared by the `apply_block_inherents` mandatory inherent executed in the same block.
+	#[pallet::storage]
+	pub(super) type PendingAutoRenewals<T: Config> = StorageValue<
+		_,
+		BoundedVec<
+			(ContentHash, TransactionInfo, AutoRenewalData<T::AccountId>),
+			T::MaxBlockTransactions,
+		>,
+		ValueQuery,
+	>;
 
 	/// Was the proof checked in this block?
 	#[pallet::storage]
@@ -960,10 +1114,21 @@ pub mod pallet {
 		const INHERENT_IDENTIFIER: InherentIdentifier = INHERENT_IDENTIFIER;
 
 		fn create_inherent(data: &InherentData) -> Option<Self::Call> {
+			// `ProvideInherent::create_inherent` returns a single `Call`, but two block-end
+			// concerns may need to land in the same block: verifying the storage proof for the
+			// block at `n - RetentionPeriod`, and draining `PendingAutoRenewals` populated by
+			// `on_initialize`. Both effects collapse into the composite
+			// `Call::apply_block_inherents { proof: Option<_> }`, emitted whenever either side
+			// has work to do.
 			let proof = data
 				.get_data::<TransactionStorageProof>(&Self::INHERENT_IDENTIFIER)
 				.unwrap_or(None);
-			proof.map(|proof| Call::check_proof { proof })
+			let has_pending_renewals = !PendingAutoRenewals::<T>::get().is_empty();
+
+			if proof.is_none() && !has_pending_renewals {
+				return None;
+			}
+			Some(Call::apply_block_inherents { proof })
 		}
 
 		fn check_inherent(_call: &Self::Call, _data: &InherentData) -> Result<(), Self::Error> {
@@ -971,7 +1136,7 @@ pub mod pallet {
 		}
 
 		fn is_inherent(call: &Self::Call) -> bool {
-			matches!(call, Call::check_proof { .. })
+			matches!(call, Call::apply_block_inherents { .. })
 		}
 	}
 
@@ -984,6 +1149,12 @@ pub mod pallet {
 		type Call = Call<T>;
 
 		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+			// Mandatory inherent (`apply_block_inherents`) is injected by the block author,
+			// not the transaction pool. Return a valid but empty transaction if one arrives
+			// here.
+			if Self::is_inherent(call) {
+				return Ok(ValidTransaction::default());
+			}
 			Self::check_unsigned(call, CheckContext::Validate)?.ok_or(IMPOSSIBLE.into())
 		}
 
@@ -994,6 +1165,118 @@ pub mod pallet {
 			}
 
 			Self::check_unsigned(call, CheckContext::PreDispatch).map(|_| ())
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		/// Verify a transaction storage proof for the block at `n - RetentionPeriod` and mark
+		/// [`ProofChecked`]. Invoked by the [`Self::apply_block_inherents`] mandatory inherent.
+		pub(super) fn do_check_proof(proof: TransactionStorageProof) -> DispatchResult {
+			ensure!(!ProofChecked::<T>::get(), Error::<T>::DoubleCheck);
+
+			let number = <frame_system::Pallet<T>>::block_number();
+			let period = Self::retention_period();
+			let target_number = number.saturating_sub(period);
+			ensure!(!target_number.is_zero(), Error::<T>::UnexpectedProof);
+			// Shape-tolerant: `transactions_at` falls back to the v2 layout while the
+			// v2→v3 multi-block migration is still in flight, so historical entries
+			// that have not yet been rewritten can still be proof-verified.
+			let transactions =
+				Self::transactions_at(target_number).ok_or(Error::<T>::MissingStateData)?;
+
+			let parent_hash = frame_system::Pallet::<T>::parent_hash();
+			Self::verify_chunk_proof(proof, parent_hash.as_ref(), transactions.to_vec())?;
+			ProofChecked::<T>::put(true);
+			Self::deposit_event(Event::ProofChecked);
+			Ok(())
+		}
+
+		/// Drain [`PendingAutoRenewals`], renewing each entry whose owner has sufficient
+		/// authorization. Returns the count drained.
+		///
+		/// Batches the [`BlockTransactions`] read/write across all `n` renewals. Calling
+		/// [`Self::do_renew`] in the loop would re-encode the full vec per iteration (O(n²)),
+		/// which a linear weight model underestimates by ~17% at saturation.
+		pub(super) fn do_process_auto_renewals() -> u32 {
+			let pending = PendingAutoRenewals::<T>::take();
+			let n_actual = pending.len() as u32;
+			if n_actual == 0 {
+				return 0;
+			}
+
+			let extrinsic_index = match <frame_system::Pallet<T>>::extrinsic_index() {
+				Some(idx) => idx,
+				// Defensive: no extrinsic context means we can't index renewals; fail all
+				// rather than silently skip.
+				None => {
+					for (content_hash, _, renewal_data) in pending.into_iter() {
+						AutoRenewals::<T>::remove(content_hash);
+						Self::deposit_event(Event::AutoRenewalFailed {
+							content_hash,
+							account: renewal_data.account,
+						});
+					}
+					return n_actual;
+				},
+			};
+			let mut transactions = <BlockTransactions<T>>::get();
+
+			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
+				let scope = AuthorizationScope::Account(renewal_data.account.clone());
+				let new_index =
+					if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
+						Self::push_renewal_in_memory(&mut transactions, &tx_info, extrinsic_index)
+					} else {
+						None
+					};
+
+				if let Some(new_index) = new_index {
+					Self::deposit_event(Event::DataAutoRenewed {
+						index: new_index,
+						content_hash,
+						account: renewal_data.account,
+					});
+				} else {
+					AutoRenewals::<T>::remove(content_hash);
+					Self::deposit_event(Event::AutoRenewalFailed {
+						content_hash,
+						account: renewal_data.account,
+					});
+				}
+			}
+
+			<BlockTransactions<T>>::put(transactions);
+			n_actual
+		}
+
+		/// Push `info` into an in-memory accumulator, call `transaction_index::renew`, and
+		/// insert into `TransactionByContentHash`. Returns `None` at capacity. Lets
+		/// [`Self::do_process_auto_renewals`] amortize the [`BlockTransactions`] storage
+		/// round-trip across all `n` renewals.
+		fn push_renewal_in_memory(
+			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
+			info: &TransactionInfo,
+			extrinsic_index: u32,
+		) -> Option<u32> {
+			let block_chunks = TransactionInfo::total_chunks(transactions) + num_chunks(info.size);
+			let new_index = transactions.len() as u32;
+			let new_info = TransactionInfo {
+				chunk_root: info.chunk_root,
+				size: info.size,
+				content_hash: info.content_hash,
+				hashing: info.hashing,
+				cid_codec: info.cid_codec,
+				extrinsic_index,
+				block_chunks,
+				kind: TransactionKind::Renew,
+			};
+			transactions.try_push(new_info).ok()?;
+			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
+			TransactionByContentHash::<T>::insert(
+				info.content_hash,
+				(frame_system::Pallet::<T>::block_number(), new_index),
+			);
+			Some(new_index)
 		}
 	}
 
@@ -1080,28 +1363,18 @@ pub mod pallet {
 
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
-			let mut index = 0;
-			<BlockTransactions<T>>::mutate(|transactions| {
-				if transactions.len() + 1 > T::MaxBlockTransactions::get() as usize {
-					return Err(Error::<T>::TooManyTransactions);
-				}
-				let total_chunks = TransactionInfo::total_chunks(transactions) + chunk_count;
-				index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
-						chunk_root: root,
-						size: data_len,
-						content_hash: cid.content_hash,
-						hashing,
-						cid_codec,
-						extrinsic_index,
-						block_chunks: total_chunks,
-						kind: TransactionKind::Store,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)
-			})?;
+			let index = Self::append_to_block_transactions(
+				root,
+				data_len,
+				cid.content_hash,
+				hashing,
+				cid_codec,
+				extrinsic_index,
+				TransactionKind::Store,
+			)?;
+			// Index after the runtime mutation — index ops aren't rolled back on dispatch error.
+			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			Self::deposit_event(Event::Stored {
 				index,
@@ -1110,6 +1383,60 @@ pub mod pallet {
 			});
 
 			Ok(())
+		}
+
+		/// Shared `renew` / `renew_content_hash` / auto-renewal entry point.
+		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			let content_hash = info.content_hash;
+			let new_index = Self::append_to_block_transactions(
+				info.chunk_root,
+				info.size,
+				info.content_hash,
+				info.hashing,
+				info.cid_codec,
+				extrinsic_index,
+				TransactionKind::Renew,
+			)?;
+			sp_io::transaction_index::renew(extrinsic_index, content_hash);
+			Ok(new_index)
+		}
+
+		/// Append a new entry to [`BlockTransactions`] (with the cumulative `block_chunks`)
+		/// and update [`TransactionByContentHash`]. Caller must call
+		/// `transaction_index::{index,renew}` AFTER this — host calls aren't rolled back on
+		/// dispatch error.
+		fn append_to_block_transactions(
+			chunk_root: <BlakeTwo256 as Hash>::Output,
+			size: u32,
+			content_hash: ContentHash,
+			hashing: HashingAlgorithm,
+			cid_codec: CidCodec,
+			extrinsic_index: u32,
+			kind: TransactionKind,
+		) -> Result<u32, Error<T>> {
+			let mut transactions = <BlockTransactions<T>>::get();
+			let block_chunks = TransactionInfo::total_chunks(&transactions) + num_chunks(size);
+			let new_index = transactions.len() as u32;
+			transactions
+				.try_push(TransactionInfo {
+					chunk_root,
+					size,
+					content_hash,
+					hashing,
+					cid_codec,
+					extrinsic_index,
+					block_chunks,
+					kind,
+				})
+				.map_err(|_| Error::<T>::TooManyTransactions)?;
+			<BlockTransactions<T>>::put(transactions);
+			TransactionByContentHash::<T>::insert(
+				content_hash,
+				(frame_system::Pallet::<T>::block_number(), new_index),
+			);
+			Ok(new_index)
 		}
 
 		/// Returns `true` if the system is beyond the given expiration point.
@@ -1553,6 +1880,17 @@ pub mod pallet {
 						true,
 					)
 				},
+				Call::<T>::renew_content_hash { content_hash } => {
+					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
+						.ok_or(RENEWED_NOT_FOUND)?;
+					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
+					Self::check_store_renew_unsigned(
+						info.size as usize,
+						|| info.content_hash,
+						context,
+						true,
+					)
+				},
 				Call::<T>::remove_expired_account_authorization { who } => {
 					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
 					Ok(context.want_valid_transaction().then(|| {
@@ -1579,6 +1917,8 @@ pub mod pallet {
 						.into()
 					}))
 				},
+				// Mandatory inherent — always allowed, no pool validation needed.
+				Call::<T>::apply_block_inherents { .. } => Ok(None),
 				_ => Err(InvalidTransaction::Call.into()),
 			}
 		}
@@ -1612,6 +1952,27 @@ pub mod pallet {
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
+					return Ok((
+						context.want_valid_transaction().then(|| ValidTransaction {
+							priority: T::StoreRenewPriority::get(),
+							longevity: T::StoreRenewLongevity::get(),
+							..Default::default()
+						}),
+						None,
+					));
+				},
+				Call::<T>::renew_content_hash { content_hash } => {
+					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
+						.ok_or(RENEWED_NOT_FOUND)?;
+					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
+					(info.size as usize, info.content_hash, true)
+				},
+				Call::<T>::enable_auto_renew { .. } | Call::<T>::disable_auto_renew { .. } => {
+					// No authorization is consumed at registration time — the dispatch handler
+					// performs its own checks (existence of the content hash, ownership for
+					// disable, and a non-consuming authorization probe for enable). Return a
+					// non-prioritized ValidTransaction so the call enters the pool ordered only
+					// by the signer's nonce.
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
 							priority: T::StoreRenewPriority::get(),
@@ -1927,11 +2288,28 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 		effective_normal.ref_time(),
 	);
 
-	// 5. check_proof (DispatchClass::Mandatory, once per block) must fit in max block.
-	let check_proof_weight = T::WeightInfo::check_proof();
+	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit
+	// in max block at worst case (proof check + draining MaxBlockTransactions
+	// auto-renewals).
+	let apply_inherents_weight = T::WeightInfo::apply_block_inherents(max_block_txs);
 	assert!(
-		check_proof_weight.all_lte(block_weights.max_block),
-		"check_proof weight {check_proof_weight:?} exceeds max block {:?}",
+		apply_inherents_weight.all_lte(block_weights.max_block),
+		"apply_block_inherents weight {apply_inherents_weight:?} exceeds max block {:?}",
+		block_weights.max_block,
+	);
+
+	// 6. on_initialize at the worst-case expiry block (taking
+	// `MaxBlockTransactions` items out of `Transactions[obsolete]` and looking up
+	// `TransactionByContentHash` + `AutoRenewals` for each) must fit alongside
+	// `apply_block_inherents` within `max_block`. Both run on the same block in
+	// the mandatory class; their sum is the floor of the mandatory budget for
+	// that block.
+	let on_init_with_expiry_weight = T::WeightInfo::on_initialize_with_expiry(max_block_txs);
+	let mandatory_floor = on_init_with_expiry_weight.saturating_add(apply_inherents_weight);
+	assert!(
+		mandatory_floor.all_lte(block_weights.max_block),
+		"on_initialize_with_expiry({max_block_txs}) + apply_block_inherents({max_block_txs}) \
+		 = {mandatory_floor:?} exceeds max block {:?}",
 		block_weights.max_block,
 	);
 
@@ -1961,7 +2339,10 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	println!("  store(max_size) weight:     {max_store_dispatch:?}");
 	println!("  store(even_split) weight:   {store_weight:?} (at {per_tx_size} bytes)");
 	println!("  renew weight:               {renew_weight:?}");
-	println!("  check_proof weight:         {check_proof_weight:?}");
+	println!("  block_weights.max_block:    {:?}", block_weights.max_block);
+	println!("  apply_block_inherents wt:   {apply_inherents_weight:?}");
+	println!("  on_initialize_with_expiry:  {on_init_with_expiry_weight:?}");
+	println!("  Mandatory floor (sum):      {mandatory_floor:?}");
 	println!("  Max store txs by weight:    {max_txs_by_weight}");
 	println!("  Max store txs by length:    {}", normal_length / per_tx_size);
 }
