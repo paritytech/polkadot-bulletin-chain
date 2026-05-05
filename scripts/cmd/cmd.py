@@ -22,6 +22,33 @@ def setup_logging():
     open('/tmp/cmd/command_output.log', 'w').close()
 
 
+def install_frame_omni_bencher():
+    version = os.environ.get('POLKADOT_SDK_VERSION')
+    sha256 = os.environ.get('FRAME_OMNI_BENCHER_SHA256')
+
+    if not version:
+        print_and_log('❌ POLKADOT_SDK_VERSION not set in environment')
+        sys.exit(1)
+
+    url = f'https://github.com/paritytech/polkadot-sdk/releases/download/{version}/frame-omni-bencher'
+    print_and_log(f'Downloading frame-omni-bencher {version} from {url}...')
+
+    if os.system(f'curl -fL -o frame-omni-bencher {url}') != 0:
+        print_and_log('❌ Failed to download frame-omni-bencher')
+        sys.exit(1)
+
+    if sha256:
+        if os.system(f'echo "{sha256}  frame-omni-bencher" | sha256sum -c') != 0:
+            print_and_log('❌ frame-omni-bencher sha256 verification failed')
+            sys.exit(1)
+
+    if os.system('chmod +x frame-omni-bencher && mv frame-omni-bencher /usr/local/bin/') != 0:
+        print_and_log('❌ Failed to install frame-omni-bencher')
+        sys.exit(1)
+
+    print_and_log('✅ frame-omni-bencher installed')
+
+
 setup_logging()
 
 f = open('scripts/runtimes-matrix.json', 'r')
@@ -91,6 +118,8 @@ args, unknown = parser.parse_known_args()
 print_and_log(f'args: {args}')
 
 if args.command == 'bench':
+    install_frame_omni_bencher()
+
     tempdir = tempfile.TemporaryDirectory()
     print_and_log(f'Created temp dir: {tempdir.name}')
     runtime_pallets_map = {}

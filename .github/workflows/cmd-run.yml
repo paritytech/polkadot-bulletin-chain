@@ -189,6 +189,11 @@ jobs:
           git config user.name "cmd[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Export env vars from .github/env so cmd.py can read them (e.g. POLKADOT_SDK_VERSION)
+          if [ -f .github/env ]; then
+            set -a && source .github/env && set +a
+          fi
+
           echo "Using cmd-bot branch for cmd-bot scripts"
           TMP_DIR=/tmp/polkadot-bulletin-chain
           git clone --depth 1 --branch cmd-bot https://github.com/paritytech/polkadot-bulletin-chain $TMP_DIR
