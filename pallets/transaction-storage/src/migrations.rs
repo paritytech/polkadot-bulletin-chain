@@ -496,14 +496,36 @@ pub mod v3 {
 		fn post_upgrade(
 			state: Vec<u8>,
 		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+
 			let old_count =
 				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
-			let new_count = Transactions::<T>::iter().count() as u64;
+
+			let prefix = Transactions::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut new_count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key.clone();
+				let raw = sp_io::storage::get(&key)
+					.ok_or("v2->v3 post_upgrade: missing Transactions entry")?;
+				BoundedVec::<TransactionInfo, T::MaxBlockTransactions>::decode(&mut &raw[..])
+					.map_err(|_| "v2->v3 post_upgrade: remaining entry is not v3")?;
+				new_count += 1;
+			}
+
 			polkadot_sdk_frame::prelude::ensure!(
-				new_count == old_count,
-				"v2->v3 post_upgrade: entry count mismatch"
+				new_count <= old_count,
+				"v2->v3 post_upgrade: entry count increased"
 			);
-			tracing::info!(target: LOG_TARGET, old_count, new_count, "v2->v3 post_upgrade: valid");
+			tracing::info!(
+				target: LOG_TARGET,
+				old_count,
+				new_count,
+				pruned = old_count.saturating_sub(new_count),
+				"v2->v3 post_upgrade: valid"
+			);
 			Ok(())
 		}
 	}

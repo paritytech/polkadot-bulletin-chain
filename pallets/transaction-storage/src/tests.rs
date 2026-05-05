@@ -1807,6 +1807,27 @@ fn migrate_v2_to_v3_insufficient_weight_returns_err() {
 	});
 }
 
+#[cfg(feature = "try-runtime")]
+#[test]
+fn migrate_v2_to_v3_post_upgrade_allows_pruned_entries() {
+	use crate::migrations::v3::MigrateV2ToV3;
+	use polkadot_sdk_frame::deps::frame_support::migrations::SteppedMigration;
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(2).put::<TransactionStorage>();
+		insert_v2_format_transactions(1, 1);
+		insert_v2_format_transactions(2, 1);
+		insert_v2_format_transactions(3, 1);
+
+		let state = MigrateV2ToV3::<Test>::pre_upgrade().expect("pre_upgrade succeeds");
+
+		Transactions::remove(2u64);
+		drive_v2_to_v3_migration();
+
+		MigrateV2ToV3::<Test>::post_upgrade(state).expect("pruned entries are allowed");
+	});
+}
+
 #[test]
 fn migrate_v2_to_v3_skips_already_v3_entries() {
 	use crate::migrations::v3::MigrateV2ToV3;
