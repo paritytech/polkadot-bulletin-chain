@@ -2038,6 +2038,7 @@ dependencies = [
  "pallet-authorship",
  "pallet-balances",
  "pallet-bulletin-transaction-storage",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "pallet-collator-selection",
  "pallet-hop-promotion",
  "pallet-message-queue",
@@ -2194,6 +2195,7 @@ dependencies = [
  "pallet-authorship",
  "pallet-balances",
  "pallet-bulletin-transaction-storage",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "pallet-collator-selection",
  "pallet-hop-promotion",
  "pallet-message-queue",
@@ -8049,6 +8051,15 @@ dependencies = [
  "scale-info",
  "sp-transaction-storage-proof",
  "tracing",
+]
+
+[[package]]
+name = "pallet-bulletin-transaction-storage-runtime-api"
+version = "0.1.0"
+dependencies = [
+ "parity-scale-codec",
+ "scale-info",
+ "sp-api",
 ]
 
 [[package]]
