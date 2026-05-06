@@ -8039,7 +8039,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-bulletin-hop-promotion"
-version = "0.2.0-draft"
+version = "0.1.0"
 dependencies = [
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
