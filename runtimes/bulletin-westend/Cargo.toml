@@ -38,7 +38,7 @@ pallet-skip-feeless-payment = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-utility = { workspace = true }
-pallet-hop-promotion = { workspace = true }
+pallet-bulletin-hop-promotion = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-bulletin-transaction-storage = { workspace = true }
@@ -120,9 +120,9 @@ std = [
 	"pallet-aura/std",
 	"pallet-authorship/std",
 	"pallet-balances/std",
+	"pallet-bulletin-hop-promotion/std",
 	"pallet-bulletin-transaction-storage/std",
 	"pallet-collator-selection/std",
-	"pallet-hop-promotion/std",
 	"pallet-message-queue/std",
 	"pallet-migrations/std",
 	"pallet-session/std",
@@ -179,9 +179,9 @@ runtime-benchmarks = [
 	"frame-system-benchmarking/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
 	"pallet-balances/runtime-benchmarks",
+	"pallet-bulletin-hop-promotion/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-collator-selection/runtime-benchmarks",
-	"pallet-hop-promotion/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
 	"pallet-migrations/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
@@ -216,9 +216,9 @@ try-runtime = [
 	"pallet-aura/try-runtime",
 	"pallet-authorship/try-runtime",
 	"pallet-balances/try-runtime",
+	"pallet-bulletin-hop-promotion/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-collator-selection/try-runtime",
-	"pallet-hop-promotion/try-runtime",
 	"pallet-message-queue/try-runtime",
 	"pallet-migrations/try-runtime",
 	"pallet-session/try-runtime",

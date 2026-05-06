@@ -1,4 +1,4 @@
-# pallet-hop-promotion
+# pallet-bulletin-hop-promotion
 
 Promotes near-expiry HOP pool data to permanent chain storage on the Polkadot Bulletin Chain.
 
