@@ -33,13 +33,13 @@ tracing-subscriber = { version = "=0.3.19" }
 westend-runtime-constants = { version = "27.0.0", package = "westend-runtime-constants", default-features = false }
 
 # Local workspace members
-bulletin-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
+bulletin-pallets-common = { version = "0.2.0-draft", path = "pallets/common", default-features = false }
 bulletin-paseo-runtime = { path = "runtimes/bulletin-paseo" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
-bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
+bulletin-transaction-storage-primitives = { version = "0.2.0-draft", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
-pallet-bulletin-hop-promotion = { version = "0.1.0", path = "pallets/hop-promotion", default-features = false }
-pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
+pallet-bulletin-hop-promotion = { version = "0.2.0-draft", path = "pallets/hop-promotion", default-features = false }
+pallet-bulletin-transaction-storage = { version = "0.2.0-draft", path = "pallets/transaction-storage", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "47.0.0", default-features = false }
