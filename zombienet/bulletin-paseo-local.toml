@@ -38,9 +38,16 @@ validator = true
 p2p_port = 10001
 rpc_port = 10000
 args = [
+	"--enable-hop",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
+	# Promote data after 50 blocks ~ 300s ~ 5mins
+	# "--hop-retention-blocks 50",
+	"--hop-retention-blocks 10",
+	# Interval every 100 seconds
+	# "--hop-check-interval 100",
+	"--hop-check-interval 10",
 	# Embedded relay chain args (after "--"):
 	# Use -:--port to exclude zombienet's auto-generated --port flag,
 	# then provide --listen-addr to bind only on 127.0.0.1 (avoids litep2p
