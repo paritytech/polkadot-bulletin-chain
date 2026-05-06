@@ -75,6 +75,15 @@ export {
   type MockClientConfig,
   type MockOperation,
 } from "./mock-client.js"
+// pipeline: high-throughput bulk submission
+export {
+  type BlockLimits,
+  type LatencyStats,
+  type PipelineConfig,
+  type PipelineResult,
+  type PipelineStats,
+  pipelineStore,
+} from "./pipeline.js"
 
 // preparer: offline CID calculation and chunking
 export { BulletinPreparer } from "./preparer.js"
