@@ -4,7 +4,7 @@ version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 repository.workspace = true
-license = "GPL-3.0-or-later"
+license = "GPL-3.0-only"
 description = "Off-chain client SDK for Polkadot Bulletin Chain"
 publish = false
 

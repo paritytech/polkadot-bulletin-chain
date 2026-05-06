@@ -41,7 +41,7 @@
     "blockchain"
   ],
   "author": "Parity Technologies <admin@parity.io>",
-  "license": "GPL-3.0-or-later WITH Classpath-exception-2.0",
+  "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/paritytech/polkadot-bulletin-chain.git",
