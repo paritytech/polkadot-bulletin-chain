@@ -3,6 +3,8 @@
 import os
 import sys
 import json
+import shutil
+import platform
 import argparse
 import tempfile
 import _help
@@ -22,7 +24,59 @@ def setup_logging():
     open('/tmp/cmd/command_output.log', 'w').close()
 
 
+def load_github_env(env_file='.github/env'):
+    if not os.path.exists(env_file):
+        return
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, _, value = line.partition('=')
+                os.environ.setdefault(key.strip(), value.strip())
+
+
+def install_frame_omni_bencher():
+    # If already installed anywhere in PATH, skip download (no re-verification)
+    if shutil.which('frame-omni-bencher'):
+        print_and_log(f'✅ frame-omni-bencher already installed, skipping download')
+        return
+
+    # If current os is MacOS, throw error to guide manual installation
+    if platform.system() == 'Darwin':
+        print_and_log(
+            'Please manually install frame-omni-bencher via source, this action is not automatically on macOS.\n'
+        )
+        sys.exit(1)
+
+    version = os.environ.get('POLKADOT_SDK_VERSION')
+    sha256 = os.environ.get('FRAME_OMNI_BENCHER_SHA256')
+
+    if not version:
+        print_and_log('❌ POLKADOT_SDK_VERSION not set in environment')
+        sys.exit(1)
+
+    install_path = '/usr/local/bin/frame-omni-bencher'
+    url = f'https://github.com/paritytech/polkadot-sdk/releases/download/{version}/frame-omni-bencher'
+    print_and_log(f'Downloading frame-omni-bencher {version} from {url}...')
+
+    if os.system(f'curl -fL -o frame-omni-bencher {url}') != 0:
+        print_and_log('❌ Failed to download frame-omni-bencher')
+        sys.exit(1)
+
+    if sha256:
+        if os.system(f'echo "{sha256}  frame-omni-bencher" | sha256sum -c') != 0:
+            print_and_log('❌ frame-omni-bencher sha256 verification failed')
+            sys.exit(1)
+
+    if os.system(f'chmod +x frame-omni-bencher && mv frame-omni-bencher {install_path}') != 0:
+        print_and_log(f'❌ Failed to install frame-omni-bencher to {install_path}')
+        sys.exit(1)
+
+    print_and_log(f'✅ frame-omni-bencher installed to {install_path}')
+
+
 setup_logging()
+load_github_env()
 
 f = open('scripts/runtimes-matrix.json', 'r')
 runtimesMatrix = json.load(f)
@@ -91,6 +145,8 @@ args, unknown = parser.parse_known_args()
 print_and_log(f'args: {args}')
 
 if args.command == 'bench':
+    install_frame_omni_bencher()
+
     tempdir = tempfile.TemporaryDirectory()
     print_and_log(f'Created temp dir: {tempdir.name}')
     runtime_pallets_map = {}
