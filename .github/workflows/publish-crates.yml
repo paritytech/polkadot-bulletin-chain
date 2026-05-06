@@ -33,7 +33,7 @@ on:
         type: string
         required: true
       hop_promotion_version:
-        description: "Version for pallet-hop-promotion"
+        description: "Version for pallet-bulletin-hop-promotion"
         type: string
         required: true
       dry_run:
@@ -115,7 +115,7 @@ jobs:
           sed -i "s|bulletin-pallets-common = { \(version = \"[^\"]*\", \)\?path = \"pallets/common\"|bulletin-pallets-common = { version = \"$COMMON_VERSION\", path = \"pallets/common\"|" Cargo.toml
           sed -i "s|bulletin-transaction-storage-primitives = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage/primitives\"|bulletin-transaction-storage-primitives = { version = \"$PRIMITIVES_VERSION\", path = \"pallets/transaction-storage/primitives\"|" Cargo.toml
           sed -i "s|pallet-bulletin-transaction-storage = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage\"|pallet-bulletin-transaction-storage = { version = \"$PALLET_VERSION\", path = \"pallets/transaction-storage\"|" Cargo.toml
-          sed -i "s|pallet-hop-promotion = { \(version = \"[^\"]*\", \)\?path = \"pallets/hop-promotion\"|pallet-hop-promotion = { version = \"$HOP_PROMOTION_VERSION\", path = \"pallets/hop-promotion\"|" Cargo.toml
+          sed -i "s|pallet-bulletin-hop-promotion = { \(version = \"[^\"]*\", \)\?path = \"pallets/hop-promotion\"|pallet-bulletin-hop-promotion = { version = \"$HOP_PROMOTION_VERSION\", path = \"pallets/hop-promotion\"|" Cargo.toml
 
           echo "--- Updated crate versions ---"
           grep '^version' pallets/common/Cargo.toml
@@ -123,10 +123,10 @@ jobs:
           grep '^version' pallets/transaction-storage/Cargo.toml
           grep '^version' pallets/hop-promotion/Cargo.toml
           echo "--- Updated workspace dependencies ---"
-          grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage|pallet-hop-promotion' Cargo.toml
+          grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage|pallet-bulletin-hop-promotion' Cargo.toml
 
           # Regenerate Cargo.lock so the pinned path-dep versions match the bumped Cargo.toml files.
-          cargo check -p bulletin-pallets-common -p bulletin-transaction-storage-primitives -p pallet-bulletin-transaction-storage -p pallet-hop-promotion
+          cargo check -p bulletin-pallets-common -p bulletin-transaction-storage-primitives -p pallet-bulletin-transaction-storage -p pallet-bulletin-hop-promotion
 
       - name: Commit and push release branch
         if: ${{ !inputs.dry_run }}
@@ -195,18 +195,18 @@ jobs:
             cargo publish --locked -p "$NAME"
           fi
 
-      # pallet-hop-promotion depends on pallet-bulletin-transaction-storage (just published)
-      # and bulletin-transaction-storage-primitives, so both must be indexed on crates.io
-      # before it can resolve them.
+      # pallet-bulletin-hop-promotion depends on pallet-bulletin-transaction-storage (just
+      # published) and bulletin-transaction-storage-primitives, so both must be indexed on
+      # crates.io before it can resolve them.
       - name: Wait for crates.io to index pallet-bulletin-transaction-storage
         if: ${{ !inputs.dry_run }}
         run: sleep 30
 
-      - name: Publish pallet-hop-promotion
+      - name: Publish pallet-bulletin-hop-promotion
         if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-          NAME: pallet-hop-promotion
+          NAME: pallet-bulletin-hop-promotion
           VERSION: ${{ inputs.hop_promotion_version }}
         run: |
           status=$(curl -so /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
@@ -229,7 +229,7 @@ jobs:
             "bulletin-pallets-common-v$COMMON_VERSION" \
             "bulletin-transaction-storage-primitives-v$PRIMITIVES_VERSION" \
             "pallet-bulletin-transaction-storage-v$PALLET_VERSION" \
-            "pallet-hop-promotion-v$HOP_PROMOTION_VERSION"; do
+            "pallet-bulletin-hop-promotion-v$HOP_PROMOTION_VERSION"; do
             if git ls-remote --exit-code --tags origin "$tag" > /dev/null 2>&1; then
               echo "Tag $tag already exists on origin — skipping"
             else
@@ -248,5 +248,5 @@ jobs:
           # new (not-yet-published) version. The real publish path handles this via
           # sequential publish + index wait.
           cargo package --locked --no-verify -p pallet-bulletin-transaction-storage --allow-dirty
-          cargo package --locked --no-verify -p pallet-hop-promotion --allow-dirty
+          cargo package --locked --no-verify -p pallet-bulletin-hop-promotion --allow-dirty
           echo "Dry run complete - all crates packaged successfully"

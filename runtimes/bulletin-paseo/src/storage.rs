@@ -144,7 +144,7 @@ parameter_types! {
 	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
 }
 
-impl pallet_hop_promotion::Config for Runtime {
+impl pallet_bulletin_hop_promotion::Config for Runtime {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
-	type WeightInfo = crate::weights::pallet_hop_promotion::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bulletin_hop_promotion::WeightInfo<Runtime>;
 }

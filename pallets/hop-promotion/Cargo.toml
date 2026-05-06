@@ -1,5 +1,5 @@
 [package]
-name = "pallet-hop-promotion"
+name = "pallet-bulletin-hop-promotion"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true

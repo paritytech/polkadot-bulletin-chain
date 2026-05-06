@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Weights for `pallet-hop-promotion`.
+//! Weights for `pallet-bulletin-hop-promotion`.
 //!
 //! `authorize_promote` measures the cost of the `#[pallet::authorize]` path for
 //! [`crate::Call::promote`]: storage reads for block-fullness / timestamp /
@@ -24,7 +24,7 @@
 
 use polkadot_sdk_frame::weights_prelude::*;
 
-/// Weight functions needed for `pallet-hop-promotion`.
+/// Weight functions needed for `pallet-bulletin-hop-promotion`.
 pub trait WeightInfo {
 	/// Worst-case weight of the `#[pallet::authorize]` closure for
 	/// [`crate::Call::promote`], parameterized by `d` = data length in bytes.
