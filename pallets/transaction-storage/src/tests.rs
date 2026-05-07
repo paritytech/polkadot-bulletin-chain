@@ -3717,6 +3717,14 @@ mod migration_v3_to_v4 {
 
 	const RELAY_NOW: u32 = 1_000;
 
+	/// Set the mock relay block to a non-zero value and pin the on-chain
+	/// storage version to v3 so the migration has a real pre-migration state
+	/// to walk.
+	fn setup_v3() {
+		set_relay_now(RELAY_NOW);
+		StorageVersion::new(3).put::<TransactionStorage>();
+	}
+
 	/// Per-step weight from the mock `()` `WeightInfo`. Used to size meters.
 	fn step_weight() -> polkadot_sdk_frame::deps::sp_runtime::Weight {
 		<Test as crate::Config>::WeightInfo::migrate_v3_to_v4_step()
@@ -3756,8 +3764,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn translates_active_account_auth() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let who = 1u64;
 			let scope = AuthorizationScope::Account(who);
 			let parachain_now = System::block_number();
@@ -3792,8 +3799,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn drops_expired_account_auth() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let who = 1u64;
 			let scope = AuthorizationScope::Account(who);
 			let parachain_now = System::block_number();
@@ -3811,8 +3817,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn drops_empty_account_auth() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let who = 1u64;
 			let scope = AuthorizationScope::Account(who);
 			let parachain_now = System::block_number();
@@ -3830,8 +3835,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn translates_preimage_auth() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let hash = [42u8; 32];
 			let scope = AuthorizationScope::Preimage(hash);
 			let parachain_now = System::block_number();
@@ -3851,8 +3855,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn resumes_across_steps() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let parachain_now = System::block_number();
 			for who in 0u64..10u64 {
 				LegacyAuthorizations::insert(
@@ -3907,8 +3910,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn version_bumps_only_after_drain() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let scope = AuthorizationScope::Account(1u64);
 			LegacyAuthorizations::insert(
 				&scope,
@@ -3938,8 +3940,7 @@ mod migration_v3_to_v4 {
 	#[test]
 	fn clears_legacy_storage_prefix() {
 		new_test_ext().execute_with(|| {
-			set_relay_now(RELAY_NOW);
-			StorageVersion::new(3).put::<TransactionStorage>();
+			setup_v3();
 			let parachain_now = System::block_number();
 			for who in 0u64..3u64 {
 				LegacyAuthorizations::insert(

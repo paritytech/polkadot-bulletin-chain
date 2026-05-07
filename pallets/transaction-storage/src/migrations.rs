@@ -22,6 +22,12 @@ use polkadot_sdk_frame::{
 	traits::{Get, OnRuntimeUpgrade, Zero},
 };
 
+/// Identifier prefix for every stepped migration in this pallet. The
+/// MBM scheduler keys on `(pallet_id, version_from, version_to)`, so all of
+/// our `SteppedMigration` impls must share this constant — only the version
+/// pair distinguishes one from the next.
+const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
 /// Runtime migration that sets the `RetentionPeriod` storage item to a
 /// non-zero `NewValue` value **only if it is currently zero**.
 ///
@@ -414,10 +420,9 @@ pub mod v4 {
 		prelude::{frame_system, StorageVersion},
 	};
 
-	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
-
-	/// Legacy `Authorization` shape (v3): single-window per scope. Used only
-	/// for decoding pre-migration entries; never written.
+	/// Legacy `Authorization` shape (v3): single-window per scope. Production
+	/// code only decodes existing entries; the benchmark and tests write it
+	/// via the `Authorizations` storage alias to seed scenarios.
 	#[derive(Encode, Decode, MaxEncodedLen, scale_info::TypeInfo)]
 	pub(crate) struct LegacyAuthorization<BlockNumber> {
 		pub extent: AuthorizationExtent,
@@ -443,7 +448,7 @@ pub mod v4 {
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 3, version_to: 4 }
+			MigrationId { pallet_id: *super::MIGRATIONS_ID, version_from: 3, version_to: 4 }
 		}
 
 		fn step(
@@ -495,13 +500,11 @@ pub mod v4 {
 				// translate branch panics in debug.
 				cursor = Some(scope.clone());
 
-				// Drop already-dead entries (already expired or zero allowance).
 				if old.expiration <= parachain_now || old.extent.bytes_allowance == 0 {
 					Authorizations::<T>::remove(&scope);
 					continue;
 				}
 
-				// Translate to a fresh slot.
 				let slot = TimedAuthorization {
 					extent: AuthorizationExtent {
 						bytes: 0,
@@ -607,8 +610,6 @@ pub mod v3 {
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
 
-	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
-
 	/// `TransactionInfo` layout at v2 (no `extrinsic_index`). Used only for
 	/// decoding pre-migration entries; never written.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
@@ -629,7 +630,7 @@ pub mod v3 {
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 2, version_to: 3 }
+			MigrationId { pallet_id: *super::MIGRATIONS_ID, version_from: 2, version_to: 3 }
 		}
 
 		fn step(
