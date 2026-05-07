@@ -134,7 +134,7 @@ pub struct AuthorizationExtent {
 
 impl AuthorizationExtent {
 	/// Per-account renew quota check: `bytes_permanent + size <= bytes_allowance`.
-	pub fn renew_fits(&self, size: u64) -> bool {
+	pub fn has_permanent_capacity(&self, size: u64) -> bool {
 		self.bytes_permanent.saturating_add(size) <= self.bytes_allowance
 	}
 }
