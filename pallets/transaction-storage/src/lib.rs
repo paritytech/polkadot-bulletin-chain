@@ -132,6 +132,13 @@ pub struct AuthorizationExtent {
 	pub bytes_allowance: u64,
 }
 
+impl AuthorizationExtent {
+	/// Per-account renew quota check: `bytes_permanent + size <= bytes_allowance`.
+	pub fn renew_fits(&self, size: u64) -> bool {
+		self.bytes_permanent.saturating_add(size) <= self.bytes_allowance
+	}
+}
+
 /// The scope of an authorization.
 ///
 /// This type is used both for storage keys and to indicate which authorization
@@ -863,13 +870,12 @@ pub mod pallet {
 			let tx_info =
 				Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
-			// Per-account hard-cap check on the renew axis. Mirror `check_authorization`:
-			// renews are gated by `bytes_permanent`, not the soft-side `bytes`.
-			let extent = Self::authorization_extent(AuthorizationScope::Account(who.clone()));
+			// Mirror `check_authorization`: the authorization must exist, be unexpired,
+			// and have room for one more renewal of `tx_info.size`.
+			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
+				.ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(
-				extent.transactions_allowance > extent.transactions &&
-					extent.bytes_permanent.saturating_add(tx_info.size as u64) <=
-						extent.bytes_allowance,
+				!Self::expired(auth.expiration) && auth.extent.renew_fits(tx_info.size as u64),
 				Error::<T>::AuthorizationNotFound,
 			);
 
@@ -1769,9 +1775,7 @@ pub mod pallet {
 				}
 				if is_renew {
 					// Per-account hard cap (per-window quota).
-					if authorization.extent.bytes_permanent.saturating_add(size_u64) >
-						authorization.extent.bytes_allowance
-					{
+					if !authorization.extent.renew_fits(size_u64) {
 						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into())
 					}
 					// Chain-wide hard cap.
