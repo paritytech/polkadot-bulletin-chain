@@ -134,6 +134,13 @@ pub struct AuthorizationExtent {
 	pub bytes_allowance: u64,
 }
 
+impl AuthorizationExtent {
+	/// Per-account renew quota check: `bytes_permanent + size <= bytes_allowance`.
+	pub fn has_permanent_capacity(&self, size: u64) -> bool {
+		self.bytes_permanent.saturating_add(size) <= self.bytes_allowance
+	}
+}
+
 /// The scope of an authorization.
 ///
 /// This type is used both for storage keys and to indicate which authorization
@@ -436,23 +443,18 @@ pub mod pallet {
 				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
 					num_expiring = transactions.len() as u32;
 
-					// Decrement the chain-wide permanent counter for any renewed bytes that
-					// just aged out (covers entries flagged `TransactionKind::Renew`).
-					let renewed_sum: u64 = transactions
-						.iter()
-						.filter(|t| matches!(t.kind, TransactionKind::Renew))
-						.fold(0u64, |acc, t| acc.saturating_add(t.size as u64));
-					if renewed_sum > 0 {
-						Self::update_permanent_storage_used(|used| {
-							used.saturating_sub(renewed_sum)
-						});
-					}
-
-					// Before removing, collect any transactions that are registered for
-					// auto-renewal and schedule them for processing this block.
+					// Single pass: sum renewed sizes, clean up `TransactionByContentHash`,
+					// and schedule auto-renewals.
 					let mut pending = PendingAutoRenewals::<T>::get();
-					for tx_info in transactions.iter() {
+					let mut renewed_sum: u64 = 0;
+					for tx_info in transactions.into_iter() {
 						let hash: ContentHash = tx_info.content_hash;
+
+						// Sum renewed sizes for the chain-wide permanent counter decrement.
+						if matches!(tx_info.kind, TransactionKind::Renew) {
+							renewed_sum = renewed_sum.saturating_add(tx_info.size as u64);
+						}
+
 						// Only remove TransactionByContentHash if this entry still points to
 						// the obsolete block (otherwise the entry has been re-stored or
 						// renewed elsewhere and points at a different block).
@@ -464,8 +466,14 @@ pub mod pallet {
 						// `try_push` cannot overflow: `pending` is empty per `on_finalize`'s
 						// drain invariant, and `transactions.len() <= MaxBlockTransactions`.
 						if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
-							let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
+							let _ = pending.try_push((hash, tx_info, renewal_data));
 						}
+					}
+
+					if renewed_sum > 0 {
+						Self::update_permanent_storage_used(|used| {
+							used.saturating_sub(renewed_sum)
+						});
 					}
 					if !pending.is_empty() {
 						PendingAutoRenewals::<T>::put(&pending);
@@ -813,6 +821,7 @@ pub mod pallet {
 		/// Emits [`Renewed`](Event::Renewed) when successful.
 		#[pallet::call_index(10)]
 		#[pallet::weight((T::WeightInfo::renew_content_hash(), DispatchClass::Operational))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
 		pub fn renew_content_hash(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
@@ -833,10 +842,15 @@ pub mod pallet {
 
 		/// Enable automatic renewal for a previously stored piece of data.
 		///
-		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
-		/// data size). The authorization is **not** consumed here; it is consumed each time
-		/// the data is auto-renewed (every `StoragePeriod` blocks).
-		/// Authorization is checked here but might still be missing when actually renewed.
+		/// Snapshot check: the caller's authorization must have enough remaining
+		/// renew-window quota (`bytes_permanent + tx_info.size <= bytes_allowance`) to
+		/// fit one more renewal. This mirrors the per-account hard cap that
+		/// `check_authorization` enforces at renewal time, on the correct axis
+		/// (`bytes_permanent`, not `bytes`). It does **not** guarantee the renewal will
+		/// succeed at process time — `bytes_permanent` may have advanced (other
+		/// renewals), the auth may have expired and been re-granted (counters reset),
+		/// or the chain-wide cap may have been hit. The actual gate is
+		/// `do_process_auto_renewals`.
 		///
 		/// Emits [`AutoRenewalEnabled`](Event::AutoRenewalEnabled) when successful.
 		#[pallet::call_index(12)]
@@ -852,17 +866,21 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// Verify the content hash exists and the account has sufficient authorization.
+			// Verify the content hash refers to currently-stored data and look up its
+			// size; we need it for the per-account quota check below.
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 			let tx_info =
 				Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
-			let extent = Self::authorization_extent(AuthorizationScope::Account(who.clone()));
-			let bytes_remaining = extent.bytes_allowance.saturating_sub(extent.bytes);
+
+			// Mirror `check_authorization`: the authorization must exist, be unexpired,
+			// and have room for one more renewal of `tx_info.size`.
+			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
+				.ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(
-				extent.transactions_allowance > extent.transactions &&
-					bytes_remaining >= tx_info.size as u64,
-				Error::<T>::AuthorizationNotFound
+				!Self::expired(auth.expiration) &&
+					auth.extent.has_permanent_capacity(tx_info.size as u64),
+				Error::<T>::AuthorizationNotFound,
 			);
 
 			AutoRenewals::<T>::insert(content_hash, AutoRenewalData { account: who.clone() });
@@ -1838,12 +1856,7 @@ pub mod pallet {
 						AuthorizationScope::Preimage(_) => {
 							// Preimage scopes: keep existing cumulative counter
 							// (one-shot grants).
-							if authorization
-								.extent
-								.bytes_permanent
-								.saturating_add(size_u64) >
-								authorization.extent.bytes_allowance
-							{
+							if !authorization.extent.has_permanent_capacity(size_u64) {
 								return Err(PERMANENT_ALLOWANCE_EXCEEDED.into())
 							}
 						},

@@ -33,7 +33,7 @@ Without bounds, at sustained-peak block usage one window of fresh `store` data a
 - **Temporary storage** — happens through the `store` call. Lives on chain for one `RetentionPeriod` from its `store` block.
 - **Renewed storage** — happens through the `renew` call. The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
 
-Both `store`/`store_with_cid_config` and `renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
+`store`, `store_with_cid_config`, `renew`, and `renew_content_hash` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
 Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`. The kind is what `on_initialize`'s obsolete-block cleanup uses to tell which entries should decrement the chain-wide renewed-bytes counter when they age out — see [Hard limit on renewed storage](#hard-limit-on-renewed-storage).
 
@@ -41,7 +41,7 @@ Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`.
 
 PoP grants two numbers per account: `bytes_allowance` (size budget) and `transactions_allowance` (count budget). The same `bytes_allowance` is reused on the soft and hard sides, with different semantics.
 
-- **Soft (temporary)** — `bytes_allowance` and `transactions_allowance` are priority thresholds only. The boost drops to `0` once *either* axis is at-or-over cap (`bytes >= bytes_allowance` or `transactions >= transactions_allowance`). `store` calls are never rejected; they queue behind in-budget signers when over.
+- **Soft (temporary)** — `bytes_allowance` and `transactions_allowance` are priority thresholds only. The boost stays on while in-budget on both axes (`bytes <= bytes_allowance` *and* `transactions <= transactions_allowance`) and drops to `0` once *either* is strictly over cap. A missing or `0`-allowance grant also yields no boost. `store` calls are never rejected; they queue behind in-budget signers when over.
 - **Hard (renewed)** — `bytes_allowance` is a real cap on the **live** renewed bytes for the account. `renew` is **rejected** when `live_permanent_bytes + size > bytes_allowance`. Re-renewing the same content is a no-op for capacity (see [Per-account quota](#per-account-quota)). The transaction-count axis does not gate renew. A separate chain-wide cap (`MaxPermanentStorageSize`) bounds the total renewed bytes on chain across all signers.
 
 ### Authorization storage
