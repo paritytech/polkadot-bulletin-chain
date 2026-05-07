@@ -634,7 +634,7 @@ mod runtime {
 	#[runtime::pallet_index(40)]
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
-	pub type HopPromotion = pallet_hop_promotion;
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
@@ -674,7 +674,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
-		[pallet_hop_promotion, HopPromotion]
+		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -945,7 +945,7 @@ impl_runtime_apis! {
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
 		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
-			pallet_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
 		}
 
 		fn create_promotion_extrinsic(
@@ -955,8 +955,8 @@ impl_runtime_apis! {
 			submit_timestamp: u64,
 		) -> <Block as BlockT>::Extrinsic {
 			use frame_system::offchain::CreateAuthorizedTransaction;
-			<Runtime as CreateAuthorizedTransaction<pallet_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
-				pallet_hop_promotion::Call::<Runtime>::promote {
+			<Runtime as CreateAuthorizedTransaction<pallet_bulletin_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
+				pallet_bulletin_hop_promotion::Call::<Runtime>::promote {
 					data,
 					signer,
 					signature,
@@ -972,7 +972,7 @@ impl_runtime_apis! {
 		}
 
 		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
-			pallet_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
 		}
 	}
 

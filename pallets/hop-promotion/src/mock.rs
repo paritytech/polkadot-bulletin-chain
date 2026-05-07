@@ -15,7 +15,7 @@
 
 //! Test environment for hop-promotion pallet.
 
-use crate as pallet_hop_promotion;
+use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
 use sp_runtime::{traits::IdentityLookup, AccountId32};
@@ -28,7 +28,7 @@ construct_runtime!(
 		System: frame_system,
 		Timestamp: pallet_timestamp,
 		TransactionStorage: pallet_bulletin_transaction_storage,
-		HopPromotion: pallet_hop_promotion,
+		HopPromotion: pallet_bulletin_hop_promotion,
 	}
 );
 
@@ -88,7 +88,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
-impl pallet_hop_promotion::Config for Test {
+impl pallet_bulletin_hop_promotion::Config for Test {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
 	type WeightInfo = ();
 }
