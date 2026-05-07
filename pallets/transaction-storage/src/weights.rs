@@ -58,9 +58,9 @@ pub trait WeightInfo {
 	fn apply_block_inherents(n: u32) -> Weight;
 	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn authorize_account() -> Weight;
-	fn refresh_account_authorization() -> Weight;
+	fn authorize_account_window() -> Weight;
 	fn authorize_preimage() -> Weight;
-	fn refresh_preimage_authorization() -> Weight;
+	fn authorize_preimage_window() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
 	fn enable_auto_renew() -> Weight;
@@ -68,6 +68,7 @@ pub trait WeightInfo {
 	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
+	fn migrate_v3_to_v4_step() -> Weight;
 }
 
 /// Weights for pallet_bulletin_transaction_storage using the Substrate node and recommended hardware.
@@ -157,13 +158,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	fn authorize_account() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
-	fn refresh_account_authorization() -> Weight {
+	fn authorize_account_window() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn authorize_preimage() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
-	fn refresh_preimage_authorization() -> Weight {
+	fn authorize_preimage_window() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn remove_expired_account_authorization() -> Weight {
@@ -202,6 +203,15 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(50_000_000, 43_500)
 			.saturating_add(T::DbWeight::get().reads(2_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
+	/// Worst-case weight for one inner-loop iteration of the v3→v4 multi-block
+	/// migration: read one legacy entry, insert a translated slot, remove the
+	/// legacy entry, bump the provider-ref (`Account` scope only). Conservative
+	/// placeholder until benchmarked.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(50_000_000, 5_500)
+			.saturating_add(T::DbWeight::get().reads(2_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
 	}
 }
 
@@ -275,13 +285,13 @@ impl WeightInfo for () {
 	fn authorize_account() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
-	fn refresh_account_authorization() -> Weight {
+	fn authorize_account_window() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn authorize_preimage() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
-	fn refresh_preimage_authorization() -> Weight {
+	fn authorize_preimage_window() -> Weight {
 		Weight::from_parts(1_000, 1_000)
 	}
 	fn remove_expired_account_authorization() -> Weight {
@@ -311,5 +321,10 @@ impl WeightInfo for () {
 		Weight::from_parts(50_000_000, 43_500)
 			.saturating_add(RocksDbWeight::get().reads(2_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(50_000_000, 5_500)
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
 	}
 }

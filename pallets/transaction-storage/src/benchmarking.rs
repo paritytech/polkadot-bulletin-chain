@@ -116,6 +116,17 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 	}
 }
 
+/// Push the runtime's relay-chain block number forward to at least `n`.
+/// `set_block_number` is the benchmarking-only escape hatch on
+/// [`BlockNumberProvider`]; on `RelaychainDataProvider` it writes through to
+/// the inner `ValidationData` storage value.
+pub(crate) fn bump_mock_relay_for_bench<T: Config>(n: u32) {
+	let now = T::RelayChainBlockNumberProvider::current_block_number();
+	if now < n {
+		T::RelayChainBlockNumberProvider::set_block_number(n);
+	}
+}
+
 #[benchmarks(where
 	T: Send + Sync,
 	RuntimeCallOf<T>: IsSubType<Call<T>> + From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
@@ -180,32 +191,48 @@ mod benchmarks {
 		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
 
+		// `ensure_relay_now` rejects the genesis sentinel; bump the mock
+		// provider once so the benchmark runs against a non-zero relay block.
+		bump_mock_relay_for_bench::<T>(1);
+		let relay_now = TransactionStorage::<T>::relay_now();
+		let starts_at = relay_now;
+		let expiration = relay_now.saturating_add(T::DefaultAuthorizationWindow::get());
+
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes);
 
-		assert_last_event::<T>(Event::AccountAuthorized { who, transactions, bytes }.into());
+		assert_last_event::<T>(
+			Event::AccountAuthorized { who, transactions, bytes, starts_at, expiration }.into(),
+		);
 		Ok(())
 	}
 
 	#[benchmark]
-	fn refresh_account_authorization() -> Result<(), BenchmarkError> {
+	fn authorize_account_window() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
+		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
-		let origin2 = origin.clone();
-		TransactionStorage::<T>::authorize_account(
-			origin2 as T::RuntimeOrigin,
-			who.clone(),
-			0,
-			bytes,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		bump_mock_relay_for_bench::<T>(1);
+		let relay_now = TransactionStorage::<T>::relay_now();
+		let starts_at = relay_now;
+		let expiration = relay_now.saturating_add(100);
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone());
+		_(
+			origin as T::RuntimeOrigin,
+			who.clone(),
+			transactions,
+			bytes,
+			Some(starts_at),
+			expiration,
+		);
 
-		assert_last_event::<T>(Event::AccountAuthorizationRefreshed { who }.into());
+		assert_last_event::<T>(
+			Event::AccountAuthorized { who, transactions, bytes, starts_at, expiration }.into(),
+		);
 		Ok(())
 	}
 
@@ -216,31 +243,38 @@ mod benchmarks {
 		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
 
+		bump_mock_relay_for_bench::<T>(1);
+		let relay_now = TransactionStorage::<T>::relay_now();
+		let starts_at = relay_now;
+		let expiration = relay_now.saturating_add(T::DefaultAuthorizationWindow::get());
+
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, content_hash, max_size);
 
-		assert_last_event::<T>(Event::PreimageAuthorized { content_hash, max_size }.into());
+		assert_last_event::<T>(
+			Event::PreimageAuthorized { content_hash, max_size, starts_at, expiration }.into(),
+		);
 		Ok(())
 	}
 
 	#[benchmark]
-	fn refresh_preimage_authorization() -> Result<(), BenchmarkError> {
+	fn authorize_preimage_window() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
-		let origin2 = origin.clone();
-		TransactionStorage::<T>::authorize_preimage(
-			origin2 as T::RuntimeOrigin,
-			content_hash,
-			max_size,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		bump_mock_relay_for_bench::<T>(1);
+		let relay_now = TransactionStorage::<T>::relay_now();
+		let starts_at = relay_now;
+		let expiration = relay_now.saturating_add(100);
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, content_hash);
+		_(origin as T::RuntimeOrigin, content_hash, max_size, Some(starts_at), expiration);
 
-		assert_last_event::<T>(Event::PreimageAuthorizationRefreshed { content_hash }.into());
+		assert_last_event::<T>(
+			Event::PreimageAuthorized { content_hash, max_size, starts_at, expiration }.into(),
+		);
 		Ok(())
 	}
 
@@ -249,16 +283,18 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
+		bump_mock_relay_for_bench::<T>(1);
 		TransactionStorage::<T>::authorize_account(origin, who.clone(), 0, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
-		// `AuthorizationPeriod` is ~14 days of blocks on real runtimes; iterating
-		// `on_initialize`/`on_finalize` for each is ~1.3M no-op iterations per step.
-		// The dispatchable only compares `block_number >= expiration`, so we can jump
-		// the system block number directly without running intermediate block hooks.
-		let period = T::AuthorizationPeriod::get();
-		let now = System::<T>::block_number();
-		System::<T>::set_block_number(now + period);
+		// Advance the mock relay block past every slot's expiration so the
+		// permissionless cleanup is allowed. `ensure_relay_now` already prevents
+		// the sentinel; the slot expires `relay_now + DefaultAuthorizationWindow`
+		// blocks ahead, so jumping there is sufficient.
+		let now = TransactionStorage::<T>::relay_now();
+		bump_mock_relay_for_bench::<T>(
+			now.saturating_add(T::DefaultAuthorizationWindow::get()).saturating_add(1),
+		);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, who.clone());
@@ -272,12 +308,14 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let content_hash = [0; 32];
+		bump_mock_relay_for_bench::<T>(1);
 		TransactionStorage::<T>::authorize_preimage(origin, content_hash, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize preimage"))?;
 
-		let period = T::AuthorizationPeriod::get();
-		let now = System::<T>::block_number();
-		System::<T>::set_block_number(now + period);
+		let now = TransactionStorage::<T>::relay_now();
+		bump_mock_relay_for_bench::<T>(
+			now.saturating_add(T::DefaultAuthorizationWindow::get()).saturating_add(1),
+		);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, content_hash);
@@ -295,6 +333,7 @@ mod benchmarks {
 		let caller: T::AccountId = whitelisted_caller();
 		let data = vec![0u8; l as usize];
 		let bytes_allowance = l as u64 * 10;
+		bump_mock_relay_for_bench::<T>(1);
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
@@ -336,6 +375,7 @@ mod benchmarks {
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
 		let bytes_allowance = T::MaxTransactionSize::get() as u64 * 10;
+		bump_mock_relay_for_bench::<T>(1);
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
@@ -377,6 +417,7 @@ mod benchmarks {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
+		bump_mock_relay_for_bench::<T>(1);
 		// Authorize account and store data
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
@@ -403,6 +444,7 @@ mod benchmarks {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
+		bump_mock_relay_for_bench::<T>(1);
 		// Authorize, store, advance, then enable auto-renew
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
@@ -484,11 +526,12 @@ mod benchmarks {
 		// updates `TransactionByContentHash`, and bumps the column-TRANSACTION refcount
 		// via `transaction_index::renew`. Synthetic content hashes are sufficient — none
 		// of those operations validate against existing storage.
+		bump_mock_relay_for_bench::<T>(1);
 		if n > 0 {
 			let mut pending = PendingAutoRenewals::<T>::get();
 			for i in 0..n {
 				// Unique caller per item so each `check_authorization` hits a distinct
-				// `Authorizations` key — shared callers collapse into a single cache hit
+				// `AuthorizationSlots` key — shared callers collapse into a single cache hit
 				// and undercharge the per-item write.
 				let caller: T::AccountId = account("rn_caller", i, 0);
 				let origin = T::Authorizer::try_successful_origin()
@@ -692,6 +735,59 @@ mod benchmarks {
 		let v3 = Transactions::<T>::get(block).expect("entry exists");
 		assert_eq!(v3.len(), max as usize);
 		assert_eq!(v3[0].extrinsic_index, u32::MAX);
+
+		Ok(())
+	}
+
+	/// Benchmarks one inner-loop iteration of the v3→v4 multi-block migration:
+	/// read one legacy `Authorizations` entry, translate to a `TimedAuthorization`
+	/// slot, insert into `AuthorizationSlots`, remove the legacy entry, bump
+	/// the provider-ref. Active+non-empty entry exercises the translate branch.
+	#[benchmark]
+	fn migrate_v3_to_v4_step() -> Result<(), BenchmarkError> {
+		use crate::{
+			migrations::v4::{
+				Authorizations as LegacyAuthorizations, LegacyAuthorization, MigrateV3ToV4,
+			},
+			AuthorizationScope,
+		};
+		use polkadot_sdk_frame::deps::frame_support::{
+			migrations::SteppedMigration, weights::WeightMeter,
+		};
+
+		// Bump the mock relay block past the genesis sentinel so the step does
+		// not bail.
+		bump_mock_relay_for_bench::<T>(1);
+
+		// Seed one legacy entry in the active+non-empty branch (translates).
+		let who: T::AccountId = whitelisted_caller();
+		let scope = AuthorizationScope::<T::AccountId>::Account(who.clone());
+		LegacyAuthorizations::<T>::insert(
+			&scope,
+			LegacyAuthorization {
+				extent: AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					transactions: 0,
+					bytes_allowance: 1024 * 1024,
+					transactions_allowance: 10,
+				},
+				expiration: frame_system::Pallet::<T>::block_number() + 100u32.into(),
+			},
+		);
+
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			MigrateV3ToV4::<T>::step(None, &mut meter).expect("step must succeed");
+		}
+
+		// Legacy entry drained; new slot inserted with allowance preserved.
+		assert!(LegacyAuthorizations::<T>::get(&scope).is_none());
+		let slots = crate::pallet::AuthorizationSlots::<T>::get(&scope).expect("slot exists");
+		assert_eq!(slots.len(), 1);
+		assert_eq!(slots[0].extent.bytes_allowance, 1024 * 1024);
 
 		Ok(())
 	}

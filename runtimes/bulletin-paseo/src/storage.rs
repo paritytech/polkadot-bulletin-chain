@@ -59,8 +59,21 @@ impl SortedMembers<AccountId> for TestAccounts {
 	}
 }
 
+/// Number of relay-chain blocks per day (relay produces a block every 6 s, so
+/// 14 400 blocks/day). Used to express slot-window constants in relay-chain
+/// time, which is what [`pallet_bulletin_transaction_storage`] uses for slot
+/// `(starts_at, expiration)`.
+pub const DAYS_RELAY: u32 = 14_400;
+
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
+	/// Default authorization window for `authorize_account` / `authorize_preimage`
+	/// (relay blocks). 14 days = 201 600 relay blocks.
+	pub const DefaultAuthorizationWindow: u32 = 14 * DAYS_RELAY;
+	/// Maximum future offset for `authorize_account_window` / `authorize_preimage_window`
+	/// (relay blocks). 30 days of headroom.
+	pub const MaxStartsAtFuture: u32 = 30 * DAYS_RELAY;
+	/// Maximum number of overlapping slots stored per scope.
+	pub const MaxAuthorizationSlots: u32 = 8;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	//
 	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
@@ -118,7 +131,11 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider =
+		cumulus_pallet_parachain_system::RelaychainDataProvider<Runtime>;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
 			// Root can do whatever.

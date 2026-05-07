@@ -164,8 +164,10 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
+	pub type MbmMigrations = (
+		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+	);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -190,7 +192,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_013,
+	spec_version: 1_000_014,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,

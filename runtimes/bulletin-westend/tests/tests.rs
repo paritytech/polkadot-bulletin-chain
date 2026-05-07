@@ -741,6 +741,15 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 		});
 }
 
+/// Bump the runtime's `RelaychainDataProvider` so `ensure_relay_now()` does
+/// not reject the genesis sentinel `0`. Returns the relay block in use.
+fn seed_relay_for_tests() -> u32 {
+	use sp_runtime::traits::BlockNumberProvider;
+	let n = 1u32;
+	cumulus_pallet_parachain_system::RelaychainDataProvider::<Runtime>::set_block_number(n);
+	n
+}
+
 #[test]
 fn people_chain_can_authorize_storage_with_transact() {
 	// Prepare call.
@@ -764,6 +773,9 @@ fn people_chain_can_authorize_storage_with_transact() {
 		.with_tracing()
 		.build()
 		.execute_with(|| {
+			let relay_now = seed_relay_for_tests();
+			let expiration = relay_now +
+				<Runtime as pallet_bulletin_transaction_storage::Config>::DefaultAuthorizationWindow::get();
 			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
 				(PeopleLocation::get(), OriginKind::Xcm),
 				authorize_call,
@@ -777,6 +789,8 @@ fn people_chain_can_authorize_storage_with_transact() {
 					who: account.to_account_id(),
 					transactions: 0,
 					bytes: 1024,
+					starts_at: relay_now,
+					expiration,
 				},
 			));
 		})
@@ -807,6 +821,9 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		.with_tracing()
 		.build()
 		.execute_with(|| {
+			let relay_now = seed_relay_for_tests();
+			let expiration = relay_now +
+				<Runtime as pallet_bulletin_transaction_storage::Config>::DefaultAuthorizationWindow::get();
 			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
 				(people_next_location, OriginKind::Xcm),
 				authorize_call,
@@ -820,6 +837,8 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 					who: account.to_account_id(),
 					transactions: 0,
 					bytes: 1024,
+					starts_at: relay_now,
+					expiration,
 				},
 			));
 		})

@@ -111,20 +111,15 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn refresh_account_authorization() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `316`
-		//  Estimated: `3550`
-		// Minimum execution time: 16_380_000 picoseconds.
-		Weight::from_parts(17_090_000, 0)
+	/// Storage: `TransactionStorage::AuthorizationSlots` (r:1 w:1)
+	fn authorize_account_window() -> Weight {
+		// Placeholder until the slot pallet is benchmarked end-to-end.
+		Weight::from_parts(21_140_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::AuthorizationSlots` (r:1 w:1)
 	fn authorize_preimage() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `272`
@@ -135,14 +130,10 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn refresh_preimage_authorization() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `315`
-		//  Estimated: `3550`
-		// Minimum execution time: 15_790_000 picoseconds.
-		Weight::from_parts(16_570_000, 0)
+	/// Storage: `TransactionStorage::AuthorizationSlots` (r:1 w:1)
+	fn authorize_preimage_window() -> Weight {
+		// Placeholder; mirrors `authorize_preimage`.
+		Weight::from_parts(15_540_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -325,5 +316,14 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
+	}
+	/// Placeholder for the v3→v4 stepped migration. One iteration: read one
+	/// legacy `Authorizations` entry, insert into `AuthorizationSlots`, remove
+	/// the legacy entry, bump the provider-ref (`Account` scope only). Will be
+	/// overwritten by `frame-omni-bencher`.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(50_000_000, 5_500)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(3))
 	}
 }
