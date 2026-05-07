@@ -98,13 +98,8 @@ pub const PERMANENT_ALLOWANCE_EXCEEDED: InvalidTransaction = InvalidTransaction:
 /// Renew rejected: would push `PermanentStorageUsed` past `MaxPermanentStorageSize`
 /// (chain-wide hard cap).
 pub const CHAIN_PERMANENT_CAP_REACHED: InvalidTransaction = InvalidTransaction::Custom(6);
-/// Push of a new authorization slot would exceed [`Config::MaxAuthorizationSlots`]
-/// after the lazy prune.
-pub const TOO_MANY_SLOTS: InvalidTransaction = InvalidTransaction::Custom(7);
-/// `(starts_at, expiration)` rejected as invalid (see [`Error::InvalidWindow`]).
-pub const INVALID_WINDOW: InvalidTransaction = InvalidTransaction::Custom(8);
 /// Relay-chain block number not yet available (genesis sentinel `0`).
-pub const RELAY_CHAIN_TIME_UNAVAILABLE: InvalidTransaction = InvalidTransaction::Custom(9);
+pub const RELAY_CHAIN_TIME_UNAVAILABLE: InvalidTransaction = InvalidTransaction::Custom(7);
 
 /// Percent of `MaxPermanentStorageSize` at which the pallet emits
 /// [`Event::PermanentStorageNearCap`] (rising-edge only). Off-chain governance consumers
@@ -709,25 +704,7 @@ pub mod pallet {
 			transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			let relay_now = Self::ensure_relay_now()?;
-			let expiration = relay_now.saturating_add(T::DefaultAuthorizationWindow::get());
-			Self::add_slot(
-				AuthorizationScope::Account(who.clone()),
-				transactions,
-				bytes,
-				relay_now,
-				expiration,
-			)?;
-			Self::deposit_event(Event::AccountAuthorized {
-				who,
-				transactions,
-				bytes,
-				starts_at: relay_now,
-				expiration,
-			});
-			Ok(())
+			Self::do_authorize_account(origin, who, transactions, bytes, None, None)
 		}
 
 		/// Authorize an account with an explicit `(starts_at, expiration)` slot
@@ -755,26 +732,14 @@ pub mod pallet {
 			starts_at: Option<u32>,
 			expiration: u32,
 		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			let relay_now = Self::ensure_relay_now()?;
-			let effective_starts_at = starts_at.unwrap_or(relay_now);
-			Self::ensure_valid_window(relay_now, effective_starts_at, expiration)?;
-			Self::add_slot(
-				AuthorizationScope::Account(who.clone()),
-				transactions,
-				bytes,
-				effective_starts_at,
-				expiration,
-			)?;
-			Self::deposit_event(Event::AccountAuthorized {
+			Self::do_authorize_account(
+				origin,
 				who,
 				transactions,
 				bytes,
-				starts_at: effective_starts_at,
-				expiration,
-			});
-			Ok(())
+				starts_at,
+				Some(expiration),
+			)
 		}
 
 		/// Authorize anyone to store a preimage of the given content hash with
@@ -798,27 +763,7 @@ pub mod pallet {
 			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			let relay_now = Self::ensure_relay_now()?;
-			let expiration = relay_now.saturating_add(T::DefaultAuthorizationWindow::get());
-			// Two transactions: one `store` plus one `renew`. The slot model gates
-			// the tx-counter axis hard (no soft saturation), so a single-tx budget
-			// would prevent the canonical "store-then-renew" preimage flow.
-			Self::add_slot(
-				AuthorizationScope::Preimage(content_hash),
-				2,
-				max_size,
-				relay_now,
-				expiration,
-			)?;
-			Self::deposit_event(Event::PreimageAuthorized {
-				content_hash,
-				max_size,
-				starts_at: relay_now,
-				expiration,
-			});
-			Ok(())
+			Self::do_authorize_preimage(origin, content_hash, max_size, None, None)
 		}
 
 		/// Authorize a preimage with an explicit `(starts_at, expiration)` slot
@@ -837,25 +782,7 @@ pub mod pallet {
 			starts_at: Option<u32>,
 			expiration: u32,
 		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			let relay_now = Self::ensure_relay_now()?;
-			let effective_starts_at = starts_at.unwrap_or(relay_now);
-			Self::ensure_valid_window(relay_now, effective_starts_at, expiration)?;
-			Self::add_slot(
-				AuthorizationScope::Preimage(content_hash),
-				2,
-				max_size,
-				effective_starts_at,
-				expiration,
-			)?;
-			Self::deposit_event(Event::PreimageAuthorized {
-				content_hash,
-				max_size,
-				starts_at: effective_starts_at,
-				expiration,
-			});
-			Ok(())
+			Self::do_authorize_preimage(origin, content_hash, max_size, starts_at, Some(expiration))
 		}
 
 		/// Remove an expired account authorization from storage. Anyone can call this.
@@ -1191,43 +1118,24 @@ pub mod pallet {
 			let starts_at: u32 = T::RelayChainBlockNumberProvider::current_block_number();
 			let expiration = starts_at.saturating_add(T::DefaultAuthorizationWindow::get());
 			for (who, transactions_allowance, bytes_allowance) in &self.account_authorizations {
-				let scope = AuthorizationScope::Account(who.clone());
-				let slot = TimedAuthorization {
-					extent: AuthorizationExtent {
-						bytes: 0,
-						bytes_permanent: 0,
-						bytes_allowance: *bytes_allowance,
-						transactions: 0,
-						transactions_allowance: *transactions_allowance,
-					},
+				Pallet::<T>::add_slot(
+					AuthorizationScope::Account(who.clone()),
+					*transactions_allowance,
+					*bytes_allowance,
 					starts_at,
 					expiration,
-				};
-				let bounded = BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::try_from(
-					alloc::vec![slot],
 				)
-				.expect("MaxAuthorizationSlots > 0 by integrity_test; one slot fits");
-				AuthorizationSlots::<T>::insert(&scope, bounded);
-				Pallet::<T>::authorization_added(&scope);
+				.expect("genesis account authorization fits in MaxAuthorizationSlots; qed");
 			}
 			for (content_hash, max_size) in &self.preimage_authorizations {
-				let scope = AuthorizationScope::Preimage(*content_hash);
-				let slot = TimedAuthorization {
-					extent: AuthorizationExtent {
-						bytes: 0,
-						bytes_permanent: 0,
-						bytes_allowance: *max_size,
-						transactions: 0,
-						transactions_allowance: 1,
-					},
+				Pallet::<T>::add_slot(
+					AuthorizationScope::Preimage(*content_hash),
+					1,
+					*max_size,
 					starts_at,
 					expiration,
-				};
-				let bounded = BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::try_from(
-					alloc::vec![slot],
 				)
-				.expect("MaxAuthorizationSlots > 0 by integrity_test; one slot fits");
-				AuthorizationSlots::<T>::insert(&scope, bounded);
+				.expect("genesis preimage authorization fits in MaxAuthorizationSlots; qed");
 			}
 		}
 	}
@@ -1604,6 +1512,90 @@ pub mod pallet {
 			Ok(())
 		}
 
+		/// Resolve `(starts_at, expiration)` for an authorize call: when
+		/// `expiration` is `None` the caller wants the default window
+		/// (`relay_now + DefaultAuthorizationWindow`); otherwise the explicit
+		/// window is validated via [`Self::ensure_valid_window`].
+		fn resolve_window(
+			relay_now: u32,
+			starts_at: Option<u32>,
+			expiration: Option<u32>,
+		) -> Result<(u32, u32), Error<T>> {
+			match expiration {
+				None =>
+					Ok((relay_now, relay_now.saturating_add(T::DefaultAuthorizationWindow::get()))),
+				Some(expiration) => {
+					let effective_starts_at = starts_at.unwrap_or(relay_now);
+					Self::ensure_valid_window(relay_now, effective_starts_at, expiration)?;
+					Ok((effective_starts_at, expiration))
+				},
+			}
+		}
+
+		/// Shared body for [`Self::authorize_account`] and
+		/// [`Self::authorize_account_window`]. `expiration = None` selects the
+		/// default window; `Some` runs full window validation.
+		fn do_authorize_account(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+			transactions: u32,
+			bytes: u64,
+			starts_at: Option<u32>,
+			expiration: Option<u32>,
+		) -> DispatchResult {
+			T::Authorizer::ensure_origin(origin)?;
+			ensure!(bytes > 0, Error::<T>::BadDataSize);
+			let relay_now = Self::ensure_relay_now()?;
+			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
+			Self::add_slot(
+				AuthorizationScope::Account(who.clone()),
+				transactions,
+				bytes,
+				starts_at,
+				expiration,
+			)?;
+			Self::deposit_event(Event::AccountAuthorized {
+				who,
+				transactions,
+				bytes,
+				starts_at,
+				expiration,
+			});
+			Ok(())
+		}
+
+		/// Shared body for [`Self::authorize_preimage`] and
+		/// [`Self::authorize_preimage_window`]. Preimage slots carry a
+		/// `transactions_allowance` of `2` so the canonical "store-then-renew"
+		/// flow fits — the slot model gates the tx-counter axis hard and a
+		/// single-tx budget would block the renew.
+		fn do_authorize_preimage(
+			origin: OriginFor<T>,
+			content_hash: ContentHash,
+			max_size: u64,
+			starts_at: Option<u32>,
+			expiration: Option<u32>,
+		) -> DispatchResult {
+			T::Authorizer::ensure_origin(origin)?;
+			ensure!(max_size > 0, Error::<T>::BadDataSize);
+			let relay_now = Self::ensure_relay_now()?;
+			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
+			Self::add_slot(
+				AuthorizationScope::Preimage(content_hash),
+				2,
+				max_size,
+				starts_at,
+				expiration,
+			)?;
+			Self::deposit_event(Event::PreimageAuthorized {
+				content_hash,
+				max_size,
+				starts_at,
+				expiration,
+			});
+			Ok(())
+		}
+
 		pub(crate) fn authorization_added(scope: &AuthorizationScopeFor<T>) {
 			match scope {
 				AuthorizationScope::Account(who) => {
@@ -1656,6 +1648,15 @@ pub mod pallet {
 		/// holds for the rest of the call.
 		pub(crate) fn prune_expired(scope: &AuthorizationScopeFor<T>) {
 			let relay_now = Self::relay_now();
+			// `mutate_exists` writes back unconditionally when the value is
+			// `Some` after the closure, so guard with a cheap read so the
+			// no-prune-needed path on every store/renew validate avoids
+			// pointless storage churn.
+			let needs_prune = AuthorizationSlots::<T>::get(scope)
+				.is_some_and(|slots| slots.iter().any(|s| s.expiration <= relay_now));
+			if !needs_prune {
+				return;
+			}
 			AuthorizationSlots::<T>::mutate_exists(scope, |maybe_slots| {
 				let Some(slots) = maybe_slots.as_mut() else {
 					return;

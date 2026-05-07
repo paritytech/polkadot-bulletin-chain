@@ -3069,7 +3069,7 @@ fn transaction_info_projects_into_upstream_runtime_api_type() {
 /// [`mock::set_relay_now`].
 mod slots {
 	use super::*;
-	use crate::{mock::set_relay_now, TimedAuthorization, INVALID_WINDOW, TOO_MANY_SLOTS};
+	use crate::{mock::set_relay_now, TimedAuthorization};
 
 	type AuthorizationSlots = super::AuthorizationSlots;
 
@@ -3597,14 +3597,6 @@ mod slots {
 			let slots = decoded.into_inner();
 			assert_eq!(slots.iter().map(|s| s.expiration).collect::<Vec<_>>(), vec![150, 175, 200]);
 		});
-	}
-
-	#[test]
-	fn invalid_window_inherent_codes_match_errors() {
-		// The pool-side `Custom` codes match the dispatch-time errors so the
-		// extension and the call agree on the rejection reason.
-		assert_eq!(INVALID_WINDOW, InvalidTransaction::Custom(8));
-		assert_eq!(TOO_MANY_SLOTS, InvalidTransaction::Custom(7));
 	}
 
 	/// Canonical accounting scenario: `bytes` (store) and `bytes_permanent`
