@@ -875,7 +875,7 @@ pub mod pallet {
 			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
 				.ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(
-				!Self::expired(auth.expiration) && auth.extent.renew_fits(tx_info.size as u64),
+				!Self::expired(auth.expiration) && auth.extent.has_permanent_capacity(tx_info.size as u64),
 				Error::<T>::AuthorizationNotFound,
 			);
 
@@ -1775,7 +1775,7 @@ pub mod pallet {
 				}
 				if is_renew {
 					// Per-account hard cap (per-window quota).
-					if !authorization.extent.renew_fits(size_u64) {
+					if !authorization.extent.has_permanent_capacity(size_u64) {
 						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into())
 					}
 					// Chain-wide hard cap.
