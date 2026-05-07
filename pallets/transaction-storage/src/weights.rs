@@ -66,7 +66,7 @@ pub trait WeightInfo {
 	fn enable_auto_renew() -> Weight;
 	fn disable_auto_renew() -> Weight;
 	fn validate_store(l: u32) -> Weight;
-	fn validate_renew() -> Weight;
+	fn validate_renew(r: u32) -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
 }
 
@@ -188,8 +188,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		T::DbWeight::get().reads_writes(6, 2)
 			.saturating_add(Weight::from_parts(6_912, 0).saturating_mul(l.into()))
 	}
-	fn validate_renew() -> Weight {
-		T::DbWeight::get().reads_writes(8, 2)
+	fn validate_renew(r: u32) -> Weight {
+		T::DbWeight::get().reads_writes(8_u64.saturating_add(r as u64), 2)
 	}
 	/// Worst-case weight for one outer-loop iteration of the v2→v3 multi-block
 	/// migration: 2 reads (iterator step + raw fetch), 1 write (re-insert), plus
@@ -304,8 +304,8 @@ impl WeightInfo for () {
 		RocksDbWeight::get().reads_writes(6, 2)
 			.saturating_add(Weight::from_parts(6_912, 0).saturating_mul(l.into()))
 	}
-	fn validate_renew() -> Weight {
-		RocksDbWeight::get().reads_writes(8, 2)
+	fn validate_renew(r: u32) -> Weight {
+		RocksDbWeight::get().reads_writes(8_u64.saturating_add(r as u64), 2)
 	}
 	fn migrate_v2_to_v3_step() -> Weight {
 		Weight::from_parts(50_000_000, 43_500)

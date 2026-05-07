@@ -326,8 +326,13 @@ mod benchmarks {
 		Ok(())
 	}
 
+	/// Benchmark the signed renew validation path. The `r` parameter controls the
+	/// number of pre-existing `AccountRenewals` entries for the caller, which affects
+	/// the cost of [`Pallet::live_permanent_bytes`] (iterates all entries on each renew).
 	#[benchmark]
-	fn validate_renew() -> Result<(), BenchmarkError> {
+	fn validate_renew(
+		r: Linear<0, { T::MaxBlockTransactions::get() }>,
+	) -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data.clone())?;
 		run_to_block::<T>(1u32.into());
@@ -335,7 +340,7 @@ mod benchmarks {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
-		let bytes_allowance = T::MaxTransactionSize::get() as u64 * 10;
+		let bytes_allowance = T::MaxTransactionSize::get() as u64 * (r as u64 + 10);
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
@@ -343,6 +348,13 @@ mod benchmarks {
 			bytes_allowance,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		// Pre-populate `r` AccountRenewals entries to exercise live_permanent_bytes iteration.
+		let current_block = System::<T>::block_number();
+		for i in 0..r {
+			let unique_hash: ContentHash = sp_io::hashing::blake2_256(&i.to_le_bytes());
+			AccountRenewals::<T>::insert(&caller, unique_hash, (current_block, 1u32));
+		}
 
 		let ext = ValidateStorageCalls::<T>::default();
 		let call: RuntimeCallOf<T> =
@@ -364,7 +376,7 @@ mod benchmarks {
 		// prepare added `data.len()` bytes to the permanent-usage counter
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
 		assert_eq!(extent.bytes, 0);
-		assert_eq!(extent.bytes_permanent, data.len() as u64);
+		assert_eq!(extent.bytes_permanent, data.len() as u64 + r as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
