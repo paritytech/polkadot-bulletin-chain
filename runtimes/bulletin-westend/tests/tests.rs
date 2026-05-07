@@ -320,8 +320,10 @@ fn authorized_storage_transactions_are_for_free() {
 			// 1. user authorization flow.
 			let account = Sr25519Keyring::Eve;
 			let who: AccountId = account.to_account_id();
+			let data = vec![0u8; 24];
+			let content_hash = sp_io::hashing::blake2_256(&data);
 			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-				data: vec![0u8; 24],
+				data: data.clone(),
 			});
 
 			// Not authorized account should fail to store.
@@ -331,7 +333,7 @@ fn authorized_storage_transactions_are_for_free() {
 					InvalidTransaction::Payment
 				)
 			);
-			// Authorize user for two transactions (store + renew).
+			// Authorize user for store + renew + enable_auto_renew.
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
@@ -354,6 +356,22 @@ fn authorized_storage_transactions_are_for_free() {
 			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
+
+			advance_block();
+
+			// `enable_auto_renew` should also be feeless and consume one tx unit instead.
+			let extent_before = TransactionStorage::account_authorization_extent(who.clone());
+			let enable_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::enable_auto_renew {
+					content_hash,
+				});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), enable_call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+			let extent_after = TransactionStorage::account_authorization_extent(who.clone());
+			assert_eq!(extent_after.transactions, extent_before.transactions + 1);
+			assert_eq!(extent_after.bytes, extent_before.bytes);
+			assert_eq!(extent_after.bytes_permanent, extent_before.bytes_permanent);
 		});
 }
 

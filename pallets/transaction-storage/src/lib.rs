@@ -831,14 +831,20 @@ pub mod pallet {
 
 		/// Enable automatic renewal for a previously stored piece of data.
 		///
-		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
-		/// data size). The authorization is **not** consumed here; it is consumed each time
-		/// the data is auto-renewed (every `StoragePeriod` blocks).
-		/// Authorization is checked here but might still be missing when actually renewed.
+		/// Feeless: instead of charging a token fee, this call consumes **one transaction
+		/// unit** from the caller's account authorization at registration time. Bytes are
+		/// not charged here — they are charged on each auto-renewal cycle by
+		/// [`do_process_auto_renewals`](Self::do_process_auto_renewals), which bumps
+		/// `bytes_permanent` against the renew hard cap.
+		///
+		/// `who` must have an active account authorization. If the authorization is
+		/// missing or expired the call is rejected with
+		/// [`AuthorizationNotFound`](Error::AuthorizationNotFound).
 		///
 		/// Emits [`AutoRenewalEnabled`](Event::AutoRenewalEnabled) when successful.
 		#[pallet::call_index(12)]
 		#[pallet::weight(T::WeightInfo::enable_auto_renew())]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
 		pub fn enable_auto_renew(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
@@ -850,18 +856,17 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// Verify the content hash exists and the account has sufficient authorization.
+			// Verify the content hash points at currently-stored data.
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
-			let tx_info =
-				Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
-			let extent = Self::authorization_extent(AuthorizationScope::Account(who.clone()));
-			let bytes_remaining = extent.bytes_allowance.saturating_sub(extent.bytes);
-			ensure!(
-				extent.transactions_allowance > extent.transactions &&
-					bytes_remaining >= tx_info.size as u64,
-				Error::<T>::AuthorizationNotFound
-			);
+			Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
+
+			// Consume one transaction unit from the caller's account authorization in
+			// lieu of a token fee. `size = 0` and `is_renew = false` keep the bytes and
+			// chain-wide `PermanentStorageUsed` counters untouched — actual bytes are
+			// charged on each renewal cycle by `do_process_auto_renewals`.
+			Self::check_authorization(&AuthorizationScope::Account(who.clone()), 0, true, false)
+				.map_err(|_| Error::<T>::AuthorizationNotFound)?;
 
 			AutoRenewals::<T>::insert(content_hash, AutoRenewalData { account: who.clone() });
 			Self::deposit_event(Event::AutoRenewalEnabled { content_hash, who });
@@ -1967,12 +1972,32 @@ pub mod pallet {
 					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash, true)
 				},
-				Call::<T>::enable_auto_renew { .. } | Call::<T>::disable_auto_renew { .. } => {
-					// No authorization is consumed at registration time — the dispatch handler
-					// performs its own checks (existence of the content hash, ownership for
-					// disable, and a non-consuming authorization probe for enable). Return a
-					// non-prioritized ValidTransaction so the call enters the pool ordered only
-					// by the signer's nonce.
+				Call::<T>::enable_auto_renew { content_hash } => {
+					// `enable_auto_renew` is feeless and consumes one tx unit from the caller's
+					// account authorization in dispatch. Pool-entry validates the same
+					// preconditions non-consumptively so unauthorized calls are rejected before
+					// they enter the pool — without this, a free-spam vector exists.
+					TransactionByContentHash::<T>::get(*content_hash).ok_or(RENEWED_NOT_FOUND)?;
+					Self::check_authorization(
+						&AuthorizationScope::Account(who.clone()),
+						0,
+						false,
+						false,
+					)?;
+					return Ok((
+						context.want_valid_transaction().then(|| ValidTransaction {
+							priority: T::StoreRenewPriority::get(),
+							longevity: T::StoreRenewLongevity::get(),
+							..Default::default()
+						}),
+						None,
+					));
+				},
+				Call::<T>::disable_auto_renew { .. } => {
+					// `disable_auto_renew` does not consume authorization. The dispatch handler
+					// enforces ownership (caller must be the registered owner). Return a
+					// permissive ValidTransaction so the call enters the pool ordered only by
+					// the signer's nonce.
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
 							priority: T::StoreRenewPriority::get(),

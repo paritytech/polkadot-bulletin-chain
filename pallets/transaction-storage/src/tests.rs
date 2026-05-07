@@ -2027,8 +2027,10 @@ fn auto_renewal_consumes_authorization() {
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Authorize with exactly enough for 2 operations (store doesn't consume here,
-		// since it's unsigned, but renew does via process_auto_renewals)
+		// Authorize with enough for the enable + one renewal cycle. `store` is unsigned
+		// here so it does not consume; `enable_auto_renew` consumes one tx unit (no
+		// bytes); `do_process_auto_renewals` consumes one tx + size bytes_permanent per
+		// cycle.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
@@ -2036,6 +2038,7 @@ fn auto_renewal_consumes_authorization() {
 			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
 		);
 
+		// `enable_auto_renew` consumes one tx unit in lieu of a token fee.
 		let initial_extent = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(
 			initial_extent,
@@ -2043,7 +2046,7 @@ fn auto_renewal_consumes_authorization() {
 				bytes: 0,
 				bytes_permanent: 0,
 				bytes_allowance: 6000,
-				transactions: 0,
+				transactions: 1,
 				transactions_allowance: 3,
 			},
 		);
@@ -2416,8 +2419,7 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 			Some(Call::apply_block_inherents { proof: None }) => {},
 			other => panic!(
 				"expected Some(apply_block_inherents {{ proof: None }}) when only pending renewals \
-				 are present, got {:?}",
-				other
+				 are present, got {other:?}"
 			),
 		}
 	});
@@ -2891,8 +2893,7 @@ fn migrate_v2_to_v3_insufficient_weight_returns_err() {
 		let res = MigrateV2ToV3::<Test>::step(None, &mut meter);
 		assert!(
 			matches!(res, Err(SteppedMigrationError::InsufficientWeight { .. })),
-			"expected InsufficientWeight, got {:?}",
-			res,
+			"expected InsufficientWeight, got {res:?}",
 		);
 	});
 }
