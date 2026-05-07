@@ -831,10 +831,15 @@ pub mod pallet {
 
 		/// Enable automatic renewal for a previously stored piece of data.
 		///
-		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
-		/// data size). The authorization is **not** consumed here; it is consumed each time
-		/// the data is auto-renewed (every `StoragePeriod` blocks).
-		/// Authorization is checked here but might still be missing when actually renewed.
+		/// Snapshot check: the caller's authorization must have enough remaining
+		/// renew-window quota (`bytes_permanent + tx_info.size <= bytes_allowance`) to
+		/// fit one more renewal. This mirrors the per-account hard cap that
+		/// `check_authorization` enforces at renewal time, on the correct axis
+		/// (`bytes_permanent`, not `bytes`). It does **not** guarantee the renewal will
+		/// succeed at process time — `bytes_permanent` may have advanced (other
+		/// renewals), the auth may have expired and been re-granted (counters reset),
+		/// or the chain-wide cap may have been hit. The actual gate is
+		/// `do_process_auto_renewals`.
 		///
 		/// Emits [`AutoRenewalEnabled`](Event::AutoRenewalEnabled) when successful.
 		#[pallet::call_index(12)]
@@ -850,17 +855,21 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// Verify the content hash exists and the account has sufficient authorization.
+			// Verify the content hash refers to currently-stored data and look up its
+			// size; we need it for the per-account quota check below.
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 			let tx_info =
 				Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
+
+			// Per-account hard-cap check on the renew axis. Mirror `check_authorization`:
+			// renews are gated by `bytes_permanent`, not the soft-side `bytes`.
 			let extent = Self::authorization_extent(AuthorizationScope::Account(who.clone()));
-			let bytes_remaining = extent.bytes_allowance.saturating_sub(extent.bytes);
 			ensure!(
 				extent.transactions_allowance > extent.transactions &&
-					bytes_remaining >= tx_info.size as u64,
-				Error::<T>::AuthorizationNotFound
+					extent.bytes_permanent.saturating_add(tx_info.size as u64) <=
+						extent.bytes_allowance,
+				Error::<T>::AuthorizationNotFound,
 			);
 
 			AutoRenewals::<T>::insert(content_hash, AutoRenewalData { account: who.clone() });
