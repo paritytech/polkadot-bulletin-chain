@@ -572,12 +572,12 @@ mod hop_tests {
 				// Build the promotion extrinsic via the same path the `create_promotion_extrinsic`
 				// runtime API uses.
 				let payload =
-					pallet_hop_promotion::signing_payload(&content_hash, submit_timestamp);
+					pallet_bulletin_hop_promotion::signing_payload(&content_hash, submit_timestamp);
 				let signature = MultiSignature::Sr25519(alice.pair().sign(&payload));
 				let xt = <Runtime as CreateAuthorizedTransaction<
-					pallet_hop_promotion::Call<Runtime>,
+					pallet_bulletin_hop_promotion::Call<Runtime>,
 				>>::create_authorized_transaction(
-					pallet_hop_promotion::Call::<Runtime>::promote {
+					pallet_bulletin_hop_promotion::Call::<Runtime>::promote {
 						data: data.clone(),
 						signer,
 						signature,
