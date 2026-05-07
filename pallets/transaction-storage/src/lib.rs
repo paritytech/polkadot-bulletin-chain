@@ -434,23 +434,18 @@ pub mod pallet {
 				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
 					num_expiring = transactions.len() as u32;
 
-					// Decrement the chain-wide permanent counter for any renewed bytes that
-					// just aged out (covers entries flagged `TransactionKind::Renew`).
-					let renewed_sum: u64 = transactions
-						.iter()
-						.filter(|t| matches!(t.kind, TransactionKind::Renew))
-						.fold(0u64, |acc, t| acc.saturating_add(t.size as u64));
-					if renewed_sum > 0 {
-						Self::update_permanent_storage_used(|used| {
-							used.saturating_sub(renewed_sum)
-						});
-					}
-
-					// Before removing, collect any transactions that are registered for
-					// auto-renewal and schedule them for processing this block.
+					// Single pass: sum renewed sizes, clean up `TransactionByContentHash`,
+					// and schedule auto-renewals.
 					let mut pending = PendingAutoRenewals::<T>::get();
-					for tx_info in transactions.iter() {
+					let mut renewed_sum: u64 = 0;
+					for tx_info in transactions.into_iter() {
 						let hash: ContentHash = tx_info.content_hash;
+
+						// Sum renewed sizes for the chain-wide permanent counter decrement.
+						if matches!(tx_info.kind, TransactionKind::Renew) {
+							renewed_sum = renewed_sum.saturating_add(tx_info.size as u64);
+						}
+
 						// Only remove TransactionByContentHash if this entry still points to
 						// the obsolete block (otherwise the entry has been re-stored or
 						// renewed elsewhere and points at a different block).
@@ -462,8 +457,14 @@ pub mod pallet {
 						// `try_push` cannot overflow: `pending` is empty per `on_finalize`'s
 						// drain invariant, and `transactions.len() <= MaxBlockTransactions`.
 						if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
-							let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
+							let _ = pending.try_push((hash, tx_info, renewal_data));
 						}
+					}
+
+					if renewed_sum > 0 {
+						Self::update_permanent_storage_used(|used| {
+							used.saturating_sub(renewed_sum)
+						});
 					}
 					if !pending.is_empty() {
 						PendingAutoRenewals::<T>::put(&pending);
