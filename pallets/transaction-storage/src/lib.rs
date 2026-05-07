@@ -819,6 +819,7 @@ pub mod pallet {
 		/// Emits [`Renewed`](Event::Renewed) when successful.
 		#[pallet::call_index(10)]
 		#[pallet::weight((T::WeightInfo::renew_content_hash(), DispatchClass::Operational))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
 		pub fn renew_content_hash(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
