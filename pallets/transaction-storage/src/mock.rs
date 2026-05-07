@@ -57,6 +57,7 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -68,6 +69,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
+	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
@@ -98,9 +100,8 @@ pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 's
 	System::run_to_block_with::<AllPalletsWithSystem>(
 		n,
 		RunToBlockHooks::default().before_finalize(|_| {
-			if let Some(proof) = f() {
-				TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-			}
+			let proof = f();
+			TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof).unwrap();
 		}),
 	);
 }

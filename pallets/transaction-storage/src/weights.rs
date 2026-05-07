@@ -54,13 +54,17 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn store(l: u32, ) -> Weight;
 	fn renew() -> Weight;
-	fn check_proof() -> Weight;
+	fn renew_content_hash() -> Weight;
+	fn apply_block_inherents(n: u32) -> Weight;
+	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn authorize_account() -> Weight;
 	fn refresh_account_authorization() -> Weight;
 	fn authorize_preimage() -> Weight;
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
+	fn enable_auto_renew() -> Weight;
+	fn disable_auto_renew() -> Weight;
 	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
@@ -104,6 +108,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(4_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
+	// TODO: update weights
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(50_939_000, 40351)
+			.saturating_add(T::DbWeight::get().reads(5_u64))
+			.saturating_add(T::DbWeight::get().writes(2_u64))
+	}
 	/// Storage: TransactionStorage ProofChecked (r:1 w:1)
 	/// Proof: TransactionStorage ProofChecked (max_values: Some(1), max_size: Some(1), added: 496, mode: MaxEncodedLen)
 	/// Storage: TransactionStorage StoragePeriod (r:1 w:0)
@@ -114,14 +125,34 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: System ParentHash (max_values: Some(1), max_size: Some(32), added: 527, mode: MaxEncodedLen)
 	/// Storage: TransactionStorage Transactions (r:1 w:0)
 	/// Proof: TransactionStorage Transactions (max_values: None, max_size: Some(36886), added: 39361, mode: MaxEncodedLen)
-	fn check_proof() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `37145`
-		//  Estimated: `40351`
-		// Minimum execution time: 80_913_000 picoseconds.
-		Weight::from_parts(84_812_000, 40351)
+	// TODO: update weights — placeholder is the sum of the previous standalone
+	// `check_proof()` and `process_auto_renewals(n)` weights so the declared block
+	// budget is unchanged until `apply_block_inherents` is benchmarked end-to-end.
+	fn apply_block_inherents(n: u32) -> Weight {
+		// Fixed cost: proof check (~85M ref_time, 5r/1w, 40_351 PoV) +
+		// drain dispatch overhead (~100M ref_time, 40_351 PoV).
+		// Per-item: 5 reads + 3 writes for each renewal (AutoRenewals lookup,
+		// Authorizations read+write, BlockTransactions append, TransactionByContentHash update).
+		Weight::from_parts(184_812_000, 80_702)
 			.saturating_add(T::DbWeight::get().reads(5_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
+			.saturating_add(T::DbWeight::get().reads(5_u64).saturating_mul(n as u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64).saturating_mul(n as u64))
+	}
+	// TODO: update weights once benchmarked.
+	// `on_initialize` does a fixed read of `RetentionPeriod` plus, when items expire,
+	// a take of `Transactions[obsolete]` and per-item lookups of
+	// `TransactionByContentHash` and `AutoRenewals`. We approximate it as:
+	//   base: 1 read (RetentionPeriod) + 1 write (Transactions::take) + 2r/2w
+	//         reservation for on_finalize
+	//   per-item: 2 reads (TransactionByContentHash, AutoRenewals) + 1 write
+	//         (TransactionByContentHash::remove on cleanup path).
+	fn on_initialize_with_expiry(n: u32) -> Weight {
+		Weight::from_parts(20_000_000, 10_000)
+			.saturating_add(T::DbWeight::get().reads(3_u64))
+			.saturating_add(T::DbWeight::get().writes(3_u64))
+			.saturating_add(T::DbWeight::get().reads(2_u64).saturating_mul(n as u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64).saturating_mul(n as u64))
 	}
 	fn authorize_account() -> Weight {
 		Weight::from_parts(1_000, 1_000)
@@ -140,6 +171,18 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	}
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
+	}
+	// TODO: update weights
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
+	}
+	// TODO: update weights
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(1_u64))
+			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
 	fn validate_store(l: u32) -> Weight {
 		T::DbWeight::get().reads_writes(6, 2)
@@ -199,6 +242,12 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(4_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
+	fn renew_content_hash() -> Weight {
+		// Same as renew() + 1 extra read for content hash lookup + 1 extra write for content hash update
+		Weight::from_parts(50_939_000, 40351)
+			.saturating_add(RocksDbWeight::get().reads(5_u64))
+			.saturating_add(RocksDbWeight::get().writes(2_u64))
+	}
 	/// Storage: TransactionStorage ProofChecked (r:1 w:1)
 	/// Proof: TransactionStorage ProofChecked (max_values: Some(1), max_size: Some(1), added: 496, mode: MaxEncodedLen)
 	/// Storage: TransactionStorage StoragePeriod (r:1 w:0)
@@ -209,14 +258,19 @@ impl WeightInfo for () {
 	/// Proof: System ParentHash (max_values: Some(1), max_size: Some(32), added: 527, mode: MaxEncodedLen)
 	/// Storage: TransactionStorage Transactions (r:1 w:0)
 	/// Proof: TransactionStorage Transactions (max_values: None, max_size: Some(36886), added: 39361, mode: MaxEncodedLen)
-	fn check_proof() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `37145`
-		//  Estimated: `40351`
-		// Minimum execution time: 80_913_000 picoseconds.
-		Weight::from_parts(84_812_000, 40351)
+	fn apply_block_inherents(n: u32) -> Weight {
+		Weight::from_parts(184_812_000, 80_702)
 			.saturating_add(RocksDbWeight::get().reads(5_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
+			.saturating_add(RocksDbWeight::get().reads(5_u64).saturating_mul(n as u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64).saturating_mul(n as u64))
+	}
+	fn on_initialize_with_expiry(n: u32) -> Weight {
+		Weight::from_parts(20_000_000, 10_000)
+			.saturating_add(RocksDbWeight::get().reads(3_u64))
+			.saturating_add(RocksDbWeight::get().writes(3_u64))
+			.saturating_add(RocksDbWeight::get().reads(2_u64).saturating_mul(n as u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64).saturating_mul(n as u64))
 	}
 	fn authorize_account() -> Weight {
 		Weight::from_parts(1_000, 1_000)
@@ -235,6 +289,16 @@ impl WeightInfo for () {
 	}
 	fn remove_expired_preimage_authorization() -> Weight {
 		Weight::from_parts(1_000, 1_000)
+	}
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(2_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(1_u64))
+			.saturating_add(RocksDbWeight::get().writes(1_u64))
 	}
 	fn validate_store(l: u32) -> Weight {
 		RocksDbWeight::get().reads_writes(6, 2)
