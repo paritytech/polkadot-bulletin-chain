@@ -15,8 +15,8 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
-import { bulletin } from '../.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from 'polkadot-api/ws';
+import { bulletin } from '../.papi/descriptors/dist/index.js';
 import { AsyncBulletinClient } from '../../sdk/typescript/dist/index.mjs';
 
 // Command line arguments
@@ -63,7 +63,7 @@ async function main() {
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        ).withSudo().send();
+        ).withSudo().withWaitFor('finalized').send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK
