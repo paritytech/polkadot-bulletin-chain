@@ -77,14 +77,6 @@ jobs:
           chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
           echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
 
-      - name: Install RocksDB ldb tool
-        run: |
-          if ! command -v ldb >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends librocksdb-tools
-          fi
-          echo "ROCKSDB_LDB_PATH=$(command -v ldb)" >> "$GITHUB_ENV"
-
       - name: Generate parachain chain spec
         run: |
           cargo build --release -p bulletin-westend-runtime
@@ -106,10 +98,13 @@ jobs:
           POLKADOT_PARACHAIN_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot-omni-node
           PARACHAIN_CHAIN_SPEC_PATH: ./zombienet/bulletin-westend-spec.json
         run: |
+          # parachain_ldb_storage_verification_test requires the rocksdb `ldb` CLI,
+          # which is not packaged for Debian Bullseye.
           cargo test -p bulletin-chain-zombienet-sdk-tests \
             --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
             parachain_sync_storage \
-            -- --test-threads=1 --nocapture
+            -- --test-threads=1 --nocapture \
+            --skip parachain_ldb_storage_verification_test
 
       - name: Upload logs on failure
         if: failure()
