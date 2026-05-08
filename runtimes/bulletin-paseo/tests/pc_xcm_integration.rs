@@ -31,7 +31,7 @@ use bulletin_paseo_runtime::{
 	paseo_constants::locations::PeopleLocation, xcm_config::LocationToAccountId, Runtime,
 	RuntimeCall, RuntimeGenesisConfig, RuntimeOrigin, System, TransactionStorage,
 };
-use common::{advance_block, assert_ok_ok, construct_and_apply_extrinsic};
+use common::{advance_block, assert_extrinsic_ok, construct_and_apply_extrinsic};
 use frame_support::{assert_ok, traits::Get};
 use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
@@ -327,7 +327,7 @@ mod authorize_semantics {
 			assert_eq!(extent_of(&who), extent(0, 1_000, 0, 5));
 
 			advance_block();
-			assert_ok_ok(construct_and_apply_extrinsic(
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: vec![0u8; 200],
@@ -358,7 +358,7 @@ mod authorize_semantics {
 			assert_ok!(pc_authorize(who.clone(), 5, 1_000));
 
 			advance_block();
-			assert_ok_ok(construct_and_apply_extrinsic(
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: vec![0u8; 400],
@@ -463,7 +463,7 @@ mod end_to_end {
 			// Authorized user stores 1_000 bytes (feeless, boost-tier).
 			advance_block();
 			let stored_block = System::block_number();
-			assert_ok_ok(construct_and_apply_extrinsic(
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: vec![0u8; 1_000],
@@ -474,7 +474,7 @@ mod end_to_end {
 			// Same user renews against the just-stored block/index. `renew`
 			// charges the per-window permanent quota (`bytes_permanent`).
 			advance_block();
-			assert_ok_ok(construct_and_apply_extrinsic(
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
 					block: stored_block,

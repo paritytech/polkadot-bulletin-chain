@@ -112,7 +112,7 @@ pub fn construct_and_apply_extrinsic(
 	bulletin_paseo_runtime::Executive::apply_extrinsic(xt)
 }
 
-pub fn assert_ok_ok(apply_result: ApplyExtrinsicResult) {
+pub fn assert_extrinsic_ok(apply_result: ApplyExtrinsicResult) {
 	assert_ok!(apply_result);
 	assert_ok!(apply_result.unwrap());
 }
