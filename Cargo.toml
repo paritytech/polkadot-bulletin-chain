@@ -35,6 +35,7 @@ westend-runtime-constants = { version = "27.0.0", package = "westend-runtime-con
 # Local workspace members
 bulletin-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
 bulletin-paseo-runtime = { path = "runtimes/bulletin-paseo" }
+bulletin-runtimes-test-utils = { version = "0.1.0", path = "runtimes/test-utils" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
@@ -127,6 +128,7 @@ members = [
 	"runtimes/bulletin-paseo",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
+	"runtimes/test-utils",
 	"sdk/rust",
 	"stress-test",
 ]

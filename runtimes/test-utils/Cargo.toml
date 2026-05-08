@@ -1,0 +1,20 @@
+[package]
+name = "bulletin-runtimes-test-utils"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Conformance tests for Bulletin Chain runtimes. Used as a dev-dependency by runtime crates to share generic XCM-driven authorize_account integration tests."
+
+[dependencies]
+codec = { workspace = true, default-features = true }
+frame-system = { workspace = true, default-features = true }
+pallet-bulletin-transaction-storage = { workspace = true, default-features = true }
+pallet-utility = { workspace = true, default-features = true }
+parachains-common = { workspace = true, default-features = true }
+polkadot-sdk-frame = { workspace = true, default-features = true }
+sp-io = { workspace = true, default-features = true }
+sp-keyring = { workspace = true, default-features = true }
+xcm = { workspace = true, default-features = true }
+xcm-executor = { workspace = true, default-features = true }

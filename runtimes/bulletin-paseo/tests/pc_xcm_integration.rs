@@ -14,17 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! People Chain → Bulletin Chain `authorize_account` integration tests.
+//! People Chain → Bulletin Chain `authorize_account` integration tests for the
+//! Paseo runtime. The conformance suite lives in
+//! `bulletin-runtimes-test-utils`; each scenario file under
+//! `tests/pc_xcm_integration/` is a thin wrapper that supplies Paseo's runtime
+//! types, the People Chain location, an externalities builder, and an
+//! `advance_block` callback.
 //!
-//! Drives `XcmExecutor::prepare_and_execute` directly with messages shaped the
-//! way People Chain sends them (sibling parachain origin, `OriginKind::Xcm`,
-//! unpaid execution + Transact). Exercises the full receive-side pipeline:
-//! barrier, origin conversion, `SafeCallFilter`, `Authorizer = EnsureXcm<
-//! IsSiblingParachain>`, and the pallet's `authorize_account` /
-//! `refresh_account_authorization` semantics.
-//!
-//! Each scenario lives in its own submodule file under
-//! `tests/pc_xcm_integration/`. This file holds the shared helpers.
+//! The end-to-end scenario stays runtime-local because it constructs signed
+//! extrinsics with the runtime's tx-extension stack.
 
 #![cfg(test)]
 
@@ -44,92 +42,20 @@ mod safe_call_filter;
 use bulletin_paseo_runtime::{
 	paseo_constants::locations::PeopleLocation,
 	xcm_config::{LocationToAccountId, XcmConfig},
-	Runtime, RuntimeCall, RuntimeGenesisConfig, RuntimeOrigin, System, TransactionStorage,
+	Runtime, RuntimeCall, RuntimeGenesisConfig, System, TransactionStorage,
 };
+use bulletin_runtimes_test_utils as utils;
 use common::{advance_block, assert_extrinsic_ok, construct_and_apply_extrinsic};
-use frame_support::{assert_ok, traits::Get};
-use pallet_bulletin_transaction_storage::{
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
-};
-use parachains_common::{AccountId, BlockNumber};
-use sp_core::Encode;
+use pallet_bulletin_transaction_storage::{AuthorizationExtent, Call as TxStorageCall};
+use parachains_common::AccountId;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::BuildStorage;
-use xcm::latest::{prelude::*, InstructionError};
-use xcm_executor::traits::ConvertLocation;
+use xcm::latest::Location;
 
-/// People Chain location on Paseo. Matches `paseo_constants::PeopleLocation`.
 fn pc_location() -> Location {
 	PeopleLocation::get()
 }
 
-fn auth_period() -> BlockNumber {
-	<<Runtime as TxStorageConfig>::AuthorizationPeriod as Get<BlockNumber>>::get()
-}
-
-fn empty() -> AuthorizationExtent {
-	AuthorizationExtent::default()
-}
-
-fn extent(
-	bytes: u64,
-	bytes_allowance: u64,
-	transactions: u32,
-	transactions_allowance: u32,
-) -> AuthorizationExtent {
-	AuthorizationExtent {
-		bytes,
-		bytes_permanent: 0,
-		bytes_allowance,
-		transactions,
-		transactions_allowance,
-	}
-}
-
-fn extent_of(who: &AccountId) -> AuthorizationExtent {
-	TransactionStorage::account_authorization_extent(who.clone())
-}
-
-/// Build an XCM message in the shape PC uses: free unpaid execution + Transact.
-fn xcm_transact(call: RuntimeCall, kind: OriginKind) -> Xcm<RuntimeCall> {
-	Xcm::builder_unsafe()
-		.unpaid_execution(Unlimited, None)
-		.transact(kind, None, call.encode())
-		.build()
-}
-
-fn execute_from(origin: Location, message: Xcm<RuntimeCall>) -> Result<(), InstructionError> {
-	let mut id = [0u8; 32];
-	xcm_executor::XcmExecutor::<XcmConfig>::prepare_and_execute(
-		origin,
-		message,
-		&mut id,
-		Weight::MAX,
-		Weight::MAX,
-	)
-	.ensure_complete()
-}
-
-fn pc_authorize(who: AccountId, transactions: u32, bytes: u64) -> Result<(), InstructionError> {
-	let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-		who,
-		transactions,
-		bytes,
-	});
-	execute_from(pc_location(), xcm_transact(call, OriginKind::Xcm))
-}
-
-fn pc_refresh(who: AccountId) -> Result<(), InstructionError> {
-	let call =
-		RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::refresh_account_authorization {
-			who,
-		});
-	execute_from(pc_location(), xcm_transact(call, OriginKind::Xcm))
-}
-
 fn new_test_ext() -> sp_io::TestExternalities {
-	let mut ext =
-		sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap());
-	ext.execute_with(advance_block);
-	ext
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
 }
