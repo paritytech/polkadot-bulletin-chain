@@ -1673,6 +1673,18 @@ pub mod pallet {
 			RetentionPeriod::<T>::get()
 		}
 
+		/// Whether `content_hash` is currently stored on-chain — i.e. some
+		/// retained transaction in this pallet indexes it.
+		///
+		/// O(1): one [`TransactionByContentHash`] map read. The map's
+		/// lifecycle matches the question's semantics — `store`/`renew`
+		/// insert (or overwrite to the latest `(block, index)`), and
+		/// `on_initialize` removes the entry when the block it points at
+		/// ages out of [`RetentionPeriod`].
+		pub fn contains_transaction(content_hash: ContentHash) -> bool {
+			TransactionByContentHash::<T>::contains_key(content_hash)
+		}
+
 		/// Returns `true` if a blob of the given size can be stored.
 		pub fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)
