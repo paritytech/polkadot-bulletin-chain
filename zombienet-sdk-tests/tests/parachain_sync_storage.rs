@@ -114,9 +114,8 @@ use crate::{
 		verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
 		wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
 		wait_for_parachain_inclusion_on_relay, wait_for_relay_chain_to_sync,
-		wait_for_session_change_on_node,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+		wait_for_session_change_on_node, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{anyhow, Context, Result};
