@@ -2416,8 +2416,7 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 			Some(Call::apply_block_inherents { proof: None }) => {},
 			other => panic!(
 				"expected Some(apply_block_inherents {{ proof: None }}) when only pending renewals \
-				 are present, got {:?}",
-				other
+				 are present, got {other:?}"
 			),
 		}
 	});
@@ -2891,8 +2890,7 @@ fn migrate_v2_to_v3_insufficient_weight_returns_err() {
 		let res = MigrateV2ToV3::<Test>::step(None, &mut meter);
 		assert!(
 			matches!(res, Err(SteppedMigrationError::InsufficientWeight { .. })),
-			"expected InsufficientWeight, got {:?}",
-			res,
+			"expected InsufficientWeight, got {res:?}",
 		);
 	});
 }

@@ -238,6 +238,10 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
+      - name: Test fullflow-hop
+        working-directory: examples
+        run: just run-test-fullflow-hop "$TEST_DIR"
+
       - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"

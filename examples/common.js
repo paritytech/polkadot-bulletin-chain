@@ -211,6 +211,27 @@ export class NonceManager {
 }
 
 /**
+ * Poll System.Number until the chain's block number exceeds `targetBlock`.
+ *
+ * @param {object} typedApi - PAPI typed API
+ * @param {number} targetBlock - Block number to wait past (waits for > targetBlock)
+ * @param {number} timeoutMs - Give up after this many milliseconds (default: 300 s)
+ * @param {number} pollIntervalMs - How often to poll (default: 6 s ≈ 1 block)
+ */
+export async function waitForBlock(typedApi, targetBlock, timeoutMs = 300_000, pollIntervalMs = 6_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+        const current = Number(await typedApi.query.System.Number.getValue());
+        console.log(`⏳ Block ${current} / waiting for > ${targetBlock}`);
+        if (current > targetBlock) return;
+        if (Date.now() > deadline) {
+            throw new Error(`Timed out after ${timeoutMs / 1000}s waiting for block > ${targetBlock}`);
+        }
+        await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
+}
+
+/**
  * Wait until the chain has produced at least one block (block number > 0).
  * Useful after zombienet startup to ensure the chain is actually producing blocks
  * before submitting transactions.
