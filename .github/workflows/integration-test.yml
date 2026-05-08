@@ -188,7 +188,6 @@ jobs:
 
       - name: Start services
         working-directory: examples
-        continue-on-error: ${{ matrix.runtime.experimental == true }}
         env:
           RUNTIME_PACKAGE: ${{ matrix.runtime.package }}
         run: |
@@ -200,8 +199,7 @@ jobs:
       # The remaining tests rely on signed `authorize_account` (TestAccounts /
       # Sudo), which the bulletin-polkadot Fellows runtime does not expose —
       # only Root and XCM from People can authorize. Skip them here until a
-      # local authorization path lands, but keep `Test chopsticks compatibility`
-      # in scope as a chain-up sanity check.
+      # local authorization path lands; chain-up + chopsticks still run.
       - name: Test authorize-and-store ws
         if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
@@ -234,7 +232,6 @@ jobs:
 
       - name: Test chopsticks compatibility
         working-directory: examples
-        continue-on-error: ${{ matrix.runtime.experimental == true }}
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
       # SDK Client Tests
