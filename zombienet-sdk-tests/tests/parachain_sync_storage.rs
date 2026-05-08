@@ -997,6 +997,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	let para_args = vec![
 		"--ipfs-server".into(),
+		"--database=rocksdb".into(),
 		format!("--blocks-pruning={}", LDB_TEST_RETENTION_PERIOD),
 		"-ltransaction-storage=trace".into(),
 		"--".into(),
