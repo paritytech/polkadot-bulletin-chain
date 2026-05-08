@@ -106,18 +106,16 @@ pub mod pallet {
 			pallet_bulletin_transaction_storage::Pallet::<T>::account_has_active_authorization(who)
 		}
 
-		/// Whether `content_hash` is currently stored on-chain — i.e. some retained
-		/// transaction in `pallet-bulletin-transaction-storage` indexes it.
+		/// Whether `content_hash` is currently stored on-chain — i.e. some
+		/// retained transaction in `pallet-bulletin-transaction-storage`
+		/// indexes it.
 		///
 		/// Used by HOP's maintenance task to confirm a previously submitted
-		/// promotion extrinsic landed in a block. Resolves the hash's most recent
-		/// store/renew location via `transaction_location` and confirms the block
-		/// is still within the current retention window. Defensive against a
-		/// shrunk `RetentionPeriod` racing the per-block cleanup in
-		/// `on_initialize`, which otherwise lets stale entries linger.
+		/// promotion extrinsic landed in a block. Delegates to
+		/// `pallet-bulletin-transaction-storage::contains_transaction`,
+		/// which answers in O(1) via the content-hash index.
 		pub fn is_promoted_on_chain(content_hash: ContentHash) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<T>::transaction_location(content_hash)
-				.is_some()
+			pallet_bulletin_transaction_storage::Pallet::<T>::contains_transaction(content_hash)
 		}
 
 		/// Authorizes a [`Call::promote`] dispatch in the tx pool: validates the

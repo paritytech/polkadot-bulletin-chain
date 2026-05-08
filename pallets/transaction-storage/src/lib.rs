@@ -876,8 +876,8 @@ pub mod pallet {
 			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
 				.ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(
-				!Self::expired(auth.expiration) &&
-					auth.extent.has_permanent_capacity(tx_info.size as u64),
+				!Self::expired(auth.expiration)
+					&& auth.extent.has_permanent_capacity(tx_info.size as u64),
 				Error::<T>::AuthorizationNotFound,
 			);
 
@@ -1673,15 +1673,16 @@ pub mod pallet {
 			RetentionPeriod::<T>::get()
 		}
 
-		/// Most recent `(block, index)` at which `content_hash` was stored or
-		/// renewed, or `None` if no such entry is currently retained.
+		/// Whether `content_hash` is currently stored on-chain — i.e. some
+		/// retained transaction in this pallet indexes it.
 		///
-		/// `on_initialize` keeps the underlying map in sync with retention: an
-		/// entry is removed when the block it points at ages out, unless the
-		/// hash was re-stored or renewed at a later block (in which case the
-		/// map already points at the newer location).
-		pub fn transaction_location(content_hash: ContentHash) -> Option<(BlockNumberFor<T>, u32)> {
-			TransactionByContentHash::<T>::get(content_hash)
+		/// O(1): one [`TransactionByContentHash`] map read. The map's
+		/// lifecycle matches the question's semantics — `store`/`renew`
+		/// insert (or overwrite to the latest `(block, index)`), and
+		/// `on_initialize` removes the entry when the block it points at
+		/// ages out of [`RetentionPeriod`].
+		pub fn contains_transaction(content_hash: ContentHash) -> bool {
+			TransactionByContentHash::<T>::contains_key(content_hash)
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.
@@ -1971,10 +1972,10 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash, true)
 				},
-				Call::<T>::authorize_account { .. } |
-				Call::<T>::authorize_preimage { .. } |
-				Call::<T>::refresh_account_authorization { .. } |
-				Call::<T>::refresh_preimage_authorization { .. } => {
+				Call::<T>::authorize_account { .. }
+				| Call::<T>::authorize_preimage { .. }
+				| Call::<T>::refresh_account_authorization { .. }
+				| Call::<T>::refresh_preimage_authorization { .. } => {
 					// Verify that the signer satisfies the Authorizer origin.
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
