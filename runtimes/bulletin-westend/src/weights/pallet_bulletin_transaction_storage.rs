@@ -198,14 +198,14 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Authorizations` (r:2 w:2)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn validate_renew(r: u32) -> Weight {
+	fn validate_renew() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `533`
 		//  Estimated: `47519`
 		// Minimum execution time: 38_526_000 picoseconds.
 		Weight::from_parts(40_220_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(5_u64.saturating_add(r as u64)))
+			.saturating_add(T::DbWeight::get().reads(5))
 			.saturating_add(T::DbWeight::get().writes(3))
 	}
 	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)

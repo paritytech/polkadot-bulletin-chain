@@ -211,8 +211,7 @@ where
 		match inner_call {
 			Call::store { data, .. } | Call::store_with_cid_config { data, .. } =>
 				T::WeightInfo::validate_store(data.len() as u32),
-			Call::renew { .. } | Call::renew_content_hash { .. } =>
-				T::WeightInfo::validate_renew(T::MaxBlockTransactions::get()),
+			Call::renew { .. } | Call::renew_content_hash { .. } => T::WeightInfo::validate_renew(),
 			_ => Weight::zero(),
 		}
 	}

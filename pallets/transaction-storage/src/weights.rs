@@ -47,7 +47,7 @@ pub trait WeightInfo {
 	fn enable_auto_renew() -> Weight;
 	fn disable_auto_renew() -> Weight;
 	fn validate_store(l: u32) -> Weight;
-	fn validate_renew(r: u32) -> Weight;
+	fn validate_renew() -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
 }
 
@@ -304,10 +304,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
 	/// Storage: `TransactionStorage::Authorizations` (r:2 w:2)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::AccountRenewals` (r:r w:1)
-	/// Proof: `TransactionStorage::AccountRenewals` (`max_values`: None, `max_size`: Some(68), added: 2543, mode: `MaxEncodedLen`)
-	/// The range of component `r` is `[0, 512]`.
-	fn validate_renew(r: u32) -> Weight {
+	fn validate_renew() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `533`
 		//  Estimated: `47519`
@@ -315,7 +312,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(47_394_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(T::DbWeight::get().reads(6))
-			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(r.into())))
 			.saturating_add(T::DbWeight::get().writes(3))
 	}
 	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
@@ -432,11 +428,10 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(5))
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
-	fn validate_renew(r: u32) -> Weight {
+	fn validate_renew() -> Weight {
 		Weight::from_parts(47_394_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(RocksDbWeight::get().reads(6))
-			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(r.into())))
 			.saturating_add(RocksDbWeight::get().writes(3))
 	}
 	fn migrate_v2_to_v3_step() -> Weight {
