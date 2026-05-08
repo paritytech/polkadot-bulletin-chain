@@ -543,10 +543,11 @@ mod benchmarks {
 		run_to_block::<T>(crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one());
 
 		// Step 3: pre-populate `n` PendingAutoRenewals entries. The drain loop calls
-		// `do_renew` for each, which pushes a `TransactionInfo` into `BlockTransactions`,
-		// updates `TransactionByContentHash`, and bumps the column-TRANSACTION refcount
-		// via `transaction_index::renew`. Synthetic content hashes are sufficient — none
-		// of those operations validate against existing storage.
+		// `do_renew_in_memory` for each, which pushes a `TransactionInfo` into the
+		// in-memory `BlockTransactions` accumulator, updates `TransactionByContentHash`,
+		// and bumps the column-TRANSACTION refcount via `transaction_index::renew`.
+		// Synthetic content hashes are sufficient — none of those operations validate
+		// against existing storage.
 		if n > 0 {
 			let mut pending = PendingAutoRenewals::<T>::get();
 			for i in 0..n {

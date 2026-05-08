@@ -1211,9 +1211,26 @@ pub mod pallet {
 		/// Drain [`PendingAutoRenewals`], renewing each entry whose owner has sufficient
 		/// authorization. Returns the count drained.
 		///
-		/// Batches the [`BlockTransactions`] read/write across all `n` renewals. Calling
-		/// [`Self::do_renew`] in the loop would re-encode the full vec per iteration (O(n²)),
-		/// which a linear weight model underestimates by ~17% at saturation.
+		/// Batches the [`BlockTransactions`] read/write across all `n` renewals by threading
+		/// an in-memory accumulator through repeated [`Self::do_renew_in_memory`] calls.
+		/// A naive [`Self::do_renew`]-per-item loop would re-encode the full vec per
+		/// iteration (O(n²)), which a linear weight model underestimates by ~17% at
+		/// saturation.
+		///
+		/// **Failure handling.** A pending renewal is treated as failed (the registration
+		/// is removed from [`AutoRenewals`] and [`Event::AutoRenewalFailed`] is emitted)
+		/// when any of the following hold:
+		///
+		/// - [`Self::check_authorization`] rejects — the auth was missing/expired, the per-account
+		///   renew quota (`bytes_permanent + size > bytes_allowance`) was exhausted, or the
+		///   chain-wide cap (`PermanentStorageUsed + size > MaxPermanentStorageSize`) would be
+		///   breached.
+		/// - [`Self::do_renew_in_memory`] returns `None` because the per-block transaction slot cap
+		///   (`MaxBlockTransactions`) is reached.
+		///
+		/// In all cases the on-chain data is left to expire normally on its existing
+		/// `RetentionPeriod` clock; the caller may re-`enable_auto_renew` once the
+		/// constraint clears.
 		pub(super) fn do_process_auto_renewals() -> u32 {
 			let pending = PendingAutoRenewals::<T>::take();
 			let n_actual = pending.len() as u32;
@@ -1242,7 +1259,7 @@ pub mod pallet {
 				let scope = AuthorizationScope::Account(renewal_data.account.clone());
 				let new_index =
 					if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
-						Self::push_renewal_in_memory(&mut transactions, &tx_info, extrinsic_index)
+						Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
 					} else {
 						None
 					};
@@ -1266,11 +1283,21 @@ pub mod pallet {
 			n_actual
 		}
 
-		/// Push `info` into an in-memory accumulator, call `transaction_index::renew`, and
-		/// insert into `TransactionByContentHash`. Returns `None` at capacity. Lets
-		/// [`Self::do_process_auto_renewals`] amortize the [`BlockTransactions`] storage
-		/// round-trip across all `n` renewals.
-		fn push_renewal_in_memory(
+		/// Centralized renewal mechanics: stamp the entry as `kind = Renew`, push it onto
+		/// the in-memory `BlockTransactions` accumulator, call `transaction_index::renew`,
+		/// and update [`TransactionByContentHash`]. Returns `None` at the per-block
+		/// `MaxBlockTransactions` cap.
+		///
+		/// Called by:
+		/// - [`Self::do_renew`] for the single-renewal manual flow (`renew`, `renew_content_hash`).
+		/// - [`Self::do_process_auto_renewals`] in a loop, amortizing one [`BlockTransactions`]
+		///   read/write across all pending entries.
+		///
+		/// The hard-cap accounting (per-account `bytes_permanent`, chain-wide
+		/// [`PermanentStorageUsed`]) is performed by [`Self::check_authorization`] —
+		/// invoked by the extension's `pre_dispatch` for the manual flow and by
+		/// [`Self::do_process_auto_renewals`] for the auto flow before this is called.
+		fn do_renew_in_memory(
 			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 			info: &TransactionInfo,
 			extrinsic_index: u32,
@@ -1399,21 +1426,24 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Shared `renew` / `renew_content_hash` / auto-renewal entry point.
+		/// Single-renewal entry point for the [`renew`](Self::renew) and
+		/// [`renew_content_hash`](Self::renew_content_hash) dispatchables.
+		///
+		/// Wraps [`Self::do_renew_in_memory`] (the centralized renewal mechanics) with a
+		/// [`BlockTransactions`] read/write. Auto-renewals do not go through this wrapper —
+		/// [`Self::do_process_auto_renewals`] amortizes a single read/write across the
+		/// whole drain loop instead.
+		///
+		/// Hard-cap accounting (per-account `bytes_permanent`, chain-wide
+		/// [`PermanentStorageUsed`]) is enforced by [`Self::check_authorization`] in the
+		/// extension's `pre_dispatch` before this runs.
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = info.content_hash;
-			let new_index = Self::append_to_block_transactions(
-				info.chunk_root,
-				info.size,
-				info.content_hash,
-				info.hashing,
-				info.cid_codec,
-				extrinsic_index,
-				TransactionKind::Renew,
-			)?;
-			sp_io::transaction_index::renew(extrinsic_index, content_hash);
+			let mut transactions = <BlockTransactions<T>>::get();
+			let new_index = Self::do_renew_in_memory(&mut transactions, &info, extrinsic_index)
+				.ok_or(Error::<T>::TooManyTransactions)?;
+			<BlockTransactions<T>>::put(transactions);
 			Ok(new_index)
 		}
 
