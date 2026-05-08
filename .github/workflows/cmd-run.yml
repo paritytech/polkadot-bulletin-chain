@@ -172,6 +172,29 @@ jobs:
           repository: ${{ env.REPO }}
           ref: ${{ env.PR_BRANCH }}
 
+      - name: Load .github/env
+        if: startsWith(github.event.inputs.cmd, 'bench')
+        run: grep -v '^#' .github/env | grep '=' >> $GITHUB_ENV
+
+      - name: Cache frame-omni-bencher
+        id: cache-bencher
+        if: startsWith(github.event.inputs.cmd, 'bench')
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /usr/local/bin/frame-omni-bencher
+          key: frame-omni-bencher-${{ env.POLKADOT_SDK_VERSION }}
+
+      - name: Download frame-omni-bencher
+        if: startsWith(github.event.inputs.cmd, 'bench') && steps.cache-bencher.outputs.cache-hit != 'true'
+        run: |
+          url="https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
+          curl -fL -o /tmp/frame-omni-bencher "$url"
+          if [ -n "${FRAME_OMNI_BENCHER_SHA256}" ]; then
+            echo "${FRAME_OMNI_BENCHER_SHA256}  /tmp/frame-omni-bencher" | sha256sum -c
+          fi
+          chmod +x /tmp/frame-omni-bencher
+          mv /tmp/frame-omni-bencher /usr/local/bin/frame-omni-bencher
+
       - name: Run cmd
         id: cmd
         env:
