@@ -21,7 +21,6 @@ def setup_logging():
         os.makedirs('/tmp/cmd')
     open('/tmp/cmd/command_output.log', 'w').close()
 
-
 setup_logging()
 
 f = open('scripts/runtimes-matrix.json', 'r')
