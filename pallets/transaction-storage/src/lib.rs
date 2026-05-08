@@ -1673,6 +1673,19 @@ pub mod pallet {
 			RetentionPeriod::<T>::get()
 		}
 
+		/// Most recent `(block, index)` at which `content_hash` was stored or
+		/// renewed, or `None` if no such entry is currently retained.
+		///
+		/// `on_initialize` keeps the underlying map in sync with retention: an
+		/// entry is removed when the block it points at ages out, unless the
+		/// hash was re-stored or renewed at a later block (in which case the
+		/// map already points at the newer location).
+		pub fn transaction_location(
+			content_hash: ContentHash,
+		) -> Option<(BlockNumberFor<T>, u32)> {
+			TransactionByContentHash::<T>::get(content_hash)
+		}
+
 		/// Returns `true` if a blob of the given size can be stored.
 		pub fn data_size_ok(size: usize) -> bool {
 			(size > 0) && (size <= T::MaxTransactionSize::get() as usize)

@@ -72,7 +72,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use pallet_bulletin_transaction_storage::WeightInfo as _;
 	use sp_runtime::{
-		traits::{IdentifyAccount, One, Verify, Zero},
+		traits::{IdentifyAccount, Verify},
 		AccountId32, MultiSignature, MultiSigner, Saturating,
 	};
 
@@ -110,29 +110,22 @@ pub mod pallet {
 		/// transaction in `pallet-bulletin-transaction-storage` indexes it.
 		///
 		/// Used by HOP's maintenance task to confirm a previously submitted
-		/// promotion extrinsic landed in a block. Walks blocks from latest to
-		/// oldest so freshly-promoted hashes short-circuit after a couple of reads.
-		///
-		/// TODO(optimisation): https://github.com/paritytech/polkadot-bulletin-chain/issues/477
+		/// promotion extrinsic landed in a block. Resolves the hash's most recent
+		/// store/renew location via `transaction_location` and confirms the block
+		/// is still within the current retention window. Defensive against a
+		/// shrunk `RetentionPeriod` racing the per-block cleanup in
+		/// `on_initialize`, which otherwise lets stale entries linger.
 		pub fn is_promoted_on_chain(content_hash: ContentHash) -> bool {
-			let current = frame_system::Pallet::<T>::block_number();
+			let Some((block, _)) =
+				pallet_bulletin_transaction_storage::Pallet::<T>::transaction_location(
+					content_hash,
+				)
+			else {
+				return false;
+			};
+			let now = frame_system::Pallet::<T>::block_number();
 			let retention = pallet_bulletin_transaction_storage::Pallet::<T>::retention_period();
-			let oldest = current.saturating_sub(retention);
-			let mut block = current;
-			while block >= oldest {
-				if let Some(txs) =
-					pallet_bulletin_transaction_storage::Pallet::<T>::transactions_at(block)
-				{
-					if txs.iter().any(|t| t.content_hash == content_hash) {
-						return true;
-					}
-				}
-				if block.is_zero() {
-					break;
-				}
-				block = block.saturating_sub(One::one());
-			}
-			false
+			now.saturating_sub(block) <= retention
 		}
 
 		/// Authorizes a [`Call::promote`] dispatch in the tx pool: validates the
