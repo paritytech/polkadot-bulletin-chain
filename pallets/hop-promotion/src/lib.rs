@@ -116,16 +116,8 @@ pub mod pallet {
 		/// shrunk `RetentionPeriod` racing the per-block cleanup in
 		/// `on_initialize`, which otherwise lets stale entries linger.
 		pub fn is_promoted_on_chain(content_hash: ContentHash) -> bool {
-			let Some((block, _)) =
-				pallet_bulletin_transaction_storage::Pallet::<T>::transaction_location(
-					content_hash,
-				)
-			else {
-				return false;
-			};
-			let now = frame_system::Pallet::<T>::block_number();
-			let retention = pallet_bulletin_transaction_storage::Pallet::<T>::retention_period();
-			now.saturating_sub(block) <= retention
+			pallet_bulletin_transaction_storage::Pallet::<T>::transaction_location(content_hash)
+				.is_some()
 		}
 
 		/// Authorizes a [`Call::promote`] dispatch in the tx pool: validates the
