@@ -103,19 +103,23 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
+      runtime_experimental: ${{ steps.runtime.outputs.runtime_experimental }}
     name: Extract tasks from matrix
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - id: runtime
         run: |
-          TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
+          TASKS=$(jq '[.[] | select(.integration_tests == true and (.experimental // false) == false)]' scripts/runtimes-matrix.json)
+          EXPERIMENTAL=$(jq '[.[] | select(.integration_tests == true and (.experimental // false) == true)]' scripts/runtimes-matrix.json)
           SKIPPED=$(jq '[.[] | select(.integration_tests != true)]' scripts/runtimes-matrix.json)
-          echo "--- Running integration tests for ---"
+          echo "--- Running full integration tests for ---"
           echo "$TASKS"
+          echo "--- Running experimental smoke tests for ---"
+          echo "$EXPERIMENTAL"
           echo "--- Skipping integration tests for ---"
           echo "$SKIPPED"
-          TASKS=$(echo "$TASKS" | jq -c .)
-          echo "runtime=$TASKS" >> $GITHUB_OUTPUT
+          echo "runtime=$(echo "$TASKS" | jq -c .)" >> $GITHUB_OUTPUT
+          echo "runtime_experimental=$(echo "$EXPERIMENTAL" | jq -c .)" >> $GITHUB_OUTPUT
 
   integration-tests:
     needs: [set-image, setup, runtime-matrix]
@@ -196,37 +200,27 @@ jobs:
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
           just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
-      # The remaining tests rely on signed `authorize_account` (TestAccounts /
-      # Sudo), which the bulletin-polkadot Fellows runtime does not expose:
-      # only Root and XCM from People can authorize. Skip them here until a
-      # local authorization path lands; chain-up + chopsticks still run.
       - name: Test authorize-and-store ws
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
 
       - name: Test authorize-and-store smoldot
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
 
       - name: Test store-chunked-data
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-store-chunked-data "$TEST_DIR"
 
       - name: Test native-ipfs-dag-pb-chunked-data
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
 
       - name: Test store-big-data
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-store-big-data "$TEST_DIR" "big32"
 
       - name: Test authorize-preimage-and-store
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
@@ -236,17 +230,14 @@ jobs:
 
       # SDK Client Tests
       - name: Test Rust SDK
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "$RUNTIME_PACKAGE"
 
       - name: Test TypeScript SDK
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just test-ts-sdk "${{ env.TEST_DIR }}"
 
       - name: Test TypeScript SDK (vitest integration)
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         # TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/443
         # Flaky chunked-store tests hit the per-tx timeout under CI load.
@@ -256,7 +247,6 @@ jobs:
         run: just test-ts-sdk-vitest
 
       - name: Run console-ui tests
-        if: ${{ !matrix.runtime.experimental }}
         working-directory: console-ui
         run: just test
 
@@ -282,9 +272,96 @@ jobs:
           path: |
             ${{ env.TEST_DIR }}/*.log
 
+  # Smoke tests for runtimes flagged `experimental` in runtimes-matrix.json.
+  # The bulletin-polkadot Fellows runtime exposes neither Sudo nor TestAccounts,
+  # so signed `authorize_account` paths exercised by the full suite don't apply.
+  # Verify chain-up and chopsticks compatibility only.
+  integration-tests-experimental:
+    needs: [set-image, setup, runtime-matrix]
+    if: ${{ needs.runtime-matrix.outputs.runtime_experimental != '[]' }}
+    name: Integration Tests (${{ matrix.runtime.name }}, experimental)
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime_experimental) }}
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Rust cache (Bulletin)
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-bulletin-integration-tests-experimental-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: examples/package.json
+
+      - name: Install just
+        run: cargo install just --locked || true
+
+      - name: Cache Polkadot SDK binaries
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
+      - name: Cache Zombienet
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ${{ env.ZOMBIENET_BIN_DIR }}
+          key: zombienet-${{ env.ZOMBIENET_VERSION }}-binaries
+      - name: Add binaries to PATH
+        run: |
+          chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
+          chmod +x "${ZOMBIENET_BIN_DIR}"/*
+          echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
+          echo "${ZOMBIENET_BIN_DIR}" >> "$GITHUB_PATH"
+          echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
+          echo "ZOMBIENET_BINARY=zombienet-linux-x64" >> "$GITHUB_ENV"
+
+      - name: Start services
+        working-directory: examples
+        env:
+          RUNTIME_PACKAGE: ${{ matrix.runtime.package }}
+        run: |
+          TEST_DIR="$(mktemp -d $GITHUB_WORKSPACE/bulletin-tests-run-XXXXX)/test"
+          echo "TEST_DIR=$TEST_DIR" >> "$GITHUB_ENV"
+          echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
+          just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
+
+      - name: Test chopsticks compatibility
+        working-directory: examples
+        run: just run-test-chopsticks "ws://127.0.0.1:10000"
+
+      - name: Stop services
+        if: always()
+        working-directory: examples
+        run: just KUBO_VERSION="${KUBO_VERSION}" stop-services "$TEST_DIR" "kubo-native"
+
+      - name: Upload Zombienet logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-zombienet-logs-${{ matrix.runtime.name }}
+          path: |
+            ${{ env.TEST_DIR }}/*.log
+
   integration-tests-complete:
     name: All integration tests passed
-    needs: [changes, integration-tests]
+    needs: [changes, integration-tests, integration-tests-experimental]
     if: always()
     runs-on: ubuntu-latest
     steps:
