@@ -73,7 +73,7 @@ pub mod pallet {
 	use pallet_bulletin_transaction_storage::WeightInfo as _;
 	use sp_runtime::{
 		traits::{IdentifyAccount, Verify},
-		AccountId32, MultiSignature, MultiSigner, Saturating,
+		AccountId32, MultiSignature, MultiSigner,
 	};
 
 	#[pallet::pallet]
