@@ -1,13 +1,8 @@
 CI_IMAGE=docker.io/paritytech/ci-unified:bullseye-1.93.0-2026-01-27-v202603042356
 RUST_STABLE_VERSION=1.88.0
 NODE_VERSION=22
-# Version pin for polkadot + workers + polkadot-parachain. Overridable from
-# the sync-tests.yml workflow_dispatch input. Accepts either a release tag
-# (e.g. polkadot-stable2603) or a paritypr PR-build tag (e.g. 11662-afba6ccb).
 POLKADOT_BIN_VERS=11662-afba6ccb
-# Version pin for the chain-spec-builder tool (always a polkadot-sdk release tag).
 CHAIN_SPEC_BUILDER_VERS=polkadot-stable2603
-# Version pin for the frame-omni-bencher tool (always a polkadot-sdk release tag).
 FRAME_OMNI_BENCHER_VERS=polkadot-stable2603
 KUBO_VERSION=v0.40.1
 ZOMBIENET_VERSION=v1.3.138
