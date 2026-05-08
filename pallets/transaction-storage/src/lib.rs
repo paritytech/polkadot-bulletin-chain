@@ -876,8 +876,8 @@ pub mod pallet {
 			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
 				.ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(
-				!Self::expired(auth.expiration)
-					&& auth.extent.has_permanent_capacity(tx_info.size as u64),
+				!Self::expired(auth.expiration) &&
+					auth.extent.has_permanent_capacity(tx_info.size as u64),
 				Error::<T>::AuthorizationNotFound,
 			);
 
@@ -1972,10 +1972,10 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash, true)
 				},
-				Call::<T>::authorize_account { .. }
-				| Call::<T>::authorize_preimage { .. }
-				| Call::<T>::refresh_account_authorization { .. }
-				| Call::<T>::refresh_preimage_authorization { .. } => {
+				Call::<T>::authorize_account { .. } |
+				Call::<T>::authorize_preimage { .. } |
+				Call::<T>::refresh_account_authorization { .. } |
+				Call::<T>::refresh_preimage_authorization { .. } => {
 					// Verify that the signer satisfies the Authorizer origin.
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
