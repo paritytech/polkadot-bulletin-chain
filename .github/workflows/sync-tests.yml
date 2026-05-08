@@ -3,10 +3,11 @@ name: Zombienet Sync Tests
 on:
   workflow_dispatch:
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
 
-# Only run when manually triggered or when the zombienet-sync-tests label is added
-# The job-level 'if' below handles the label check for pull_request events.
+# Only run when manually triggered or when the zombienet-sync-tests label is present.
+# Including 'synchronize' makes the workflow run on every push while the label is set,
+# instead of only the single moment the label is applied.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -22,7 +23,7 @@ jobs:
   set-image:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.label.name == 'zombienet-sync-tests')
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
     uses: ./.github/workflows/set-image.yml
 
   zombienet-sync-tests:
