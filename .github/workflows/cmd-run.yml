@@ -189,9 +189,7 @@ jobs:
         run: |
           url="https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
           curl -fL -o /tmp/frame-omni-bencher "$url"
-          if [ -n "${FRAME_OMNI_BENCHER_SHA256}" ]; then
-            echo "${FRAME_OMNI_BENCHER_SHA256}  /tmp/frame-omni-bencher" | sha256sum -c
-          fi
+          echo "${FRAME_OMNI_BENCHER_SHA256} /tmp/frame-omni-bencher" | sha256sum -c -
           chmod +x /tmp/frame-omni-bencher
           mv /tmp/frame-omni-bencher /usr/local/bin/frame-omni-bencher
 
