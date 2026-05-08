@@ -113,7 +113,8 @@ use crate::{
 		verify_all_items_bitswap, verify_col11, verify_ldb_tool, verify_node_bitswap,
 		verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
 		wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
-		wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
+		wait_for_parachain_inclusion_on_relay, wait_for_relay_chain_to_sync,
+		wait_for_session_change_on_node,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
 		PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
@@ -508,6 +509,12 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
+
+	// Confirm the relay validators have observed parachain inclusion before spawning the
+	// sync node with --sync=warp. Without this, cumulus's warp-sync init can race the
+	// embedded relay client and lock in target = parachain genesis (#0), hanging warp sync.
+	let relay_alice_client: OnlineClient<SubstrateConfig> = relay_alice.wait_client().await?;
+	wait_for_parachain_inclusion_on_relay(&relay_alice_client, SYNC_TIMEOUT_SECS).await?;
 
 	// Add sync node with warp sync
 	log::info!("Adding sync-node with --sync=warp");

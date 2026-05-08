@@ -257,3 +257,52 @@ pub async fn wait_for_session_change_on_node(
 		relay_node.wait_client().await.context("Failed to get relay chain client")?;
 	wait_for_first_session_change(&relay_client, timeout_secs).await
 }
+
+/// Wait for a `ParaInclusion::CandidateIncluded` event on a finalized relay-chain block.
+///
+/// Used before adding a `--sync=warp` parachain node to a freshly-bootstrapped network.
+/// Cumulus's warp-sync logic queries the embedded relay client for the latest finalized
+/// parachain head; if the embedded relay is still at genesis (empty `Paras::Heads`) when
+/// that query happens, cumulus locks in a `#0` target and the parachain warp sync hangs
+/// indefinitely. Asserting that an inclusion event has finalised on the relay first
+/// shrinks that race: peers the new node will warp from already have a non-genesis head
+/// to advertise.
+pub async fn wait_for_parachain_inclusion_on_relay(
+	relay_client: &OnlineClient<SubstrateConfig>,
+	timeout_secs: u64,
+) -> Result<()> {
+	log::info!("Waiting for parachain CandidateIncluded event on a finalized relay block...");
+
+	let wait_future = async {
+		let mut blocks_sub = relay_client
+			.blocks()
+			.subscribe_finalized()
+			.await
+			.context("Failed to subscribe to relay finalized blocks")?;
+
+		while let Some(block_result) = blocks_sub.next().await {
+			let block = block_result.context("Error receiving relay block")?;
+			let events = block.events().await.context("Failed to fetch relay block events")?;
+			let included = events.iter().any(|event| {
+				event.as_ref().is_ok_and(|e| {
+					e.pallet_name() == "ParaInclusion" && e.variant_name() == "CandidateIncluded"
+				})
+			});
+			if included {
+				log::info!(
+					"✓ Parachain candidate included and finalized at relay block #{}",
+					block.number()
+				);
+				return Ok(());
+			}
+		}
+
+		anyhow::bail!("Relay finalized-block subscription ended unexpectedly")
+	};
+
+	tokio::time::timeout(Duration::from_secs(timeout_secs), wait_future)
+		.await
+		.map_err(|_| {
+			anyhow!("Timeout waiting for parachain inclusion on relay after {}s", timeout_secs)
+		})?
+}
