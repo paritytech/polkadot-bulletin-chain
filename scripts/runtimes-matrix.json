@@ -31,5 +31,17 @@
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
     }
+  },
+  {
+    "name": "bulletin-polkadot",
+    "package": "bulletin-polkadot-runtime",
+    "path": "external/fellows-runtimes/system-parachains/bulletin/bulletin-polkadot",
+    "uris": [],
+    "integration_tests": true,
+    "experimental": true,
+    "external_runtime": {
+      "repo": "https://github.com/bkontur/runtimes.git",
+      "ref": "bko-bulletin-stage1"
+    }
   }
 ]

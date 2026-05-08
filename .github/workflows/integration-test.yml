@@ -188,6 +188,7 @@ jobs:
 
       - name: Start services
         working-directory: examples
+        continue-on-error: ${{ matrix.runtime.experimental == true }}
         env:
           RUNTIME_PACKAGE: ${{ matrix.runtime.package }}
         run: |
@@ -196,44 +197,59 @@ jobs:
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
           just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
+      # The remaining tests rely on signed `authorize_account` (TestAccounts /
+      # Sudo), which the bulletin-polkadot Fellows runtime does not expose —
+      # only Root and XCM from People can authorize. Skip them here until a
+      # local authorization path lands, but keep `Test chopsticks compatibility`
+      # in scope as a chain-up sanity check.
       - name: Test authorize-and-store ws
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
 
       - name: Test authorize-and-store smoldot
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
 
       - name: Test store-chunked-data
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-store-chunked-data "$TEST_DIR"
 
       - name: Test native-ipfs-dag-pb-chunked-data
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
 
       - name: Test store-big-data
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-store-big-data "$TEST_DIR" "big32"
 
       - name: Test authorize-preimage-and-store
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
       - name: Test chopsticks compatibility
         working-directory: examples
+        continue-on-error: ${{ matrix.runtime.experimental == true }}
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
       # SDK Client Tests
       - name: Test Rust SDK
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "$RUNTIME_PACKAGE"
 
       - name: Test TypeScript SDK
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         run: just test-ts-sdk "${{ env.TEST_DIR }}"
 
       - name: Test TypeScript SDK (vitest integration)
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: examples
         # TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/443
         # Flaky chunked-store tests hit the per-tx timeout under CI load.
@@ -243,6 +259,7 @@ jobs:
         run: just test-ts-sdk-vitest
 
       - name: Run console-ui tests
+        if: ${{ !matrix.runtime.experimental }}
         working-directory: console-ui
         run: just test
 
