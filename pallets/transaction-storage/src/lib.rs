@@ -1680,9 +1680,7 @@ pub mod pallet {
 		/// entry is removed when the block it points at ages out, unless the
 		/// hash was re-stored or renewed at a later block (in which case the
 		/// map already points at the newer location).
-		pub fn transaction_location(
-			content_hash: ContentHash,
-		) -> Option<(BlockNumberFor<T>, u32)> {
+		pub fn transaction_location(content_hash: ContentHash) -> Option<(BlockNumberFor<T>, u32)> {
 			TransactionByContentHash::<T>::get(content_hash)
 		}
 
