@@ -197,7 +197,7 @@ jobs:
           just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
       # The remaining tests rely on signed `authorize_account` (TestAccounts /
-      # Sudo), which the bulletin-polkadot Fellows runtime does not expose —
+      # Sudo), which the bulletin-polkadot Fellows runtime does not expose:
       # only Root and XCM from People can authorize. Skip them here until a
       # local authorization path lands; chain-up + chopsticks still run.
       - name: Test authorize-and-store ws
