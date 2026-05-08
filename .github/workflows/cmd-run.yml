@@ -182,12 +182,12 @@ jobs:
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /usr/local/bin/frame-omni-bencher
-          key: frame-omni-bencher-${{ env.POLKADOT_SDK_VERSION }}
+          key: frame-omni-bencher-${{ env.FRAME_OMNI_BENCHER_VERS }}
 
       - name: Download frame-omni-bencher
         if: startsWith(github.event.inputs.cmd, 'bench') && steps.cache-bencher.outputs.cache-hit != 'true'
         run: |
-          url="https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
+          url="https://github.com/paritytech/polkadot-sdk/releases/download/${FRAME_OMNI_BENCHER_VERS}/frame-omni-bencher"
           curl -fL -o /tmp/frame-omni-bencher "$url"
           echo "${FRAME_OMNI_BENCHER_SHA256} /tmp/frame-omni-bencher" | sha256sum -c -
           chmod +x /tmp/frame-omni-bencher
