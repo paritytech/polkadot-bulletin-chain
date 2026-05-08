@@ -10,13 +10,13 @@ async function main() {
 	const message = 'Hello from HOP!';
 	const data = new TextEncoder().encode(message);
 
-	const { authorizationSigner } = setupKeyringAndSigners(SEED, '//CustomSigner');
+	const { authorizationAccount } = setupKeyringAndSigners(SEED, '//CustomSigner');
 
 	logInfo(`Connecting to custom network`);
 	const client = HopClient.connectWithAccount(
 		NODE_WS,
-		authorizationSigner.publicKey,
-		authorizationSigner.signBytes,
+		authorizationAccount.publicKey,
+		authorizationAccount.sign,
 		'sr25519'
 	);
 

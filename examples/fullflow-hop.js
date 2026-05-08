@@ -8,10 +8,10 @@ import { cidFromBytes } from './cid_dag_metadata.js';
 import { authorizeAccount, TX_MODE_FINALIZED_BLOCK } from './api.js';
 
 /**
- * 1. Setup authorized account (to the signer of `pallet_hop_promotion::promote` call)
- * 2. Upload data via HOP rpc
- * 3. Use authorized account to sign the payload
- * 4. Use the same / different account to call `pallet_hop_promotion::promote` (whatever signed/unsigned/sudo)
+ * 1. Setup authorized account: authorize to `who`
+ * 2. Upload data via HOP rpc using `who` to upload data
+ * 3. Use `who` account to sign the payload
+ * 4. Wait for `--hop-retention-blocks` blocks and verify data will be promoted
  */
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
@@ -27,7 +27,7 @@ async function main() {
 	logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
 	// Signers
-	const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//CustomSigner');
+	const { authorizationSigner, authorizationAccount, whoSigner, whoAddress, whoAccount } = setupKeyringAndSigners(SEED, '//CustomSigner');
 
 	// Data to store
 	const message = 'Hello from HOP!';
@@ -39,12 +39,12 @@ async function main() {
 	const bulletinAPI = papiClient.getTypedApi(bulletin);
 	await waitForBlockProduction(bulletinAPI);
 
-	// Create HOP client
+	// Create HOP client for `who`
 	logInfo(`Connecting to local`);
 	const hopClient = HopClient.connectWithAccount(
 		NODE_WS,
-		authorizationSigner.publicKey,
-		authorizationSigner,
+		whoAccount.publicKey,
+		whoAccount.sign,
 		'sr25519'
 	);
 
