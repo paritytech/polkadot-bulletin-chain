@@ -993,7 +993,10 @@ fn authorized_wrapped_store_rejected() {
 			});
 
 			// Direct store should succeed.
-			assert_extrinsic_ok(construct_and_apply_extrinsic(Some(account.pair()), store_call.clone()));
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				store_call.clone(),
+			));
 
 			// Batch-wrapped store must be rejected.
 			for (wrapped, name) in wrap_call_utility_variants(store_call) {
@@ -1244,7 +1247,10 @@ fn renew_must_be_direct_extrinsic() {
 		});
 
 		// Direct renew succeeds with the existing account authorization.
-		assert_extrinsic_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
+		assert_extrinsic_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			renew_call.clone(),
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who.clone()),
 			AuthorizationExtent {
