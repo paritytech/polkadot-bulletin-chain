@@ -2005,21 +2005,7 @@ pub mod pallet {
 					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
 						.ok_or(RENEWED_NOT_FOUND)?;
 					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
-					let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
-						.ok_or(AUTHORIZATION_NOT_FOUND)?;
-					if Self::expired(auth.expiration) ||
-						!auth.extent.has_permanent_capacity(info.size as u64)
-					{
-						return Err(AUTHORIZATION_NOT_FOUND.into());
-					}
-					return Ok((
-						context.want_valid_transaction().then(|| ValidTransaction {
-							priority: T::StoreRenewPriority::get(),
-							longevity: T::StoreRenewLongevity::get(),
-							..Default::default()
-						}),
-						None,
-					));
+					(info.size as usize, info.content_hash, true)
 				},
 				Call::<T>::disable_auto_renew { .. } => {
 					// `disable_auto_renew` does not consume authorization. The dispatch handler
