@@ -418,6 +418,22 @@ pub mod pallet {
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Mandatory per-block hook: ages out the obsolete `Transactions[obsolete]` entry,
+		/// decrements [`PermanentStorageUsed`] for any `kind == Renew` items in it, cleans
+		/// up `TransactionByContentHash`, and queues auto-renewals for `process_auto_renewals`.
+		///
+		/// Weight is charged via the [`WeightInfo::on_initialize_with_expiry`] benchmark:
+		/// constant 5 reads + 3 writes for the sweep, plus 2 reads + 1 write per expiring
+		/// tx. At `n = MaxBlockTransactions` (512) the worst case is ~1029 reads + 515
+		/// writes. Combined with `apply_block_inherents(MaxBlockTransactions)` that runs
+		/// in the same block, the mandatory floor is ~207 ms ref_time and ~2.78 MiB
+		/// proof_size — ~10% of `max_block.ref_time` and ~27% of `max_block.proof_size`,
+		/// leaving headroom for user `store` / `renew` traffic in `DispatchClass::Normal`.
+		///
+		/// The fit is asserted at runtime-test time by [`ensure_weight_sanity`], called
+		/// from `transaction_storage_weight_sanity` in each runtime's `tests/tests.rs`.
+		/// Any change that pushes `on_initialize_with_expiry` or `apply_block_inherents`
+		/// up will fail the test before reaching CI.
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
 			let mut weight = Weight::zero();
 
