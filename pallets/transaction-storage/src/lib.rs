@@ -418,6 +418,13 @@ pub mod pallet {
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Mandatory per-block hook: ages out the obsolete `Transactions[obsolete]` entry,
+		/// decrements [`PermanentStorageUsed`] for any `kind == Renew` items in it, cleans
+		/// up `TransactionByContentHash`, and queues auto-renewals for `process_auto_renewals`.
+		///
+		/// Weight is charged via the [`WeightInfo::on_initialize_with_expiry`] benchmark.
+		/// The fit within `max_block` is asserted by [`ensure_weight_sanity`] — every
+		/// runtime should exercise it from a test.
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
 			let mut weight = Weight::zero();
 
