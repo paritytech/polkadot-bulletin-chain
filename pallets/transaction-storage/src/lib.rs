@@ -418,6 +418,13 @@ pub mod pallet {
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Mandatory per-block hook: ages out the obsolete `Transactions[obsolete]` entry,
+		/// decrements [`PermanentStorageUsed`] for any `kind == Renew` items in it, cleans
+		/// up `TransactionByContentHash`, and queues auto-renewals for `process_auto_renewals`.
+		///
+		/// Weight is charged via the [`WeightInfo::on_initialize_with_expiry`] benchmark.
+		/// The fit within `max_block` is asserted by [`ensure_weight_sanity`] — every
+		/// runtime should exercise it from a test.
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
 			let mut weight = Weight::zero();
 
@@ -1671,6 +1678,18 @@ pub mod pallet {
 		/// Get RetentionPeriod storage information from the outside of this pallet.
 		pub fn retention_period() -> BlockNumberFor<T> {
 			RetentionPeriod::<T>::get()
+		}
+
+		/// Whether `content_hash` is currently stored on-chain — i.e. some
+		/// retained transaction in this pallet indexes it.
+		///
+		/// O(1): one [`TransactionByContentHash`] map read. The map's
+		/// lifecycle matches the question's semantics — `store`/`renew`
+		/// insert (or overwrite to the latest `(block, index)`), and
+		/// `on_initialize` removes the entry when the block it points at
+		/// ages out of [`RetentionPeriod`].
+		pub fn contains_transaction(content_hash: ContentHash) -> bool {
+			TransactionByContentHash::<T>::contains_key(content_hash)
 		}
 
 		/// Returns `true` if a blob of the given size can be stored.
