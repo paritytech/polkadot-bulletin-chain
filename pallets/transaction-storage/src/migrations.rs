@@ -319,6 +319,28 @@ pub mod v2 {
 		pub expiration: BlockNumber,
 	}
 
+	/// `Authorization` layout v1→v2 actually produces — frozen. The
+	/// `From` impl below maps it into the current `Authorization` struct; any
+	/// future field added to `Authorization` becomes a compile error here, forcing
+	/// the author to pick an explicit placeholder rather than silently writing the
+	/// new shape from this old migration.
+	pub(crate) struct V2Authorization<BlockNumber> {
+		pub extent: AuthorizationExtent,
+		pub expiration: BlockNumber,
+	}
+
+	impl<BlockNumber: Copy> From<V2Authorization<BlockNumber>> for Authorization<BlockNumber> {
+		fn from(v2: V2Authorization<BlockNumber>) -> Self {
+			Self {
+				extent: v2.extent,
+				expiration: v2.expiration,
+				// v2 had no grace concept; later migrations (v3→v4) populate this
+				// with `expiration + GracePeriod`. Until then grace is zero-length.
+				grace_until: v2.expiration,
+			}
+		}
+	}
+
 	/// `TransactionInfo` layout at v1 — same shape as v2 minus the trailing `kind`
 	/// field. Used here to decode existing entries during translation.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
@@ -337,23 +359,27 @@ pub mod v2 {
 		fn on_runtime_upgrade() -> Weight {
 			let mut auth_migrated: u64 = 0;
 			let mut auth_dropped: u64 = 0;
+			let now = Pallet::<T>::now();
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					if old.extent.bytes == 0 || Pallet::<T>::expired(old.expiration) {
+					if old.extent.bytes == 0 || now >= old.expiration {
 						auth_dropped = auth_dropped.saturating_add(1);
 						return None;
 					}
 					auth_migrated = auth_migrated.saturating_add(1);
-					Some(Authorization {
-						extent: AuthorizationExtent {
-							bytes: 0,
-							bytes_permanent: 0,
-							bytes_allowance: old.extent.bytes,
-							transactions: 0,
-							transactions_allowance: old.extent.transactions,
-						},
-						expiration: old.expiration,
-					})
+					Some(
+						V2Authorization {
+							extent: AuthorizationExtent {
+								bytes: 0,
+								bytes_permanent: 0,
+								bytes_allowance: old.extent.bytes,
+								transactions: 0,
+								transactions_allowance: old.extent.transactions,
+							},
+							expiration: old.expiration,
+						}
+						.into(),
+					)
 				},
 			);
 			tracing::info!(
@@ -477,15 +503,14 @@ pub mod v3 {
 			mut cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-			use polkadot_sdk_frame::prelude::{frame_system, Saturating};
+			use polkadot_sdk_frame::prelude::Saturating;
 
 			let required = T::WeightInfo::migrate_v2_to_v3_step();
 			if meter.remaining().any_lt(required) {
 				return Err(SteppedMigrationError::InsufficientWeight { required });
 			}
 
-			let oldest_valid = frame_system::Pallet::<T>::block_number()
-				.saturating_sub(RetentionPeriod::<T>::get());
+			let oldest_valid = Pallet::<T>::now().saturating_sub(RetentionPeriod::<T>::get());
 
 			loop {
 				if meter.try_consume(required).is_err() {
@@ -609,4 +634,72 @@ pub mod v3 {
 			Ok(())
 		}
 	}
+}
+
+/// Migration v3→v4: adds `grace_until` to `Authorization`. Existing entries get
+/// `grace_until = expiration + GracePeriod` (saturating). New `Authorization`s minted
+/// by `authorize` / `refresh_authorization` already set the field directly.
+pub mod v4 {
+	use super::*;
+	use crate::{
+		pallet::{Authorizations, Pallet},
+		Authorization, AuthorizationExtent,
+	};
+	use polkadot_sdk_frame::{
+		deps::frame_support::{migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade},
+		prelude::Saturating,
+	};
+
+	#[derive(Encode, Decode)]
+	pub(crate) struct V3Authorization<BlockNumber> {
+		pub extent: AuthorizationExtent,
+		pub expiration: BlockNumber,
+	}
+
+	pub struct VersionUncheckedMigrateV3ToV4<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV3ToV4<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let grace = T::GracePeriod::get();
+			let now = Pallet::<T>::now();
+			let mut migrated: u64 = 0;
+			let mut dropped: u64 = 0;
+			Authorizations::<T>::translate::<V3Authorization<BlockNumberFor<T>>, _>(
+				|scope, old| {
+					let grace_until = old.expiration.saturating_add(grace);
+					// Drop entries that are already past their v4 grace window.
+					// Account scopes had their provider reference bumped at grant
+					// time; release it here so we don't leak references.
+					if now >= grace_until {
+						Pallet::<T>::authorization_removed(&scope);
+						dropped = dropped.saturating_add(1);
+						return None;
+					}
+					migrated = migrated.saturating_add(1);
+					Some(Authorization {
+						extent: old.extent,
+						expiration: old.expiration,
+						grace_until,
+					})
+				},
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				migrated,
+				dropped,
+				"v3->v4 Authorization grace_until migration complete",
+			);
+			let touched = migrated.saturating_add(dropped);
+			T::DbWeight::get().reads_writes(touched, touched)
+		}
+	}
+
+	/// Versioned migration v3→v4: tail-extends `Authorization` with `grace_until`.
+	pub type MigrateV3ToV4<T> = VersionedMigration<
+		3,
+		4,
+		VersionUncheckedMigrateV3ToV4<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
 }
