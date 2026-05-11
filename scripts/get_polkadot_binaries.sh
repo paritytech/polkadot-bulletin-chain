@@ -233,35 +233,31 @@ else
 				export DYLD_FALLBACK_LIBRARY_PATH="$llvm_prefix/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
 			fi
 		fi
-		# Dedup crates so we don't pass the same `-p` twice (`polkadot-node` group
-		# builds polkadot + workers from the same `polkadot` crate).
 		targets="$(build_targets_for_group "$GROUP")"
-		crates_to_build=""
-		while IFS=: read -r crate bin; do
-			case " $crates_to_build " in
-				*" $crate "*) ;;
-				*) crates_to_build="$crates_to_build $crate" ;;
-			esac
-		done <<< "$targets"
-		# Group-specific build flags:
-		#   polkadot-node — needs the embedded westend WASM (don't skip it), and
-		#       `--features fast-runtime` so zombienet's `westend-development`
-		#       preset is available + epochs are short enough for tests.
-		#   everything else — no embedded WASM to ship, so SKIP_WASM_BUILD=1 saves
-		#       a meaningful chunk of build time.
-		case "$GROUP" in
-			polkadot-node)
-				BUILD_ENV=""
-				BUILD_EXTRA_ARGS="--features fast-runtime"
-				;;
-			*)
-				BUILD_ENV="SKIP_WASM_BUILD=1"
-				BUILD_EXTRA_ARGS=""
-				;;
-		esac
-		log "  ${BUILD_ENV:+$BUILD_ENV }cargo build --release --locked${crates_to_build// / -p}${BUILD_EXTRA_ARGS:+ $BUILD_EXTRA_ARGS}"
-		# shellcheck disable=SC2086
-		env $BUILD_ENV cargo build --release --locked $(printf -- '-p %s ' $crates_to_build) $BUILD_EXTRA_ARGS
+		if [ "$GROUP" = "polkadot-node" ]; then
+			# polkadot relay binary embeds the westend/kusama/etc. runtime WASMs and
+			# needs `--features fast-runtime` so zombienet's `westend-development`
+			# preset is available with short epoch durations. `-p polkadot` builds all
+			# three relay bins (polkadot + 2 workers). Separate invocation because
+			# `--features fast-runtime` isn't a feature of polkadot-omni-node.
+			log "  cargo build --release --locked -p polkadot --features fast-runtime"
+			cargo build --release --locked -p polkadot --features fast-runtime
+			# omni-node loads runtime from the chain spec, so no embedded WASM needed.
+			log "  SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node"
+			SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node
+		else
+			# Dedup crates so we don't pass the same `-p` twice.
+			crates_to_build=""
+			while IFS=: read -r crate bin; do
+				case " $crates_to_build " in
+					*" $crate "*) ;;
+					*) crates_to_build="$crates_to_build $crate" ;;
+				esac
+			done <<< "$targets"
+			log "  SKIP_WASM_BUILD=1 cargo build --release --locked${crates_to_build// / -p}"
+			# shellcheck disable=SC2086
+			SKIP_WASM_BUILD=1 cargo build --release --locked $(printf -- '-p %s ' $crates_to_build)
+		fi
 		while IFS=: read -r crate bin; do
 			[ -x "target/release/$bin" ] || die "expected target/release/$bin not produced by cargo"
 			cp "target/release/$bin" "$CACHE_DIR/$bin"
