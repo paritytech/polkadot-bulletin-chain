@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { RefreshCw, AlertCircle, Check, Clock, Database, Search, History, Info } from "lucide-react";
+import { RefreshCw, AlertCircle, Check, Clock, Copy, Database, Search, History, Info } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -21,9 +21,15 @@ import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes, bytesToHex } from "@/utils/format";
-import { CID, WaitFor, UnixFsDagBuilder } from "@parity/bulletin-sdk";
+import { cn } from "@/utils/cn";
+import { CID, WaitFor } from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
-import { isDagPb, resolveAllCids, type CidResolution } from "@/lib/cid-lookup";
+import {
+  isDagPb,
+  resolveCid,
+  type CidResolution,
+  type OnChainTransaction,
+} from "@/lib/cid-lookup";
 import { fetchRawBlock, IPFS_GATEWAYS } from "@/lib/ipfs";
 
 interface RenewalTarget {
@@ -36,8 +42,8 @@ interface RenewalTarget {
 interface BatchRenewResult {
   cidString: string;
   success: boolean;
-  error?: string;
   newExpiresAt?: number;
+  error?: string;
 }
 
 export function Renew() {
@@ -85,12 +91,25 @@ export function Renew() {
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [resolveProgress, setResolveProgress] = useState<string | null>(null);
   const [resolutions, setResolutions] = useState<CidResolution[]>([]);
+  const [totalSize, setTotalSize] = useState<number>(0);
   const [checkedCids, setCheckedCids] = useState<Set<string>>(new Set());
 
   // Batch renewal state
   const [isBatchRenewing, setIsBatchRenewing] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [batchResults, setBatchResults] = useState<BatchRenewResult[]>([]);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [copiedCid, setCopiedCid] = useState<string | null>(null);
+
+  const handleCopyCid = useCallback(async (cid: string) => {
+    try {
+      await navigator.clipboard.writeText(cid);
+      setCopiedCid(cid);
+      setTimeout(() => setCopiedCid((c) => (c === cid ? null : c)), 1500);
+    } catch {
+      // Clipboard API blocked — silently ignore.
+    }
+  }, []);
 
   // Retention period from chain
   const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
@@ -223,8 +242,10 @@ export function Renew() {
     setParsedCid(cid);
     // Clear previous resolution when CID changes
     setResolutions([]);
+    setTotalSize(0);
     setCheckedCids(new Set());
     setResolveError(null);
+    setBatchError(null);
     setBatchResults([]);
   };
 
@@ -236,61 +257,58 @@ export function Renew() {
     setResolveError(null);
     setResolveProgress(null);
     setResolutions([]);
+    setTotalSize(0);
     setCheckedCids(new Set());
+    setBatchError(null);
     setBatchResults([]);
 
+    const gatewayUrl = IPFS_GATEWAYS[currentNetwork.id];
+    if (isDagPb(parsedCid) && !gatewayUrl) {
+      setResolveError(
+        `No IPFS gateway configured for the "${currentNetwork.id}" network. ` +
+        `Use the "By Block + Index" tab to renew manually.`,
+      );
+      setIsResolving(false);
+      return;
+    }
+
+    // Build local hints from the current network's upload history.
+    const localHints = new Map<string, OnChainTransaction>(
+      networkHistory.map((e) => [
+        e.contentHash,
+        { blockNumber: e.blockNumber, index: e.index, size: e.size },
+      ]),
+    );
+
     try {
-      let cidsToResolve: { cid: CID; isManifest: boolean }[];
-
-      if (isDagPb(parsedCid)) {
-        // Fetch and parse DAG-PB manifest
-        const gatewayUrl = IPFS_GATEWAYS[currentNetwork.id];
-        if (!gatewayUrl) {
-          setResolveError(
-            `No IPFS gateway configured for the "${currentNetwork.id}" network. ` +
-            `Use the "By Block + Index" tab to renew manually.`
-          );
-          return;
-        }
-
-        setResolveProgress("Fetching DAG-PB manifest...");
-        const dagBytes = await fetchRawBlock(parsedCid.toString(), gatewayUrl);
-
-        setResolveProgress("Parsing manifest...");
-        const dagBuilder = new UnixFsDagBuilder();
-        const { chunkCids } = await dagBuilder.parse(dagBytes);
-
-        // Root manifest + all child chunks
-        cidsToResolve = [
-          { cid: parsedCid, isManifest: true },
-          ...chunkCids.map((c: CID) => ({ cid: c, isManifest: false })),
-        ];
-      } else {
-        // Single raw CID
-        cidsToResolve = [{ cid: parsedCid, isManifest: false }];
-      }
-
-      setResolveProgress(`Resolving ${cidsToResolve.length} CID(s) on chain...`);
-
-      const resolved = await resolveAllCids(
+      const { resolutions: resolved, totalSize: parsedTotalSize } = await resolveCid(
         api,
-        cidsToResolve,
-        networkHistory,
-        (done, total) => {
-          setResolveProgress(`Resolving CIDs: ${done} / ${total}`);
+        parsedCid,
+        (cidStr) => fetchRawBlock(cidStr, gatewayUrl ?? ""),
+        {
+          localHints,
+          onProgress: (phase) => {
+            setResolveProgress(
+              phase === "fetch-manifest"
+                ? "Fetching DAG-PB manifest..."
+                : "Looking up on-chain transactions...",
+            );
+          },
         },
       );
 
       setResolutions(resolved);
+      setTotalSize(parsedTotalSize);
 
       // Check all found CIDs by default
-      const foundCids = new Set(
-        resolved.filter((r) => r.found).map((r) => r.cidString),
+      setCheckedCids(
+        new Set(resolved.filter((r) => r.location !== null).map((r) => r.cidString)),
       );
-      setCheckedCids(foundCids);
 
-      if (resolved.every((r) => !r.found)) {
-        setResolveError("None of the CIDs were found on chain. The data may have expired or was never stored on this network.");
+      if (resolved.every((r) => r.location === null)) {
+        setResolveError(
+          "None of the CIDs were found on chain. The data may have expired or was never stored on this network.",
+        );
       }
     } catch (err) {
       console.error("CID resolution failed:", err);
@@ -315,46 +333,51 @@ export function Renew() {
   };
 
   const handleSelectAll = () => {
-    setCheckedCids(new Set(resolutions.filter((r) => r.found).map((r) => r.cidString)));
+    setCheckedCids(new Set(resolutions.filter((r) => r.location !== null).map((r) => r.cidString)));
   };
 
   const handleDeselectAll = () => {
     setCheckedCids(new Set());
   };
 
-  // Batch renew selected CIDs
+  // Renew each selected CID with its own signed extrinsic. The chain's
+  // ValidateStorageCalls extension rejects store/renew wrapped in Utility
+  // batches (`pallets/transaction-storage/src/extension.rs:244`), so batching
+  // isn't an option — sequential per-CID renewals are required.
   const handleBatchRenew = useCallback(async () => {
     if (!api || !selectedAccount?.polkadotSigner) return;
 
-    const toRenew = resolutions.filter(
-      (r) => r.found && checkedCids.has(r.cidString) && r.blockNumber !== null && r.index !== null,
+    const targets = resolutions.filter(
+      (r) => r.location !== null && checkedCids.has(r.cidString),
     );
-
-    if (toRenew.length === 0) return;
+    if (targets.length === 0) return;
 
     setIsBatchRenewing(true);
-    setBatchProgress(null);
+    setBatchError(null);
     setBatchResults([]);
+    setBatchProgress(null);
 
     const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
     const results: BatchRenewResult[] = [];
 
-    for (let i = 0; i < toRenew.length; i++) {
-      const resolution = toRenew[i]!;
-      const cidStr = resolution.cidString;
-      const shortCid = cidStr.length > 20 ? `${cidStr.slice(0, 10)}...${cidStr.slice(-6)}` : cidStr;
-      setBatchProgress(`Renewing ${i + 1} of ${toRenew.length}: ${shortCid}`);
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i]!;
+      const cidStr = t.cidString;
+      const shortCid =
+        cidStr.length > 20 ? `${cidStr.slice(0, 10)}...${cidStr.slice(-6)}` : cidStr;
+      setBatchProgress(`Renewing ${i + 1} of ${targets.length}: ${shortCid}`);
 
       try {
+        // Per-tx InBlock (not Finalized): each renew is idempotent and a
+        // reorg-dropped one can simply be retried. Saves ~6s per CID.
         const result = await bulletinClient
-          .renew(resolution.blockNumber!, resolution.index!)
+          .renew(t.location!.blockNumber, t.location!.index)
           .withCallback(handleProgress)
-          .withWaitFor(WaitFor.Finalized)
+          .withWaitFor(WaitFor.InBlock)
           .send();
 
-        const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
+        const renewedAtBlock = result.blockNumber ?? currentBlockNumber ?? 0;
         const newExpiresAt = renewedAtBlock + (retentionPeriod ?? 0);
-
         results.push({ cidString: cidStr, success: true, newExpiresAt });
       } catch (err) {
         console.error(`Failed to renew ${cidStr}:`, err);
@@ -370,7 +393,16 @@ export function Renew() {
     setIsBatchRenewing(false);
     setBatchProgress(null);
     setTxStatus(null);
-  }, [api, selectedAccount, resolutions, checkedCids, currentBlockNumber, retentionPeriod]);
+  }, [
+    api,
+    selectedAccount,
+    resolutions,
+    checkedCids,
+    currentBlockNumber,
+    retentionPeriod,
+    createBulletinClient,
+    handleProgress,
+  ]);
 
   const canRenew =
     api &&
@@ -387,16 +419,16 @@ export function Renew() {
   const isExpiringSoon = blocksUntilExpiration !== null && blocksUntilExpiration > 0 && blocksUntilExpiration < 1000;
 
   // CID tab helpers
-  const checkedCount = resolutions.filter((r) => r.found && checkedCids.has(r.cidString)).length;
-  const foundCount = resolutions.filter((r) => r.found).length;
+  const checkedCount = resolutions.filter((r) => r.location !== null && checkedCids.has(r.cidString)).length;
+  const foundCount = resolutions.filter((r) => r.location !== null).length;
   const canBatchRenew = api && selectedAccount?.polkadotSigner && checkedCount > 0 && !isBatchRenewing;
 
   // Calculate expiration for a resolution
   const getExpirationInfo = (resolution: CidResolution) => {
-    if (!resolution.found || resolution.blockNumber === null || retentionPeriod === null || currentBlockNumber === undefined) {
+    if (resolution.location === null || retentionPeriod === null || currentBlockNumber === undefined) {
       return null;
     }
-    const expiresAt = resolution.blockNumber + retentionPeriod;
+    const expiresAt = resolution.location.blockNumber + retentionPeriod;
     const remaining = expiresAt - currentBlockNumber;
     return { expiresAt, remaining, expired: remaining <= 0, expiringSoon: remaining > 0 && remaining < 1000 };
   };
@@ -571,10 +603,13 @@ export function Renew() {
                   {/* Resolution Results */}
                   {resolutions.length > 0 && (
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="text-sm text-muted-foreground">
                           Found {foundCount} of {resolutions.length} CID(s) on chain
-                        </span>
+                          {totalSize > 0 && (
+                            <> · Total size: {formatBytes(totalSize)}</>
+                          )}
+                        </div>
                         <div className="flex gap-1">
                           <Button variant="ghost" size="sm" onClick={handleSelectAll}>
                             Select All
@@ -591,6 +626,7 @@ export function Renew() {
                           const shortCid = r.cidString.length > 30
                             ? `${r.cidString.slice(0, 14)}...${r.cidString.slice(-8)}`
                             : r.cidString;
+                          const found = r.location !== null;
 
                           return (
                             <div
@@ -600,7 +636,7 @@ export function Renew() {
                               <input
                                 type="checkbox"
                                 checked={checkedCids.has(r.cidString)}
-                                disabled={!r.found}
+                                disabled={!found}
                                 onChange={() => handleToggleCid(r.cidString)}
                                 className="h-4 w-4 rounded border-input accent-primary"
                               />
@@ -609,15 +645,28 @@ export function Renew() {
                                   <span className="font-mono text-xs truncate" title={r.cidString}>
                                     {shortCid}
                                   </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyCid(r.cidString)}
+                                    className="text-muted-foreground hover:text-foreground transition-colors"
+                                    title="Copy CID"
+                                    aria-label="Copy CID"
+                                  >
+                                    {copiedCid === r.cidString ? (
+                                      <Check className="h-3.5 w-3.5 text-green-600" />
+                                    ) : (
+                                      <Copy className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
                                   <Badge variant="secondary" className="text-xs">
                                     {r.isManifest ? "Manifest" : `Chunk ${i}`}
                                   </Badge>
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  {r.found ? (
+                                  {r.location ? (
                                     <>
                                       <span className="text-xs text-muted-foreground">
-                                        Block #{r.blockNumber}, Index #{r.index}
+                                        Block #{r.location.blockNumber}, Index #{r.location.index}
                                       </span>
                                       {expInfo && (
                                         <>
@@ -651,7 +700,7 @@ export function Renew() {
                         {isBatchRenewing ? (
                           <>
                             <Spinner size="sm" className="mr-2" />
-                            {batchProgress || txStatus || "Renewing..."}
+                            {txStatus || "Renewing..."}
                           </>
                         ) : (
                           <>
@@ -669,40 +718,90 @@ export function Renew() {
                     </div>
                   )}
 
-                  {/* Batch Results */}
-                  {batchResults.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium">Renewal Results</h4>
-                      {batchResults.map((r) => {
-                        const shortCid = r.cidString.length > 30
-                          ? `${r.cidString.slice(0, 14)}...${r.cidString.slice(-8)}`
-                          : r.cidString;
-                        return (
-                          <div
-                            key={r.cidString}
-                            className={`flex items-center gap-2 p-2 rounded-md text-sm ${
-                              r.success
-                                ? "bg-green-500/10 text-green-700 dark:text-green-400"
-                                : "bg-destructive/10 text-destructive"
-                            }`}
-                          >
-                            {r.success ? (
-                              <Check className="h-4 w-4 shrink-0" />
-                            ) : (
-                              <AlertCircle className="h-4 w-4 shrink-0" />
-                            )}
-                            <span className="font-mono text-xs truncate">{shortCid}</span>
-                            {r.success && r.newExpiresAt && (
-                              <span className="text-xs ml-auto whitespace-nowrap">
-                                Expires at #{r.newExpiresAt.toLocaleString()}
-                              </span>
-                            )}
-                            {!r.success && r.error && (
-                              <span className="text-xs ml-auto truncate">{r.error}</span>
-                            )}
+                  {/* Per-CID progress while renewing */}
+                  {isBatchRenewing && batchProgress && (
+                    <div className="flex items-start gap-3 p-3 rounded-md bg-secondary/50 text-sm">
+                      <Spinner size="sm" className="mt-0.5 shrink-0" />
+                      <div className="space-y-0.5 min-w-0">
+                        <p className="font-medium">{batchProgress}</p>
+                        {txStatus && (
+                          <p className="text-xs text-muted-foreground">{txStatus}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Per-CID renewal results */}
+                  {batchResults.length > 0 && (() => {
+                    const succeeded = batchResults.filter((r) => r.success).length;
+                    const failed = batchResults.length - succeeded;
+                    return (
+                      <div className="space-y-2">
+                        <div
+                          className={cn(
+                            "flex items-start gap-3 p-3 rounded-md",
+                            failed === 0
+                              ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                              : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
+                          )}
+                        >
+                          {failed === 0 ? (
+                            <Check className="h-5 w-5 mt-0.5 shrink-0" />
+                          ) : (
+                            <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" />
+                          )}
+                          <div className="text-sm">
+                            <p className="font-medium">
+                              Renewed {succeeded} of {batchResults.length} CID(s)
+                              {failed > 0 && ` — ${failed} failed`}
+                            </p>
                           </div>
-                        );
-                      })}
+                        </div>
+                        {failed > 0 && (
+                          <div className="space-y-1">
+                            {batchResults
+                              .filter((r) => !r.success)
+                              .map((r) => {
+                                const shortCid =
+                                  r.cidString.length > 20
+                                    ? `${r.cidString.slice(0, 10)}...${r.cidString.slice(-6)}`
+                                    : r.cidString;
+                                return (
+                                  <div
+                                    key={r.cidString}
+                                    className="text-xs text-destructive flex items-center gap-1.5"
+                                  >
+                                    <span className="font-mono">{shortCid}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyCid(r.cidString)}
+                                      className="text-destructive/70 hover:text-destructive transition-colors"
+                                      title="Copy CID"
+                                      aria-label="Copy CID"
+                                    >
+                                      {copiedCid === r.cidString ? (
+                                        <Check className="h-3 w-3" />
+                                      ) : (
+                                        <Copy className="h-3 w-3" />
+                                      )}
+                                    </button>
+                                    <span>: {r.error}</span>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {batchError && (
+                    <div className="flex items-start gap-3 p-3 rounded-md bg-destructive/10 text-destructive">
+                      <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" />
+                      <div className="text-sm">
+                        <p className="font-medium">Batch renewal failed</p>
+                        <p className="mt-1">{batchError}</p>
+                      </div>
                     </div>
                   )}
                 </TabsContent>

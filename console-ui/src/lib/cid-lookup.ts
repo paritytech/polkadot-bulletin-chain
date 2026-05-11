@@ -1,157 +1,183 @@
 import type { CID } from "@parity/bulletin-sdk";
-import { CidCodec } from "@parity/bulletin-sdk";
-import type { StorageEntry } from "@/state/history.state";
-import { bytesToHex } from "@/utils/format";
+import { CidCodec, UnixFsDagBuilder } from "@parity/bulletin-sdk";
+import { Binary, type HexString } from "polkadot-api";
 
-/**
- * Result of resolving a CID to its on-chain location.
- */
+/** Chain truth for a single stored transaction. */
+export interface OnChainTransaction {
+  blockNumber: number;
+  index: number;
+  size: number;
+}
+
+/** A CID resolved (or attempted) against the chain. */
 export interface CidResolution {
   cid: CID;
   cidString: string;
-  contentHash: Uint8Array;
-  blockNumber: number | null;
-  index: number | null;
-  found: boolean;
+  /** Multihash digest as 0x-prefixed hex; matches on-chain `content_hash`. */
+  contentHashHex: string;
+  /** True if this CID is the DAG-PB root manifest, false for chunks or raw CIDs. */
   isManifest: boolean;
+  /** null if no on-chain transaction matches this CID's content hash. */
+  location: OnChainTransaction | null;
 }
 
-/**
- * Extract the 32-byte content hash (multihash digest) from a CID.
- * This matches the on-chain ContentHash = [u8; 32].
- */
-export function contentHashFromCid(cid: CID): Uint8Array {
-  return cid.multihash.digest;
-}
-
-/**
- * Check if a CID uses DAG-PB codec (0x70).
- */
 export function isDagPb(cid: CID): boolean {
   return cid.code === CidCodec.DagPb;
 }
 
-/**
- * Look up a content hash in local browser history.
- */
-function lookupInHistory(
-  contentHashHex: string,
-  history: StorageEntry[],
-): { blockNumber: number; index: number } | null {
-  const entry = history.find((e) => e.contentHash === contentHashHex);
-  if (entry) {
-    return { blockNumber: entry.blockNumber, index: entry.index };
-  }
-  return null;
+/** 32-byte multihash digest as 0x-hex — the on-chain `content_hash` shape. */
+export function contentHashHex(cid: CID): string {
+  return Binary.toHex(cid.multihash.digest);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-interface TransactionEntry {
-  keyArgs: [number];
-  value: Array<{
-    content_hash: { asBytes(): Uint8Array };
-    size: number;
-  }>;
+type Api = any;
+
+interface TxInfo {
+  content_hash: HexString;
+  size: number;
+}
+
+async function locateContentHashes(
+  api: Api,
+  hashes: HexString[],
+): Promise<Map<HexString, OnChainTransaction | null>> {
+  const out = new Map<HexString, OnChainTransaction | null>();
+  if (hashes.length === 0) return out;
+  for (const h of hashes) out.set(h, null);
+
+  const indexHits = (await Promise.all(
+    hashes.map((h) =>
+      api.query.TransactionStorage.TransactionByContentHash.getValue(h),
+    ),
+  )) as Array<[number | bigint, number] | undefined>;
+
+  const uniqueBlocks = new Set<number>();
+  const found: Array<{ hash: HexString; block: number; index: number }> = [];
+  for (let i = 0; i < hashes.length; i++) {
+    const hit = indexHits[i];
+    if (!hit) continue;
+    const block = Number(hit[0]);
+    const index = hit[1];
+    found.push({ hash: hashes[i]!, block, index });
+    uniqueBlocks.add(block);
+  }
+  if (found.length === 0) return out;
+
+  const blocks = Array.from(uniqueBlocks);
+  const blockInfos = (await Promise.all(
+    blocks.map((b) => api.query.TransactionStorage.Transactions.getValue(b)),
+  )) as Array<TxInfo[] | undefined>;
+  const blockMap = new Map<number, TxInfo[]>();
+  blocks.forEach((b, i) => blockMap.set(b, blockInfos[i] ?? []));
+
+  for (const f of found) {
+    const info = blockMap.get(f.block)?.[f.index];
+    if (!info) continue;
+    out.set(f.hash, { blockNumber: f.block, index: f.index, size: info.size });
+  }
+  return out;
 }
 
 /**
- * Resolve multiple CIDs to their on-chain block/index locations.
- *
- * Optimized to call Transactions.getEntries() only once and scan the result
- * for all CIDs. Checks local history first for each CID before falling back
- * to the chain scan.
+ * Look up a single CID on chain. Returns null if not found.
  */
-export async function resolveAllCids(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  api: any,
-  cids: { cid: CID; isManifest: boolean }[],
-  networkHistory: StorageEntry[],
-  onProgress?: (resolved: number, total: number) => void,
-): Promise<CidResolution[]> {
-  const total = cids.length;
-  const results: CidResolution[] = [];
-
-  // Build content hash map for all CIDs
-  const cidInfos = cids.map(({ cid, isManifest }) => {
-    const contentHash = contentHashFromCid(cid);
-    const contentHashHex = bytesToHex(contentHash);
-    return { cid, isManifest, contentHash, contentHashHex, cidString: cid.toString() };
-  });
-
-  // Try history first for each CID
-  const needsChainLookup: typeof cidInfos = [];
-  for (const info of cidInfos) {
-    const historyResult = lookupInHistory(info.contentHashHex, networkHistory);
-    if (historyResult) {
-      results.push({
-        cid: info.cid,
-        cidString: info.cidString,
-        contentHash: info.contentHash,
-        blockNumber: historyResult.blockNumber,
-        index: historyResult.index,
-        found: true,
-        isManifest: info.isManifest,
-      });
-    } else {
-      needsChainLookup.push(info);
-    }
-  }
-
-  onProgress?.(results.length, total);
-
-  // If all resolved from history, return early
-  if (needsChainLookup.length === 0) {
-    return results;
-  }
-
-  // Fetch all transaction entries from chain (single RPC call)
-  const entries: TransactionEntry[] =
-    await api.query.TransactionStorage.Transactions.getEntries();
-
-  // Build a lookup map: contentHashHex -> { blockNumber, index }
-  const chainMap = new Map<string, { blockNumber: number; index: number }>();
-  for (const { keyArgs, value } of entries) {
-    const blockNumber = Number(keyArgs[0]);
-    if (!Array.isArray(value)) continue;
-    for (let idx = 0; idx < value.length; idx++) {
-      const info = value[idx];
-      if (!info) continue;
-      const hash = bytesToHex(info.content_hash.asBytes());
-      // Only store first occurrence (earliest block)
-      if (!chainMap.has(hash)) {
-        chainMap.set(hash, { blockNumber, index: idx });
-      }
-    }
-  }
-
-  // Resolve remaining CIDs from chain data
-  for (const info of needsChainLookup) {
-    const chainResult = chainMap.get(info.contentHashHex);
-    results.push({
-      cid: info.cid,
-      cidString: info.cidString,
-      contentHash: info.contentHash,
-      blockNumber: chainResult?.blockNumber ?? null,
-      index: chainResult?.index ?? null,
-      found: !!chainResult,
-      isManifest: info.isManifest,
-    });
-    onProgress?.(results.length, total);
-  }
-
-  // Sort results: manifest first, then chunks in order
-  results.sort((a, b) => {
-    if (a.isManifest && !b.isManifest) return 0;
-    if (!a.isManifest && b.isManifest) return 0;
-    return 0;
-  });
-
-  // Preserve original order (manifest first, then chunks)
-  const ordered: CidResolution[] = [];
-  for (const { cid } of cids) {
-    const match = results.find((r) => r.cidString === cid.toString());
-    if (match) ordered.push(match);
-  }
-
-  return ordered;
+export async function lookupCidOnChain(
+  api: Api,
+  cid: CID,
+): Promise<OnChainTransaction | null> {
+  const hash = contentHashHex(cid) as HexString;
+  const map = await locateContentHashes(api, [hash]);
+  return map.get(hash) ?? null;
 }
+
+export interface ResolveCidOptions {
+  /**
+   * Pre-known `content_hash` → location pairs (e.g. browser upload history).
+   * CIDs covered by hints skip the on-chain lookup entirely; if hints cover
+   * all CIDs we never call the chain.
+   */
+  localHints?: Map<string, OnChainTransaction>;
+  onProgress?: (phase: "fetch-manifest" | "lookup-chain") => void;
+}
+
+export interface ResolveCidResult {
+  /** Manifest first (if DAG-PB), then chunks in declared order. */
+  resolutions: CidResolution[];
+  /** UnixFs total file size for DAG-PB; otherwise the single resolution's size (or 0). */
+  totalSize: number;
+}
+
+/**
+ * Resolve a root CID to all on-chain transactions backing it.
+ *
+ * - Raw CID: returns one resolution.
+ * - DAG-PB CID: fetches the manifest via `fetchRawBlock`, parses it with
+ *   `UnixFsDagBuilder`, returns `[manifest, ...chunks]`.
+ *
+ * `fetchRawBlock` is injected so this module stays transport-agnostic
+ * (browser gateway today, bitswap or test mock later).
+ */
+export async function resolveCid(
+  api: Api,
+  rootCid: CID,
+  fetchRawBlock: (cidStr: string) => Promise<Uint8Array>,
+  opts: ResolveCidOptions = {},
+): Promise<ResolveCidResult> {
+  const { localHints, onProgress } = opts;
+
+  let targets: { cid: CID; isManifest: boolean }[];
+  let manifestTotalSize: number | null = null;
+
+  if (isDagPb(rootCid)) {
+    onProgress?.("fetch-manifest");
+    const manifestBytes = await fetchRawBlock(rootCid.toString());
+    const { chunkCids, totalSize } = await new UnixFsDagBuilder().parse(manifestBytes);
+    manifestTotalSize = totalSize;
+    targets = [
+      { cid: rootCid, isManifest: true },
+      ...chunkCids.map((c: CID) => ({ cid: c, isManifest: false })),
+    ];
+  } else {
+    targets = [{ cid: rootCid, isManifest: false }];
+  }
+
+  const enriched = targets.map(({ cid, isManifest }) => ({
+    cid,
+    cidString: cid.toString(),
+    contentHashHex: contentHashHex(cid),
+    isManifest,
+  }));
+
+  const locations = new Map<string, OnChainTransaction | null>();
+  const misses: HexString[] = [];
+  for (const e of enriched) {
+    const hint = localHints?.get(e.contentHashHex);
+    if (hint) {
+      locations.set(e.contentHashHex, hint);
+    } else {
+      misses.push(e.contentHashHex as HexString);
+    }
+  }
+
+  if (misses.length > 0) {
+    onProgress?.("lookup-chain");
+    const located = await locateContentHashes(api, misses);
+    for (const hash of misses) {
+      locations.set(hash, located.get(hash) ?? null);
+    }
+  }
+
+  const resolutions: CidResolution[] = enriched.map((e) => ({
+    cid: e.cid,
+    cidString: e.cidString,
+    contentHashHex: e.contentHashHex,
+    isManifest: e.isManifest,
+    location: locations.get(e.contentHashHex) ?? null,
+  }));
+
+  const totalSize = manifestTotalSize ?? resolutions[0]?.location?.size ?? 0;
+
+  return { resolutions, totalSize };
+}
+
