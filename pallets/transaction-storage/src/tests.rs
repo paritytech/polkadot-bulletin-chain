@@ -1885,11 +1885,11 @@ fn remove_authorizer_rejects_non_manager_origin() {
 }
 
 #[test]
-fn add_authorizer_is_idempotent() {
+fn add_authorizer_overwrites_existing_entry() {
 	new_test_ext().execute_with(|| {
 		let who = 42u64;
 		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, 100, 1024, None));
-		// Second call overwrites with same value, still Ok.
+		// Second call with a different budget replaces the first.
 		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, 200, 2048, None));
 		assert!(AllowedAuthorizers::<Test>::contains_key(who));
 		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
