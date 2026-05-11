@@ -282,8 +282,11 @@ pub struct AuthorizerBudget<BlockNumber> {
 	pub authorization_period: Option<BlockNumber>,
 }
 
-pub type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
+pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 
+/// `EnsureOrigin` adapter that accepts a `Signed(account)` origin iff the signing
+/// account is registered in [`AllowedAuthorizers`]. Used to plug the runtime-mutable
+/// authorizer list into the pallet's `Authorizer` chain.
 pub struct EnsureAllowedAuthorizers<T>(core::marker::PhantomData<T>);
 
 impl<T: Config> EnsureOrigin<T::RuntimeOrigin> for EnsureAllowedAuthorizers<T>
