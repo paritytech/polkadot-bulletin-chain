@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Benchmarks for `pallet-hop-promotion`.
+//! Benchmarks for `pallet-bulletin-hop-promotion`.
 
 use super::{signing_payload, Call, Config, Pallet};
 use alloc::vec;

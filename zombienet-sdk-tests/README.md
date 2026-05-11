@@ -1,6 +1,6 @@
 # Zombienet SDK Tests
 
-Integration tests for Polkadot Bulletin Chain sync modes and transaction storage, using [zombienet-sdk](https://github.com/nicokosi/zombienet-sdk) to spawn local networks.
+Integration tests for Polkadot Bulletin Chain sync modes and transaction storage, using [zombienet-sdk](https://github.com/paritytech/zombienet-sdk) to spawn local networks.
 
 ## Prerequisites
 
@@ -109,7 +109,7 @@ These allow running parachain tests against a different relay chain or deploymen
 | Variable | Description | Default |
 |---|---|---|
 | `RELAY_CHAIN` | Relay chain spec name | `westend-local` |
-| `PARACHAIN_ID` | Parachain ID | `2487` |
+| `PARACHAIN_ID` | Parachain ID | `1010` |
 | `PARACHAIN_CHAIN_ID` | Chain ID for DB path resolution | `bulletin-westend` |
 
 Example with a custom relay chain:

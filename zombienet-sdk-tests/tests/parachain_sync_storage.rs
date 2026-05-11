@@ -87,7 +87,7 @@
 //! - `PARACHAIN_CHAIN_SPEC_PATH`: Path to the parachain chain spec (default:
 //!   "./zombienet/bulletin-westend-spec.json")
 //! - `RELAY_CHAIN`: Relay chain spec name (default: "westend-local")
-//! - `PARACHAIN_ID`: Parachain ID (default: 2487)
+//! - `PARACHAIN_ID`: Parachain ID (default: 1010)
 //! - `PARACHAIN_CHAIN_ID`: Chain ID for parachain DB path (default: "bulletin-westend")
 //!
 //! ## Running Tests
@@ -399,17 +399,22 @@ async fn parachain_warp_sync_test() -> Result<()> {
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
-	// Add a sync node with warp sync
-	log::info!("Adding sync-node with --sync=warp");
+	// Add a sync node with warp sync. We point its cumulus relay-chain interface at
+	// alice's already-synced RPC instead of running an embedded relay client. Otherwise
+	// cumulus's wait_for_finalized_para_head (cumulus/client/service/src/lib.rs) races
+	// the embedded relay's cold start and locks in target = parachain genesis, which
+	// neuters warp sync.
+	log::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
 	let para_binary = get_parachain_binary_path();
+	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
 		args: vec![
 			"--sync=warp".into(),
 			"--ipfs-server".into(),
+			"--relay-chain-rpc-url".into(),
+			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
-			"--".into(),
-			"--network-backend=libp2p".into(),
 		],
 		is_validator: false,
 		..Default::default()
@@ -421,15 +426,6 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Wait for the node to be up first
 	wait_for_fullnode(sync_node).await?;
 
-	// Wait for the sync node's embedded relay chain to sync.
-	// This is critical for warp sync because the parachain warp sync target is determined
-	// by querying the embedded relay chain for the finalized parachain head.
-	// If the relay chain hasn't synced yet, it returns genesis (#0) as the target,
-	// which causes warp sync to get stuck.
-	log::info!("Waiting for sync-node's embedded relay chain to sync...");
-	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
-		.await
-		.context("Sync node's embedded relay chain did not sync")?;
 	log::info!("Verifying sync-node's progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
 		.await
@@ -509,17 +505,21 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
-	// Add sync node with warp sync
-	log::info!("Adding sync-node with --sync=warp");
+	// Add sync node with warp sync. We point its cumulus relay-chain interface at
+	// alice's already-synced RPC instead of running an embedded relay client. Otherwise
+	// cumulus's wait_for_finalized_para_head races the embedded relay's cold start and
+	// locks in target = parachain genesis, which neuters warp sync.
+	log::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
 	let para_binary = get_parachain_binary_path();
+	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
 		args: vec![
 			"--sync=warp".into(),
 			"--ipfs-server".into(),
+			"--relay-chain-rpc-url".into(),
+			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
-			"--".into(),
-			"--network-backend=libp2p".into(),
 		],
 		is_validator: false,
 		..Default::default()
@@ -530,12 +530,6 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 
 	// Wait for the node to be up first
 	wait_for_fullnode(sync_node).await?;
-
-	// Wait for the sync node's embedded relay chain to sync.
-	log::info!("Waiting for sync-node's embedded relay chain to sync...");
-	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
-		.await
-		.context("Sync node's embedded relay chain did not sync")?;
 
 	// Wait for warp sync to complete
 	log::info!("Verifying sync-node's progress (target: block {})", target_block);
@@ -997,6 +991,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	let para_args = vec![
 		"--ipfs-server".into(),
+		"--database=rocksdb".into(),
 		format!("--blocks-pruning={}", LDB_TEST_RETENTION_PERIOD),
 		"-ltransaction-storage=trace".into(),
 		"--".into(),

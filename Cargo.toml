@@ -21,6 +21,7 @@ cumulus-primitives-utility = { version = "0.27.0", default-features = false }
 futures = { version = "0.3.21" }
 hex = { version = "0.4" }
 jsonrpsee = { version = "0.24.3" }
+litep2p = { version = "0.13" }
 parachain-info = { version = "0.27.0", package = "staging-parachain-info", default-features = false }
 polkadot-parachain-primitives = { version = "22.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
@@ -38,8 +39,8 @@ bulletin-paseo-runtime = { path = "runtimes/bulletin-paseo" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
+pallet-bulletin-hop-promotion = { version = "0.1.0", path = "pallets/hop-promotion", default-features = false }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
-pallet-hop-promotion = { path = "pallets/hop-promotion", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "47.0.0", default-features = false }

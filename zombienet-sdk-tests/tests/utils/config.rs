@@ -41,7 +41,7 @@ pub const RELAY_CHAIN_ENV: &str = "RELAY_CHAIN";
 pub const DEFAULT_RELAY_CHAIN: &str = "westend-local";
 
 pub const PARA_ID_ENV: &str = "PARACHAIN_ID";
-pub const DEFAULT_PARA_ID: u32 = 2487;
+pub const DEFAULT_PARA_ID: u32 = 1010;
 
 pub const PARACHAIN_CHAIN_ID_ENV: &str = "PARACHAIN_CHAIN_ID";
 pub const DEFAULT_PARACHAIN_CHAIN_ID: &str = "bulletin-westend";
