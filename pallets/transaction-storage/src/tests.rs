@@ -3670,6 +3670,7 @@ fn remove_exhausted_authorizer_fails_for_missing_authorizer() {
 fn add_authorizer_with_period_override() {
 	new_test_ext().execute_with(|| {
 		let who = 42u64;
+		// Mock's `AuthorizationPeriod = 10`; 5 is strictly below that.
 		assert_ok!(TransactionStorage::add_authorizer(
 			RuntimeOrigin::root(),
 			who,
@@ -3679,6 +3680,33 @@ fn add_authorizer_with_period_override() {
 		));
 		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
 		assert_eq!(budget.authorization_period, Some(5));
+	});
+}
+
+#[test]
+fn add_authorizer_rejects_zero_period_override() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, 100, 1024, Some(0)),
+			Error::InvalidAuthorizationPeriodOverride,
+		);
+		assert!(!AllowedAuthorizers::<Test>::contains_key(42u64));
+	});
+}
+
+#[test]
+fn add_authorizer_rejects_period_override_at_or_above_default() {
+	new_test_ext().execute_with(|| {
+		// Mock's `AuthorizationPeriod = 10`. Both `== 10` and `> 10` must be rejected.
+		assert_noop!(
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, 100, 1024, Some(10)),
+			Error::InvalidAuthorizationPeriodOverride,
+		);
+		assert_noop!(
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, 100, 1024, Some(11)),
+			Error::InvalidAuthorizationPeriodOverride,
+		);
+		assert!(!AllowedAuthorizers::<Test>::contains_key(42u64));
 	});
 }
 

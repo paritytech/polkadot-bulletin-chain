@@ -439,6 +439,10 @@ pub mod pallet {
 		AutoRenewalNotEnabled,
 		/// Caller is not the owner of the auto-renewal registration.
 		NotAutoRenewalOwner,
+		/// Authorizer's `authorization_period` override is zero or `>= T::AuthorizationPeriod`.
+		/// The override is intended to shorten an authorizer's window; to grant the default
+		/// length, pass `None` instead.
+		InvalidAuthorizationPeriodOverride,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
@@ -940,6 +944,15 @@ pub mod pallet {
 			authorization_period: Option<BlockNumberFor<T>>,
 		) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
+			if let Some(period) = authorization_period {
+				// The override is intended to *shorten* the default window. Reject zero
+				// (would expire immediately) and any value at or above the default (no-op
+				// or longer — pass `None` instead).
+				ensure!(
+					!period.is_zero() && period < T::AuthorizationPeriod::get(),
+					Error::<T>::InvalidAuthorizationPeriodOverride,
+				);
+			}
 			AllowedAuthorizers::<T>::insert(
 				&who,
 				AuthorizerBudget { transactions_budget, bytes_budget, authorization_period },
