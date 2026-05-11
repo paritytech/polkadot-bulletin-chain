@@ -1862,19 +1862,19 @@ fn enable_auto_renew_rejects_invalid() {
 			Error::RenewedNotFound,
 		);
 
-		// Enabling without account authorization fails
+		// Enabling without account authorization fails. Auth validation lives in
+		// the extension's `check_signed` for this call, not in dispatch — so we
+		// exercise it via `validate_signed` rather than calling dispatch directly.
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
 		let unauthorized_user = 99;
-		assert_noop!(
-			TransactionStorage::enable_auto_renew(
-				RuntimeOrigin::signed(unauthorized_user),
-				content_hash
-			),
-			Error::AuthorizationNotFound,
+		let call = Call::enable_auto_renew { content_hash };
+		assert_eq!(
+			TransactionStorage::validate_signed(&unauthorized_user, &call).map(|_| ()),
+			Err(crate::AUTHORIZATION_NOT_FOUND.into()),
 		);
 	});
 }
@@ -2027,10 +2027,11 @@ fn auto_renewal_consumes_authorization() {
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Authorize with enough for the enable + one renewal cycle. `store` is unsigned
-		// here so it does not consume; `enable_auto_renew` consumes one tx unit (no
-		// bytes); `do_process_auto_renewals` consumes one tx + size bytes_permanent per
-		// cycle.
+		// Authorize with enough for one renewal cycle. `store` is unsigned here so it
+		// does not consume; `enable_auto_renew` consumes one tx unit *in the extension*
+		// — this test calls dispatch directly, so no consumption is observed at this
+		// point. `do_process_auto_renewals` consumes one tx + size bytes_permanent per
+		// cycle further down.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
@@ -2038,7 +2039,7 @@ fn auto_renewal_consumes_authorization() {
 			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
 		);
 
-		// `enable_auto_renew` consumes one tx unit in lieu of a token fee.
+		// Direct dispatch bypasses the extension, so registration is not charged here.
 		let initial_extent = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(
 			initial_extent,
@@ -2046,7 +2047,7 @@ fn auto_renewal_consumes_authorization() {
 				bytes: 0,
 				bytes_permanent: 0,
 				bytes_allowance: 6000,
-				transactions: 1,
+				transactions: 0,
 				transactions_allowance: 3,
 			},
 		);
