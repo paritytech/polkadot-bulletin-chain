@@ -662,6 +662,24 @@ pub mod pallet {
 			Self::do_store(data, HashingAlgorithm::Blake2b256, RAW_CODEC)
 		}
 
+		/// Index and store data off chain with an explicit CID configuration.
+		///
+		/// Behaves identically to [`store`](Self::store), but the CID configuration
+		/// (codec and hashing algorithm) is passed directly as a parameter.
+		///
+		/// Emits [`Stored`](Event::Stored) when successful.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
+		pub fn store_with_cid_config(
+			origin: OriginFor<T>,
+			cid: CidConfig,
+			data: Vec<u8>,
+		) -> DispatchResult {
+			let _caller = Self::ensure_authorized(origin)?;
+			Self::do_store(data, cid.hashing, cid.codec)
+		}
+
 		/// Renew previously stored data. Parameters are the block number that contains previous
 		/// `store` or `renew` call and transaction index within that block. Transaction index is
 		/// emitted in the `Stored` or `Renewed` event.
@@ -873,24 +891,6 @@ pub mod pallet {
 			Self::refresh_authorization(AuthorizationScope::Preimage(content_hash))?;
 			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
-		}
-
-		/// Index and store data off chain with an explicit CID configuration.
-		///
-		/// Behaves identically to [`store`](Self::store), but the CID configuration
-		/// (codec and hashing algorithm) is passed directly as a parameter.
-		///
-		/// Emits [`Stored`](Event::Stored) when successful.
-		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
-		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
-		pub fn store_with_cid_config(
-			origin: OriginFor<T>,
-			cid: CidConfig,
-			data: Vec<u8>,
-		) -> DispatchResult {
-			let _caller = Self::ensure_authorized(origin)?;
-			Self::do_store(data, cid.hashing, cid.codec)
 		}
 
 		/// Renew previously stored data by content hash. The content hash is the BLAKE2b hash
