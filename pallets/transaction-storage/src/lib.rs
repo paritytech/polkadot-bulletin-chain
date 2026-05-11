@@ -877,7 +877,8 @@ pub mod pallet {
 				.ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(
 				!Self::expired(auth.expiration) &&
-					auth.extent.has_permanent_capacity(tx_info.size as u64),
+					(AccountRenewals::<T>::contains_key(&who, content_hash) ||
+						auth.extent.has_permanent_capacity(tx_info.size as u64)),
 				Error::<T>::AuthorizationNotFound,
 			);
 
@@ -1046,6 +1047,25 @@ pub mod pallet {
 	/// Was the proof checked in this block?
 	#[pallet::storage]
 	pub(super) type ProofChecked<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+	/// Tracks which (account, content_hash) pairs have already been charged
+	/// `bytes_permanent` in the current authorization window.
+	///
+	/// Inserted on the first successful renew of a given content hash by a given
+	/// account. Checked to detect re-renewals: if the entry exists, the renew is
+	/// a re-renewal and the per-account `bytes_permanent` check/increment is
+	/// skipped. Cleared via `clear_prefix` when the authorization window resets
+	/// (expired-but-present re-authorize path, or `remove_expired_authorization`).
+	#[pallet::storage]
+	pub(super) type AccountRenewals<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		T::AccountId,
+		Blake2_128Concat,
+		ContentHash,
+		(),
+		OptionQuery,
+	>;
 
 	/// Chain-wide total of currently-on-chain renewed bytes. Source of truth for the
 	/// chain-wide hard cap: a `renew` of `size` bytes is rejected when
@@ -1241,19 +1261,14 @@ pub mod pallet {
 
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 				let scope = AuthorizationScope::Account(renewal_data.account.clone());
-				let new_index = if Self::check_authorization(
-					&scope,
-					tx_info.size,
-					true,
-					true,
-					tx_info.kind == TransactionKind::Renew,
-				)
-				.is_ok()
-				{
-					Self::push_renewal_in_memory(&mut transactions, &tx_info, extrinsic_index)
-				} else {
-					None
-				};
+				let new_index =
+					if Self::check_authorization(&scope, tx_info.size, true, true, content_hash)
+						.is_ok()
+					{
+						Self::push_renewal_in_memory(&mut transactions, &tx_info, extrinsic_index)
+					} else {
+						None
+					};
 
 				if let Some(new_index) = new_index {
 					Self::deposit_event(Event::DataAutoRenewed {
@@ -1533,6 +1548,11 @@ pub mod pallet {
 						authorization.extent.transactions = 0;
 						authorization.extent.bytes_allowance = bytes_allowance;
 						authorization.extent.transactions_allowance = transactions_allowance;
+						// Clear per-(account, content_hash) renewal tracking for the old
+						// window so the new window starts fresh.
+						if let AuthorizationScope::Account(who) = &scope {
+							let _ = AccountRenewals::<T>::clear_prefix(who, u32::MAX, None);
+						}
 					} else {
 						match scope {
 							// Account grants are additive within an unexpired window:
@@ -1599,6 +1619,10 @@ pub mod pallet {
 				Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
 			ensure!(Self::expired(authorization.expiration), Error::<T>::AuthorizationNotExpired);
 			Authorizations::<T>::remove(&scope);
+			// Clear per-(account, content_hash) renewal tracking.
+			if let AuthorizationScope::Account(ref who) = scope {
+				let _ = AccountRenewals::<T>::clear_prefix(who, u32::MAX, None);
+			}
 			Self::authorization_removed(&scope);
 			Ok(())
 		}
@@ -1756,16 +1780,15 @@ pub mod pallet {
 		/// For `renew` (`is_renew == true`): hard cap. Rejects with
 		/// [`PERMANENT_ALLOWANCE_EXCEEDED`] if `bytes_permanent + size > bytes_allowance`,
 		/// or with [`CHAIN_PERMANENT_CAP_REACHED`] if the chain-wide check fails.
-		/// **Re-renewals** (`is_re_renewal == true`, i.e. the existing entry already has
-		/// `kind == Renew`) skip the per-account `bytes_permanent` check and increment —
-		/// the content was already counted in a prior renewal. This is essential for
-		/// content kept alive permanently: each `RetentionPeriod` the user re-renews the
-		/// same content, and without this skip every cycle would double-count against the
-		/// per-account quota.
+		/// **Re-renewals** (same account + same content_hash already tracked in
+		/// [`AccountRenewals`]) skip the per-account `bytes_permanent` check and
+		/// increment — the content was already counted in a prior renewal within this
+		/// authorization window. Different accounts renewing the same content are each
+		/// charged independently.
 		///
 		/// If `consume` is `true` and the checks pass: for renewals (not re-renewals),
-		/// bumps `bytes_permanent`; for stores, bumps `bytes`.
-		/// `transactions` is always bumped by 1. For renew, the chain-wide
+		/// bumps `bytes_permanent` and inserts into [`AccountRenewals`]; for stores,
+		/// bumps `bytes`. `transactions` is always bumped by 1. For renew, the chain-wide
 		/// `PermanentStorageUsed` counter is also bumped; the matching decrement happens in
 		/// `on_initialize` when the obsolete `Transactions` entry is removed.
 		fn check_authorization(
@@ -1773,11 +1796,19 @@ pub mod pallet {
 			size: u32,
 			consume: bool,
 			is_renew: bool,
-			is_re_renewal: bool,
+			content_hash: ContentHash,
 		) -> Result<(), TransactionValidityError> {
 			let chain_used = PermanentStorageUsed::<T>::get();
 			let chain_cap = T::MaxPermanentStorageSize::get();
 			let size_u64: u64 = size.into();
+
+			// Per-(account, content_hash) re-renewal detection. Preimage scopes are
+			// never re-renewals (no account to track).
+			let is_re_renewal = match scope {
+				AuthorizationScope::Account(who) =>
+					is_renew && AccountRenewals::<T>::contains_key(who, content_hash),
+				AuthorizationScope::Preimage(_) => false,
+			};
 
 			let check = |maybe_authorization: &mut Option<Authorization<_>>|
 			 -> Result<(), TransactionValidityError> {
@@ -1825,11 +1856,15 @@ pub mod pallet {
 				check(&mut authorization)
 			};
 
-			// On a successful renew consume: bump the chain-wide counter. The matching
-			// decrement happens in `on_initialize` when the renewed entry's block becomes
-			// obsolete and `Transactions[obsolete]` is removed.
+			// On a successful renew consume: bump the chain-wide counter and record
+			// the (account, content_hash) pair for future re-renewal detection.
 			if result.is_ok() && consume && is_renew {
 				Self::update_permanent_storage_used(|used| used.saturating_add(size_u64));
+				if !is_re_renewal {
+					if let AuthorizationScope::Account(who) = scope {
+						AccountRenewals::<T>::insert(who, content_hash, ());
+					}
+				}
 			}
 
 			result
@@ -1864,7 +1899,6 @@ pub mod pallet {
 			content_hash: impl FnOnce() -> ContentHash,
 			context: CheckContext,
 			is_renew: bool,
-			is_re_renewal: bool,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			if !Self::data_size_ok(size) {
 				return Err(BAD_DATA_SIZE.into());
@@ -1881,7 +1915,7 @@ pub mod pallet {
 				size as u32,
 				context.consume_authorization(),
 				is_renew,
-				is_re_renewal,
+				content_hash,
 			)?;
 
 			Ok(context
@@ -1899,13 +1933,11 @@ pub mod pallet {
 					|| sp_io::hashing::blake2_256(data),
 					context,
 					false,
-					false,
 				),
 				Call::<T>::store_with_cid_config { cid, data } => Self::check_store_renew_unsigned(
 					data.len(),
 					|| cid.hashing.hash(data),
 					context,
-					false,
 					false,
 				),
 				Call::<T>::renew { block, index } => {
@@ -1915,7 +1947,6 @@ pub mod pallet {
 						|| info.content_hash,
 						context,
 						true,
-						info.kind == TransactionKind::Renew,
 					)
 				},
 				Call::<T>::renew_content_hash { content_hash } => {
@@ -1927,7 +1958,6 @@ pub mod pallet {
 						|| info.content_hash,
 						context,
 						true,
-						info.kind == TransactionKind::Renew,
 					)
 				},
 				Call::<T>::remove_expired_account_authorization { who } => {
@@ -1970,23 +2000,18 @@ pub mod pallet {
 			(Option<ValidTransaction>, Option<AuthorizationScopeFor<T>>),
 			TransactionValidityError,
 		> {
-			let (size, content_hash, is_renew, is_re_renewal) = match call {
+			let (size, content_hash, is_renew) = match call {
 				Call::<T>::store { data } => {
 					let content_hash = sp_io::hashing::blake2_256(data);
-					(data.len(), content_hash, false, false)
+					(data.len(), content_hash, false)
 				},
 				Call::<T>::store_with_cid_config { cid, data } => {
 					let content_hash = cid.hashing.hash(data);
-					(data.len(), content_hash, false, false)
+					(data.len(), content_hash, false)
 				},
 				Call::<T>::renew { block, index } => {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
-					(
-						info.size as usize,
-						info.content_hash,
-						true,
-						info.kind == TransactionKind::Renew,
-					)
+					(info.size as usize, info.content_hash, true)
 				},
 				Call::<T>::authorize_account { .. } |
 				Call::<T>::authorize_preimage { .. } |
@@ -2009,12 +2034,7 @@ pub mod pallet {
 					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
 						.ok_or(RENEWED_NOT_FOUND)?;
 					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
-					(
-						info.size as usize,
-						info.content_hash,
-						true,
-						info.kind == TransactionKind::Renew,
-					)
+					(info.size as usize, info.content_hash, true)
 				},
 				Call::<T>::enable_auto_renew { .. } | Call::<T>::disable_auto_renew { .. } => {
 					// No authorization is consumed at registration time — the dispatch handler
@@ -2052,7 +2072,7 @@ pub mod pallet {
 				size as u32,
 				consume,
 				is_renew,
-				is_re_renewal,
+				content_hash,
 			)
 			.is_ok();
 
@@ -2062,7 +2082,7 @@ pub mod pallet {
 					size as u32,
 					consume,
 					is_renew,
-					is_re_renewal,
+					content_hash,
 				)?;
 			}
 

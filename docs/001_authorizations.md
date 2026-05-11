@@ -49,8 +49,9 @@ PoP grants two numbers per account: `bytes_allowance` (size budget) and `transac
 - One `AuthorizationExtent` per scope is kept in `Authorizations`, keyed by `AuthorizationScope::{Account, Preimage}`.
 - `AuthorizationExtent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }` holds the soft-side counters (`bytes`, `transactions`), the per-account renew usage (`bytes_permanent`), and the caps.
 - `bytes` and `transactions` bump on `store` / `store_with_cid_config`. The `transactions` axis bumps on both store and renew, since both consume a transaction slot.
+- `AccountRenewals` is a `StorageDoubleMap<AccountId, ContentHash, ()>` that tracks which (account, content_hash) pairs have already been charged `bytes_permanent` in the current authorization window. It is inserted on the first successful renew and checked for re-renewal detection. Cleared via `clear_prefix` when the authorization window resets (expired-but-present re-authorize path, or `remove_expired_authorization`).
 
-`bytes_permanent` bumps on each first-time renewal. Re-renewing content that already has `kind == Renew` skips the `bytes_permanent` check and increment — the content was already counted in a prior renewal. Without this, content kept alive permanently (re-renewed every `RetentionPeriod`) would double-count against the quota on every cycle, eventually exhausting the allowance even though no new distinct content was added. The counter resets to zero when the authorization window expires and a fresh grant is issued.
+`bytes_permanent` bumps on each first-time renewal per (account, content_hash) pair. The same account re-renewing the same content skips the `bytes_permanent` check and increment — the content was already counted in a prior renewal within this window. A different account renewing the same content is always charged, matching `store` semantics where each account pays independently. Without the re-renewal skip, content kept alive permanently (re-renewed every `RetentionPeriod`) would double-count against the quota on every cycle, eventually exhausting the allowance even though no new distinct content was added. The counter resets to zero when the authorization window expires and a fresh grant is issued.
 
 ### `authorize_account` semantics
 
@@ -96,11 +97,13 @@ The hard cap is enforced at two levels, and a renewal that would breach **either
 bytes_permanent + size > A.bytes_allowance
 ```
 
-`bytes_permanent` bumps on each first-time renewal.
+`bytes_permanent` bumps on each first-time renewal per (account, content_hash) pair.
 
-**Re-renewing content that already has `kind == Renew` skips both the check and the increment** — the content was already counted in a prior renewal. This is essential for content kept alive permanently: each `RetentionPeriod` the user must re-renew the same content, and without this skip, every cycle would double-count against the per-account quota, eventually exhausting the allowance even though no new distinct content was added. The re-renewal sees that the existing entry has `kind == Renew` and skips the `bytes_permanent` logic entirely, so the counter stays at its original value.
+**Re-renewal detection is per-(account, content_hash)** via the `AccountRenewals` storage map, not per-entry `kind`. When the same account renews the same content again within the same authorization window, the `AccountRenewals` entry already exists and the `bytes_permanent` check and increment are skipped. A different account renewing the same content hash will NOT find an `AccountRenewals` entry (it only tracks their own renewals), so they are charged independently — matching `store` semantics where each account pays for the same content.
 
-The counter resets to zero when the authorization window expires and a fresh grant is issued (the expired-but-present re-authorize path).
+This is essential for content kept alive permanently: each `RetentionPeriod` the user must re-renew the same content, and without this skip, every cycle would double-count against the per-account quota, eventually exhausting the allowance even though no new distinct content was added.
+
+The counter resets to zero when the authorization window expires and a fresh grant is issued (the expired-but-present re-authorize path). `AccountRenewals` entries are also cleared at that point via `clear_prefix`.
 
 ### Chain-wide cap
 
