@@ -3,11 +3,6 @@ name: Zombienet Auto-Renew Tests
 on:
   workflow_dispatch:
   pull_request:
-    types: [labeled, synchronize]
-
-# Only run when manually triggered or when the `zombienet-auto-renew-tests`
-# label is present. `synchronize` keeps the workflow firing on every push
-# while the label is set, not only the moment the label is applied.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,9 +16,6 @@ env:
 
 jobs:
   set-image:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-auto-renew-tests'))
     uses: ./.github/workflows/set-image.yml
 
   zombienet-auto-renew-tests:
