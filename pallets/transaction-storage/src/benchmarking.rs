@@ -326,7 +326,6 @@ mod benchmarks {
 		Ok(())
 	}
 
-	/// Benchmark the signed renew validation path.
 	#[benchmark]
 	fn validate_renew() -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
