@@ -38,7 +38,6 @@
     "path": "external/fellows-runtimes/system-parachains/bulletin/bulletin-polkadot",
     "uris": [],
     "integration_tests": true,
-    "experimental": true,
     "external_runtime": {
       "repo": "https://github.com/bkontur/runtimes.git",
       "ref": "bko-bulletin-stage1"
