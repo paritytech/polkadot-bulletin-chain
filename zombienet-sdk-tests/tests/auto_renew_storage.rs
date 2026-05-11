@@ -1312,7 +1312,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		};
 
 		// Mark interesting blocks in the log line for easy scanning.
-		let marker = if block_hashes_by_number.get(&block_n).is_some() &&
+		let marker = if block_hashes_by_number.contains_key(&block_n) &&
 			block_n == first_renewal_block - 1
 		{
 			" <-- proof-only block"
@@ -1968,10 +1968,9 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		pre_store_block
 	);
 	let mut futs = Vec::with_capacity(total_items as usize);
-	let mut idx = 0;
-	for data in set1.iter().chain(set2.iter()) {
+	for (idx, data) in set1.iter().chain(set2.iter()).enumerate() {
 		let call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
-		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce + idx).build();
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce + idx as u64).build();
 		let signer = alice.clone();
 		let cli = client.clone();
 		futs.push(async move {
@@ -1980,7 +1979,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 				.await
 				.map_err(anyhow::Error::from)
 		});
-		idx += 1;
 	}
 	nonce += total_items as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
@@ -2067,7 +2065,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		let start = std::time::Instant::now();
 		loop {
 			let head = current_best_block(&client).await?;
-			if head.number() as u64 >= expiry_block + 1 {
+			if head.number() as u64 > expiry_block {
 				break;
 			}
 			if start.elapsed() > poll_timeout {
