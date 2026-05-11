@@ -4,48 +4,39 @@ Integration tests for Polkadot Bulletin Chain sync modes and transaction storage
 
 ## Prerequisites
 
-### Parachain binaries
+Install `just` once: `cargo install just --locked`.
 
-Parachain tests require Polkadot SDK binaries and a chain spec. There are two ways to set this up:
+### Parachain binaries + chain spec
 
-**Option A: Use the setup script** (builds from source, takes a while):
-
-```bash
-# Builds polkadot, polkadot-omni-node, and chain-spec-builder from polkadot-sdk
-./scripts/setup_parachain_prerequisites.sh
-
-# Add built binaries to PATH
-export PATH=~/local_bulletin_testing/bin:$PATH
-```
-
-**Option B: Provide your own binaries** (if you already have compatible builds):
-
-Download or build `polkadot` and `polkadot-omni-node` from [polkadot-sdk](https://github.com/paritytech/polkadot-sdk) at the revision pinned in `Cargo.toml`.
-
-Then set the paths:
+All driven through `just`. From the repo root:
 
 ```bash
-export POLKADOT_RELAY_BINARY_PATH=/path/to/polkadot
-export POLKADOT_PARACHAIN_BINARY_PATH=/path/to/polkadot-omni-node
+# Fetch (or build from source) polkadot + workers + omni-node + chain-spec-builder.
+# Reads POLKADOT_NODE_VERSION / CHAIN_SPEC_BUILDER_VERSION from .github/env.
+# Outputs cached under <repo>/.polkadot-binaries/ (gitignored).
+just binaries-polkadot
+just binaries-chain-spec-builder
+
+# Generate the bulletin-westend chain spec at ./zombienet/bulletin-westend-spec.json.
+just chain-spec westend
 ```
 
-### Chain spec
-
-The parachain chain spec is not checked into git. Generate it with:
+To pin a different polkadot-sdk version for one session, override the env var:
 
 ```bash
-# Requires chain-spec-builder on PATH (installed by setup_parachain_prerequisites.sh
-# or via `cargo install staging-chain-spec-builder`)
-./scripts/create_bulletin_westend_spec.sh
+POLKADOT_NODE_VERSION=polkadot-stable2603 just binaries-polkadot
+# OR by commit hash (source-built):
+POLKADOT_NODE_VERSION=afba6ccb0a75908f2181ed0e849ddf827c71c501 just binaries-polkadot
 ```
 
-This builds the bulletin-westend runtime WASM, generates a chain spec with `chain-spec-builder`, and places it at `./zombienet/bulletin-westend-spec.json`.
-
-To use a different para ID, set `PARACHAIN_ID` before running:
+To use a different parachain ID for the spec, set `PARACHAIN_ID`:
 
 ```bash
-PARACHAIN_ID=2000 ./scripts/create_bulletin_westend_spec.sh
+PARACHAIN_ID=2000 just chain-spec westend
 ```
+
+The all-in-one `just test-zombienet-auto-renew` / `just test-zombienet-sync` recipes
+will fetch the binaries and generate the chain spec for you — see "Running tests" below.
 
 ### LDB tests (optional)
 
@@ -57,25 +48,36 @@ export ROCKSDB_LDB_PATH=/path/to/ldb
 
 ## Running tests
 
-Tests are gated behind the `zombie-sync-tests` feature to prevent accidental execution during `cargo test --workspace`.
+Tests are gated behind feature flags (`zombie-sync-tests`, `zombie-auto-renew-tests`)
+so `cargo test --workspace` doesn't accidentally fire them.
 
-Set `ZOMBIE_PROVIDER=native` to run with local binaries (without Docker):
+Recommended path — `just` recipes from the repo root:
 
 ```bash
-export ZOMBIE_PROVIDER=native
+# Whole sync suite against bulletin-westend (default; `paseo` works too).
+just test-zombienet-sync
 
-# All parachain tests
-cargo test -p bulletin-chain-zombienet-sdk-tests \
-  --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
-  parachain_sync_storage -- --nocapture
+# Single sync test, runtime override:
+just test-zombienet-sync paseo parachain_fast_sync_test
 
-# Single test
-cargo test -p bulletin-chain-zombienet-sdk-tests \
-  --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
-  parachain_fast_sync_test -- --nocapture
+# Whole auto-renew suite (long-running soak skipped automatically).
+just test-zombienet-auto-renew
+
+# Single auto-renew test:
+just test-zombienet-auto-renew westend parachain_auto_renew_quota_exhaustion_test
 ```
 
-Run tests one at a time or with `--test-threads=1`. Each test spawns a full network and they are resource-intensive.
+The recipes fetch the right binaries, generate the chain spec, export the env
+vars and call cargo for you. Behind the scenes:
+
+```bash
+ZOMBIE_PROVIDER=native cargo test -p bulletin-chain-zombienet-sdk-tests \
+  --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+  parachain_fast_sync_test -- --test-threads=1 --nocapture
+```
+
+Run tests one at a time (`--test-threads=1`) — each spawns a full network and they
+are resource-intensive.
 
 ## Test matrix
 
@@ -137,6 +139,9 @@ PARACHAIN_CHAIN_ID=bulletin-rococo \
 
 ## CI
 
-These tests can be triggered in CI via:
-- **`workflow_dispatch`**: Manual trigger from the Actions tab
-- **`zombienet-sync-tests` label**: Add this label to a PR to run the tests
+| Workflow | Trigger |
+|---|---|
+| `auto-renew-tests.yml` | Every PR push + `workflow_dispatch` |
+| `sync-tests.yml` | `zombienet-sync-tests` PR label + `workflow_dispatch` |
+
+Both call the same `just` recipes locally so behaviour is identical.

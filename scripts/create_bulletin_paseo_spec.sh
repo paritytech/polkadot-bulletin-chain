@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cargo build --release -p bulletin-paseo-runtime
 
-# cargo install staging-chain-spec-builder
+# Requires chain-spec-builder from polkadot-sdk on PATH (run `just binaries-chain-spec-builder`).
 cd "$ROOT_DIR"
 
 chain-spec-builder create \

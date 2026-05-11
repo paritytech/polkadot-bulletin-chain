@@ -81,13 +81,20 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Install try-runtime-cli
+      - name: Ensure `just` is available
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
+        run: command -v just || cargo install just --locked
+
+      - name: Cache try-runtime CLI
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: .polkadot-binaries
+          key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
+
+      - name: Resolve try-runtime + add to PATH
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        run: echo "$(just binaries-try-runtime)" >> "$GITHUB_PATH"
 
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -165,12 +172,17 @@ jobs:
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
-      - name: Install try-runtime-cli
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
+      - name: Ensure `just` is available
+        run: command -v just || cargo install just --locked
+
+      - name: Cache try-runtime CLI
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: .polkadot-binaries
+          key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
+
+      - name: Resolve try-runtime + add to PATH
+        run: echo "$(just binaries-try-runtime)" >> "$GITHUB_PATH"
 
       - name: Restore snapshot from cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5

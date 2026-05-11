@@ -39,12 +39,17 @@
 //!
 //! ## Running
 //!
+//! Easiest: `just test-zombienet-auto-renew westend parachain_auto_renew_test` from the
+//! repo root. It fetches binaries, generates the chain spec, and invokes cargo with the
+//! right env. To run cargo directly:
+//!
 //! ```bash
-//! POLKADOT_RELAY_BINARY_PATH=~/local_bulletin_testing/bin/polkadot \
-//! POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node \
+//! BIN_DIR=$(just binaries-polkadot)
+//! POLKADOT_RELAY_BINARY_PATH=$BIN_DIR/polkadot \
+//! POLKADOT_PARACHAIN_BINARY_PATH=$BIN_DIR/polkadot-omni-node \
 //! PARACHAIN_CHAIN_SPEC_PATH=$(pwd)/zombienet/bulletin-westend-spec.json \
-//!   cargo test -p bulletin-chain-zombienet-sdk-tests \
-//!   --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
+//!   cargo test --release -p bulletin-chain-zombienet-sdk-tests \
+//!   --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
 //!   parachain_auto_renew_test -- --nocapture --test-threads=1
 //! ```
 

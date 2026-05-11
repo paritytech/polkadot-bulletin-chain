@@ -5,8 +5,9 @@
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "bulletin-westend-runtime" "ws")
 
-# Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
-# This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
+# Setup prerequisites for parachain runtime (polkadot + polkadot-omni-node + chain-spec-builder).
+# Delegates to the root justfile's `binaries-*` recipes, which in turn call
+# scripts/get_polkadot_binaries.sh. Binaries are cached under <repo>/.polkadot-binaries/.
 setup-parachain-prerequisites:
     #!/usr/bin/env bash
     set -e
@@ -15,7 +16,8 @@ setup-parachain-prerequisites:
     else
         ROOT_DIR="{{ justfile_directory() }}/.."
         cd "$ROOT_DIR"
-        ./scripts/setup_parachain_prerequisites.sh
+        just binaries-polkadot
+        just binaries-chain-spec-builder
         cd -
     fi
 
@@ -128,14 +130,17 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     # Run prerequisites setup first
     just setup-parachain-prerequisites
 
-    # Set paths to binaries
+    # Set paths to binaries. After setup-parachain-prerequisites the binaries live in the
+    # root repo's <repo>/.polkadot-binaries/ cache; in CI SKIP_PARACHAIN_SETUP=1 is set and
+    # the workflow has already extended PATH, so plain names work.
+    ROOT_DIR="{{ justfile_directory() }}/.."
     if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
-        # Expect in the PATH
         POLKADOT_BINARY_PATH=polkadot
         POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
     else
-        POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+        POLKADOT_BIN_DIR="$("$ROOT_DIR/scripts/get_polkadot_binaries.sh" polkadot-node)"
+        POLKADOT_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
+        POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     fi
 
     # Verify binaries exist after setup
@@ -162,10 +167,10 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
         exit 1
     fi
 
-    # Create chain spec
+    # Create chain spec — make sure chain-spec-builder is on PATH.
     echo "   Creating chain spec for {{ runtime }}..."
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/$SPEC_SCRIPT"
+    CSB_DIR="$("$ROOT_DIR/scripts/get_polkadot_binaries.sh" chain-spec-builder)"
+    PATH="$CSB_DIR:$PATH" "$ROOT_DIR/scripts/$SPEC_SCRIPT"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet

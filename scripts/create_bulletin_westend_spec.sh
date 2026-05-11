@@ -10,7 +10,7 @@ PARA_ID="${PARACHAIN_ID:-2487}"
 
 cargo build --release -p bulletin-westend-runtime
 
-# Requires chain-spec-builder from polkadot-sdk (see scripts/setup_parachain_prerequisites.sh)
+# Requires chain-spec-builder from polkadot-sdk on PATH (run `just binaries-chain-spec-builder`).
 cd "$ROOT_DIR"
 
 chain-spec-builder create \
