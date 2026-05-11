@@ -75,7 +75,10 @@ test-pallets:
     cargo test --release -p pallet-bulletin-transaction-storage
 
 # Zombienet auto-renew suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
-test-zombienet-auto-renew runtime="westend" filter="parachain_":
+# `threads` controls test parallelism; default "" lets cargo pick num_cpus. Each test
+# spawns ~3 processes (2 relay validators + 1 collator); set threads=4 if you hit OOM
+# or threads=1 to force serial (helpful for timing-sensitive failure triage).
+test-zombienet-auto-renew runtime="westend" filter="parachain_" threads="":
     #!/usr/bin/env bash
     set -euo pipefail
     POLKADOT_BIN_DIR="$(./scripts/get_polkadot_binaries.sh polkadot-node)"
@@ -87,14 +90,19 @@ test-zombienet-auto-renew runtime="westend" filter="parachain_":
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
+    THREADS_FLAG=""
+    if [ -n "{{threads}}" ]; then
+        THREADS_FLAG="--test-threads={{threads}}"
+    fi
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
         "{{filter}}" \
-        -- --test-threads=1 --nocapture \
+        -- --nocapture $THREADS_FLAG \
         --skip parachain_long_running_pruning_soak_test
 
 # Zombienet sync suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
-test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
+# `threads` — see `test-zombienet-auto-renew`.
+test-zombienet-sync runtime="westend" filter="parachain_sync_storage" threads="":
     #!/usr/bin/env bash
     set -euo pipefail
     POLKADOT_BIN_DIR="$(./scripts/get_polkadot_binaries.sh polkadot-node)"
@@ -106,10 +114,14 @@ test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
+    THREADS_FLAG=""
+    if [ -n "{{threads}}" ]; then
+        THREADS_FLAG="--test-threads={{threads}}"
+    fi
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
         "{{filter}}" \
-        -- --test-threads=1 --nocapture \
+        -- --nocapture $THREADS_FLAG \
         --skip parachain_ldb_storage_verification_test
 
 

@@ -61,9 +61,9 @@ use crate::{
 		expect_bitswap_dont_have, generate_test_data, get_alice_nonce, initialize_network,
 		override_alice_authorization, set_retention_period, submit_renew_pair, submit_store_signed,
 		top_up_alice_authorization, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_session_change_on_node, AuthorizationOverride,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		wait_for_block_height, wait_for_finalized_height, wait_for_session_change_on_node,
+		AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -590,16 +590,22 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-renew)").await?;
 
-	// Wait until both the store block and the renew block have aged well past the pruning
-	// window. Finality lag (2-3 blocks on a healthy westend-local) shifts the actual pruning
-	// boundary, so we use a generous +5 buffer beyond `pruning_size` past the latest renew
-	// block. By then col11 refs from S, R should all be gone — refcount = 0 → entry evicted.
-	let after_renew_pruned = renew_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 5;
+	// `--blocks-pruning=N` prunes blocks once they are FINALIZED and at least N blocks
+	// behind finalized head — best-block height is not what controls pruning, so waiting
+	// on a fudge factor past best (as we used to) is flaky under finality lag (slow CI
+	// disks can push finality 10+ blocks behind best).
+	let after_renew_pruned_finalized =
+		renew_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
 	log::info!(
-		"Waiting for block {} so both store and renew blocks are pruned",
-		after_renew_pruned
+		"Waiting for FINALIZED block {} so both store and renew blocks are past the pruning boundary",
+		after_renew_pruned_finalized
 	);
-	wait_for_block_height(collator1, after_renew_pruned, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(
+		collator1,
+		after_renew_pruned_finalized,
+		BLOCK_PRODUCTION_TIMEOUT_SECS,
+	)
+	.await?;
 
 	expect_bitswap_dont_have(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-pruning)")
 		.await
@@ -715,9 +721,22 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	// Wait until block R is pruned. data2 has no auto-renewal — its only ref was at R, so
 	// once R is gone, data2 is evicted. data1 had its ref refreshed at R AND at R2 = R + 11
 	// (= S + 22), so data1 keeps surviving.
-	let after_renewal_pruned = renewal_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 5;
-	log::info!("Waiting for block {} so the renewal block is pruned", after_renewal_pruned);
-	wait_for_block_height(collator1, after_renewal_pruned, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	//
+	// Pruning fires off FINALIZED head — under CI finality lag, polling for best-block
+	// equality with a small fudge is insufficient. Wait for finalized to cross the pruning
+	// boundary directly.
+	let after_renewal_pruned_finalized =
+		renewal_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
+	log::info!(
+		"Waiting for FINALIZED block {} so the renewal block is past the pruning boundary",
+		after_renewal_pruned_finalized
+	);
+	wait_for_finalized_height(
+		collator1,
+		after_renewal_pruned_finalized,
+		BLOCK_PRODUCTION_TIMEOUT_SECS,
+	)
+	.await?;
 
 	expect_bitswap_dont_have(
 		collator1,
@@ -3154,11 +3173,18 @@ async fn spawn_omni_node_detached_to_log(
 
 const EVICT_TEST_INITIAL_STORE_TARGET_BLOCK: u64 = 12;
 const EVICT_TEST_RESTART_AFTER_BLOCK: u64 = 50;
-/// How long to let the respawned node run before verifying that pruning has caught up. With
-/// 6-second blocks and ~10-block finality lag on cumulus, after 5 minutes the restarted node
-/// should have produced ~50 more blocks and finalized ~40 of them — well past
-/// `--blocks-pruning=10`, so the originally-stored items' col11 refs from blocks ~10 are dropped.
+/// Initial wait after respawn before we *start* polling for eviction. Generous enough that on
+/// healthy hardware everything is already pruned by the time we first poll. On slow CI runners
+/// (slow disks → finalisation lag) the later retry loop covers the rest.
 const EVICT_TEST_POST_RESTART_WAIT_SECS: u64 = 300;
+
+/// Total wall-clock budget for the eviction-poll loop after the initial wait above. Each
+/// iteration probes bitswap for all three items; we succeed as soon as all three return
+/// DONT_HAVE, and fail only if the budget runs out. Tuned to absorb the slowest CI runs we've
+/// observed (~5 min of finality lag past the boundary).
+const EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS: u64 = 600;
+/// Pause between successive bitswap poll iterations.
+const EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS: u64 = 15;
 const EVICT_TEST_RETENTION_PERIOD: u32 = 10;
 
 /// End-to-end: store data while the collator is in archive mode, restart the same data dir
@@ -3317,22 +3343,45 @@ async fn parachain_restart_archive_to_pruning_evicts_old_blocks_test() -> Result
 	let _ = still_alive;
 
 	// 9. Bitswap verification: data stored at blocks ~12 should now return DONT_HAVE.
-	let mut all_evicted = true;
-	for (i, data) in items.iter().enumerate() {
-		match expect_bitswap_dont_have(
-			collator1,
-			data,
-			BITSWAP_TIMEOUT_SECS,
-			&format!("collator-1 / item-{} (post-pruning eviction)", i),
-		)
-		.await
-		{
-			Ok(_) => log::info!("[evict] ✓ item {} evicted from col11 — bitswap DONT_HAVE", i),
-			Err(e) => {
-				log::warn!("[evict] ✗ item {} still served by bitswap: {}", i, e);
-				all_evicted = false;
-			},
+	// Pruning runs off the FINALIZED head, and finality lag varies wildly across hardware
+	// (healthy laptop: ~10 blocks; slow CI disks: 30+ blocks). Instead of one-shot probing
+	// after a fixed sleep, retry until every item is gone OR the budget runs out.
+	let poll_deadline = std::time::Instant::now() +
+		std::time::Duration::from_secs(EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS);
+	let mut last_error: Option<String> = None;
+	let mut all_evicted = false;
+	while std::time::Instant::now() < poll_deadline {
+		let mut iteration_evicted = true;
+		let mut iteration_error: Option<String> = None;
+		for (i, data) in items.iter().enumerate() {
+			match expect_bitswap_dont_have(
+				collator1,
+				data,
+				BITSWAP_TIMEOUT_SECS,
+				&format!("collator-1 / item-{} (post-pruning eviction)", i),
+			)
+			.await
+			{
+				Ok(_) => log::info!("[evict] ✓ item {} evicted from col11 — bitswap DONT_HAVE", i),
+				Err(e) => {
+					iteration_error = Some(format!("item {} still served: {}", i, e));
+					iteration_evicted = false;
+				},
+			}
 		}
+		if iteration_evicted {
+			all_evicted = true;
+			break;
+		}
+		last_error = iteration_error;
+		log::info!(
+			"[evict] not all items evicted yet — sleeping {}s and retrying",
+			EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS
+		);
+		tokio::time::sleep(std::time::Duration::from_secs(
+			EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS,
+		))
+		.await;
 	}
 
 	// 10. Cleanup: kill manual respawn first, then network.
@@ -3341,7 +3390,12 @@ async fn parachain_restart_archive_to_pruning_evicts_old_blocks_test() -> Result
 	network.destroy().await?;
 
 	if !all_evicted {
-		anyhow::bail!("at least one item was still bitswap-fetchable after restart-with-pruning + {}s wait — col11 wasn't evicted", EVICT_TEST_POST_RESTART_WAIT_SECS);
+		anyhow::bail!(
+			"at least one item still bitswap-fetchable after {}s post-restart wait + {}s poll budget — col11 wasn't evicted ({})",
+			EVICT_TEST_POST_RESTART_WAIT_SECS,
+			EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS,
+			last_error.unwrap_or_else(|| "no error captured".to_string()),
+		);
 	}
 
 	test_log!(TEST, "=== Restart archive → pruning EVICTED all old items as expected ===");
