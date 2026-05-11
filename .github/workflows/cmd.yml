@@ -328,7 +328,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh workflow run cmd-run.yml \
-            --ref cmd-bot \
+            --ref main \
             -f cmd="${CMD}" \
             -f repo="${REPO}" \
             -f pr_branch="${PR_BRANCH}" \
