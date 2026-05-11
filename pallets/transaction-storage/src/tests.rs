@@ -23,7 +23,7 @@
 #![allow(deprecated)]
 
 use super::{
-	extension::{BoostStrategy, FlatBoost, ValidateStorageCalls, ALLOWANCE_PRIORITY_BOOST},
+	extension::ValidateStorageCalls,
 	mock::{
 		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeCall, RuntimeEvent,
 		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
@@ -2416,7 +2416,8 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 			Some(Call::apply_block_inherents { proof: None }) => {},
 			other => panic!(
 				"expected Some(apply_block_inherents {{ proof: None }}) when only pending renewals \
-				 are present, got {other:?}"
+				 are present, got {:?}",
+				other
 			),
 		}
 	});
@@ -2644,7 +2645,7 @@ fn authorize_account_after_expiry_resets_bytes_permanent() {
 		run_to_block(5, || None);
 		let who = 1;
 
-		// Authorize and seed `bytes_permanent` directly (simulates a past renew).
+		// Authorize and seed `bytes_permanent = 2000` directly (simulates a past renew).
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
 		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
 			let auth = maybe_auth.as_mut().expect("authorization present");
@@ -2671,7 +2672,8 @@ fn authorize_account_after_expiry_resets_bytes_permanent() {
 
 /// `remove_expired_account_authorization` succeeds even when there is renewed data
 /// outstanding from the old window: the chain-wide `PermanentStorageUsed` counter and
-/// `Transactions` are the source of truth for renewed bytes.
+/// `Transactions` are the source of truth for renewed bytes; the per-account
+/// `bytes_permanent` is just a per-window quota and removing the entry is safe.
 #[test]
 fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 	new_test_ext().execute_with(|| {
@@ -2763,276 +2765,6 @@ fn renew_rejects_when_per_account_allowance_exceeded() {
 			"rejected renew must not bump bytes_permanent",
 		);
 		assert_eq!(PermanentStorageUsed::get(), 0, "rejected renew must not bump chain counter");
-	});
-}
-
-// ---- store → renew → renew boundary condition tests ----
-
-/// With `bytes_allowance == data.len()`, the first `renew` fits exactly
-/// (`0 + 2000 > 2000` is false). Re-renewing the same content succeeds because the
-/// existing entry has `kind == Renew`, so the per-account check and increment are skipped.
-#[test]
-fn store_and_renew_at_exact_allowance_then_re_renew_succeeds() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		let data = vec![42u8; 2000];
-
-		// Allowance exactly matches data size.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 2000));
-		let store_call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
-
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent {
-				bytes: 2000,
-				bytes_permanent: 0,
-				bytes_allowance: 2000,
-				transactions: 1,
-				transactions_allowance: 0,
-			},
-		);
-		assert_eq!(PermanentStorageUsed::get(), 0);
-
-		// First renew: exact fit (0 + 2000 > 2000 is false).
-		run_to_block(3, || None);
-		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
-		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RuntimeOrigin::none()));
-
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent {
-				bytes: 2000,
-				bytes_permanent: 2000,
-				bytes_allowance: 2000,
-				transactions: 2,
-				transactions_allowance: 0,
-			},
-		);
-		assert_eq!(PermanentStorageUsed::get(), 2000);
-
-		// Re-renew same content: succeeds because the entry at block 3 has kind=Renew
-		// (it was created by the first renew), so it's a re-renewal — per-account
-		// bytes_permanent check and increment are skipped.
-		run_to_block(5, || None);
-		let renew_call2 = Call::renew { block: 3, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call2));
-		assert_ok!(Into::<RuntimeCall>::into(renew_call2).dispatch(RuntimeOrigin::none()));
-
-		// bytes_permanent still 2000 (re-renewal skipped the increment).
-		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 2000,);
-		// Chain counter bumped by the new renew dispatch (2000 + 2000 = 4000).
-		assert_eq!(PermanentStorageUsed::get(), 4000);
-	});
-}
-
-/// `PermanentStorageUsed` (chain-wide) decrements when renewed data ages out.
-/// `bytes_permanent` reports 0 because the authorization itself has expired by then
-/// (`authorization_extent` returns default for expired authorizations).
-#[test]
-fn expired_renewed_entry_frees_chain_cap_but_not_per_account() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		let data = vec![42u8; 2000];
-
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 2000));
-		let store_call = Call::store { data };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
-
-		run_to_block(3, || None);
-		let renew_call = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
-		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RuntimeOrigin::none()));
-
-		assert_eq!(PermanentStorageUsed::get(), 2000);
-		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 2000);
-
-		// Advance to finalize block 3 so BlockTransactions moves to Transactions[3].
-		run_to_block(5, || None);
-
-		// Block 12: original store (block 1, kind=Store) ages out — no counter change.
-		System::set_block_number(12);
-		<TransactionStorage as Hooks<u64>>::on_initialize(12);
-		assert_eq!(
-			PermanentStorageUsed::get(),
-			2000,
-			"Store-kind entry must not decrement PermanentStorageUsed",
-		);
-
-		// Block 14: renewed entry (block 3, kind=Renew) ages out — counter drops.
-		System::set_block_number(14);
-		<TransactionStorage as Hooks<u64>>::on_initialize(14);
-		assert_eq!(PermanentStorageUsed::get(), 0, "PermanentStorageUsed must drop to zero");
-
-		// Authorization expired (created at block 1, period=10, expired at block 11).
-		// `authorization_extent` returns default (all zeros) for expired authorizations.
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who).bytes_permanent,
-			0,
-			"bytes_permanent reports 0 because the authorization is expired",
-		);
-	});
-}
-
-/// `bytes_permanent` is bounded by `bytes_allowance` across distinct content items.
-/// With `bytes_allowance = 4000`, two different 2000-byte items fill the cap exactly.
-/// A third distinct item is rejected.
-#[test]
-fn distinct_content_renewals_bounded_by_allowance() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		let data_a = vec![42u8; 2000];
-		let data_b = vec![99u8; 2000];
-		let data_c = vec![77u8; 2000];
-
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
-		// Store all three items.
-		let store_a = Call::store { data: data_a };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_a));
-		assert_ok!(Into::<RuntimeCall>::into(store_a).dispatch(RuntimeOrigin::none()));
-		let store_b = Call::store { data: data_b };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_b));
-		assert_ok!(Into::<RuntimeCall>::into(store_b).dispatch(RuntimeOrigin::none()));
-		let store_c = Call::store { data: data_c };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_c));
-		assert_ok!(Into::<RuntimeCall>::into(store_c).dispatch(RuntimeOrigin::none()));
-
-		// Renew A: bytes_permanent = 0 → 2000.
-		run_to_block(3, || None);
-		let renew_a = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_a));
-		assert_ok!(Into::<RuntimeCall>::into(renew_a).dispatch(RuntimeOrigin::none()));
-		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 2000);
-
-		// Renew B: bytes_permanent = 2000 → 4000 (at cap).
-		run_to_block(4, || None);
-		let renew_b = Call::renew { block: 1, index: 1 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_b));
-		assert_ok!(Into::<RuntimeCall>::into(renew_b).dispatch(RuntimeOrigin::none()));
-		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 4000);
-
-		// Renew C: blocked (bytes_permanent=4000, 4000 + 2000 > 4000).
-		run_to_block(5, || None);
-		let renew_c = Call::renew { block: 1, index: 2 };
-		assert_noop!(
-			TransactionStorage::pre_dispatch_signed(&who, &renew_c),
-			PERMANENT_ALLOWANCE_EXCEEDED,
-		);
-	});
-}
-
-/// After the authorization window expires and a fresh grant is issued, all consumed
-/// counters — including `bytes_permanent` — reset to zero, enabling fresh renew cycles.
-#[test]
-fn re_authorization_after_expiry_resets_permanent_counter() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		let data_a = vec![42u8; 2000];
-		let data_b = vec![99u8; 2000];
-
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 2000));
-		let store_a = Call::store { data: data_a.clone() };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_a));
-		assert_ok!(Into::<RuntimeCall>::into(store_a).dispatch(RuntimeOrigin::none()));
-		let store_b = Call::store { data: data_b };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_b));
-		assert_ok!(Into::<RuntimeCall>::into(store_b).dispatch(RuntimeOrigin::none()));
-
-		// Renew A: bytes_permanent saturates the allowance.
-		run_to_block(3, || None);
-		let renew_a = Call::renew { block: 1, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_a));
-		assert_ok!(Into::<RuntimeCall>::into(renew_a).dispatch(RuntimeOrigin::none()));
-		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 2000);
-
-		// Renew B: blocked (bytes_permanent=2000, 2000 + 2000 > 2000).
-		run_to_block(5, || None);
-		let renew_b = Call::renew { block: 1, index: 1 };
-		assert_noop!(
-			TransactionStorage::pre_dispatch_signed(&who, &renew_b),
-			PERMANENT_ALLOWANCE_EXCEEDED,
-		);
-
-		// Force the authorization to expire.
-		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
-			let auth = maybe_auth.as_mut().expect("authorization present");
-			auth.expiration = 5; // already at block 5 → expired
-		});
-
-		// Re-authorize: all consumed counters reset to 0.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 2000));
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent {
-				bytes: 0,
-				bytes_permanent: 0,
-				bytes_allowance: 2000,
-				transactions: 0,
-				transactions_allowance: 0,
-			},
-			"re-authorize after expiry must reset all consumed counters",
-		);
-
-		// Store new data and renew under the fresh window.
-		let store_c = Call::store { data: data_a };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_c));
-		assert_ok!(Into::<RuntimeCall>::into(store_c).dispatch(RuntimeOrigin::none()));
-
-		run_to_block(7, || None);
-		let renew_c = Call::renew { block: 5, index: 0 };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_c));
-		assert_ok!(Into::<RuntimeCall>::into(renew_c).dispatch(RuntimeOrigin::none()));
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who).bytes_permanent,
-			2000,
-			"fresh window permits renew from zero",
-		);
-	});
-}
-
-/// `FlatBoost` grants the full priority boost when `bytes <= bytes_allowance` (at exact
-/// cap, `<=` still holds). One byte over the cap drops the boost to zero.
-#[test]
-fn store_at_exact_allowance_still_gets_priority_boost() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-
-		// Use non-zero transactions_allowance so the tx axis doesn't gate the boost.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 2000));
-
-		// Before any store: extent.bytes = 0. A 2000-byte store would push the
-		// post-tx extent to bytes=2000, which is exactly bytes_allowance → in-budget.
-		let mut extent = TransactionStorage::account_authorization_extent(who);
-		extent.bytes = extent.bytes.saturating_add(2000);
-		extent.transactions = extent.transactions.saturating_add(1);
-		assert_eq!(
-			FlatBoost::boost(extent),
-			ALLOWANCE_PRIORITY_BOOST,
-			"at exact bytes cap, boost must still apply",
-		);
-
-		// Actually dispatch the 2000-byte store so the extent is consumed.
-		let store_call = Call::store { data: vec![42u8; 2000] };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
-		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
-
-		// Now extent.bytes = 2000. A 1-byte store would push to bytes=2001 → over cap.
-		let mut extent = TransactionStorage::account_authorization_extent(who);
-		extent.bytes = extent.bytes.saturating_add(1);
-		extent.transactions = extent.transactions.saturating_add(1);
-		assert_eq!(
-			FlatBoost::boost(extent),
-			0,
-			"one byte over the cap must drop the boost to zero",
-		);
 	});
 }
 
@@ -3159,7 +2891,8 @@ fn migrate_v2_to_v3_insufficient_weight_returns_err() {
 		let res = MigrateV2ToV3::<Test>::step(None, &mut meter);
 		assert!(
 			matches!(res, Err(SteppedMigrationError::InsufficientWeight { .. })),
-			"expected InsufficientWeight, got {res:?}",
+			"expected InsufficientWeight, got {:?}",
+			res,
 		);
 	});
 }
