@@ -28,7 +28,8 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	AuthorizerBudget, CallInspector, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	AuthorizerBudget, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
@@ -132,13 +133,18 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
-			// Root can do whatever.
-			crate::EnsureRoot<Self::AccountId>,
-			// Any sibling parachain can handle authorizations.
-			EnsureXcm<IsSiblingParachain>,
+			EitherOfDiverse<
+				// Root can do whatever.
+				crate::EnsureRoot<Self::AccountId>,
+				// Any sibling parachain can handle authorizations.
+				EnsureXcm<IsSiblingParachain>,
+			>,
+			// Test accounts can also authorize for testing purposes.
+			EnsureSignedBy<TestAccounts, Self::AccountId>,
 		>,
-		// Test accounts can also authorize for testing purposes.
-		EnsureSignedBy<TestAccounts, Self::AccountId>,
+		// Accounts registered in `AllowedAuthorizers` storage (managed via
+		// `add_authorizer` / `remove_authorizer`).
+		EnsureAllowedAuthorizers<Runtime>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
