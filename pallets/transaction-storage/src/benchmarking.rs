@@ -189,7 +189,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn add_authorizer() -> Result<(), BenchmarkError> {
-		let origin = T::ManagerOrigin::try_successful_origin()
+		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
 		let transactions = 100;
@@ -204,7 +204,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn remove_authorizer() -> Result<(), BenchmarkError> {
-		let origin = T::ManagerOrigin::try_successful_origin()
+		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
 		let transactions = 100;

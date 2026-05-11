@@ -78,7 +78,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
-	type ManagerOrigin = EnsureRoot<Self::AccountId>;
+	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;

@@ -371,7 +371,7 @@ pub mod pallet {
 		#[pallet::constant]
 		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;
 		/// The origin that manages the authorizer list.
-		type ManagerOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+		type AuthorizerRegistrarOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 		/// The origin that can authorize data storage.
 		type Authorizer: EnsureOrigin<Self::RuntimeOrigin>;
 		/// Priority of store/renew transactions.
@@ -928,7 +928,7 @@ pub mod pallet {
 		///
 		/// - `who`: The account to add as an allowed authorizer.
 		///
-		/// The origin for this call must satisfy `ManagerOrigin`. Emits
+		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
 		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
 		#[pallet::call_index(11)]
 		#[pallet::weight(T::WeightInfo::add_authorizer())]
@@ -939,7 +939,7 @@ pub mod pallet {
 			bytes_budget: u64,
 			authorization_period: Option<BlockNumberFor<T>>,
 		) -> DispatchResult {
-			T::ManagerOrigin::ensure_origin(origin)?;
+			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
 			AllowedAuthorizers::<T>::insert(
 				&who,
 				AuthorizerBudget { transactions_budget, bytes_budget, authorization_period },
@@ -1060,12 +1060,12 @@ pub mod pallet {
 		///
 		/// - `who`: The account to remove from the allowed authorizers.
 		///
-		/// The origin for this call must satisfy `ManagerOrigin`. Emits
+		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
 		/// [`AuthorizerRemoved`](Event::AuthorizerRemoved) when successful.
 		#[pallet::call_index(15)]
 		#[pallet::weight(T::WeightInfo::remove_authorizer())]
 		pub fn remove_authorizer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
-			T::ManagerOrigin::ensure_origin(origin)?;
+			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
 			AllowedAuthorizers::<T>::remove(&who);
 			Self::deposit_event(Event::AuthorizerRemoved { who });
 			Ok(())
@@ -2227,8 +2227,8 @@ pub mod pallet {
 				},
 				Call::<T>::add_authorizer { .. } | Call::<T>::remove_authorizer { .. } => {
 					// Manager-origin calls. No signed authorization check needed here —
-					// the ManagerOrigin check happens at dispatch. Just let them through
-					// validation so they can reach dispatch.
+					// the AuthorizerRegistrarOrigin check happens at dispatch. Just let them
+					// through validation so they can reach dispatch.
 					return Ok((
 						context.want_valid_transaction().then(ValidTransaction::default),
 						None,
