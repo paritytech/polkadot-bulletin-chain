@@ -83,7 +83,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
-			// Account authorizations (account, transactions, bytes).
+			// Account authorizations (account, transactions_allowance, bytes_allowance).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
 			// Additional account authorizers (account, transactions budget, bytes budget).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100_000, 100 * 1024 * 1024 * 1024)],
@@ -101,7 +101,7 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
-			// Account authorizations (account, transactions, bytes).
+			// Account authorizations (account, transactions_allowance, bytes_allowance).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
 			// Additional account authorizers (account, transactions budget, bytes budget).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100_000, 100 * 1024 * 1024 * 1024)],

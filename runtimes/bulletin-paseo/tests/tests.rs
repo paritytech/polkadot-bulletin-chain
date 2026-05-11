@@ -20,7 +20,7 @@ use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
 	paseo_constants::{fee::WeightToFee, locations::PeopleLocation},
 	xcm_config::{GovernanceLocation, LocationToAccountId},
-	AllPalletsWithoutSystem, Balances, Block, Runtime, RuntimeCall, RuntimeEvent,
+	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
 	UncheckedExtrinsic,
 };
@@ -29,15 +29,18 @@ use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
 use pallet_bulletin_transaction_storage::{
-	AuthorizationExtent, Call as TxStorageCall, Config as TxStorageConfig,
+	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
+	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
+	Origin as TxStorageOrigin,
 };
 use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
+	traits::{TransactionExtension, TxBaseImplication},
 	transaction_validity,
-	transaction_validity::{InvalidTransaction, TransactionValidityError},
+	transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidityError},
 	ApplyExtrinsicResult, BuildStorage, Either,
 };
 use std::collections::HashMap;
@@ -90,6 +93,8 @@ fn construct_extrinsic(
 			Runtime,
 			bulletin_paseo_runtime::storage::StorageCallInspector,
 		>::default(),
+		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
+		),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 	);
 	let tx_ext: TxExtension =
@@ -157,12 +162,18 @@ fn transaction_storage_runtime_sizes() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				sizes.len() as u32,
+				0,
 				total_bytes
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent { transactions: sizes.len() as u32, bytes: total_bytes },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: total_bytes,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 
 			// store data via signed extrinsics (ValidateSigned consumes authorization)
@@ -182,7 +193,13 @@ fn transaction_storage_runtime_sizes() {
 			}
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: total_bytes,
+					bytes_permanent: 0,
+					bytes_allowance: total_bytes,
+					transactions: 6,
+					transactions_allowance: 0,
+				},
 			);
 
 			// (MaxTransactionSize+1) should exceed MaxTransactionSize and fail
@@ -194,12 +211,20 @@ fn transaction_storage_runtime_sizes() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				oversized
 			));
+			// Re-authorize within the unexpired window adds to the existing allowance;
+			// `bytes` (used) is preserved and expiry is unchanged.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent { transactions: 1_u32, bytes: oversized },
+				AuthorizationExtent {
+					bytes: total_bytes,
+					bytes_permanent: 0,
+					bytes_allowance: total_bytes + oversized,
+					transactions: 6,
+					transactions_allowance: 0,
+				},
 			);
 			let res = construct_and_apply_extrinsic(
 				Some(account.pair()),
@@ -232,14 +257,17 @@ fn transaction_storage_max_throughput_per_block() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				NUM_TRANSACTIONS + 1,
+				0,
 				(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE
 			));
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
 				AuthorizationExtent {
-					transactions: NUM_TRANSACTIONS + 1,
-					bytes: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
+					transactions: 0,
+					transactions_allowance: 0,
 				},
 			);
 
@@ -274,7 +302,13 @@ fn transaction_storage_max_throughput_per_block() {
 			// Verify just 8 authorizations were consumed
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent { transactions: 1, bytes: TRANSACTION_SIZE },
+				AuthorizationExtent {
+					bytes: NUM_TRANSACTIONS as u64 * TRANSACTION_SIZE,
+					bytes_permanent: 0,
+					bytes_allowance: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
+					transactions: NUM_TRANSACTIONS,
+					transactions_allowance: 0,
+				},
 			);
 		});
 }
@@ -297,17 +331,100 @@ fn authorized_storage_transactions_are_for_free() {
 					InvalidTransaction::Payment
 				)
 			);
-			// Authorize user.
+			// Authorize user for two transactions (store + renew).
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
-				24
+				0,
+				48
 			));
-			// Now should work.
+			// Store should now work without funding (feeless).
+			let stored_block = System::block_number();
 			let res = construct_and_apply_extrinsic(Some(account.pair()), call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
+
+			advance_block();
+
+			// Renew should also work without funding (feeless).
+			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				block: stored_block,
+				index: 0,
+			});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+		});
+}
+
+/// Run `AllowanceBasedPriority::validate` and return the contributed priority.
+fn allowance_based_priority(
+	origin: RuntimeOrigin,
+	call: &RuntimeCall,
+) -> transaction_validity::TransactionPriority {
+	let info = call.get_dispatch_info();
+	AllowanceBasedPriority::<Runtime>::default()
+		.validate(origin, call, &info, 0, (), &TxBaseImplication(()), TransactionSource::External)
+		.expect("validate should not fail")
+		.0
+		.priority
+}
+
+#[test]
+fn allowance_based_priority_works() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let account = Sr25519Keyring::Eve;
+			let who: AccountId = account.to_account_id();
+			let origin: RuntimeOrigin = TxStorageOrigin::<Runtime>::Authorized {
+				who: who.clone(),
+				scope: AuthorizationScope::Account(who.clone()),
+			}
+			.into();
+			let store = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+				data: vec![0u8; 1],
+			});
+
+			// No authorization → no boost.
+			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
+
+			// In-budget → flat boost (the strategy unit-tests live in the pallet; this
+			// integration test just confirms the wired-up extension reports a boost while
+			// the signer is authorized).
+			let allowance: u64 = 4_000;
+			let tx_allowance: u32 = 10;
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				tx_allowance,
+				allowance,
+			));
+			assert_eq!(allowance_based_priority(origin.clone(), &store), ALLOWANCE_PRIORITY_BOOST);
+
+			// Eager-compute: a single tx whose size alone would push the signer over the cap
+			// is demoted to `0` boost on entry, even though current `bytes == 0`.
+			let oversized_store =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; allowance as usize + 1],
+				});
+			assert_eq!(allowance_based_priority(origin.clone(), &oversized_store), 0);
+
+			// Consume the entire allowance → over-budget → no boost.
+			assert_ok_ok(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![0u8; allowance as usize],
+				}),
+			));
+			advance_block();
+			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
+
+			// `renew` carries `Origin::Authorized` too, but must not be boosted.
+			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				block: 1,
+				index: 0,
+			});
+			assert_eq!(allowance_based_priority(origin, &renew), 0);
 		});
 }
 
@@ -325,12 +442,18 @@ fn store_with_cid_config_works() {
 		assert_ok!(runtime::TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
-			3,
+			0,
 			3 * total_bytes
 		));
 		assert_eq!(
 			runtime::TransactionStorage::account_authorization_extent(who.clone()),
-			AuthorizationExtent { transactions: 3, bytes: 3 * total_bytes },
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 3 * total_bytes,
+				transactions: 0,
+				transactions_allowance: 0,
+			},
 		);
 
 		// 1. Store data WITHOUT a custom cid_config (plain `store`).
@@ -377,6 +500,100 @@ fn store_with_cid_config_works() {
 		assert_eq!(stored_txs[&0].content_hash, stored_txs[&1].content_hash);
 		assert_ne!(stored_txs[&0].content_hash, stored_txs[&2].content_hash);
 	});
+}
+
+mod hop_tests {
+	use super::*;
+
+	#[test]
+	fn is_promoted_on_chain_works() {
+		sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+			.execute_with(|| {
+				let account = Sr25519Keyring::Alice;
+				let who: AccountId = account.to_account_id();
+				let data = b"some-promoted-blob".to_vec();
+				let content_hash = sp_io::hashing::blake2_256(&data);
+
+				// Nothing stored yet — unknown hash returns false.
+				assert!(!HopPromotion::is_promoted_on_chain(content_hash));
+
+				// Authorize Alice and store the blob via `TransactionStorage::store`. Default
+				// hashing is `Blake2b256`, which matches `content_hash` above.
+				assert_ok!(TransactionStorage::authorize_account(
+					RuntimeOrigin::root(),
+					who.clone(),
+					0,
+					data.len() as u64,
+				));
+				advance_block();
+				assert_ok_ok(construct_and_apply_extrinsic(
+					Some(account.pair()),
+					RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+						data: data.clone(),
+					}),
+				));
+				// `BlockTransactions` is moved into `Transactions[block]` in `on_finalize`.
+				advance_block();
+
+				// Stored hash is now visible; an unrelated hash is not.
+				assert!(HopPromotion::is_promoted_on_chain(content_hash));
+				assert!(!HopPromotion::is_promoted_on_chain([0xAB; 32]));
+			});
+	}
+
+	#[test]
+	fn create_promotion_extrinsic_works() {
+		use bulletin_paseo_runtime::Executive;
+		use frame_system::offchain::CreateAuthorizedTransaction;
+		use sp_io::hashing::blake2_256;
+		use sp_runtime::{traits::IdentifyAccount, MultiSignature, MultiSigner};
+
+		sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+			.execute_with(|| {
+				let alice = Sr25519Keyring::Alice;
+				let signer = MultiSigner::Sr25519(alice.public());
+				let who: AccountId = signer.clone().into_account();
+				let data = b"hop-promoted-data".to_vec();
+				let content_hash = blake2_256(&data);
+				let submit_timestamp: u64 = 0;
+
+				// Nothing stored yet — unknown hash returns false.
+				assert!(!HopPromotion::is_promoted_on_chain(content_hash));
+
+				// Authorize Alice's account so the promotion's authorize closure passes.
+				assert_ok!(TransactionStorage::authorize_account(
+					RuntimeOrigin::root(),
+					who.clone(),
+					0,
+					data.len() as u64,
+				));
+				advance_block();
+
+				// Build the promotion extrinsic via the same path the `create_promotion_extrinsic`
+				// runtime API uses.
+				let payload =
+					pallet_bulletin_hop_promotion::signing_payload(&content_hash, submit_timestamp);
+				let signature = MultiSignature::Sr25519(alice.pair().sign(&payload));
+				let xt = <Runtime as CreateAuthorizedTransaction<
+					pallet_bulletin_hop_promotion::Call<Runtime>,
+				>>::create_authorized_transaction(
+					pallet_bulletin_hop_promotion::Call::<Runtime>::promote {
+						data: data.clone(),
+						signer,
+						signature,
+						submit_timestamp,
+					}
+					.into(),
+				);
+
+				// Apply the extrinsic and confirm dispatch succeeded.
+				assert_ok_ok(Executive::apply_extrinsic(xt));
+
+				// After block flush, the promoted hash is visible on-chain.
+				advance_block();
+				assert!(HopPromotion::is_promoted_on_chain(content_hash));
+			});
+	}
 }
 
 #[test]
@@ -567,7 +784,7 @@ fn alice_can_sign_authorize_account_extrinsic() {
 
 		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 			who: target.to_account_id(),
-			transactions: 5,
+			transactions: 0,
 			bytes: 1024,
 		});
 
@@ -578,7 +795,13 @@ fn alice_can_sign_authorize_account_extrinsic() {
 		// Verify the authorization was actually applied.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(target.to_account_id()),
-			AuthorizationExtent { transactions: 5, bytes: 1024 },
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 1024,
+				transactions: 0,
+				transactions_allowance: 0,
+			},
 		);
 	});
 }
@@ -599,7 +822,7 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 			let call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.to_account_id(),
-					transactions: 5,
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -619,7 +842,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
 			who: account.to_account_id(),
-			transactions: 16,
+			transactions: 0,
 			bytes: 1024,
 		},
 	);
@@ -646,7 +869,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 			System::assert_has_event(RuntimeEvent::TransactionStorage(
 				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
 					who: account.to_account_id(),
-					transactions: 16,
+					transactions: 0,
 					bytes: 1024,
 				},
 			));
@@ -663,7 +886,7 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
 			who: account.to_account_id(),
-			transactions: 16,
+			transactions: 0,
 			bytes: 1024,
 		},
 	);
@@ -689,7 +912,7 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 			System::assert_has_event(RuntimeEvent::TransactionStorage(
 				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
 					who: account.to_account_id(),
-					transactions: 16,
+					transactions: 0,
 					bytes: 1024,
 				},
 			));
@@ -851,7 +1074,7 @@ fn authorized_wrapped_store_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				4,
+				0,
 				4 * data.len() as u64
 			));
 
@@ -874,7 +1097,13 @@ fn authorized_wrapped_store_rejected() {
 			// Only the direct store consumed authorization (1 tx, data.len() bytes).
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 3, bytes: 3 * data.len() as u64 },
+				AuthorizationExtent {
+					bytes: data.len() as u64,
+					bytes_permanent: 0,
+					bytes_allowance: 4 * data.len() as u64,
+					transactions: 1,
+					transactions_allowance: 0,
+				},
 			);
 		});
 }
@@ -907,7 +1136,7 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				data_b.len() as u64
 			));
 
@@ -928,12 +1157,24 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 			// Authorizations were NOT consumed (rejected before prepare).
 			assert_eq!(
 				TransactionStorage::preimage_authorization_extent(content_hash_a),
-				AuthorizationExtent { transactions: 1, bytes: 100 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 100,
+					transactions: 0,
+					transactions_allowance: 1,
+				},
 				"Preimage authorization should not be consumed",
 			);
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 1, bytes: 200 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 200,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 				"Account authorization should not be consumed",
 			);
 		});
@@ -980,7 +1221,13 @@ fn preimage_authorized_storage_transactions_work() {
 			// Verify preimage authorization was consumed.
 			assert_eq!(
 				TransactionStorage::preimage_authorization_extent(content_hash),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 24,
+					bytes_permanent: 0,
+					bytes_allowance: 24,
+					transactions: 1,
+					transactions_allowance: 1,
+				},
 			);
 		});
 }
@@ -1000,7 +1247,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				5,
+				0,
 				500
 			));
 			assert_ok!(TransactionStorage::authorize_preimage(
@@ -1018,20 +1265,33 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			// Verify: preimage authorization was consumed, account authorization unchanged
 			assert_eq!(
 				TransactionStorage::preimage_authorization_extent(content_hash),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 100,
+					bytes_permanent: 0,
+					bytes_allowance: 100,
+					transactions: 1,
+					transactions_allowance: 1,
+				},
 				"Preimage authorization should be consumed"
 			);
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 5, bytes: 500 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 500,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 				"Account authorization should remain unchanged when preimage auth is used"
 			);
 		});
 }
 
-/// Renew calls wrapped in utility/sudo require authorization, same as store.
+/// `renew` is allowed as a direct extrinsic (consuming the caller's account allowance)
+/// but rejected when nested inside utility/sudo wrappers.
 #[test]
-fn wrapped_renew_requires_authorization() {
+fn renew_must_be_direct_extrinsic() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
@@ -1039,6 +1299,7 @@ fn wrapped_renew_requires_authorization() {
 		entry_fee: 0,
 		account_authorizations: vec![],
 		preimage_authorizations: vec![],
+		allowed_authorizers: vec![],
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
@@ -1049,13 +1310,15 @@ fn wrapped_renew_requires_authorization() {
 		let who: AccountId = account.to_account_id();
 		let data = vec![42u8; 100];
 
-		// Fund for fees and authorize a store.
+		// Fund Alice so utility::batch wrappers (not feeless) reach the wrapper rejection
+		// in ValidateStorageCalls instead of failing earlier on payment. Direct store and
+		// renew are themselves feeless, so the funding is irrelevant for those calls.
 		use frame_support::traits::fungible::Mutate;
 		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
-			1,
+			0,
 			data.len() as u64
 		));
 		assert_ok_ok(construct_and_apply_extrinsic(
@@ -1071,11 +1334,17 @@ fn wrapped_renew_requires_authorization() {
 			index: 0,
 		});
 
-		// Direct: rejected for missing authorization.
+		// Direct renew succeeds with the existing account authorization.
+		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
 		assert_eq!(
-			construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()),
-			Err(TransactionValidityError::Invalid(InvalidTransaction::Payment)),
-			"renew: direct",
+			TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent {
+				bytes: 100,
+				bytes_permanent: 100,
+				bytes_allowance: 100,
+				transactions: 2,
+				transactions_allowance: 0,
+			},
 		);
 
 		// Utility wrappers: rejected because renew is not allowed inside wrappers.
@@ -1118,7 +1387,7 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 			let call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: who.clone(),
-					transactions: 5,
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -1135,7 +1404,13 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 			let _ = construct_and_apply_extrinsic(Some(attacker.pair()), batch_call);
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 0,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 				"authorize_account via batch must not succeed for non-Authorizer",
 			);
 		});
@@ -1162,7 +1437,7 @@ fn wrapped_authorize_account_succeeds() {
 			let authorize_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.clone(),
-					transactions: 10,
+					transactions: 0,
 					bytes: 10 * 1024,
 				});
 			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch_all {
@@ -1174,7 +1449,13 @@ fn wrapped_authorize_account_succeeds() {
 			// Authorization must have been created.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(target.clone()),
-				AuthorizationExtent { transactions: 10, bytes: 10 * 1024 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 10 * 1024,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 
 			// Now verify that the authorized target can actually store data.
@@ -1208,7 +1489,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				data.len() as u64
 			));
 
@@ -1218,7 +1499,7 @@ fn mixed_batch_store_and_authorize_rejected() {
 			let authorize_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.clone(),
-					transactions: 5,
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -1243,7 +1524,13 @@ fn mixed_batch_store_and_authorize_rejected() {
 			// Authorization was NOT consumed (rejected before prepare).
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: data.len() as u64,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 		});
 }
@@ -1264,7 +1551,7 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				data.len() as u64
 			));
 
@@ -1286,7 +1573,13 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 			// Authorization was NOT consumed.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 1, bytes: data.len() as u64 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: data.len() as u64,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 		});
 }
@@ -1308,7 +1601,7 @@ fn max_recursion_depth_is_enforced() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				data.len() as u64
 			));
 
@@ -1358,7 +1651,13 @@ fn sudo_store_works_for_sudo_key_holder() {
 		// No account authorization was needed or consumed.
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent { transactions: 0, bytes: 0 },
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 0,
+				transactions: 0,
+				transactions_allowance: 0,
+			},
 		);
 	});
 }
@@ -1386,12 +1685,18 @@ fn xcm_transact_store_is_blocked() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				data.len() as u64
 			));
 			assert_ne!(
 				TransactionStorage::account_authorization_extent(who.clone()),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 0,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
@@ -1423,7 +1728,13 @@ fn xcm_transact_store_is_blocked() {
 			// Authorization must not have been consumed.
 			assert_ne!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 0,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 				"Authorization should remain unconsumed since XCM was blocked",
 			);
 		});
@@ -1444,7 +1755,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
-				1,
+				0,
 				data.len() as u64
 			));
 
@@ -1474,7 +1785,13 @@ fn xcm_transact_wrapped_store_is_blocked() {
 			// Authorization must not have been consumed.
 			assert_ne!(
 				TransactionStorage::account_authorization_extent(who),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 0,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 		});
 }
@@ -1492,13 +1809,19 @@ fn xcm_transact_authorize_account_works() {
 			// Verify no authorization exists yet.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(target.clone()),
-				AuthorizationExtent { transactions: 0, bytes: 0 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 0,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 
 			let authorize_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 					who: target.clone(),
-					transactions: 10,
+					transactions: 0,
 					bytes: 1024,
 				});
 
@@ -1522,7 +1845,13 @@ fn xcm_transact_authorize_account_works() {
 			// Authorization must have been created.
 			assert_eq!(
 				TransactionStorage::account_authorization_extent(target),
-				AuthorizationExtent { transactions: 10, bytes: 1024 },
+				AuthorizationExtent {
+					bytes: 0,
+					bytes_permanent: 0,
+					bytes_allowance: 1024,
+					transactions: 0,
+					transactions_allowance: 0,
+				},
 			);
 		});
 }

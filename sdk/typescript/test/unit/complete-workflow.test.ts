@@ -8,7 +8,7 @@
  * called with correct argument types and produce the expected results.
  */
 
-import { blake2AsU8a } from "@polkadot/util-crypto"
+import { blake2b } from "@noble/hashes/blake2.js"
 import { Binary } from "polkadot-api"
 import { describe, expect, it } from "vitest"
 import { MockBulletinClient, type MockOperation } from "../../src/mock-client"
@@ -40,14 +40,14 @@ describe("Complete workflow (MockBulletinClient)", () => {
     const data = Binary.fromText(message)
     const storeResult = await client.store(data).send()
     expect(storeResult.cid).toBeDefined()
-    expect(storeResult.size).toBe(data.asBytes().length)
+    expect(storeResult.size).toBe(data.length)
 
     // 3. Authorize preimage
     const specificData = Binary.fromText("Preimage-authorized content")
-    const contentHash = blake2AsU8a(specificData.asBytes())
+    const contentHash = blake2b(specificData, { dkLen: 32 })
 
     const preimageReceipt = await client
-      .authorizePreimage(contentHash, BigInt(specificData.asBytes().length))
+      .authorizePreimage(contentHash, BigInt(specificData.length))
       .send()
     expect(preimageReceipt.blockHash).toBeDefined()
 
@@ -124,7 +124,7 @@ describe("Complete workflow (MockBulletinClient)", () => {
       .send()
 
     expect(result.cid).toBeDefined()
-    expect(result.size).toBe(data.asBytes().length)
+    expect(result.size).toBe(data.length)
 
     // The CID should be different from default (Raw + Blake2b256)
     const defaultResult = await client.store(data).send()

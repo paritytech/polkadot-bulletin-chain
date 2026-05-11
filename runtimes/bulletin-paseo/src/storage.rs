@@ -33,6 +33,14 @@ use pallet_bulletin_transaction_storage::{
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+
+parameter_types! {
+	/// Cap on the total bytes committed to permanent storage (via `renew`) across all
+	/// authorizations on this chain. Seeded at 1.7 TiB; storage-backed so governance
+	/// (root) can raise/lower it via `system.set_storage` without a runtime upgrade.
+	pub storage MaxPermanentStorageSize: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
+}
+
 /// Provides test accounts for use with `EnsureSignedBy`.
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
@@ -52,13 +60,17 @@ impl SortedMembers<AccountId> for TestAccounts {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 90 * crate::DAYS;
+	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
-	pub const SudoPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const SetPurgeKeysPriority: TransactionPriority = SudoPriority::get() - 1;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = SetPurgeKeysPriority::get() - 1;
+	//
+	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
+	// runs before stores compete for blockspace.
+	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	pub const StoreRenewPriority: TransactionPriority = RemoveExpiredAuthorizationPriority::get() - 1;
+	// Base priority for `store` / `renew`. Picked well below `TransactionPriority::MAX` so
+	// `AllowanceBasedPriority` can add its boost without saturating `u64`, while still
+	// leaving plenty of headroom above generic transactions.
+	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX / 4;
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
@@ -105,7 +117,9 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
+	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
+	type ManagerOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
 			// Root can do whatever.
@@ -123,4 +137,15 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+parameter_types! {
+	/// Maximum allowable skew between the user's submit timestamp and the on-chain
+	/// time when validating a HOP promotion: 48 hours, in milliseconds.
+	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
+}
+
+impl pallet_bulletin_hop_promotion::Config for Runtime {
+	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+	type WeightInfo = crate::weights::pallet_bulletin_hop_promotion::WeightInfo<Runtime>;
 }
