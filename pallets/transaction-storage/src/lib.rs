@@ -722,9 +722,15 @@ pub mod pallet {
 			transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
+			let authorization_period_override = Self::authorization_period_override_for(&origin);
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes);
+			Self::authorize(
+				AuthorizationScope::Account(who.clone()),
+				transactions,
+				bytes,
+				authorization_period_override,
+			);
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -757,10 +763,16 @@ pub mod pallet {
 			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
+			let authorization_period_override = Self::authorization_period_override_for(&origin);
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			// Preimage scope is single-use, so the per-grant tx budget is `1`.
-			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size);
+			Self::authorize(
+				AuthorizationScope::Preimage(content_hash),
+				1,
+				max_size,
+				authorization_period_override,
+			);
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -1142,11 +1154,6 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type AllowedAuthorizers<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, AuthorizerBudgetFor<T>, OptionQuery>;
-
-	/// Custom authorization period set by one of the additional authorizers. Set pre-dispatch
-	/// and taken on execution, so that different authorizers can set their own values.
-	#[pallet::storage]
-	pub(super) type PendingAuthorizationPeriod<T: Config> = StorageValue<_, BlockNumberFor<T>>;
 
 	/// Collection of transaction metadata by block number.
 	#[pallet::storage]
@@ -1683,16 +1690,16 @@ pub mod pallet {
 		///   consumed counters preserved.
 		/// - **Missing**: create a fresh entry with all counters at `0`.
 		///
-		/// The window length is taken from `PendingAuthorizationPeriod` (set by an
-		/// `AllowedAuthorizers` signer when its `authorization_period` override is `Some`)
-		/// and falls back to `T::AuthorizationPeriod::get()`.
+		/// The window length is `authorization_period_override` if `Some` (used when the
+		/// dispatching authorizer is an `AllowedAuthorizers` entry with a per-authorizer period
+		/// set), else `T::AuthorizationPeriod::get()`.
 		fn authorize(
 			scope: AuthorizationScopeFor<T>,
 			transactions_allowance: u32,
 			bytes_allowance: u64,
+			authorization_period_override: Option<BlockNumberFor<T>>,
 		) {
-			let period =
-				PendingAuthorizationPeriod::<T>::take().unwrap_or_else(T::AuthorizationPeriod::get);
+			let period = authorization_period_override.unwrap_or_else(T::AuthorizationPeriod::get);
 			let expiration = frame_system::Pallet::<T>::block_number().saturating_add(period);
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
@@ -2193,12 +2200,6 @@ pub mod pallet {
 						byte_budget_to_consume,
 						context.consume_authorization(),
 					)?;
-					// Stash the period override for the extrinsic to pick up
-					let period =
-						AllowedAuthorizers::<T>::get(who).and_then(|b| b.authorization_period);
-					if period.is_some() {
-						PendingAuthorizationPeriod::<T>::set(period);
-					}
 
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
@@ -2367,6 +2368,19 @@ pub mod pallet {
 			);
 
 			Ok(())
+		}
+
+		/// Per-authorizer `authorization_period` override, if the dispatching origin is a
+		/// `Signed(_)` account present in [`AllowedAuthorizers`] and has set one. Returns
+		/// `None` for Root, XCM, or any signer without an override.
+		fn authorization_period_override_for(origin: &OriginFor<T>) -> Option<BlockNumberFor<T>> {
+			let signer: Option<T::AccountId> = match origin.clone().into() {
+				Ok(frame_system::RawOrigin::Signed(s)) => Some(s),
+				_ => None,
+			};
+			signer
+				.and_then(AllowedAuthorizers::<T>::get)
+				.and_then(|b| b.authorization_period)
 		}
 
 		fn check_authorizer_budget(

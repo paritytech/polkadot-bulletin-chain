@@ -1885,11 +1885,11 @@ fn remove_authorizer_rejects_non_manager_origin() {
 }
 
 #[test]
-fn add_authorizer_is_idempotent() {
+fn add_authorizer_overwrites_existing_entry() {
 	new_test_ext().execute_with(|| {
 		let who = 42u64;
 		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, 100, 1024, None));
-		// Second call overwrites with same value, still Ok.
+		// Second call with a different budget replaces the first.
 		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, 200, 2048, None));
 		assert!(AllowedAuthorizers::<Test>::contains_key(who));
 		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
@@ -3773,7 +3773,7 @@ fn root_bypasses_authorizer_budget() {
 }
 
 #[test]
-fn authorization_period_override_via_pending_storage() {
+fn authorization_period_override_applied_at_dispatch() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let authorizer = 10u64;
@@ -3788,12 +3788,14 @@ fn authorization_period_override_via_pending_storage() {
 		);
 
 		let who = 1u64;
-		let call = Call::authorize_account { who, transactions: 1, bytes: 1000 };
-		// pre_dispatch_signed stashes the period override and consumes budget
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&authorizer, &call));
-
-		// Now dispatch — authorize() should pick up the pending period
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1000));
+		// Dispatch signed by the authorizer — `authorize_account` reads the override
+		// directly from `AllowedAuthorizers` at dispatch time.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			who,
+			1,
+			1000,
+		));
 
 		// The authorization should expire at block 1 + 5 = 6 (not 1 + 10 = 11)
 		// Check: at block 5, authorization still valid
