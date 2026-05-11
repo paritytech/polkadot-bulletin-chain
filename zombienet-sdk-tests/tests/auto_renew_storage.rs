@@ -3173,16 +3173,10 @@ async fn spawn_omni_node_detached_to_log(
 
 const EVICT_TEST_INITIAL_STORE_TARGET_BLOCK: u64 = 12;
 const EVICT_TEST_RESTART_AFTER_BLOCK: u64 = 50;
-/// Initial wait after respawn before we *start* polling for eviction. Generous enough that on
-/// healthy hardware everything is already pruned by the time we first poll. On slow CI runners
-/// (slow disks → finalisation lag) the later retry loop covers the rest.
-const EVICT_TEST_POST_RESTART_WAIT_SECS: u64 = 300;
-
-/// Total wall-clock budget for the eviction-poll loop after the initial wait above. Each
-/// iteration probes bitswap for all three items; we succeed as soon as all three return
-/// DONT_HAVE, and fail only if the budget runs out. Tuned to absorb the slowest CI runs we've
-/// observed (~5 min of finality lag past the boundary).
-const EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS: u64 = 600;
+/// Total wall-clock budget for the post-respawn eviction-poll loop. Each iteration probes
+/// bitswap for all three items; we succeed as soon as all three return DONT_HAVE, and fail
+/// only if the budget runs out. Generous to absorb finality lag on slow CI hardware.
+const EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS: u64 = 900;
 /// Pause between successive bitswap poll iterations.
 const EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS: u64 = 15;
 const EVICT_TEST_RETENTION_PERIOD: u32 = 10;
@@ -3292,13 +3286,6 @@ async fn parachain_restart_archive_to_pruning_evicts_old_blocks_test() -> Result
 		spawn_omni_node_detached_to_log(&binary, &respawn_args, &respawn_log_path).await?;
 	log::info!("[evict] respawn log will be at {}", respawn_log_path.display());
 
-	// 8. Let the restarted node run long enough that pruning catches up well past block ~12.
-	log::info!(
-		"[evict] sleeping {}s for finalization+pruning to evict initial blocks...",
-		EVICT_TEST_POST_RESTART_WAIT_SECS
-	);
-	tokio::time::sleep(std::time::Duration::from_secs(EVICT_TEST_POST_RESTART_WAIT_SECS)).await;
-
 	// Diagnostic: is the respawned process actually alive and did it advance the chain?
 	let still_alive = match child.try_wait() {
 		Ok(Some(status)) => {
@@ -3391,8 +3378,7 @@ async fn parachain_restart_archive_to_pruning_evicts_old_blocks_test() -> Result
 
 	if !all_evicted {
 		anyhow::bail!(
-			"at least one item still bitswap-fetchable after {}s post-restart wait + {}s poll budget — col11 wasn't evicted ({})",
-			EVICT_TEST_POST_RESTART_WAIT_SECS,
+			"at least one item still bitswap-fetchable after {}s poll budget — col11 wasn't evicted ({})",
 			EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS,
 			last_error.unwrap_or_else(|| "no error captured".to_string()),
 		);
