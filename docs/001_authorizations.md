@@ -26,7 +26,9 @@ Accept over-allowance `store` calls at a lower priority instead. In-budget users
 
 `renew` re-anchors an existing stored item: when the original entry's `RetentionPeriod` is about to elapse, a `renew` lands a fresh `Transactions[block]` entry pointing at the same content, and the *renewed* entry's own `RetentionPeriod` clock starts from that block. Repeat indefinitely and a single piece of content can stay on chain forever.
 
-Without bounds, at sustained-peak block usage one window of fresh `store` data alone is ~1.73 TiB, and re-renewals stack on top. Crucially, content that is kept alive permanently is re-renewed every `RetentionPeriod` — each re-renewal must not double-count against the per-account quota, or the account would exhaust its allowance after just one cycle. ⇒ motivates a **hard limit** on renewed storage (per account and chain-wide), with re-renewal detection to avoid double-counting.
+Without bounds, at sustained-peak block usage one window of fresh `store` data alone is ~1.73 TiB, and re-renewals stack on top. ⇒ motivates a **hard limit** on renewed storage (per account and chain-wide).
+
+> **Note (Authorization Slots):** The upcoming Authorization Slots model (see [Authorization Slots](#authorization-slots)) aligns slot duration with `RetentionPeriod` (both 14 days). Each re-renew lands in a **new slot with fresh `bytes_permanent = 0`**, so double-counting is structurally impossible — no special re-renewal detection is needed. The current `kind`-based skip (see [Per-account quota](#per-account-quota)) is an interim measure until Slots land.
 
 ## Storage types
 
@@ -52,6 +54,8 @@ PoP grants two numbers per account: `bytes_allowance` (size budget) and `transac
 
 `bytes_permanent` bumps on each first-time renewal. Re-renewing content that already has `kind == Renew` skips the `bytes_permanent` check and increment — the content was already counted in a prior renewal. Without this, content kept alive permanently (re-renewed every `RetentionPeriod`) would double-count against the quota on every cycle, eventually exhausting the allowance even though no new distinct content was added. The counter resets to zero when the authorization window expires and a fresh grant is issued.
 
+> **Note:** This `kind`-based re-renewal skip is an interim mechanism. Once Authorization Slots land, each re-renew falls in a new slot with fresh `bytes_permanent = 0`, making the skip unnecessary. See [Authorization Slots](#authorization-slots).
+
 ### `authorize_account` semantics
 
 Per existing entry state:
@@ -61,6 +65,8 @@ Per existing entry state:
 - **Missing**: create a fresh entry with all counters at `0`.
 
 `authorize_preimage` follows the same shape, but `transactions_allowance` is fixed at `1` (a preimage grant is a single-shot store right) and the unexpired path **replaces** rather than adds.
+
+> **Future (Authorization Slots):** The additive unexpired path and the refresh mechanism will be replaced by the Slots model, where People Chain sends distinct authorization slots with explicit start/end dates. Each slot is an immutable, independent grant — no additive semantics, no refresh. See [Authorization Slots](#authorization-slots).
 
 ### `refresh_account_authorization`
 
@@ -101,6 +107,8 @@ bytes_permanent + size > A.bytes_allowance
 **Re-renewing content that already has `kind == Renew` skips both the check and the increment** — the content was already counted in a prior renewal. This is essential for content kept alive permanently: each `RetentionPeriod` the user must re-renew the same content, and without this skip, every cycle would double-count against the per-account quota, eventually exhausting the allowance even though no new distinct content was added. The re-renewal sees that the existing entry has `kind == Renew` and skips the `bytes_permanent` logic entirely, so the counter stays at its original value.
 
 The counter resets to zero when the authorization window expires and a fresh grant is issued (the expired-but-present re-authorize path).
+
+> **Note (Authorization Slots):** With Slots, this `kind`-based skip becomes unnecessary. Each 14-day slot has fresh `bytes_permanent = 0`. A re-renew always lands in a new slot (since `RetentionPeriod == SlotDuration == 14 days`), so the charge is against fresh budget. The per-account allowance is sized to accommodate one cycle of renewals per slot. Cross-account renewing the same content is also naturally handled — each account draws from its own slot's budget.
 
 ### Chain-wide cap
 
@@ -222,3 +230,52 @@ When `PermanentStorageNearCap` fires governance can either:
 Auto-renewal reuses the manual `renew` code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` tracking with re-renewal detection, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. No separate accounting path.
 
 `process_auto_renewals` runs as part of the mandatory `apply_block_inherents` inherent. If `check_authorization` rejects an auto-renewal (expired auth, permanent allowance exceeded, or chain-wide cap reached), the auto-renewal registration is removed, `AutoRenewalFailed` is emitted, and the data expires normally.
+
+## Authorization Slots
+
+> **Status:** Design finalised in RFC10; implementation in progress on People Chain. The bulletin chain changes are tracked in the Authorization Slots PR.
+
+Authorization Slots replace the current `authorize_account` / `refresh_account_authorization` model with a cleaner abstraction where **People Chain sends distinct, immutable authorization slots** with explicit start and end dates.
+
+### Key properties
+
+- **Slot duration = `RetentionPeriod` = 14 days.** Each slot is a self-contained authorization window.
+- **Immutable grants.** A slot is created once with fixed `bytes_allowance` and `transactions_allowance`. No additive semantics, no refresh. To change limits, issue a new slot with different values.
+- **Multiple concurrent slots.** An account can have more than one slot open at once, including future slots. Two 10 MiB slots = 20 MiB total allowance across the overlapping windows.
+- **Fresh counters per slot.** Each slot starts with `bytes_permanent = 0`, `bytes = 0`, `transactions = 0`. Consumed counters are never carried across slots.
+- **Create, not refresh.** People Chain creates a new slot each period rather than refreshing an existing one. This preserves privacy (the user can assign each slot to a different bulletin-chain account) and avoids mutable state.
+- **User-controlled allocation.** Users choose how to distribute their allowance across accounts and applications. They can revoke storage authorization for a specific app by not creating future slots for that app's account.
+
+### Why re-renewal detection becomes unnecessary
+
+With aligned 14-day slots, the renewal lifecycle is:
+
+| Day | Action | Slot | `bytes_permanent` |
+|--:|---|---|--:|
+| 0 | `store` X; `renew` X | Slot 1 (fresh) | 0 → size |
+| 14 | Slot 1 expires; Slot 2 already created | Slot 2 (fresh) | 0 |
+| 14 | re-`renew` X | Slot 2 | 0 → size |
+| 28 | Slot 2 expires; Slot 3 already created | Slot 3 (fresh) | 0 |
+| 28 | re-`renew` X | Slot 3 | 0 → size |
+
+Every re-renew charges against a **new slot with fresh `bytes_permanent = 0`**. The per-account allowance per slot is sized to accommodate the user's renewal needs. No double-counting occurs because the old slot's counters are irrelevant — the new slot starts clean.
+
+This eliminates the need for:
+- The `kind == Renew` re-renewal skip in `check_authorization`
+- Any per-(account, content_hash) tracking (e.g. `AccountRenewals`)
+
+Cross-account semantics are also naturally correct: each account draws from its own slot's budget, so two accounts renewing the same content are each charged independently.
+
+### Reducing allowances
+
+If governance needs to reduce allowances (e.g. 100 MiB → 80 MiB), no existing state needs to be mutated. Current slots run to expiry with their original limits; new slots are simply issued with the lower limit. This is a key advantage of the immutable "create new" model over mutable refresh.
+
+### Bulletin chain implications
+
+The bulletin chain remains "dumb" — it processes `authorize_account` commands from People Chain without needing to understand the slot lifecycle. People Chain owns the logic for slot sizing, user eligibility, and claim flows. Communication flows one-way (People → Bulletin), simplifying synchronization.
+
+When Slots land, the following bulletin-chain changes are expected:
+- `authorize_account` gains explicit `start` / `end` block parameters (replacing the implicit `now + AuthorizationPeriod` expiry).
+- `refresh_account_authorization` may be removed (slots are immutable).
+- The `kind`-based re-renewal skip in `check_authorization` can be removed (each slot has fresh counters).
+- The additive unexpired path in `authorize_account` may be simplified or removed.
