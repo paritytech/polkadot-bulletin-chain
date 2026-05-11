@@ -24,8 +24,9 @@ use alloc::{vec, vec::Vec};
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
-	traits::{ConstU64, Contains, EitherOfDiverse},
+	traits::{ConstU64, Contains, EitherOfDiverse, SortedMembers},
 };
+use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
 	AuthorizerBudget, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
@@ -43,6 +44,16 @@ pub const EXTRA_AUTHORIZER: AccountId = AccountId::new([
 /// Cap on the total bytes committed to permanent storage (via `renew`) across all
 /// authorizations on this chain. We decided to go with 1.7 TiB.
 pub const MAX_PERMANENT_STORAGE_SIZE: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
+
+/// Provides test accounts for use with `EnsureSignedBy`.
+pub struct TestAccounts;
+impl SortedMembers<AccountId> for TestAccounts {
+	fn sorted_members() -> Vec<AccountId> {
+		let mut members = vec![Sr25519Keyring::Alice.to_account_id(), EXTRA_AUTHORIZER];
+		members.sort();
+		members
+	}
+}
 
 parameter_types! {
 	/// Default authorizers seeded into `AllowedAuthorizers` storage by the
@@ -119,13 +130,17 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
-			// Root can do whatever.
-			crate::EnsureRoot<Self::AccountId>,
-			// Any sibling parachain can handle authorizations.
-			EnsureXcm<IsSiblingParachain>,
+			EitherOfDiverse<
+				// Root can do whatever.
+				crate::EnsureRoot<Self::AccountId>,
+				// Any sibling parachain can handle authorizations.
+				EnsureXcm<IsSiblingParachain>,
+			>,
+			// Test accounts can also authorize for testing purposes.
+			EnsureSignedBy<TestAccounts, Self::AccountId>,
 		>,
-		// Otherwise authorizers (test accounts included) must come from a list first set at
-		// genesis and modified in runtime.
+		// Accounts registered in `AllowedAuthorizers` storage (managed via
+		// `add_authorizer` / `remove_authorizer`).
 		EnsureAllowedAuthorizers<Runtime>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;

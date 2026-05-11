@@ -36,7 +36,7 @@ impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFo
 	fn on_runtime_upgrade() -> Weight {
 		let weight = T::DbWeight::get().reads(1);
 
-		if AllowedAuthorizers::<T>::iter().next().is_some() {
+		if AllowedAuthorizers::<T>::iter_keys().next().is_some() {
 			tracing::info!(
 				target: LOG_TARGET,
 				"[PopulateAllowedAuthorizersIfEmpty] AllowedAuthorizers non-empty, skipping",

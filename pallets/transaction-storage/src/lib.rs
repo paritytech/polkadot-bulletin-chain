@@ -272,7 +272,7 @@ impl CheckContext {
 }
 
 /// A registered authorizer's budget.
-#[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[derive(Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct AuthorizerBudget<BlockNumber> {
 	/// Max transactions this authorizer can authorize.
 	pub transactions_budget: u32,
@@ -929,7 +929,8 @@ pub mod pallet {
 		/// [`authorize_account`](Self::authorize_account) and
 		/// [`authorize_preimage`](Self::authorize_preimage) to grant storage access.
 		///
-		/// If the account is already an allowed authorizer, this is a no-op.
+		/// If the account is already an allowed authorizer, its budget and
+		/// `authorization_period` override are **overwritten** with the new values.
 		///
 		/// Parameters:
 		///
@@ -1082,8 +1083,11 @@ pub mod pallet {
 		#[pallet::weight(T::WeightInfo::remove_authorizer())]
 		pub fn remove_authorizer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
-			AllowedAuthorizers::<T>::remove(&who);
-			Self::deposit_event(Event::AuthorizerRemoved { who });
+			// `take` returns the previous value; only emit the event when an entry
+			// actually existed so observers don't see phantom "removed" events.
+			if AllowedAuthorizers::<T>::take(&who).is_some() {
+				Self::deposit_event(Event::AuthorizerRemoved { who });
+			}
 			Ok(())
 		}
 
@@ -1102,13 +1106,15 @@ pub mod pallet {
 			_origin: OriginFor<T>,
 			who: T::AccountId,
 		) -> DispatchResult {
-			let authorizer_budget =
-				AllowedAuthorizers::<T>::get(&who).ok_or(Error::<T>::AuthorizerNotFound)?;
-			ensure!(
-				authorizer_budget.transactions_budget == 0 || authorizer_budget.bytes_budget == 0,
-				Error::<T>::AuthorizerBudgetNotExhausted
-			);
-			AllowedAuthorizers::<T>::remove(&who);
+			AllowedAuthorizers::<T>::try_mutate_exists(&who, |maybe_budget| {
+				let budget = maybe_budget.as_ref().ok_or(Error::<T>::AuthorizerNotFound)?;
+				ensure!(
+					budget.transactions_budget == 0 || budget.bytes_budget == 0,
+					Error::<T>::AuthorizerBudgetNotExhausted,
+				);
+				*maybe_budget = None;
+				Ok::<_, DispatchError>(())
+			})?;
 			Self::deposit_event(Event::ExhaustedAuthorizerRemoved { who });
 			Ok(())
 		}
@@ -2242,9 +2248,8 @@ pub mod pallet {
 					));
 				},
 				Call::<T>::add_authorizer { .. } | Call::<T>::remove_authorizer { .. } => {
-					// Manager-origin calls. No signed authorization check needed here —
-					// the AuthorizerRegistrarOrigin check happens at dispatch. Just let them
-					// through validation so they can reach dispatch.
+					// `AuthorizerRegistrarOrigin` is enforced at dispatch; pool validation is a
+					// passthrough.
 					return Ok((
 						context.want_valid_transaction().then(ValidTransaction::default),
 						None,
@@ -2390,11 +2395,8 @@ pub mod pallet {
 		/// `Signed(_)` account present in [`AllowedAuthorizers`] and has set one. Returns
 		/// `None` for Root, XCM, or any signer without an override.
 		fn authorization_period_override_for(origin: &OriginFor<T>) -> Option<BlockNumberFor<T>> {
-			let signer: Option<T::AccountId> = match origin.clone().into() {
-				Ok(frame_system::RawOrigin::Signed(s)) => Some(s),
-				_ => None,
-			};
-			signer
+			frame_system::ensure_signed(origin.clone())
+				.ok()
 				.and_then(AllowedAuthorizers::<T>::get)
 				.and_then(|b| b.authorization_period)
 		}

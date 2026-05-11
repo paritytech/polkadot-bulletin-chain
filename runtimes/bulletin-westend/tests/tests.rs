@@ -1823,40 +1823,44 @@ fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
 
 #[test]
 fn sudo_can_remove_authorizer_and_removed_cannot_authorize() {
+	// Use Bob: he isn't in `TestAccounts` (Alice + EXTRA_AUTHORIZER), so once
+	// removed from `AllowedAuthorizers` he should genuinely lose authorize rights.
 	let mut genesis = RuntimeGenesisConfig::default();
 	genesis.transaction_storage.allowed_authorizers =
-		vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)];
+		vec![(Sr25519Keyring::Bob.to_account_id(), 1000, 100 * 1024 * 1024)];
 	genesis.sudo.key = Some(Sr25519Keyring::Alice.to_account_id());
 
 	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
 		let alice = Sr25519Keyring::Alice;
+		let bob = Sr25519Keyring::Bob;
 		let target = Sr25519Keyring::Ferdie;
 
-		// Alice needs balance for call fees
+		// Fund Alice (sudo caller) and Bob (authorizer) for call fees.
 		use frame_support::traits::fungible::Mutate;
 		Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
+		Balances::mint_into(&bob.to_account_id(), 1_000_000_000_000).unwrap();
 
-		// Alice currently IS an authorizer — confirm via a successful authorize first.
+		// Bob currently IS an authorizer — confirm via a successful authorize first.
 		let authorize_call =
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 				who: target.to_account_id(),
 				transactions: 1,
 				bytes: 1,
 			});
-		assert_ok_ok(construct_and_apply_extrinsic(Some(alice.pair()), authorize_call.clone()));
+		assert_ok_ok(construct_and_apply_extrinsic(Some(bob.pair()), authorize_call.clone()));
 
-		// Sudo removes Alice.
+		// Sudo (Alice) removes Bob.
 		let remove_call =
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::remove_authorizer {
-				who: alice.to_account_id(),
+				who: bob.to_account_id(),
 			});
 		let sudo_call =
 			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(remove_call) });
 		assert_ok_ok(construct_and_apply_extrinsic(Some(alice.pair()), sudo_call));
 
-		// Now Alice can no longer authorize — same call fails at validation.
+		// Bob is neither in `TestAccounts` nor `AllowedAuthorizers` anymore.
 		assert_eq!(
-			construct_and_apply_extrinsic(Some(alice.pair()), authorize_call),
+			construct_and_apply_extrinsic(Some(bob.pair()), authorize_call),
 			Err(transaction_validity::TransactionValidityError::Invalid(
 				InvalidTransaction::BadSigner
 			)),
