@@ -219,3 +219,67 @@ pub fn build_parachain_network_config_three_relay_validators(
 			anyhow!("config errs: {message}")
 		})
 }
+
+/// Parachain network: 3 relay validators (alice/bob/charlie) + 3 collators (collator-1/-2/-3),
+/// all collators using the same `para_node_args`. Used by long-running soak tests.
+pub fn build_parachain_network_config_three_collators(
+	para_node_args: Vec<String>,
+) -> Result<NetworkConfig> {
+	let relay_binary = get_relay_binary_path();
+	let para_binary = get_parachain_binary_path();
+	let para_chain_spec = get_parachain_chain_spec();
+
+	let relay_args: Vec<_> = vec!["-lruntime=debug"].into_iter().map(|s| s.into()).collect();
+	let relay_args2 = relay_args.clone();
+	let relay_args3 = relay_args.clone();
+
+	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
+	let para_args2 = para_args.clone();
+	let para_args3 = para_args.clone();
+
+	let relay_chain = get_relay_chain();
+	let para_id = get_para_id();
+
+	NetworkConfigBuilder::new()
+		.with_relaychain(|relaychain| {
+			relaychain
+				.with_chain(relay_chain.as_str())
+				.with_default_command(relay_binary.as_str())
+				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
+				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
+				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
+		})
+		.with_parachain(|parachain| {
+			parachain
+				.with_id(para_id)
+				.with_chain_spec_path(para_chain_spec.as_str())
+				.cumulus_based(true)
+				.with_collator(|c| {
+					c.with_name("collator-1")
+						.validator(true)
+						.with_command(para_binary.as_str())
+						.with_args(para_args)
+				})
+				.with_collator(|c| {
+					c.with_name("collator-2")
+						.validator(true)
+						.with_command(para_binary.as_str())
+						.with_args(para_args2)
+				})
+				.with_collator(|c| {
+					c.with_name("collator-3")
+						.validator(true)
+						.with_command(para_binary.as_str())
+						.with_args(para_args3)
+				})
+		})
+		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
+			Ok(val) => gs.with_base_dir(val),
+			_ => gs,
+		})
+		.build()
+		.map_err(|errs| {
+			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
+			anyhow!("config errs: {message}")
+		})
+}

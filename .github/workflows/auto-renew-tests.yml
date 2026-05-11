@@ -1,0 +1,133 @@
+name: Zombienet Auto-Renew Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+# Only run when manually triggered or when the `zombienet-auto-renew-tests`
+# label is present. `synchronize` keeps the workflow firing on every push
+# while the label is set, not only the moment the label is applied.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
+
+jobs:
+  set-image:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-auto-renew-tests'))
+    uses: ./.github/workflows/set-image.yml
+
+  zombienet-auto-renew-tests:
+    needs: [set-image]
+    name: Zombienet Auto-Renew Tests (${{ matrix.runtime.name }})
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    # The full auto-renew suite (basic, eviction, concurrent, many-items,
+    # worst-case, on_initialize cleanup, restart variants, …) at ~5–10 min
+    # per test totals ~60–90 min wall-clock per matrix runtime.
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: bulletin-westend
+            package: bulletin-westend-runtime
+            wasm: bulletin_westend_runtime.compact.compressed.wasm
+            para_id: 1010
+            chain_id: bulletin-westend
+          - name: bulletin-paseo
+            package: bulletin-paseo-runtime
+            wasm: bulletin_paseo_runtime.compact.compressed.wasm
+            para_id: 1501
+            chain_id: bulletin-paseo
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Cache Polkadot SDK binaries
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        id: polkadot-sdk-cache
+        with:
+          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
+          key: polkadot-sdk-${{ env.POLKADOT_SDK_VERSION }}-binaries
+
+      - name: Download Polkadot SDK binaries
+        if: steps.polkadot-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $POLKADOT_SDK_BIN_DIR
+          cd $POLKADOT_SDK_BIN_DIR
+          curl -fL -o polkadot https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot
+          curl -fL -o polkadot-prepare-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-prepare-worker
+          curl -fL -o polkadot-execute-worker https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-execute-worker
+          curl -fL -o chain-spec-builder https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/chain-spec-builder
+          curl -fL -o polkadot-omni-node https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node
+          echo "${POLKADOT_SHA256}  polkadot" | sha256sum -c -
+          echo "${POLKADOT_PREPARE_WORKER_SHA256}  polkadot-prepare-worker" | sha256sum -c -
+          echo "${POLKADOT_EXECUTE_WORKER_SHA256}  polkadot-execute-worker" | sha256sum -c -
+          echo "${CHAIN_SPEC_BUILDER_SHA256}  chain-spec-builder" | sha256sum -c -
+          echo "${POLKADOT_OMNI_NODE_SHA256}  polkadot-omni-node" | sha256sum -c -
+          chmod +x *
+
+      - name: Add Polkadot SDK binaries to PATH
+        run: |
+          chmod +x "${POLKADOT_SDK_BIN_DIR}"/*
+          echo "${POLKADOT_SDK_BIN_DIR}" >> "$GITHUB_PATH"
+
+      - name: Generate parachain chain spec
+        run: |
+          cargo build --release -p ${{ matrix.runtime.package }}
+          mkdir -p ./zombienet
+          chain-spec-builder create \
+            -p ${{ matrix.runtime.para_id }} \
+            -c westend \
+            -i ${{ matrix.runtime.chain_id }} \
+            -n Bulletin \
+            -t local \
+            -r ./target/release/wbuild/${{ matrix.runtime.package }}/${{ matrix.runtime.wasm }} \
+            named-preset local_testnet
+          mv chain_spec.json ./zombienet/${{ matrix.runtime.name }}-spec.json
+
+      - name: Run zombienet auto-renew tests
+        env:
+          ZOMBIE_PROVIDER: native
+          POLKADOT_RELAY_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot
+          POLKADOT_PARACHAIN_BINARY_PATH: ${{ env.POLKADOT_SDK_BIN_DIR }}/polkadot-omni-node
+          PARACHAIN_CHAIN_SPEC_PATH: ${{ github.workspace }}/zombienet/${{ matrix.runtime.name }}-spec.json
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+          PARACHAIN_CHAIN_ID: ${{ matrix.runtime.chain_id }}
+        run: |
+          # The `_soak` test runs for ~60 min and is intended for manual
+          # invocation only; skip it from CI.
+          cargo test --release -p bulletin-chain-zombienet-sdk-tests \
+            --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
+            parachain_ \
+            -- --test-threads=1 --nocapture \
+            --skip parachain_long_running_pruning_soak_test
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14

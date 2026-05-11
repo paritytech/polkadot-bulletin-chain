@@ -61,39 +61,58 @@ pub async fn wait_for_finalized(
 	anyhow::bail!("Transaction stream ended without InFinalizedBlock status")
 }
 
+/// Submit `sudo(System::set_storage([(key, value)]))` signed by Alice. Used to write to
+/// runtime storage that has no public extrinsic — RetentionPeriod, Authorizations, etc.
+/// `wait_for_finality` selects in-best-block vs finalized progress wait.
+async fn sudo_set_storage_item(
+	client: &OnlineClient<SubstrateConfig>,
+	key: &[u8],
+	value: &[u8],
+	nonce: u64,
+	wait_for_finality: bool,
+) -> Result<()> {
+	let signer = dev::alice();
+	let items = Value::unnamed_composite([Value::unnamed_composite([
+		Value::from_bytes(key),
+		Value::from_bytes(value),
+	])]);
+	let set_storage_call = tx("System", "set_storage", vec![items]);
+	let sudo_call = tx("Sudo", "sudo", vec![set_storage_call.into_value()]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+	let timeout = if wait_for_finality {
+		FINALIZED_TRANSACTION_TIMEOUT_SECS
+	} else {
+		TRANSACTION_TIMEOUT_SECS
+	};
+
+	tokio::time::timeout(Duration::from_secs(timeout), async {
+		let progress = client.tx().sign_and_submit_then_watch(&sudo_call, &signer, params).await?;
+		if wait_for_finality {
+			wait_for_finalized(progress).await?;
+		} else {
+			wait_for_in_best_block(progress).await?;
+		}
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("sudo set_storage timed out"))??;
+	Ok(())
+}
+
 pub async fn set_retention_period(
 	client: &OnlineClient<SubstrateConfig>,
 	retention_period: u32,
 	nonce: u64,
 ) -> Result<()> {
-	let signer = dev::alice();
 	let key = retention_period_storage_key();
-	let value = retention_period.to_le_bytes().to_vec();
-
+	let value = retention_period.to_le_bytes();
 	log::info!(
 		"Setting RetentionPeriod to {} blocks via sudo (key: 0x{}, value: 0x{})",
 		retention_period,
 		hex::encode(&key),
-		hex::encode(&value)
+		hex::encode(value),
 	);
-
-	let items = Value::unnamed_composite([Value::unnamed_composite([
-		Value::from_bytes(&key),
-		Value::from_bytes(&value),
-	])]);
-
-	let set_storage_call = tx("System", "set_storage", vec![items]);
-	let sudo_call = tx("Sudo", "sudo", vec![set_storage_call.into_value()]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client.tx().sign_and_submit_then_watch(&sudo_call, &signer, params).await?;
-		wait_for_in_best_block(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
-	.await
-	.map_err(|_| anyhow!("set_retention_period transaction timed out"))??;
-
+	sudo_set_storage_item(client, &key, &value, nonce, false).await?;
 	log::info!("RetentionPeriod set successfully");
 	Ok(())
 }
@@ -103,33 +122,14 @@ pub async fn set_retention_period_finalized(
 	retention_period: u32,
 	nonce: u64,
 ) -> Result<()> {
-	let signer = dev::alice();
 	let key = retention_period_storage_key();
-	let value = retention_period.to_le_bytes().to_vec();
-
+	let value = retention_period.to_le_bytes();
 	log::info!(
 		"Setting RetentionPeriod to {} blocks via sudo (finalized, nonce={})",
 		retention_period,
-		nonce
+		nonce,
 	);
-
-	let items = Value::unnamed_composite([Value::unnamed_composite([
-		Value::from_bytes(&key),
-		Value::from_bytes(&value),
-	])]);
-
-	let set_storage_call = tx("System", "set_storage", vec![items]);
-	let sudo_call = tx("Sudo", "sudo", vec![set_storage_call.into_value()]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-
-	tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client.tx().sign_and_submit_then_watch(&sudo_call, &signer, params).await?;
-		wait_for_finalized(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
-	.await
-	.map_err(|_| anyhow!("set_retention_period_finalized transaction timed out"))??;
-
+	sudo_set_storage_item(client, &key, &value, nonce, true).await?;
 	log::info!("RetentionPeriod set successfully (finalized)");
 	Ok(())
 }
@@ -348,10 +348,269 @@ pub async fn authorize_and_store_data_finalized(
 	Ok((block_number, nonce))
 }
 
+/// Submit a sudo'd `TransactionStorage::authorize_account` for `who` with the given capacity,
+/// adding to any existing authorization. Each successful store/renew consumes one transaction
+/// slot and `data.len()` bytes from this allowance. Signed by Alice (the sudo key).
+pub async fn authorize_account_via_sudo(
+	client: &OnlineClient<SubstrateConfig>,
+	who: &[u8; 32],
+	transactions: u32,
+	bytes: u64,
+	nonce: u64,
+) -> Result<()> {
+	let alice = dev::alice();
+	let authorize_call = subxt::tx::dynamic(
+		"Sudo",
+		"sudo",
+		vec![value! {
+			TransactionStorage(authorize_account {
+				who: Value::from_bytes(*who),
+				transactions: transactions,
+				bytes: bytes
+			})
+		}],
+	);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	log::info!(
+		"Authorizing 0x{}.. (+{} tx, +{} bytes, alice nonce={})",
+		hex::encode(&who[..4]),
+		transactions,
+		bytes,
+		nonce
+	);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress =
+			client.tx().sign_and_submit_then_watch(&authorize_call, &alice, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("authorize_account via sudo timed out"))??;
+
+	log::info!("Authorization included");
+	Ok(())
+}
+
+/// Convenience wrapper around [`authorize_account_via_sudo`] for Alice.
+pub async fn top_up_alice_authorization(
+	client: &OnlineClient<SubstrateConfig>,
+	transactions: u32,
+	bytes: u64,
+	nonce: u64,
+) -> Result<()> {
+	let alice_pk = dev::alice().public_key().0;
+	authorize_account_via_sudo(client, &alice_pk, transactions, bytes, nonce).await
+}
+
+/// Submit a single `TransactionStorage::store(data)` signed by Alice. Caller is responsible
+/// for ensuring Alice has sufficient pre-existing authorization. Returns the inclusion block
+/// number.
+pub async fn submit_store_signed(
+	client: &OnlineClient<SubstrateConfig>,
+	data: &[u8],
+	nonce: u64,
+) -> Result<u64> {
+	let signer = dev::alice();
+	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	log::info!("Submitting store (nonce={}, {} bytes)...", nonce, data.len());
+
+	let (block_hash, _events) =
+		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+			let progress =
+				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
+			wait_for_in_best_block(progress).await
+		})
+		.await
+		.map_err(|_| anyhow!("store transaction timed out"))??;
+
+	let block_number = client.blocks().at(block_hash).await?.number() as u64;
+	log::info!("Store transaction included at block {}", block_number);
+	Ok(block_number)
+}
+
+/// Submit two `TransactionStorage::renew(block, index)` extrinsics back-to-back, signed by
+/// **Alice and Bob respectively**. The pallet's `validate_signed` adds a `provides((who,
+/// content_hash))` tag, so two renews of the same data from the **same** signer would
+/// conflict in the pool — using two distinct signers avoids the conflict so both can sit in
+/// the pool simultaneously and land in the same block. Caller must have authorized Bob for at
+/// least one renew worth of capacity. Returns each renew's inclusion block number.
+pub async fn submit_renew_pair(
+	client: &OnlineClient<SubstrateConfig>,
+	block: u32,
+	index: u32,
+	alice_nonce: u64,
+	bob_nonce: u64,
+) -> Result<(u64, u64)> {
+	let alice = dev::alice();
+	let bob = dev::bob();
+	let renew_call = tx(
+		"TransactionStorage",
+		"renew",
+		vec![Value::u128(block as u128), Value::u128(index as u128)],
+	);
+	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
+	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
+
+	log::info!(
+		"Submitting two renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
+		block,
+		index,
+		alice_nonce,
+		bob_nonce
+	);
+
+	let alice_progress = client
+		.tx()
+		.sign_and_submit_then_watch(&renew_call, &alice, alice_params)
+		.await?;
+	let bob_progress =
+		client.tx().sign_and_submit_then_watch(&renew_call, &bob, bob_params).await?;
+
+	let (hash_alice, _) = tokio::time::timeout(
+		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
+		wait_for_in_best_block(alice_progress),
+	)
+	.await
+	.map_err(|_| anyhow!("alice renew timed out"))??;
+	let (hash_bob, _) = tokio::time::timeout(
+		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
+		wait_for_in_best_block(bob_progress),
+	)
+	.await
+	.map_err(|_| anyhow!("bob renew timed out"))??;
+
+	let block_alice = client.blocks().at(hash_alice).await?.number() as u64;
+	let block_bob = client.blocks().at(hash_bob).await?.number() as u64;
+	log::info!(
+		"renew(block={}, idx={}) inclusions: alice={}, bob={}",
+		block,
+		index,
+		block_alice,
+		block_bob
+	);
+	Ok((block_alice, block_bob))
+}
+
+/// Submit `TransactionStorage::enable_auto_renew(content_hash)` signed by Alice. The
+/// account must already have authorization sufficient for one renewal cycle.
+pub async fn enable_auto_renew(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let call = tx(
+		"TransactionStorage",
+		"enable_auto_renew",
+		vec![Value::from_bytes(content_hash.as_slice())],
+	);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	log::info!("Submitting enable_auto_renew (nonce={})...", nonce);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("enable_auto_renew transaction timed out"))??;
+
+	log::info!("enable_auto_renew included in block");
+	Ok(())
+}
+
 pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
 	let alice_account_id = dev::alice().public_key().to_account_id();
 	let nonce = client.tx().account_nonce(&alice_account_id).await?;
 	log::info!("Alice's current nonce: {}", nonce);
 	Ok(nonce)
+}
+
+/// Submit a single `TransactionStorage::renew_content_hash(content_hash)` signed by Alice. The
+/// pallet looks up the latest `(block, index)` for `content_hash` via `TransactionByContentHash`
+/// and re-indexes it. Caller is responsible for: (a) the data still being in pallet retention
+/// (otherwise `TransactionByContentHash` is empty and the call fails with `RenewedNotFound`);
+/// (b) Alice having sufficient pre-existing authorization. Returns the inclusion block number.
+#[allow(dead_code)]
+pub async fn submit_renew_content_hash_signed(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let renew_call = tx(
+		"TransactionStorage",
+		"renew_content_hash",
+		vec![Value::from_bytes(content_hash.as_slice())],
+	);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		client.tx().sign_and_submit(&renew_call, &signer, params).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("renew_content_hash submission timed out"))??;
+
+	Ok(())
+}
+
+/// Fields to write into Alice's `Authorization` entry; mirrors the pallet's
+/// `Authorization<BlockNumber>` SCALE layout (encoded as a tuple in that order).
+pub struct AuthorizationOverride {
+	pub transactions: u32,
+	pub transactions_allowance: u32,
+	pub bytes: u64,
+	pub bytes_permanent: u64,
+	pub bytes_allowance: u64,
+	pub expiration: u32,
+}
+
+/// Overwrite Alice's `Authorizations[Account(alice)]` entry via `sudo(System::set_storage(..))`.
+/// There is no extrinsic that lets a caller set a custom expiration block on an authorization,
+/// so tests that need a short expiration (vs. the runtime's `AuthorizationPeriod = 14 * DAYS`)
+/// must write the storage entry directly. The key is computed from metadata via
+/// `address_bytes`, so the correct `Blake2_128Concat` hasher is applied automatically.
+pub async fn override_alice_authorization(
+	client: &OnlineClient<SubstrateConfig>,
+	auth: AuthorizationOverride,
+	nonce: u64,
+) -> Result<()> {
+	use subxt::ext::{
+		codec::Encode,
+		scale_value::{Composite, Value as ScaleValue},
+	};
+
+	let alice_pk = dev::alice().public_key().0;
+	let scope_value =
+		ScaleValue::variant("Account", Composite::Unnamed(vec![ScaleValue::from_bytes(alice_pk)]));
+	let address =
+		subxt::dynamic::storage("TransactionStorage", "Authorizations", vec![scope_value]);
+	let key = client.storage().address_bytes(&address)?;
+	let value = (
+		auth.transactions,
+		auth.transactions_allowance,
+		auth.bytes,
+		auth.bytes_permanent,
+		auth.bytes_allowance,
+		auth.expiration,
+	)
+		.encode();
+
+	log::info!(
+		"Overriding Alice's Authorization (expiration={}, bytes_permanent={}, \
+		 bytes_allowance={}) via sudo set_storage",
+		auth.expiration,
+		auth.bytes_permanent,
+		auth.bytes_allowance,
+	);
+	sudo_set_storage_item(client, &key, &value, nonce, false).await?;
+	log::info!("Alice's Authorization overridden");
+	Ok(())
 }

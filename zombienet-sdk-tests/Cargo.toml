@@ -39,7 +39,10 @@ async-trait = "0.1"
 bytes = "1"
 
 [features]
+# Parachain sync regression tests (parachain_sync_storage.rs).
 zombie-sync-tests = []
+# Auto-renewal + pruning + restart-with-modified-args tests (auto_renew_storage.rs).
+zombie-auto-renew-tests = []
 
 [build-dependencies]
 prost-build = "0.13"
