@@ -130,12 +130,10 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
 
     # Set paths to binaries
     if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
-        # CI: binaries downloaded from polkadot-sdk releases. Uses polkadot-parachain
-        # so PR builds can be substituted via paritypr/polkadot-parachain-debug images.
+        # Expect in the PATH
         POLKADOT_BINARY_PATH=polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-parachain
+        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
     else
-        # Local dev: setup_parachain_prerequisites.sh builds polkadot-omni-node from source.
         POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
         POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
     fi
