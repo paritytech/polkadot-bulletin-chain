@@ -20,17 +20,18 @@ use super::{
 	xcm_config::IsSiblingParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeHoldReason,
 };
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
 	traits::{ConstU64, Contains, EitherOfDiverse},
 };
 use pallet_bulletin_transaction_storage::{
-	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	AuthorizerBudget, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
+use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 
 // 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
@@ -42,6 +43,18 @@ pub const EXTRA_AUTHORIZER: AccountId = AccountId::new([
 /// Cap on the total bytes committed to permanent storage (via `renew`) across all
 /// authorizations on this chain. We decided to go with 1.7 TiB.
 pub const MAX_PERMANENT_STORAGE_SIZE: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
+
+parameter_types! {
+	/// Default authorizers seeded into `AllowedAuthorizers` storage by the
+	/// `PopulateAllowedAuthorizersIfEmpty` migration when the storage is empty.
+	pub DefaultAllowedAuthorizers: Vec<AccountId> = vec![Sr25519Keyring::Bob.to_account_id()];
+	/// Default authorizer budget equivalent to the values set in Westend genesis.
+	pub DefaultAuthorizerBudget: AuthorizerBudget<crate::BlockNumber> = AuthorizerBudget {
+		transactions_budget: 100_000,
+		bytes_budget: 100 * 1024 * 1024 * 1024,
+		authorization_period: None,
+	};
+}
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;

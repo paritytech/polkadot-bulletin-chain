@@ -167,6 +167,11 @@ pub mod migrations {
 			Runtime,
 			pallet_bulletin_transaction_storage::DefaultRetentionPeriod,
 		>,
+		pallet_bulletin_transaction_storage::migrations::PopulateAllowedAuthorizersIfEmpty<
+			Runtime,
+			storage::DefaultAllowedAuthorizers,
+			storage::DefaultAuthorizerBudget,
+		>,
 	);
 
 	/// All single block migrations that will run on the next runtime upgrade.
