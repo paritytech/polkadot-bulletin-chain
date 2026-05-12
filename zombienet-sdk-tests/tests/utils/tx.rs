@@ -534,6 +534,7 @@ pub async fn submit_renew_pair(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
 	index: u32,
+	content_hash: &[u8; 32],
 	alice_nonce: u64,
 	bob_nonce: u64,
 ) -> Result<(u64, u64)> {
@@ -575,14 +576,25 @@ pub async fn submit_renew_pair(
 	.await
 	.map_err(|_| anyhow!("bob renew timed out"))??;
 
-	let block_alice = client.blocks().at(hash_alice).await?.number() as u64;
-	let block_bob = client.blocks().at(hash_bob).await?.number() as u64;
+	// As with `submit_store_signed` / `authorize_and_store_data`, don't trust subxt's
+	// reported block number for `wait_for_in_best_block` — it can be one off from the
+	// canonical block where `do_renew` -> `push_renewal_in_memory` re-keyed
+	// `TransactionByContentHash` at `Self::now()`. That mismatch is what previously made
+	// `parachain_renew_twice_within_block_with_pruning_test` flaky: pruning math built on
+	// `client.blocks().at(hash).number()` could overshoot the canonical renew block by 1,
+	// the +1 buffer used to wait for finality didn't reach the canonical pruning boundary,
+	// and col11 stayed populated past the test's `expect_bitswap_dont_have` window.
+	// `canonical_store_block` reads `TransactionByContentHash` at the inclusion-block hash,
+	// which the pallet updates with the canonical `(Self::now(), index)` of the renewal —
+	// the same authoritative number `on_initialize`'s pruning hook uses.
+	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
+	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
 	log::info!(
-		"renew(block={}, idx={}) inclusions: alice={}, bob={}",
+		"renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
 		block,
 		index,
 		block_alice,
-		block_bob
+		block_bob,
 	);
 	Ok((block_alice, block_bob))
 }

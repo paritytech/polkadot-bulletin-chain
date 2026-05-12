@@ -655,8 +655,9 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		.account_nonce(&subxt_signer::sr25519::dev::bob().public_key().to_account_id())
 		.await?;
 
+	let content_hash = blake2_256(&data);
 	let (renew_block_a, renew_block_b) =
-		submit_renew_pair(client, store_block as u32, 0, nonce, bob_nonce).await?;
+		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
 	// `nonce` is no longer used after this point in the test; the two renews are the last
 	// signed extrinsics here.
 	if renew_block_a != renew_block_b {
