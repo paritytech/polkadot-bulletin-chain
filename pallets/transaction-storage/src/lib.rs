@@ -280,6 +280,10 @@ pub struct AuthorizerBudget<BlockNumber> {
 	pub bytes_budget: u64,
 	/// Optional override for the authorization period.
 	pub authorization_period: Option<BlockNumber>,
+	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
+	/// while `now < t`; once `now >= t`, [`EnsureAllowedAuthorizers`] rejects them and
+	/// [`Pallet::remove_exhausted_authorizer`] becomes callable on this entry.
+	pub valid_until: Option<BlockNumber>,
 }
 
 pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
@@ -298,8 +302,13 @@ where
 
 	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
 		o.into().and_then(|raw| match raw {
-			frame_system::RawOrigin::Signed(who) if AllowedAuthorizers::<T>::contains_key(&who) =>
-				Ok(who),
+			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
+				Some(b)
+					if b.valid_until
+						.map_or(true, |t| frame_system::Pallet::<T>::block_number() < t) =>
+					Ok(who),
+				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
+			},
 			other => Err(T::RuntimeOrigin::from(other)),
 		})
 	}
@@ -316,6 +325,7 @@ where
 						transactions_budget: 10_000,
 						bytes_budget: 100_000,
 						authorization_period: None,
+						valid_until: None,
 					},
 				);
 				new
@@ -434,7 +444,8 @@ pub mod pallet {
 		InvalidContentHash,
 		/// Authorizer account was not found.
 		AuthorizerNotFound,
-		/// Authorizer had remaining budget.
+		/// Authorizer is not eligible for permissionless removal — it still has budget on both
+		/// axes AND (if `valid_until` is set) has not yet expired.
 		AuthorizerBudgetNotExhausted,
 		/// Auto-renewal is already enabled for this content hash.
 		AutoRenewalAlreadyEnabled,
@@ -446,6 +457,9 @@ pub mod pallet {
 		/// The override is intended to shorten an authorizer's window; to grant the default
 		/// length, pass `None` instead.
 		InvalidAuthorizationPeriodOverride,
+		/// `valid_period` supplied to `add_authorizer` is zero (would expire immediately).
+		/// Pass `None` for no expiration.
+		InvalidValidPeriod,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
@@ -925,46 +939,6 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Add an account to the set of allowed authorizers. Allowed authorizers can call
-		/// [`authorize_account`](Self::authorize_account) and
-		/// [`authorize_preimage`](Self::authorize_preimage) to grant storage access.
-		///
-		/// If the account is already an allowed authorizer, its budget and
-		/// `authorization_period` override are **overwritten** with the new values.
-		///
-		/// Parameters:
-		///
-		/// - `who`: The account to add as an allowed authorizer.
-		///
-		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
-		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
-		#[pallet::call_index(11)]
-		#[pallet::weight(T::WeightInfo::add_authorizer())]
-		pub fn add_authorizer(
-			origin: OriginFor<T>,
-			who: T::AccountId,
-			transactions_budget: u32,
-			bytes_budget: u64,
-			authorization_period: Option<BlockNumberFor<T>>,
-		) -> DispatchResult {
-			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
-			if let Some(period) = authorization_period {
-				// The override is intended to *shorten* the default window. Reject zero
-				// (would expire immediately) and any value at or above the default (no-op
-				// or longer — pass `None` instead).
-				ensure!(
-					!period.is_zero() && period < T::AuthorizationPeriod::get(),
-					Error::<T>::InvalidAuthorizationPeriodOverride,
-				);
-			}
-			AllowedAuthorizers::<T>::insert(
-				&who,
-				AuthorizerBudget { transactions_budget, bytes_budget, authorization_period },
-			);
-			Self::deposit_event(Event::AuthorizerAdded { who });
-			Ok(())
-		}
-
 		/// Enable automatic renewal for a previously stored piece of data.
 		///
 		/// Snapshot check: the caller's authorization must have enough remaining
@@ -1067,6 +1041,65 @@ pub mod pallet {
 			Ok(Some(T::WeightInfo::apply_block_inherents(n_actual)).into())
 		}
 
+		/// Add an account to the set of allowed authorizers. Allowed authorizers can call
+		/// [`authorize_account`](Self::authorize_account) and
+		/// [`authorize_preimage`](Self::authorize_preimage) to grant storage access.
+		///
+		/// If the account is already an allowed authorizer, its budget,
+		/// `authorization_period` override, and `valid_until` are **overwritten** with the
+		/// new values.
+		///
+		/// Parameters:
+		///
+		/// - `who`: The account to add as an allowed authorizer.
+		/// - `transactions_budget` / `bytes_budget`: budgets consumed per `authorize_*` call.
+		/// - `authorization_period`: optional override for the default `T::AuthorizationPeriod`.
+		///   Must be `> 0` and `< T::AuthorizationPeriod` when `Some`.
+		/// - `valid_period`: optional lifetime for the authorizer itself. When `Some(p)` and `p >
+		///   0`, the entry stops authorizing once `now >= now + p` (at insert time), and becomes
+		///   eligible for permissionless cleanup via
+		///   [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
+		///
+		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
+		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
+		#[pallet::call_index(11)]
+		#[pallet::weight(T::WeightInfo::add_authorizer())]
+		pub fn add_authorizer(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+			transactions_budget: u32,
+			bytes_budget: u64,
+			authorization_period: Option<BlockNumberFor<T>>,
+			valid_period: Option<BlockNumberFor<T>>,
+		) -> DispatchResult {
+			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
+			if let Some(period) = authorization_period {
+				// The override is intended to *shorten* the default window. Reject zero
+				// (would expire immediately) and any value at or above the default (no-op
+				// or longer — pass `None` instead).
+				ensure!(
+					!period.is_zero() && period < T::AuthorizationPeriod::get(),
+					Error::<T>::InvalidAuthorizationPeriodOverride,
+				);
+			}
+			if let Some(period) = valid_period {
+				ensure!(!period.is_zero(), Error::<T>::InvalidValidPeriod);
+			}
+			let valid_until =
+				valid_period.map(|p| frame_system::Pallet::<T>::block_number().saturating_add(p));
+			AllowedAuthorizers::<T>::insert(
+				&who,
+				AuthorizerBudget {
+					transactions_budget,
+					bytes_budget,
+					authorization_period,
+					valid_until,
+				},
+			);
+			Self::deposit_event(Event::AuthorizerAdded { who });
+			Ok(())
+		}
+
 		/// Remove an account from the set of allowed authorizers. The removed account will no
 		/// longer be able to call [`authorize_account`](Self::authorize_account) or
 		/// [`authorize_preimage`](Self::authorize_preimage).
@@ -1091,8 +1124,8 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Remove an authorizer whose `transactions_budget` or `bytes_budget` has been
-		/// exhausted. Anyone can call this.
+		/// Remove an authorizer that is exhausted (budget zero on either axis) or expired
+		/// (`now >= valid_until` for an entry that set `valid_period`). Anyone can call this.
 		///
 		/// Parameters:
 		///
@@ -1109,7 +1142,7 @@ pub mod pallet {
 			AllowedAuthorizers::<T>::try_mutate_exists(&who, |maybe_budget| {
 				let budget = maybe_budget.as_ref().ok_or(Error::<T>::AuthorizerNotFound)?;
 				ensure!(
-					budget.transactions_budget == 0 || budget.bytes_budget == 0,
+					Self::authorizer_removable(budget),
 					Error::<T>::AuthorizerBudgetNotExhausted,
 				);
 				*maybe_budget = None;
@@ -1322,8 +1355,10 @@ pub mod pallet {
 					AuthorizerBudget {
 						transactions_budget: *transactions_budget,
 						bytes_budget: *bytes_budget,
-						// no override of the pallet default
+						// Genesis authorizers default to the pallet's `AuthorizationPeriod` and
+						// never expire; root can re-add them later to set overrides.
 						authorization_period: None,
+						valid_until: None,
 					},
 				);
 			}
@@ -2157,10 +2192,7 @@ pub mod pallet {
 				},
 				Call::<T>::remove_exhausted_authorizer { who } => {
 					let budget = AllowedAuthorizers::<T>::get(who).ok_or(AUTHORIZER_NOT_FOUND)?;
-					ensure!(
-						budget.transactions_budget == 0 || budget.bytes_budget == 0,
-						AUTHORIZATION_NOT_EXHAUSTED
-					);
+					ensure!(Self::authorizer_removable(&budget), AUTHORIZATION_NOT_EXHAUSTED);
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExhaustedAuthorizer",
@@ -2394,6 +2426,17 @@ pub mod pallet {
 		/// Per-authorizer `authorization_period` override, if the dispatching origin is a
 		/// `Signed(_)` account present in [`AllowedAuthorizers`] and has set one. Returns
 		/// `None` for Root, XCM, or any signer without an override.
+		/// `true` if the authorizer entry is eligible for permissionless cleanup —
+		/// either its budget is zero on at least one axis, or its `valid_until` has
+		/// elapsed.
+		fn authorizer_removable(budget: &AuthorizerBudgetFor<T>) -> bool {
+			let exhausted = budget.transactions_budget == 0 || budget.bytes_budget == 0;
+			let expired = budget
+				.valid_until
+				.is_some_and(|t| frame_system::Pallet::<T>::block_number() >= t);
+			exhausted || expired
+		}
+
 		fn authorization_period_override_for(origin: &OriginFor<T>) -> Option<BlockNumberFor<T>> {
 			frame_system::ensure_signed(origin.clone())
 				.ok()

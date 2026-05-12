@@ -196,7 +196,7 @@ mod benchmarks {
 		let bytes: u64 = 10 * 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes, None);
+		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes, None, None);
 
 		assert_last_event::<T>(Event::AuthorizerAdded { who }.into());
 		Ok(())
@@ -215,6 +215,7 @@ mod benchmarks {
 			who.clone(),
 			transactions,
 			bytes,
+			None,
 			None,
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to add authorizer"))?;
@@ -334,6 +335,7 @@ mod benchmarks {
 				transactions_budget: 0,
 				bytes_budget: 0,
 				authorization_period: None,
+				valid_until: None,
 			},
 		);
 

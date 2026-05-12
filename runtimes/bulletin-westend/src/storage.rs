@@ -64,6 +64,7 @@ parameter_types! {
 		transactions_budget: 100_000,
 		bytes_budget: 100 * 1024 * 1024 * 1024,
 		authorization_period: None,
+		valid_until: None,
 	};
 }
 

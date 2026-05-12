@@ -1885,6 +1885,7 @@ fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
 			transactions_budget: 1000,
 			bytes_budget: 100 * 1024 * 1024,
 			authorization_period: None,
+			valid_period: None,
 		});
 		let sudo_call =
 			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(add_call) });
@@ -1977,6 +1978,7 @@ fn non_sudo_cannot_add_authorizer() {
 				transactions_budget: 1000,
 				bytes_budget: 100 * 1024 * 1024,
 				authorization_period: None,
+				valid_period: None,
 			});
 
 			// BadOrigin comes back at dispatch (not at validation) — so the
