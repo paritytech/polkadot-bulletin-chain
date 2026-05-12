@@ -800,7 +800,8 @@ fn allowed_authorizer_needs_balance_to_sign_authorize_account() {
 				authorizer.to_account_id(),
 			)
 			.expect("authorizer remains registered")
-			.bytes_budget;
+			.quota
+			.map(|q| q.bytes);
 			(result, post)
 		})
 	};
@@ -808,7 +809,7 @@ fn allowed_authorizer_needs_balance_to_sign_authorize_account() {
 	// Funded: dispatch succeeds; budget decremented by the requested bytes.
 	let (res, post) = attempt_authorize(true);
 	assert_ok_ok(res);
-	assert_eq!(post, bytes_budget - bytes);
+	assert_eq!(post, Some(bytes_budget - bytes));
 
 	// Unfunded: fee check rejects before dispatch; budget unchanged.
 	let (res, post) = attempt_authorize(false);
@@ -816,7 +817,7 @@ fn allowed_authorizer_needs_balance_to_sign_authorize_account() {
 		res,
 		Err(transaction_validity::TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 	);
-	assert_eq!(post, bytes_budget);
+	assert_eq!(post, Some(bytes_budget));
 }
 
 #[test]
@@ -1943,16 +1944,21 @@ fn xcm_transact_authorize_account_from_asset_hub_contract() {
 		extent,
 		AuthorizationExtent { bytes_allowance: bytes, transactions_allowance: txs, ..zero },
 	);
-	let budget = budget.expect("hashed contract account still registered after partial spend");
-	assert_eq!(budget.transactions_budget, txs_budget - txs);
-	assert_eq!(budget.bytes_budget, bytes_budget - bytes);
+	let quota = budget
+		.expect("hashed contract account still registered after partial spend")
+		.quota
+		.expect("authorizer has a tracked quota");
+	assert_eq!(quota.transactions, txs_budget - txs);
+	assert_eq!(quota.bytes, bytes_budget - bytes);
 }
 
 fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::AuthorizerBudget<BlockNumber>
 {
 	pallet_bulletin_transaction_storage::AuthorizerBudget {
-		transactions_budget: 1000,
-		bytes_budget: 100 * 1024 * 1024,
+		quota: Some(pallet_bulletin_transaction_storage::Quota {
+			transactions: 1000,
+			bytes: 100 * 1024 * 1024,
+		}),
 		authorization_period: None,
 		valid_until: None,
 	}

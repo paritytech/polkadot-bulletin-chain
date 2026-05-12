@@ -222,10 +222,8 @@ impl CheckContext {
 	MaxEncodedLen,
 )]
 pub struct AuthorizerBudget<BlockNumber> {
-	/// Max transactions this authorizer can authorize.
-	pub transactions_budget: u32,
-	/// Max bytes this authorizer can authorize.
-	pub bytes_budget: u64,
+	/// `None` is unlimited; `Some(_)` decrements both axes per dispatch.
+	pub quota: Option<Quota>,
 	/// Optional override for the authorization period.
 	pub authorization_period: Option<BlockNumber>,
 	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
@@ -234,11 +232,40 @@ pub struct AuthorizerBudget<BlockNumber> {
 	pub valid_until: Option<BlockNumber>,
 }
 
+/// Paired transaction / byte quota for an authorizer.
+#[derive(
+	Copy,
+	Clone,
+	PartialEq,
+	Eq,
+	Debug,
+	Encode,
+	Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
+pub struct Quota {
+	pub transactions: u32,
+	pub bytes: u64,
+}
+
 impl<BlockNumber> AuthorizerBudget<BlockNumber> {
-	/// `true` iff either budget axis is `0` — the authorizer has no remaining
-	/// capacity (or was misconfigured with a zero budget at registration).
+	/// `quota = Some` with either axis at zero. `quota = None` is never exhausted.
 	pub fn is_exhausted(&self) -> bool {
-		self.transactions_budget == 0 || self.bytes_budget == 0
+		self.quota.is_some_and(|q| q.transactions == 0 || q.bytes == 0)
+	}
+
+	/// Decrement both quota axes by `(transactions, bytes)`. `Ok` is also returned when
+	/// `quota = None` (unlimited — no-op). `Err(())` on underflow of either axis; the
+	/// budget is left unchanged in that case.
+	pub fn try_consume(&mut self, transactions: u32, bytes: u64) -> Result<(), ()> {
+		let Some(q) = self.quota.as_mut() else { return Ok(()) };
+		let new_tx = q.transactions.checked_sub(transactions).ok_or(())?;
+		let new_bytes = q.bytes.checked_sub(bytes).ok_or(())?;
+		q.transactions = new_tx;
+		q.bytes = new_bytes;
+		Ok(())
 	}
 }
 
@@ -285,8 +312,7 @@ where
 				AllowedAuthorizers::<T>::insert(
 					&new,
 					AuthorizerBudget {
-						transactions_budget: 10_000,
-						bytes_budget: 100_000,
+						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
 						authorization_period: None,
 						valid_until: None,
 					},

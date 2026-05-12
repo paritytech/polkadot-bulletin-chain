@@ -30,7 +30,7 @@ use super::{
 	},
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
-	AuthorizerBudget, EnsureAllowedAuthorizers, Event, TransactionInfo, TransactionKind,
+	AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo, TransactionKind,
 	AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
 	CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 	PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
@@ -69,8 +69,7 @@ type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
 	AuthorizerBudget {
-		transactions_budget: transactions,
-		bytes_budget: bytes,
+		quota: Some(Quota { transactions, bytes }),
 		authorization_period: None,
 		valid_until: None,
 	}
@@ -3746,8 +3745,7 @@ fn authorization_period_override_applied_at_dispatch() {
 		AllowedAuthorizers::<Test>::insert(
 			authorizer,
 			AuthorizerBudget {
-				transactions_budget: 100,
-				bytes_budget: 100_000,
+				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
 				authorization_period: Some(5),
 				valid_until: None,
 			},

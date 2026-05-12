@@ -121,8 +121,7 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 /// `#[benchmarks]` macro doesn't try to interpret it as a benchmark fn.
 fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
 	AuthorizerBudget {
-		transactions_budget: 100,
-		bytes_budget: 10 * 1024 * 1024,
+		quota: Some(Quota { transactions: 100, bytes: 10 * 1024 * 1024 }),
 		authorization_period: None,
 		valid_until: None,
 	}
@@ -337,8 +336,7 @@ mod benchmarks {
 		AllowedAuthorizers::<T>::insert(
 			&who,
 			AuthorizerBudget {
-				transactions_budget: 0,
-				bytes_budget: 0,
+				quota: Some(Quota { transactions: 0, bytes: 0 }),
 				authorization_period: None,
 				valid_until: None,
 			},

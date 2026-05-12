@@ -1109,12 +1109,11 @@ pub mod pallet {
 					},
 				);
 			}
-			for (account, transactions_budget, bytes_budget) in &self.allowed_authorizers {
+			for (account, transactions, bytes) in &self.allowed_authorizers {
 				AllowedAuthorizers::<T>::insert(
 					account,
 					AuthorizerBudget {
-						transactions_budget: *transactions_budget,
-						bytes_budget: *bytes_budget,
+						quota: Some(Quota { transactions: *transactions, bytes: *bytes }),
 						// Genesis authorizers default to the pallet's `AuthorizationPeriod` and
 						// never expire; root can re-add them later to set overrides.
 						authorization_period: None,
@@ -2177,17 +2176,11 @@ pub mod pallet {
 			transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
-			AllowedAuthorizers::<T>::try_mutate(who, |maybe_budget| -> DispatchResult {
+			AllowedAuthorizers::<T>::try_mutate(who, |maybe_budget| {
 				let Some(budget) = maybe_budget else { return Ok(()) };
-				budget.transactions_budget = budget
-					.transactions_budget
-					.checked_sub(transactions)
-					.ok_or(Error::<T>::InsufficientAuthorizerBudget)?;
-				budget.bytes_budget = budget
-					.bytes_budget
-					.checked_sub(bytes)
-					.ok_or(Error::<T>::InsufficientAuthorizerBudget)?;
-				Ok(())
+				budget
+					.try_consume(transactions, bytes)
+					.map_err(|_| Error::<T>::InsufficientAuthorizerBudget.into())
 			})
 		}
 	}
