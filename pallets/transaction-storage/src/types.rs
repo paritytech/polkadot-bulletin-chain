@@ -256,16 +256,16 @@ impl<BlockNumber> AuthorizerBudget<BlockNumber> {
 		self.quota.is_some_and(|q| q.transactions == 0 || q.bytes == 0)
 	}
 
-	/// Decrement both quota axes by `(transactions, bytes)`. `Ok` is also returned when
-	/// `quota = None` (unlimited — no-op). `Err(())` on underflow of either axis; the
-	/// budget is left unchanged in that case.
-	pub fn try_consume(&mut self, transactions: u32, bytes: u64) -> Result<(), ()> {
-		let Some(q) = self.quota.as_mut() else { return Ok(()) };
-		let new_tx = q.transactions.checked_sub(transactions).ok_or(())?;
-		let new_bytes = q.bytes.checked_sub(bytes).ok_or(())?;
+	/// Decrement both quota axes by `(transactions, bytes)`. `Some(())` on success and
+	/// also when `quota = None` (unlimited — no-op). `None` on underflow of either
+	/// axis; the budget is left unchanged in that case.
+	pub fn try_consume(&mut self, transactions: u32, bytes: u64) -> Option<()> {
+		let Some(q) = self.quota.as_mut() else { return Some(()) };
+		let new_tx = q.transactions.checked_sub(transactions)?;
+		let new_bytes = q.bytes.checked_sub(bytes)?;
 		q.transactions = new_tx;
 		q.bytes = new_bytes;
-		Ok(())
+		Some(())
 	}
 }
 

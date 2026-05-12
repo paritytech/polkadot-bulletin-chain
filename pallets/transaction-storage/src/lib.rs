@@ -2180,7 +2180,7 @@ pub mod pallet {
 				let Some(budget) = maybe_budget else { return Ok(()) };
 				budget
 					.try_consume(transactions, bytes)
-					.map_err(|_| Error::<T>::InsufficientAuthorizerBudget.into())
+					.ok_or(Error::<T>::InsufficientAuthorizerBudget.into())
 			})
 		}
 	}
