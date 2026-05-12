@@ -74,8 +74,15 @@ chain-spec runtime="westend":
 test-pallets:
     cargo test --release -p pallet-bulletin-transaction-storage
 
-# Zombienet auto-renew suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
-test-zombienet-auto-renew runtime="westend" filter="parachain_":
+# Zombienet auto-renew suite. runtime ∈ westend | paseo.
+# group selects the test slice (groups are named after the collator's chain-mode setting):
+#   all      — every test (skips long-running soak); default
+#   archive  — collator in archive mode, RP=10 (shared network)
+#   pruning  — collator with --blocks-pruning=15, RP=10 (shared network)
+#   restart  — scenarios that change pruning args across collator restarts
+#   mixed    — heterogeneous standalone tests (each spawns its own network)
+#   <substr> — any other value is treated as a cargo-test substring filter
+test-zombienet-auto-renew runtime="westend" group="all":
     #!/usr/bin/env bash
     set -euo pipefail
     POLKADOT_BIN_DIR="$(./scripts/get_polkadot_binaries.sh polkadot-node)"
@@ -87,11 +94,42 @@ test-zombienet-auto-renew runtime="westend" filter="parachain_":
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
+    declare -a filter_args
+    case "{{group}}" in
+        all)
+            filter_args=(parachain_ --skip parachain_long_running_pruning_soak_test)
+            ;;
+        archive)
+            filter_args=(--exact \
+                auto_renew_storage::parachain_auto_renew_test \
+                auto_renew_storage::parachain_auto_renew_many_items_test \
+                auto_renew_storage::parachain_auto_renew_quota_exhaustion_test \
+                auto_renew_storage::parachain_auto_renew_authorization_expires_mid_cycle_test)
+            ;;
+        pruning)
+            filter_args=(--exact \
+                auto_renew_storage::parachain_auto_renew_vs_no_renew_eviction_test \
+                auto_renew_storage::parachain_renew_twice_within_block_with_pruning_test \
+                auto_renew_storage::parachain_auto_renew_with_concurrent_store_test)
+            ;;
+        restart)
+            filter_args=(parachain_restart_)
+            ;;
+        mixed)
+            filter_args=(--exact \
+                auto_renew_storage::parachain_check_proof_fails_under_pruning_test \
+                auto_renew_storage::parachain_auto_renew_under_pruning_chain_halts_test \
+                auto_renew_storage::parachain_auto_renew_many_items_worst_case_test \
+                auto_renew_storage::parachain_on_initialize_cleanup_test \
+                auto_renew_storage::parachain_on_initialize_no_renewals_weight_test)
+            ;;
+        *)
+            filter_args=("{{group}}")
+            ;;
+    esac
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
-        "{{filter}}" \
-        -- --test-threads=1 --nocapture \
-        --skip parachain_long_running_pruning_soak_test
+        -- --test-threads=1 --nocapture "${filter_args[@]}"
 
 # Zombienet sync suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
 test-zombienet-sync runtime="westend" filter="parachain_sync_storage":

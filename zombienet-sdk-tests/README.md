@@ -139,9 +139,13 @@ PARACHAIN_CHAIN_ID=bulletin-rococo \
 
 ## CI
 
-| Workflow | Trigger |
-|---|---|
-| `auto-renew-tests.yml` | Every PR push + `workflow_dispatch` |
-| `sync-tests.yml` | `zombienet-sync-tests` PR label + `workflow_dispatch` |
+A single workflow (`.github/workflows/zombienet-tests.yml`) hosts both suites:
 
-Both call the same `just` recipes locally so behaviour is identical.
+| Job | Trigger |
+|---|---|
+| `zombienet-auto-renew-tests` | Every PR push + `workflow_dispatch` |
+| `zombienet-sync-tests` | `zombienet-sync-tests` PR label + `workflow_dispatch` |
+
+A shared `prepare-binaries` job fetches/builds the polkadot binaries once and uploads them
+as an artifact; both suites download that artifact instead of building locally. Each suite
+invokes the same `just test-zombienet-*` recipes used for local runs.

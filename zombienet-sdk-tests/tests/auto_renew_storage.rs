@@ -59,11 +59,12 @@ use crate::{
 		authorize_account_via_sudo, authorize_and_store_data, blake2_256,
 		build_parachain_network_config_single_collator, content_hash_and_cid, enable_auto_renew,
 		expect_bitswap_dont_have, generate_test_data, get_alice_nonce, initialize_network,
-		override_alice_authorization, set_retention_period, submit_renew_pair, submit_store_signed,
-		top_up_alice_authorization, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_session_change_on_node,
-		AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
-		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		override_alice_authorization, set_retention_period, set_retention_period_finalized,
+		submit_renew_pair, submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
+		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
+		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
+		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -151,6 +152,102 @@ fn get_para_node_args() -> Vec<String> {
 	]
 }
 
+// ===========================================================================================
+// Shared network harnesses (per group)
+//
+// Tests belonging to the same group share one zombienet network: the first `#[tokio::test]` in
+// the group to call `group_*_harness()` triggers the spawn; subsequent tests get the cached
+// handle. Static OnceCell storage means the Network is never dropped — its spawned processes
+// stay alive until the test binary exits, at which point the OS reaps them. (Statics are not
+// destructed per Rust spec, which is what we want here.)
+//
+// Group invariants are set ONCE on first spawn (e.g. `RetentionPeriod`); tests in the group
+// MUST tolerate any state left behind by previously-run sibling tests — use unique data
+// patterns (`generate_test_data` with a per-test salt), capture your own `store_block`, and
+// don't assume nonce 0 or a clean `Authorizations` entry.
+// ===========================================================================================
+
+/// Shared per-group zombienet network handle.
+///
+/// We deliberately don't cache a long-lived `OnlineClient` here: the WebSocket connection it
+/// holds drops after the inter-test quiescence idle period, surfacing as opaque "Custom
+/// error: Error reason could not be found" RPC failures in the next test. Each test instead
+/// asks `collator1.wait_client().await?` for a fresh client.
+struct SharedHarness {
+	/// Held to keep spawned processes alive for the test binary's lifetime; never dropped.
+	_network: zombienet_sdk::Network<zombienet_sdk::LocalFileSystem>,
+	collator1: zombienet_sdk::NetworkNode,
+}
+
+/// `archive` group: collator runs in archive mode (no `--blocks-pruning`), RP=10. Use for
+/// renewal-lifecycle / on-init / failure-path tests that don't need block pruning and tolerate
+/// accumulated chain state.
+static ARCHIVE_HARNESS: tokio::sync::OnceCell<std::sync::Arc<SharedHarness>> =
+	tokio::sync::OnceCell::const_new();
+
+/// `pruning` group: collator runs with `--blocks-pruning=15`, RP=10. Use for tests that
+/// exercise pruning-driven eviction.
+static PRUNING_HARNESS: tokio::sync::OnceCell<std::sync::Arc<SharedHarness>> =
+	tokio::sync::OnceCell::const_new();
+
+async fn archive_harness() -> Result<std::sync::Arc<SharedHarness>> {
+	let harness = ARCHIVE_HARNESS
+		.get_or_try_init(|| async { spawn_shared_harness("archive", get_para_node_args()).await })
+		.await?
+		.clone();
+	wait_for_finalized_quiescence(&harness.collator1, QUIESCENCE_TIMEOUT_SECS).await?;
+	Ok(harness)
+}
+
+async fn pruning_harness() -> Result<std::sync::Arc<SharedHarness>> {
+	let harness = PRUNING_HARNESS
+		.get_or_try_init(|| async {
+			spawn_shared_harness(
+				"pruning",
+				get_para_node_args_with_pruning(BLOCKS_PRUNING_GREATER_THAN_RETENTION),
+			)
+			.await
+		})
+		.await?
+		.clone();
+	wait_for_finalized_quiescence(&harness.collator1, QUIESCENCE_TIMEOUT_SECS).await?;
+	Ok(harness)
+}
+
+/// Per-test quiescence timeout: best→finalized typically takes ~30 s on a parachain;
+/// pick a budget that's well past finality lag even on a slow CI runner.
+const QUIESCENCE_TIMEOUT_SECS: u64 = 120;
+
+async fn spawn_shared_harness(
+	label: &str,
+	para_node_args: Vec<String>,
+) -> Result<std::sync::Arc<SharedHarness>> {
+	log::info!("[{}] spawning shared zombienet network", label);
+	verify_parachain_binaries()?;
+	let config = build_parachain_network_config_single_collator(para_node_args)?;
+	let network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+	let relay_alice = network
+		.get_node("alice")
+		.with_context(|| format!("[{}] failed to get relay alice node", label))?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
+		.await
+		.with_context(|| format!("[{}] failed to detect first session change", label))?;
+	let collator1 = network
+		.get_node("collator-1")
+		.with_context(|| format!("[{}] failed to get collator-1", label))?
+		.clone();
+	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+
+	// One-time group setup: set RetentionPeriod for every test in the group. Wait for
+	// finalization so tests can rely on `get_alice_nonce` reflecting the bump.
+	let nonce = get_alice_nonce(&collator1).await?;
+	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
+	log::info!("[{}] harness ready (RetentionPeriod={})", label, RETENTION_PERIOD);
+
+	Ok(std::sync::Arc::new(SharedHarness { _network: network, collator1 }))
+}
+
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
 	vec![
 		"--ipfs-server".into(),
@@ -236,43 +333,30 @@ async fn parachain_auto_renew_test() -> Result<()> {
 		NUM_RENEWAL_CYCLES
 	);
 
-	verify_parachain_binaries()?;
+	let harness = archive_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	log::info!("Waiting for relay chain session change...");
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
-		.await
-		.context("Failed to detect session change on relay chain")?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
-
-	// 1. Shrink RetentionPeriod so each cycle fits in test runtime.
-	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
-
-	// 2. Authorize 2× data and store one item. Helper consumes 1× of that on the store, leaving 1×
-	//    / 9 tx — enough for one renewal cycle.
-	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
+	// Authorize 2× data and store one item. Helper consumes 1× on the store, leaving 1× / 9 tx
+	// — enough for one renewal cycle. Salt the data with the test name so we don't collide
+	// with sibling tests on the shared chain.
+	let mut data_pattern = PARACHAIN_TEST_DATA_PATTERN.to_vec();
+	data_pattern.extend_from_slice(b"_basic_");
+	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
 	let (hash_hex, cid) = content_hash_and_cid(&data);
 	log::info!("Test data: {} bytes, hash={}, CID={}", data.len(), hash_hex, cid);
 
-	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	nonce = next_nonce;
+	let nonce = get_alice_nonce(collator1).await?;
+	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	log::info!("Data stored at block {}", store_block);
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
-	// 3. Top up authorization for the additional renewal cycles. `authorize_account` adds to
-	//    existing authorization (per pallet docs).
+	// Top up authorization for the additional renewal cycles. `authorize_account` adds to
+	// existing authorization (per pallet docs).
 	top_up_alice_authorization(
-		&client,
+		client,
 		TOPUP_TX_COUNT,
 		data.len() as u64 * TOPUP_BYTES_MULTIPLIER,
 		nonce,
@@ -280,14 +364,13 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	.await?;
 	nonce += 1;
 
-	// 4. Enable auto-renewal for this content hash.
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(&client, &content_hash, nonce).await?;
+	enable_auto_renew(client, &content_hash, nonce).await?;
 	log::info!("Auto-renewal enabled for content_hash {}", hash_hex);
 
-	// 5. Verify the data survives each retention deadline. Renewal cadence is `RP + 1`, so cycle
-	//    `k` lands at `S + k * (RP + 1)`. We wait one extra block so the `apply_block_inherents`
-	//    inherent has been observed by the chain head.
+	// Verify the data survives each retention deadline. Renewal cadence is `RP + 1`, so cycle
+	// `k` lands at `store_block + k * (RP + 1)`. Wait one extra block so the
+	// `apply_block_inherents` inherent has been observed by the chain head.
 	let cadence = RETENTION_PERIOD as u64 + 1;
 	for cycle in 1..=NUM_RENEWAL_CYCLES {
 		let renewal_block = store_block + cycle * cadence;
@@ -324,7 +407,6 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	}
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Test ({} cycles) PASSED ===", NUM_RENEWAL_CYCLES);
-	network.destroy().await?;
 	Ok(())
 }
 
@@ -535,25 +617,14 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		RETENTION_PERIOD
 	);
 
-	verify_parachain_binaries()?;
-
-	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_GREATER_THAN_RETENTION);
-	let config = build_parachain_network_config_single_collator(para_args)?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let harness = pruning_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
 
-	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
+	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_RENEW_TWICE_");
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
@@ -565,15 +636,21 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	// from the **same** signer for the same data conflict in the pool. To get two renews of
 	// the same data into the same block we need a second signer — Bob, authorized via sudo.
 	let bob_pk = subxt_signer::sr25519::dev::bob().public_key().0;
-	authorize_account_via_sudo(&client, &bob_pk, 1, data.len() as u64, nonce).await?;
+	authorize_account_via_sudo(client, &bob_pk, 1, data.len() as u64, nonce).await?;
 	nonce += 1;
+	// Pool-validation of Bob's renew calls the pallet's `validate_signed`, which reads
+	// `Authorizations` from the runtime state at the latest *finalized* block. The
+	// `authorize_account` we just submitted is in best block but not finalized, so a
+	// renew submitted immediately is rejected as `InvalidTransaction`. Quiesce so that
+	// Bob's authorization is visible to the pool before the renew goes in.
+	wait_for_finalized_quiescence(collator1, QUIESCENCE_TIMEOUT_SECS).await?;
 	let bob_nonce = client
 		.tx()
 		.account_nonce(&subxt_signer::sr25519::dev::bob().public_key().to_account_id())
 		.await?;
 
 	let (renew_block_a, renew_block_b) =
-		submit_renew_pair(&client, store_block as u32, 0, nonce, bob_nonce).await?;
+		submit_renew_pair(client, store_block as u32, 0, nonce, bob_nonce).await?;
 	// `nonce` is no longer used after this point in the test; the two renews are the last
 	// signed extrinsics here.
 	if renew_block_a != renew_block_b {
@@ -619,7 +696,6 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	);
 
 	test_log!(TEST, "=== Parachain double-renew under pruning PASSED ===");
-	network.destroy().await?;
 	Ok(())
 }
 
@@ -654,23 +730,12 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 		RETENTION_PERIOD
 	);
 
-	verify_parachain_binaries()?;
-
-	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_GREATER_THAN_RETENTION);
-	let config = build_parachain_network_config_single_collator(para_args)?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let harness = pruning_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
 
 	let data1 = generate_test_data(TEST_DATA_SIZE, b"DATA1_CONCURRENT_STORE_");
 	let data2 = generate_test_data(TEST_DATA_SIZE, b"DATA2_CONCURRENT_STORE_");
@@ -682,11 +747,11 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	log::info!("data1 stored at block {}", store_block);
 
 	// Top up authorization for: 1× data2 store + 2× data1 renewals (R1 and R2) + safety.
-	top_up_alice_authorization(&client, 5, 4 * data1.len() as u64, nonce).await?;
+	top_up_alice_authorization(client, 5, 4 * data1.len() as u64, nonce).await?;
 	nonce += 1;
 
 	let content_hash_data1 = blake2_256(&data1);
-	enable_auto_renew(&client, &content_hash_data1, nonce).await?;
+	enable_auto_renew(client, &content_hash_data1, nonce).await?;
 	nonce += 1;
 	log::info!("Auto-renewal enabled for data1");
 
@@ -702,7 +767,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	);
 	wait_for_block_height(collator1, wait_until_pre_renewal, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	let data2_block = submit_store_signed(&client, &data2, nonce).await?;
+	let data2_block = submit_store_signed(client, &data2, nonce).await?;
 	log::info!("data2 store landed at block {}", data2_block);
 	if data2_block != renewal_block {
 		anyhow::bail!(
@@ -765,7 +830,6 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	log::info!("✓ data1 still alive — auto-renewal at R2 added a fresh ref before R was pruned");
 
 	test_log!(TEST, "=== Parachain auto-renewal + same-block store PASSED ===");
-	network.destroy().await?;
 	Ok(())
 }
 
@@ -795,26 +859,15 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		RETENTION_PERIOD,
 	);
 
-	verify_parachain_binaries()?;
-
-	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_GREATER_THAN_RETENTION);
-	let config = build_parachain_network_config_single_collator(para_args)?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let harness = pruning_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
 
-	let data_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_AUTO_RENEWED_");
-	let data_not_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_NOT_RENEWED_");
+	let data_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_RENEWED_");
+	let data_not_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_NOT_RENEWED_");
 
 	// Store both items. `authorize_and_store_data` returns the block the first store landed in;
 	// the second store goes through Alice's leftover authorization (topped up below) and lands
@@ -826,16 +879,16 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	log::info!("data_renewed stored at block {}", store_block);
 
 	// Top up authorization for: 1× data_not_renewed store + 2× data_renewed renewals + safety.
-	top_up_alice_authorization(&client, 5, 4 * data_renewed.len() as u64, nonce).await?;
+	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
 	nonce += 1;
 
-	let data_not_renewed_block = submit_store_signed(&client, &data_not_renewed, nonce).await?;
+	let data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
 	nonce += 1;
 	log::info!("data_not_renewed stored at block {}", data_not_renewed_block);
 
 	// Enable auto-renew for ONLY the first item.
 	let content_hash_renewed = blake2_256(&data_renewed);
-	enable_auto_renew(&client, &content_hash_renewed, nonce).await?;
+	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
 	log::info!("Auto-renewal enabled for data_renewed");
 
 	// Both items should be bitswap-fetchable shortly after upload.
@@ -893,7 +946,6 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	log::info!("✓ data_not_renewed evicted (no auto-renewal kept it alive)");
 
 	test_log!(TEST, "=== Auto-renew vs no-renew eviction PASSED ===");
-	network.destroy().await?;
 	Ok(())
 }
 
@@ -923,29 +975,19 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	test_log!(TEST, "=== Auto-renew {} items, measure block weight ===", MANY_ITEMS_COUNT);
 
-	verify_parachain_binaries()?;
-
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let harness = archive_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
 
 	// Authorize Alice for: 1 store + RENEWAL_CYCLES_TO_OBSERVE renewals per item + one cycle
 	// of safety margin. Each cycle consumes 1 tx-slot and `data.len()` bytes per item.
 	let bytes_per_item = TEST_DATA_SIZE as u64;
 	let cycles_to_authorize = RENEWAL_CYCLES_TO_OBSERVE + 2; // 1 store + N renewals + 1 safety
 	authorize_account_via_sudo(
-		&client,
+		client,
 		&dev::alice().public_key().0,
 		MANY_ITEMS_COUNT * cycles_to_authorize,
 		bytes_per_item * (MANY_ITEMS_COUNT as u64) * cycles_to_authorize as u64,
@@ -982,7 +1024,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		.map(|n| n != 0)
 		.unwrap_or(false);
 	let alice = dev::alice();
-	let pre_store_block = current_best_block(&client).await?.number() as u64;
+	let pre_store_block = current_best_block(client).await?.number() as u64;
 	log::info!(
 		"Submitting {} stores (pre-store block={}, proof_decoy={})",
 		MANY_ITEMS_COUNT,
@@ -1038,7 +1080,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
 		loop {
-			let head = current_best_block(&client).await?;
+			let head = current_best_block(client).await?;
 			if head.number() as u64 >= store_inclusion_target {
 				break head.number() as u64;
 			}
@@ -1050,7 +1092,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	};
 	let mut store_blocks: Vec<u64> = Vec::with_capacity(items.len());
 	{
-		let mut current = current_best_block(&client).await?;
+		let mut current = current_best_block(client).await?;
 		while current.number() as u64 > pre_store_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
@@ -1100,7 +1142,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 
 	// Submit all N enable_auto_renew calls to the pool in parallel (no watch).
-	let pre_enable_block = current_best_block(&client).await?.number() as u64;
+	let pre_enable_block = current_best_block(client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
@@ -1130,7 +1172,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
 		loop {
-			let head = current_best_block(&client).await?;
+			let head = current_best_block(client).await?;
 			if head.number() as u64 >= enable_inclusion_target {
 				break;
 			}
@@ -1142,7 +1184,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 	let mut enabled_count = 0usize;
 	{
-		let mut current = current_best_block(&client).await?;
+		let mut current = current_best_block(client).await?;
 		while current.number() as u64 > pre_enable_block {
 			let events = current.events().await?;
 			enabled_count += events
@@ -1239,7 +1281,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
 		loop {
-			let head = current_best_block(&client).await?;
+			let head = current_best_block(client).await?;
 			if head.number() as u64 >= wait_until {
 				break head;
 			}
@@ -1284,7 +1326,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	let block_weight_addr = subxt::dynamic::storage("System", "BlockWeight", Vec::<Value>::new());
 
-	let (max_block_ref, max_block_pov) = fetch_max_block_weight(&client).await?;
+	let (max_block_ref, max_block_pov) = fetch_max_block_weight(client).await?;
 	log::info!(
 		"BlockWeights::max_block = (ref_time={}, proof_size={})",
 		max_block_ref,
@@ -1407,7 +1449,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 
 	test_log!(TEST, "=== Auto-renew {} items PASSED ===", MANY_ITEMS_COUNT);
-	network.destroy().await?;
 	Ok(())
 }
 
@@ -3117,277 +3158,6 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 	Ok(())
 }
 
-// ===========================================================================================
-// Bitswap-confirmed: restart archive → pruning evicts old col11 entries
-// ===========================================================================================
-
-/// Like `build_respawn_args` but preserves the original libp2p/RPC/Prometheus ports.
-/// Needed for the eviction test so the respawned node keeps the same multiaddr (which lets us
-/// reuse `collator1.multiaddr()` for bitswap), and the same relay-side --port (so relay-chain
-/// peer discovery via the chain spec's bootnodes still works on a known address).
-fn build_respawn_args_keep_ports(orig: &[String], new_pruning: Option<u32>) -> Vec<String> {
-	let mut out = Vec::with_capacity(orig.len() + 2);
-	let mut i = 0;
-	while i < orig.len() {
-		let a = &orig[i];
-		if a == "--blocks-pruning" {
-			i += 2;
-			continue;
-		}
-		if a.starts_with("--blocks-pruning=") {
-			i += 1;
-			continue;
-		}
-		out.push(a.clone());
-		i += 1;
-	}
-	if let Some(n) = new_pruning {
-		if let Some(idx) = out.iter().position(|a| a == "--") {
-			out.insert(idx, format!("--blocks-pruning={}", n));
-		} else {
-			out.push(format!("--blocks-pruning={}", n));
-		}
-	}
-	out
-}
-
-/// Spawn omni-node detached, redirecting stdout+stderr to `log_path` so the caller can
-/// inspect what the respawned process actually did. Returns the Child handle.
-async fn spawn_omni_node_detached_to_log(
-	binary: &str,
-	args: &[String],
-	log_path: &std::path::Path,
-) -> Result<tokio::process::Child> {
-	use std::process::Stdio;
-	use tokio::process::Command;
-	let log_file = std::fs::File::create(log_path).context("create respawn log file")?;
-	let log_file_err = log_file.try_clone().context("clone log file handle")?;
-	let mut cmd = Command::new(binary);
-	for a in args {
-		cmd.arg(a);
-	}
-	cmd.stdout(Stdio::from(log_file)).stderr(Stdio::from(log_file_err));
-	let child = cmd.spawn().context("spawn omni-node")?;
-	Ok(child)
-}
-
-const EVICT_TEST_INITIAL_STORE_TARGET_BLOCK: u64 = 12;
-const EVICT_TEST_RESTART_AFTER_BLOCK: u64 = 50;
-/// Total wall-clock budget for the post-respawn eviction-poll loop. Each iteration probes
-/// bitswap for all three items; we succeed as soon as all three return DONT_HAVE, and fail
-/// only if the budget runs out. Generous to absorb finality lag on slow CI hardware.
-const EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS: u64 = 900;
-/// Pause between successive bitswap poll iterations.
-const EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS: u64 = 15;
-const EVICT_TEST_RETENTION_PERIOD: u32 = 10;
-
-/// End-to-end: store data while the collator is in archive mode, restart the same data dir
-/// with `--blocks-pruning=10`, wait for finalized-block pruning to catch up, and confirm
-/// bitswap returns `DONT_HAVE` for the originally-stored items.
-///
-/// This is the empirical companion to the "is `--blocks-pruning` change really applied?"
-/// question: substrate accepts the change silently (no compatibility check on
-/// `BlocksPruning`), but we want to see col11 actually evicted.
-#[tokio::test(flavor = "multi_thread")]
-async fn parachain_restart_archive_to_pruning_evicts_old_blocks_test() -> Result<()> {
-	const TEST: &str = "evict_archive_to_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
-	test_log!(TEST, "=== Restart archive → --blocks-pruning=10, verify col11 evicted ===");
-
-	verify_parachain_binaries()?;
-
-	// 1. Spawn 1 collator in archive mode (no --blocks-pruning).
-	let para_args = get_para_node_args();
-	let config = build_parachain_network_config_single_collator(para_args)?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("alice not found")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("collator-1 not found")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
-
-	// 2. Shrink RetentionPeriod (so pallet state is also pruned alongside the bitswap eviction).
-	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("[evict] setting RetentionPeriod = {}", EVICT_TEST_RETENTION_PERIOD);
-	set_retention_period(&client, EVICT_TEST_RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
-
-	// 3. Authorize Alice for ~5 stores' worth of capacity.
-	let bytes_per_item = TEST_DATA_SIZE as u64;
-	authorize_account_via_sudo(&client, &dev::alice().public_key().0, 5, bytes_per_item * 5, nonce)
-		.await?;
-	nonce += 1;
-
-	// 4. Store three distinct items at the chain's earliest blocks.
-	wait_for_block_height(
-		collator1,
-		EVICT_TEST_INITIAL_STORE_TARGET_BLOCK,
-		BLOCK_PRODUCTION_TIMEOUT_SECS,
-	)
-	.await?;
-	let items: Vec<Vec<u8>> = (0..3)
-		.map(|i| {
-			let mut pattern = b"RESTART_EVICT_".to_vec();
-			pattern.extend_from_slice(format!("{:03}_", i).as_bytes());
-			generate_test_data(TEST_DATA_SIZE, &pattern)
-		})
-		.collect();
-
-	let mut store_blocks: Vec<u64> = Vec::new();
-	for (i, data) in items.iter().enumerate() {
-		let block_n = submit_store_signed(&client, data, nonce).await?;
-		store_blocks.push(block_n);
-		nonce += 1;
-		log::info!("[evict] stored item {} at block {}", i, block_n);
-	}
-
-	// 5. Sanity bitswap: data should be retrievable in archive mode.
-	for (i, data) in items.iter().enumerate() {
-		verify_node_bitswap(
-			collator1,
-			data,
-			BITSWAP_TIMEOUT_SECS,
-			&format!("collator-1 / item-{} (pre-restart sanity)", i),
-		)
-		.await?;
-	}
-	log::info!("[evict] ✓ pre-restart bitswap fetch succeeded for all 3 items");
-
-	// 6. Let chain run until block 50, then SIGTERM the collator.
-	wait_for_block_height(collator1, EVICT_TEST_RESTART_AFTER_BLOCK, BLOCK_PRODUCTION_TIMEOUT_SECS)
-		.await?;
-	log::info!(
-		"[evict] reached block {}; preparing to restart with --blocks-pruning=10",
-		EVICT_TEST_RESTART_AFTER_BLOCK
-	);
-
-	let orig_args: Vec<String> = collator1.args().iter().map(|s| s.to_string()).collect();
-	let base_path = extract_arg_value(&orig_args, "--base-path")
-		.ok_or_else(|| anyhow::anyhow!("collator-1 missing --base-path"))?;
-	let original_multiaddr = collator1.multiaddr().to_string();
-	log::info!("[evict] base_path={}", base_path);
-	log::info!("[evict] saving multiaddr for post-restart bitswap: {}", original_multiaddr);
-
-	let pid = find_pid_by_base_path(&base_path).ok_or_else(|| anyhow::anyhow!("PID not found"))?;
-	log::info!("[evict] SIGTERM pid={}", pid);
-	sigterm_and_wait(pid).await?;
-
-	// 7. Re-spawn with --blocks-pruning=10, KEEPING ports so the multiaddr is unchanged and the
-	//    relay client reuses the bootnode wiring from the chain spec.
-	let respawn_args = build_respawn_args_keep_ports(&orig_args, Some(10));
-	let binary = std::env::var("POLKADOT_PARACHAIN_BINARY_PATH")
-		.unwrap_or_else(|_| "polkadot-omni-node".to_string());
-	log::info!("[evict] re-spawning with --blocks-pruning=10 (keeping all ports)");
-	let respawn_log_path = std::env::temp_dir().join("bulletin-evict-respawn.log");
-	let _ = std::fs::remove_file(&respawn_log_path);
-	let mut child =
-		spawn_omni_node_detached_to_log(&binary, &respawn_args, &respawn_log_path).await?;
-	log::info!("[evict] respawn log will be at {}", respawn_log_path.display());
-
-	// Diagnostic: is the respawned process actually alive and did it advance the chain?
-	let still_alive = match child.try_wait() {
-		Ok(Some(status)) => {
-			log::warn!(
-				"[evict] respawned process EXITED early with status={:?} — pruning never had a chance",
-				status
-			);
-			false
-		},
-		Ok(None) => {
-			log::info!("[evict] respawned process is still running");
-			true
-		},
-		Err(e) => {
-			log::warn!("[evict] try_wait failed: {}", e);
-			false
-		},
-	};
-	if let Ok(log_text) = std::fs::read_to_string(&respawn_log_path) {
-		let last: Vec<&str> = log_text.lines().rev().take(40).collect();
-		let last: Vec<&str> = last.into_iter().rev().collect();
-		log::info!(
-			"[evict] respawn log size = {} bytes; last 40 lines:\n{}",
-			log_text.len(),
-			last.join("\n")
-		);
-		// Look for any pruning-related lines from earlier in the log.
-		let pruning_lines: Vec<&str> = log_text
-			.lines()
-			.filter(|line| {
-				let lower = line.to_lowercase();
-				lower.contains("prun") || lower.contains("archive") || lower.contains("error")
-			})
-			.collect();
-		if !pruning_lines.is_empty() {
-			log::info!(
-				"[evict] pruning/archive/error lines from the full log:\n{}",
-				pruning_lines.join("\n")
-			);
-		}
-	}
-	let _ = still_alive;
-
-	// 9. Bitswap verification: data stored at blocks ~12 should now return DONT_HAVE.
-	// Pruning runs off the FINALIZED head, and finality lag varies wildly across hardware
-	// (healthy laptop: ~10 blocks; slow CI disks: 30+ blocks). Instead of one-shot probing
-	// after a fixed sleep, retry until every item is gone OR the budget runs out.
-	let poll_deadline = std::time::Instant::now() +
-		std::time::Duration::from_secs(EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS);
-	let mut last_error: Option<String> = None;
-	let mut all_evicted = false;
-	while std::time::Instant::now() < poll_deadline {
-		let mut iteration_evicted = true;
-		let mut iteration_error: Option<String> = None;
-		for (i, data) in items.iter().enumerate() {
-			match expect_bitswap_dont_have(
-				collator1,
-				data,
-				BITSWAP_TIMEOUT_SECS,
-				&format!("collator-1 / item-{} (post-pruning eviction)", i),
-			)
-			.await
-			{
-				Ok(_) => log::info!("[evict] ✓ item {} evicted from col11 — bitswap DONT_HAVE", i),
-				Err(e) => {
-					iteration_error = Some(format!("item {} still served: {}", i, e));
-					iteration_evicted = false;
-				},
-			}
-		}
-		if iteration_evicted {
-			all_evicted = true;
-			break;
-		}
-		last_error = iteration_error;
-		log::info!(
-			"[evict] not all items evicted yet — sleeping {}s and retrying",
-			EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS
-		);
-		tokio::time::sleep(std::time::Duration::from_secs(
-			EVICT_TEST_POST_RESTART_POLL_INTERVAL_SECS,
-		))
-		.await;
-	}
-
-	// 10. Cleanup: kill manual respawn first, then network.
-	let _ = child.kill().await;
-	let _ = child.wait().await;
-	network.destroy().await?;
-
-	if !all_evicted {
-		anyhow::bail!(
-			"at least one item still bitswap-fetchable after {}s poll budget — col11 wasn't evicted ({})",
-			EVICT_TEST_POST_RESTART_POLL_BUDGET_SECS,
-			last_error.unwrap_or_else(|| "no error captured".to_string()),
-		);
-	}
-
-	test_log!(TEST, "=== Restart archive → pruning EVICTED all old items as expected ===");
-	Ok(())
-}
-
 /// Drive `do_process_auto_renewals` into the `AutoRenewalFailed` branch by sizing Alice's
 /// `bytes_allowance` so the per-account `has_permanent_capacity` cap is hit on cycle 3.
 /// `authorize_and_store_data` grants `bytes_allowance = 2 * data.len()` and we intentionally
@@ -3400,28 +3170,19 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Quota Exhaustion Test ===");
 
-	verify_parachain_binaries()?;
+	let harness = archive_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
-
-	let mut nonce = get_alice_nonce(collator1).await?;
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
-
-	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
+	let mut data_pattern = PARACHAIN_TEST_DATA_PATTERN.to_vec();
+	data_pattern.extend_from_slice(b"_quota_exhaustion_");
+	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	nonce = next_nonce;
+	let nonce = get_alice_nonce(collator1).await?;
+	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "post-store").await?;
 
 	// The `local_testnet` genesis preset pre-authorizes Alice with `(100 tx, 10 MiB)`, and
@@ -3430,7 +3191,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	// directly so the per-account cap actually trips after a known number of cycles.
 	let l = data.len() as u64;
 	override_alice_authorization(
-		&client,
+		client,
 		AuthorizationOverride {
 			transactions: 1,
 			transactions_allowance: 10,
@@ -3450,7 +3211,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	);
 
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(&client, &content_hash, nonce).await?;
+	enable_auto_renew(client, &content_hash, nonce).await?;
 	log::info!("Auto-renewal enabled for {}", hash_hex);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
@@ -3469,7 +3230,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		);
 		wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-		let renewal_hash = block_hash_at(&client, renewal_block).await?;
+		let renewal_hash = block_hash_at(client, renewal_block).await?;
 		let events = client.blocks().at(renewal_hash).await?.events().await?;
 		let renewed = count_event(&events, "DataAutoRenewed");
 		let failed = count_event(&events, "AutoRenewalFailed");
@@ -3499,7 +3260,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	log::info!("[cycle 3] Waiting for block {} (renewal at {}) — expected to fail", wait_until, r3);
 	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	let r3_hash = block_hash_at(&client, r3).await?;
+	let r3_hash = block_hash_at(client, r3).await?;
 	let events = client.blocks().at(r3_hash).await?.events().await?;
 	let failed = count_event(&events, "AutoRenewalFailed");
 	let renewed = count_event(&events, "DataAutoRenewed");
@@ -3534,7 +3295,6 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	log::info!("✓ AutoRenewals[{}] removed at block {}", hash_hex, r3);
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Quota Exhaustion Test PASSED ===");
-	network.destroy().await?;
 	Ok(())
 }
 
@@ -3576,28 +3336,19 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Authorization Expires Mid-Cycle Test ===");
 
-	verify_parachain_binaries()?;
+	let harness = archive_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
 
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
-
-	let mut nonce = get_alice_nonce(collator1).await?;
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
-
-	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
+	let mut data_pattern = PARACHAIN_TEST_DATA_PATTERN.to_vec();
+	data_pattern.extend_from_slice(b"_auth_expires_");
+	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	nonce = next_nonce;
+	let nonce = get_alice_nonce(collator1).await?;
+	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	log::info!("Data stored at block {}", store_block);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
@@ -3619,7 +3370,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	// `transactions=1, bytes=data.len()`; we overwrite to those + plenty of headroom.
 	let l = data.len() as u64;
 	override_alice_authorization(
-		&client,
+		client,
 		AuthorizationOverride {
 			transactions: 1,
 			transactions_allowance: 100,
@@ -3634,13 +3385,13 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	nonce += 1;
 
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(&client, &content_hash, nonce).await?;
+	enable_auto_renew(client, &content_hash, nonce).await?;
 	nonce += 1;
 	log::info!("Auto-renewal enabled");
 
 	// Cycle 1: success.
 	wait_for_block_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	let r1_hash = block_hash_at(&client, r1).await?;
+	let r1_hash = block_hash_at(client, r1).await?;
 	let r1_events = client.blocks().at(r1_hash).await?.events().await?;
 	assert_eq!(
 		count_event(&r1_events, "DataAutoRenewed"),
@@ -3658,7 +3409,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	// Cycle 2: AutoRenewalFailed because auth has expired.
 	wait_for_block_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	let r2_hash = block_hash_at(&client, r2).await?;
+	let r2_hash = block_hash_at(client, r2).await?;
 	let r2_events = client.blocks().at(r2_hash).await?.events().await?;
 	assert_eq!(
 		count_event(&r2_events, "AutoRenewalFailed"),
@@ -3693,7 +3444,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	// installing a fresh expiration of `now + AuthorizationPeriod`.
 	let alice_pk = subxt_signer::sr25519::dev::alice().public_key().0;
 	authorize_account_via_sudo(
-		&client,
+		client,
 		&alice_pk,
 		/* transactions */ 10,
 		/* bytes */ 4 * l,
@@ -3715,17 +3466,17 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	};
 	let (hash2_hex, _) = content_hash_and_cid(&data2);
 
-	let store2_block = submit_store_signed(&client, &data2, nonce).await?;
+	let store2_block = submit_store_signed(client, &data2, nonce).await?;
 	nonce += 1;
 	log::info!("Stored second item at block {} (hash={})", store2_block, hash2_hex);
 
 	let content_hash2 = blake2_256(&data2);
-	enable_auto_renew(&client, &content_hash2, nonce).await?;
+	enable_auto_renew(client, &content_hash2, nonce).await?;
 	log::info!("Auto-renewal enabled for second item");
 
 	let r1_after = store2_block + cadence;
 	wait_for_block_height(collator1, r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	let r1_after_hash = block_hash_at(&client, r1_after).await?;
+	let r1_after_hash = block_hash_at(client, r1_after).await?;
 	let r1_after_events = client.blocks().at(r1_after_hash).await?.events().await?;
 	assert_eq!(
 		count_event(&r1_after_events, "DataAutoRenewed"),
@@ -3743,6 +3494,5 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	log::info!("✓ Post-reauth cycle 1 succeeded — counters reset");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Authorization Expires Mid-Cycle Test PASSED ===");
-	network.destroy().await?;
 	Ok(())
 }

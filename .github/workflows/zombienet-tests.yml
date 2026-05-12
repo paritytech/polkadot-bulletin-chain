@@ -1,0 +1,180 @@
+name: Zombienet SDK Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # `labeled` lets the sync suite kick in mid-PR when the `zombienet-sync-tests` label is
+    # added; auto-renew runs on every push regardless via its lack of an `if:` gate.
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  set-image:
+    uses: ./.github/workflows/set-image.yml
+
+  prepare-binaries:
+    name: Fetch polkadot binaries
+    needs: [set-image]
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Ensure `just` is available
+        run: command -v just || cargo install just --locked
+
+      - name: Cache polkadot-sdk binaries
+        id: cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        with:
+          path: .polkadot-binaries
+          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
+
+      - name: Fetch / build polkadot binaries
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          just binaries-polkadot
+          just binaries-chain-spec-builder
+
+      - name: Upload binaries artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: polkadot-binaries
+          path: .polkadot-binaries
+          retention-days: 1
+          include-hidden-files: true
+
+  zombienet-auto-renew-tests:
+    needs: [set-image, prepare-binaries]
+    name: auto-renew / ${{ matrix.runtime.name }} / ${{ matrix.group }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    # Wall-clock budgets after group split + shared harness:
+    #   archive/pruning: ~25-40 min (4 / 3 tests, one shared network)
+    #   restart:         ~20-30 min (3 tests, each its own network)
+    #   mixed:           ~50-70 min (5 tests, each its own network)
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+        group:
+          - archive
+          - pruning
+          - restart
+          - mixed
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Ensure `just` is available
+        run: command -v just || cargo install just --locked
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Download polkadot binaries artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: polkadot-binaries
+          path: .polkadot-binaries
+
+      - name: Mark binaries executable
+        run: chmod -R +x .polkadot-binaries
+
+      - name: Run zombienet auto-renew tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        run: just test-zombienet-auto-renew ${{ matrix.runtime.name }} ${{ matrix.group }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
+
+  zombienet-sync-tests:
+    # Sync suite is heavy (~120 min) — only run on manual dispatch or when the PR has the
+    # `zombienet-sync-tests` label.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
+    needs: [set-image, prepare-binaries]
+    name: sync / ${{ matrix.runtime.name }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Ensure `just` is available
+        run: command -v just || cargo install just --locked
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Download polkadot binaries artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: polkadot-binaries
+          path: .polkadot-binaries
+
+      - name: Mark binaries executable
+        run: chmod -R +x .polkadot-binaries
+
+      - name: Run zombienet sync tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        # parachain_ldb_storage_verification_test requires the rocksdb `ldb` CLI,
+        # which is not packaged for Debian Bullseye — skipped by the just recipe.
+        run: just test-zombienet-sync ${{ matrix.runtime.name }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
