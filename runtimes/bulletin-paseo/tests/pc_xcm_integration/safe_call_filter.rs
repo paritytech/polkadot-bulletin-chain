@@ -14,86 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `SafeCallFilter`.
-//!
-//! Storage-mutating calls must not reach dispatch over XCM, even when the
-//! origin is otherwise valid. The filter inspects through `Utility::batch*`.
+//! `SafeCallFilter`: storage-mutating calls must not reach dispatch over XCM.
+//! Thin wrappers around `bulletin-runtimes-test-utils`.
 
 use super::*;
 
 #[test]
 fn sibling_xcm_store_is_blocked() {
-	new_test_ext().execute_with(|| {
-		let who: AccountId = Sr25519Keyring::Alice.to_account_id();
-		assert_ok!(TransactionStorage::authorize_account(
-			RuntimeOrigin::root(),
-			who.clone(),
-			1,
-			1_000
-		));
-
-		let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-			data: vec![0u8; 100],
-		});
-
-		assert!(execute_from(pc_location(), xcm_transact(store_call, OriginKind::Xcm)).is_err());
-		assert_eq!(extent_of(&who), extent(0, 1_000, 0, 1));
-	});
+	utils::xcm_store_is_blocked::<Runtime, XcmConfig>(pc_location(), new_test_ext, advance_block);
 }
 
 #[test]
 fn sibling_xcm_batch_with_store_is_entirely_blocked() {
-	new_test_ext().execute_with(|| {
-		let target: AccountId = Sr25519Keyring::Bob.to_account_id();
-		let store_target: AccountId = Sr25519Keyring::Alice.to_account_id();
-
-		let authorize_call =
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-				who: target.clone(),
-				transactions: 5,
-				bytes: 1_000,
-			});
-		let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-			data: vec![0u8; 50],
-		});
-		let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch {
-			calls: vec![authorize_call, store_call],
-		});
-
-		assert!(execute_from(pc_location(), xcm_transact(batch_call, OriginKind::Xcm)).is_err());
-		assert_eq!(
-			extent_of(&target),
-			empty(),
-			"the inner authorize_account must NOT have executed alongside a filtered store",
-		);
-		assert_eq!(extent_of(&store_target), empty());
-	});
+	utils::xcm_batch_with_store_is_entirely_blocked::<Runtime, XcmConfig>(
+		pc_location(),
+		new_test_ext,
+		advance_block,
+	);
 }
 
 #[test]
 fn sibling_xcm_batch_of_only_authorize_calls_succeeds() {
-	new_test_ext().execute_with(|| {
-		let alice: AccountId = Sr25519Keyring::Alice.to_account_id();
-		let bob: AccountId = Sr25519Keyring::Bob.to_account_id();
-
-		let authorize_alice =
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-				who: alice.clone(),
-				transactions: 5,
-				bytes: 1_000,
-			});
-		let authorize_bob =
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-				who: bob.clone(),
-				transactions: 10,
-				bytes: 2_000,
-			});
-		let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch {
-			calls: vec![authorize_alice, authorize_bob],
-		});
-
-		assert_ok!(execute_from(pc_location(), xcm_transact(batch_call, OriginKind::Xcm)));
-		assert_eq!(extent_of(&alice), extent(0, 1_000, 0, 5));
-		assert_eq!(extent_of(&bob), extent(0, 2_000, 0, 10));
-	});
+	utils::xcm_batch_of_only_authorize_calls_succeeds::<Runtime, XcmConfig>(
+		pc_location(),
+		new_test_ext,
+		advance_block,
+	);
 }

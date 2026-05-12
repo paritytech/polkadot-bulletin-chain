@@ -15,21 +15,39 @@
 // limitations under the License.
 
 //! End-to-end: People Chain authorizes, then the user submits a signed
-//! `store` and a signed `renew` on Bulletin Chain.
+//! `store` and a signed `renew` on Bulletin Chain. Stays runtime-local
+//! because it constructs signed extrinsics with the runtime's
+//! tx-extension stack.
 
 use super::*;
+use frame_support::assert_ok;
 
 #[test]
 fn authorize_then_user_stores_and_renews() {
-	new_test_ext().execute_with(|| {
+	let mut ext = new_test_ext();
+	ext.execute_with(|| {
+		advance_block();
 		let account = Sr25519Keyring::Alice;
 		let who: AccountId = account.to_account_id();
 
-		// PC issues a 2-tx, 4_000-byte allowance via XCM.
-		assert_ok!(pc_authorize(who.clone(), 2, 4_000));
-		assert_eq!(extent_of(&who), extent(0, 4_000, 0, 2));
+		assert_ok!(utils::xcm_authorize::<Runtime, XcmConfig>(
+			pc_location(),
+			who.clone(),
+			2,
+			4_000,
+		)
+		.ensure_complete());
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 4_000,
+				transactions: 0,
+				transactions_allowance: 2,
+			},
+		);
 
-		// Authorized user stores 1_000 bytes (feeless, boost-tier).
 		advance_block();
 		let stored_block = System::block_number();
 		assert_extrinsic_ok(construct_and_apply_extrinsic(
@@ -38,10 +56,17 @@ fn authorize_then_user_stores_and_renews() {
 				data: vec![0u8; 1_000],
 			}),
 		));
-		assert_eq!(extent_of(&who), extent(1_000, 4_000, 1, 2));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent {
+				bytes: 1_000,
+				bytes_permanent: 0,
+				bytes_allowance: 4_000,
+				transactions: 1,
+				transactions_allowance: 2,
+			},
+		);
 
-		// Same user renews against the just-stored block/index. `renew`
-		// charges the per-window permanent quota (`bytes_permanent`).
 		advance_block();
 		assert_extrinsic_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
@@ -51,7 +76,7 @@ fn authorize_then_user_stores_and_renews() {
 			}),
 		));
 		assert_eq!(
-			extent_of(&who),
+			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 1_000,
 				bytes_permanent: 1_000,

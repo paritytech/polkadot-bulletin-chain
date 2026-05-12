@@ -2066,6 +2066,7 @@ name = "bulletin-paseo-runtime"
 version = "0.1.0"
 dependencies = [
  "bulletin-pallets-common",
+ "bulletin-runtimes-test-utils",
  "bulletin-transaction-storage-primitives",
  "cumulus-pallet-aura-ext",
  "cumulus-pallet-parachain-system",
@@ -2133,6 +2134,22 @@ dependencies = [
  "substrate-wasm-builder",
  "tracing",
  "xcm-runtime-apis",
+]
+
+[[package]]
+name = "bulletin-runtimes-test-utils"
+version = "0.1.0"
+dependencies = [
+ "frame-system",
+ "pallet-bulletin-transaction-storage",
+ "pallet-utility",
+ "parachains-common",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "sp-io",
+ "sp-keyring",
+ "staging-xcm",
+ "staging-xcm-executor",
 ]
 
 [[package]]

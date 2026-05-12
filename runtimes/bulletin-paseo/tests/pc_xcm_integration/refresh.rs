@@ -14,47 +14,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `refresh_account_authorization` semantics.
+//! `refresh_account_authorization` semantics. Thin wrappers around
+//! `bulletin-runtimes-test-utils`.
 
 use super::*;
 
 #[test]
 fn extends_only_expiration() {
-	new_test_ext().execute_with(|| {
-		let who: AccountId = Sr25519Keyring::Alice.to_account_id();
-
-		assert_ok!(pc_authorize(who.clone(), 5, 1_000));
-		assert_eq!(extent_of(&who), extent(0, 1_000, 0, 5));
-
-		let half = auth_period() / 2;
-		let now = System::block_number();
-		System::set_block_number(now + half);
-
-		assert_ok!(pc_refresh(who.clone()));
-
-		assert_eq!(extent_of(&who), extent(0, 1_000, 0, 5));
-
-		// A block past the *original* expiry must still be active because
-		// refresh extended the window.
-		System::set_block_number(now + auth_period());
-		assert!(
-			TransactionStorage::account_has_active_authorization(&who),
-			"refresh must have extended expiry past the original window",
-		);
-	});
+	utils::xcm_refresh_extends_only_expiration::<Runtime, XcmConfig>(
+		pc_location(),
+		new_test_ext,
+		advance_block,
+	);
 }
 
 #[test]
 fn without_prior_authorize_fails() {
-	new_test_ext().execute_with(|| {
-		let who: AccountId = Sr25519Keyring::Alice.to_account_id();
-
-		// XCM completes; the inner `refresh_account_authorization` returns
-		// `Error::AccountNotAuthorized` which is reported via runtime events,
-		// not as an XCM-level instruction error.
-		assert_ok!(pc_refresh(who.clone()));
-
-		assert_eq!(extent_of(&who), empty());
-		assert!(!TransactionStorage::account_has_active_authorization(&who));
-	});
+	utils::xcm_refresh_without_prior_authorize_fails::<Runtime, XcmConfig>(
+		pc_location(),
+		new_test_ext,
+		advance_block,
+	);
 }
