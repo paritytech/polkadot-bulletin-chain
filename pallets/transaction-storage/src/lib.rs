@@ -854,9 +854,7 @@ pub mod pallet {
 					Error::<T>::InvalidAuthorizationPeriodOverride,
 				);
 			}
-			if let Some(t) = budget.valid_until {
-				ensure!(t > Self::now(), Error::<T>::InvalidValidUntil);
-			}
+			ensure!(!budget.is_expired(Self::now()), Error::<T>::InvalidValidUntil);
 			AllowedAuthorizers::<T>::insert(&who, budget);
 			Self::deposit_event(Event::AuthorizerAdded { who });
 			Ok(())
@@ -2156,9 +2154,7 @@ pub mod pallet {
 		/// either its budget is zero on at least one axis, or its `valid_until` has
 		/// elapsed.
 		fn authorizer_removable(budget: &AuthorizerBudgetFor<T>) -> bool {
-			let exhausted = budget.transactions_budget == 0 || budget.bytes_budget == 0;
-			let expired = budget.valid_until.is_some_and(|t| Self::now() >= t);
-			exhausted || expired
+			budget.is_exhausted() || budget.is_expired(Self::now())
 		}
 
 		fn authorization_period_override_for(origin: &OriginFor<T>) -> Option<BlockNumberFor<T>> {

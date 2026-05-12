@@ -234,6 +234,24 @@ pub struct AuthorizerBudget<BlockNumber> {
 	pub valid_until: Option<BlockNumber>,
 }
 
+impl<BlockNumber> AuthorizerBudget<BlockNumber> {
+	/// `true` iff either budget axis is `0` — the authorizer has no remaining
+	/// capacity (or was misconfigured with a zero budget at registration).
+	pub fn is_exhausted(&self) -> bool {
+		self.transactions_budget == 0 || self.bytes_budget == 0
+	}
+}
+
+impl<BlockNumber: PartialOrd + Copy> AuthorizerBudget<BlockNumber> {
+	/// `true` iff `valid_until` is set and `now` has reached or passed it. Authorizers
+	/// with `valid_until = None` never expire. Single source of truth for the
+	/// `[registration_block, valid_until)` window used by `add_authorizer` validation,
+	/// [`EnsureAllowedAuthorizers`], and [`Pallet::remove_exhausted_authorizer`].
+	pub fn is_expired(&self, now: BlockNumber) -> bool {
+		self.valid_until.is_some_and(|t| now >= t)
+	}
+}
+
 pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 
 /// `EnsureOrigin` adapter that accepts a `Signed(account)` origin iff the signing
@@ -251,7 +269,7 @@ where
 	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
 		o.into().and_then(|raw| match raw {
 			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
-				Some(b) if b.valid_until.is_none_or(|t| Pallet::<T>::now() < t) => Ok(who),
+				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(who),
 				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
 			},
 			other => Err(T::RuntimeOrigin::from(other)),
