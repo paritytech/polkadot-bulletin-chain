@@ -113,20 +113,33 @@ pub enum AuthorizedCaller<AccountId> {
 /// Convenience alias for [`AuthorizedCaller`] bound to a runtime's `AccountId`.
 pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::AccountId>;
 
-/// An authorization to store data.
+/// An authorization to store data. Lifecycle by block number `now`:
+/// - `now < expiration`: active — `store` and `renew` allowed.
+/// - `expiration <= now < grace_until`: in grace — `renew` only.
+/// - `now >= grace_until`: expired — both rejected; eligible for `remove_expired_*`.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub(crate) struct Authorization<BlockNumber> {
 	/// Extent of the authorization (number of transactions/bytes).
 	pub(crate) extent: AuthorizationExtent,
-	/// The block at which this authorization expires.
+	/// The block at which this authorization expires (start of grace).
 	pub(crate) expiration: BlockNumber,
+	/// The block at which the grace window ends. Always `>= expiration`.
+	pub(crate) grace_until: BlockNumber,
 }
 
 impl<BlockNumber: PartialOrd + Copy> Authorization<BlockNumber> {
-	/// `true` once `now` has reached `expiration`; the authorization no longer
-	/// permits `store`/`renew` and is eligible for `remove_expired_*`.
+	/// `true` once `now` has reached `expiration`. While `expired(now)` is `true`
+	/// and `past_grace(now)` is `false`, the authorization is in the grace window:
+	/// `renew` is still allowed, `store` is not.
 	pub(crate) fn expired(&self, now: BlockNumber) -> bool {
 		now >= self.expiration
+	}
+
+	/// `true` once `now` has reached `grace_until`. Both `store` and `renew` are
+	/// rejected; the entry is eligible for `remove_expired_*` and the
+	/// expired-but-present branch of `authorize`.
+	pub(crate) fn past_grace(&self, now: BlockNumber) -> bool {
+		now >= self.grace_until
 	}
 }
 

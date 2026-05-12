@@ -25,8 +25,8 @@
 use super::{
 	extension::ValidateStorageCalls,
 	mock::{
-		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeCall, RuntimeEvent,
-		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
+		new_test_ext, run_to_block, GracePeriod, MaxPermanentStorageSize, RuntimeCall,
+		RuntimeEvent, RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
 	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
@@ -468,6 +468,60 @@ fn expired_authorization_clears() {
 		// No longer in storage
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
+	});
+}
+
+#[test]
+fn grace_period_allows_renew_but_rejects_store_and_blocks_remove() {
+	// Active → In grace (renew only) → Expired (both rejected). Timeline is compressed
+	// via direct `Authorizations::mutate` so the test fits inside `RetentionPeriod` (10)
+	// and does not require a storage proof.
+	new_test_ext().execute_with(|| {
+		GracePeriod::set(&3);
+		run_to_block(1, || None);
+		let who = 1;
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		// Store at block 1 to populate `Transactions[1][0]` for the renew below.
+		let store_call = Call::store { data: vec![0; 500] };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call.clone()).dispatch(RuntimeOrigin::none()));
+
+		// Compress the lifecycle so this test never crosses `RetentionPeriod`:
+		// active until block 3, grace 3..6, past-grace from block 6.
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.expiration = 3;
+			auth.grace_until = 6;
+			// Re-grant enough room for one renew in grace.
+			auth.extent.bytes_permanent = 0;
+			auth.extent.bytes_allowance = 2000;
+			auth.extent.transactions = 0;
+			auth.extent.transactions_allowance = 1;
+		});
+
+		// `now == expiration` < `grace_until` → in grace.
+		run_to_block(3, || None);
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &store_call),
+			InvalidTransaction::Payment,
+		);
+		let renew_call = Call::renew { block: 1, index: 0 };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
+		let remove_call = Call::remove_expired_account_authorization { who };
+		assert_noop!(TransactionStorage::pre_dispatch(&remove_call), AUTHORIZATION_NOT_EXPIRED);
+
+		// `now >= grace_until` → past grace.
+		run_to_block(6, || None);
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &store_call),
+			InvalidTransaction::Payment,
+		);
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &renew_call),
+			InvalidTransaction::Payment,
+		);
+		assert_ok!(TransactionStorage::pre_dispatch(&remove_call));
 	});
 }
 
@@ -1280,7 +1334,7 @@ fn migration_v1_old_entries_only() {
 		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
 		drive_v2_to_v3_migration();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 
 		let txs1 = Transactions::get(1).expect("should decode after v0→v3 chain");
 		assert_eq!(txs1.len(), 2);
@@ -1368,7 +1422,7 @@ fn migration_v1_version_updated() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(3));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(4));
 
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
@@ -1481,10 +1535,10 @@ fn try_state_detects_zero_authorization_allowance() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 
-		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
-		// AuthorizationExtent SCALE layout: transactions(u32), transactions_allowance(u32),
-		// bytes(u64), bytes_permanent(u64), bytes_allowance(u64)
-		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 0u64, 100u64); // all zero counters, bytes_allowance=0, expiration=100
+		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64),
+		// grace_until(u64) AuthorizationExtent SCALE layout: transactions(u32),
+		// transactions_allowance(u32), bytes(u64), bytes_permanent(u64), bytes_allowance(u64)
+		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 0u64, 100u64, 100u64); // all zero counters, bytes_allowance=0, expiration=100, grace_until=100
 		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &corrupted_auth.encode());
 
@@ -2685,6 +2739,7 @@ fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 			let auth = maybe_auth.as_mut().expect("authorization present");
 			auth.extent.bytes_permanent = 2000;
 			auth.expiration = 1;
+			auth.grace_until = 1;
 		});
 
 		assert_ok!(TransactionStorage::remove_expired_account_authorization(
@@ -2837,7 +2892,7 @@ fn migrate_v2_to_v3_sets_sentinel_for_existing_entries() {
 			assert_eq!(tx.cid_codec, 0x55);
 		}
 
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 	});
 }
 
@@ -2872,7 +2927,7 @@ fn migrate_v2_to_v3_resumes_across_steps() {
 			assert_eq!(txs.len(), 1);
 			assert_eq!(txs[0].extrinsic_index, u32::MAX);
 		}
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 	});
 }
 
@@ -3265,7 +3320,7 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 		assert_eq!(txs2[0].extrinsic_index, 7);
 		assert_eq!(txs2[0].size, 999);
 
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 	});
 }
 
@@ -3293,7 +3348,7 @@ fn migrate_v2_to_v3_prunes_stale_entries() {
 		assert!(Transactions::get(45).is_some(), "in-retention entry must be migrated");
 		assert_eq!(Transactions::get(40).unwrap()[0].extrinsic_index, u32::MAX);
 
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 
 		// `do_try_state` must accept the post-migration state (no stale entries left).
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));

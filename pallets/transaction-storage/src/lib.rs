@@ -151,6 +151,10 @@ pub mod pallet {
 		/// Authorizations expire after this many blocks.
 		#[pallet::constant]
 		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;
+		/// After `expiration`, the authorization stays in a renew-only grace window for
+		/// this many blocks. `0` disables grace (lifecycle collapses to Active → Expired).
+		#[pallet::constant]
+		type GracePeriod: Get<BlockNumberFor<Self>>;
 		/// The origin that can authorize data storage.
 		type Authorizer: EnsureOrigin<Self::RuntimeOrigin>;
 		/// Priority of store/renew transactions.
@@ -216,7 +220,7 @@ pub mod pallet {
 		NotAutoRenewalOwner,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(4);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -932,6 +936,7 @@ pub mod pallet {
 			EntryFee::<T>::put(self.entry_fee);
 			RetentionPeriod::<T>::put(self.retention_period);
 			let expiration = T::AuthorizationPeriod::get();
+			let grace_until = expiration.saturating_add(T::GracePeriod::get());
 			for (who, transactions_allowance, bytes_allowance) in &self.account_authorizations {
 				let scope = AuthorizationScope::Account(who.clone());
 				Authorizations::<T>::insert(
@@ -945,6 +950,7 @@ pub mod pallet {
 							transactions_allowance: *transactions_allowance,
 						},
 						expiration,
+						grace_until,
 					},
 				);
 				Pallet::<T>::authorization_added(&scope);
@@ -962,6 +968,7 @@ pub mod pallet {
 							transactions_allowance: 1,
 						},
 						expiration,
+						grace_until,
 					},
 				);
 			}
@@ -1309,7 +1316,7 @@ pub mod pallet {
 			}
 		}
 
-		fn authorization_removed(scope: &AuthorizationScopeFor<T>) {
+		pub(crate) fn authorization_removed(scope: &AuthorizationScopeFor<T>) {
 			match scope {
 				AuthorizationScope::Account(who) => {
 					// Cleanup nonce storage. Authorized accounts should be careful to use a short
@@ -1349,14 +1356,17 @@ pub mod pallet {
 		) {
 			let now = Self::now();
 			let expiration = now.saturating_add(T::AuthorizationPeriod::get());
+			let grace_until = expiration.saturating_add(T::GracePeriod::get());
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					if authorization.expired(now) {
-						// Expired-but-present: re-grant the caps, reset all consumed counters.
-						// The new window's `bytes_permanent` quota is independent of any
-						// renewed bytes still on chain from the old window.
+						// Expired-but-present (in-grace or fully expired): re-grant the caps,
+						// reset all consumed counters. The new window's `bytes_permanent`
+						// quota is independent of any renewed bytes still on chain from the
+						// old window.
 						authorization.expiration = expiration;
+						authorization.grace_until = grace_until;
 						authorization.extent.bytes = 0;
 						authorization.extent.bytes_permanent = 0;
 						authorization.extent.transactions = 0;
@@ -1396,6 +1406,7 @@ pub mod pallet {
 							transactions_allowance,
 						},
 						expiration,
+						grace_until,
 					});
 					Self::authorization_added(&scope);
 				}
@@ -1409,10 +1420,12 @@ pub mod pallet {
 		/// expire and re-authorize.
 		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let expiration = Self::now().saturating_add(T::AuthorizationPeriod::get());
+			let grace_until = expiration.saturating_add(T::GracePeriod::get());
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
 					authorization.expiration = expiration;
+					authorization.grace_until = grace_until;
 					Ok(())
 				} else {
 					// No previous authorization to refresh.
@@ -1421,11 +1434,11 @@ pub mod pallet {
 			})
 		}
 
-		/// Remove an expired authorization.
+		/// Remove an authorization once it has passed its grace window (`now >= grace_until`).
 		fn remove_expired_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let authorization =
 				Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
-			ensure!(authorization.expired(Self::now()), Error::<T>::AuthorizationNotExpired);
+			ensure!(authorization.past_grace(Self::now()), Error::<T>::AuthorizationNotExpired);
 			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
@@ -1620,7 +1633,11 @@ pub mod pallet {
 				let Some(authorization) = maybe_authorization else {
 					return Err(InvalidTransaction::Payment.into())
 				};
-				if authorization.expired(now) {
+				// Past grace: both rejected. In grace: only `renew` survives.
+				if authorization.past_grace(now) {
+					return Err(InvalidTransaction::Payment.into())
+				}
+				if !is_renew && authorization.expired(now) {
 					return Err(InvalidTransaction::Payment.into())
 				}
 				if is_renew {
@@ -1676,7 +1693,9 @@ pub mod pallet {
 			let Some(authorization) = Authorizations::<T>::get(scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
-			if !authorization.expired(Self::now()) {
+			// Cleanup only after grace has elapsed: while in-grace, `renew` is still
+			// allowed against this entry, so it is not yet safe to remove.
+			if !authorization.past_grace(Self::now()) {
 				return Err(AUTHORIZATION_NOT_EXPIRED.into());
 			}
 			Ok(())

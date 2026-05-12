@@ -254,9 +254,10 @@ mod benchmarks {
 
 		// `AuthorizationPeriod` is ~14 days of blocks on real runtimes; iterating
 		// `on_initialize`/`on_finalize` for each is ~1.3M no-op iterations per step.
-		// The dispatchable only compares `block_number >= expiration`, so we can jump
+		// The dispatchable only compares `block_number >= grace_until`, so we can jump
 		// the system block number directly without running intermediate block hooks.
-		let period = T::AuthorizationPeriod::get();
+		// Jump past `grace_until = expiration + GracePeriod`.
+		let period = T::AuthorizationPeriod::get() + T::GracePeriod::get();
 		let now = System::<T>::block_number();
 		System::<T>::set_block_number(now + period);
 
@@ -275,7 +276,8 @@ mod benchmarks {
 		TransactionStorage::<T>::authorize_preimage(origin, content_hash, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize preimage"))?;
 
-		let period = T::AuthorizationPeriod::get();
+		// Jump past `grace_until = expiration + GracePeriod`.
+		let period = T::AuthorizationPeriod::get() + T::GracePeriod::get();
 		let now = System::<T>::block_number();
 		System::<T>::set_block_number(now + period);
 

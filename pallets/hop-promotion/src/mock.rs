@@ -51,6 +51,7 @@ impl pallet_timestamp::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
+	pub const GracePeriod: BlockNumberFor<Test> = 0;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
@@ -78,6 +79,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
+	type GracePeriod = GracePeriod;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;

@@ -15,6 +15,7 @@ Block-throughput reference numbers:
 | Sustained max throughput | **~127 GiB/day**, **~1.73 TiB / 2 weeks** |
 | `RetentionPeriod` | `2 × 100 800` blocks = 14 days |
 | `AuthorizationPeriod` | `14 days` (Westend / Paseo configs) |
+| `GracePeriod` | `14 days` (Westend / Paseo configs) |
 
 ### 1. Wasted block space (soft)
 
@@ -62,7 +63,21 @@ Per existing entry state:
 
 ### `refresh_account_authorization`
 
-Extends `expiration` by another `AuthorizationPeriod` and leaves all consumed counters (`bytes`, `bytes_permanent`, `transactions`) untouched. Refresh does **not** grant additional capacity. To start a fresh window, let the authorization expire and re-authorize. Origin is `T::Authorizer` (e.g. PoP).
+Extends `expiration` (and `grace_until`) by another `AuthorizationPeriod` (+ `GracePeriod`) and leaves all consumed counters (`bytes`, `bytes_permanent`, `transactions`) untouched. Refresh does **not** grant additional capacity. To start a fresh window, let the authorization expire and re-authorize. Origin is `T::Authorizer` (e.g. PoP).
+
+## Lifecycle: Active → In grace → Expired
+
+`AuthorizationExtent` carries two block numbers — `expiration` and `grace_until = expiration + GracePeriod`. Lifecycle by `now`:
+
+| State | Condition | `store` | `renew` | `remove_expired_*` |
+|---|---|:---:|:---:|:---:|
+| **Active** | `now < expiration` | ✔ | ✔ | rejected |
+| **In grace** | `expiration ≤ now < grace_until` | ✘ (`Payment`) | ✔ | rejected |
+| **Expired** | `now ≥ grace_until` | ✘ | ✘ | ✔ |
+
+Grace is a forgiveness window for `renew` only: it lets the holder keep already-stored content on chain after the authorization expires, instead of losing auth and data simultaneously. `store` is rejected throughout grace, and `remove_expired_account_authorization` waits for `grace_until` so it can't race a still-permitted `renew`. `authorize_account` against an in-grace or fully-expired entry hits the expired-but-present branch (re-grant + reset).
+
+`GracePeriod` is a `Config` constant; setting it to `0` collapses the lifecycle back to Active → Expired.
 
 ## Soft limit (priority boost)
 
@@ -187,7 +202,7 @@ A user across many accounts (Sybil-like) is bounded by the chain-wide cap (Examp
 
 ## Migration
 
-`STORAGE_VERSION = 3`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3}` modules for the wiring.
+`STORAGE_VERSION = 4`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4}` modules for the wiring. `v4` tail-extends `Authorization` with `grace_until = expiration + GracePeriod`.
 
 ## Capacity planning operational steps
 
