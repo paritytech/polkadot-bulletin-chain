@@ -677,45 +677,52 @@ fn governance_authorize_upgrade_works() {
 }
 
 #[test]
-fn alice_can_sign_authorize_account_extrinsic() {
-	// Alice needs to be added to Authorizer list manually. A signed `authorize_account` extrinsic
-	// from Alice must pass ValidateSigned (not be rejected as InvalidTransaction::Call)
-	// and succeed at dispatch.
-	let mut genesis = RuntimeGenesisConfig::default();
-	genesis.transaction_storage.account_authorizations =
-		vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)];
-	genesis.transaction_storage.allowed_authorizers =
-		vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)];
-	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
-		let alice = Sr25519Keyring::Alice;
-		let target = Sr25519Keyring::Eve;
+fn allowed_authorizer_needs_balance_to_sign_authorize_account() {
+	// With `feeless_if` removed from `authorize_account`, the signer — even one registered
+	// in `AllowedAuthorizers` — must hold balance: `ChargeTransactionPayment` runs before
+	// the pallet's origin / budget checks. With balance the dispatch succeeds and the
+	// budget shrinks; without it the extrinsic is rejected with `Payment` and the budget
+	// is untouched.
+	let authorizer = Sr25519Keyring::Ferdie; // not in `TestAccounts`, only `AllowedAuthorizers`
+	let (txs_budget, bytes_budget, bytes) = (1000u32, 100 * 1024 * 1024u64, 1024u64);
 
-		// Alice needs balance for call fees
-		use frame_support::traits::fungible::Mutate;
-		Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
+	let attempt_authorize = |funded: bool| {
+		let mut genesis = RuntimeGenesisConfig::default();
+		genesis.transaction_storage.allowed_authorizers =
+			vec![(authorizer.to_account_id(), txs_budget, bytes_budget)];
+		sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+			if funded {
+				use frame_support::traits::fungible::Mutate;
+				Balances::mint_into(&authorizer.to_account_id(), 1_000_000_000_000).unwrap();
+			}
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: Sr25519Keyring::Eve.to_account_id(),
+					transactions: 0,
+					bytes,
+				});
+			let result = construct_and_apply_extrinsic(Some(authorizer.pair()), call);
+			let post = pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::get(
+				authorizer.to_account_id(),
+			)
+			.expect("authorizer remains registered")
+			.bytes_budget;
+			(result, post)
+		})
+	};
 
-		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-			who: target.to_account_id(),
-			transactions: 0,
-			bytes: 1024,
-		});
+	// Funded: dispatch succeeds; budget decremented by the requested bytes.
+	let (res, post) = attempt_authorize(true);
+	assert_ok_ok(res);
+	assert_eq!(post, bytes_budget - bytes);
 
-		let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
-		assert_ok!(res);
-		assert_ok!(res.unwrap());
-
-		// Verify the authorization was actually applied.
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(target.to_account_id()),
-			AuthorizationExtent {
-				bytes: 0,
-				bytes_permanent: 0,
-				bytes_allowance: 1024,
-				transactions: 0,
-				transactions_allowance: 0,
-			},
-		);
-	});
+	// Unfunded: fee check rejects before dispatch; budget unchanged.
+	let (res, post) = attempt_authorize(false);
+	assert_eq!(
+		res,
+		Err(transaction_validity::TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+	);
+	assert_eq!(post, bytes_budget);
 }
 
 #[test]
@@ -1797,7 +1804,7 @@ fn xcm_transact_authorize_account_from_asset_hub_contract() {
 		transactions_allowance: 0,
 	};
 
-	let run = |registered: bool| {
+	let execute_xcm = |registered: bool| {
 		let mut genesis = RuntimeGenesisConfig::default();
 		if registered {
 			genesis.transaction_storage.allowed_authorizers =
@@ -1834,10 +1841,10 @@ fn xcm_transact_authorize_account_from_asset_hub_contract() {
 	};
 
 	// Unregistered: inner dispatch fails with BadOrigin; no authorization created.
-	assert_eq!(run(false), (zero.clone(), None));
+	assert_eq!(execute_xcm(false), (zero.clone(), None));
 
 	// Registered: dispatch succeeds; target gains allowance and contract budget shrinks.
-	let (extent, budget) = run(true);
+	let (extent, budget) = execute_xcm(true);
 	assert_eq!(
 		extent,
 		AuthorizationExtent { bytes_allowance: bytes, transactions_allowance: txs, ..zero },
