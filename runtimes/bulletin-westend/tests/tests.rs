@@ -32,7 +32,7 @@ use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin,
 };
-use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
+use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
@@ -40,7 +40,7 @@ use sp_runtime::{
 	traits::{TransactionExtension, TxBaseImplication},
 	transaction_validity,
 	transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidityError},
-	ApplyExtrinsicResult, BuildStorage, Either,
+	ApplyExtrinsicResult, BuildStorage, DispatchError, Either,
 };
 use std::collections::HashMap;
 use testnet_parachains_constants::westend::{fee::WeightToFee, locations::PeopleLocation};
@@ -1766,51 +1766,55 @@ fn xcm_transact_authorize_account_works() {
 		});
 }
 
+fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::AuthorizerBudget<BlockNumber>
+{
+	pallet_bulletin_transaction_storage::AuthorizerBudget {
+		transactions_budget: 1000,
+		bytes_budget: 100 * 1024 * 1024,
+		authorization_period: None,
+		valid_until: None,
+	}
+}
+
 #[test]
-fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
-	// Root/sudo calls `add_authorizer(Eve)`; Eve can then sign authorize_account.
+fn sudo_round_trips_authorizer_membership() {
+	// Lifecycle: sudo adds Bob → Bob authorizes → sudo removes Bob → Bob rejected.
+	// Bob isn't in `TestAccounts` (Alice + EXTRA_AUTHORIZER), so removal genuinely
+	// strips his authorize rights.
 	let mut genesis = RuntimeGenesisConfig::default();
-	// Start empty — no Alice, no anyone. We'll add Eve via sudo.
 	genesis.transaction_storage.allowed_authorizers = vec![];
-	// Sudo key is Alice (per default RuntimeGenesisConfig setup; verify).
 	genesis.sudo.key = Some(Sr25519Keyring::Alice.to_account_id());
 
 	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
 		let alice = Sr25519Keyring::Alice;
-		let eve = Sr25519Keyring::Eve;
+		let bob = Sr25519Keyring::Bob;
 		let target = Sr25519Keyring::Ferdie;
-
-		// Both Alice and Eve need balance for call fees
 		use frame_support::traits::fungible::Mutate;
 		Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
-		Balances::mint_into(&eve.to_account_id(), 1_000_000_000_000).unwrap();
+		Balances::mint_into(&bob.to_account_id(), 1_000_000_000_000).unwrap();
 
-		// Step 1: Alice (sudo) adds Eve as an authorizer.
-		let add_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
-			who: eve.to_account_id(),
-			budget: pallet_bulletin_transaction_storage::AuthorizerBudget {
-				transactions_budget: 1000,
-				bytes_budget: 100 * 1024 * 1024,
-				authorization_period: None,
-				valid_until: None,
-			},
-		});
-		let sudo_call =
-			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(add_call) });
-		assert_ok_ok(construct_and_apply_extrinsic(Some(alice.pair()), sudo_call));
-		assert!(pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::contains_key(
-			eve.to_account_id()
-		));
-
-		// Step 2: Eve, now an authorizer, can dispatch authorize_account.
-		let authorize_call =
+		let sudo = |inner: RuntimeCall| -> RuntimeCall {
+			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(inner) })
+		};
+		let authorize =
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
 				who: target.to_account_id(),
 				transactions: 5,
 				bytes: 1024,
 			});
-		assert_ok_ok(construct_and_apply_extrinsic(Some(eve.pair()), authorize_call));
 
+		// Add Bob via sudo, then Bob authorizes.
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(alice.pair()),
+			sudo(RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
+				who: bob.to_account_id(),
+				budget: default_authorizer_budget(),
+			})),
+		));
+		assert!(pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::contains_key(
+			bob.to_account_id(),
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(Some(bob.pair()), authorize.clone()));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(target.to_account_id()),
 			AuthorizationExtent {
@@ -1821,51 +1825,18 @@ fn sudo_can_add_authorizer_and_newly_added_can_authorize() {
 				transactions_allowance: 5,
 			},
 		);
-	});
-}
 
-#[test]
-fn sudo_can_remove_authorizer_and_removed_cannot_authorize() {
-	// Use Bob: he isn't in `TestAccounts` (Alice + EXTRA_AUTHORIZER), so once
-	// removed from `AllowedAuthorizers` he should genuinely lose authorize rights.
-	let mut genesis = RuntimeGenesisConfig::default();
-	genesis.transaction_storage.allowed_authorizers =
-		vec![(Sr25519Keyring::Bob.to_account_id(), 1000, 100 * 1024 * 1024)];
-	genesis.sudo.key = Some(Sr25519Keyring::Alice.to_account_id());
-
-	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
-		let alice = Sr25519Keyring::Alice;
-		let bob = Sr25519Keyring::Bob;
-		let target = Sr25519Keyring::Ferdie;
-
-		// Fund Alice (sudo caller) and Bob (authorizer) for call fees.
-		use frame_support::traits::fungible::Mutate;
-		Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
-		Balances::mint_into(&bob.to_account_id(), 1_000_000_000_000).unwrap();
-
-		// Bob currently IS an authorizer — confirm via a successful authorize first.
-		let authorize_call =
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-				who: target.to_account_id(),
-				transactions: 1,
-				bytes: 1,
-			});
-		assert_ok_ok(construct_and_apply_extrinsic(Some(bob.pair()), authorize_call.clone()));
-
-		// Sudo (Alice) removes Bob.
-		let remove_call =
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::remove_authorizer {
+		// Sudo removes Bob → his subsequent authorize is rejected as BadSigner.
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(alice.pair()),
+			sudo(RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::remove_authorizer {
 				who: bob.to_account_id(),
-			});
-		let sudo_call =
-			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(remove_call) });
-		assert_ok_ok(construct_and_apply_extrinsic(Some(alice.pair()), sudo_call));
-
-		// Bob is neither in `TestAccounts` nor `AllowedAuthorizers` anymore.
+			})),
+		));
 		assert_eq!(
-			construct_and_apply_extrinsic(Some(bob.pair()), authorize_call),
+			construct_and_apply_extrinsic(Some(bob.pair()), authorize),
 			Err(transaction_validity::TransactionValidityError::Invalid(
-				InvalidTransaction::BadSigner
+				InvalidTransaction::BadSigner,
 			)),
 		);
 	});
@@ -1873,7 +1844,8 @@ fn sudo_can_remove_authorizer_and_removed_cannot_authorize() {
 
 #[test]
 fn non_sudo_cannot_add_authorizer() {
-	// Bob (not sudo) tries to call add_authorizer directly — rejected.
+	// Bob (not sudo) calls `add_authorizer` directly — `AuthorizerRegistrarOrigin`
+	// is enforced at dispatch, so the outer apply Ok but dispatch returns BadOrigin.
 	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
 		.execute_with(|| {
 			let bob = Sr25519Keyring::Bob;
@@ -1882,18 +1854,10 @@ fn non_sudo_cannot_add_authorizer() {
 
 			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
 				who: Sr25519Keyring::Eve.to_account_id(),
-				budget: pallet_bulletin_transaction_storage::AuthorizerBudget {
-					transactions_budget: 1000,
-					bytes_budget: 100 * 1024 * 1024,
-					authorization_period: None,
-					valid_until: None,
-				},
+				budget: default_authorizer_budget(),
 			});
-
-			// BadOrigin comes back at dispatch (not at validation) — so the
-			// outer Result is Ok but the inner DispatchResult is Err.
-			let applied = construct_and_apply_extrinsic(Some(bob.pair()), call);
-			let dispatch = applied.expect("validation passes (balance present)");
-			assert!(dispatch.is_err(), "expected BadOrigin, got {dispatch:?}");
+			let applied = construct_and_apply_extrinsic(Some(bob.pair()), call)
+				.expect("validation passes (balance present)");
+			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin.into()));
 		});
 }
