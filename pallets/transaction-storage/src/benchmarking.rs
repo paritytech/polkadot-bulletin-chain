@@ -116,6 +116,18 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 	}
 }
 
+/// Default `AuthorizerBudget` used by the `add_authorizer` / `remove_authorizer`
+/// benchmarks. Kept at module scope (not inside `mod benchmarks`) so the
+/// `#[benchmarks]` macro doesn't try to interpret it as a benchmark fn.
+fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
+	AuthorizerBudget {
+		transactions_budget: 100,
+		bytes_budget: 10 * 1024 * 1024,
+		authorization_period: None,
+		valid_until: None,
+	}
+}
+
 #[benchmarks(where
 	T: Send + Sync,
 	RuntimeCallOf<T>: IsSubType<Call<T>> + From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
@@ -192,11 +204,9 @@ mod benchmarks {
 		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		let transactions = 100;
-		let bytes: u64 = 10 * 1024 * 1024;
 
 		#[extrinsic_call]
-		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes, None, None);
+		_(origin as T::RuntimeOrigin, who.clone(), bench_budget::<T>());
 
 		assert_last_event::<T>(Event::AuthorizerAdded { who }.into());
 		Ok(())
@@ -207,16 +217,11 @@ mod benchmarks {
 		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = whitelisted_caller();
-		let transactions = 100;
-		let bytes: u64 = 10 * 1024 * 1024;
 		let origin2 = origin.clone();
 		TransactionStorage::<T>::add_authorizer(
 			origin2 as T::RuntimeOrigin,
 			who.clone(),
-			transactions,
-			bytes,
-			None,
-			None,
+			bench_budget::<T>(),
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to add authorizer"))?;
 

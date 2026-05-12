@@ -1834,10 +1834,7 @@ fn add_authorizer_inserts_into_storage_and_emits_event() {
 		assert_ok!(TransactionStorage::add_authorizer(
 			RuntimeOrigin::root(),
 			who,
-			100,
-			1024 * 1024,
-			None,
-			None,
+			test_budget(100, 1024 * 1024),
 		));
 
 		assert!(AllowedAuthorizers::<Test>::contains_key(who));
@@ -1869,7 +1866,11 @@ fn remove_authorizer_removes_from_storage_and_emits_event() {
 fn add_authorizer_rejects_non_manager_origin() {
 	new_test_ext().execute_with(|| {
 		assert_noop!(
-			TransactionStorage::add_authorizer(RuntimeOrigin::signed(1), 42, 100, 1024, None, None),
+			TransactionStorage::add_authorizer(
+				RuntimeOrigin::signed(1),
+				42,
+				test_budget(100, 1024)
+			),
 			DispatchError::BadOrigin,
 		);
 	});
@@ -1893,19 +1894,13 @@ fn add_authorizer_overwrites_existing_entry() {
 		assert_ok!(TransactionStorage::add_authorizer(
 			RuntimeOrigin::root(),
 			who,
-			100,
-			1024,
-			None,
-			None
+			test_budget(100, 1024),
 		));
 		// Second call with a different budget replaces the first.
 		assert_ok!(TransactionStorage::add_authorizer(
 			RuntimeOrigin::root(),
 			who,
-			200,
-			2048,
-			None,
-			None
+			test_budget(200, 2048),
 		));
 		assert!(AllowedAuthorizers::<Test>::contains_key(who));
 		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
@@ -3687,31 +3682,19 @@ fn add_authorizer_with_period_override() {
 	new_test_ext().execute_with(|| {
 		let who = 42u64;
 		// Mock's `AuthorizationPeriod = 10`; 5 is strictly below that.
-		assert_ok!(TransactionStorage::add_authorizer(
-			RuntimeOrigin::root(),
-			who,
-			100,
-			1024,
-			Some(5),
-			None,
-		));
-		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
-		assert_eq!(budget.authorization_period, Some(5));
+		let budget = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 1024) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, budget));
+		let stored = AllowedAuthorizers::<Test>::get(who).unwrap();
+		assert_eq!(stored.authorization_period, Some(5));
 	});
 }
 
 #[test]
 fn add_authorizer_rejects_zero_period_override() {
 	new_test_ext().execute_with(|| {
+		let bad = AuthorizerBudget { authorization_period: Some(0), ..test_budget(100, 1024) };
 		assert_noop!(
-			TransactionStorage::add_authorizer(
-				RuntimeOrigin::root(),
-				42u64,
-				100,
-				1024,
-				Some(0),
-				None
-			),
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, bad),
 			Error::InvalidAuthorizationPeriodOverride,
 		);
 		assert!(!AllowedAuthorizers::<Test>::contains_key(42u64));
@@ -3722,26 +3705,15 @@ fn add_authorizer_rejects_zero_period_override() {
 fn add_authorizer_rejects_period_override_at_or_above_default() {
 	new_test_ext().execute_with(|| {
 		// Mock's `AuthorizationPeriod = 10`. Both `== 10` and `> 10` must be rejected.
+		let at_default =
+			AuthorizerBudget { authorization_period: Some(10), ..test_budget(100, 1024) };
 		assert_noop!(
-			TransactionStorage::add_authorizer(
-				RuntimeOrigin::root(),
-				42u64,
-				100,
-				1024,
-				Some(10),
-				None
-			),
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, at_default),
 			Error::InvalidAuthorizationPeriodOverride,
 		);
+		let above = AuthorizerBudget { authorization_period: Some(11), ..test_budget(100, 1024) };
 		assert_noop!(
-			TransactionStorage::add_authorizer(
-				RuntimeOrigin::root(),
-				42u64,
-				100,
-				1024,
-				Some(11),
-				None
-			),
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, above),
 			Error::InvalidAuthorizationPeriodOverride,
 		);
 		assert!(!AllowedAuthorizers::<Test>::contains_key(42u64));
@@ -3749,37 +3721,31 @@ fn add_authorizer_rejects_period_override_at_or_above_default() {
 }
 
 #[test]
-fn add_authorizer_with_valid_period_stores_valid_until() {
+fn add_authorizer_stores_valid_until() {
 	new_test_ext().execute_with(|| {
 		run_to_block(5, || None);
 		let who = 42u64;
-		assert_ok!(TransactionStorage::add_authorizer(
-			RuntimeOrigin::root(),
-			who,
-			100,
-			1024,
-			None,
-			Some(20),
-		));
-		let budget = AllowedAuthorizers::<Test>::get(who).unwrap();
-		// valid_until = now (=5) + valid_period (=20)
-		assert_eq!(budget.valid_until, Some(25));
+		// valid_until is absolute — chosen here as now (=5) + 20 = 25.
+		let budget = AuthorizerBudget { valid_until: Some(25), ..test_budget(100, 1024) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, budget));
+		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap().valid_until, Some(25));
 	});
 }
 
 #[test]
-fn add_authorizer_rejects_zero_valid_period() {
+fn add_authorizer_rejects_valid_until_in_the_past() {
 	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		// `now = 5`; `valid_until = 5` is "expired immediately"; `0` is in the past.
+		let at_now = AuthorizerBudget { valid_until: Some(5), ..test_budget(100, 1024) };
 		assert_noop!(
-			TransactionStorage::add_authorizer(
-				RuntimeOrigin::root(),
-				42u64,
-				100,
-				1024,
-				None,
-				Some(0)
-			),
-			Error::InvalidValidPeriod,
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, at_now),
+			Error::InvalidValidUntil,
+		);
+		let past = AuthorizerBudget { valid_until: Some(0), ..test_budget(100, 1024) };
+		assert_noop!(
+			TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, past),
+			Error::InvalidValidUntil,
 		);
 		assert!(!AllowedAuthorizers::<Test>::contains_key(42u64));
 	});
@@ -3790,15 +3756,9 @@ fn expired_authorizer_cannot_authorize() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let authorizer = 10u64;
-		// valid for 5 blocks → expires at block 6.
-		assert_ok!(TransactionStorage::add_authorizer(
-			RuntimeOrigin::root(),
-			authorizer,
-			100,
-			10_000,
-			None,
-			Some(5),
-		));
+		// `valid_until = 6` → authorizes through block 5, expires at block 6.
+		let budget = AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 10_000) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), authorizer, budget,));
 		let call = Call::authorize_account { who: 1, transactions: 1, bytes: 1000 };
 
 		// Still valid at block 5.
@@ -3820,14 +3780,8 @@ fn remove_exhausted_authorizer_works_for_expired() {
 		run_to_block(1, || None);
 		let who = 42u64;
 		// Has budget but expires at block 6.
-		assert_ok!(TransactionStorage::add_authorizer(
-			RuntimeOrigin::root(),
-			who,
-			100,
-			1000,
-			None,
-			Some(5),
-		));
+		let budget = AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 1000) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, budget));
 
 		// Before expiry: removal rejected (budget present, not expired).
 		assert_noop!(

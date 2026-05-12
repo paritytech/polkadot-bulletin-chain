@@ -272,7 +272,17 @@ impl CheckContext {
 }
 
 /// A registered authorizer's budget.
-#[derive(Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	Debug,
+	Encode,
+	Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
 pub struct AuthorizerBudget<BlockNumber> {
 	/// Max transactions this authorizer can authorize.
 	pub transactions_budget: u32,
@@ -457,9 +467,9 @@ pub mod pallet {
 		/// The override is intended to shorten an authorizer's window; to grant the default
 		/// length, pass `None` instead.
 		InvalidAuthorizationPeriodOverride,
-		/// `valid_period` supplied to `add_authorizer` is zero (would expire immediately).
-		/// Pass `None` for no expiration.
-		InvalidValidPeriod,
+		/// `valid_until` supplied to `add_authorizer` is in the past (`<= now`, would
+		/// expire immediately). Pass `None` for no expiration.
+		InvalidValidUntil,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
@@ -1045,19 +1055,16 @@ pub mod pallet {
 		/// [`authorize_account`](Self::authorize_account) and
 		/// [`authorize_preimage`](Self::authorize_preimage) to grant storage access.
 		///
-		/// If the account is already an allowed authorizer, its budget,
-		/// `authorization_period` override, and `valid_until` are **overwritten** with the
-		/// new values.
+		/// If the account is already an allowed authorizer, its `budget` is **overwritten**
+		/// with the new values.
 		///
-		/// Parameters:
+		/// `budget` constraints:
 		///
-		/// - `who`: The account to add as an allowed authorizer.
-		/// - `transactions_budget` / `bytes_budget`: budgets consumed per `authorize_*` call.
-		/// - `authorization_period`: optional override for the default `T::AuthorizationPeriod`.
-		///   Must be `> 0` and `< T::AuthorizationPeriod` when `Some`.
-		/// - `valid_period`: optional lifetime for the authorizer itself. When `Some(p)` and `p >
-		///   0`, the entry stops authorizing once `now >= now + p` (at insert time), and becomes
-		///   eligible for permissionless cleanup via
+		/// - `authorization_period`: when `Some(p)`, must satisfy `0 < p <
+		///   T::AuthorizationPeriod::get()`; intended to *shorten* the default window. Pass `None`
+		///   to use the default.
+		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`; the entry stops authorizing
+		///   once `now >= t` and becomes eligible for permissionless cleanup via
 		///   [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
 		///
 		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
@@ -1067,35 +1074,22 @@ pub mod pallet {
 		pub fn add_authorizer(
 			origin: OriginFor<T>,
 			who: T::AccountId,
-			transactions_budget: u32,
-			bytes_budget: u64,
-			authorization_period: Option<BlockNumberFor<T>>,
-			valid_period: Option<BlockNumberFor<T>>,
+			budget: AuthorizerBudget<BlockNumberFor<T>>,
 		) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
-			if let Some(period) = authorization_period {
-				// The override is intended to *shorten* the default window. Reject zero
-				// (would expire immediately) and any value at or above the default (no-op
-				// or longer — pass `None` instead).
+			if let Some(period) = budget.authorization_period {
 				ensure!(
 					!period.is_zero() && period < T::AuthorizationPeriod::get(),
 					Error::<T>::InvalidAuthorizationPeriodOverride,
 				);
 			}
-			if let Some(period) = valid_period {
-				ensure!(!period.is_zero(), Error::<T>::InvalidValidPeriod);
+			if let Some(t) = budget.valid_until {
+				ensure!(
+					t > frame_system::Pallet::<T>::block_number(),
+					Error::<T>::InvalidValidUntil,
+				);
 			}
-			let valid_until =
-				valid_period.map(|p| frame_system::Pallet::<T>::block_number().saturating_add(p));
-			AllowedAuthorizers::<T>::insert(
-				&who,
-				AuthorizerBudget {
-					transactions_budget,
-					bytes_budget,
-					authorization_period,
-					valid_until,
-				},
-			);
+			AllowedAuthorizers::<T>::insert(&who, budget);
 			Self::deposit_event(Event::AuthorizerAdded { who });
 			Ok(())
 		}
@@ -2246,7 +2240,7 @@ pub mod pallet {
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
 
-					// Consume authorizer budget if this is an AllowedAuthorizers signer.
+					// Consume the authorizer budget if this is an AllowedAuthorizers signer.
 					// Root/XCM origins won't be in the map — that's fine, they have no budget.
 					Self::check_authorizer_budget(
 						who,
