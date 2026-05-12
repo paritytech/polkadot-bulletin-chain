@@ -840,7 +840,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
 		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
-		#[pallet::call_index(11)]
+		#[pallet::call_index(15)]
 		#[pallet::weight(T::WeightInfo::add_authorizer())]
 		pub fn add_authorizer(
 			origin: OriginFor<T>,
@@ -874,7 +874,7 @@ pub mod pallet {
 		///
 		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
 		/// [`AuthorizerRemoved`](Event::AuthorizerRemoved) when successful.
-		#[pallet::call_index(15)]
+		#[pallet::call_index(16)]
 		#[pallet::weight(T::WeightInfo::remove_authorizer())]
 		pub fn remove_authorizer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
@@ -895,7 +895,7 @@ pub mod pallet {
 		///
 		/// Emits [`ExhaustedAuthorizerRemoved`](Event::ExhaustedAuthorizerRemoved)
 		/// when successful.
-		#[pallet::call_index(16)]
+		#[pallet::call_index(17)]
 		#[pallet::weight(T::WeightInfo::remove_exhausted_authorizer())]
 		pub fn remove_exhausted_authorizer(
 			_origin: OriginFor<T>,
