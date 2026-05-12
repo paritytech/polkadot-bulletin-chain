@@ -20,7 +20,7 @@ use super::{
 	xcm_config::IsSiblingParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeHoldReason,
 };
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
@@ -28,11 +28,18 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	CallInspector, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
+
+// 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
+pub const EXTRA_AUTHORIZER: AccountId = AccountId::new([
+	0xb6, 0x45, 0x5b, 0xc5, 0x38, 0x36, 0x5d, 0x32, 0xd3, 0x29, 0x67, 0xb6, 0xf2, 0x1a, 0x0c, 0x9b,
+	0x07, 0x15, 0x65, 0xe8, 0x78, 0xfe, 0x98, 0x5f, 0x88, 0xd1, 0x54, 0x3c, 0xb1, 0x99, 0x1a, 0x7d,
+]);
 
 parameter_types! {
 	/// Cap on the total bytes committed to permanent storage (via `renew`) across all
@@ -45,15 +52,7 @@ parameter_types! {
 pub struct TestAccounts;
 impl SortedMembers<AccountId> for TestAccounts {
 	fn sorted_members() -> Vec<AccountId> {
-		let mut members = alloc::vec![
-			Sr25519Keyring::Alice.to_account_id(),
-			// 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
-			AccountId::new([
-				0xb6, 0x45, 0x5b, 0xc5, 0x38, 0x36, 0x5d, 0x32, 0xd3, 0x29, 0x67, 0xb6, 0xf2, 0x1a,
-				0x0c, 0x9b, 0x07, 0x15, 0x65, 0xe8, 0x78, 0xfe, 0x98, 0x5f, 0x88, 0xd1, 0x54, 0x3c,
-				0xb1, 0x99, 0x1a, 0x7d,
-			]),
-		];
+		let mut members = vec![Sr25519Keyring::Alice.to_account_id(), EXTRA_AUTHORIZER];
 		members.sort();
 		members
 	}
@@ -119,15 +118,21 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
+	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOfDiverse<
 		EitherOfDiverse<
-			// Root can do whatever.
-			crate::EnsureRoot<Self::AccountId>,
-			// Any sibling parachain can handle authorizations.
-			EnsureXcm<IsSiblingParachain>,
+			EitherOfDiverse<
+				// Root can do whatever.
+				crate::EnsureRoot<Self::AccountId>,
+				// Any sibling parachain can handle authorizations.
+				EnsureXcm<IsSiblingParachain>,
+			>,
+			// Test accounts can also authorize for testing purposes.
+			EnsureSignedBy<TestAccounts, Self::AccountId>,
 		>,
-		// Test accounts can also authorize for testing purposes.
-		EnsureSignedBy<TestAccounts, Self::AccountId>,
+		// Accounts registered in `AllowedAuthorizers` storage (managed via
+		// `add_authorizer` / `remove_authorizer`).
+		EnsureAllowedAuthorizers<Runtime>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
