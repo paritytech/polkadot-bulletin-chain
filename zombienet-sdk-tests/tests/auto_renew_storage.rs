@@ -99,6 +99,12 @@ async fn current_best_block(
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
 const BITSWAP_TIMEOUT_SECS: u64 = 30;
+/// Generous budget for the negative-eviction check (`expect_bitswap_dont_have`) after a
+/// pruning boundary. `wait_for_finalized_height` returns the moment the metric crosses,
+/// but the actual `--blocks-pruning` deletion + col11 refcount-zero cleanup is a separate
+/// background pass in the client backend — its lag under CI load can be tens of seconds.
+/// Keep this 4-5× higher than the positive-bitswap timeout so eviction has time to land.
+const BITSWAP_EVICTION_TIMEOUT_SECS: u64 = 180;
 
 /// Number of renewal cycles to verify end-to-end. Bumping this requires more authorization
 /// headroom (see [`TOPUP_TX_COUNT`] / [`TOPUP_BYTES_MULTIPLIER`]) and a longer wait at the end
@@ -691,12 +697,17 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	)
 	.await?;
 
-	expect_bitswap_dont_have(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-pruning)")
-		.await
-		.context(
-			"Bitswap still serves data after both store and renew blocks were pruned — col11 \
+	expect_bitswap_dont_have(
+		collator1,
+		&data,
+		BITSWAP_EVICTION_TIMEOUT_SECS,
+		"Collator-1 (post-pruning)",
+	)
+	.await
+	.context(
+		"Bitswap still serves data after both store and renew blocks were pruned — col11 \
 			 should be empty",
-		)?;
+	)?;
 	log::info!(
 		"✓ Bitswap returns DONT_HAVE after both store and renew blocks were pruned (col11 \
 		 refcount reached zero)"
@@ -813,7 +824,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	expect_bitswap_dont_have(
 		collator1,
 		&data2,
-		BITSWAP_TIMEOUT_SECS,
+		BITSWAP_EVICTION_TIMEOUT_SECS,
 		"Collator-1 / data2 (post-pruning)",
 	)
 	.await
@@ -943,7 +954,7 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	expect_bitswap_dont_have(
 		collator1,
 		&data_not_renewed,
-		BITSWAP_TIMEOUT_SECS,
+		BITSWAP_EVICTION_TIMEOUT_SECS,
 		"Collator-1 / data_not_renewed (post-retention)",
 	)
 	.await
