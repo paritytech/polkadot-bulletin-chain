@@ -2401,24 +2401,32 @@ pub mod pallet {
 				.and_then(|b| b.authorization_period)
 		}
 
+		/// Validate-or-commit budget consumption for `who`. When `consume` is `true`, persists
+		/// the decrement via `try_mutate`. When `consume` is `false`, performs the same
+		/// `checked_sub` on a local copy and discards it — exists purely to surface
+		/// `InvalidTransaction::Payment` during pool validation without writing state.
+		///
+		/// A missing entry (Root/XCM origins, not in `AllowedAuthorizers`) is a no-op: they
+		/// have no budget to consume.
 		fn check_authorizer_budget(
 			who: &T::AccountId,
 			transactions: u32,
 			bytes: u64,
 			consume: bool,
 		) -> Result<(), TransactionValidityError> {
-			let try_consume = |maybe_budget: &mut Option<AuthorizerBudgetFor<T>>| -> Result<(), TransactionValidityError> {
-                let Some(budget) = maybe_budget else {
-                    return Ok(());
-                };
-                budget.transactions_budget = budget.transactions_budget
-                    .checked_sub(transactions)
-                    .ok_or(InvalidTransaction::Payment)?;
-                budget.bytes_budget = budget.bytes_budget
-                    .checked_sub(bytes)
-                    .ok_or(InvalidTransaction::Payment)?;
-                Ok(())
-            };
+			let try_consume = |maybe_budget: &mut Option<AuthorizerBudgetFor<T>>|
+			 -> Result<(), TransactionValidityError> {
+				let Some(budget) = maybe_budget else {
+					return Ok(());
+				};
+				budget.transactions_budget = budget
+					.transactions_budget
+					.checked_sub(transactions)
+					.ok_or(InvalidTransaction::Payment)?;
+				budget.bytes_budget =
+					budget.bytes_budget.checked_sub(bytes).ok_or(InvalidTransaction::Payment)?;
+				Ok(())
+			};
 
 			if consume {
 				AllowedAuthorizers::<T>::try_mutate(who, try_consume)
