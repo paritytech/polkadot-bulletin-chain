@@ -319,6 +319,28 @@ pub mod v2 {
 		pub expiration: BlockNumber,
 	}
 
+	impl<BlockNumber: PartialOrd + Copy> V1Authorization<BlockNumber> {
+		fn expired(&self, now: BlockNumber) -> bool {
+			now >= self.expiration
+		}
+	}
+
+	/// `Authorization` layout v1→v2 actually produces — frozen. The `From` impl
+	/// below maps it into the current `Authorization` struct; any future field
+	/// added to `Authorization` becomes a compile error here, forcing the author
+	/// to pick an explicit placeholder rather than silently writing the new shape
+	/// from this old migration.
+	pub(crate) struct V2Authorization<BlockNumber> {
+		pub extent: AuthorizationExtent,
+		pub expiration: BlockNumber,
+	}
+
+	impl<BlockNumber> From<V2Authorization<BlockNumber>> for Authorization<BlockNumber> {
+		fn from(v2: V2Authorization<BlockNumber>) -> Self {
+			Self { extent: v2.extent, expiration: v2.expiration }
+		}
+	}
+
 	/// `TransactionInfo` layout at v1 — same shape as v2 minus the trailing `kind`
 	/// field. Used here to decode existing entries during translation.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
@@ -337,23 +359,27 @@ pub mod v2 {
 		fn on_runtime_upgrade() -> Weight {
 			let mut auth_migrated: u64 = 0;
 			let mut auth_dropped: u64 = 0;
+			let now = Pallet::<T>::now();
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					if old.extent.bytes == 0 || Pallet::<T>::expired(old.expiration) {
+					if old.extent.bytes == 0 || old.expired(now) {
 						auth_dropped = auth_dropped.saturating_add(1);
 						return None;
 					}
 					auth_migrated = auth_migrated.saturating_add(1);
-					Some(Authorization {
-						extent: AuthorizationExtent {
-							bytes: 0,
-							bytes_permanent: 0,
-							bytes_allowance: old.extent.bytes,
-							transactions: 0,
-							transactions_allowance: old.extent.transactions,
-						},
-						expiration: old.expiration,
-					})
+					Some(
+						V2Authorization {
+							extent: AuthorizationExtent {
+								bytes: 0,
+								bytes_permanent: 0,
+								bytes_allowance: old.extent.bytes,
+								transactions: 0,
+								transactions_allowance: old.extent.transactions,
+							},
+							expiration: old.expiration,
+						}
+						.into(),
+					)
 				},
 			);
 			tracing::info!(
@@ -477,15 +503,14 @@ pub mod v3 {
 			mut cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-			use polkadot_sdk_frame::prelude::{frame_system, Saturating};
+			use polkadot_sdk_frame::prelude::Saturating;
 
 			let required = T::WeightInfo::migrate_v2_to_v3_step();
 			if meter.remaining().any_lt(required) {
 				return Err(SteppedMigrationError::InsufficientWeight { required });
 			}
 
-			let oldest_valid = frame_system::Pallet::<T>::block_number()
-				.saturating_sub(RetentionPeriod::<T>::get());
+			let oldest_valid = Pallet::<T>::now().saturating_sub(RetentionPeriod::<T>::get());
 
 			loop {
 				if meter.try_consume(required).is_err() {
