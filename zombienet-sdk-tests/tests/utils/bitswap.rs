@@ -473,6 +473,17 @@ pub async fn expect_all_items_bitswap_dont_have(
 }
 
 /// Expect DONT_HAVE - state/warp synced nodes don't have indexed transactions.
+/// Poll bitswap until it returns DONT_HAVE for `expected_data`, or `timeout_secs` elapses.
+///
+/// Single-shot probing is racy after a `wait_for_finalized_height` wait: the collator's
+/// finalized-height metric crosses the target as soon as the chain finalizes the relevant
+/// block, but the **physical** `--blocks-pruning` deletion + col11 refcount-zero eviction
+/// runs asynchronously a moment later. A test that probes immediately after finality can
+/// catch col11 still holding the entry.
+///
+/// We poll once per second with a short per-probe budget — return Ok the moment the node
+/// reports DONT_HAVE, error only if it's still serving the block (or surfacing some other
+/// unexpected error) after the full `timeout_secs`.
 pub async fn expect_bitswap_dont_have(
 	node: &zombienet_sdk::NetworkNode,
 	expected_data: &[u8],
@@ -481,29 +492,42 @@ pub async fn expect_bitswap_dont_have(
 ) -> Result<()> {
 	log::info!("=== Expecting bitswap DONT_HAVE from {} ===", node_name);
 	let multiaddr = node.multiaddr();
-	match verify_bitswap_fetch(multiaddr, expected_data, timeout_secs).await {
-		Ok(_) => {
-			anyhow::bail!(
-				"Expected bitswap to fail with DONT_HAVE from {}, but it succeeded",
-				node_name
-			);
-		},
-		Err(e) => {
-			let error_msg = e.to_string();
-			if error_msg.contains("Peer does not have the block") || error_msg.contains("DONT_HAVE")
-			{
-				log::info!(
-					"✓ Bitswap correctly returned DONT_HAVE from {} (expected for synced nodes)",
-					node_name
-				);
-				Ok(())
-			} else {
-				anyhow::bail!(
-					"Bitswap failed with unexpected error from {}: {}. Expected 'Peer does not have the block'",
-					node_name,
-					error_msg
-				);
-			}
-		},
+	let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+	let per_probe_secs: u64 = 3;
+	loop {
+		match verify_bitswap_fetch(multiaddr, expected_data, per_probe_secs).await {
+			Ok(_) => {
+				// Still serving the block — eviction hasn't completed yet.
+				if std::time::Instant::now() >= deadline {
+					anyhow::bail!(
+						"Bitswap on {} still serves the block after polling for {}s; col11 \
+						 entry was not evicted as expected",
+						node_name,
+						timeout_secs
+					);
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			},
+			Err(e) => {
+				let msg = e.to_string();
+				if msg.contains("Peer does not have the block") || msg.contains("DONT_HAVE") {
+					log::info!(
+						"✓ Bitswap correctly returned DONT_HAVE from {} (expected for synced nodes)",
+						node_name
+					);
+					return Ok(());
+				}
+				// Other transient error (e.g. transport hiccup) — keep polling.
+				if std::time::Instant::now() >= deadline {
+					return Err(e).with_context(|| {
+						format!(
+							"bitswap probe to {} kept returning unexpected errors over {}s",
+							node_name, timeout_secs
+						)
+					});
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			},
+		}
 	}
 }
