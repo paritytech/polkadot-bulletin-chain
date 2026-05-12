@@ -319,6 +319,12 @@ pub mod v2 {
 		pub expiration: BlockNumber,
 	}
 
+	impl<BlockNumber: PartialOrd + Copy> V1Authorization<BlockNumber> {
+		fn expired(&self, now: BlockNumber) -> bool {
+			now >= self.expiration
+		}
+	}
+
 	/// `Authorization` layout v1→v2 actually produces — frozen. The `From` impl
 	/// below maps it into the current `Authorization` struct; any future field
 	/// added to `Authorization` becomes a compile error here, forcing the author
@@ -356,7 +362,7 @@ pub mod v2 {
 			let now = Pallet::<T>::now();
 			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
-					if old.extent.bytes == 0 || now >= old.expiration {
+					if old.extent.bytes == 0 || old.expired(now) {
 						auth_dropped = auth_dropped.saturating_add(1);
 						return None;
 					}
