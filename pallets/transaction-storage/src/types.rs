@@ -22,6 +22,8 @@ use bulletin_transaction_storage_primitives::{
 	ContentHash,
 };
 use codec::{Decode, Encode, MaxEncodedLen};
+#[cfg(feature = "runtime-benchmarks")]
+use polkadot_sdk_frame::deps::frame_benchmarking;
 use polkadot_sdk_frame::{
 	deps::*,
 	prelude::*,
@@ -29,7 +31,7 @@ use polkadot_sdk_frame::{
 };
 use sp_transaction_storage_proof::ChunkIndex;
 
-use crate::Config;
+use crate::{AllowedAuthorizers, Config, Pallet};
 
 /// A type alias for the balance type from this pallet's point of view.
 pub(crate) type BalanceOf<T> =
@@ -204,5 +206,120 @@ impl CheckContext {
 	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
 	pub(crate) fn want_valid_transaction(self) -> bool {
 		matches!(self, CheckContext::Validate)
+	}
+}
+
+/// A registered authorizer's budget.
+#[derive(
+	Clone,
+	PartialEq,
+	Eq,
+	Debug,
+	Encode,
+	Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
+pub struct AuthorizerBudget<BlockNumber> {
+	/// `None` is unlimited; `Some(_)` decrements both axes per dispatch.
+	pub quota: Option<Quota>,
+	/// Optional override for the authorization period.
+	pub authorization_period: Option<BlockNumber>,
+	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
+	/// while `now < t`; once `now >= t`, [`EnsureAllowedAuthorizers`] rejects them and
+	/// [`Pallet::remove_exhausted_authorizer`] becomes callable on this entry.
+	pub valid_until: Option<BlockNumber>,
+}
+
+/// Paired transaction / byte quota for an authorizer.
+#[derive(
+	Copy,
+	Clone,
+	PartialEq,
+	Eq,
+	Debug,
+	Encode,
+	Decode,
+	codec::DecodeWithMemTracking,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
+pub struct Quota {
+	pub transactions: u32,
+	pub bytes: u64,
+}
+
+impl<BlockNumber> AuthorizerBudget<BlockNumber> {
+	/// `quota = Some` with either axis at zero. `quota = None` is never exhausted.
+	pub fn is_exhausted(&self) -> bool {
+		self.quota.is_some_and(|q| q.transactions == 0 || q.bytes == 0)
+	}
+
+	/// Decrement both quota axes by `(transactions, bytes)`. `Some(())` on success and
+	/// also when `quota = None` (unlimited — no-op). `None` on underflow of either
+	/// axis; the budget is left unchanged in that case.
+	pub fn try_consume(&mut self, transactions: u32, bytes: u64) -> Option<()> {
+		let Some(q) = self.quota.as_mut() else { return Some(()) };
+		let new_tx = q.transactions.checked_sub(transactions)?;
+		let new_bytes = q.bytes.checked_sub(bytes)?;
+		q.transactions = new_tx;
+		q.bytes = new_bytes;
+		Some(())
+	}
+}
+
+impl<BlockNumber: PartialOrd + Copy> AuthorizerBudget<BlockNumber> {
+	/// `true` iff `valid_until` is set and `now` has reached or passed it. Authorizers
+	/// with `valid_until = None` never expire. Single source of truth for the
+	/// `[registration_block, valid_until)` window used by `add_authorizer` validation,
+	/// [`EnsureAllowedAuthorizers`], and [`Pallet::remove_exhausted_authorizer`].
+	pub fn is_expired(&self, now: BlockNumber) -> bool {
+		self.valid_until.is_some_and(|t| now >= t)
+	}
+}
+
+pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
+
+/// `EnsureOrigin` adapter that accepts a `Signed(account)` origin iff the signing
+/// account is registered in [`AllowedAuthorizers`]. Used to plug the runtime-mutable
+/// authorizer list into the pallet's `Authorizer` chain.
+pub struct EnsureAllowedAuthorizers<T>(core::marker::PhantomData<T>);
+
+impl<T: Config> EnsureOrigin<T::RuntimeOrigin> for EnsureAllowedAuthorizers<T>
+where
+	T::RuntimeOrigin: From<frame_system::RawOrigin<T::AccountId>>
+		+ Into<Result<frame_system::RawOrigin<T::AccountId>, T::RuntimeOrigin>>,
+{
+	type Success = T::AccountId;
+
+	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
+		o.into().and_then(|raw| match raw {
+			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
+				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(who),
+				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
+			},
+			other => Err(T::RuntimeOrigin::from(other)),
+		})
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<T::RuntimeOrigin, ()> {
+		let who = match AllowedAuthorizers::<T>::iter_keys().next() {
+			Some(existing) => existing,
+			None => {
+				let new: T::AccountId = frame_benchmarking::account("allowed_authorizer", 0, 0);
+				AllowedAuthorizers::<T>::insert(
+					&new,
+					AuthorizerBudget {
+						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
+						authorization_period: None,
+						valid_until: None,
+					},
+				);
+				new
+			},
+		};
+		Ok(frame_system::RawOrigin::Signed(who).into())
 	}
 }
