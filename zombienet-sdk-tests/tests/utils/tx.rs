@@ -355,12 +355,43 @@ pub async fn authorize_and_store_data_finalized(
 /// Submit a sudo'd `TransactionStorage::authorize_account` for `who` with the given capacity,
 /// adding to any existing authorization. Each successful store/renew consumes one transaction
 /// slot and `data.len()` bytes from this allowance. Signed by Alice (the sudo key).
+///
+/// `wait_for_finality` selects in-best-block vs finalized progress wait. Use the finalized
+/// variant whenever the next step is a signed extrinsic from `who` and the pool's
+/// `validate_signed` would otherwise see a stale (pre-authorize) finalized state and reject
+/// the tx with `InvalidTransaction`. The non-finalized variant is fine when `who` already
+/// had authorization (top-up scenarios), when the next dependent action is many blocks away,
+/// or when the caller batches a finalization wait afterward.
 pub async fn authorize_account_via_sudo(
 	client: &OnlineClient<SubstrateConfig>,
 	who: &[u8; 32],
 	transactions: u32,
 	bytes: u64,
 	nonce: u64,
+) -> Result<()> {
+	authorize_account_via_sudo_inner(client, who, transactions, bytes, nonce, false).await
+}
+
+/// Same as [`authorize_account_via_sudo`] but blocks until the authorize tx is finalized.
+/// Use when the immediate next step is a signed extrinsic from `who` (e.g. a fresh account
+/// whose first tx would otherwise race the pool's finalized-state validation).
+pub async fn authorize_account_via_sudo_finalized(
+	client: &OnlineClient<SubstrateConfig>,
+	who: &[u8; 32],
+	transactions: u32,
+	bytes: u64,
+	nonce: u64,
+) -> Result<()> {
+	authorize_account_via_sudo_inner(client, who, transactions, bytes, nonce, true).await
+}
+
+async fn authorize_account_via_sudo_inner(
+	client: &OnlineClient<SubstrateConfig>,
+	who: &[u8; 32],
+	transactions: u32,
+	bytes: u64,
+	nonce: u64,
+	wait_for_finality: bool,
 ) -> Result<()> {
 	let alice = dev::alice();
 	let authorize_call = subxt::tx::dynamic(
@@ -377,17 +408,27 @@ pub async fn authorize_account_via_sudo(
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	log::info!(
-		"Authorizing 0x{}.. (+{} tx, +{} bytes, alice nonce={})",
+		"Authorizing 0x{}.. (+{} tx, +{} bytes, alice nonce={}, wait_for_finality={})",
 		hex::encode(&who[..4]),
 		transactions,
 		bytes,
-		nonce
+		nonce,
+		wait_for_finality,
 	);
 
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+	let timeout = if wait_for_finality {
+		FINALIZED_TRANSACTION_TIMEOUT_SECS
+	} else {
+		TRANSACTION_TIMEOUT_SECS
+	};
+	tokio::time::timeout(Duration::from_secs(timeout), async {
 		let progress =
 			client.tx().sign_and_submit_then_watch(&authorize_call, &alice, params).await?;
-		wait_for_in_best_block(progress).await?;
+		if wait_for_finality {
+			wait_for_finalized(progress).await?;
+		} else {
+			wait_for_in_best_block(progress).await?;
+		}
 		Ok::<_, anyhow::Error>(())
 	})
 	.await

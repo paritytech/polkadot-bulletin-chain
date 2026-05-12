@@ -6,6 +6,11 @@ on:
     # `labeled` lets the sync suite kick in mid-PR when the `zombienet-sync-tests` label is
     # added; auto-renew runs on every push regardless via its lack of an `if:` gate.
     types: [opened, synchronize, reopened, labeled]
+  # Run on pushes to `main` so the post-merge workflow populates the polkadot-binaries cache
+  # under main's scope. PRs whose base is `main` can then read that cache and skip the cold
+  # ~17-min source build of polkadot, even on a fresh `POLKADOT_NODE_VERSION` bump.
+  push:
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -19,7 +24,7 @@ jobs:
     uses: ./.github/workflows/set-image.yml
 
   prepare-binaries:
-    name: Fetch polkadot binaries
+    name: Fetch polkadot binaries + bulletin chain specs
     needs: [set-image]
     runs-on: parity-large
     container:
@@ -34,26 +39,38 @@ jobs:
       - name: Ensure `just` is available
         run: command -v just || cargo install just --locked
 
+      # Polkadot binaries cache: keyed only by the polkadot-sdk + chain-spec-builder versions,
+      # so it stays warm across every PR that doesn't bump those env values.
       - name: Cache polkadot-sdk binaries
-        id: cache
+        id: cache-binaries
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: .polkadot-binaries
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
 
       - name: Fetch / build polkadot binaries
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache-binaries.outputs.cache-hit != 'true'
         run: |
           just binaries-polkadot
           just binaries-chain-spec-builder
 
-      - name: Upload binaries artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      # Bulletin chain specs cache: keyed by commit SHA because the spec embeds the bulletin
+      # runtime WASM, which depends on every line of source under the runtime/pallet crates.
+      # On a hit, matrix legs skip the ~4-min `cargo build -p bulletin-*-runtime` per leg.
+      - name: Cache bulletin chain specs
+        id: cache-specs
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          name: polkadot-binaries
-          path: .polkadot-binaries
-          retention-days: 1
-          include-hidden-files: true
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+
+      - name: Generate chain specs
+        if: steps.cache-specs.outputs.cache-hit != 'true'
+        run: |
+          just chain-spec westend
+          just chain-spec paseo
 
   zombienet-auto-renew-tests:
     needs: [set-image, prepare-binaries]
@@ -96,11 +113,24 @@ jobs:
           shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Download polkadot binaries artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      # Restore the artifacts produced by `prepare-binaries`. Cache restore is ~1-2 min for
+      # ~330 MB vs ~10-12 min over `actions/download-artifact` — and skips one moving part
+      # (the GH artifact service, which has flaked twice on this workflow).
+      - name: Restore polkadot binaries cache
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          name: polkadot-binaries
           path: .polkadot-binaries
+          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
+          fail-on-cache-miss: true
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
 
       - name: Mark binaries executable
         run: chmod -R +x .polkadot-binaries
@@ -155,11 +185,21 @@ jobs:
           shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Download polkadot binaries artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Restore polkadot binaries cache
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          name: polkadot-binaries
           path: .polkadot-binaries
+          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
+          fail-on-cache-miss: true
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
 
       - name: Mark binaries executable
         run: chmod -R +x .polkadot-binaries

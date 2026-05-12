@@ -7,6 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PARA_ID="${PARACHAIN_ID:-2487}"
+SPEC_PATH="$ROOT_DIR/zombienet/bulletin-westend-spec.json"
+
+# Idempotent on cache hit: if the spec already exists, skip the (~4-min) runtime build.
+# Caller can force regeneration with FORCE_REBUILD_SPEC=1.
+if [ -f "$SPEC_PATH" ] && [ "${FORCE_REBUILD_SPEC:-0}" != "1" ]; then
+    echo "Chain spec already at $SPEC_PATH — skipping build (set FORCE_REBUILD_SPEC=1 to override)"
+    exit 0
+fi
 
 cargo build --release -p bulletin-westend-runtime
 

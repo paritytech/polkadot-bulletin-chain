@@ -56,10 +56,10 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_account_via_sudo, authorize_and_store_data, blake2_256,
-		build_parachain_network_config_single_collator, content_hash_and_cid, disable_auto_renew,
-		enable_auto_renew, expect_bitswap_dont_have, generate_test_data, get_alice_nonce,
-		initialize_network, override_alice_authorization, set_retention_period,
+		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
+		blake2_256, build_parachain_network_config_single_collator, content_hash_and_cid,
+		disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have, generate_test_data,
+		get_alice_nonce, initialize_network, override_alice_authorization, set_retention_period,
 		set_retention_period_finalized, submit_renew_pair, submit_store_signed,
 		top_up_alice_authorization, verify_node_bitswap, verify_parachain_binaries,
 		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
@@ -641,15 +641,15 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	// The pallet's `validate_signed` tags renewals with `(who, content_hash)`, so two renews
 	// from the **same** signer for the same data conflict in the pool. To get two renews of
 	// the same data into the same block we need a second signer — Bob, authorized via sudo.
+	//
+	// Bob's renew is his FIRST ever signed extrinsic. The pool's `validate_signed` reads
+	// `Authorizations` from the runtime state at the latest *finalized* block, so the
+	// authorize-account tx must be FINALIZED (not just in best block) before Bob's renew
+	// enters the pool — otherwise it's rejected as `InvalidTransaction`. The `_finalized`
+	// variant blocks until finality so the next step is race-free.
 	let bob_pk = subxt_signer::sr25519::dev::bob().public_key().0;
-	authorize_account_via_sudo(client, &bob_pk, 1, data.len() as u64, nonce).await?;
+	authorize_account_via_sudo_finalized(client, &bob_pk, 1, data.len() as u64, nonce).await?;
 	nonce += 1;
-	// Pool-validation of Bob's renew calls the pallet's `validate_signed`, which reads
-	// `Authorizations` from the runtime state at the latest *finalized* block. The
-	// `authorize_account` we just submitted is in best block but not finalized, so a
-	// renew submitted immediately is rejected as `InvalidTransaction`. Quiesce so that
-	// Bob's authorization is visible to the pool before the renew goes in.
-	wait_for_finalized_quiescence(collator1, QUIESCENCE_TIMEOUT_SECS).await?;
 	let bob_nonce = client
 		.tx()
 		.account_nonce(&subxt_signer::sr25519::dev::bob().public_key().to_account_id())
@@ -1626,6 +1626,18 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	alice_nonce += WORST_CASE_WORKERS as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(authz_futs).await?;
 	log::info!("All {} sudo authorize_account calls accepted into pool", WORST_CASE_WORKERS);
+
+	// Each worker's first signed extrinsic depends on its `Authorizations` entry being
+	// visible to the pool at validation time, which reads finalized state. We just submitted
+	// 512 authorize_account sudos in best block — batch-wait once for finality (cheaper than
+	// per-call finalization) before any worker tx fires. See the analogous single-account
+	// case in `parachain_renew_twice_within_block_with_pruning_test`.
+	{
+		let post_authz_best = current_best_block(&client).await?.number() as u64;
+		wait_for_finalized_height(&collator1, post_authz_best + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+			.await?;
+		log::info!("Worker authorizations finalized (waited finalized >= {})", post_authz_best + 2);
+	}
 
 	// Pre-fund every worker so they can pay the fee for `enable_auto_renew`.
 	// `store` slips through `SkipCheckIfFeeless<ChargeTransactionPayment>` because
