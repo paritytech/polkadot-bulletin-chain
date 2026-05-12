@@ -981,20 +981,35 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	let mut nonce = get_alice_nonce(collator1).await?;
 
-	// Authorize Alice for EXACTLY 1 store + RENEWAL_CYCLES_TO_OBSERVE renewals per item — no
-	// safety margin. On the shared `archive` harness this matters: any extra slot left over
-	// after the observed window keeps the auto-renew inherent firing on every (RP+1)-th block
-	// for the rest of the harness lifetime, saturating the per-block weight quota and
-	// crowding out the single-item renewals that later tests in the group try to observe.
-	// With no extra slot, the cycle immediately after the observed window fails for every
-	// item, the pallet removes them from `AutoRenewals`, and the chain returns to idle.
+	// Clobber Alice's `Authorizations` entry directly so it holds EXACTLY the renewal capacity
+	// this test needs and no more. `authorize_account` is additive on the unexpired path
+	// (`pallets/transaction-storage/src/lib.rs:1544-1553`), so on the shared `archive` harness
+	// it would just stack on top of Alice's genesis (100 tx, 10 MiB) — far more than this test
+	// needs. The resulting overflow would keep all `MANY_ITEMS_COUNT` items renewing on every
+	// (RP+1)-th block for the rest of the harness lifetime, polluting state for later tests.
+	//
+	// Pallet semantics for renewals (see `check_authorization`): the gate is
+	// `bytes_permanent + size <= bytes_allowance`. We size `bytes_allowance` to
+	// `RENEWAL_CYCLES_TO_OBSERVE × MANY_ITEMS_COUNT × data.len()` so that exactly N cycles fit
+	// and cycle N+1 trips `PERMANENT_ALLOWANCE_EXCEEDED` for every item, the pallet emits
+	// `AutoRenewalFailed`, and entries are removed from `AutoRenewals` — leaving the chain
+	// idle for the next test.
 	let bytes_per_item = TEST_DATA_SIZE as u64;
-	let cycles_to_authorize = RENEWAL_CYCLES_TO_OBSERVE + 1; // 1 store + N renewals
-	authorize_account_via_sudo(
+	let bytes_allowance =
+		bytes_per_item * MANY_ITEMS_COUNT as u64 * RENEWAL_CYCLES_TO_OBSERVE as u64;
+	// transactions_allowance is not checked by the renewal path, but we set it generously
+	// anyway so it doesn't gate the upfront stores via the signed extension.
+	let transactions_allowance = MANY_ITEMS_COUNT * (RENEWAL_CYCLES_TO_OBSERVE + 1);
+	override_alice_authorization(
 		client,
-		&dev::alice().public_key().0,
-		MANY_ITEMS_COUNT * cycles_to_authorize,
-		bytes_per_item * (MANY_ITEMS_COUNT as u64) * cycles_to_authorize as u64,
+		AuthorizationOverride {
+			transactions: 0,
+			transactions_allowance,
+			bytes: 0,
+			bytes_permanent: 0,
+			bytes_allowance,
+			expiration: u32::MAX,
+		},
 		nonce,
 	)
 	.await?;
@@ -1452,6 +1467,48 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		);
 	}
 
+	// Wind-down observation: the override sized Alice's `bytes_allowance` to exactly N cycles,
+	// so cycle N+1 must fail for every item. Wait the cadence past the last observed renewal,
+	// then prove the chain hit `AutoRenewalFailed × MANY_ITEMS_COUNT` — at which point the
+	// pallet has removed every entry from `AutoRenewals` and the shared chain is back to idle.
+	// Spilling across two blocks is allowed (the inherent splits the work when weight-bound).
+	let exhaustion_block = last_renewal_block + renewal_cadence;
+	let exhaustion_wait_until = exhaustion_block + 1;
+	log::info!(
+		"Waiting for cycle-N+1 exhaustion at block {} (last observed renewal at {})",
+		exhaustion_block,
+		last_renewal_block
+	);
+	wait_for_block_height(collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	let mut total_failed: u32 = 0;
+	let mut total_renewed_post_window: u32 = 0;
+	for n in exhaustion_block..=exhaustion_block + 1 {
+		let hash = block_hash_at(client, n).await?;
+		let events = client.blocks().at(hash).await?.events().await?;
+		total_failed += count_event(&events, "AutoRenewalFailed");
+		total_renewed_post_window += count_event(&events, "DataAutoRenewed");
+	}
+	assert_eq!(
+		total_failed, MANY_ITEMS_COUNT,
+		"expected exactly {} AutoRenewalFailed events at blocks {}..={} (cycle N+1 exhaustion); saw {}",
+		MANY_ITEMS_COUNT, exhaustion_block, exhaustion_block + 1, total_failed
+	);
+	assert_eq!(
+		total_renewed_post_window,
+		0,
+		"expected 0 DataAutoRenewed events post-exhaustion at blocks {}..={}; saw {} \
+		 (Alice's authorization should have been fully consumed by the observation window)",
+		exhaustion_block,
+		exhaustion_block + 1,
+		total_renewed_post_window
+	);
+	log::info!(
+		"✓ All {} items hit AutoRenewalFailed at blocks {}..={}; AutoRenewals storage drained",
+		MANY_ITEMS_COUNT,
+		exhaustion_block,
+		exhaustion_block + 1,
+	);
+
 	test_log!(TEST, "=== Auto-renew {} items PASSED ===", MANY_ITEMS_COUNT);
 	Ok(())
 }
@@ -1509,11 +1566,13 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 
 	// Authorize every worker via sudo. Each call needs its own Alice nonce; submit all in
 	// parallel via `sign_and_submit` (no watcher) so the pool batches them into the next 1-2
-	// blocks. Each worker is authorized for EXACTLY 1 store + RENEWAL_CYCLES_TO_OBSERVE
-	// renewals (no safety margin) so renewals cease cleanly once the observed window ends
-	// — see the equivalent note in [`parachain_auto_renew_many_items_test`] for the rationale.
+	// blocks. Workers have no genesis authorization, so `authorize_account` creates a fresh
+	// entry with `bytes_allowance = N · data.len()`. After N renewal cycles each worker's
+	// `bytes_permanent` saturates the allowance, cycle N+1's `check_authorization` fails for
+	// every worker, the pallet emits `AutoRenewalFailed` and removes from `AutoRenewals` —
+	// chain returns to idle.
 	let alice = dev::alice();
-	let cycles_to_authorize = RENEWAL_CYCLES_TO_OBSERVE + 1;
+	let cycles_to_authorize = RENEWAL_CYCLES_TO_OBSERVE;
 	let pre_authz_block = current_best_block(&client).await?.number() as u64;
 	log::info!(
 		"Submitting {} sudo authorize_account calls in parallel (pre-block={})",
@@ -1917,6 +1976,47 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 			total_renewed
 		);
 	}
+
+	// Wind-down observation (see equivalent block in `parachain_auto_renew_many_items_test`):
+	// each worker's `bytes_allowance` is sized to exactly N cycles, so cycle N+1 must fail for
+	// every worker. Asserting `AutoRenewalFailed × WORST_CASE_WORKERS` proves the chain has
+	// drained every entry from `AutoRenewals` before the test exits.
+	let exhaustion_block = last_renewal_block + renewal_cadence;
+	let exhaustion_wait_until = exhaustion_block + 1;
+	log::info!(
+		"Waiting for cycle-N+1 exhaustion at block {} (last observed renewal at {})",
+		exhaustion_block,
+		last_renewal_block
+	);
+	wait_for_block_height(&collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	let mut total_failed: u32 = 0;
+	let mut total_renewed_post_window: u32 = 0;
+	for n in exhaustion_block..=exhaustion_block + 1 {
+		let hash = block_hash_at(&client, n).await?;
+		let events = client.blocks().at(hash).await?.events().await?;
+		total_failed += count_event(&events, "AutoRenewalFailed");
+		total_renewed_post_window += count_event(&events, "DataAutoRenewed");
+	}
+	assert_eq!(
+		total_failed, WORST_CASE_WORKERS,
+		"expected exactly {} AutoRenewalFailed events at blocks {}..={} (cycle N+1 exhaustion); saw {}",
+		WORST_CASE_WORKERS, exhaustion_block, exhaustion_block + 1, total_failed
+	);
+	assert_eq!(
+		total_renewed_post_window,
+		0,
+		"expected 0 DataAutoRenewed post-exhaustion at blocks {}..={}; saw {} (every worker's \
+		 authorization should have been fully consumed by the observation window)",
+		exhaustion_block,
+		exhaustion_block + 1,
+		total_renewed_post_window
+	);
+	log::info!(
+		"✓ All {} workers hit AutoRenewalFailed at blocks {}..={}; AutoRenewals storage drained",
+		WORST_CASE_WORKERS,
+		exhaustion_block,
+		exhaustion_block + 1,
+	);
 
 	test_log!(TEST, "=== Worst-case auto-renew {} items PASSED ===", WORST_CASE_WORKERS);
 

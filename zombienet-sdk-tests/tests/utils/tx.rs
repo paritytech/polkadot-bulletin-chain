@@ -282,10 +282,14 @@ pub async fn authorize_and_store_data(
 		.await
 		.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	let block = client.blocks().at(block_hash).await?;
-	let block_number = block.number() as u64;
+	// Read the authoritative block from `TransactionByContentHash` at the inclusion block —
+	// subxt's `tx_in_block.block_hash()` can name a block whose `block.number()` is one ahead
+	// of the canonical key in `Transactions[N]` (the latter is what `on_initialize` uses to
+	// schedule auto-renewal). See `canonical_store_block` for the full rationale.
+	let content_hash = blake2_256(data);
+	let block_number = canonical_store_block(&client, block_hash, &content_hash).await?;
 
-	log::info!("Store transaction included at block {}", block_number);
+	log::info!("Store transaction included at canonical block {}", block_number);
 	Ok((block_number, nonce))
 }
 
@@ -427,9 +431,56 @@ pub async fn submit_store_signed(
 		.await
 		.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	let block_number = client.blocks().at(block_hash).await?.number() as u64;
-	log::info!("Store transaction included at block {}", block_number);
+	// See `authorize_and_store_data` / `canonical_store_block` for why we read the canonical
+	// block at the inclusion block hash instead of trusting subxt's reported block number.
+	let content_hash = blake2_256(data);
+	let block_number = canonical_store_block(client, block_hash, &content_hash).await?;
+	log::info!("Store transaction included at canonical block {}", block_number);
 	Ok(block_number)
+}
+
+/// Read `TransactionByContentHash[content_hash]` at the supplied block hash and return the
+/// canonical block number where the store/renewal was indexed. Reading AT the inclusion
+/// block (not `at_latest`) avoids the case where subxt's chainHead_v2 backend's latest view
+/// is still pinned to a finalized block that doesn't yet reflect the just-included tx. The
+/// pallet stores `(frame_system::block_number(), index)` at extrinsic-execution time, so
+/// reading at the inclusion block's state always returns the authoritative block number —
+/// even if subxt's `tx_in_block.block_hash()` later turns out to name a short-lived fork
+/// candidate, the storage map at the SAME block-hash references is internally consistent.
+pub async fn canonical_store_block(
+	client: &OnlineClient<SubstrateConfig>,
+	at_block_hash: subxt::utils::H256,
+	content_hash: &[u8; 32],
+) -> Result<u64> {
+	let address = subxt::dynamic::storage(
+		"TransactionStorage",
+		"TransactionByContentHash",
+		vec![Value::from_bytes(content_hash.as_slice())],
+	);
+	let value = client.storage().at(at_block_hash).fetch(&address).await?.ok_or_else(|| {
+		anyhow!(
+			"TransactionByContentHash[0x{}] is empty at block 0x{} — the store extrinsic \
+				 should have populated this entry in the same block",
+			hex::encode(content_hash),
+			hex::encode(&at_block_hash.0[..8]),
+		)
+	})?;
+	use subxt::ext::scale_value::{Primitive, ValueDef};
+	let decoded = value.to_value()?;
+	let block_number = match decoded.value {
+		ValueDef::Composite(ref c) => c
+			.values()
+			.next()
+			.and_then(|v| match &v.value {
+				ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
+				_ => None,
+			})
+			.ok_or_else(|| {
+				anyhow!("TransactionByContentHash value composite empty or non-numeric")
+			})?,
+		_ => anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded),
+	};
+	Ok(block_number as u64)
 }
 
 /// Submit two `TransactionStorage::renew(block, index)` extrinsics back-to-back, signed by
