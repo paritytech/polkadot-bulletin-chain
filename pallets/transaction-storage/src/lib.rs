@@ -475,6 +475,10 @@ pub mod pallet {
 		/// `valid_until` supplied to `add_authorizer` is in the past (`<= now`, would
 		/// expire immediately). Pass `None` for no expiration.
 		InvalidValidUntil,
+		/// `authorize_account` / `authorize_preimage` called by a signer whose
+		/// `AllowedAuthorizers` budget cannot cover the requested
+		/// `transactions` / `bytes` (or `max_size`).
+		InsufficientAuthorizerBudget,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
@@ -767,9 +771,6 @@ pub mod pallet {
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
-			T::Authorizer::try_origin(origin.clone()).is_ok()
-		})]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -777,8 +778,15 @@ pub mod pallet {
 			bytes: u64,
 		) -> DispatchResult {
 			let authorization_period_override = Self::authorization_period_override_for(&origin);
+			// Capture the signer (if any) before `ensure_origin` consumes the origin —
+			// we use it post-check to charge their `AllowedAuthorizers` budget. Root /
+			// XCM origins have no signer and no budget to consume.
+			let signer = frame_system::ensure_signed(origin.clone()).ok();
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
+			if let Some(signer) = signer {
+				Self::consume_authorizer_budget(&signer, transactions, bytes)?;
+			}
 			Self::authorize(
 				AuthorizationScope::Account(who.clone()),
 				transactions,
@@ -809,18 +817,19 @@ pub mod pallet {
 		/// [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
 		#[pallet::call_index(4)]
 		#[pallet::weight(T::WeightInfo::authorize_preimage())]
-		#[pallet::feeless_if(|origin: &OriginFor<T>, _content_hash: &ContentHash, _max_size: &u64| -> bool {
-			T::Authorizer::try_origin(origin.clone()).is_ok()
-		})]
 		pub fn authorize_preimage(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
 			let authorization_period_override = Self::authorization_period_override_for(&origin);
+			let signer = frame_system::ensure_signed(origin.clone()).ok();
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			// Preimage scope is single-use, so the per-grant tx budget is `1`.
+			if let Some(signer) = signer {
+				Self::consume_authorizer_budget(&signer, 1, max_size)?;
+			}
 			Self::authorize(
 				AuthorizationScope::Preimage(content_hash),
 				1,
@@ -2220,43 +2229,13 @@ pub mod pallet {
 					let info = Self::transaction_info(*block, *index).ok_or(RENEWED_NOT_FOUND)?;
 					(info.size as usize, info.content_hash, true)
 				},
-				Call::<T>::authorize_account { .. } | Call::<T>::authorize_preimage { .. } => {
-					// For authorize_preimage, transactions is always 1
-					let transaction_budget_to_consume = match call {
-						Call::<T>::authorize_account { transactions, .. } => *transactions,
-						_ => 1,
-					};
-					let byte_budget_to_consume = match call {
-						Call::<T>::authorize_account { bytes, .. } => *bytes,
-						Call::<T>::authorize_preimage { max_size, .. } => *max_size,
-						_ => unreachable!(),
-					};
-
-					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
-					T::Authorizer::ensure_origin(origin)
-						.map_err(|_| InvalidTransaction::BadSigner)?;
-
-					// Consume the authorizer budget if this is an AllowedAuthorizers signer.
-					// Root/XCM origins won't be in the map — that's fine, they have no budget.
-					Self::check_authorizer_budget(
-						who,
-						transaction_budget_to_consume,
-						byte_budget_to_consume,
-						context.consume_authorization(),
-					)?;
-
-					return Ok((
-						context.want_valid_transaction().then(|| ValidTransaction {
-							priority: T::StoreRenewPriority::get(),
-							longevity: T::StoreRenewLongevity::get(),
-							..Default::default()
-						}),
-						None,
-					));
-				},
+				Call::<T>::authorize_account { .. } |
+				Call::<T>::authorize_preimage { .. } |
 				Call::<T>::refresh_account_authorization { .. } |
 				Call::<T>::refresh_preimage_authorization { .. } => {
-					// Verify that the signer satisfies the Authorizer origin.
+					// Verify that the signer satisfies the Authorizer origin. Budget
+					// consumption (for `AllowedAuthorizers` signers on `authorize_*`)
+					// happens inside the dispatch body, not here.
 					let origin = frame_system::RawOrigin::Signed(who.clone()).into();
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
@@ -2432,39 +2411,31 @@ pub mod pallet {
 				.and_then(|b| b.authorization_period)
 		}
 
-		/// Validate-or-commit budget consumption for `who`. When `consume` is `true`, persists
-		/// the decrement via `try_mutate`. When `consume` is `false`, performs the same
-		/// `checked_sub` on a local copy and discards it — exists purely to surface
-		/// `InvalidTransaction::Payment` during pool validation without writing state.
+		/// Atomically decrement `who`'s [`AllowedAuthorizers`] budget by
+		/// `transactions` / `bytes`. Returns [`Error::InsufficientAuthorizerBudget`]
+		/// when either axis would go negative; on failure the budget is unchanged.
 		///
-		/// A missing entry (Root/XCM origins, not in `AllowedAuthorizers`) is a no-op: they
-		/// have no budget to consume.
-		fn check_authorizer_budget(
+		/// A missing entry (Root/XCM origins not in [`AllowedAuthorizers`]) is a no-op:
+		/// they have no budget to track. Callers should invoke this *after*
+		/// [`Config::Authorizer::ensure_origin`] to ensure unrelated signers can't
+		/// trigger arbitrary budget reads.
+		fn consume_authorizer_budget(
 			who: &T::AccountId,
 			transactions: u32,
 			bytes: u64,
-			consume: bool,
-		) -> Result<(), TransactionValidityError> {
-			let try_consume = |maybe_budget: &mut Option<AuthorizerBudgetFor<T>>|
-			 -> Result<(), TransactionValidityError> {
-				let Some(budget) = maybe_budget else {
-					return Ok(());
-				};
+		) -> DispatchResult {
+			AllowedAuthorizers::<T>::try_mutate(who, |maybe_budget| -> DispatchResult {
+				let Some(budget) = maybe_budget else { return Ok(()) };
 				budget.transactions_budget = budget
 					.transactions_budget
 					.checked_sub(transactions)
-					.ok_or(InvalidTransaction::Payment)?;
-				budget.bytes_budget =
-					budget.bytes_budget.checked_sub(bytes).ok_or(InvalidTransaction::Payment)?;
+					.ok_or(Error::<T>::InsufficientAuthorizerBudget)?;
+				budget.bytes_budget = budget
+					.bytes_budget
+					.checked_sub(bytes)
+					.ok_or(Error::<T>::InsufficientAuthorizerBudget)?;
 				Ok(())
-			};
-
-			if consume {
-				AllowedAuthorizers::<T>::try_mutate(who, try_consume)
-			} else {
-				let mut budget = AllowedAuthorizers::<T>::get(who);
-				try_consume(&mut budget)
-			}
+			})
 		}
 	}
 }

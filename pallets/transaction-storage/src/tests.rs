@@ -3666,21 +3666,25 @@ fn remove_exhausted_authorizer_works_for_expired() {
 #[test]
 fn authorizer_budget_decrements_on_authorize() {
 	// `authorize_account` consumes `(transactions, bytes)`; `authorize_preimage` is
-	// equivalent to consuming `(1, max_size)`.
+	// equivalent to consuming `(1, max_size)`. Budget consumption happens inside
+	// the dispatch body, so we dispatch via `Signed(authorizer)` directly.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let authorizer = 10u64;
 		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(5, 10_000));
 
-		assert_ok!(TransactionStorage::pre_dispatch_signed(
-			&authorizer,
-			&Call::authorize_account { who: 1, transactions: 2, bytes: 4000 },
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			1,
+			2,
+			4000,
 		));
 		assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap(), test_budget(3, 6000));
 
-		assert_ok!(TransactionStorage::pre_dispatch_signed(
-			&authorizer,
-			&Call::authorize_preimage { content_hash: [0u8; 32], max_size: 3000 },
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::signed(authorizer),
+			[0u8; 32],
+			3000,
 		));
 		assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap(), test_budget(2, 3000));
 	});
@@ -3689,20 +3693,25 @@ fn authorizer_budget_decrements_on_authorize() {
 #[test]
 fn authorizer_budget_insufficient_rejects_without_writing() {
 	// Both axes (transactions, bytes) gate independently; on rejection the budget
-	// must be unchanged (try_consume runs `checked_sub` on a local clone first).
+	// must be unchanged (`try_mutate` rolls back when the closure returns Err).
 	let scenarios = [
-		// (initial_budget, call_consuming_too_much_on_one_axis)
-		(test_budget(1, 10_000), Call::authorize_account { who: 1, transactions: 5, bytes: 1000 }),
-		(test_budget(100, 500), Call::authorize_account { who: 1, transactions: 1, bytes: 1000 }),
+		// (initial_budget, transactions, bytes)
+		(test_budget(1, 10_000), 5, 1000),
+		(test_budget(100, 500), 1, 1000),
 	];
-	for (initial, call) in scenarios {
+	for (initial, transactions, bytes) in scenarios {
 		new_test_ext().execute_with(|| {
 			run_to_block(1, || None);
 			let authorizer = 10u64;
 			AllowedAuthorizers::<Test>::insert(authorizer, initial.clone());
 			assert_noop!(
-				TransactionStorage::pre_dispatch_signed(&authorizer, &call),
-				InvalidTransaction::Payment,
+				TransactionStorage::authorize_account(
+					RuntimeOrigin::signed(authorizer),
+					1,
+					transactions,
+					bytes,
+				),
+				Error::InsufficientAuthorizerBudget,
 			);
 			assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap(), initial);
 		});

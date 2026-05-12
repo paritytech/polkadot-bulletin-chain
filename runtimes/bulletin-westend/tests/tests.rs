@@ -1766,6 +1766,87 @@ fn xcm_transact_authorize_account_works() {
 		});
 }
 
+/// XCM Transact from an AssetHub smart contract: an `AccountKey20`-descended
+/// sibling origin (e.g. a pallet-revive contract) converts to a `Signed` origin
+/// via `HashedDescription`. Registration in `AllowedAuthorizers` gates dispatch;
+/// on success the hashed-account budget is decremented.
+#[test]
+fn xcm_transact_authorize_account_from_asset_hub_contract() {
+	use westend_runtime_constants::system_parachain::ASSET_HUB_ID;
+
+	let contract_addr = [0xAAu8; 20];
+	let hashed: AccountId =
+		LocationToAccountHelper::<AccountId, LocationToAccountId>::convert_location(
+			Location::new(
+				1,
+				[Parachain(ASSET_HUB_ID), AccountKey20 { network: None, key: contract_addr }],
+			)
+			.into(),
+		)
+		.expect("HashedDescription resolves sibling+AccountKey20");
+
+	let target = Sr25519Keyring::Ferdie.to_account_id();
+	let (txs_budget, bytes_budget) = (1000u32, 100 * 1024 * 1024u64);
+	let (txs, bytes) = (3u32, 1024u64);
+
+	let zero = AuthorizationExtent {
+		bytes: 0,
+		bytes_permanent: 0,
+		bytes_allowance: 0,
+		transactions: 0,
+		transactions_allowance: 0,
+	};
+
+	let run = |registered: bool| {
+		let mut genesis = RuntimeGenesisConfig::default();
+		if registered {
+			genesis.transaction_storage.allowed_authorizers =
+				vec![(hashed.clone(), txs_budget, bytes_budget)];
+		}
+		sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.clone(),
+					transactions: txs,
+					bytes,
+				});
+			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
+				.unpaid_execution(Unlimited, None)
+				.descend_origin(Junctions::from([AccountKey20 {
+					network: None,
+					key: contract_addr,
+				}]))
+				.transact(OriginKind::SovereignAccount, None, call.encode())
+				.build();
+			let mut id = [0u8; 32];
+			xcm_executor::XcmExecutor::<bulletin_westend_runtime::xcm_config::XcmConfig>::prepare_and_execute(
+				Location::new(1, [Parachain(ASSET_HUB_ID)]),
+				message,
+				&mut id,
+				Weight::MAX,
+				Weight::MAX,
+			);
+			(
+				TransactionStorage::account_authorization_extent(target.clone()),
+				pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::get(&hashed),
+			)
+		})
+	};
+
+	// Unregistered: inner dispatch fails with BadOrigin; no authorization created.
+	assert_eq!(run(false), (zero.clone(), None));
+
+	// Registered: dispatch succeeds; target gains allowance and contract budget shrinks.
+	let (extent, budget) = run(true);
+	assert_eq!(
+		extent,
+		AuthorizationExtent { bytes_allowance: bytes, transactions_allowance: txs, ..zero },
+	);
+	let budget = budget.expect("hashed contract account still registered after partial spend");
+	assert_eq!(budget.transactions_budget, txs_budget - txs);
+	assert_eq!(budget.bytes_budget, bytes_budget - bytes);
+}
+
 fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::AuthorizerBudget<BlockNumber>
 {
 	pallet_bulletin_transaction_storage::AuthorizerBudget {
