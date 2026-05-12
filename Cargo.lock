@@ -2038,6 +2038,7 @@ dependencies = [
  "litep2p",
  "log",
  "multihash 0.19.3",
+ "pallet-bulletin-transaction-storage",
  "prost 0.13.5",
  "prost-build 0.13.5",
  "serde_json",

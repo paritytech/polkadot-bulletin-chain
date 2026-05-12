@@ -532,35 +532,6 @@ pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	Ok(nonce)
 }
 
-/// Submit a single `TransactionStorage::renew_content_hash(content_hash)` signed by Alice. The
-/// pallet looks up the latest `(block, index)` for `content_hash` via `TransactionByContentHash`
-/// and re-indexes it. Caller is responsible for: (a) the data still being in pallet retention
-/// (otherwise `TransactionByContentHash` is empty and the call fails with `RenewedNotFound`);
-/// (b) Alice having sufficient pre-existing authorization. Returns the inclusion block number.
-#[allow(dead_code)]
-pub async fn submit_renew_content_hash_signed(
-	client: &OnlineClient<SubstrateConfig>,
-	content_hash: &[u8; 32],
-	nonce: u64,
-) -> Result<()> {
-	let signer = dev::alice();
-	let renew_call = tx(
-		"TransactionStorage",
-		"renew_content_hash",
-		vec![Value::from_bytes(content_hash.as_slice())],
-	);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		client.tx().sign_and_submit(&renew_call, &signer, params).await?;
-		Ok::<_, anyhow::Error>(())
-	})
-	.await
-	.map_err(|_| anyhow!("renew_content_hash submission timed out"))??;
-
-	Ok(())
-}
-
 /// Fields to write into Alice's `Authorization` entry; mirrors the pallet's
 /// `Authorization<BlockNumber>` SCALE layout (encoded as a tuple in that order).
 pub struct AuthorizationOverride {

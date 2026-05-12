@@ -38,6 +38,10 @@ futures.workspace = true
 async-trait = "0.1"
 bytes = "1"
 
+# Re-used in tests to source compile-time limits (e.g. `DEFAULT_MAX_BLOCK_TRANSACTIONS`)
+# from the same crate the runtime uses, rather than hardcoding magic numbers.
+pallet-bulletin-transaction-storage = { path = "../pallets/transaction-storage", default-features = false, features = ["std"] }
+
 [features]
 # Parachain sync regression tests (parachain_sync_storage.rs).
 zombie-sync-tests = []
