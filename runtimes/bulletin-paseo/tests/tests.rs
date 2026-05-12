@@ -16,15 +16,17 @@
 
 #![cfg(test)]
 
+mod common;
+
 use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
 	paseo_constants::{fee::WeightToFee, locations::PeopleLocation},
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
-	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
-	UncheckedExtrinsic,
+	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage,
 };
 use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
+use common::{advance_block, assert_extrinsic_ok, construct_and_apply_extrinsic, ALICE};
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
@@ -33,7 +35,7 @@ use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin,
 };
-use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
+use parachains_common::{AccountId, AuraId};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
@@ -41,103 +43,11 @@ use sp_runtime::{
 	traits::{TransactionExtension, TxBaseImplication},
 	transaction_validity,
 	transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidityError},
-	ApplyExtrinsicResult, BuildStorage, Either,
+	BuildStorage, Either,
 };
 use std::collections::HashMap;
 use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
-
-const ALICE: [u8; 32] = [1u8; 32];
-
-/// Advance to the next block for testing transaction storage.
-fn advance_block() {
-	let current = frame_system::Pallet::<Runtime>::block_number();
-
-	<TransactionStorage as Hooks<_>>::on_finalize(current);
-	<System as Hooks<_>>::on_finalize(current);
-
-	let next = current + 1;
-	System::set_block_number(next);
-
-	frame_system::BlockWeight::<Runtime>::kill();
-	frame_system::BlockSize::<Runtime>::kill();
-
-	<System as Hooks<_>>::on_initialize(next);
-	<TransactionStorage as Hooks<_>>::on_initialize(next);
-}
-
-fn construct_extrinsic(
-	sender: Option<sp_core::sr25519::Pair>,
-	call: RuntimeCall,
-) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
-	// provide a known block hash for the immortal era check
-	frame_system::BlockHash::<Runtime>::insert(0, PcHash::default());
-	let inner = (
-		frame_system::AuthorizeCall::<Runtime>::new(),
-		frame_system::CheckNonZeroSender::<Runtime>::new(),
-		frame_system::CheckSpecVersion::<Runtime>::new(),
-		frame_system::CheckTxVersion::<Runtime>::new(),
-		frame_system::CheckGenesis::<Runtime>::new(),
-		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
-		frame_system::CheckNonce::<Runtime>::from(if let Some(s) = sender.as_ref() {
-			let account_id = AccountId::from(s.public());
-			frame_system::Pallet::<Runtime>::account(&account_id).nonce
-		} else {
-			0
-		}),
-		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
-		),
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
-			Runtime,
-			bulletin_paseo_runtime::storage::StorageCallInspector,
-		>::default(),
-		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
-		),
-		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-	);
-	let tx_ext: TxExtension =
-		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
-
-	if let Some(s) = sender.as_ref() {
-		// Signed call.
-		let account_id = AccountId::from(s.public());
-		let payload = sp_runtime::generic::SignedPayload::new(call.clone(), tx_ext.clone())?;
-		let signature = payload.using_encoded(|e| s.sign(e));
-		Ok(UncheckedExtrinsic::new_signed(
-			call,
-			account_id.into(),
-			PcSignature::Sr25519(signature),
-			tx_ext,
-		))
-	} else {
-		// Unsigned call.
-		Ok(UncheckedExtrinsic::new_transaction(call, tx_ext))
-	}
-}
-
-fn construct_and_apply_extrinsic(
-	account: Option<sp_core::sr25519::Pair>,
-	call: RuntimeCall,
-) -> ApplyExtrinsicResult {
-	let dispatch_info = call.get_dispatch_info();
-	let xt = construct_extrinsic(account, call)?;
-	let xt_len = xt.encode().len();
-	tracing::info!(
-		"Applying extrinsic: class={:?} pays_fee={:?} weight={:?} encoded_len={} bytes",
-		dispatch_info.class,
-		dispatch_info.pays_fee,
-		dispatch_info.total_weight(),
-		xt_len
-	);
-	bulletin_paseo_runtime::Executive::apply_extrinsic(xt)
-}
-
-fn assert_ok_ok(apply_result: ApplyExtrinsicResult) {
-	assert_ok!(apply_result);
-	assert_ok!(apply_result.unwrap());
-}
 
 #[test]
 fn transaction_storage_runtime_sizes() {
@@ -410,7 +320,7 @@ fn allowance_based_priority_works() {
 			assert_eq!(allowance_based_priority(origin.clone(), &oversized_store), 0);
 
 			// Consume the entire allowance → over-budget → no boost.
-			assert_ok_ok(construct_and_apply_extrinsic(
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
 				Some(account.pair()),
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 					data: vec![0u8; allowance as usize],
@@ -457,7 +367,7 @@ fn store_with_cid_config_works() {
 		);
 
 		// 1. Store data WITHOUT a custom cid_config (plain `store`).
-		assert_ok_ok(construct_and_apply_extrinsic(
+		assert_extrinsic_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
 		));
@@ -465,7 +375,7 @@ fn store_with_cid_config_works() {
 		// 2. Store data WITH a cid_config as the default codec for raw data via
 		//    `store_with_cid_config`.
 		// (Should produce the same content_hash as above).
-		assert_ok_ok(construct_and_apply_extrinsic(
+		assert_extrinsic_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
 				cid: CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 },
@@ -475,7 +385,7 @@ fn store_with_cid_config_works() {
 
 		// 3. Store data WITH a custom cid_config (Sha2_256 + 0x70 codec) via
 		//    `store_with_cid_config`.
-		assert_ok_ok(construct_and_apply_extrinsic(
+		assert_extrinsic_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store_with_cid_config {
 				cid: CidConfig { codec: 0x70, hashing: HashingAlgorithm::Sha2_256 },
@@ -526,7 +436,7 @@ mod hop_tests {
 					data.len() as u64,
 				));
 				advance_block();
-				assert_ok_ok(construct_and_apply_extrinsic(
+				assert_extrinsic_ok(construct_and_apply_extrinsic(
 					Some(account.pair()),
 					RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 						data: data.clone(),
@@ -587,7 +497,7 @@ mod hop_tests {
 				);
 
 				// Apply the extrinsic and confirm dispatch succeeded.
-				assert_ok_ok(Executive::apply_extrinsic(xt));
+				assert_extrinsic_ok(Executive::apply_extrinsic(xt));
 
 				// After block flush, the promoted hash is visible on-chain.
 				advance_block();
@@ -1083,7 +993,10 @@ fn authorized_wrapped_store_rejected() {
 			});
 
 			// Direct store should succeed.
-			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), store_call.clone()));
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				store_call.clone(),
+			));
 
 			// Batch-wrapped store must be rejected.
 			for (wrapped, name) in wrap_call_utility_variants(store_call) {
@@ -1216,7 +1129,7 @@ fn preimage_authorized_storage_transactions_work() {
 			));
 
 			// Now should work via preimage authorization.
-			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
+			assert_extrinsic_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
 
 			// Verify preimage authorization was consumed.
 			assert_eq!(
@@ -1260,7 +1173,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 				data: data.clone(),
 			});
-			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
+			assert_extrinsic_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
 
 			// Verify: preimage authorization was consumed, account authorization unchanged
 			assert_eq!(
@@ -1320,7 +1233,7 @@ fn renew_must_be_direct_extrinsic() {
 			0,
 			data.len() as u64
 		));
-		assert_ok_ok(construct_and_apply_extrinsic(
+		assert_extrinsic_ok(construct_and_apply_extrinsic(
 			Some(account.pair()),
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
 		));
@@ -1334,7 +1247,10 @@ fn renew_must_be_direct_extrinsic() {
 		});
 
 		// Direct renew succeeds with the existing account authorization.
-		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
+		assert_extrinsic_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			renew_call.clone(),
+		));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who.clone()),
 			AuthorizationExtent {
@@ -1443,7 +1359,7 @@ fn wrapped_authorize_account_succeeds() {
 				calls: vec![authorize_call],
 			});
 
-			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), batch_call));
+			assert_extrinsic_ok(construct_and_apply_extrinsic(Some(account.pair()), batch_call));
 
 			// Authorization must have been created.
 			assert_eq!(
@@ -1462,7 +1378,7 @@ fn wrapped_authorize_account_succeeds() {
 			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
 				data: data.clone(),
 			});
-			assert_ok_ok(construct_and_apply_extrinsic(
+			assert_extrinsic_ok(construct_and_apply_extrinsic(
 				Some(Sr25519Keyring::Bob.pair()),
 				store_call,
 			));
@@ -1645,7 +1561,7 @@ fn sudo_store_works_for_sudo_key_holder() {
 
 		// sudo(store) should work — Root origin is accepted by ensure_authorized.
 		let sudo_call = RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(store_call) });
-		assert_ok_ok(construct_and_apply_extrinsic(Some(sudo_account.pair()), sudo_call));
+		assert_extrinsic_ok(construct_and_apply_extrinsic(Some(sudo_account.pair()), sudo_call));
 
 		// No account authorization was needed or consumed.
 		assert_eq!(
