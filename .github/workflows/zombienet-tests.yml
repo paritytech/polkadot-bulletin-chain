@@ -45,7 +45,15 @@ jobs:
         id: cache-binaries
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          path: .polkadot-binaries
+          # Cache ONLY the resolved binary subdirs, not the entire `.polkadot-binaries/`.
+          # The latter contains `.polkadot-binaries/_src/` — the polkadot-sdk source clone +
+          # cargo target from the cold-build path (~11 GB) — which we don't need to
+          # distribute: cache hits are detected by `scripts/get_polkadot_binaries.sh` looking
+          # for the binary file at `polkadot-node/<version>/<platform>/polkadot`. The two
+          # subdirs below total ~333 MB.
+          path: |
+            .polkadot-binaries/polkadot-node
+            .polkadot-binaries/chain-spec-builder
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
 
       - name: Fetch / build polkadot binaries
@@ -119,7 +127,15 @@ jobs:
       - name: Restore polkadot binaries cache
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          path: .polkadot-binaries
+          # Cache ONLY the resolved binary subdirs, not the entire `.polkadot-binaries/`.
+          # The latter contains `.polkadot-binaries/_src/` — the polkadot-sdk source clone +
+          # cargo target from the cold-build path (~11 GB) — which we don't need to
+          # distribute: cache hits are detected by `scripts/get_polkadot_binaries.sh` looking
+          # for the binary file at `polkadot-node/<version>/<platform>/polkadot`. The two
+          # subdirs below total ~333 MB.
+          path: |
+            .polkadot-binaries/polkadot-node
+            .polkadot-binaries/chain-spec-builder
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
           fail-on-cache-miss: true
 
@@ -188,7 +204,15 @@ jobs:
       - name: Restore polkadot binaries cache
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          path: .polkadot-binaries
+          # Cache ONLY the resolved binary subdirs, not the entire `.polkadot-binaries/`.
+          # The latter contains `.polkadot-binaries/_src/` — the polkadot-sdk source clone +
+          # cargo target from the cold-build path (~11 GB) — which we don't need to
+          # distribute: cache hits are detected by `scripts/get_polkadot_binaries.sh` looking
+          # for the binary file at `polkadot-node/<version>/<platform>/polkadot`. The two
+          # subdirs below total ~333 MB.
+          path: |
+            .polkadot-binaries/polkadot-node
+            .polkadot-binaries/chain-spec-builder
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
           fail-on-cache-miss: true
 
