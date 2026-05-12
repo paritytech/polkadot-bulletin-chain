@@ -575,6 +575,38 @@ pub async fn enable_auto_renew(
 	Ok(())
 }
 
+/// Submit `TransactionStorage::disable_auto_renew(content_hash)` signed by Alice. Removes
+/// the content hash from `AutoRenewals` so the auto-renew inherent stops processing it on
+/// subsequent renewal blocks. Use at the end of shared-harness tests that called
+/// `enable_auto_renew`: without this the chain keeps re-storing the item until Alice's
+/// authorization runs out, polluting state for later tests in the group.
+pub async fn disable_auto_renew(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let call = tx(
+		"TransactionStorage",
+		"disable_auto_renew",
+		vec![Value::from_bytes(content_hash.as_slice())],
+	);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	log::info!("Submitting disable_auto_renew (nonce={})...", nonce);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("disable_auto_renew transaction timed out"))??;
+
+	log::info!("disable_auto_renew included in block");
+	Ok(())
+}
+
 pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
 	let alice_account_id = dev::alice().public_key().to_account_id();

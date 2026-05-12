@@ -57,14 +57,14 @@ use crate::{
 	test_log,
 	utils::{
 		authorize_account_via_sudo, authorize_and_store_data, blake2_256,
-		build_parachain_network_config_single_collator, content_hash_and_cid, enable_auto_renew,
-		expect_bitswap_dont_have, generate_test_data, get_alice_nonce, initialize_network,
-		override_alice_authorization, set_retention_period, set_retention_period_finalized,
-		submit_renew_pair, submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
-		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
-		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		build_parachain_network_config_single_collator, content_hash_and_cid, disable_auto_renew,
+		enable_auto_renew, expect_bitswap_dont_have, generate_test_data, get_alice_nonce,
+		initialize_network, override_alice_authorization, set_retention_period,
+		set_retention_period_finalized, submit_renew_pair, submit_store_signed,
+		top_up_alice_authorization, verify_node_bitswap, verify_parachain_binaries,
+		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
+		wait_for_session_change_on_node, AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS,
+		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -365,6 +365,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 
 	let content_hash = blake2_256(&data);
 	enable_auto_renew(client, &content_hash, nonce).await?;
+	nonce += 1;
 	log::info!("Auto-renewal enabled for content_hash {}", hash_hex);
 
 	// Verify the data survives each retention deadline. Renewal cadence is `RP + 1`, so cycle
@@ -404,6 +405,12 @@ async fn parachain_auto_renew_test() -> Result<()> {
 			wait_until
 		);
 	}
+
+	// Cleanup: remove from `AutoRenewals` so the shared `archive` harness doesn't keep
+	// renewing this item for the rest of the harness lifetime, consuming Alice's
+	// authorization and confusing later tests in the group.
+	disable_auto_renew(client, &content_hash, nonce).await?;
+	log::info!("✓ Disabled auto-renew for content_hash — chain idle for the next test");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Test ({} cycles) PASSED ===", NUM_RENEWAL_CYCLES);
 	Ok(())
@@ -1468,11 +1475,15 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 
 	// Wind-down observation: the override sized Alice's `bytes_allowance` to exactly N cycles,
-	// so cycle N+1 must fail for every item. Wait the cadence past the last observed renewal,
-	// then prove the chain hit `AutoRenewalFailed × MANY_ITEMS_COUNT` — at which point the
-	// pallet has removed every entry from `AutoRenewals` and the shared chain is back to idle.
+	// so cycle N+1 must fail for every item. After cycle 1, every item's `Transactions` entry
+	// gets re-keyed to the cycle-1 renewal block (the inherent re-stores all 512 entries in
+	// the same block), so subsequent cycles fire at `first_renewal_block + k*cadence`, not at
+	// `latest_store + k*cadence` — the test's `last_renewal_block` (built from `latest_store`)
+	// is therefore an upper bound that overshoots the actual final cycle. Anchor on
+	// `first_renewal_block` instead to find cycle N+1 reliably.
+	//
 	// Spilling across two blocks is allowed (the inherent splits the work when weight-bound).
-	let exhaustion_block = last_renewal_block + renewal_cadence;
+	let exhaustion_block = first_renewal_block + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let exhaustion_wait_until = exhaustion_block + 1;
 	log::info!(
 		"Waiting for cycle-N+1 exhaustion at block {} (last observed renewal at {})",
@@ -1980,15 +1991,18 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	// Wind-down observation (see equivalent block in `parachain_auto_renew_many_items_test`):
 	// each worker's `bytes_allowance` is sized to exactly N cycles, so cycle N+1 must fail for
 	// every worker. Asserting `AutoRenewalFailed × WORST_CASE_WORKERS` proves the chain has
-	// drained every entry from `AutoRenewals` before the test exits.
-	let exhaustion_block = last_renewal_block + renewal_cadence;
+	// drained every entry from `AutoRenewals` before the test exits. Anchor on
+	// `first_renewal_block` (post-cycle-1 consolidation point) so the exhaustion block lands
+	// exactly N cadences later — `last_renewal_block` is an overshooting upper bound built
+	// from `latest_store`, which the inherent's re-keying drops after cycle 1.
+	let exhaustion_block = first_renewal_block + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let exhaustion_wait_until = exhaustion_block + 1;
 	log::info!(
 		"Waiting for cycle-N+1 exhaustion at block {} (last observed renewal at {})",
 		exhaustion_block,
 		last_renewal_block
 	);
-	wait_for_block_height(&collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_block_height(collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	let mut total_failed: u32 = 0;
 	let mut total_renewed_post_window: u32 = 0;
 	for n in exhaustion_block..=exhaustion_block + 1 {
@@ -3645,6 +3659,14 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "post-reauth cycle 1").await?;
 	log::info!("✓ Post-reauth cycle 1 succeeded — counters reset");
+
+	// Cleanup: remove `data2` from `AutoRenewals` so the shared `archive` harness doesn't
+	// keep renewing it for the rest of the harness lifetime. `data` was already cleaned up
+	// by the cycle-2 expiration path (the pallet removes failed entries). `data2` doesn't
+	// have a natural exhaustion in scope here, so disable it explicitly.
+	let nonce_after_enable = nonce + 1;
+	disable_auto_renew(client, &content_hash2, nonce_after_enable).await?;
+	log::info!("✓ Disabled auto-renew for data2 — chain idle for the next test");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Authorization Expires Mid-Cycle Test PASSED ===");
 	Ok(())
