@@ -28,7 +28,7 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	AuthorizerBudget, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
@@ -53,19 +53,6 @@ impl SortedMembers<AccountId> for TestAccounts {
 		members.sort();
 		members
 	}
-}
-
-parameter_types! {
-	/// Default authorizers seeded into `AllowedAuthorizers` storage by the
-	/// `PopulateAllowedAuthorizersIfEmpty` migration when the storage is empty.
-	pub DefaultAllowedAuthorizers: Vec<AccountId> = vec![Sr25519Keyring::Bob.to_account_id()];
-	/// Default authorizer budget equivalent to the values set in Westend genesis.
-	pub DefaultAuthorizerBudget: AuthorizerBudget<crate::BlockNumber> = AuthorizerBudget {
-		transactions_budget: 100_000,
-		bytes_budget: 100 * 1024 * 1024 * 1024,
-		authorization_period: None,
-		valid_until: None,
-	};
 }
 
 parameter_types! {

@@ -28,7 +28,7 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	AuthorizerBudget, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
@@ -46,19 +46,6 @@ parameter_types! {
 	/// authorizations on this chain. Seeded at 1.7 TiB; storage-backed so governance
 	/// (root) can raise/lower it via `system.set_storage` without a runtime upgrade.
 	pub storage MaxPermanentStorageSize: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
-}
-
-parameter_types! {
-	/// Default authorizers seeded into `AllowedAuthorizers` storage by the
-	/// `PopulateAllowedAuthorizersIfEmpty` migration when the storage is empty.
-	pub DefaultAllowedAuthorizers: Vec<AccountId> = vec![Sr25519Keyring::Bob.to_account_id()];
-	/// Default authorizer budget equivalent to the values set in Paseo genesis.
-	pub DefaultAuthorizerBudget: AuthorizerBudget<crate::BlockNumber> = AuthorizerBudget {
-		transactions_budget: 100_000,
-		bytes_budget: 100 * 1024 * 1024 * 1024,
-		authorization_period: None,
-		valid_until: None,
-	};
 }
 
 /// Provides test accounts for use with `EnsureSignedBy`.
