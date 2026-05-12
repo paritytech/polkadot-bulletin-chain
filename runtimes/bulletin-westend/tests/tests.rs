@@ -1841,7 +1841,7 @@ fn xcm_transact_authorize_account_from_asset_hub_contract() {
 	};
 
 	// Unregistered: inner dispatch fails with BadOrigin; no authorization created.
-	assert_eq!(execute_xcm(false), (zero.clone(), None));
+	assert_eq!(execute_xcm(false), (zero, None));
 
 	// Registered: dispatch succeeds; target gains allowance and contract budget shrinks.
 	let (extent, budget) = execute_xcm(true);
@@ -1946,6 +1946,6 @@ fn non_sudo_cannot_add_authorizer() {
 			});
 			let applied = construct_and_apply_extrinsic(Some(bob.pair()), call)
 				.expect("validation passes (balance present)");
-			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin.into()));
+			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin));
 		});
 }
