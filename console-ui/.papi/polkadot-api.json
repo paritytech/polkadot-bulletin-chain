@@ -19,6 +19,12 @@
       "metadata": ".papi/metadata/web3_storage.scale",
       "genesis": "0x4545454545454545454545454545454545454545454545454545454545454545",
       "codeHash": "0x289091ecfc0d1c0b66b62e22d54788fbcd0314f037c3ed7aebae4c330d21e879"
+    },
+    "bulletin_paseo_next_v2": {
+      "wsUrl": "wss://paseo-bulletin-next-rpc.polkadot.io",
+      "metadata": ".papi/metadata/bulletin_paseo_next_v2.scale",
+      "genesis": "0x8cfe6717dc4becfda2e13c488a1e2061ff2dfee96e7d031157f72d36716c0a22",
+      "codeHash": "0x4fe167698d8a654b0d832ffa2b22471689331b278d93e1802b4f3d469b807d5a"
     }
   }
 }
