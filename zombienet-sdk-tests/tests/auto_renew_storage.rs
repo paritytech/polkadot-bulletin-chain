@@ -1634,7 +1634,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	// case in `parachain_renew_twice_within_block_with_pruning_test`.
 	{
 		let post_authz_best = current_best_block(&client).await?.number() as u64;
-		wait_for_finalized_height(&collator1, post_authz_best + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		wait_for_finalized_height(collator1, post_authz_best + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
 			.await?;
 		log::info!("Worker authorizations finalized (waited finalized >= {})", post_authz_best + 2);
 	}
