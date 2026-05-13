@@ -25,6 +25,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
     lightClient: false,
   },
+  "paseo-next-v2": {
+    id: "paseo-next-v2",
+    name: "Bulletin Paseo Next v2",
+    endpoints: ["wss://paseo-bulletin-next-rpc.polkadot.io"],
+    lightClient: false,
+  },
   previewnet: {
     id: "previewnet",
     name: "Bulletin Previewnet",

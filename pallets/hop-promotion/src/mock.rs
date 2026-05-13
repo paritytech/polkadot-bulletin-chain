@@ -17,20 +17,45 @@
 
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
-use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
+use polkadot_sdk_frame::{
+	deps::{frame_support, frame_system},
+	prelude::*,
+	runtime::prelude::*,
+	testing_prelude::*,
+};
 use sp_runtime::{traits::IdentityLookup, AccountId32};
 
 type Block = MockBlock<Test>;
 
-construct_runtime!(
-	pub enum Test
-	{
-		System: frame_system,
-		Timestamp: pallet_timestamp,
-		TransactionStorage: pallet_bulletin_transaction_storage,
-		HopPromotion: pallet_bulletin_hop_promotion,
-	}
-);
+#[frame_support::runtime]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Test;
+
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+
+	#[runtime::pallet_index(1)]
+	pub type Timestamp = pallet_timestamp;
+
+	#[runtime::pallet_index(2)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+
+	#[runtime::pallet_index(3)]
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
+}
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
@@ -78,6 +103,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
+	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
@@ -102,6 +128,7 @@ pub fn new_test_ext() -> TestExternalities {
 			entry_fee: 0,
 			account_authorizations: vec![],
 			preimage_authorizations: vec![],
+			allowed_authorizers: vec![],
 		},
 	}
 	.build_storage()
