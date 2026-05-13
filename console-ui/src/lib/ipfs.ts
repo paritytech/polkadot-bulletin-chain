@@ -104,6 +104,30 @@ export async function getIpfsContentInfo(
 }
 
 /**
+ * Fetch raw block data from IPFS gateway (using ?format=raw).
+ * Returns the raw encoded block bytes, needed for parsing DAG-PB manifests.
+ */
+export async function fetchRawBlock(
+  cid: string,
+  gateway: string = DEFAULT_IPFS_GATEWAY
+): Promise<Uint8Array> {
+  const url = `${gateway}/ipfs/${cid}?format=raw`;
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/vnd.ipld.raw",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`IPFS raw block fetch failed: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
+/**
  * Build IPFS gateway URL for a CID
  */
 export function buildIpfsUrl(
