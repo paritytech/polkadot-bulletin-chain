@@ -30,12 +30,14 @@ Every finalized block:
 Every 60 seconds:
 - Reads the on-chain `Authorizations` storage map and compares against the local model. Logs any mismatch.
 
-Block production SLI is `observed_blocks / expected_blocks` (expected derived from wall-clock vs 24 s slot duration).
+Block production SLI is `observed_blocks / expected_blocks` (expected derived from wall-clock vs 6 s slot duration; async backing produces parablocks at the relay-chain slot cadence).
+
+SLO window is 2 weeks. The script logs per-block; aggregation over the window is a Prometheus query concern once metrics are wired.
 
 ## Constants
 
 These mirror the Bulletin runtime:
-- `SLOT_DURATION_MS = 24_000`
+- `SLOT_DURATION_MS = 6_000` (parachain block cadence with async backing)
 - `MAX_BLOCK_TX = 512` (`MaxBlockTransactions`)
 - `BYTE_CAP = 8 MB`
 

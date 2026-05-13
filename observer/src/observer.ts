@@ -15,7 +15,7 @@ import { bulletin } from "@polkadot-api/descriptors"
 
 const RPC = "wss://paseo-bulletin-rpc.polkadot.io"
 
-const SLOT_DURATION_MS    = 24_000
+const SLOT_DURATION_MS    = 6_000
 const MAX_BLOCK_TX        = 512
 const BYTE_CAP            = 8 * 1024 * 1024
 const COUNT_THRESHOLD     = MAX_BLOCK_TX * 0.8
