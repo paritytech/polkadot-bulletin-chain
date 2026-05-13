@@ -23,19 +23,39 @@ use crate::{
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
-	prelude::*, runtime::prelude::*, testing_prelude::*, traits::EitherOfDiverse,
+	deps::{frame_support, frame_system},
+	prelude::*,
+	runtime::prelude::*,
+	testing_prelude::*,
+	traits::EitherOfDiverse,
 };
 
 type Block = MockBlock<Test>;
 
 // Configure a mock runtime to test the pallet.
-construct_runtime!(
-	pub enum Test
-	{
-		System: frame_system,
-		TransactionStorage: pallet_bulletin_transaction_storage,
-	}
-);
+#[frame_support::runtime]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Test;
+
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+
+	#[runtime::pallet_index(1)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+}
 
 parameter_types! {
 	pub const TestDbWeight: polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight =
