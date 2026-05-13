@@ -1,4 +1,4 @@
-// PAPI demo for Bulletin Chain SLIs: block production, headroom, authorization lifecycle.
+// PAPI demo for the Bulletin Chain block-headroom SLI.
 
 import { createClient } from "polkadot-api"
 import { getWsProvider } from "polkadot-api/ws-provider/node"
@@ -7,34 +7,20 @@ import { bulletin } from "@polkadot-api/descriptors"
 
 const RPC = "wss://paseo-bulletin-rpc.polkadot.io"
 
-const SLOT_DURATION_MS    = 6_000
-const MAX_BLOCK_TX        = 512
-const BYTE_CAP            = 8 * 1024 * 1024
-const COUNT_THRESHOLD     = MAX_BLOCK_TX * 0.8
-const BYTES_THRESHOLD     = BYTE_CAP        * 0.8
-const AUTH_CHECK_EVERY_MS = 60_000
-
-type AuthState = { transactions: number; bytes: bigint }
+const MAX_BLOCK_TX    = 512
+const BYTE_CAP        = 8 * 1024 * 1024
+const COUNT_THRESHOLD = MAX_BLOCK_TX * 0.8
+const BYTES_THRESHOLD = BYTE_CAP        * 0.8
 
 async function main(): Promise<void> {
   const client = createClient(getWsProvider(RPC))
   const api    = client.getTypedApi(bulletin)
 
-  let observedBlocks = 0
-  let goodBlocks     = 0
-  let badBlocks      = 0
-  const startTime    = Date.now()
-
-  const authModel = new Map<string, AuthState>()
-  let authBreachCount = 0
+  let goodBlocks = 0
+  let badBlocks  = 0
 
   client.finalizedBlock$.subscribe(async (header: { hash: string; number: number }) => {
     const { hash, number: num } = header
-
-    observedBlocks += 1
-    const elapsedMs      = Date.now() - startTime
-    const expectedBlocks = Math.max(1, Math.floor(elapsedMs / SLOT_DURATION_MS))
-    const productionSli  = observedBlocks / expectedBlocks
 
     const events = await api.query.System.Events.getValue({ at: hash })
 
@@ -49,75 +35,21 @@ async function main(): Promise<void> {
       []
     const storeBytes = txs.reduce((s: number, tx: any) => s + Number(tx.size), 0)
 
-    const isGood =
-      storedCount < COUNT_THRESHOLD && storeBytes < BYTES_THRESHOLD
+    const isGood = storedCount < COUNT_THRESHOLD && storeBytes < BYTES_THRESHOLD
     if (isGood) goodBlocks += 1
     else badBlocks += 1
-    const headroomSli = goodBlocks / (goodBlocks + badBlocks)
-
-    for (const ev of events) {
-      const e: any = ev.event
-      if (e?.type !== "TransactionStorage") continue
-      const v = e.value
-      switch (v.type) {
-        case "AccountAuthorized":
-          authModel.set(v.value.who, {
-            transactions: v.value.transactions,
-            bytes:        BigInt(v.value.bytes),
-          })
-          break
-        case "AccountAuthorizationRefreshed":
-          authModel.set(v.value.who, authModel.get(v.value.who) ?? {
-            transactions: 0,
-            bytes:        0n,
-          })
-          break
-        case "ExpiredAccountAuthorizationRemoved":
-          authModel.delete(v.value.who)
-          break
-        default:
-          break
-      }
-    }
+    const sli = goodBlocks / (goodBlocks + badBlocks)
 
     console.log(
       JSON.stringify({
-        block:       num,
+        block:   num,
         storedCount,
         storeBytes,
-        verdict:     isGood ? "good" : "bad",
-        sli: {
-          production: productionSli.toFixed(4),
-          headroom:   headroomSli.toFixed(4),
-        },
+        verdict: isGood ? "good" : "bad",
+        sli:     sli.toFixed(4),
       }),
     )
   })
-
-  setInterval(async () => {
-    const onChain = await api.query.TransactionStorage.Authorizations.getEntries()
-    const onChainKeys = new Set(
-      onChain.map(({ keyArgs }: { keyArgs: unknown }) => JSON.stringify(keyArgs)),
-    )
-    const modelKeys = new Set(
-      [...authModel.keys()].map((who) => JSON.stringify([{ Account: who }])),
-    )
-
-    const missingOnChain    = [...modelKeys].filter((k) => !onChainKeys.has(k))
-    const unexpectedOnChain = [...onChainKeys].filter((k) => !modelKeys.has(k))
-
-    const mismatch = missingOnChain.length + unexpectedOnChain.length
-    if (mismatch > 0) authBreachCount += 1
-
-    console.log(
-      JSON.stringify({
-        authConsistency:   mismatch === 0 ? "OK" : "BREACH",
-        missingOnChain:    missingOnChain.length,
-        unexpectedOnChain: unexpectedOnChain.length,
-        totalBreaches:     authBreachCount,
-      }),
-    )
-  }, AUTH_CHECK_EVERY_MS)
 }
 
 main().catch((e: unknown) => {
