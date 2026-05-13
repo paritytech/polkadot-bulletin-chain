@@ -17,20 +17,45 @@
 
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
-use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
+use polkadot_sdk_frame::{
+	deps::{frame_support, frame_system},
+	prelude::*,
+	runtime::prelude::*,
+	testing_prelude::*,
+};
 use sp_runtime::{traits::IdentityLookup, AccountId32};
 
 type Block = MockBlock<Test>;
 
-construct_runtime!(
-	pub enum Test
-	{
-		System: frame_system,
-		Timestamp: pallet_timestamp,
-		TransactionStorage: pallet_bulletin_transaction_storage,
-		HopPromotion: pallet_bulletin_hop_promotion,
-	}
-);
+#[frame_support::runtime]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Test;
+
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system::Pallet<Test>;
+
+	#[runtime::pallet_index(1)]
+	pub type Timestamp = pallet_timestamp::Pallet<Test>;
+
+	#[runtime::pallet_index(2)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage::Pallet<Test>;
+
+	#[runtime::pallet_index(3)]
+	pub type HopPromotion = pallet_bulletin_hop_promotion::Pallet<Test>;
+}
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
