@@ -1,0 +1,17 @@
+{
+  "name": "bulletin-observer",
+  "version": "0.0.1",
+  "private": true,
+  "description": "PAPI script demonstrating Bulletin Chain SLO measurement (block production, headroom, authorization lifecycle).",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/observer.ts"
+  },
+  "dependencies": {
+    "polkadot-api": "^1.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
