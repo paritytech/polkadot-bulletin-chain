@@ -44,6 +44,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # override per-shell to share across worktrees, e.g.
 #   export POLKADOT_BINARIES_DIR=$HOME/.cache/polkadot-bulletin-binaries
 CACHE_ROOT="${POLKADOT_BINARIES_DIR:-$REPO_ROOT/.polkadot-binaries}"
+# Resolve to absolute: the source-build path `cd`s into the cloned repo before `cp`-ing
+# binaries to $CACHE_ROOT/<group>/<ref>/<platform>, so a relative path breaks.
+mkdir -p "$CACHE_ROOT"
+CACHE_ROOT="$(cd "$CACHE_ROOT" && pwd)"
 SRC_ROOT="$CACHE_ROOT/_src"
 
 # --- platform detection ------------------------------------------------------
