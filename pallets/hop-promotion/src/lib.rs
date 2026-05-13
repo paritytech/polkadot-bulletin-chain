@@ -72,8 +72,8 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use pallet_bulletin_transaction_storage::WeightInfo as _;
 	use sp_runtime::{
-		traits::{IdentifyAccount, One, Verify, Zero},
-		AccountId32, MultiSignature, MultiSigner, Saturating,
+		traits::{IdentifyAccount, Verify},
+		AccountId32, MultiSignature, MultiSigner,
 	};
 
 	#[pallet::pallet]
@@ -106,33 +106,16 @@ pub mod pallet {
 			pallet_bulletin_transaction_storage::Pallet::<T>::account_has_active_authorization(who)
 		}
 
-		/// Whether `content_hash` is currently stored on-chain — i.e. some retained
-		/// transaction in `pallet-bulletin-transaction-storage` indexes it.
+		/// Whether `content_hash` is currently stored on-chain — i.e. some
+		/// retained transaction in `pallet-bulletin-transaction-storage`
+		/// indexes it.
 		///
 		/// Used by HOP's maintenance task to confirm a previously submitted
-		/// promotion extrinsic landed in a block. Walks blocks from latest to
-		/// oldest so freshly-promoted hashes short-circuit after a couple of reads.
-		///
-		/// TODO(optimisation): https://github.com/paritytech/polkadot-bulletin-chain/issues/477
+		/// promotion extrinsic landed in a block. Delegates to
+		/// `pallet-bulletin-transaction-storage::contains_transaction`,
+		/// which answers in O(1) via the content-hash index.
 		pub fn is_promoted_on_chain(content_hash: ContentHash) -> bool {
-			let current = frame_system::Pallet::<T>::block_number();
-			let retention = pallet_bulletin_transaction_storage::Pallet::<T>::retention_period();
-			let oldest = current.saturating_sub(retention);
-			let mut block = current;
-			while block >= oldest {
-				if let Some(txs) =
-					pallet_bulletin_transaction_storage::Pallet::<T>::transactions_at(block)
-				{
-					if txs.iter().any(|t| t.content_hash == content_hash) {
-						return true;
-					}
-				}
-				if block.is_zero() {
-					break;
-				}
-				block = block.saturating_sub(One::one());
-			}
-			false
+			pallet_bulletin_transaction_storage::Pallet::<T>::contains_transaction(content_hash)
 		}
 
 		/// Authorizes a [`Call::promote`] dispatch in the tx pool: validates the

@@ -33,7 +33,7 @@ Without bounds, at sustained-peak block usage one window of fresh `store` data a
 - **Temporary storage** — happens through the `store` call. Lives on chain for one `RetentionPeriod` from its `store` block.
 - **Renewed storage** — happens through the `renew` call. The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
 
-Both `store`/`store_with_cid_config` and `renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
+`store`, `store_with_cid_config`, `renew`, and `renew_content_hash` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
 Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`. The kind is what `on_initialize`'s obsolete-block cleanup uses to tell which entries should decrement the chain-wide renewed-bytes counter when they age out — see [Hard limit on renewed storage](#hard-limit-on-renewed-storage).
 
@@ -41,7 +41,7 @@ Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`.
 
 PoP grants two numbers per account: `bytes_allowance` (size budget) and `transactions_allowance` (count budget). The same `bytes_allowance` is reused on the soft and hard sides, with different semantics.
 
-- **Soft (temporary)** — `bytes_allowance` and `transactions_allowance` are priority thresholds only. The boost drops to `0` once *either* axis is at-or-over cap (`bytes >= bytes_allowance` or `transactions >= transactions_allowance`). `store` calls are never rejected; they queue behind in-budget signers when over.
+- **Soft (temporary)** — `bytes_allowance` and `transactions_allowance` are priority thresholds only. The boost stays on while in-budget on both axes (`bytes <= bytes_allowance` *and* `transactions <= transactions_allowance`) and drops to `0` once *either* is strictly over cap. A missing or `0`-allowance grant also yields no boost. `store` calls are never rejected; they queue behind in-budget signers when over.
 - **Hard (renewed)** — `bytes_allowance` is a real cap on the per-window renew quota. `renew` is **rejected** when `bytes_permanent + size > bytes_allowance`. The transaction-count axis does not gate renew. A separate chain-wide cap (`MaxPermanentStorageSize`) bounds the total renewed bytes on chain across all signers.
 
 ### Authorization storage
@@ -210,5 +210,5 @@ PR #313 introduces `TransactionByContentHash`, `AutoRenewals`, `PendingAutoRenew
 - **Specify `process_auto_renewals` behavior on chain-wide cap rejection.** If `do_renew` rejects an auto-renewal because of `MaxPermanentStorageSize`, treat it the same as PR #313's "block full" path: remove the registration, emit `AutoRenewalFailed`, let the data expire normally.
 - **Drop the snapshot check in `enable_auto_renew`** (or replace with a real reservation). The current check (`extent.transactions > 0 && extent.bytes >= tx_info.size`) is misleading and the per-window quota framing makes it even less meaningful — it suggests "this will work" while making no guarantees beyond the current block.
 - **Reserve block-transaction slots for user txs.** `process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store`/`renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
-- **Audit `on_initialize` weight.** Per expiring tx: 2 reads + up to 2 writes, all in mandatory weight. Worst case at `MaxBlockTransactions = 512` is ~1500 reads + ~500 writes per `on_initialize`. Bench it.
 - **Per-content dedup of re-renewals (nice-to-have).** On `renew(X)`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.
+
