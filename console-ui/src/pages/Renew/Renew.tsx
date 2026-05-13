@@ -46,6 +46,18 @@ interface BatchRenewResult {
   error?: string;
 }
 
+interface ResolveResults {
+  resolutions: CidResolution[];
+  totalSize: number;
+  checkedCids: Set<string>;
+}
+
+const emptyResolveResults: ResolveResults = {
+  resolutions: [],
+  totalSize: 0,
+  checkedCids: new Set(),
+};
+
 export function Renew() {
   const api = useApi();
   const createBulletinClient = useCreateBulletinClient();
@@ -90,9 +102,8 @@ export function Renew() {
   const [isResolving, setIsResolving] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [resolveProgress, setResolveProgress] = useState<string | null>(null);
-  const [resolutions, setResolutions] = useState<CidResolution[]>([]);
-  const [totalSize, setTotalSize] = useState<number>(0);
-  const [checkedCids, setCheckedCids] = useState<Set<string>>(new Set());
+  const [resolveResults, setResolveResults] = useState<ResolveResults>(emptyResolveResults);
+  const { resolutions, totalSize, checkedCids } = resolveResults;
 
   // Batch renewal state
   const [isBatchRenewing, setIsBatchRenewing] = useState(false);
@@ -241,9 +252,7 @@ export function Renew() {
     setIsCidValid(isValid);
     setParsedCid(cid);
     // Clear previous resolution when CID changes
-    setResolutions([]);
-    setTotalSize(0);
-    setCheckedCids(new Set());
+    setResolveResults(emptyResolveResults);
     setResolveError(null);
     setBatchError(null);
     setBatchResults([]);
@@ -256,9 +265,7 @@ export function Renew() {
     setIsResolving(true);
     setResolveError(null);
     setResolveProgress(null);
-    setResolutions([]);
-    setTotalSize(0);
-    setCheckedCids(new Set());
+    setResolveResults(emptyResolveResults);
     setBatchError(null);
     setBatchResults([]);
 
@@ -276,7 +283,7 @@ export function Renew() {
     const localHints = new Map<string, OnChainTransaction>(
       networkHistory.map((e) => [
         e.contentHash,
-        { blockNumber: e.blockNumber, index: e.index, size: e.size },
+        { blockNumber: e.blockNumber, index: e.index },
       ]),
     );
 
@@ -297,13 +304,14 @@ export function Renew() {
         },
       );
 
-      setResolutions(resolved);
-      setTotalSize(parsedTotalSize);
-
       // Check all found CIDs by default
-      setCheckedCids(
-        new Set(resolved.filter((r) => r.location !== null).map((r) => r.cidString)),
-      );
+      setResolveResults({
+        resolutions: resolved,
+        totalSize: parsedTotalSize,
+        checkedCids: new Set(
+          resolved.filter((r) => r.location !== null).map((r) => r.cidString),
+        ),
+      });
 
       if (resolved.every((r) => r.location === null)) {
         setResolveError(
@@ -321,23 +329,28 @@ export function Renew() {
 
   // Toggle a single CID checkbox
   const handleToggleCid = (cidString: string) => {
-    setCheckedCids((prev) => {
-      const next = new Set(prev);
+    setResolveResults((prev) => {
+      const next = new Set(prev.checkedCids);
       if (next.has(cidString)) {
         next.delete(cidString);
       } else {
         next.add(cidString);
       }
-      return next;
+      return { ...prev, checkedCids: next };
     });
   };
 
   const handleSelectAll = () => {
-    setCheckedCids(new Set(resolutions.filter((r) => r.location !== null).map((r) => r.cidString)));
+    setResolveResults((prev) => ({
+      ...prev,
+      checkedCids: new Set(
+        prev.resolutions.filter((r) => r.location !== null).map((r) => r.cidString),
+      ),
+    }));
   };
 
   const handleDeselectAll = () => {
-    setCheckedCids(new Set());
+    setResolveResults((prev) => ({ ...prev, checkedCids: new Set() }));
   };
 
   // Renew each selected CID with its own signed extrinsic. The chain's

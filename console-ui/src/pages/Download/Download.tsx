@@ -131,10 +131,6 @@ function OnChainStatusContent({
         <span>{estimateBlockDate(cidLookup.blockNumber, currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-muted-foreground">Size</span>
-        <span>{formatBytes(cidLookup.size)}</span>
-      </div>
-      <div className="flex justify-between">
         <span className="text-muted-foreground">Expires at block</span>
         <span className="font-mono">{formatBlockNumber(expiresAtBlock)}</span>
       </div>

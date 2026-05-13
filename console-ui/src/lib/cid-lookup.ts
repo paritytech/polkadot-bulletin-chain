@@ -1,12 +1,12 @@
 import type { CID } from "@parity/bulletin-sdk";
 import { CidCodec, UnixFsDagBuilder } from "@parity/bulletin-sdk";
-import { Binary, type HexString } from "polkadot-api";
+import { bulletin_westend } from "@polkadot-api/descriptors";
+import { Binary, type HexString, type SizedHex, type TypedApi } from "polkadot-api";
 
 /** Chain truth for a single stored transaction. */
 export interface OnChainTransaction {
   blockNumber: number;
   index: number;
-  size: number;
 }
 
 /** A CID resolved (or attempted) against the chain. */
@@ -30,13 +30,7 @@ export function contentHashHex(cid: CID): string {
   return Binary.toHex(cid.multihash.digest);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Api = any;
-
-interface TxInfo {
-  content_hash: HexString;
-  size: number;
-}
+type Api = TypedApi<typeof bulletin_westend>;
 
 async function locateContentHashes(
   api: Api,
@@ -46,35 +40,18 @@ async function locateContentHashes(
   if (hashes.length === 0) return out;
   for (const h of hashes) out.set(h, null);
 
-  const indexHits = (await Promise.all(
+  const indexHits = await Promise.all(
     hashes.map((h) =>
-      api.query.TransactionStorage.TransactionByContentHash.getValue(h),
+      api.query.TransactionStorage.TransactionByContentHash.getValue(
+        h as SizedHex<32>,
+      ),
     ),
-  )) as Array<[number | bigint, number] | undefined>;
+  );
 
-  const uniqueBlocks = new Set<number>();
-  const found: Array<{ hash: HexString; block: number; index: number }> = [];
   for (let i = 0; i < hashes.length; i++) {
     const hit = indexHits[i];
     if (!hit) continue;
-    const block = Number(hit[0]);
-    const index = hit[1];
-    found.push({ hash: hashes[i]!, block, index });
-    uniqueBlocks.add(block);
-  }
-  if (found.length === 0) return out;
-
-  const blocks = Array.from(uniqueBlocks);
-  const blockInfos = (await Promise.all(
-    blocks.map((b) => api.query.TransactionStorage.Transactions.getValue(b)),
-  )) as Array<TxInfo[] | undefined>;
-  const blockMap = new Map<number, TxInfo[]>();
-  blocks.forEach((b, i) => blockMap.set(b, blockInfos[i] ?? []));
-
-  for (const f of found) {
-    const info = blockMap.get(f.block)?.[f.index];
-    if (!info) continue;
-    out.set(f.hash, { blockNumber: f.block, index: f.index, size: info.size });
+    out.set(hashes[i]!, { blockNumber: hit[0]!, index: hit[1]! });
   }
   return out;
 }
@@ -104,7 +81,7 @@ export interface ResolveCidOptions {
 export interface ResolveCidResult {
   /** Manifest first (if DAG-PB), then chunks in declared order. */
   resolutions: CidResolution[];
-  /** UnixFs total file size for DAG-PB; otherwise the single resolution's size (or 0). */
+  /** UnixFs total file size from the DAG-PB manifest; 0 for raw CIDs (no manifest to aggregate from). */
   totalSize: number;
 }
 
@@ -176,7 +153,7 @@ export async function resolveCid(
     location: locations.get(e.contentHashHex) ?? null,
   }));
 
-  const totalSize = manifestTotalSize ?? resolutions[0]?.location?.size ?? 0;
+  const totalSize = manifestTotalSize ?? 0;
 
   return { resolutions, totalSize };
 }
