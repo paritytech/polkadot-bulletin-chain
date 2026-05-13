@@ -38,10 +38,10 @@ validator = true
 p2p_port = 10001
 rpc_port = 10000
 args = [
-	"--enable-hop",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=debug",
+	"--enable-hop",
 	# Promote data after 50 blocks ~ 300s ~ 5mins
 	# "--hop-retention-blocks 50",
 	"--hop-retention-blocks 10",
