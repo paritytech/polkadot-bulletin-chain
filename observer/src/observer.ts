@@ -1,12 +1,4 @@
-// Demo observer for three Bulletin Chain SLIs:
-//   1. Block production:    actual finalized blocks vs expected by slot cadence
-//   2. Block headroom:      per-block count and byte capacity below 80% of caps
-//   3. Authorization:       local event-derived model matches on-chain storage
-//
-// Run:
-//   npm install
-//   npx papi add bulletin -w wss://paseo-bulletin-rpc.polkadot.io
-//   npm start
+// PAPI demo for Bulletin Chain SLIs: block production, headroom, authorization lifecycle.
 
 import { createClient } from "polkadot-api"
 import { getWsProvider } from "polkadot-api/ws-provider/node"
