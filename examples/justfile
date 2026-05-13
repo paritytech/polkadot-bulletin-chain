@@ -952,7 +952,7 @@ run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="s
 #   test_dir - Test directory where services are running
 #   ws_url   - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed     - Account seed phrase or dev seed (default: //Alice)
-run-test-fullflow-hop test_dir ws_url="ws://127.0.0.1:10000" seed="//Alice":
+run-test-hop-protocol test_dir ws_url="ws://127.0.0.1:10000" seed="//Alice":
     #!/usr/bin/env bash
     set -e
     node fullflow-hop.js "{{ ws_url }}" "{{ seed }}"

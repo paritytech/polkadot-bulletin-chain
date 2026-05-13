@@ -238,9 +238,9 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
-      - name: Test fullflow-hop
+      - name: Test HOP
         working-directory: examples
-        run: just run-test-fullflow-hop "$TEST_DIR"
+        run: just run-test-hop-protocol "$TEST_DIR"
 
       - name: Test chopsticks compatibility
         working-directory: examples
