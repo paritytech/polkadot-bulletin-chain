@@ -116,6 +116,17 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 	}
 }
 
+/// Default `AuthorizerBudget` used by the `add_authorizer` / `remove_authorizer`
+/// benchmarks. Kept at module scope (not inside `mod benchmarks`) so the
+/// `#[benchmarks]` macro doesn't try to interpret it as a benchmark fn.
+fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
+	AuthorizerBudget {
+		quota: Some(Quota { transactions: 100, bytes: 10 * 1024 * 1024 }),
+		authorization_period: None,
+		valid_until: None,
+	}
+}
+
 #[benchmarks(where
 	T: Send + Sync,
 	RuntimeCallOf<T>: IsSubType<Call<T>> + From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
@@ -184,6 +195,39 @@ mod benchmarks {
 		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes);
 
 		assert_last_event::<T>(Event::AccountAuthorized { who, transactions, bytes }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn add_authorizer() -> Result<(), BenchmarkError> {
+		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let who: T::AccountId = whitelisted_caller();
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, who.clone(), bench_budget::<T>());
+
+		assert_last_event::<T>(Event::AuthorizerAdded { who }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn remove_authorizer() -> Result<(), BenchmarkError> {
+		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let who: T::AccountId = whitelisted_caller();
+		let origin2 = origin.clone();
+		TransactionStorage::<T>::add_authorizer(
+			origin2 as T::RuntimeOrigin,
+			who.clone(),
+			bench_budget::<T>(),
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to add authorizer"))?;
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, who.clone());
+
+		assert_last_event::<T>(Event::AuthorizerRemoved { who }.into());
 		Ok(())
 	}
 
@@ -283,6 +327,25 @@ mod benchmarks {
 		_(RawOrigin::None, content_hash);
 
 		assert_last_event::<T>(Event::ExpiredPreimageAuthorizationRemoved { content_hash }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn remove_exhausted_authorizer() -> Result<(), BenchmarkError> {
+		let who: T::AccountId = whitelisted_caller();
+		AllowedAuthorizers::<T>::insert(
+			&who,
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 0, bytes: 0 }),
+				authorization_period: None,
+				valid_until: None,
+			},
+		);
+
+		#[extrinsic_call]
+		_(RawOrigin::None, who.clone());
+
+		assert_last_event::<T>(Event::ExhaustedAuthorizerRemoved { who }.into());
 		Ok(())
 	}
 

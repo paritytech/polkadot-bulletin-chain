@@ -16,11 +16,15 @@
 **/node_modules/
 tsconfig.tsbuildinfo
 
+# Python
+__pycache__
+
 # Polkadot API generated files (descriptors dir is gitignored inside .papi)
 
 # Local test files
 kubo/
 zombienet-*
+!zombienet-sdk-tests/
 
 # Coverage reports
 coverage/

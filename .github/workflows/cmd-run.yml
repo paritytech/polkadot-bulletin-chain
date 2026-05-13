@@ -172,6 +172,27 @@ jobs:
           repository: ${{ env.REPO }}
           ref: ${{ env.PR_BRANCH }}
 
+      - name: Load .github/env
+        if: startsWith(github.event.inputs.cmd, 'bench')
+        run: grep -v '^#' .github/env | grep '=' >> $GITHUB_ENV
+
+      - name: Cache frame-omni-bencher
+        id: cache-bencher
+        if: startsWith(github.event.inputs.cmd, 'bench')
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /usr/local/bin/frame-omni-bencher
+          key: frame-omni-bencher-${{ env.POLKADOT_SDK_VERSION }}
+
+      - name: Download frame-omni-bencher
+        if: startsWith(github.event.inputs.cmd, 'bench') && steps.cache-bencher.outputs.cache-hit != 'true'
+        run: |
+          url="https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
+          curl -fL -o /tmp/frame-omni-bencher "$url"
+          echo "${FRAME_OMNI_BENCHER_SHA256} /tmp/frame-omni-bencher" | sha256sum -c -
+          chmod +x /tmp/frame-omni-bencher
+          mv /tmp/frame-omni-bencher /usr/local/bin/frame-omni-bencher
+
       - name: Run cmd
         id: cmd
         env:
@@ -189,9 +210,9 @@ jobs:
           git config user.name "cmd[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Using cmd-bot branch for cmd-bot scripts"
+          echo "Using main branch for cmd-bot scripts"
           TMP_DIR=/tmp/polkadot-bulletin-chain
-          git clone --depth 1 --branch cmd-bot https://github.com/paritytech/polkadot-bulletin-chain $TMP_DIR
+          git clone --depth 1 --branch main https://github.com/paritytech/polkadot-bulletin-chain $TMP_DIR
           BOT_PATH=$TMP_DIR
 
           python3 $BOT_PATH/scripts/cmd/cmd.py $CMD
@@ -303,7 +324,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # needs to be able to trigger CI, as default token does not retrigger
-      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: generate_token
         with:
           app-id: ${{ secrets.CMD_BOT_APP_ID }}
