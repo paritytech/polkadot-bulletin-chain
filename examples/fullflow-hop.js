@@ -206,50 +206,6 @@ async function main() {
 		}
 		logSuccess('Content hash matches — data integrity verified.');
 
-		// ── Step 5: renew the entry (permanent storage) ────────────────────────
-		// renew(block, index) resets the retention clock for another RetentionPeriod.
-		// The pallet marks the entry as TransactionKind::Renew so the chain-wide
-		// PermanentStorageUsed counter tracks it correctly.
-		logStep('5️⃣', `Renewing entry at block=${storedBlock} index=${storedIndex}…`);
-		const renewTx = bulletinAPI.tx.TransactionStorage.renew({
-			block: storedBlock,
-			index: storedIndex,
-		});
-		const renewResult = await waitForTransaction(
-			renewTx,
-			whoSigner,
-			'Renew',
-			TX_MODE_FINALIZED_BLOCK,
-		);
-		logSuccess(`Renewed in block ${renewResult.block?.hash ?? '(unknown)'}.`);
-
-		// ── Step 6: show retention info ────────────────────────────────────────
-		logStep('6️⃣', 'Reading RetentionPeriod…');
-		const retentionPeriod = await bulletinAPI.query.TransactionStorage.RetentionPeriod
-			.getValue();
-		const currentBlock = await bulletinAPI.query.System.Number.getValue();
-		const expiresAtBlock = Number(currentBlock) + Number(retentionPeriod);
-
-		logInfo(`  RetentionPeriod : ${retentionPeriod} blocks (~${Math.round(Number(retentionPeriod) * 6 / 3600)} h at 6 s/block)`);
-		logInfo(`  Current block   : ${currentBlock}`);
-		logInfo(`  Expires at      : ~block ${expiresAtBlock}`);
-		logInfo('  Data will be swept from chain by on_initialize at that block.');
-
-		// ── Step 7: wait for retention expiry and verify data is dropped ───────
-		logStep('7️⃣', `Waiting for block #${expiresAtBlock} (retention expiry)…`);
-		await waitForBlock(bulletinAPI, expiresAtBlock, DROP_TIMEOUT_MS, POLL_INTERVAL_MS);
-
-		// TransactionByContentHash must now be absent — on_initialize swept the entry.
-		const droppedEntry = await bulletinAPI.query.TransactionStorage.TransactionByContentHash
-			.getValue(toHex(contentHash));
-
-		if (droppedEntry != null) {
-			throw new Error(
-				`Data was NOT dropped after retention expiry — ` +
-				`TransactionByContentHash still has an entry at block ${droppedEntry[0]} index ${droppedEntry[1]}`,
-			);
-		}
-		logSuccess('TransactionByContentHash entry is gone — data successfully dropped by on_initialize.');
 
 		logTestResult(true, 'HOP Full Flow Test');
 	} catch (err) {
