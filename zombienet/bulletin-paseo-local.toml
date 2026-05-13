@@ -40,7 +40,7 @@ rpc_port = 10000
 args = [
 	"--ipfs-server",
 	"--pool-kbytes 65536",
-	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=debug",
+	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
 	"--enable-hop",
 	# Promote data after 50 blocks ~ 300s ~ 5mins
 	# "--hop-retention-blocks 50",
