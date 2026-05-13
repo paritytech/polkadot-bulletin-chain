@@ -32,7 +32,7 @@ import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
 import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
-import { lookupCidOnChain, type CidOnChainInfo } from "@/state/storage.state";
+import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
 
 const P2P_MULTIADDRS: Record<string, string> = {
   local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
@@ -75,11 +75,15 @@ function OnChainStatusContent({
   cidLookupLoading,
   cidLookupDone,
   cidLookup,
+  currentBlock,
+  retentionPeriod,
 }: {
   parsedCid: CID | undefined;
   cidLookupLoading: boolean;
   cidLookupDone: boolean;
-  cidLookup: CidOnChainInfo | null;
+  cidLookup: OnChainTransaction | null;
+  currentBlock: number | undefined;
+  retentionPeriod: number | null;
 }) {
   if (!parsedCid) {
     return <p className="text-sm text-muted-foreground">Enter a valid CID to check on-chain status</p>;
@@ -107,11 +111,12 @@ function OnChainStatusContent({
     );
   }
 
-  if (!cidLookup) {
+  if (!cidLookup || currentBlock === undefined || retentionPeriod === null) {
     return null;
   }
 
-  const blocksRemaining = cidLookup.expiresAtBlock - cidLookup.currentBlock;
+  const expiresAtBlock = cidLookup.blockNumber + retentionPeriod;
+  const blocksRemaining = expiresAtBlock - currentBlock;
   const isExpired = blocksRemaining <= 0;
   const isExpiringSoon = !isExpired && blocksRemaining < 14400; // ~1 day
 
@@ -123,15 +128,11 @@ function OnChainStatusContent({
       </div>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Upload date</span>
-        <span>{estimateBlockDate(cidLookup.blockNumber, cidLookup.currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-muted-foreground">Size</span>
-        <span>{formatBytes(cidLookup.size)}</span>
+        <span>{estimateBlockDate(cidLookup.blockNumber, currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
       </div>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Expires at block</span>
-        <span className="font-mono">{formatBlockNumber(cidLookup.expiresAtBlock)}</span>
+        <span className="font-mono">{formatBlockNumber(expiresAtBlock)}</span>
       </div>
       <div className="flex justify-between items-center">
         <span className="text-muted-foreground">Retention</span>
@@ -187,9 +188,10 @@ export function Download() {
   const [displayMode, setDisplayMode] = useState<"text" | "hex" | "preview">("text");
 
   // On-chain CID lookup
-  const [cidLookup, setCidLookup] = useState<CidOnChainInfo | null>(null);
+  const [cidLookup, setCidLookup] = useState<OnChainTransaction | null>(null);
   const [cidLookupLoading, setCidLookupLoading] = useState(false);
   const [cidLookupDone, setCidLookupDone] = useState(false);
+  const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
 
   const [gatewayUrl, setGatewayUrl] = useState(
     () => IPFS_GATEWAYS[network.id] ?? ""
@@ -259,9 +261,19 @@ export function Download() {
     }
   }, [cidInput, setSearchParams]);
 
+  // Fetch retention period once per api change
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    api.query.TransactionStorage.RetentionPeriod.getValue().then((period: bigint | number) => {
+      if (!cancelled) setRetentionPeriod(Number(period));
+    });
+    return () => { cancelled = true; };
+  }, [api]);
+
   // Look up CID on-chain when a valid CID is entered
   useEffect(() => {
-    if (!parsedCid || !api || !blockNumber) {
+    if (!parsedCid || !api) {
       setCidLookup(null);
       setCidLookupDone(false);
       return;
@@ -272,17 +284,23 @@ export function Download() {
     setCidLookupDone(false);
     setCidLookup(null);
 
-    const digest = parsedCid.multihash.digest;
-    lookupCidOnChain(api, digest, blockNumber).then((result) => {
+    lookupCidOnChain(api, parsedCid).then((result) => {
       if (!cancelled) {
         setCidLookup(result);
+        setCidLookupLoading(false);
+        setCidLookupDone(true);
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error("Failed to look up CID on chain:", err);
+        setCidLookup(null);
         setCidLookupLoading(false);
         setCidLookupDone(true);
       }
     });
 
     return () => { cancelled = true; };
-  }, [parsedCid?.toString(), api, blockNumber]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [parsedCid?.toString(), api]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCidChange = (value: string, isValid: boolean, cid?: CID) => {
     setCidInput(value);
@@ -1000,6 +1018,8 @@ export function Download() {
                 cidLookupLoading={cidLookupLoading}
                 cidLookupDone={cidLookupDone}
                 cidLookup={cidLookup}
+                currentBlock={blockNumber}
+                retentionPeriod={retentionPeriod}
               />
             </CardContent>
           </Card>
