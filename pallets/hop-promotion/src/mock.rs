@@ -45,16 +45,16 @@ mod runtime {
 	pub struct Test;
 
 	#[runtime::pallet_index(0)]
-	pub type System = frame_system::Pallet<Test>;
+	pub type System = frame_system;
 
 	#[runtime::pallet_index(1)]
-	pub type Timestamp = pallet_timestamp::Pallet<Test>;
+	pub type Timestamp = pallet_timestamp;
 
 	#[runtime::pallet_index(2)]
-	pub type TransactionStorage = pallet_bulletin_transaction_storage::Pallet<Test>;
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 
 	#[runtime::pallet_index(3)]
-	pub type HopPromotion = pallet_bulletin_hop_promotion::Pallet<Test>;
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
 }
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]

@@ -30,6 +30,8 @@ use polkadot_sdk_frame::{
 	traits::EitherOfDiverse,
 };
 
+type Block = MockBlock<Test>;
+
 // Configure a mock runtime to test the pallet.
 #[frame_support::runtime]
 mod runtime {
@@ -49,13 +51,11 @@ mod runtime {
 	pub struct Test;
 
 	#[runtime::pallet_index(0)]
-	pub type System = frame_system::Pallet<Test>;
+	pub type System = frame_system;
 
 	#[runtime::pallet_index(1)]
-	pub type TransactionStorage = pallet_bulletin_transaction_storage::Pallet<Test>;
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 }
-
-type Block = MockBlock<Test>;
 
 parameter_types! {
 	pub const TestDbWeight: polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight =
