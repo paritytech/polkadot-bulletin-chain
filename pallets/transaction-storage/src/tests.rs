@@ -2081,6 +2081,52 @@ fn disable_auto_renew_fails_if_not_enabled() {
 	});
 }
 
+/// `disable_auto_renew` is feeless: admission is gated in `check_signed` so spam is
+/// bounded even without a token fee. Verify pool-level rejection mirrors the dispatch
+/// errors — unknown content hash returns `AUTO_RENEWAL_NOT_ENABLED`, non-owner returns
+/// `NOT_AUTO_RENEWAL_OWNER`, and the registered owner is admitted.
+#[test]
+fn disable_auto_renew_validate_signed_gates_on_ownership() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let owner = 1;
+		let other = 2;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Unknown content hash: pool rejects with AUTO_RENEWAL_NOT_ENABLED.
+		let bogus_hash = blake2_256(&[99u8; 100]);
+		let call = Call::disable_auto_renew { content_hash: bogus_hash };
+		assert_eq!(
+			TransactionStorage::validate_signed(&owner, &call).map(|_| ()),
+			Err(crate::AUTO_RENEWAL_NOT_ENABLED.into()),
+		);
+
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			owner,
+			10,
+			100_000
+		));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(TransactionStorage::enable_auto_renew(
+			RuntimeOrigin::signed(owner),
+			content_hash,
+		));
+
+		// Non-owner: pool rejects with NOT_AUTO_RENEWAL_OWNER.
+		let call = Call::disable_auto_renew { content_hash };
+		assert_eq!(
+			TransactionStorage::validate_signed(&other, &call).map(|_| ()),
+			Err(crate::NOT_AUTO_RENEWAL_OWNER.into()),
+		);
+
+		// Owner: pool admits.
+		assert_ok!(TransactionStorage::validate_signed(&owner, &call));
+	});
+}
+
 #[test]
 fn auto_renewal_lifecycle() {
 	new_test_ext().execute_with(|| {

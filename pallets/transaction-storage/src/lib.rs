@@ -99,6 +99,10 @@ pub const CHAIN_PERMANENT_CAP_REACHED: InvalidTransaction = InvalidTransaction::
 pub const AUTHORIZER_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(7);
 /// Authorizer budget has not been exhausted.
 pub const AUTHORIZATION_NOT_EXHAUSTED: InvalidTransaction = InvalidTransaction::Custom(8);
+/// `disable_auto_renew`: no auto-renewal is registered for the given content hash.
+pub const AUTO_RENEWAL_NOT_ENABLED: InvalidTransaction = InvalidTransaction::Custom(9);
+/// `disable_auto_renew`: caller is not the account that registered the auto-renewal.
+pub const NOT_AUTO_RENEWAL_OWNER: InvalidTransaction = InvalidTransaction::Custom(10);
 
 /// Percent of `MaxPermanentStorageSize` at which the pallet emits
 /// [`Event::PermanentStorageNearCap`] (rising-edge only). Off-chain governance consumers
@@ -769,9 +773,15 @@ pub mod pallet {
 		///
 		/// Can only be called by the account that originally enabled auto-renewal.
 		///
+		/// Feeless: no token fee and no authorization is consumed. Spam is bounded
+		/// because [`check_signed`](Self::check_signed) admits the call only when
+		/// `AutoRenewals[content_hash].account == who`, so a caller can issue at most
+		/// one successful `disable_auto_renew` per registration it owns.
+		///
 		/// Emits [`AutoRenewalDisabled`](Event::AutoRenewalDisabled) when successful.
 		#[pallet::call_index(13)]
 		#[pallet::weight(T::WeightInfo::disable_auto_renew())]
+		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
 		pub fn disable_auto_renew(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
@@ -1224,9 +1234,11 @@ pub mod pallet {
 		/// - [`Self::do_renew_in_memory`] returns `None` because the per-block transaction slot cap
 		///   (`MaxBlockTransactions`) is reached.
 		///
-		/// In both cases the on-chain data is left to expire normally on its existing
-		/// `RetentionPeriod` clock; the caller may re-`enable_auto_renew` once the
-		/// constraint clears.
+		/// On failure the data is **gone**: the same `on_initialize` that queued the
+		/// pending renewal already `take`-d the obsolete `Transactions` entry and cleared
+		/// [`TransactionByContentHash`]. The caller cannot re-`enable_auto_renew` because
+		/// the content hash no longer resolves to a stored entry — to keep the data alive
+		/// they must re-`store` it first.
 		pub(super) fn do_process_auto_renewals() -> u32 {
 			let pending = PendingAutoRenewals::<T>::take();
 			let n_actual = pending.len() as u32;
@@ -2087,11 +2099,17 @@ pub mod pallet {
 						None,
 					));
 				},
-				Call::<T>::disable_auto_renew { .. } => {
-					// `disable_auto_renew` does not consume authorization. The dispatch handler
-					// enforces ownership (caller must be the registered owner). Return a
-					// permissive ValidTransaction so the call enters the pool ordered only by
-					// the signer's nonce.
+				Call::<T>::disable_auto_renew { content_hash } => {
+					// `disable_auto_renew` is feeless and does not consume authorization. To
+					// bound spam (no token fee is charged), gate admission on ownership: the
+					// registration must exist and `who` must be its owner. A caller can
+					// therefore admit at most one `disable_auto_renew` per registration it
+					// owns — the same cap that bounds successful dispatch.
+					let renewal_data =
+						AutoRenewals::<T>::get(content_hash).ok_or(AUTO_RENEWAL_NOT_ENABLED)?;
+					if &renewal_data.account != who {
+						return Err(NOT_AUTO_RENEWAL_OWNER.into());
+					}
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
 							priority: T::StoreRenewPriority::get(),
