@@ -33,7 +33,7 @@ use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin,
 };
-use parachains_common::{AccountId, AuraId, Hash as PcHash, Signature as PcSignature};
+use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
@@ -41,7 +41,7 @@ use sp_runtime::{
 	traits::{TransactionExtension, TxBaseImplication},
 	transaction_validity,
 	transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidityError},
-	ApplyExtrinsicResult, BuildStorage, Either,
+	ApplyExtrinsicResult, BuildStorage, DispatchError, Either,
 };
 use std::collections::HashMap;
 use xcm::latest::prelude::*;
@@ -771,39 +771,53 @@ fn governance_authorize_upgrade_works() {
 }
 
 #[test]
-fn alice_can_sign_authorize_account_extrinsic() {
-	// Alice is a TestAccount and thus an Authorizer. A signed `authorize_account` extrinsic
-	// from Alice must pass ValidateSigned (not be rejected as InvalidTransaction::Call)
-	// and succeed at dispatch.
-	let mut genesis = RuntimeGenesisConfig::default();
-	genesis.transaction_storage.account_authorizations =
-		vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)];
-	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
-		let alice = Sr25519Keyring::Alice;
-		let target = Sr25519Keyring::Eve;
+fn allowed_authorizer_needs_balance_to_sign_authorize_account() {
+	// With `feeless_if` removed from `authorize_account`, the signer — even one registered
+	// in `AllowedAuthorizers` — must hold balance: `ChargeTransactionPayment` runs before
+	// the pallet's origin / budget checks. With balance the dispatch succeeds and the
+	// budget shrinks; without it the extrinsic is rejected with `Payment` and the budget
+	// is untouched.
+	let authorizer = Sr25519Keyring::Ferdie; // not in `TestAccounts`, only `AllowedAuthorizers`
+	let (txs_budget, bytes_budget, bytes) = (1000u32, 100 * 1024 * 1024u64, 1024u64);
 
-		let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-			who: target.to_account_id(),
-			transactions: 0,
-			bytes: 1024,
-		});
+	let attempt_authorize = |funded: bool| {
+		let mut genesis = RuntimeGenesisConfig::default();
+		genesis.transaction_storage.allowed_authorizers =
+			vec![(authorizer.to_account_id(), txs_budget, bytes_budget)];
+		sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+			if funded {
+				use frame_support::traits::fungible::Mutate;
+				Balances::mint_into(&authorizer.to_account_id(), 1_000_000_000_000).unwrap();
+			}
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: Sr25519Keyring::Eve.to_account_id(),
+					transactions: 0,
+					bytes,
+				});
+			let result = construct_and_apply_extrinsic(Some(authorizer.pair()), call);
+			let post = pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::get(
+				authorizer.to_account_id(),
+			)
+			.expect("authorizer remains registered")
+			.quota
+			.map(|q| q.bytes);
+			(result, post)
+		})
+	};
 
-		let res = construct_and_apply_extrinsic(Some(alice.pair()), call);
-		assert_ok!(res);
-		assert_ok!(res.unwrap());
+	// Funded: dispatch succeeds; budget decremented by the requested bytes.
+	let (res, post) = attempt_authorize(true);
+	assert_ok_ok(res);
+	assert_eq!(post, Some(bytes_budget - bytes));
 
-		// Verify the authorization was actually applied.
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(target.to_account_id()),
-			AuthorizationExtent {
-				bytes: 0,
-				bytes_permanent: 0,
-				bytes_allowance: 1024,
-				transactions: 0,
-				transactions_allowance: 0,
-			},
-		);
-	});
+	// Unfunded: fee check rejects before dispatch; budget unchanged.
+	let (res, post) = attempt_authorize(false);
+	assert_eq!(
+		res,
+		Err(transaction_validity::TransactionValidityError::Invalid(InvalidTransaction::Payment)),
+	);
+	assert_eq!(post, Some(bytes_budget));
 }
 
 #[test]
@@ -1299,6 +1313,7 @@ fn renew_must_be_direct_extrinsic() {
 		entry_fee: 0,
 		account_authorizations: vec![],
 		preimage_authorizations: vec![],
+		allowed_authorizers: vec![],
 	}
 	.assimilate_storage(&mut t)
 	.unwrap();
@@ -1420,53 +1435,51 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 /// `T::Authorizer::ensure_origin()` succeeds at dispatch time.
 #[test]
 fn wrapped_authorize_account_succeeds() {
-	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
-		.execute_with(|| {
-			advance_block();
-			let account = Sr25519Keyring::Alice;
-			let who: AccountId = account.to_account_id();
-			let target: AccountId = Sr25519Keyring::Bob.to_account_id();
+	let mut genesis = RuntimeGenesisConfig::default();
+	genesis.transaction_storage.allowed_authorizers =
+		vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)];
 
-			// Fund Alice for batch fee overhead.
-			use frame_support::traits::fungible::Mutate;
-			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+		advance_block();
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let target: AccountId = Sr25519Keyring::Bob.to_account_id();
 
-			// Wrap authorize_account inside batch_all — this is what the JS integration
-			// test does. The origin must stay Signed(Alice) so the Authorizer check passes.
-			let authorize_call =
-				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-					who: target.clone(),
-					transactions: 0,
-					bytes: 10 * 1024,
-				});
-			let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch_all {
-				calls: vec![authorize_call],
+		// Fund Alice for batch fee overhead.
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+		// Wrap authorize_account inside batch_all — this is what the JS integration
+		// test does. The origin must stay Signed(Alice) so the Authorizer check passes.
+		let authorize_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+				who: target.clone(),
+				transactions: 10,
+				bytes: 10 * 1024,
 			});
+		let batch_call =
+			RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: vec![authorize_call] });
 
-			assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), batch_call));
+		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), batch_call));
 
-			// Authorization must have been created.
-			assert_eq!(
-				TransactionStorage::account_authorization_extent(target.clone()),
-				AuthorizationExtent {
-					bytes: 0,
-					bytes_permanent: 0,
-					bytes_allowance: 10 * 1024,
-					transactions: 0,
-					transactions_allowance: 0,
-				},
-			);
+		// Authorization must have been created.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(target.clone()),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 10 * 1024,
+				transactions: 0,
+				transactions_allowance: 10,
+			},
+		);
 
-			// Now verify that the authorized target can actually store data.
-			let data = vec![42u8; 100];
-			let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-				data: data.clone(),
-			});
-			assert_ok_ok(construct_and_apply_extrinsic(
-				Some(Sr25519Keyring::Bob.pair()),
-				store_call,
-			));
-		});
+		// Now verify that the authorized target can actually store data.
+		let data = vec![42u8; 100];
+		let store_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
+		assert_ok_ok(construct_and_apply_extrinsic(Some(Sr25519Keyring::Bob.pair()), store_call));
+	});
 }
 
 /// Batch containing store is rejected — store must be submitted as direct extrinsics,
@@ -1852,5 +1865,187 @@ fn xcm_transact_authorize_account_works() {
 					transactions_allowance: 0,
 				},
 			);
+		});
+}
+
+/// XCM Transact from an AssetHub smart contract: an `AccountKey20`-descended
+/// sibling origin (e.g. a pallet-revive contract) converts to a `Signed` origin
+/// via `HashedDescription`. Registration in `AllowedAuthorizers` gates dispatch;
+/// on success the hashed-account budget is decremented.
+#[test]
+fn xcm_transact_authorize_account_from_asset_hub_contract() {
+	use bulletin_paseo_runtime::paseo_constants::system_parachain::ASSET_HUB_ID;
+
+	let contract_addr = [0xAAu8; 20];
+	let hashed: AccountId =
+		LocationToAccountHelper::<AccountId, LocationToAccountId>::convert_location(
+			Location::new(
+				1,
+				[Parachain(ASSET_HUB_ID), AccountKey20 { network: None, key: contract_addr }],
+			)
+			.into(),
+		)
+		.expect("HashedDescription resolves sibling+AccountKey20");
+
+	let target = Sr25519Keyring::Ferdie.to_account_id();
+	let (txs_budget, bytes_budget) = (1000u32, 100 * 1024 * 1024u64);
+	let (txs, bytes) = (3u32, 1024u64);
+
+	let zero = AuthorizationExtent {
+		bytes: 0,
+		bytes_permanent: 0,
+		bytes_allowance: 0,
+		transactions: 0,
+		transactions_allowance: 0,
+	};
+
+	let execute_xcm = |registered: bool| {
+		let mut genesis = RuntimeGenesisConfig::default();
+		if registered {
+			genesis.transaction_storage.allowed_authorizers =
+				vec![(hashed.clone(), txs_budget, bytes_budget)];
+		}
+		sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+			let call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: target.clone(),
+					transactions: txs,
+					bytes,
+				});
+			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
+				.unpaid_execution(Unlimited, None)
+				.descend_origin(Junctions::from([AccountKey20 {
+					network: None,
+					key: contract_addr,
+				}]))
+				.transact(OriginKind::SovereignAccount, None, call.encode())
+				.build();
+			let mut id = [0u8; 32];
+			xcm_executor::XcmExecutor::<bulletin_paseo_runtime::xcm_config::XcmConfig>::prepare_and_execute(
+				Location::new(1, [Parachain(ASSET_HUB_ID)]),
+				message,
+				&mut id,
+				Weight::MAX,
+				Weight::MAX,
+			);
+			(
+				TransactionStorage::account_authorization_extent(target.clone()),
+				pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::get(&hashed),
+			)
+		})
+	};
+
+	// Unregistered: inner dispatch fails with BadOrigin; no authorization created.
+	assert_eq!(execute_xcm(false), (zero, None));
+
+	// Registered: dispatch succeeds; target gains allowance and contract budget shrinks.
+	let (extent, budget) = execute_xcm(true);
+	assert_eq!(
+		extent,
+		AuthorizationExtent { bytes_allowance: bytes, transactions_allowance: txs, ..zero },
+	);
+	let quota = budget
+		.expect("hashed contract account still registered after partial spend")
+		.quota
+		.expect("authorizer has a tracked quota");
+	assert_eq!(quota.transactions, txs_budget - txs);
+	assert_eq!(quota.bytes, bytes_budget - bytes);
+}
+
+fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::AuthorizerBudget<BlockNumber>
+{
+	pallet_bulletin_transaction_storage::AuthorizerBudget {
+		quota: Some(pallet_bulletin_transaction_storage::Quota {
+			transactions: 1000,
+			bytes: 100 * 1024 * 1024,
+		}),
+		authorization_period: None,
+		valid_until: None,
+	}
+}
+
+#[test]
+fn sudo_round_trips_authorizer_membership() {
+	// Lifecycle: sudo adds Eve → Eve authorizes → sudo removes Eve → Eve rejected.
+	// Eve isn't in `TestAccounts` (Alice + EXTRA_AUTHORIZER), so removal genuinely
+	// strips her authorize rights.
+	let mut genesis = RuntimeGenesisConfig::default();
+	genesis.transaction_storage.allowed_authorizers = vec![];
+	genesis.sudo.key = Some(Sr25519Keyring::Alice.to_account_id());
+
+	sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+		let alice = Sr25519Keyring::Alice;
+		let eve = Sr25519Keyring::Eve;
+		let target = Sr25519Keyring::Ferdie;
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000).unwrap();
+		Balances::mint_into(&eve.to_account_id(), 1_000_000_000_000).unwrap();
+
+		let sudo = |inner: RuntimeCall| -> RuntimeCall {
+			RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(inner) })
+		};
+		let authorize =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+				who: target.to_account_id(),
+				transactions: 5,
+				bytes: 1024,
+			});
+
+		// Add Eve via sudo, then Eve authorizes.
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(alice.pair()),
+			sudo(RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
+				who: eve.to_account_id(),
+				budget: default_authorizer_budget(),
+			})),
+		));
+		assert!(pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::contains_key(
+			eve.to_account_id(),
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(Some(eve.pair()), authorize.clone()));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(target.to_account_id()),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 1024,
+				transactions: 0,
+				transactions_allowance: 5,
+			},
+		);
+
+		// Sudo removes Eve → her subsequent authorize is rejected as BadSigner.
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(alice.pair()),
+			sudo(RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::remove_authorizer {
+				who: eve.to_account_id(),
+			})),
+		));
+		assert_eq!(
+			construct_and_apply_extrinsic(Some(eve.pair()), authorize),
+			Err(transaction_validity::TransactionValidityError::Invalid(
+				InvalidTransaction::BadSigner,
+			)),
+		);
+	});
+}
+
+#[test]
+fn non_sudo_cannot_add_authorizer() {
+	// Bob (not sudo) calls `add_authorizer` directly — `AuthorizerRegistrarOrigin`
+	// is enforced at dispatch, so the outer apply Ok but dispatch returns BadOrigin.
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let bob = Sr25519Keyring::Bob;
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&bob.to_account_id(), 1_000_000_000_000).unwrap();
+
+			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
+				who: Sr25519Keyring::Eve.to_account_id(),
+				budget: default_authorizer_budget(),
+			});
+			let applied = construct_and_apply_extrinsic(Some(bob.pair()), call)
+				.expect("validation passes (balance present)");
+			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin));
 		});
 }
