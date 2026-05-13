@@ -35,12 +35,14 @@
   {
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
-    "path": "external/fellows-runtimes/system-parachains/bulletin/bulletin-polkadot",
-    "uris": [],
+    "uris": [
+      "wss://bulletin-rpc.polkadot.io"
+    ],
     "integration_tests": true,
     "external_runtime": {
       "repo": "https://github.com/bkontur/runtimes.git",
-      "ref": "bko-bulletin-stage1"
+      "ref": "bko-bulletin-stage1",
+      "path": "./system-parachains/bulletin/bulletin-polkadot"
     }
   }
 ]
