@@ -3,26 +3,34 @@
 
 //! Utilities for zombienet-sdk tests
 
+use tracing_subscriber::EnvFilter;
+
+/// Idempotent `tracing-subscriber` init. Honors `RUST_LOG`; defaults to `info`.
+pub fn init_logging() {
+	let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+	let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
 /// Log macros that prefix messages with test name for parallel test runs.
 /// Usage: `test_log!(TEST, "message {}", arg);`
 #[macro_export]
 macro_rules! test_log {
 	($test_name:expr, $($arg:tt)*) => {
-		log::info!("[{}] {}", $test_name, format!($($arg)*))
+		tracing::info!("[{}] {}", $test_name, format!($($arg)*))
 	};
 }
 
 #[macro_export]
 macro_rules! test_warn {
 	($test_name:expr, $($arg:tt)*) => {
-		log::warn!("[{}] {}", $test_name, format!($($arg)*))
+		tracing::warn!("[{}] {}", $test_name, format!($($arg)*))
 	};
 }
 
 #[macro_export]
 macro_rules! test_error {
 	($test_name:expr, $($arg:tt)*) => {
-		log::error!("[{}] {}", $test_name, format!($($arg)*))
+		tracing::error!("[{}] {}", $test_name, format!($($arg)*))
 	};
 }
 

@@ -46,12 +46,14 @@ jobs:
         run: command -v just || cargo install just --locked
 
       - name: Cache polkadot-sdk + zombienet binaries
+        id: cache-binaries
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: .polkadot-binaries
+          path: ${{ env.POLKADOT_BINARIES_DIR }}
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}-${{ env.ZOMBIENET_VERSION }}
 
       - name: Populate cache
+        if: steps.cache-binaries.outputs.cache-hit != 'true'
         run: |
           just binaries-polkadot
           just binaries-chain-spec-builder
@@ -126,7 +128,7 @@ jobs:
       - name: Restore binary cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: .polkadot-binaries
+          path: ${{ env.POLKADOT_BINARIES_DIR }}
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}-${{ env.ZOMBIENET_VERSION }}
 
       - name: Resolve binary directories + add to PATH

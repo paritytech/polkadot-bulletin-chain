@@ -2,12 +2,13 @@ name: Zombienet SDK Tests
 
 on:
   workflow_dispatch:
-  pull_request:
-    # `labeled` lets the sync suite kick in when its label is added mid-PR.
-    types: [opened, synchronize, reopened, labeled]
   # Populate the binaries cache under main's scope so PRs can read it.
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+    # `labeled` lets the sync suite kick in when its label is added mid-PR.
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -43,8 +44,8 @@ jobs:
           # Cache only the resolved binaries (~333 MB); skip `.polkadot-binaries/_src/`
           # which holds the polkadot-sdk clone + cargo target (~11 GB) from cold builds.
           path: |
-            .polkadot-binaries/polkadot-node
-            .polkadot-binaries/chain-spec-builder
+            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
 
       - name: Fetch / build polkadot binaries
@@ -110,8 +111,8 @@ jobs:
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: |
-            .polkadot-binaries/polkadot-node
-            .polkadot-binaries/chain-spec-builder
+            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
           fail-on-cache-miss: true
 
@@ -125,7 +126,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Mark binaries executable
-        run: chmod -R +x .polkadot-binaries
+        run: chmod -R +x "$POLKADOT_BINARIES_DIR"
 
       - name: Run zombienet auto-renew tests
         env:
@@ -180,8 +181,8 @@ jobs:
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: |
-            .polkadot-binaries/polkadot-node
-            .polkadot-binaries/chain-spec-builder
+            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
           key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
           fail-on-cache-miss: true
 
@@ -195,7 +196,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Mark binaries executable
-        run: chmod -R +x .polkadot-binaries
+        run: chmod -R +x "$POLKADOT_BINARIES_DIR"
 
       - name: Run zombienet sync tests
         env:

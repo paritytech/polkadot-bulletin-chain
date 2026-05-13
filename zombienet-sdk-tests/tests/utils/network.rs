@@ -90,17 +90,17 @@ pub fn verify_ldb_tool() -> Result<String> {
 
 pub fn verify_parachain_binaries() -> Result<()> {
 	let relay_binary = get_relay_binary_path();
-	log::info!("Relay binary: {}", relay_binary);
+	tracing::info!("Relay binary: {}", relay_binary);
 	verify_binary(&relay_binary)
 		.context(format!("Relay binary '{}' ({})", relay_binary, RELAY_BINARY_PATH_ENV))?;
 
 	let para_binary = get_parachain_binary_path();
-	log::info!("Parachain binary: {}", para_binary);
+	tracing::info!("Parachain binary: {}", para_binary);
 	verify_binary(&para_binary)
 		.context(format!("Parachain binary '{}' ({})", para_binary, PARACHAIN_BINARY_PATH_ENV))?;
 
 	let chain_spec = get_parachain_chain_spec();
-	log::info!("Chain spec: {}", chain_spec);
+	tracing::info!("Chain spec: {}", chain_spec);
 	if !PathBuf::from(&chain_spec).exists() {
 		anyhow::bail!(
 			"Chain spec not found at '{}' (set {} to override)",
@@ -120,9 +120,9 @@ pub fn build_parachain_network_config_single_collator(
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
 
-	log::info!("Relay binary: {}", relay_binary);
-	log::info!("Parachain binary: {}", para_binary);
-	log::info!("Parachain chain spec: {}", para_chain_spec);
+	tracing::info!("Relay binary: {}", relay_binary);
+	tracing::info!("Parachain binary: {}", para_binary);
+	tracing::info!("Parachain chain spec: {}", para_chain_spec);
 
 	let relay_args: Vec<_> = vec!["-lruntime=debug"].into_iter().map(|s| s.into()).collect();
 	let relay_args2 = relay_args.clone();
@@ -131,8 +131,8 @@ pub fn build_parachain_network_config_single_collator(
 
 	let relay_chain = get_relay_chain();
 	let para_id = get_para_id();
-	log::info!("Relay chain: {}", relay_chain);
-	log::info!("Parachain ID: {}", para_id);
+	tracing::info!("Relay chain: {}", relay_chain);
+	tracing::info!("Parachain ID: {}", para_id);
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
@@ -173,9 +173,9 @@ pub fn build_parachain_network_config_three_relay_validators(
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
 
-	log::info!("Relay binary: {}", relay_binary);
-	log::info!("Parachain binary: {}", para_binary);
-	log::info!("Parachain chain spec: {}", para_chain_spec);
+	tracing::info!("Relay binary: {}", relay_binary);
+	tracing::info!("Parachain binary: {}", para_binary);
+	tracing::info!("Parachain chain spec: {}", para_chain_spec);
 
 	let relay_args: Vec<_> = vec!["-lruntime=debug"].into_iter().map(|s| s.into()).collect();
 	let relay_args2 = relay_args.clone();
@@ -185,8 +185,8 @@ pub fn build_parachain_network_config_three_relay_validators(
 
 	let relay_chain = get_relay_chain();
 	let para_id = get_para_id();
-	log::info!("Relay chain: {}", relay_chain);
-	log::info!("Parachain ID: {}", para_id);
+	tracing::info!("Relay chain: {}", relay_chain);
+	tracing::info!("Parachain ID: {}", para_id);
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {

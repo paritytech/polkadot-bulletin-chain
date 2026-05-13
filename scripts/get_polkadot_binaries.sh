@@ -27,9 +27,9 @@
 #
 # All status / log messages go to stderr.
 #
-# Cache layout:
-#   ./.polkadot-binaries/<group>/<ref>/<platform>/<binary>
-#   ./.polkadot-binaries/_src/<repo>/                       (one git clone, reused)
+# Cache layout (rooted at $POLKADOT_BINARIES_DIR, default `./.polkadot-binaries`):
+#   <root>/<group>/<ref>/<platform>/<binary>
+#   <root>/_src/<repo>/                       (one git clone, reused)
 
 set -euo pipefail
 
@@ -40,8 +40,10 @@ GROUP="${1:-}"
 [ -n "$GROUP" ] || die "usage: $0 <group>"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Opt-in shared cache across worktrees: `export BIN_CACHE_DIR=$HOME/.cache/polkadot-bulletin-binaries`.
-CACHE_ROOT="${BIN_CACHE_DIR:-$REPO_ROOT/.polkadot-binaries}"
+# Target directory for downloaded / built binaries. Default lives in `.github/env`;
+# override per-shell to share across worktrees, e.g.
+#   export POLKADOT_BINARIES_DIR=$HOME/.cache/polkadot-bulletin-binaries
+CACHE_ROOT="${POLKADOT_BINARIES_DIR:-$REPO_ROOT/.polkadot-binaries}"
 SRC_ROOT="$CACHE_ROOT/_src"
 
 # --- platform detection ------------------------------------------------------

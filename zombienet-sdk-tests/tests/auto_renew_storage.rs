@@ -20,7 +20,6 @@ use crate::{
 	},
 };
 use anyhow::{Context, Result};
-use env_logger::Env;
 use std::{collections::HashMap, str::FromStr};
 use subxt::{
 	config::substrate::{SubstrateConfig, SubstrateExtrinsicParamsBuilder},
@@ -134,7 +133,7 @@ async fn spawn_shared_harness(
 	label: &str,
 	para_node_args: Vec<String>,
 ) -> Result<std::sync::Arc<SharedHarness>> {
-	log::info!("[{}] spawning shared zombienet network", label);
+	tracing::info!("[{}] spawning shared zombienet network", label);
 	verify_parachain_binaries()?;
 	let config = build_parachain_network_config_single_collator(para_node_args)?;
 	let network = initialize_network(config).await?;
@@ -154,7 +153,7 @@ async fn spawn_shared_harness(
 	// Wait for finalization so tests can rely on `get_alice_nonce` reflecting the bump.
 	let nonce = get_alice_nonce(&collator1).await?;
 	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
-	log::info!("[{}] harness ready (RetentionPeriod={})", label, RETENTION_PERIOD);
+	tracing::info!("[{}] harness ready (RetentionPeriod={})", label, RETENTION_PERIOD);
 
 	Ok(std::sync::Arc::new(SharedHarness { _network: network, collator1 }))
 }
@@ -234,7 +233,7 @@ async fn fetch_max_block_weight(client: &OnlineClient<SubstrateConfig>) -> Resul
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -252,11 +251,11 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	data_pattern.extend_from_slice(b"_basic_");
 	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
 	let (hash_hex, cid) = content_hash_and_cid(&data);
-	log::info!("Test data: {} bytes, hash={}, CID={}", data.len(), hash_hex, cid);
+	tracing::info!("Test data: {} bytes, hash={}, CID={}", data.len(), hash_hex, cid);
 
 	let nonce = get_alice_nonce(collator1).await?;
 	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	log::info!("Data stored at block {}", store_block);
+	tracing::info!("Data stored at block {}", store_block);
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
@@ -272,14 +271,14 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	let content_hash = blake2_256(&data);
 	enable_auto_renew(client, &content_hash, nonce).await?;
 	nonce += 1;
-	log::info!("Auto-renewal enabled for content_hash {}", hash_hex);
+	tracing::info!("Auto-renewal enabled for content_hash {}", hash_hex);
 
 	// Renewal cadence is `RP + 1`; wait one extra block so the inherent is observable.
 	let cadence = RETENTION_PERIOD as u64 + 1;
 	for cycle in 1..=NUM_RENEWAL_CYCLES {
 		let renewal_block = store_block + cycle * cadence;
 		let wait_until = renewal_block + 1;
-		log::info!(
+		tracing::info!(
 			"[cycle {}/{}] Waiting for block {} (renewal at block {})",
 			cycle,
 			NUM_RENEWAL_CYCLES,
@@ -287,6 +286,12 @@ async fn parachain_auto_renew_test() -> Result<()> {
 			renewal_block
 		);
 		wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+		// Proof for cycle k's source tx_info lands at `(store_block + (k-1)*cadence) + RP`,
+		// one block before the renewal. Cycle 1's source is the original store; cycle k>1's
+		// source is the previous cycle's renewal.
+		let proof_block = store_block + (cycle - 1) * cadence + RETENTION_PERIOD as u64;
+		assert_proof_checked_at(client, proof_block, &format!("cycle {}", cycle)).await?;
 
 		verify_node_bitswap(
 			collator1,
@@ -302,7 +307,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 				cycle, wait_until
 			)
 		})?;
-		log::info!(
+		tracing::info!(
 			"[cycle {}/{}] ✓ Data still served at block ≥ {}",
 			cycle,
 			NUM_RENEWAL_CYCLES,
@@ -313,7 +318,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	// Shared-harness cleanup: stop renewing this item so it doesn't keep consuming Alice's
 	// authorization for the rest of the harness lifetime.
 	disable_auto_renew(client, &content_hash, nonce).await?;
-	log::info!("✓ Disabled auto-renew for content_hash — chain idle for the next test");
+	tracing::info!("✓ Disabled auto-renew for content_hash — chain idle for the next test");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Test ({} cycles) PASSED ===", NUM_RENEWAL_CYCLES);
 	Ok(())
@@ -325,7 +330,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	const TEST: &str = "para_check_proof_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -348,32 +353,32 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD_FOR_PRUNING_HALT);
+	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD_FOR_PRUNING_HALT);
 	set_retention_period(&client, RETENTION_PERIOD_FOR_PRUNING_HALT, nonce).await?;
 	nonce += 1;
 
 	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
 	let (hash_hex, _) = content_hash_and_cid(&data);
-	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
+	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let (store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
-	log::info!("Data stored at block {}", store_block);
+	tracing::info!("Data stored at block {}", store_block);
 
 	let last_healthy_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64 - 1;
-	log::info!("Confirming chain reaches block {} (last healthy block)", last_healthy_block);
+	tracing::info!("Confirming chain reaches block {} (last healthy block)", last_healthy_block);
 	wait_for_block_height(collator1, last_healthy_block, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await
 		.context("Chain failed to reach the last healthy block before the proof block")?;
 
 	let proof_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64;
-	log::info!(
+	tracing::info!(
 		"Waiting up to {}s for block {} (proof block) — expected to time out (chain halt)",
 		HALT_DETECTION_TIMEOUT_SECS,
 		proof_block
 	);
 	match wait_for_block_height(collator1, proof_block, HALT_DETECTION_TIMEOUT_SECS).await {
 		Err(_) => {
-			log::info!(
+			tracing::info!(
 				"✓ Chain did not advance past block {} within {}s — proof block panic confirmed",
 				last_healthy_block,
 				HALT_DETECTION_TIMEOUT_SECS
@@ -400,7 +405,7 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_pruning_halt";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -423,25 +428,25 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD_FOR_PRUNING_HALT);
+	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD_FOR_PRUNING_HALT);
 	set_retention_period(&client, RETENTION_PERIOD_FOR_PRUNING_HALT, nonce).await?;
 	nonce += 1;
 
 	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
 	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	nonce = next_nonce;
-	log::info!("Data stored at block {}", store_block);
+	tracing::info!("Data stored at block {}", store_block);
 
 	let content_hash = blake2_256(&data);
 	enable_auto_renew(&client, &content_hash, nonce).await?;
-	log::info!("Auto-renewal enabled");
+	tracing::info!("Auto-renewal enabled");
 
 	let last_healthy_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64 - 1;
-	log::info!("Confirming chain reaches block {} (last healthy block)", last_healthy_block);
+	tracing::info!("Confirming chain reaches block {} (last healthy block)", last_healthy_block);
 	wait_for_block_height(collator1, last_healthy_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	let proof_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64;
-	log::info!(
+	tracing::info!(
 		"Waiting up to {}s for block {} (proof block) — expected timeout (halt before renewal \
 		 block at {})",
 		HALT_DETECTION_TIMEOUT_SECS,
@@ -450,7 +455,7 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	);
 	match wait_for_block_height(collator1, proof_block, HALT_DETECTION_TIMEOUT_SECS).await {
 		Err(_) => {
-			log::info!(
+			tracing::info!(
 				"✓ Chain did not advance past block {} within {}s — auto-renewal did not save \
 				 us from the proof-block panic",
 				last_healthy_block,
@@ -475,7 +480,7 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	const TEST: &str = "para_renew_twice_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -493,11 +498,11 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 
 	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_RENEW_TWICE_");
 	let (hash_hex, _) = content_hash_and_cid(&data);
-	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
+	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	nonce = next_nonce;
-	log::info!("Data stored at block {}", store_block);
+	tracing::info!("Data stored at block {}", store_block);
 
 	// `validate_signed` tags renewals with `(who, content_hash)`, so two renews from the
 	// same signer would conflict in the pool — use Bob as a second signer. Bob has no prior
@@ -515,16 +520,22 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	let (renew_block_a, renew_block_b) =
 		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
 	if renew_block_a != renew_block_b {
-		log::warn!(
+		tracing::warn!(
 			"Renews landed in different blocks ({} and {}) instead of one — test still valid \
 			 but uses the later block for pruning math",
 			renew_block_a,
 			renew_block_b
 		);
 	} else {
-		log::info!("Both renews landed in the same block {}", renew_block_a);
+		tracing::info!("Both renews landed in the same block {}", renew_block_a);
 	}
 	let renew_block = std::cmp::max(renew_block_a, renew_block_b);
+
+	// Proof for the original store lands at `store_block + RP` (one block before pruning
+	// could evict). At this point col11 still has the chunks and the proof can be built.
+	let proof_block = store_block + RETENTION_PERIOD as u64;
+	wait_for_block_height(collator1, proof_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	assert_proof_checked_at(client, proof_block, "post-store").await?;
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-renew)").await?;
 
@@ -532,7 +543,7 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	// on best-block + fudge is flaky under finality lag.
 	let after_renew_pruned_finalized =
 		renew_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	log::info!(
+	tracing::info!(
 		"Waiting for FINALIZED block {} so both store and renew blocks are past the pruning boundary",
 		after_renew_pruned_finalized
 	);
@@ -554,7 +565,7 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		"Bitswap still serves data after both store and renew blocks were pruned — col11 \
 			 should be empty",
 	)?;
-	log::info!(
+	tracing::info!(
 		"✓ Bitswap returns DONT_HAVE after both store and renew blocks were pruned (col11 \
 		 refcount reached zero)"
 	);
@@ -568,7 +579,7 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_concurrent_store";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -586,12 +597,12 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 
 	let data1 = generate_test_data(TEST_DATA_SIZE, b"DATA1_CONCURRENT_STORE_");
 	let data2 = generate_test_data(TEST_DATA_SIZE, b"DATA2_CONCURRENT_STORE_");
-	log::info!("data1 hash={}", content_hash_and_cid(&data1).0);
-	log::info!("data2 hash={}", content_hash_and_cid(&data2).0);
+	tracing::info!("data1 hash={}", content_hash_and_cid(&data1).0);
+	tracing::info!("data2 hash={}", content_hash_and_cid(&data2).0);
 
 	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data1, nonce).await?;
 	nonce = next_nonce;
-	log::info!("data1 stored at block {}", store_block);
+	tracing::info!("data1 stored at block {}", store_block);
 
 	top_up_alice_authorization(client, 5, 4 * data1.len() as u64, nonce).await?;
 	nonce += 1;
@@ -599,12 +610,12 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	let content_hash_data1 = blake2_256(&data1);
 	enable_auto_renew(client, &content_hash_data1, nonce).await?;
 	nonce += 1;
-	log::info!("Auto-renewal enabled for data1");
+	tracing::info!("Auto-renewal enabled for data1");
 
 	// Submit data2 at R-1 so it lands in the renewal block R = S + RetentionPeriod + 1.
 	let renewal_block = store_block + RETENTION_PERIOD as u64 + 1;
 	let wait_until_pre_renewal = renewal_block - 1;
-	log::info!(
+	tracing::info!(
 		"Waiting until block {} (one before renewal block {}) before submitting data2",
 		wait_until_pre_renewal,
 		renewal_block
@@ -612,7 +623,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	wait_for_block_height(collator1, wait_until_pre_renewal, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	let data2_block = submit_store_signed(client, &data2, nonce).await?;
-	log::info!("data2 store landed at block {}", data2_block);
+	tracing::info!("data2 store landed at block {}", data2_block);
 	if data2_block != renewal_block {
 		anyhow::bail!(
 			"Timing missed: expected data2 to land in renewal block {}, but it landed at \
@@ -621,7 +632,13 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 			data2_block
 		);
 	}
-	log::info!("✓ data2 store and auto-renewal inherent coexist in block {}", renewal_block);
+	tracing::info!("✓ data2 store and auto-renewal inherent coexist in block {}", renewal_block);
+
+	// Proof for data1's store-block lands at `store_block + RP` = `renewal_block - 1`. data2
+	// landed in the renewal block itself, so its proof block is `renewal_block + RP` (asserted
+	// after the wait_for_finalized_height below).
+	assert_proof_checked_at(client, store_block + RETENTION_PERIOD as u64, "post-store data1")
+		.await?;
 
 	verify_node_bitswap(collator1, &data1, BITSWAP_TIMEOUT_SECS, "Collator-1 / data1").await?;
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "Collator-1 / data2").await?;
@@ -629,7 +646,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	// Pruning fires off FINALIZED head — wait on finalized to cross the boundary directly.
 	let after_renewal_pruned_finalized =
 		renewal_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	log::info!(
+	tracing::info!(
 		"Waiting for FINALIZED block {} so the renewal block is past the pruning boundary",
 		after_renewal_pruned_finalized
 	);
@@ -639,6 +656,11 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 		BLOCK_PRODUCTION_TIMEOUT_SECS,
 	)
 	.await?;
+
+	// Proof for the renewal-block's contents (data1's renewal + data2's store) lands at
+	// `renewal_block + RP`. Both items were indexed in Transactions[renewal_block].
+	assert_proof_checked_at(client, renewal_block + RETENTION_PERIOD as u64, "post-renewal-block")
+		.await?;
 
 	expect_bitswap_dont_have(
 		collator1,
@@ -651,7 +673,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 		"data2 (no auto-renewal) should be evicted once its only ref-block is pruned, but \
 		 bitswap still serves it",
 	)?;
-	log::info!("✓ data2 evicted by pruning (no auto-renewal kept it alive)");
+	tracing::info!("✓ data2 evicted by pruning (no auto-renewal kept it alive)");
 
 	verify_node_bitswap(
 		collator1,
@@ -664,7 +686,9 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 		"data1 should still be served via bitswap — auto-renewal at R2 should have added a \
 		 fresh col11 ref before R was pruned",
 	)?;
-	log::info!("✓ data1 still alive — auto-renewal at R2 added a fresh ref before R was pruned");
+	tracing::info!(
+		"✓ data1 still alive — auto-renewal at R2 added a fresh ref before R was pruned"
+	);
 
 	test_log!(TEST, "=== Parachain auto-renewal + same-block store PASSED ===");
 	Ok(())
@@ -675,7 +699,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_vs_no_renew";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -697,18 +721,18 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	let (store_block, next_nonce) =
 		authorize_and_store_data(collator1, &data_renewed, nonce).await?;
 	nonce = next_nonce;
-	log::info!("data_renewed stored at block {}", store_block);
+	tracing::info!("data_renewed stored at block {}", store_block);
 
 	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
 	nonce += 1;
 
 	let data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
 	nonce += 1;
-	log::info!("data_not_renewed stored at block {}", data_not_renewed_block);
+	tracing::info!("data_not_renewed stored at block {}", data_not_renewed_block);
 
 	let content_hash_renewed = blake2_256(&data_renewed);
 	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
-	log::info!("Auto-renewal enabled for data_renewed");
+	tracing::info!("Auto-renewal enabled for data_renewed");
 
 	verify_node_bitswap(
 		collator1,
@@ -724,16 +748,31 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		"Collator-1 / data_not_renewed (post-store)",
 	)
 	.await?;
-	log::info!("✓ Both items fetchable shortly after upload");
+	tracing::info!("✓ Both items fetchable shortly after upload");
 
 	// Pruning fires off FINALIZED head; with ~3-5 block finality lag, S + RP + 15 is past it.
 	let wait_until = store_block + RETENTION_PERIOD as u64 + 15;
-	log::info!(
+	tracing::info!(
 		"Waiting for block {} (store + RP + 15) so block {} is pruned",
 		wait_until,
 		store_block
 	);
 	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Proof for each store-block (one per store, since they landed in different blocks)
+	// fires at `block + RP`. Single ProofChecked event per source-block.
+	assert_proof_checked_at(
+		client,
+		store_block + RETENTION_PERIOD as u64,
+		"post-store data_renewed",
+	)
+	.await?;
+	assert_proof_checked_at(
+		client,
+		data_not_renewed_block + RETENTION_PERIOD as u64,
+		"post-store data_not_renewed",
+	)
+	.await?;
 
 	verify_node_bitswap(
 		collator1,
@@ -746,7 +785,7 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		"data_renewed should still be served — auto-renewal added a fresh ref before the \
 		 original store block was pruned",
 	)?;
-	log::info!("✓ data_renewed still served via bitswap");
+	tracing::info!("✓ data_renewed still served via bitswap");
 
 	expect_bitswap_dont_have(
 		collator1,
@@ -758,7 +797,7 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	.context(
 		"data_not_renewed should be evicted — its only ref was at the now-pruned store block",
 	)?;
-	log::info!("✓ data_not_renewed evicted (no auto-renewal kept it alive)");
+	tracing::info!("✓ data_not_renewed evicted (no auto-renewal kept it alive)");
 
 	test_log!(TEST, "=== Auto-renew vs no-renew eviction PASSED ===");
 	Ok(())
@@ -770,7 +809,7 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_many";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Auto-renew {} items, measure block weight ===", MANY_ITEMS_COUNT);
 
@@ -812,7 +851,11 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		})
 		.collect();
 	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
-	log::info!("Generated {} items, first hash={}", items.len(), hex::encode(content_hashes[0]));
+	tracing::info!(
+		"Generated {} items, first hash={}",
+		items.len(),
+		hex::encode(content_hashes[0])
+	);
 
 	// Plain `sign_and_submit` — watcher subscriptions for hundreds of submissions saturate
 	// subxt's chainHead_v2 pinning; pure pool submission lets everything land in 1-2 blocks.
@@ -826,7 +869,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		.unwrap_or(false);
 	let alice = dev::alice();
 	let pre_store_block = current_best_block(client).await?.number() as u64;
-	log::info!(
+	tracing::info!(
 		"Submitting {} stores (pre-store block={}, proof_decoy={})",
 		MANY_ITEMS_COUNT,
 		pre_store_block,
@@ -848,7 +891,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 	nonce += MANY_ITEMS_COUNT as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(submit_futs).await?;
-	log::info!("All {} stores accepted into pool", MANY_ITEMS_COUNT);
+	tracing::info!("All {} stores accepted into pool", MANY_ITEMS_COUNT);
 
 	if proof_decoy {
 		// Submit the decoy right after the bulk block lands so it goes into the next block;
@@ -864,7 +907,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			.await
 			.context("submit proof decoy")?;
 		nonce += 1;
-		log::info!("Submitted 1 proof-decoy store (no auto-renew enabled)");
+		tracing::info!("Submitted 1 proof-decoy store (no auto-renew enabled)");
 	}
 
 	let store_inclusion_target = pre_store_block + 5;
@@ -924,7 +967,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	for b in &store_blocks {
 		*store_block_histogram.entry(*b).or_default() += 1;
 	}
-	log::info!(
+	tracing::info!(
 		"Stored {} items across blocks {}..={} ({} distinct blocks)",
 		MANY_ITEMS_COUNT,
 		earliest_store,
@@ -934,7 +977,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let mut hist_entries: Vec<_> = store_block_histogram.iter().collect();
 	hist_entries.sort_by_key(|(b, _)| **b);
 	for (b, n) in hist_entries {
-		log::info!("  block {}: {} stores", b, n);
+		tracing::info!("  block {}: {} stores", b, n);
 	}
 
 	let pre_enable_block = current_best_block(client).await?.number() as u64;
@@ -957,7 +1000,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 	nonce += MANY_ITEMS_COUNT as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(enable_futs).await?;
-	log::info!("All {} enable_auto_renew calls accepted into pool", MANY_ITEMS_COUNT);
+	tracing::info!("All {} enable_auto_renew calls accepted into pool", MANY_ITEMS_COUNT);
 
 	let enable_inclusion_target = pre_enable_block + 5;
 	wait_for_block_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
@@ -1003,7 +1046,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			enabled_count
 		);
 	}
-	log::info!("Auto-renewal enabled for all {} items", MANY_ITEMS_COUNT);
+	tracing::info!("Auto-renewal enabled for all {} items", MANY_ITEMS_COUNT);
 	let _ = nonce; // last use
 
 	// Pairwise diffs of `substrate_proposer_block_constructed_{sum,count}` give per-block
@@ -1012,7 +1055,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let first_renewal_block = earliest_store + renewal_cadence;
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let wait_until = last_renewal_block + 1;
-	log::info!(
+	tracing::info!(
 		"Renewal window: {}..={}; capturing per-block prometheus snapshots up to {}",
 		first_renewal_block,
 		last_renewal_block,
@@ -1034,8 +1077,8 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		prom_snapshots.push((n, sum, count));
 	}
 
-	log::info!("--- Per-block proposer block_constructed (wall-clock construction time) ---");
-	log::info!("Format: blocks (a..=b]: +N blocks, +T s sum, ~ms/block");
+	tracing::info!("--- Per-block proposer block_constructed (wall-clock construction time) ---");
+	tracing::info!("Format: blocks (a..=b]: +N blocks, +T s sum, ~ms/block");
 	for win in prom_snapshots.windows(2) {
 		let (n0, sum0, count0) = win[0];
 		let (n1, sum1, count1) = win[1];
@@ -1049,7 +1092,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		} else {
 			""
 		};
-		log::info!(
+		tracing::info!(
 			"blocks ({}..={}]: +{} blocks, +{:.4} s sum, ~{:.1} ms/block{}",
 			n0,
 			n1,
@@ -1085,7 +1128,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	// subtracting baseline from proof-only / renewal-only isolates per-component cost.
 	let stats_range_start = first_renewal_block.saturating_sub(15).max(1);
 	let stats_range_end = last_renewal_block + 2;
-	log::info!(
+	tracing::info!(
 		"Walking chain backward from block {} to cover stats window {}..={}",
 		head.number(),
 		stats_range_start,
@@ -1110,20 +1153,20 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let block_weight_addr = subxt::dynamic::storage("System", "BlockWeight", Vec::<Value>::new());
 
 	let (max_block_ref, max_block_pov) = fetch_max_block_weight(client).await?;
-	log::info!(
+	tracing::info!(
 		"BlockWeights::max_block = (ref_time={}, proof_size={})",
 		max_block_ref,
 		max_block_pov
 	);
 
-	log::info!("--- Block weight stats ---");
-	log::info!("Format: block N | extrinsics={{n}} DataAutoRenewed={{n}} AutoRenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
+	tracing::info!("--- Block weight stats ---");
+	tracing::info!("Format: block N | extrinsics={{n}} DataAutoRenewed={{n}} AutoRenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
 
 	let mut total_renewed: u32 = 0;
 	let mut weight_violations: Vec<String> = Vec::new();
 	for block_n in stats_range_start..=stats_range_end {
 		let Some(&block_hash) = block_hashes_by_number.get(&block_n) else {
-			log::warn!("No hash recorded for block {}; skipping", block_n);
+			tracing::warn!("No hash recorded for block {}; skipping", block_n);
 			continue;
 		};
 		let block = client.blocks().at(block_hash).await?;
@@ -1172,7 +1215,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			""
 		};
 
-		log::info!(
+		tracing::info!(
 			"block {:>3} | xt={:>2} renewed={:>3} failed={:>3} | normal=({:>13},{:>9}) op=({:>13},{:>9}) mand=({:>13},{:>9}){}",
 			block_n,
 			extrinsic_count,
@@ -1213,7 +1256,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 
 	let expected_total = MANY_ITEMS_COUNT * RENEWAL_CYCLES_TO_OBSERVE;
-	log::info!("Total renewals across window: {} / {}", total_renewed, expected_total);
+	tracing::info!("Total renewals across window: {} / {}", total_renewed, expected_total);
 	if total_renewed < expected_total {
 		anyhow::bail!(
 			"Expected at least {} DataAutoRenewed events across the renewal window {}..={} \
@@ -1228,12 +1271,21 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		);
 	}
 
+	// Proof fires at each renewal-source block + RP. Cycle k's source is the previous cycle's
+	// renewal at `first_renewal_block + (k-1)*cadence`; cycle 1's source is the original store
+	// at `first_renewal_block - cadence`. All map to proof blocks one before each renewal.
+	for cycle in 1..=RENEWAL_CYCLES_TO_OBSERVE as u64 {
+		let proof_block = first_renewal_block + (cycle - 1) * renewal_cadence - 1;
+		assert_proof_checked_at(client, proof_block, &format!("many_items cycle {}", cycle))
+			.await?;
+	}
+
 	// After cycle 1, all items get re-keyed to the cycle-1 renewal block, so subsequent
 	// cycles fire at `first_renewal_block + k*cadence`. Anchor on `first_renewal_block` to
 	// find cycle N+1 reliably (across two blocks: the inherent splits when weight-bound).
 	let exhaustion_block = first_renewal_block + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let exhaustion_wait_until = exhaustion_block + 1;
-	log::info!(
+	tracing::info!(
 		"Waiting for cycle-N+1 exhaustion at block {} (last observed renewal at {})",
 		exhaustion_block,
 		last_renewal_block
@@ -1261,7 +1313,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		exhaustion_block + 1,
 		total_renewed_post_window
 	);
-	log::info!(
+	tracing::info!(
 		"✓ All {} items hit AutoRenewalFailed at blocks {}..={}; AutoRenewals storage drained",
 		MANY_ITEMS_COUNT,
 		exhaustion_block,
@@ -1281,7 +1333,7 @@ const WORST_CASE_WORKERS: u32 = MANY_ITEMS_COUNT;
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_many_worst_case";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -1303,7 +1355,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	let mut alice_nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
+	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
 	set_retention_period(&client, RETENTION_PERIOD, alice_nonce).await?;
 	alice_nonce += 1;
 
@@ -1320,7 +1372,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let alice = dev::alice();
 	let cycles_to_authorize = RENEWAL_CYCLES_TO_OBSERVE;
 	let pre_authz_block = current_best_block(&client).await?.number() as u64;
-	log::info!(
+	tracing::info!(
 		"Submitting {} sudo authorize_account calls in parallel (pre-block={})",
 		WORST_CASE_WORKERS,
 		pre_authz_block
@@ -1358,7 +1410,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	}
 	alice_nonce += WORST_CASE_WORKERS as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(authz_futs).await?;
-	log::info!("All {} sudo authorize_account calls accepted into pool", WORST_CASE_WORKERS);
+	tracing::info!("All {} sudo authorize_account calls accepted into pool", WORST_CASE_WORKERS);
 
 	// Pool's `validate_signed` reads finalized state — batch-wait once for finality before
 	// any worker submits its first signed tx.
@@ -1366,13 +1418,16 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		let post_authz_best = current_best_block(&client).await?.number() as u64;
 		wait_for_finalized_height(collator1, post_authz_best + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
 			.await?;
-		log::info!("Worker authorizations finalized (waited finalized >= {})", post_authz_best + 2);
+		tracing::info!(
+			"Worker authorizations finalized (waited finalized >= {})",
+			post_authz_best + 2
+		);
 	}
 
 	// `enable_auto_renew` is fee-paying (unlike `store`, which is treated as feeless by the
 	// bulletin authorization extension); workers without balance fail at validate-time.
 	const WORKER_FUND: u128 = 1_000_000_000_000; // 1 WND
-	log::info!(
+	tracing::info!(
 		"Submitting {} Balances::transfer_keep_alive calls (Alice → workers) in parallel",
 		WORST_CASE_WORKERS
 	);
@@ -1397,7 +1452,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		});
 	}
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(fund_futs).await?;
-	log::info!("All {} transfer_keep_alive calls accepted into pool", WORST_CASE_WORKERS);
+	tracing::info!("All {} transfer_keep_alive calls accepted into pool", WORST_CASE_WORKERS);
 
 	// Alice's txs are nonce-ordered, so once the last worker's account exists, every prior
 	// authorize+transfer must have settled.
@@ -1422,7 +1477,9 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 			}
 			tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 		}
-		log::info!("Last worker funded (System.Account exists) — all Alice batched txs settled");
+		tracing::info!(
+			"Last worker funded (System.Account exists) — all Alice batched txs settled"
+		);
 	}
 
 	let items: Vec<Vec<u8>> = (0..WORST_CASE_WORKERS)
@@ -1435,7 +1492,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
 
 	let pre_store_block = current_best_block(&client).await?.number() as u64;
-	log::info!(
+	tracing::info!(
 		"Submitting {} signed stores in parallel (pre-store block={})",
 		WORST_CASE_WORKERS,
 		pre_store_block
@@ -1454,7 +1511,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		});
 	}
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(store_futs).await?;
-	log::info!("All {} stores accepted into pool", WORST_CASE_WORKERS);
+	tracing::info!("All {} stores accepted into pool", WORST_CASE_WORKERS);
 
 	let store_inclusion_target = pre_store_block + 5;
 	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
@@ -1496,7 +1553,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	for b in &store_blocks {
 		*store_block_histogram.entry(*b).or_default() += 1;
 	}
-	log::info!(
+	tracing::info!(
 		"Stored {} items across blocks {}..={} ({} distinct blocks)",
 		WORST_CASE_WORKERS,
 		earliest_store,
@@ -1520,7 +1577,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		});
 	}
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(enable_futs).await?;
-	log::info!("All {} enable_auto_renew calls accepted into pool", WORST_CASE_WORKERS);
+	tracing::info!("All {} enable_auto_renew calls accepted into pool", WORST_CASE_WORKERS);
 
 	let enable_inclusion_target = pre_enable_block + 5;
 	wait_for_block_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
@@ -1530,7 +1587,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let first_renewal_block = earliest_store + renewal_cadence;
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let wait_until = last_renewal_block + 1;
-	log::info!(
+	tracing::info!(
 		"Renewal window: {}..={}; capturing per-block prometheus snapshots up to {}",
 		first_renewal_block,
 		last_renewal_block,
@@ -1552,8 +1609,8 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		prom_snapshots.push((n, sum, count));
 	}
 
-	log::info!("--- Per-block proposer block_constructed (wall-clock construction time) ---");
-	log::info!("Format: blocks (a..=b]: +N blocks, +T s sum, ~ms/block");
+	tracing::info!("--- Per-block proposer block_constructed (wall-clock construction time) ---");
+	tracing::info!("Format: blocks (a..=b]: +N blocks, +T s sum, ~ms/block");
 	for win in prom_snapshots.windows(2) {
 		let (n0, sum0, count0) = win[0];
 		let (n1, sum1, count1) = win[1];
@@ -1567,7 +1624,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		} else {
 			""
 		};
-		log::info!(
+		tracing::info!(
 			"blocks ({}..={}]: +{} blocks, +{:.4} s sum, ~{:.1} ms/block{}",
 			n0,
 			n1,
@@ -1616,14 +1673,14 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 
 	let block_weight_addr = subxt::dynamic::storage("System", "BlockWeight", Vec::<Value>::new());
 	let (max_block_ref, max_block_pov) = fetch_max_block_weight(&client).await?;
-	log::info!(
+	tracing::info!(
 		"BlockWeights::max_block = (ref_time={}, proof_size={})",
 		max_block_ref,
 		max_block_pov
 	);
 
-	log::info!("--- Block weight stats ---");
-	log::info!("Format: block N | extrinsics={{n}} DataAutoRenewed={{n}} AutoRenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
+	tracing::info!("--- Block weight stats ---");
+	tracing::info!("Format: block N | extrinsics={{n}} DataAutoRenewed={{n}} AutoRenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
 
 	let mut total_renewed: u32 = 0;
 	let mut weight_violations: Vec<String> = Vec::new();
@@ -1672,7 +1729,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		} else {
 			""
 		};
-		log::info!(
+		tracing::info!(
 			"block {:>3} | xt={:>2} renewed={:>3} failed={:>3} | normal=({:>13},{:>9}) op=({:>13},{:>9}) mand=({:>13},{:>9}){}",
 			block_n,
 			extrinsic_count,
@@ -1709,7 +1766,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	}
 
 	let expected_total = WORST_CASE_WORKERS * RENEWAL_CYCLES_TO_OBSERVE;
-	log::info!("Total renewals across window: {} / {}", total_renewed, expected_total);
+	tracing::info!("Total renewals across window: {} / {}", total_renewed, expected_total);
 	if total_renewed < expected_total {
 		anyhow::bail!(
 			"Expected at least {} DataAutoRenewed events, saw {}",
@@ -1718,11 +1775,18 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		);
 	}
 
+	// Proof fires at each cycle's source-block + RP; cycle 1's source is the original stores.
+	for cycle in 1..=RENEWAL_CYCLES_TO_OBSERVE as u64 {
+		let proof_block = first_renewal_block + (cycle - 1) * renewal_cadence - 1;
+		assert_proof_checked_at(&client, proof_block, &format!("worst_case cycle {}", cycle))
+			.await?;
+	}
+
 	// Anchor on `first_renewal_block` (post-cycle-1 consolidation point); see equivalent
 	// block in `parachain_auto_renew_many_items_test`.
 	let exhaustion_block = first_renewal_block + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let exhaustion_wait_until = exhaustion_block + 1;
-	log::info!(
+	tracing::info!(
 		"Waiting for cycle-N+1 exhaustion at block {} (last observed renewal at {})",
 		exhaustion_block,
 		last_renewal_block
@@ -1750,7 +1814,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		exhaustion_block + 1,
 		total_renewed_post_window
 	);
-	log::info!(
+	tracing::info!(
 		"✓ All {} workers hit AutoRenewalFailed at blocks {}..={}; AutoRenewals storage drained",
 		WORST_CASE_WORKERS,
 		exhaustion_block,
@@ -1765,7 +1829,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		.and_then(|s| s.parse().ok())
 		.unwrap_or(0);
 	if inspect_hold_secs > 0 {
-		log::info!(
+		tracing::info!(
 			"[para_auto_renew_many_worst_case] Holding network up for {} seconds — open the PJS link printed by collator-1 above to inspect block weights. Ctrl-C the test process to exit early.",
 			inspect_hold_secs,
 		);
@@ -1784,7 +1848,7 @@ const ON_INIT_CLEANUP_ITEMS_PER_SET: u32 = 50;
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	const TEST: &str = "para_on_init_cleanup";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -1837,7 +1901,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 
 	let alice = dev::alice();
 	let pre_store_block = current_best_block(&client).await?.number() as u64;
-	log::info!(
+	tracing::info!(
 		"Submitting {} stores ({} for renewal + {} for cleanup); pre-store block={}",
 		total_items,
 		ON_INIT_CLEANUP_ITEMS_PER_SET,
@@ -1859,7 +1923,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	}
 	nonce += total_items as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
-	log::info!("All {} stores accepted into pool", total_items);
+	tracing::info!("All {} stores accepted into pool", total_items);
 
 	wait_for_block_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
@@ -1901,9 +1965,9 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	if store_block == 0 {
 		anyhow::bail!("could not locate Stored events for the {} stores", total_items);
 	}
-	log::info!("Stores landed at (or before) block {}", store_block);
+	tracing::info!("Stores landed at (or before) block {}", store_block);
 
-	log::info!("Enabling auto-renew for {} items (set 1)", ON_INIT_CLEANUP_ITEMS_PER_SET);
+	tracing::info!("Enabling auto-renew for {} items (set 1)", ON_INIT_CLEANUP_ITEMS_PER_SET);
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
 		let call = tx(
@@ -1926,13 +1990,17 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let _ = nonce;
 
 	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
-	log::info!(
+	tracing::info!(
 		"Waiting for expiry block {} (= store_block {} + RP {} + 1)",
 		expiry_block,
 		store_block,
 		RETENTION_PERIOD
 	);
 	wait_for_block_height(collator1, expiry_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Proof for the store-block fires at `store_block + RP = expiry_block - 1`, one block
+	// before `on_initialize` takes `Transactions[store_block]`.
+	assert_proof_checked_at(&client, expiry_block - 1, "on_init_cleanup post-store").await?;
 	{
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
@@ -1972,7 +2040,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			store_block,
 			expiry_block
 		);
-		log::info!("✓ Transactions[{}] is None at expiry block {}", store_block, expiry_block);
+		tracing::info!("✓ Transactions[{}] is None at expiry block {}", store_block, expiry_block);
 	}
 
 	// set-1 (auto-renew) — TransactionByContentHash still points at the expiry block.
@@ -1987,11 +2055,11 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		match value {
 			Some(v) => {
 				let v = v.to_value()?;
-				log::trace!("set1[{}] hash={} → {:?}", i, hex::encode(hash), v);
+				tracing::trace!("set1[{}] hash={} → {:?}", i, hex::encode(hash), v);
 				set1_renewed += 1;
 			},
 			None => {
-				log::warn!(
+				tracing::warn!(
 					"set1[{}] hash={} → None at expiry block (expected renewed)",
 					i,
 					hex::encode(hash)
@@ -2005,7 +2073,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		 only {} do",
 		ON_INIT_CLEANUP_ITEMS_PER_SET, set1_renewed
 	);
-	log::info!("✓ All {} set-1 (auto-renew) items still indexed at expiry block", set1_renewed);
+	tracing::info!("✓ All {} set-1 (auto-renew) items still indexed at expiry block", set1_renewed);
 
 	// set-2 (no auto-renew) — TransactionByContentHash removed by on_initialize.
 	let mut set2_cleaned = 0u32;
@@ -2022,7 +2090,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			},
 			Some(v) => {
 				let v = v.to_value()?;
-				log::warn!(
+				tracing::warn!(
 					"set2[{}] hash={} → {:?} at expiry block (expected cleaned up)",
 					i,
 					hex::encode(hash),
@@ -2037,7 +2105,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		 on_initialize; {} were cleaned up",
 		ON_INIT_CLEANUP_ITEMS_PER_SET, set2_cleaned
 	);
-	log::info!(
+	tracing::info!(
 		"✓ All {} set-2 (no auto-renew) TransactionByContentHash entries cleaned up",
 		set2_cleaned
 	);
@@ -2068,7 +2136,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		"expected 0 AutoRenewalFailed events at expiry block {}, saw {}",
 		expiry_block, auto_renewal_failed
 	);
-	log::info!(
+	tracing::info!(
 		"✓ {} DataAutoRenewed events at expiry block {} (and zero AutoRenewalFailed)",
 		auto_renewed,
 		expiry_block
@@ -2087,7 +2155,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		Some(v) => extract_class_weight(v, "mandatory"),
 		None => (0, 0),
 	};
-	log::info!(
+	tracing::info!(
 		"Expiry block {}: mand=({}, {}); max_block=({}, {})",
 		expiry_block,
 		mand.0,
@@ -2107,7 +2175,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		mand.1,
 		max_block_pov
 	);
-	log::info!("✓ mandatory weight at expiry block within max_block");
+	tracing::info!("✓ mandatory weight at expiry block within max_block");
 
 	test_log!(TEST, "=== on_initialize cleanup PASSED ===");
 	network.destroy().await?;
@@ -2123,7 +2191,7 @@ const ON_INIT_NO_RENEWALS_ITEMS: u32 =
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	const TEST: &str = "para_on_init_no_renewals";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -2164,7 +2232,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 
 	let alice = dev::alice();
 	let pre_store_block = current_best_block(&client).await?.number() as u64;
-	log::info!(
+	tracing::info!(
 		"Submitting {} stores in parallel (no enable_auto_renew); pre-store block={}",
 		ON_INIT_NO_RENEWALS_ITEMS,
 		pre_store_block
@@ -2184,7 +2252,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	}
 	let _ = nonce;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
-	log::info!("All {} stores accepted into pool", ON_INIT_NO_RENEWALS_ITEMS);
+	tracing::info!("All {} stores accepted into pool", ON_INIT_NO_RENEWALS_ITEMS);
 
 	wait_for_block_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	{
@@ -2225,10 +2293,14 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	if store_block == 0 {
 		anyhow::bail!("could not locate Stored events");
 	}
-	log::info!("Stores landed at block {}", store_block);
+	tracing::info!("Stores landed at block {}", store_block);
 
 	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
 	wait_for_block_height(collator1, expiry_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Proof for the stores fires at `store_block + RP = expiry_block - 1`, one block before
+	// `on_initialize` takes `Transactions[store_block]` as obsolete.
+	assert_proof_checked_at(&client, expiry_block - 1, "on_init_no_renewals post-store").await?;
 
 	let stats_range_start = store_block.saturating_sub(2).max(1);
 	let stats_range_end = expiry_block + 2;
@@ -2267,7 +2339,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 
 	let block_weight_addr = subxt::dynamic::storage("System", "BlockWeight", Vec::<Value>::new());
 	let (max_block_ref, max_block_pov) = fetch_max_block_weight(&client).await?;
-	log::info!(
+	tracing::info!(
 		"BlockWeights::max_block = (ref_time={}, proof_size={})",
 		max_block_ref,
 		max_block_pov
@@ -2278,7 +2350,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	let mut expiry_mand: Option<(u64, u64)> = None;
 	let mut weight_violations: Vec<String> = Vec::new();
 
-	log::info!("--- Block weight stats (no auto-renewals) ---");
+	tracing::info!("--- Block weight stats (no auto-renewals) ---");
 	for block_n in stats_range_start..=stats_range_end {
 		let Some(&block_hash) = block_hashes_by_number.get(&block_n) else { continue };
 		let block = client.blocks().at(block_hash).await?;
@@ -2307,7 +2379,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 			""
 		};
 
-		log::info!(
+		tracing::info!(
 			"block {:>3} | xt={:>2} | normal=({:>13},{:>9}) op=({:>13},{:>9}) mand=({:>13},{:>9}){}",
 			block_n,
 			extrinsic_count,
@@ -2356,7 +2428,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	{
 		let delta_ref = em.0.saturating_sub(idle_ref);
 		let delta_pov = em.1.saturating_sub(idle_pov);
-		log::info!(
+		tracing::info!(
 			"On-chain on_initialize_with_expiry({}) + proof-only delta (vs idle baseline): \
 			 ref_time={} ({:.3}% of max_block.ref_time), proof_size={} ({:.3}% of max_block.proof_size)",
 			ON_INIT_NO_RENEWALS_ITEMS,
@@ -2406,7 +2478,7 @@ fn pseudo_random(seed: u64) -> u64 {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	const TEST: &str = "para_pruning_soak";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
@@ -2430,23 +2502,23 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	let collator2 = network.get_node("collator-2").context("Failed to get collator-2")?;
 	let collator3 = network.get_node("collator-3").context("Failed to get collator-3")?;
 
-	log::info!("==================== PJS LINKS ====================");
+	tracing::info!("==================== PJS LINKS ====================");
 	for (name, node) in
 		[("collator-1", collator1), ("collator-2", collator2), ("collator-3", collator3)]
 	{
-		log::info!(
+		tracing::info!(
 			"[{}] PJS:    https://polkadot.js.org/apps/?rpc={}#/explorer",
 			name,
 			node.ws_uri()
 		);
-		log::info!("[{}] WS:     {}", name, node.ws_uri());
+		tracing::info!("[{}] WS:     {}", name, node.ws_uri());
 	}
-	log::info!("===================================================");
+	tracing::info!("===================================================");
 
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	log::info!("Setting RetentionPeriod to {} blocks", SOAK_RETENTION_PERIOD);
+	tracing::info!("Setting RetentionPeriod to {} blocks", SOAK_RETENTION_PERIOD);
 	set_retention_period(&client, SOAK_RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
@@ -2483,7 +2555,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 
 		let elapsed_min = start_time.elapsed().as_secs() / 60;
 		if block_n.is_multiple_of(5) {
-			log::info!(
+			tracing::info!(
 				"[soak] block {} | elapsed {} min | tracked={} | stores={} renews={} verified_pruned={} (failed={})",
 				block_n,
 				elapsed_min,
@@ -2501,14 +2573,14 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 			match client.tx().account_nonce(&dev::alice().public_key().to_account_id()).await {
 				Ok(chain_nonce) =>
 					if chain_nonce > nonce {
-						log::info!(
+						tracing::info!(
 							"[soak] catching up local nonce: local={} chain={}",
 							nonce,
 							chain_nonce
 						);
 						nonce = chain_nonce;
 					},
-				Err(e) => log::warn!("[soak] account_nonce query failed: {}", e),
+				Err(e) => tracing::warn!("[soak] account_nonce query failed: {}", e),
 			}
 		}
 
@@ -2524,7 +2596,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				total_stores += 1;
 				nonce += 1;
 			},
-			Err(e) => log::warn!("[soak] store at block {} failed: {}", block_n, e),
+			Err(e) => tracing::warn!("[soak] store at block {} failed: {}", block_n, e),
 		}
 
 		if pseudo_random(block_n).is_multiple_of(2) {
@@ -2550,7 +2622,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 						total_renews += 1;
 						nonce += 1;
 					},
-					Err(e) => log::warn!("[soak] renew at block {} failed: {}", block_n, e),
+					Err(e) => tracing::warn!("[soak] renew at block {} failed: {}", block_n, e),
 				}
 			}
 		}
@@ -2579,26 +2651,26 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				{
 					Ok(_) => {
 						total_pruned_verifications_ok += 1;
-						log::info!("[soak] ✓ pruning verified on {}", label);
+						tracing::info!("[soak] ✓ pruning verified on {}", label);
 					},
 					Err(e) => {
 						total_pruned_verifications_failed += 1;
-						log::warn!("[soak] ✗ pruning verification FAILED on {}: {}", label, e);
+						tracing::warn!("[soak] ✗ pruning verification FAILED on {}: {}", label, e);
 					},
 				}
 			}
 		}
 	}
 
-	log::info!("=== Soak window elapsed; final tallies ===");
-	log::info!("Total stores attempted/succeeded: {}", total_stores);
-	log::info!("Total renews succeeded: {}", total_renews);
-	log::info!(
+	tracing::info!("=== Soak window elapsed; final tallies ===");
+	tracing::info!("Total stores attempted/succeeded: {}", total_stores);
+	tracing::info!("Total renews succeeded: {}", total_renews);
+	tracing::info!(
 		"Pruning verifications: {} ok / {} failed",
 		total_pruned_verifications_ok,
 		total_pruned_verifications_failed
 	);
-	log::info!("Tracked items: {}", stored.len());
+	tracing::info!("Tracked items: {}", stored.len());
 
 	if total_pruned_verifications_failed > 0 {
 		anyhow::bail!(
@@ -2789,7 +2861,7 @@ async fn run_pruning_restart_scenario(
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
 
 	let collator1 = network.get_node("collator-1").context("collator-1 not found")?;
-	log::info!(
+	tracing::info!(
 		"[{}] waiting for parachain block {} so DB has real state...",
 		scenario,
 		PRUNE_RESTART_INITIAL_BLOCKS_TARGET
@@ -2804,16 +2876,16 @@ async fn run_pruning_restart_scenario(
 	let orig_args: Vec<String> = collator1.args().iter().map(|s| s.to_string()).collect();
 	let base_path = extract_arg_value(&orig_args, "--base-path")
 		.ok_or_else(|| anyhow::anyhow!("collator-1 args do not contain --base-path"))?;
-	log::info!("[{}] collator-1 base_path = {}", scenario, base_path);
+	tracing::info!("[{}] collator-1 base_path = {}", scenario, base_path);
 
 	let pid = find_pid_by_base_path(&base_path)
 		.ok_or_else(|| anyhow::anyhow!("could not find collator-1 PID via ps"))?;
-	log::info!("[{}] sending SIGTERM to collator-1 pid={}", scenario, pid);
+	tracing::info!("[{}] sending SIGTERM to collator-1 pid={}", scenario, pid);
 	sigterm_and_wait(pid).await?;
-	log::info!("[{}] collator-1 process terminated", scenario);
+	tracing::info!("[{}] collator-1 process terminated", scenario);
 
 	let respawn_args = build_respawn_args(&orig_args, restart_pruning);
-	log::info!("[{}] re-spawning with --blocks-pruning = {:?}", scenario, restart_pruning);
+	tracing::info!("[{}] re-spawning with --blocks-pruning = {:?}", scenario, restart_pruning);
 
 	let binary = std::env::var("POLKADOT_PARACHAIN_BINARY_PATH")
 		.unwrap_or_else(|_| "polkadot-omni-node".to_string());
@@ -2824,7 +2896,7 @@ async fn run_pruning_restart_scenario(
 	let last_30: Vec<&str> = log.lines().rev().take(30).collect();
 	let last_30: Vec<&str> = last_30.into_iter().rev().collect();
 
-	log::info!(
+	tracing::info!(
 		"[{}] respawn exit={:?}\n--- relevant log lines ---\n{}\n--- last 30 lines of full log ---\n{}\n",
 		scenario,
 		exit,
@@ -2839,7 +2911,7 @@ async fn run_pruning_restart_scenario(
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_restart_archive_to_pruning_test() -> Result<()> {
 	const TEST: &str = "restart_archive_to_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 	test_log!(TEST, "=== Restart from archive (no --blocks-pruning) → --blocks-pruning=10 ===");
 	run_pruning_restart_scenario("archive_to_10", None, Some(10)).await?;
 	test_log!(TEST, "=== finished — see log above for substrate's response ===");
@@ -2849,7 +2921,7 @@ async fn parachain_restart_archive_to_pruning_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_restart_pruning_increase_test() -> Result<()> {
 	const TEST: &str = "restart_pruning_increase";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 	test_log!(TEST, "=== Restart from --blocks-pruning=10 → --blocks-pruning=20 (increase) ===");
 	run_pruning_restart_scenario("10_to_20", Some(10), Some(20)).await?;
 	test_log!(TEST, "=== finished — see log above for substrate's response ===");
@@ -2859,7 +2931,7 @@ async fn parachain_restart_pruning_increase_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 	const TEST: &str = "restart_pruning_decrease";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 	test_log!(TEST, "=== Restart from --blocks-pruning=20 → --blocks-pruning=10 (decrease) ===");
 	run_pruning_restart_scenario("20_to_10", Some(20), Some(10)).await?;
 	test_log!(TEST, "=== finished — see log above for substrate's response ===");
@@ -2871,7 +2943,7 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_quota_exhaustion";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Quota Exhaustion Test ===");
 
@@ -2884,7 +2956,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	data_pattern.extend_from_slice(b"_quota_exhaustion_");
 	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
 	let (hash_hex, _) = content_hash_and_cid(&data);
-	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
+	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let nonce = get_alice_nonce(collator1).await?;
 	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
@@ -2907,7 +2979,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	)
 	.await?;
 	nonce += 1;
-	log::info!(
+	tracing::info!(
 		"Data stored at block {}; authorization pinned to bytes_allowance = 2 × {}",
 		store_block,
 		data.len()
@@ -2915,7 +2987,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 
 	let content_hash = blake2_256(&data);
 	enable_auto_renew(client, &content_hash, nonce).await?;
-	log::info!("Auto-renewal enabled for {}", hash_hex);
+	tracing::info!("Auto-renewal enabled for {}", hash_hex);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
 	let r1 = store_block + cadence;
@@ -2924,7 +2996,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 
 	for (cycle, renewal_block) in [(1u64, r1), (2, r2)] {
 		let wait_until = renewal_block + 1;
-		log::info!(
+		tracing::info!(
 			"[cycle {}] Waiting for block {} (renewal at {})",
 			cycle,
 			wait_until,
@@ -2933,6 +3005,9 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 		dump_renewal_window(client, renewal_block, &format!("quota_exhaustion cycle {}", cycle))
 			.await?;
+
+		// Proof for cycle k's source tx_info lands at `renewal_block - 1`.
+		assert_proof_checked_at(client, renewal_block - 1, &format!("cycle {}", cycle)).await?;
 
 		let renewal_hash = block_hash_at(client, renewal_block).await?;
 		let events = client.blocks().at(renewal_hash).await?.events().await?;
@@ -2956,19 +3031,23 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		)
 		.await
 		.with_context(|| format!("cycle {} did not preserve the data", cycle))?;
-		log::info!("[cycle {}] ✓ DataAutoRenewed at block {}", cycle, renewal_block);
+		tracing::info!("[cycle {}] ✓ DataAutoRenewed at block {}", cycle, renewal_block);
 	}
 
 	// Cycle 3: bytes_permanent (= 2L) + L > bytes_allowance (= 2L).
 	let wait_until = r3 + 1;
-	log::info!("[cycle 3] Waiting for block {} (renewal at {}) — expected to fail", wait_until, r3);
+	tracing::info!(
+		"[cycle 3] Waiting for block {} (renewal at {}) — expected to fail",
+		wait_until,
+		r3
+	);
 	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	let r3_hash = block_hash_at(client, r3).await?;
 	let events = client.blocks().at(r3_hash).await?.events().await?;
 	let failed = count_event(&events, "AutoRenewalFailed");
 	let renewed = count_event(&events, "DataAutoRenewed");
-	log::info!("[cycle 3] block {}: renewed={}, failed={}", r3, renewed, failed);
+	tracing::info!("[cycle 3] block {}: renewed={}, failed={}", r3, renewed, failed);
 	assert_eq!(
 		failed, 1,
 		"[cycle 3] expected exactly 1 AutoRenewalFailed event at block {}, saw {} (renewed={})",
@@ -2979,7 +3058,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		"[cycle 3] expected 0 DataAutoRenewed events at block {}, saw {}",
 		r3, renewed
 	);
-	log::info!("[cycle 3] ✓ AutoRenewalFailed at block {}", r3);
+	tracing::info!("[cycle 3] ✓ AutoRenewalFailed at block {}", r3);
 
 	// Query at the renewal block's hash, not `at_latest` (which reads finalized state and
 	// lags ~10s behind best on cumulus).
@@ -2995,7 +3074,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		hash_hex,
 		r3
 	);
-	log::info!("✓ AutoRenewals[{}] removed at block {}", hash_hex, r3);
+	tracing::info!("✓ AutoRenewals[{}] removed at block {}", hash_hex, r3);
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Quota Exhaustion Test PASSED ===");
 	Ok(())
@@ -3016,6 +3095,20 @@ async fn block_hash_at(
 	Ok(current.hash())
 }
 
+/// Assert exactly one `ProofChecked` event at the given block; verifies the storage-proof
+/// step of `apply_block_inherents` actually ran for `Transactions[block - RetentionPeriod]`.
+async fn assert_proof_checked_at(
+	client: &OnlineClient<SubstrateConfig>,
+	block: u64,
+	context: &str,
+) -> Result<()> {
+	let hash = block_hash_at(client, block).await?;
+	let events = client.blocks().at(hash).await?.events().await?;
+	let count = count_event(&events, "ProofChecked");
+	assert_eq!(count, 1, "{}: expected 1 ProofChecked at block {}, saw {}", context, block, count);
+	Ok(())
+}
+
 /// Log event counts at `r-1..=r+2` so a failed assertion can distinguish "renewal fired in
 /// a different block" from "renewal never fired".
 async fn dump_renewal_window(
@@ -3024,7 +3117,7 @@ async fn dump_renewal_window(
 	label: &str,
 ) -> Result<()> {
 	let head = current_best_block(client).await?;
-	log::info!(
+	tracing::info!(
 		"[{}] diagnostic: chain best={}, examining blocks {}..={} for TransactionStorage events",
 		label,
 		head.number(),
@@ -3035,7 +3128,7 @@ async fn dump_renewal_window(
 		let hash = match block_hash_at(client, n).await {
 			Ok(h) => h,
 			Err(e) => {
-				log::info!("[{}]   block {}: lookup failed ({})", label, n, e);
+				tracing::info!("[{}]   block {}: lookup failed ({})", label, n, e);
 				continue;
 			},
 		};
@@ -3044,7 +3137,7 @@ async fn dump_renewal_window(
 		let failed = count_event(&events, "AutoRenewalFailed");
 		let enabled = count_event(&events, "AutoRenewalEnabled");
 		let stored = count_event(&events, "Stored");
-		log::info!(
+		tracing::info!(
 			"[{}]   block {} ({}): Stored={} AutoRenewalEnabled={} DataAutoRenewed={} AutoRenewalFailed={}",
 			label,
 			n,
@@ -3064,7 +3157,7 @@ async fn dump_renewal_window(
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_auth_expires_mid_cycle";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Authorization Expires Mid-Cycle Test ===");
 
@@ -3077,11 +3170,11 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	data_pattern.extend_from_slice(b"_auth_expires_");
 	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
 	let (hash_hex, _) = content_hash_and_cid(&data);
-	log::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
+	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let nonce = get_alice_nonce(collator1).await?;
 	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	log::info!("Data stored at block {}", store_block);
+	tracing::info!("Data stored at block {}", store_block);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
 	let r1 = store_block + cadence;
@@ -3089,7 +3182,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	// `expired()` is `now >= expiration`; midpoint of (r1, r2] gives slack.
 	let override_expiration: u32 = ((r1 + r2) / 2) as u32;
-	log::info!(
+	tracing::info!(
 		"Overriding Alice's authorization expiration: r1={}, r2={}, expiration={}",
 		r1,
 		r2,
@@ -3116,9 +3209,11 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	let content_hash = blake2_256(&data);
 	enable_auto_renew(client, &content_hash, nonce).await?;
 	nonce += 1;
-	log::info!("Auto-renewal enabled");
+	tracing::info!("Auto-renewal enabled");
 
 	wait_for_block_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	// Proof for the original store fires at `r1 - 1 = store_block + RP`.
+	assert_proof_checked_at(client, r1 - 1, "auth_expires cycle 1").await?;
 	dump_renewal_window(client, r1, "auth_expires cycle 1").await?;
 	let r1_hash = block_hash_at(client, r1).await?;
 	let r1_events = client.blocks().at(r1_hash).await?.events().await?;
@@ -3134,9 +3229,11 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 		"[cycle 1] expected 0 AutoRenewalFailed at block {}",
 		r1
 	);
-	log::info!("[cycle 1] ✓ DataAutoRenewed at block {}", r1);
+	tracing::info!("[cycle 1] ✓ DataAutoRenewed at block {}", r1);
 
 	wait_for_block_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	// Proof for the cycle-1 renewal at r1 fires at `r2 - 1 = r1 + RP`.
+	assert_proof_checked_at(client, r2 - 1, "auth_expires cycle 2").await?;
 	let r2_hash = block_hash_at(client, r2).await?;
 	let r2_events = client.blocks().at(r2_hash).await?.events().await?;
 	assert_eq!(
@@ -3165,7 +3262,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 		hash_hex,
 		r2
 	);
-	log::info!("[cycle 2] ✓ AutoRenewalFailed at block {}; AutoRenewals[hash] removed", r2);
+	tracing::info!("[cycle 2] ✓ AutoRenewalFailed at block {}; AutoRenewals[hash] removed", r2);
 
 	// Expired-but-present: the pallet zeroes counters and installs a fresh expiration.
 	let alice_pk = subxt_signer::sr25519::dev::alice().public_key().0;
@@ -3178,7 +3275,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	)
 	.await?;
 	nonce += 1;
-	log::info!("Re-authorized Alice — expects expired-reset branch to zero counters");
+	tracing::info!("Re-authorized Alice — expects expired-reset branch to zero counters");
 
 	// End-to-end proof the reset took: a fresh store + auto-renew cycle must succeed; if
 	// `bytes_permanent` had carried over, the cycle-1 renewal would trip the per-account cap.
@@ -3191,14 +3288,16 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	let store2_block = submit_store_signed(client, &data2, nonce).await?;
 	nonce += 1;
-	log::info!("Stored second item at block {} (hash={})", store2_block, hash2_hex);
+	tracing::info!("Stored second item at block {} (hash={})", store2_block, hash2_hex);
 
 	let content_hash2 = blake2_256(&data2);
 	enable_auto_renew(client, &content_hash2, nonce).await?;
-	log::info!("Auto-renewal enabled for second item");
+	tracing::info!("Auto-renewal enabled for second item");
 
 	let r1_after = store2_block + cadence;
 	wait_for_block_height(collator1, r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	// Proof for the second store fires at `r1_after - 1 = store2_block + RP`.
+	assert_proof_checked_at(client, r1_after - 1, "post-reauth cycle 1").await?;
 	let r1_after_hash = block_hash_at(client, r1_after).await?;
 	let r1_after_events = client.blocks().at(r1_after_hash).await?.events().await?;
 	assert_eq!(
@@ -3214,13 +3313,13 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 		r1_after
 	);
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "post-reauth cycle 1").await?;
-	log::info!("✓ Post-reauth cycle 1 succeeded — counters reset");
+	tracing::info!("✓ Post-reauth cycle 1 succeeded — counters reset");
 
 	// Shared-harness cleanup: `data` was removed by the cycle-2 failure path; disable `data2`
 	// explicitly so it doesn't keep renewing for the rest of the harness lifetime.
 	let nonce_after_enable = nonce + 1;
 	disable_auto_renew(client, &content_hash2, nonce_after_enable).await?;
-	log::info!("✓ Disabled auto-renew for data2 — chain idle for the next test");
+	tracing::info!("✓ Disabled auto-renew for data2 — chain idle for the next test");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Authorization Expires Mid-Cycle Test PASSED ===");
 	Ok(())

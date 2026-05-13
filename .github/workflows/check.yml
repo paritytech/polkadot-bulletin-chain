@@ -1,17 +1,12 @@
 name: CI
 
-# Controls when the action will run.
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# Cancel previous runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -181,7 +176,7 @@ jobs:
       - name: Cache frame-omni-bencher
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: .polkadot-binaries
+          path: ${{ env.POLKADOT_BINARIES_DIR }}
           key: polkadot-binaries-${{ runner.os }}-${{ env.FRAME_OMNI_BENCHER_VERSION }}
 
       - name: Resolve frame-omni-bencher + add to PATH

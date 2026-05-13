@@ -105,14 +105,14 @@ pub async fn set_retention_period(
 ) -> Result<()> {
 	let key = retention_period_storage_key();
 	let value = retention_period.to_le_bytes();
-	log::info!(
+	tracing::info!(
 		"Setting RetentionPeriod to {} blocks via sudo (key: 0x{}, value: 0x{})",
 		retention_period,
 		hex::encode(&key),
 		hex::encode(value),
 	);
 	sudo_set_storage_item(client, &key, &value, nonce, false).await?;
-	log::info!("RetentionPeriod set successfully");
+	tracing::info!("RetentionPeriod set successfully");
 	Ok(())
 }
 
@@ -123,13 +123,13 @@ pub async fn set_retention_period_finalized(
 ) -> Result<()> {
 	let key = retention_period_storage_key();
 	let value = retention_period.to_le_bytes();
-	log::info!(
+	tracing::info!(
 		"Setting RetentionPeriod to {} blocks via sudo (finalized, nonce={})",
 		retention_period,
 		nonce,
 	);
 	sudo_set_storage_item(client, &key, &value, nonce, true).await?;
-	log::info!("RetentionPeriod set successfully (finalized)");
+	tracing::info!("RetentionPeriod set successfully (finalized)");
 	Ok(())
 }
 
@@ -180,7 +180,7 @@ pub async fn authorize_and_store_items(
 		}],
 	);
 
-	log::info!(
+	tracing::info!(
 		"Authorizing {} items ({} bytes total, nonce={})",
 		items_data.len(),
 		total_bytes,
@@ -198,13 +198,13 @@ pub async fn authorize_and_store_items(
 	.await
 	.map_err(|_| anyhow!("authorization transaction timed out"))??;
 
-	log::info!("Authorization for all items included in block");
+	tracing::info!("Authorization for all items included in block");
 
 	// Store each item
 	let mut stored_items = Vec::new();
 	for (i, data) in items_data.into_iter().enumerate() {
 		let (hash_hex, cid) = content_hash_and_cid(&data);
-		log::info!("Storing item {} ({} bytes): hash={}, CID={}", i, data.len(), hash_hex, cid);
+		tracing::info!("Storing item {} ({} bytes): hash={}, CID={}", i, data.len(), hash_hex, cid);
 
 		let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
@@ -221,7 +221,7 @@ pub async fn authorize_and_store_items(
 
 		let block = client.blocks().at(block_hash).await?;
 		let block_number = block.number() as u64;
-		log::info!("Item {} stored at block {}", i, block_number);
+		tracing::info!("Item {} stored at block {}", i, block_number);
 
 		stored_items.push(StoredItem { data, block_number });
 	}
@@ -251,7 +251,7 @@ pub async fn authorize_and_store_data(
 		}],
 	);
 
-	log::info!("Submitting authorization transaction (nonce={})...", nonce);
+	tracing::info!("Submitting authorization transaction (nonce={})...", nonce);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 	nonce += 1;
 
@@ -264,11 +264,11 @@ pub async fn authorize_and_store_data(
 	.await
 	.map_err(|_| anyhow!("authorization transaction timed out"))??;
 
-	log::info!("Authorization transaction included in block");
+	tracing::info!("Authorization transaction included in block");
 
 	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
 
-	log::info!("Submitting store transaction (nonce={})...", nonce);
+	tracing::info!("Submitting store transaction (nonce={})...", nonce);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 	nonce += 1;
 
@@ -286,7 +286,7 @@ pub async fn authorize_and_store_data(
 	let content_hash = blake2_256(data);
 	let block_number = canonical_store_block(&client, block_hash, &content_hash).await?;
 
-	log::info!("Store transaction included at canonical block {}", block_number);
+	tracing::info!("Store transaction included at canonical block {}", block_number);
 	Ok((block_number, nonce))
 }
 
@@ -312,7 +312,7 @@ pub async fn authorize_and_store_data_finalized(
 		}],
 	);
 
-	log::info!("Submitting authorization transaction (finalized, nonce={})...", nonce);
+	tracing::info!("Submitting authorization transaction (finalized, nonce={})...", nonce);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 	nonce += 1;
 
@@ -325,11 +325,11 @@ pub async fn authorize_and_store_data_finalized(
 	.await
 	.map_err(|_| anyhow!("authorization transaction timed out"))??;
 
-	log::info!("Authorization transaction finalized");
+	tracing::info!("Authorization transaction finalized");
 
 	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
 
-	log::info!("Submitting store transaction (finalized, nonce={})...", nonce);
+	tracing::info!("Submitting store transaction (finalized, nonce={})...", nonce);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 	nonce += 1;
 
@@ -345,7 +345,7 @@ pub async fn authorize_and_store_data_finalized(
 	let block = client.blocks().at(block_hash).await?;
 	let block_number = block.number() as u64;
 
-	log::info!("Store transaction finalized at block {}", block_number);
+	tracing::info!("Store transaction finalized at block {}", block_number);
 	Ok((block_number, nonce))
 }
 
@@ -395,7 +395,7 @@ async fn authorize_account_via_sudo_inner(
 	);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	log::info!(
+	tracing::info!(
 		"Authorizing 0x{}.. (+{} tx, +{} bytes, alice nonce={}, wait_for_finality={})",
 		hex::encode(&who[..4]),
 		transactions,
@@ -422,7 +422,7 @@ async fn authorize_account_via_sudo_inner(
 	.await
 	.map_err(|_| anyhow!("authorize_account via sudo timed out"))??;
 
-	log::info!("Authorization included");
+	tracing::info!("Authorization included");
 	Ok(())
 }
 
@@ -447,7 +447,7 @@ pub async fn submit_store_signed(
 	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	log::info!("Submitting store (nonce={}, {} bytes)...", nonce, data.len());
+	tracing::info!("Submitting store (nonce={}, {} bytes)...", nonce, data.len());
 
 	let (block_hash, _events) =
 		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
@@ -460,7 +460,7 @@ pub async fn submit_store_signed(
 
 	let content_hash = blake2_256(data);
 	let block_number = canonical_store_block(client, block_hash, &content_hash).await?;
-	log::info!("Store transaction included at canonical block {}", block_number);
+	tracing::info!("Store transaction included at canonical block {}", block_number);
 	Ok(block_number)
 }
 
@@ -526,7 +526,7 @@ pub async fn submit_renew_pair(
 	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
 	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
 
-	log::info!(
+	tracing::info!(
 		"Submitting two renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
 		block,
 		index,
@@ -556,7 +556,7 @@ pub async fn submit_renew_pair(
 
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
-	log::info!(
+	tracing::info!(
 		"renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
 		block,
 		index,
@@ -580,7 +580,7 @@ pub async fn enable_auto_renew(
 	);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	log::info!("Submitting enable_auto_renew (nonce={})...", nonce);
+	tracing::info!("Submitting enable_auto_renew (nonce={})...", nonce);
 
 	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
 		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
@@ -590,7 +590,7 @@ pub async fn enable_auto_renew(
 	.await
 	.map_err(|_| anyhow!("enable_auto_renew transaction timed out"))??;
 
-	log::info!("enable_auto_renew included in block");
+	tracing::info!("enable_auto_renew included in block");
 	Ok(())
 }
 
@@ -609,7 +609,7 @@ pub async fn disable_auto_renew(
 	);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	log::info!("Submitting disable_auto_renew (nonce={})...", nonce);
+	tracing::info!("Submitting disable_auto_renew (nonce={})...", nonce);
 
 	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
 		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
@@ -619,7 +619,7 @@ pub async fn disable_auto_renew(
 	.await
 	.map_err(|_| anyhow!("disable_auto_renew transaction timed out"))??;
 
-	log::info!("disable_auto_renew included in block");
+	tracing::info!("disable_auto_renew included in block");
 	Ok(())
 }
 
@@ -627,7 +627,7 @@ pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
 	let alice_account_id = dev::alice().public_key().to_account_id();
 	let nonce = client.tx().account_nonce(&alice_account_id).await?;
-	log::info!("Alice's current nonce: {}", nonce);
+	tracing::info!("Alice's current nonce: {}", nonce);
 	Ok(nonce)
 }
 
@@ -669,7 +669,7 @@ pub async fn override_alice_authorization(
 	)
 		.encode();
 
-	log::info!(
+	tracing::info!(
 		"Overriding Alice's Authorization (expiration={}, bytes_permanent={}, \
 		 bytes_allowance={}) via sudo set_storage",
 		auth.expiration,
@@ -677,6 +677,6 @@ pub async fn override_alice_authorization(
 		auth.bytes_allowance,
 	);
 	sudo_set_storage_item(client, &key, &value, nonce, false).await?;
-	log::info!("Alice's Authorization overridden");
+	tracing::info!("Alice's Authorization overridden");
 	Ok(())
 }

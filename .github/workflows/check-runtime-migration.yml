@@ -3,22 +3,15 @@ name: Check Runtime Migrations
 # If you modify more jobs, ensure that you add them as required to the job "confirmMigrationsPassed"
 # which is located at the end of this file (more info in the job)
 
-# Controls when the action will run.
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
   push:
     branches: [main, "release-*"]
   pull_request:
     branches: [main, "release-*"]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-
   schedule:
     - cron: '0 5 * * *'  # Daily at 5 AM UTC
 
-# Cancel a currently running workflow from the same PR, branch or tag when a new workflow is
-# triggered (ref https://stackoverflow.com/a/72408109)
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -89,7 +82,7 @@ jobs:
         if: steps.cache-restore.outputs.cache-matched-key == ''
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: .polkadot-binaries
+          path: ${{ env.POLKADOT_BINARIES_DIR }}
           key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
 
       - name: Resolve try-runtime + add to PATH
@@ -178,7 +171,7 @@ jobs:
       - name: Cache try-runtime CLI
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: .polkadot-binaries
+          path: ${{ env.POLKADOT_BINARIES_DIR }}
           key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
 
       - name: Resolve try-runtime + add to PATH

@@ -52,7 +52,7 @@ pub async fn expect_no_log_line(
 /// Verify state sync was attempted (--sync=fast). On fast-producing chains, state sync
 /// may fall back to block sync because the target keeps moving - we only verify it started.
 pub async fn verify_state_sync_completed(node: &zombienet_sdk::NetworkNode) -> Result<()> {
-	log::info!("Verifying state sync was attempted");
+	tracing::info!("Verifying state sync was attempted");
 	expect_log_line(
 		node,
 		"Starting state sync",
@@ -67,13 +67,13 @@ pub async fn verify_state_sync_completed(node: &zombienet_sdk::NetworkNode) -> R
 		"Node logged verification errors",
 	)
 	.await?;
-	log::info!("✓ State sync was attempted");
+	tracing::info!("✓ State sync was attempted");
 	Ok(())
 }
 
 /// Verify warp sync completed via log check, then wait for idle state via metric.
 pub async fn verify_warp_sync_completed(node: &zombienet_sdk::NetworkNode) -> Result<()> {
-	log::info!("Verifying warp sync completed");
+	tracing::info!("Verifying warp sync completed");
 	expect_log_line(
 		node,
 		"Warp sync is complete",
@@ -91,7 +91,7 @@ pub async fn verify_warp_sync_completed(node: &zombienet_sdk::NetworkNode) -> Re
 		"Node logged verification errors",
 	)
 	.await?;
-	log::info!("✓ Warp sync completed and node is idle");
+	tracing::info!("✓ Warp sync completed and node is idle");
 	Ok(())
 }
 
@@ -141,7 +141,11 @@ pub async fn wait_for_finalized_quiescence(
 ) -> Result<()> {
 	let current_best = node.reports(BEST_BLOCK_METRIC).await? as u64;
 	let target = current_best + 2;
-	log::info!("Quiesce: waiting for finalized height {} (current best={})", target, current_best);
+	tracing::info!(
+		"Quiesce: waiting for finalized height {} (current best={})",
+		target,
+		current_best
+	);
 	wait_for_finalized_height(node, target, timeout_secs).await
 }
 
@@ -181,7 +185,7 @@ pub async fn wait_for_relay_chain_to_sync(
 		);
 	}
 
-	log::info!("✓ Embedded relay chain is synced (seeing included parachain blocks)");
+	tracing::info!("✓ Embedded relay chain is synced (seeing included parachain blocks)");
 	Ok(())
 }
 
@@ -213,7 +217,7 @@ pub async fn wait_for_nth_session_change(
 	mut sessions_to_wait: u32,
 	timeout_secs: u64,
 ) -> Result<()> {
-	log::info!("Waiting for {} session change(s) on relay chain...", sessions_to_wait);
+	tracing::info!("Waiting for {} session change(s) on relay chain...", sessions_to_wait);
 
 	let wait_future = async {
 		let mut blocks_sub = relay_client
@@ -226,18 +230,18 @@ pub async fn wait_for_nth_session_change(
 
 		while let Some(block_result) = blocks_sub.next().await {
 			let block = block_result.context("Error receiving block")?;
-			log::debug!("Relay chain finalized block #{}", block.number());
+			tracing::debug!("Relay chain finalized block #{}", block.number());
 
 			if is_session_change_block(&block).await? {
 				sessions_to_wait -= 1;
-				log::info!(
+				tracing::info!(
 					"Session change detected at relay block #{}. {} more to wait.",
 					block.number(),
 					sessions_to_wait
 				);
 
 				if sessions_to_wait == 0 {
-					log::info!("All required session changes detected");
+					tracing::info!("All required session changes detected");
 					return Ok(());
 				}
 
