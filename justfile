@@ -1,25 +1,14 @@
-# justfile for the polkadot-bulletin-chain repo.
-#
 # Same recipes run in CI and locally. Binaries are resolved by
 # `scripts/get_polkadot_binaries.sh` and cached under `./.polkadot-binaries/`.
-#
-# Versions come from environment (`.github/env` defaults; override at the shell
-# to pin a specific version):
-#
-#     POLKADOT_NODE_VERSION=<tag-or-40-hex-commit>
-#     FRAME_OMNI_BENCHER_VERSION=<tag-or-40-hex-commit>
-#     CHAIN_SPEC_BUILDER_VERSION=<tag-or-40-hex-commit>
-#     TRY_RUNTIME_VERSION=<tag-or-40-hex-commit>
-#     ZOMBIENET_VERSION=<tag>                              (release-tag only)
-#
-# Local first-time setup: `cargo install just`.
+# Versions come from `.github/env`; override per-shell with e.g.
+# `POLKADOT_NODE_VERSION=<tag-or-40-hex-commit> just …`.
+# Recognised version vars: POLKADOT_NODE_VERSION, FRAME_OMNI_BENCHER_VERSION,
+# CHAIN_SPEC_BUILDER_VERSION, TRY_RUNTIME_VERSION, ZOMBIENET_VERSION (release-tag only).
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set positional-arguments
 
-# Auto-load .github/env so recipes inherit the canonical versions without
-# needing `source .github/env` every time. Shell-exported vars still take
-# precedence over file values, so `POLKADOT_NODE_VERSION=<ref> just …` works.
+# Shell-exported vars still override file values.
 set dotenv-load := true
 set dotenv-filename := ".github/env"
 

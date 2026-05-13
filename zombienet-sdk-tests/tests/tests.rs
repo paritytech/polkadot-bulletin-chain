@@ -3,10 +3,7 @@
 
 #![allow(clippy::uninlined_format_args)]
 
-// Both suites always compile so shared `utils/` helpers don't appear unused under whichever
-// feature is off. The feature flags still gate the test binary from running under a bare
-// `cargo test --workspace`; runtime selection of which tests execute is done via cargo-test
-// filters (see the `just test-zombienet-*` recipes).
+// Both suites compile together so shared `utils/` helpers don't trip dead-code warnings.
 #[cfg(any(feature = "zombie-sync-tests", feature = "zombie-auto-renew-tests"))]
 mod auto_renew_storage;
 #[cfg(any(feature = "zombie-sync-tests", feature = "zombie-auto-renew-tests"))]

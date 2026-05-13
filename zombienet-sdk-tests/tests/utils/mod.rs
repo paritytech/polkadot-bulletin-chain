@@ -29,6 +29,7 @@ macro_rules! test_error {
 pub mod bitswap;
 pub mod config;
 pub mod crypto;
+pub mod events;
 pub mod ldb;
 pub mod network;
 pub mod sync;
@@ -37,6 +38,7 @@ pub mod tx;
 pub use bitswap::*;
 pub use config::*;
 pub use crypto::*;
+pub use events::*;
 pub use ldb::*;
 pub use network::*;
 pub use sync::*;

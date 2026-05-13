@@ -133,10 +133,8 @@ pub async fn wait_for_finalized_height(
 	.context(format!("Node did not finalize block height {}", min_height))
 }
 
-/// Block until finality catches up to (current best + 2). Use between shared-harness tests:
-/// `client.tx().account_nonce()` reads the *finalized* account state, so without a quiescence
-/// step a freshly-arriving test sees a stale nonce and the next signed extrinsic is rejected
-/// as `InvalidTransaction::Stale`.
+/// Wait until finality catches up to (current best + 2). `account_nonce()` reads finalized
+/// state, so without quiescence the next test sees a stale nonce.
 pub async fn wait_for_finalized_quiescence(
 	node: &zombienet_sdk::NetworkNode,
 	timeout_secs: u64,

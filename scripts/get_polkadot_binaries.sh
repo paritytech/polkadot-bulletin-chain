@@ -181,12 +181,8 @@ if [ "$MODE" = release ]; then
 		log "  curl $url"
 		curl -fL --retry 3 --retry-delay 5 -o "$CACHE_DIR/$bin" "$url" \
 			|| die "download failed for $url"
-		# Verification order:
-		#   1. env-pinned hash (e.g. ZOMBIENET_LINUX_X64_SHA256 in .github/env) — preferred
-		#      for binaries whose upstream release doesn't publish a `.sha256` companion.
-		#   2. companion `<asset>.sha256` fetched from the same release.
-		#   3. (skip + log a warning).
-		# (1) wins because the env value comes through a separate channel (PR review).
+		# sha256 verification: env-pinned hash > companion `.sha256` > skip+warn. The
+		# env-pinned form wins because it flows through PR review.
 		pin_var="$(echo "${asset}_SHA256" | tr '[:lower:]-.' '[:upper:]__')"
 		expected="${!pin_var:-}"
 		if [ -n "$expected" ]; then
@@ -235,18 +231,14 @@ else
 		fi
 		targets="$(build_targets_for_group "$GROUP")"
 		if [ "$GROUP" = "polkadot-node" ]; then
-			# polkadot relay binary embeds the westend/kusama/etc. runtime WASMs and
-			# needs `--features fast-runtime` so zombienet's `westend-development`
-			# preset is available with short epoch durations. `-p polkadot` builds all
-			# three relay bins (polkadot + 2 workers). Separate invocation because
-			# `--features fast-runtime` isn't a feature of polkadot-omni-node.
+			# `--features fast-runtime` enables zombienet's `westend-development` preset
+			# with short epochs; not a feature of polkadot-omni-node, so split builds.
 			log "  cargo build --release --locked -p polkadot --features fast-runtime"
 			cargo build --release --locked -p polkadot --features fast-runtime
-			# omni-node loads runtime from the chain spec, so no embedded WASM needed.
+			# omni-node loads runtime from the chain spec.
 			log "  SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node"
 			SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node
 		else
-			# Dedup crates so we don't pass the same `-p` twice.
 			crates_to_build=""
 			while IFS=: read -r crate bin; do
 				case " $crates_to_build " in

@@ -220,8 +220,7 @@ pub fn build_parachain_network_config_three_relay_validators(
 		})
 }
 
-/// Parachain network: 3 relay validators (alice/bob/charlie) + 3 collators (collator-1/-2/-3),
-/// all collators using the same `para_node_args`. Used by long-running soak tests.
+/// 3 relay validators + 3 collators, all collators using the same `para_node_args`.
 pub fn build_parachain_network_config_three_collators(
 	para_node_args: Vec<String>,
 ) -> Result<NetworkConfig> {

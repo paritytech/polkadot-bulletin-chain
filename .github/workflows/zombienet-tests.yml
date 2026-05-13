@@ -3,12 +3,9 @@ name: Zombienet SDK Tests
 on:
   workflow_dispatch:
   pull_request:
-    # `labeled` lets the sync suite kick in mid-PR when the `zombienet-sync-tests` label is
-    # added; auto-renew runs on every push regardless via its lack of an `if:` gate.
+    # `labeled` lets the sync suite kick in when its label is added mid-PR.
     types: [opened, synchronize, reopened, labeled]
-  # Run on pushes to `main` so the post-merge workflow populates the polkadot-binaries cache
-  # under main's scope. PRs whose base is `main` can then read that cache and skip the cold
-  # ~17-min source build of polkadot, even on a fresh `POLKADOT_NODE_VERSION` bump.
+  # Populate the binaries cache under main's scope so PRs can read it.
   push:
     branches: [main]
 
@@ -39,18 +36,12 @@ jobs:
       - name: Ensure `just` is available
         run: command -v just || cargo install just --locked
 
-      # Polkadot binaries cache: keyed only by the polkadot-sdk + chain-spec-builder versions,
-      # so it stays warm across every PR that doesn't bump those env values.
       - name: Cache polkadot-sdk binaries
         id: cache-binaries
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          # Cache ONLY the resolved binary subdirs, not the entire `.polkadot-binaries/`.
-          # The latter contains `.polkadot-binaries/_src/` — the polkadot-sdk source clone +
-          # cargo target from the cold-build path (~11 GB) — which we don't need to
-          # distribute: cache hits are detected by `scripts/get_polkadot_binaries.sh` looking
-          # for the binary file at `polkadot-node/<version>/<platform>/polkadot`. The two
-          # subdirs below total ~333 MB.
+          # Cache only the resolved binaries (~333 MB); skip `.polkadot-binaries/_src/`
+          # which holds the polkadot-sdk clone + cargo target (~11 GB) from cold builds.
           path: |
             .polkadot-binaries/polkadot-node
             .polkadot-binaries/chain-spec-builder
@@ -62,9 +53,7 @@ jobs:
           just binaries-polkadot
           just binaries-chain-spec-builder
 
-      # Bulletin chain specs cache: keyed by commit SHA because the spec embeds the bulletin
-      # runtime WASM, which depends on every line of source under the runtime/pallet crates.
-      # On a hit, matrix legs skip the ~4-min `cargo build -p bulletin-*-runtime` per leg.
+      # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
       - name: Cache bulletin chain specs
         id: cache-specs
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
@@ -86,10 +75,6 @@ jobs:
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    # Wall-clock budgets after group split + shared harness:
-    #   archive/pruning: ~25-40 min (4 / 3 tests, one shared network)
-    #   restart:         ~20-30 min (3 tests, each its own network)
-    #   mixed:           ~50-70 min (5 tests, each its own network)
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -121,18 +106,9 @@ jobs:
           shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Restore the artifacts produced by `prepare-binaries`. Cache restore is ~1-2 min for
-      # ~330 MB vs ~10-12 min over `actions/download-artifact` — and skips one moving part
-      # (the GH artifact service, which has flaked twice on this workflow).
       - name: Restore polkadot binaries cache
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          # Cache ONLY the resolved binary subdirs, not the entire `.polkadot-binaries/`.
-          # The latter contains `.polkadot-binaries/_src/` — the polkadot-sdk source clone +
-          # cargo target from the cold-build path (~11 GB) — which we don't need to
-          # distribute: cache hits are detected by `scripts/get_polkadot_binaries.sh` looking
-          # for the binary file at `polkadot-node/<version>/<platform>/polkadot`. The two
-          # subdirs below total ~333 MB.
           path: |
             .polkadot-binaries/polkadot-node
             .polkadot-binaries/chain-spec-builder
@@ -165,8 +141,7 @@ jobs:
           retention-days: 14
 
   zombienet-sync-tests:
-    # Sync suite is heavy (~120 min) — only run on manual dispatch or when the PR has the
-    # `zombienet-sync-tests` label.
+    # Sync suite is ~120 min; gate behind dispatch / `zombienet-sync-tests` label.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
@@ -204,12 +179,6 @@ jobs:
       - name: Restore polkadot binaries cache
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
-          # Cache ONLY the resolved binary subdirs, not the entire `.polkadot-binaries/`.
-          # The latter contains `.polkadot-binaries/_src/` — the polkadot-sdk source clone +
-          # cargo target from the cold-build path (~11 GB) — which we don't need to
-          # distribute: cache hits are detected by `scripts/get_polkadot_binaries.sh` looking
-          # for the binary file at `polkadot-node/<version>/<platform>/polkadot`. The two
-          # subdirs below total ~333 MB.
           path: |
             .polkadot-binaries/polkadot-node
             .polkadot-binaries/chain-spec-builder
@@ -231,8 +200,8 @@ jobs:
       - name: Run zombienet sync tests
         env:
           PARACHAIN_ID: ${{ matrix.runtime.para_id }}
-        # parachain_ldb_storage_verification_test requires the rocksdb `ldb` CLI,
-        # which is not packaged for Debian Bullseye — skipped by the just recipe.
+        # parachain_ldb_storage_verification_test needs rocksdb's `ldb` CLI (not in the CI
+        # image) — skipped by the just recipe.
         run: just test-zombienet-sync ${{ matrix.runtime.name }}
 
       - name: Upload logs on failure

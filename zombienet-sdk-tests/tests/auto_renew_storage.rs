@@ -1,70 +1,22 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Auto-renewal end-to-end test (multi-cycle).
-//!
-//! Verifies that data with auto-renewal enabled survives **multiple consecutive** retention
-//! deadlines, not just the first one.
-//!
-//! ## Lifecycle being exercised
-//!
-//! With `S` = store block, `RP` = `RetentionPeriod`:
-//!
-//! - `R1 = S + RP + 1` — first renewal block.
-//!   - `on_initialize(R1)` takes `Transactions[obsolete = R1 - RP - 1 = S]` and pushes the entry
-//!     onto `PendingAutoRenewals` because `AutoRenewals[content_hash]` is set.
-//!   - The mandatory `apply_block_inherents` inherent drains `PendingAutoRenewals` via `do_renew`,
-//!     which calls `sp_io::transaction_index::renew(extrinsic_index, content_hash)` to re-index the
-//!     existing col11 entry under block `R1`. `TransactionByContentHash` is rewritten to `(R1,
-//!     new_index)`.
-//! - `R2 = R1 + RP + 1 = S + 2 * (RP + 1)` — second renewal block.
-//!   - Same lifecycle, taking `Transactions[R1]` and re-indexing under `R2`.
-//!
-//! Because each renewal consumes one transaction slot and `data.len()` bytes from the account
-//! authorization, the test up-front authorizes enough capacity for the initial store **plus**
-//! `NUM_RENEWAL_CYCLES` renewals.
-//!
-//! ## Assertions
-//!
-//! - Bitswap fetch from the collator succeeds **right after the original retention deadline**
-//!   (block `R1 + 1`) — proves the first renewal was applied.
-//! - Bitswap fetch succeeds again **after the second retention deadline** (block `R2 + 1`) — proves
-//!   the renewal lifecycle keeps running indefinitely as long as authorization is replenished.
-//!
-//! ## Environment variables
-//!
-//! Same as `parachain_sync_storage`:
-//! - `POLKADOT_RELAY_BINARY_PATH`, `POLKADOT_PARACHAIN_BINARY_PATH`, `PARACHAIN_CHAIN_SPEC_PATH`,
-//!   `RELAY_CHAIN`, `PARACHAIN_ID`, `PARACHAIN_CHAIN_ID`.
-//!
-//! ## Running
-//!
-//! Easiest: `just test-zombienet-auto-renew westend parachain_auto_renew_test` from the
-//! repo root. It fetches binaries, generates the chain spec, and invokes cargo with the
-//! right env. To run cargo directly:
-//!
-//! ```bash
-//! BIN_DIR=$(just binaries-polkadot)
-//! POLKADOT_RELAY_BINARY_PATH=$BIN_DIR/polkadot \
-//! POLKADOT_PARACHAIN_BINARY_PATH=$BIN_DIR/polkadot-omni-node \
-//! PARACHAIN_CHAIN_SPEC_PATH=$(pwd)/zombienet/bulletin-westend-spec.json \
-//!   cargo test --release -p bulletin-chain-zombienet-sdk-tests \
-//!   --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
-//!   parachain_auto_renew_test -- --nocapture --test-threads=1
-//! ```
+//! End-to-end tests for the auto-renewal lifecycle, on-init cleanup, and `--blocks-pruning`
+//! interactions on a single-collator parachain network.
 
 use crate::{
 	test_log,
 	utils::{
 		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
 		blake2_256, build_parachain_network_config_single_collator, content_hash_and_cid,
-		disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have, generate_test_data,
-		get_alice_nonce, initialize_network, override_alice_authorization, set_retention_period,
-		set_retention_period_finalized, submit_renew_pair, submit_store_signed,
-		top_up_alice_authorization, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
-		wait_for_session_change_on_node, AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS,
-		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		count_event, disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have,
+		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
+		set_retention_period, set_retention_period_finalized, submit_renew_pair,
+		submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
+		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
+		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
+		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -81,10 +33,9 @@ use subxt_signer::{
 	SecretUri,
 };
 
-/// Fetch the latest **best** parachain block. `client.blocks().at_latest()` returns the latest
-/// **finalized** block via chainHead_v2; on cumulus parachains finality lags production by 10+
-/// seconds at startup, so at_latest can be stuck at block 0 well after the chain is producing.
-/// `subscribe_best().next()` returns the current best block immediately.
+/// Fetch the latest best block. `at_latest()` returns the latest finalized block via
+/// chainHead_v2 — on cumulus, finality lags ~10s behind production, so it can be stuck at
+/// block 0 well after the chain is producing.
 async fn current_best_block(
 	client: &OnlineClient<SubstrateConfig>,
 ) -> Result<subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>> {
@@ -99,52 +50,27 @@ async fn current_best_block(
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
 const BITSWAP_TIMEOUT_SECS: u64 = 30;
-/// Generous budget for the negative-eviction check (`expect_bitswap_dont_have`) after a
-/// pruning boundary. `wait_for_finalized_height` returns the moment the metric crosses,
-/// but the actual `--blocks-pruning` deletion + col11 refcount-zero cleanup is a separate
-/// background pass in the client backend — its lag under CI load can be tens of seconds.
-/// Keep this 4-5× higher than the positive-bitswap timeout so eviction has time to land.
+/// `--blocks-pruning` deletion + col11 refcount-zero cleanup runs asynchronously after the
+/// finalized-height metric crosses; under CI load that lag can be tens of seconds.
 const BITSWAP_EVICTION_TIMEOUT_SECS: u64 = 180;
 
-/// Number of renewal cycles to verify end-to-end. Bumping this requires more authorization
-/// headroom (see [`TOPUP_TX_COUNT`] / [`TOPUP_BYTES_MULTIPLIER`]) and a longer wait at the end
-/// of the test.
 const NUM_RENEWAL_CYCLES: u64 = 2;
-/// Extra transaction slots to add on top of the 9 left over from `authorize_and_store_data`
-/// (which authorizes 10 — store consumes 1). Adds margin so the test isn't sensitive to
-/// off-by-one accounting.
 const TOPUP_TX_COUNT: u32 = 5;
-/// Extra bytes — sized as `(NUM_RENEWAL_CYCLES + 1) × data.len()`. The +1 is safety; without
-/// it, a single byte short would silently flip auto-renewal into `AutoRenewalFailed`.
+/// `+1` is safety: without it, a single byte short flips auto-renewal into `AutoRenewalFailed`.
 const TOPUP_BYTES_MULTIPLIER: u64 = NUM_RENEWAL_CYCLES + 1;
 
-/// Aggressive block pruning, smaller than [`RETENTION_PERIOD`]. The store block is pruned
-/// **before** the proof block (`store_block + RetentionPeriod`); the inherent provider can no
-/// longer construct a `TransactionStorageProof` from col11 (the entry has been deleted as its
-/// last `transaction_index` ref vanished). The mandatory `apply_block_inherents` is therefore
-/// not emitted, `on_finalize`'s `assert!(proof_ok)` fires, and the chain halts.
+/// Pruning smaller than retention: the store block ages out of the pruning window before
+/// the proof block, the inherent provider can't construct `TransactionStorageProof`, and
+/// `on_finalize`'s `assert!(proof_ok)` halts the chain.
 const BLOCKS_PRUNING_LESS_THAN_RETENTION: u32 = 5;
-/// Pruning larger than [`RETENTION_PERIOD`]. The proof block can still find the col11 entry
-/// because the store/renew blocks are still within the pruning window, so the chain progresses
-/// past `S + RetentionPeriod`. Eviction happens later, once the block holding the last
-/// `transaction_index` ref ages out of the pruning window.
+/// Pruning larger than retention: the proof block still finds col11 alive, chain progresses.
 const BLOCKS_PRUNING_GREATER_THAN_RETENTION: u32 = 15;
-/// Tight timeout for halt detection. If the chain has stalled (proof block panic), we want to
-/// surface that quickly rather than wait the default 300s `BLOCK_PRODUCTION_TIMEOUT_SECS`.
 const HALT_DETECTION_TIMEOUT_SECS: u64 = 120;
-/// Larger retention used by the two `..._fails_under_pruning_..._test` halt scenarios. With
-/// pruning=5 + RP=10, the proof block at `S+10` lands too close to the store block — finality
-/// hasn't caught up enough for pruning to actually evict col11 yet. Bumping retention to 20
-/// pushes the proof block out to `S+20` (~2-3 minutes wall-clock), which is comfortably past
-/// the (finality + pruning) lag, so col11 is reliably empty at the proof block.
+/// With pruning=5 + RP=10, the proof block at `S+10` lands before finality has caught up
+/// enough for pruning to actually evict col11. Bumping retention to 20 pushes the proof
+/// block out past the (finality + pruning) lag so col11 is reliably empty.
 const RETENTION_PERIOD_FOR_PRUNING_HALT: u32 = 20;
-/// Number of items used by the bulk auto-renewal test. Sourced from the pallet so the test
-/// automatically tracks any change to the per-block worst-case cap.
 const MANY_ITEMS_COUNT: u32 = pallet_bulletin_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS;
-/// Number of consecutive renewal cycles to observe for the stability check. Each cycle re-runs
-/// the same bulk renewal at `S + k*(RP+1)` for `k=1..=N`. Multiple measurements at the same N
-/// let us see whether the prometheus block-construction time is stable (suggests the
-/// inherent's actual cost is well-bounded) or volatile (suggests scheduler or I/O noise).
 const RENEWAL_CYCLES_TO_OBSERVE: u32 = 3;
 
 fn get_para_node_args() -> Vec<String> {
@@ -157,41 +83,24 @@ fn get_para_node_args() -> Vec<String> {
 	]
 }
 
-// ===========================================================================================
-// Shared network harnesses (per group)
-//
-// Tests belonging to the same group share one zombienet network: the first `#[tokio::test]` in
-// the group to call `group_*_harness()` triggers the spawn; subsequent tests get the cached
-// handle. Static OnceCell storage means the Network is never dropped — its spawned processes
-// stay alive until the test binary exits, at which point the OS reaps them. (Statics are not
-// destructed per Rust spec, which is what we want here.)
-//
-// Group invariants are set ONCE on first spawn (e.g. `RetentionPeriod`); tests in the group
-// MUST tolerate any state left behind by previously-run sibling tests — use unique data
-// patterns (`generate_test_data` with a per-test salt), capture your own `store_block`, and
-// don't assume nonce 0 or a clean `Authorizations` entry.
-// ===========================================================================================
+// Tests in the same group share one zombienet network via OnceCell. The Network is never
+// dropped — its processes stay alive until the test binary exits and the OS reaps them.
+// Group invariants (e.g. `RetentionPeriod`) are set once on first spawn; tests must tolerate
+// state left behind by previously-run sibling tests (salt data patterns, capture own
+// `store_block`, don't assume nonce 0).
 
-/// Shared per-group zombienet network handle.
-///
-/// We deliberately don't cache a long-lived `OnlineClient` here: the WebSocket connection it
-/// holds drops after the inter-test quiescence idle period, surfacing as opaque "Custom
-/// error: Error reason could not be found" RPC failures in the next test. Each test instead
-/// asks `collator1.wait_client().await?` for a fresh client.
+/// We don't cache a long-lived `OnlineClient`: its WebSocket drops during inter-test
+/// quiescence, surfacing as opaque RPC errors in the next test. Tests fetch a fresh client
+/// per run via `collator1.wait_client()`.
 struct SharedHarness {
-	/// Held to keep spawned processes alive for the test binary's lifetime; never dropped.
+	/// Held to keep spawned processes alive; never dropped.
 	_network: zombienet_sdk::Network<zombienet_sdk::LocalFileSystem>,
 	collator1: zombienet_sdk::NetworkNode,
 }
 
-/// `archive` group: collator runs in archive mode (no `--blocks-pruning`), RP=10. Use for
-/// renewal-lifecycle / on-init / failure-path tests that don't need block pruning and tolerate
-/// accumulated chain state.
 static ARCHIVE_HARNESS: tokio::sync::OnceCell<std::sync::Arc<SharedHarness>> =
 	tokio::sync::OnceCell::const_new();
 
-/// `pruning` group: collator runs with `--blocks-pruning=15`, RP=10. Use for tests that
-/// exercise pruning-driven eviction.
 static PRUNING_HARNESS: tokio::sync::OnceCell<std::sync::Arc<SharedHarness>> =
 	tokio::sync::OnceCell::const_new();
 
@@ -219,8 +128,6 @@ async fn pruning_harness() -> Result<std::sync::Arc<SharedHarness>> {
 	Ok(harness)
 }
 
-/// Per-test quiescence timeout: best→finalized typically takes ~30 s on a parachain;
-/// pick a budget that's well past finality lag even on a slow CI runner.
 const QUIESCENCE_TIMEOUT_SECS: u64 = 120;
 
 async fn spawn_shared_harness(
@@ -244,8 +151,7 @@ async fn spawn_shared_harness(
 		.clone();
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
-	// One-time group setup: set RetentionPeriod for every test in the group. Wait for
-	// finalization so tests can rely on `get_alice_nonce` reflecting the bump.
+	// Wait for finalization so tests can rely on `get_alice_nonce` reflecting the bump.
 	let nonce = get_alice_nonce(&collator1).await?;
 	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
 	log::info!("[{}] harness ready (RetentionPeriod={})", label, RETENTION_PERIOD);
@@ -263,9 +169,8 @@ fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
 	]
 }
 
-/// Navigate the dynamic `System::BlockWeight` value (a `PerDispatchClass<Weight>`) and
-/// extract `(ref_time, proof_size)` for the given class (`"normal"`, `"operational"`, or
-/// `"mandatory"`). Returns `(0, 0)` if the structure shape is unexpected.
+/// Extract `(ref_time, proof_size)` for the given dispatch class from a dynamic
+/// `System::BlockWeight` value. Returns `(0, 0)` if the shape is unexpected.
 fn extract_class_weight<C>(
 	weight_value: &subxt::ext::scale_value::Value<C>,
 	class: &str,
@@ -295,9 +200,8 @@ fn extract_class_weight<C>(
 	(ref_time, proof_size)
 }
 
-/// Read `System::BlockWeights::max_block` as `(ref_time, proof_size)` from the runtime
-/// constants. This is the absolute ceiling that even Mandatory-class extrinsics must fit
-/// inside — the same bound the in-pallet `ensure_weight_sanity` test asserts statically.
+/// Read `System::BlockWeights::max_block` as `(ref_time, proof_size)` — the absolute ceiling
+/// that even Mandatory-class extrinsics must fit inside.
 async fn fetch_max_block_weight(client: &OnlineClient<SubstrateConfig>) -> Result<(u64, u64)> {
 	use subxt::ext::scale_value::{Composite, Primitive, ValueDef};
 
@@ -343,9 +247,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	let client_owned = collator1.wait_client().await?;
 	let client = &client_owned;
 
-	// Authorize 2× data and store one item. Helper consumes 1× on the store, leaving 1× / 9 tx
-	// — enough for one renewal cycle. Salt the data with the test name so we don't collide
-	// with sibling tests on the shared chain.
+	// Salt the pattern so we don't collide with sibling tests on the shared chain.
 	let mut data_pattern = PARACHAIN_TEST_DATA_PATTERN.to_vec();
 	data_pattern.extend_from_slice(b"_basic_");
 	let data = generate_test_data(TEST_DATA_SIZE, &data_pattern);
@@ -358,8 +260,6 @@ async fn parachain_auto_renew_test() -> Result<()> {
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
-	// Top up authorization for the additional renewal cycles. `authorize_account` adds to
-	// existing authorization (per pallet docs).
 	top_up_alice_authorization(
 		client,
 		TOPUP_TX_COUNT,
@@ -374,9 +274,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	nonce += 1;
 	log::info!("Auto-renewal enabled for content_hash {}", hash_hex);
 
-	// Verify the data survives each retention deadline. Renewal cadence is `RP + 1`, so cycle
-	// `k` lands at `store_block + k * (RP + 1)`. Wait one extra block so the
-	// `apply_block_inherents` inherent has been observed by the chain head.
+	// Renewal cadence is `RP + 1`; wait one extra block so the inherent is observable.
 	let cadence = RETENTION_PERIOD as u64 + 1;
 	for cycle in 1..=NUM_RENEWAL_CYCLES {
 		let renewal_block = store_block + cycle * cadence;
@@ -412,9 +310,8 @@ async fn parachain_auto_renew_test() -> Result<()> {
 		);
 	}
 
-	// Cleanup: remove from `AutoRenewals` so the shared `archive` harness doesn't keep
-	// renewing this item for the rest of the harness lifetime, consuming Alice's
-	// authorization and confusing later tests in the group.
+	// Shared-harness cleanup: stop renewing this item so it doesn't keep consuming Alice's
+	// authorization for the rest of the harness lifetime.
 	disable_auto_renew(client, &content_hash, nonce).await?;
 	log::info!("✓ Disabled auto-renew for content_hash — chain idle for the next test");
 
@@ -422,25 +319,9 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	Ok(())
 }
 
-/// Verify that `check_proof` cannot complete when block pruning has already evicted the data
-/// the proof would cover, so the chain halts. No auto-renewal in this scenario.
-///
-/// Sequence with `--blocks-pruning=5` and `RetentionPeriod=10`:
-///
-/// - Store at `S` → col11 ref from block `S` (refcount = 1).
-/// - Around block `S + 5`, pruning ages block `S` out of the window. Its `transaction_index` ref is
-///   dropped, the col11 refcount hits 0, and the entry is deleted.
-/// - At block `S + RetentionPeriod`, the proof step targets `target_number = S`. The pallet sees
-///   `Transactions[S]` is still in state (it'll be taken at the next block), so a proof IS
-///   required. The off-chain inherent provider tries to construct the proof from col11 — but col11
-///   no longer holds the data, so the provider returns no proof.
-/// - `create_inherent` reads `proof = None`, no `PendingAutoRenewals` either → `None` is emitted →
-///   the mandatory `apply_block_inherents` extrinsic is **not** in the block.
-/// - `on_finalize`'s `assert!(proof_ok)` fires; the block proposal panics; the collator can't
-///   produce block `S + RetentionPeriod`. Chain halts at `S + RetentionPeriod - 1`.
-///
-/// The test asserts the halt by waiting on a tight timeout for the proof block to be reached
-/// and expecting that wait to time out.
+/// `--blocks-pruning < RetentionPeriod` evicts the proof target's col11 entry before the
+/// proof block; `apply_block_inherents` is not emitted and `on_finalize`'s `assert!(proof_ok)`
+/// halts the chain at `S + RetentionPeriod - 1`.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	const TEST: &str = "para_check_proof_pruning";
@@ -478,17 +359,12 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	let (store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
 	log::info!("Data stored at block {}", store_block);
 
-	// Reach the last block the chain should be able to produce. With pruning < retention,
-	// the inherent provider fails to construct a proof at block `store_block + RetentionPeriod`,
-	// the inherent isn't emitted, and on_finalize panics. So `store_block + RetentionPeriod - 1`
-	// is the last block that can be produced.
 	let last_healthy_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64 - 1;
 	log::info!("Confirming chain reaches block {} (last healthy block)", last_healthy_block);
 	wait_for_block_height(collator1, last_healthy_block, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await
 		.context("Chain failed to reach the last healthy block before the proof block")?;
 
-	// Now the proof block: chain should NOT advance past it.
 	let proof_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64;
 	log::info!(
 		"Waiting up to {}s for block {} (proof block) — expected to time out (chain halt)",
@@ -518,13 +394,9 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	Ok(())
 }
 
-/// Verify that enabling auto-renewal does **not** rescue the chain from the same `check_proof`
-/// halt as the previous test: the proof block (`S + RetentionPeriod`) precedes the renewal
-/// block (`S + RetentionPeriod + 1`) by one block, so the chain panics on the proof step
-/// **before** auto-renewal would otherwise have a chance to fire.
-///
-/// This is a regression guard: there's no clever ordering — pairing
-/// `--blocks-pruning < RetentionPeriod` with auto-renewal still halts the chain.
+/// Auto-renewal does not rescue the chain from the `check_proof` halt: the proof block
+/// (`S + RP`) precedes the renewal block (`S + RP + 1`) by one block, so the chain panics
+/// before auto-renewal fires.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_pruning_halt";
@@ -564,9 +436,6 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	enable_auto_renew(&client, &content_hash, nonce).await?;
 	log::info!("Auto-renewal enabled");
 
-	// Same halt math as parachain_check_proof_fails_under_pruning_test: chain stalls at
-	// `store_block + RetentionPeriod`. Auto-renewal would have fired one block later (at
-	// `store_block + RetentionPeriod + 1`) but never gets the chance.
 	let last_healthy_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64 - 1;
 	log::info!("Confirming chain reaches block {} (last healthy block)", last_healthy_block);
 	wait_for_block_height(collator1, last_healthy_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
@@ -601,22 +470,8 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	Ok(())
 }
 
-/// Verify that calling `renew` twice for the same data within (approximately) one block
-/// stacks col11 refs from the renewal block on top of the original store-block ref, and that
-/// the data stays fetchable until **all** referencing blocks have been pruned.
-///
-/// Setup uses `--blocks-pruning=15` (greater than `RetentionPeriod=10`) so the proof block
-/// can find col11 alive and the chain progresses normally. Sequence:
-///
-/// - Store at `S` → col11 refs from block `S` (refcount = 1).
-/// - Top up authorization, then submit two `renew(S, 0)` extrinsics back-to-back. Both go into the
-///   pool before any block is produced and normally land in the same block `R`, adding two more
-///   col11 refs (refcount = 3).
-/// - Bitswap fetch right after `R` — succeeds.
-/// - Wait until block `S + 15 + 3` so block `S` ages out of the pruning window. Refcount drops to 2
-///   (only `R`'s refs survive). Bitswap still succeeds.
-/// - Wait until block `R + 15 + 3` so block `R` ages out. Refcount drops to 0. col11 entry evicted.
-///   Bitswap returns `DONT_HAVE`.
+/// Two `renew` calls for the same data within one block stack col11 refs; bitswap stays
+/// available until all referencing blocks age out of the `--blocks-pruning` window.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	const TEST: &str = "para_renew_twice_pruning";
@@ -644,15 +499,10 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	nonce = next_nonce;
 	log::info!("Data stored at block {}", store_block);
 
-	// The pallet's `validate_signed` tags renewals with `(who, content_hash)`, so two renews
-	// from the **same** signer for the same data conflict in the pool. To get two renews of
-	// the same data into the same block we need a second signer — Bob, authorized via sudo.
-	//
-	// Bob's renew is his FIRST ever signed extrinsic. The pool's `validate_signed` reads
-	// `Authorizations` from the runtime state at the latest *finalized* block, so the
-	// authorize-account tx must be FINALIZED (not just in best block) before Bob's renew
-	// enters the pool — otherwise it's rejected as `InvalidTransaction`. The `_finalized`
-	// variant blocks until finality so the next step is race-free.
+	// `validate_signed` tags renewals with `(who, content_hash)`, so two renews from the
+	// same signer would conflict in the pool — use Bob as a second signer. Bob has no prior
+	// authorization, and the pool reads `Authorizations` from finalized state, so the
+	// authorize must be finalized before Bob's renew can validate.
 	let bob_pk = subxt_signer::sr25519::dev::bob().public_key().0;
 	authorize_account_via_sudo_finalized(client, &bob_pk, 1, data.len() as u64, nonce).await?;
 	nonce += 1;
@@ -664,8 +514,6 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	let content_hash = blake2_256(&data);
 	let (renew_block_a, renew_block_b) =
 		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
-	// `nonce` is no longer used after this point in the test; the two renews are the last
-	// signed extrinsics here.
 	if renew_block_a != renew_block_b {
 		log::warn!(
 			"Renews landed in different blocks ({} and {}) instead of one — test still valid \
@@ -680,10 +528,8 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-renew)").await?;
 
-	// `--blocks-pruning=N` prunes blocks once they are FINALIZED and at least N blocks
-	// behind finalized head — best-block height is not what controls pruning, so waiting
-	// on a fudge factor past best (as we used to) is flaky under finality lag (slow CI
-	// disks can push finality 10+ blocks behind best).
+	// `--blocks-pruning=N` prunes blocks N behind FINALIZED head, not best head. Waiting
+	// on best-block + fudge is flaky under finality lag.
 	let after_renew_pruned_finalized =
 		renew_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
 	log::info!(
@@ -717,25 +563,8 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	Ok(())
 }
 
-/// Verify that a fresh `store` and the auto-renewal inherent for already-stored data can land
-/// in the same block and both pieces of data are then fetchable. Later, block pruning evicts
-/// the freshly-stored item (it has no auto-renewal) while the original auto-renewing item
-/// stays alive (each renewal block adds a fresh col11 ref).
-///
-/// Uses `--blocks-pruning=15` so the chain progresses normally. The fresh `store` is timed to
-/// land in the renewal block:
-///
-/// - Wait until block `R - 1 = S + RetentionPeriod` is reached on the chain head.
-/// - Submit `store(data2)` — it lands in the next block, which will be `R = S + RetentionPeriod +
-///   1`.
-/// - At `R`, `apply_block_inherents` drains `PendingAutoRenewals` (renews `data1`) and the
-///   `store(data2)` extrinsic is processed in the same block. col11 ends up with refs: `data1` from
-///   `S` + `R`, `data2` from `R`.
-///
-/// Long-term: at `R + pruning_size + 3` the original store-block has been pruned, dropping
-/// `data1`'s ref from `S`. `data1` survives because `R`'s ref is still in pruning window
-/// AND auto-renewal at `R2 = S + 2*(RetentionPeriod+1)` adds another ref.
-/// `data2` has no auto-renewal — so when block `R` is pruned, `data2`'s only ref vanishes.
+/// A fresh `store` and an auto-renewal inherent can land in the same block; both items are
+/// fetchable, and later pruning evicts only the item without auto-renewal.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_concurrent_store";
@@ -764,7 +593,6 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	nonce = next_nonce;
 	log::info!("data1 stored at block {}", store_block);
 
-	// Top up authorization for: 1× data2 store + 2× data1 renewals (R1 and R2) + safety.
 	top_up_alice_authorization(client, 5, 4 * data1.len() as u64, nonce).await?;
 	nonce += 1;
 
@@ -773,9 +601,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	nonce += 1;
 	log::info!("Auto-renewal enabled for data1");
 
-	// Wait until block before the renewal target. Renewal fires at R = S + RetentionPeriod + 1.
-	// Wait until R - 1 = S + RetentionPeriod is reached, then submit data2 — it'll be pulled
-	// from the pool by the next block proposal, which is R itself.
+	// Submit data2 at R-1 so it lands in the renewal block R = S + RetentionPeriod + 1.
 	let renewal_block = store_block + RETENTION_PERIOD as u64 + 1;
 	let wait_until_pre_renewal = renewal_block - 1;
 	log::info!(
@@ -797,17 +623,10 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	}
 	log::info!("✓ data2 store and auto-renewal inherent coexist in block {}", renewal_block);
 
-	// Both items should be fetchable.
 	verify_node_bitswap(collator1, &data1, BITSWAP_TIMEOUT_SECS, "Collator-1 / data1").await?;
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "Collator-1 / data2").await?;
 
-	// Wait until block R is pruned. data2 has no auto-renewal — its only ref was at R, so
-	// once R is gone, data2 is evicted. data1 had its ref refreshed at R AND at R2 = R + 11
-	// (= S + 22), so data1 keeps surviving.
-	//
-	// Pruning fires off FINALIZED head — under CI finality lag, polling for best-block
-	// equality with a small fudge is insufficient. Wait for finalized to cross the pruning
-	// boundary directly.
+	// Pruning fires off FINALIZED head — wait on finalized to cross the boundary directly.
 	let after_renewal_pruned_finalized =
 		renewal_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
 	log::info!(
@@ -851,20 +670,8 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	Ok(())
 }
 
-/// Side-by-side eviction test: store two distinct items, enable auto-renewal on only one of them,
-/// then wait long enough for `--blocks-pruning` to evict the non-renewed item's store block. The
-/// auto-renewed item must remain bitswap-fetchable; the other must be evicted (`bitswap
-/// DONT_HAVE`).
-///
-/// Pruning configuration: `--blocks-pruning = BLOCKS_PRUNING_GREATER_THAN_RETENTION = 15`. The
-/// pruning rule keeps the last `N + 1` blocks **past finalized**, not past chain head — so block
-/// `S` is only pruned once finality reaches roughly `S + N + 1`. With the parachain's finality
-/// lag of ~3–5 blocks, that lands around chain head `S + N + 1 + lag` ≈ `S + 20`. We wait until
-/// `S + RetentionPeriod + 15 = S + 25` to be safely past pruning.
-///
-/// At that point: the non-renewed item's only `transaction_index` ref (at block `S`) is gone; the
-/// auto-renewed item had a fresh ref added at the renewal block (`S + RP + 1 = S + 11`) before
-/// `S` was pruned, so its data column entry survives.
+/// Auto-renew preserves an item across pruning of its original store block; an
+/// otherwise-identical item without auto-renew is evicted.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_vs_no_renew";
@@ -887,16 +694,11 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	let data_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_RENEWED_");
 	let data_not_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_NOT_RENEWED_");
 
-	// Store both items. `authorize_and_store_data` returns the block the first store landed in;
-	// the second store goes through Alice's leftover authorization (topped up below) and lands
-	// in the same or the next block — we don't care which, as long as it's well before the
-	// renewal block at S + RP + 1.
 	let (store_block, next_nonce) =
 		authorize_and_store_data(collator1, &data_renewed, nonce).await?;
 	nonce = next_nonce;
 	log::info!("data_renewed stored at block {}", store_block);
 
-	// Top up authorization for: 1× data_not_renewed store + 2× data_renewed renewals + safety.
 	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
 	nonce += 1;
 
@@ -904,12 +706,10 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	nonce += 1;
 	log::info!("data_not_renewed stored at block {}", data_not_renewed_block);
 
-	// Enable auto-renew for ONLY the first item.
 	let content_hash_renewed = blake2_256(&data_renewed);
 	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
 	log::info!("Auto-renewal enabled for data_renewed");
 
-	// Both items should be bitswap-fetchable shortly after upload.
 	verify_node_bitswap(
 		collator1,
 		&data_renewed,
@@ -926,10 +726,7 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	.await?;
 	log::info!("✓ Both items fetchable shortly after upload");
 
-	// Wait long enough for `--blocks-pruning` to evict the original store block. With pruning
-	// keeping `N + 1` blocks past FINALIZED (not past chain head) and finality lagging the head
-	// by ~3-5 blocks on the parachain, block `S` is reliably pruned by chain head
-	// `S + blocks_pruning + finality_lag + buffer`. Waiting `S + RP + 15` is a comfortable margin.
+	// Pruning fires off FINALIZED head; with ~3-5 block finality lag, S + RP + 15 is past it.
 	let wait_until = store_block + RETENTION_PERIOD as u64 + 15;
 	log::info!(
 		"Waiting for block {} (store + RP + 15) so block {} is pruned",
@@ -967,25 +764,9 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	Ok(())
 }
 
-/// Bulk auto-renewal scenario: enable auto-renew on `MANY_ITEMS_COUNT` items and observe how
-/// the apply_block_inherents inherent eats block weight at the renewal blocks.
-///
-/// Stores N items via parallel submissions (Alice signs all). Each `store(data)` carries a
-/// distinct `content_hash`, so the pool's `provides((who, content_hash))` tags don't conflict
-/// and as many fit into each block as the runtime's weight + length budgets allow. After all
-/// N stores are included, parallel-submit N `enable_auto_renew(content_hash)` extrinsics.
-///
-/// Once we've waited past the latest renewal block (`max(store_blocks) + RetentionPeriod + 1`),
-/// walk the chain head backward (`block.header().parent_hash`) to map every block-number-to-hash
-/// in the renewal window, then for each renewal block dump:
-///
-/// - The number of `DataAutoRenewed` events emitted (i.e. how many items the inherent renewed in
-///   this block).
-/// - `System::BlockWeight` (per-class normal/operational/mandatory `ref_time` + `proof_size`).
-///
-/// The test is diagnostic-leaning: its hard assertion is just "every stored item was renewed
-/// at least once". The interesting output is the per-block weight log — that tells you how
-/// much the inherent costs at scale.
+/// Bulk auto-renewal: enable auto-renew on `MANY_ITEMS_COUNT` items signed by a single account
+/// (Alice), then log per-block weights / event counts across the renewal window. Hard
+/// assertion: every item is renewed at least once.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_many";
@@ -1000,24 +781,13 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	let mut nonce = get_alice_nonce(collator1).await?;
 
-	// Clobber Alice's `Authorizations` entry directly so it holds EXACTLY the renewal capacity
-	// this test needs and no more. `authorize_account` is additive on the unexpired path
-	// (`pallets/transaction-storage/src/lib.rs:1544-1553`), so on the shared `archive` harness
-	// it would just stack on top of Alice's genesis (100 tx, 10 MiB) — far more than this test
-	// needs. The resulting overflow would keep all `MANY_ITEMS_COUNT` items renewing on every
-	// (RP+1)-th block for the rest of the harness lifetime, polluting state for later tests.
-	//
-	// Pallet semantics for renewals (see `check_authorization`): the gate is
-	// `bytes_permanent + size <= bytes_allowance`. We size `bytes_allowance` to
-	// `RENEWAL_CYCLES_TO_OBSERVE × MANY_ITEMS_COUNT × data.len()` so that exactly N cycles fit
-	// and cycle N+1 trips `PERMANENT_ALLOWANCE_EXCEEDED` for every item, the pallet emits
-	// `AutoRenewalFailed`, and entries are removed from `AutoRenewals` — leaving the chain
-	// idle for the next test.
+	// Overwrite the Authorizations entry so cycle N+1 reliably trips
+	// `PERMANENT_ALLOWANCE_EXCEEDED` (drains `AutoRenewals`, leaving the shared harness idle).
+	// `authorize_account` is additive on the unexpired path, so it can't shrink the existing
+	// genesis entry.
 	let bytes_per_item = TEST_DATA_SIZE as u64;
 	let bytes_allowance =
 		bytes_per_item * MANY_ITEMS_COUNT as u64 * RENEWAL_CYCLES_TO_OBSERVE as u64;
-	// transactions_allowance is not checked by the renewal path, but we set it generously
-	// anyway so it doesn't gate the upfront stores via the signed extension.
 	let transactions_allowance = MANY_ITEMS_COUNT * (RENEWAL_CYCLES_TO_OBSERVE + 1);
 	override_alice_authorization(
 		client,
@@ -1034,7 +804,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	.await?;
 	nonce += 1;
 
-	// Generate N distinct payloads.
 	let items: Vec<Vec<u8>> = (0..MANY_ITEMS_COUNT)
 		.map(|i| {
 			let mut pattern = b"AUTO_RENEW_MANY_ITEMS_".to_vec();
@@ -1045,17 +814,11 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
 	log::info!("Generated {} items, first hash={}", items.len(), hex::encode(content_hashes[0]));
 
-	// Submit all N stores to the pool in parallel via `sign_and_submit` (no watcher). Watcher
-	// subscriptions for 512 concurrent submissions saturate subxt's chainHead_v2 pinning, and
-	// batching with `then_watch` serializes one batch per block — neither is what we want.
-	// Pure pool submission is fast enough that all 512 land in the same block proposal.
+	// Plain `sign_and_submit` — watcher subscriptions for hundreds of submissions saturate
+	// subxt's chainHead_v2 pinning; pure pool submission lets everything land in 1-2 blocks.
 	//
-	// `PROOF_DECOY=1` adds one extra (non-auto-renewable) store in the block AFTER the bulk
-	// stores. That makes the proof block (`first_store_block + retention + 1`) exercise BOTH
-	// branches of `apply_block_inherents` in the same block: drain all `MANY_ITEMS_COUNT`
-	// renewals (from the bulk store block) AND verify the proof for the decoy block. With
-	// `PROOF_DECOY=0` (default), the bulk and proof phases run in adjacent blocks — never
-	// the same one.
+	// `PROOF_DECOY=1` adds one extra store after the bulk so the proof block exercises both
+	// branches of `apply_block_inherents` (drain renewals AND verify a proof) in one block.
 	let proof_decoy: bool = std::env::var("PROOF_DECOY")
 		.ok()
 		.and_then(|v| v.parse::<u32>().ok())
@@ -1088,10 +851,8 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	log::info!("All {} stores accepted into pool", MANY_ITEMS_COUNT);
 
 	if proof_decoy {
-		// Wait until the bulk store block (`pre_store_block + 1`) is reached, then submit the
-		// decoy — it then lands in `pre_store_block + 2`. Waiting any longer (e.g. `+ 2`) means
-		// the next block proposer has already started authoring, so the decoy slips to `+ 3`
-		// and the proof block is no longer adjacent to the bulk.
+		// Submit the decoy right after the bulk block lands so it goes into the next block;
+		// any longer wait and the next proposer is already authoring, pushing the decoy out.
 		wait_for_block_height(collator1, pre_store_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS)
 			.await?;
 		let decoy = generate_test_data(TEST_DATA_SIZE, b"AUTO_RENEW_MANY_PROOF_DECOY_");
@@ -1106,14 +867,11 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		log::info!("Submitted 1 proof-decoy store (no auto-renew enabled)");
 	}
 
-	// Wait until inclusion has settled. With ~512 × 2 KB stores at ~1.1 ms/2.17 KB normal-class
-	// each, they should fit in 1-2 blocks. Wait 5 blocks past the pre-store snapshot to be safe.
 	let store_inclusion_target = pre_store_block + 5;
 	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	// Walk the chain backward from head, count `Stored` events per block. This gives us the
-	// store_blocks vector without needing per-submission block lookups (which is what races
-	// against chainHead pinning when done concurrently).
+	// Walk chain backward counting `Stored` events — avoids per-submission block lookups
+	// which race against chainHead pinning when done concurrently.
 	let post_store_head_n = {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
@@ -1179,7 +937,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		log::info!("  block {}: {} stores", b, n);
 	}
 
-	// Submit all N enable_auto_renew calls to the pool in parallel (no watch).
 	let pre_enable_block = current_best_block(client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
@@ -1202,7 +959,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(enable_futs).await?;
 	log::info!("All {} enable_auto_renew calls accepted into pool", MANY_ITEMS_COUNT);
 
-	// Wait for enable inclusion + verify by walking events.
 	let enable_inclusion_target = pre_enable_block + 5;
 	wait_for_block_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await?;
@@ -1250,16 +1006,10 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	log::info!("Auto-renewal enabled for all {} items", MANY_ITEMS_COUNT);
 	let _ = nonce; // last use
 
-	// Wait past the last renewal block, with per-block prometheus snapshots covering a window
-	// that includes a couple of baseline (idle) blocks plus the proof block, the renewal
-	// block, and a post-renewal block. Each snapshot reads the cumulative
-	// `substrate_proposer_block_constructed_seconds_sum` / `_count` histogram values; pairwise
-	// diffs give us actual per-block wall-clock construction time as measured by the collator
-	// itself — independent of the runtime's declared weight.
+	// Pairwise diffs of `substrate_proposer_block_constructed_{sum,count}` give per-block
+	// wall-clock construction time, independent of the runtime's declared weight.
 	let renewal_cadence = RETENTION_PERIOD as u64 + 1;
 	let first_renewal_block = earliest_store + renewal_cadence;
-	// Stability check: observe `RENEWAL_CYCLES_TO_OBSERVE` consecutive renewal cycles for
-	// the same 512 items so we get multiple measurements at the same N.
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let wait_until = last_renewal_block + 1;
 	log::info!(
@@ -1273,8 +1023,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let mut prom_snapshots: Vec<(u64, f64, f64)> = Vec::new();
 	for n in snapshot_range_start..=wait_until {
 		wait_for_block_height(collator1, n, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-		// The metric is cumulative; one read per block right after it lands gives per-block
-		// resolution via diff.
 		let sum = collator1
 			.reports("substrate_proposer_block_constructed_sum".to_string())
 			.await
@@ -1312,9 +1060,9 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		);
 	}
 
-	// `wait_for_block_height` checks the Prometheus best-block metric, which updates faster
-	// than subxt's chainHead_v2 subscription. Poll `at_latest()` until it catches up so the
-	// backward walk starts from a head that actually covers the renewal window.
+	// `wait_for_block_height` reads the Prometheus best-block metric, which leads subxt's
+	// chainHead_v2 subscription. Poll subxt until it catches up so the backward walk covers
+	// the renewal window.
 	let head = {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
@@ -1333,11 +1081,8 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 		}
 	};
-	// Stats window: walk further back than the renewal block so we have baseline blocks
-	// (no `apply_block_inherents` emitted at all), the store block (30 stores), the proof
-	// block (`apply_block_inherents` with `Some(proof)`, no renewals), and the renewal block
-	// (`apply_block_inherents` with `proof: None`, 30 renewals). Subtracting baseline from
-	// proof-only and renewal-only blocks isolates the per-component cost.
+	// Stats window covers baseline (no inherent), store, proof-only, and renewal blocks so
+	// subtracting baseline from proof-only / renewal-only isolates per-component cost.
 	let stats_range_start = first_renewal_block.saturating_sub(15).max(1);
 	let stats_range_end = last_renewal_block + 2;
 	log::info!(
@@ -1415,7 +1160,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			None => ((0, 0), (0, 0), (0, 0)),
 		};
 
-		// Mark interesting blocks in the log line for easy scanning.
 		let marker = if block_hashes_by_number.contains_key(&block_n) &&
 			block_n == first_renewal_block - 1
 		{
@@ -1443,9 +1187,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			marker
 		);
 
-		// Hard bound: the mandatory inherent (apply_block_inherents) must fit within
-		// `BlockWeights::max_block` in BOTH dimensions. This is the on-chain analogue of
-		// the static `pallet_transaction_storage::ensure_weight_sanity` check.
+		// Mandatory inherent must fit within max_block in both dimensions.
 		if mand.0 > max_block_ref {
 			weight_violations.push(format!(
 				"block {block_n}: mandatory ref_time={} exceeds max_block ref_time={}",
@@ -1486,15 +1228,9 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		);
 	}
 
-	// Wind-down observation: the override sized Alice's `bytes_allowance` to exactly N cycles,
-	// so cycle N+1 must fail for every item. After cycle 1, every item's `Transactions` entry
-	// gets re-keyed to the cycle-1 renewal block (the inherent re-stores all 512 entries in
-	// the same block), so subsequent cycles fire at `first_renewal_block + k*cadence`, not at
-	// `latest_store + k*cadence` — the test's `last_renewal_block` (built from `latest_store`)
-	// is therefore an upper bound that overshoots the actual final cycle. Anchor on
-	// `first_renewal_block` instead to find cycle N+1 reliably.
-	//
-	// Spilling across two blocks is allowed (the inherent splits the work when weight-bound).
+	// After cycle 1, all items get re-keyed to the cycle-1 renewal block, so subsequent
+	// cycles fire at `first_renewal_block + k*cadence`. Anchor on `first_renewal_block` to
+	// find cycle N+1 reliably (across two blocks: the inherent splits when weight-bound).
 	let exhaustion_block = first_renewal_block + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let exhaustion_wait_until = exhaustion_block + 1;
 	log::info!(
@@ -1536,20 +1272,12 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	Ok(())
 }
 
-/// Number of distinct worker accounts used by the worst-case multi-signer test. Sized to match
-/// `MaxBlockTransactions` so we exercise the full bench worst case (one `Authorizations` entry
-/// touched per renewal — what the post-fix benchmarks model).
 const WORST_CASE_WORKERS: u32 = MANY_ITEMS_COUNT;
 
-/// Worst-case auto-renewal scenario for PoV accounting: `WORST_CASE_WORKERS` distinct accounts
-/// each store one item and enable auto-renewal. Every renewal hits a distinct
-/// `Authorizations[Account(worker_i)]` storage key, so iterations don't collapse into storage
-/// cache hits — matching the bench's worst-case PoV model after the cache-hit fixes.
-///
-/// The single-Alice variant ([`parachain_auto_renew_many_items_test`]) collapses
-/// `Authorizations` reads into a single key (cache hit on iterations 2..N), so it exercises a
-/// cheaper-than-declared real cost. This test exercises the actual declared worst case end to
-/// end and captures wall-clock construction time for direct comparison.
+/// Worst-case PoV: each renewal touches a distinct `Authorizations[Account(worker_i)]` so
+/// iterations don't collapse into cache hits — matches the bench's worst-case model. The
+/// single-account variant ([`parachain_auto_renew_many_items_test`]) collapses into one
+/// `Authorizations` key and exercises a cheaper-than-declared real cost.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_many_worst_case";
@@ -1579,7 +1307,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	set_retention_period(&client, RETENTION_PERIOD, alice_nonce).await?;
 	alice_nonce += 1;
 
-	// Derive `WORST_CASE_WORKERS` deterministic keypairs `//worker_0` … `//worker_{N-1}`.
 	let workers: Vec<Keypair> = (0..WORST_CASE_WORKERS)
 		.map(|i| {
 			let uri = SecretUri::from_str(&format!("//worker_{}", i)).expect("worker URI parses");
@@ -1587,13 +1314,9 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		})
 		.collect();
 
-	// Authorize every worker via sudo. Each call needs its own Alice nonce; submit all in
-	// parallel via `sign_and_submit` (no watcher) so the pool batches them into the next 1-2
-	// blocks. Workers have no genesis authorization, so `authorize_account` creates a fresh
-	// entry with `bytes_allowance = N · data.len()`. After N renewal cycles each worker's
-	// `bytes_permanent` saturates the allowance, cycle N+1's `check_authorization` fails for
-	// every worker, the pallet emits `AutoRenewalFailed` and removes from `AutoRenewals` —
-	// chain returns to idle.
+	// Workers have no genesis authorization: `authorize_account` creates a fresh entry with
+	// `bytes_allowance = N · data.len()` so cycle N+1's `check_authorization` fails for every
+	// worker, draining `AutoRenewals` and leaving the chain idle.
 	let alice = dev::alice();
 	let cycles_to_authorize = RENEWAL_CYCLES_TO_OBSERVE;
 	let pre_authz_block = current_best_block(&client).await?.number() as u64;
@@ -1617,11 +1340,9 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 				})
 			}],
 		);
-		// Immortal: subxt 0.44 defaults to mortal-for-32-blocks, but signing 512 txs
-		// at the same head and validating them after a parachain fork at the
-		// mortality height triggers `InvalidTransaction::BadProof` because the
-		// canonical block hash at that height changes and `additional_signed`
-		// no longer matches.
+		// Immortal: subxt 0.44 defaults to mortal-for-32-blocks; signing many txs at the
+		// same head and validating them post-fork at the mortality height triggers
+		// `InvalidTransaction::BadProof` because `additional_signed` no longer matches.
 		let params = SubstrateExtrinsicParamsBuilder::new()
 			.nonce(alice_nonce + i as u64)
 			.immortal()
@@ -1639,11 +1360,8 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(authz_futs).await?;
 	log::info!("All {} sudo authorize_account calls accepted into pool", WORST_CASE_WORKERS);
 
-	// Each worker's first signed extrinsic depends on its `Authorizations` entry being
-	// visible to the pool at validation time, which reads finalized state. We just submitted
-	// 512 authorize_account sudos in best block — batch-wait once for finality (cheaper than
-	// per-call finalization) before any worker tx fires. See the analogous single-account
-	// case in `parachain_renew_twice_within_block_with_pruning_test`.
+	// Pool's `validate_signed` reads finalized state — batch-wait once for finality before
+	// any worker submits its first signed tx.
 	{
 		let post_authz_best = current_best_block(&client).await?.number() as u64;
 		wait_for_finalized_height(collator1, post_authz_best + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
@@ -1651,13 +1369,9 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		log::info!("Worker authorizations finalized (waited finalized >= {})", post_authz_best + 2);
 	}
 
-	// Pre-fund every worker so they can pay the fee for `enable_auto_renew`.
-	// `store` slips through `SkipCheckIfFeeless<ChargeTransactionPayment>` because
-	// the bulletin authorization extension treats it as feeless, but
-	// `enable_auto_renew` is fee-paying — workers without balance get rejected
-	// at validate-time with `InvalidTransaction::Payment` ("Inability to pay
-	// some fees"). 10 × ED is plenty for several txs.
-	const WORKER_FUND: u128 = 1_000_000_000_000; // = 1 WND (1000 * EXISTENTIAL_DEPOSIT 1e9)
+	// `enable_auto_renew` is fee-paying (unlike `store`, which is treated as feeless by the
+	// bulletin authorization extension); workers without balance fail at validate-time.
+	const WORKER_FUND: u128 = 1_000_000_000_000; // 1 WND
 	log::info!(
 		"Submitting {} Balances::transfer_keep_alive calls (Alice → workers) in parallel",
 		WORST_CASE_WORKERS
@@ -1665,7 +1379,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let mut fund_futs = Vec::with_capacity(workers.len());
 	for (i, worker) in workers.iter().enumerate() {
 		let pubkey = worker.public_key().0;
-		// MultiAddress::Id(account) — the AccountIdLookupOf<Runtime> shape.
+		// MultiAddress::Id(account) — AccountIdLookupOf<Runtime> shape.
 		let dest_value = Value::unnamed_variant("Id", [Value::from_bytes(pubkey)]);
 		let transfer_call =
 			tx("Balances", "transfer_keep_alive", vec![dest_value, Value::u128(WORKER_FUND)]);
@@ -1685,10 +1399,8 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(fund_futs).await?;
 	log::info!("All {} transfer_keep_alive calls accepted into pool", WORST_CASE_WORKERS);
 
-	// Wait for the last worker (worker_{N-1}) to actually receive their funding.
-	// All Alice txs are nonce-ordered, so once the last transfer's recipient is
-	// non-zero in System.Account, every earlier authorize+transfer must also
-	// have settled. Poll up to BLOCK_PRODUCTION_TIMEOUT_SECS.
+	// Alice's txs are nonce-ordered, so once the last worker's account exists, every prior
+	// authorize+transfer must have settled.
 	{
 		let last_worker_pubkey = workers[workers.len() - 1].public_key().0;
 		let storage_addr = subxt::dynamic::storage(
@@ -1713,7 +1425,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		log::info!("Last worker funded (System.Account exists) — all Alice batched txs settled");
 	}
 
-	// Generate distinct payloads, one per worker.
 	let items: Vec<Vec<u8>> = (0..WORST_CASE_WORKERS)
 		.map(|i| {
 			let mut pattern = b"WORST_CASE_WORKER_".to_vec();
@@ -1723,7 +1434,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		.collect();
 	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
 
-	// Each worker submits a store (their nonce 0). All in parallel.
 	let pre_store_block = current_best_block(&client).await?.number() as u64;
 	log::info!(
 		"Submitting {} signed stores in parallel (pre-store block={})",
@@ -1733,7 +1443,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let mut store_futs = Vec::with_capacity(workers.len());
 	for (worker, data) in workers.iter().zip(items.iter()) {
 		let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
-		// Each fresh worker account starts at nonce 0.
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(0).immortal().build();
 		let signer = worker.clone();
 		let cli = client.clone();
@@ -1750,7 +1459,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let store_inclusion_target = pre_store_block + 5;
 	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	// Walk back to find the actual blocks each store landed in.
 	let post_store_head_n = current_best_block(&client).await?.number() as u64;
 	let mut store_blocks: Vec<u64> = Vec::with_capacity(items.len());
 	{
@@ -1796,7 +1504,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		store_block_histogram.len()
 	);
 
-	// Each worker enables auto-renew on its own content_hash (their nonce 1).
 	let pre_enable_block = current_best_block(&client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (worker, hash) in workers.iter().zip(content_hashes.iter()) {
@@ -1819,7 +1526,6 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	wait_for_block_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await?;
 
-	// === Renewal-window observation (mirrors parachain_auto_renew_many_items_test) ===
 	let renewal_cadence = RETENTION_PERIOD as u64 + 1;
 	let first_renewal_block = earliest_store + renewal_cadence;
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
@@ -2012,13 +1718,8 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		);
 	}
 
-	// Wind-down observation (see equivalent block in `parachain_auto_renew_many_items_test`):
-	// each worker's `bytes_allowance` is sized to exactly N cycles, so cycle N+1 must fail for
-	// every worker. Asserting `AutoRenewalFailed × WORST_CASE_WORKERS` proves the chain has
-	// drained every entry from `AutoRenewals` before the test exits. Anchor on
-	// `first_renewal_block` (post-cycle-1 consolidation point) so the exhaustion block lands
-	// exactly N cadences later — `last_renewal_block` is an overshooting upper bound built
-	// from `latest_store`, which the inherent's re-keying drops after cycle 1.
+	// Anchor on `first_renewal_block` (post-cycle-1 consolidation point); see equivalent
+	// block in `parachain_auto_renew_many_items_test`.
 	let exhaustion_block = first_renewal_block + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let exhaustion_wait_until = exhaustion_block + 1;
 	log::info!(
@@ -2058,9 +1759,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 
 	test_log!(TEST, "=== Worst-case auto-renew {} items PASSED ===", WORST_CASE_WORKERS);
 
-	// Optional post-PASS hold for manual inspection of the live network via PJS.
-	// Off by default (keeps CI fast); set `INSPECT_HOLD_SECS=N` (e.g. `1800` for
-	// 30 min) to keep the network up for `N` seconds after the assertions pass.
+	// Optional post-PASS hold for manual PJS inspection. Off by default.
 	let inspect_hold_secs: u64 = std::env::var("INSPECT_HOLD_SECS")
 		.ok()
 		.and_then(|s| s.parse().ok())
@@ -2077,38 +1776,11 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	Ok(())
 }
 
-// ===========================================================================================
-// on_initialize behavioral tests
-// ===========================================================================================
-
-/// Number of items per set (auto-renew vs no-auto-renew) in
-/// [`parachain_on_initialize_cleanup_test`]. 50 + 50 = 100 total stores; small enough that
-/// the test runs in ~5 minutes, large enough that the differential cleanup is observable.
 const ON_INIT_CLEANUP_ITEMS_PER_SET: u32 = 50;
 
-/// Assert that `Hooks::on_initialize` cleans up state correctly across the auto-renewal vs
-/// no-auto-renewal discriminator at the retention boundary.
-///
-/// Setup:
-/// - Single collator, archive pruning, `RetentionPeriod = 10`.
-/// - Store [`ON_INIT_CLEANUP_ITEMS_PER_SET`] items WITH `enable_auto_renew` (set 1).
-/// - Store [`ON_INIT_CLEANUP_ITEMS_PER_SET`] items WITHOUT `enable_auto_renew` (set 2).
-///
-/// At block `store_block + RP + 1`, on_initialize takes `Transactions[store_block]`,
-/// iterates all entries, and for each:
-/// - reads `TransactionByContentHash[hash]` and removes it iff it still points at `store_block`
-///   (the cleanup branch);
-/// - reads `AutoRenewals[hash]` and pushes to `PendingAutoRenewals` iff registered.
-///
-/// Assertions after the expiry block lands:
-/// - `Transactions[store_block]` is `None` (taken by on_initialize, never re-added).
-/// - For each set-1 hash: `TransactionByContentHash[hash]` points at the expiry block —
-///   `apply_block_inherents` ran the drain and `do_renew` updated the index to the new block.
-/// - For each set-2 hash: `TransactionByContentHash[hash]` is `None` — on_initialize's cleanup
-///   branch removed it.
-/// - Exactly `ON_INIT_CLEANUP_ITEMS_PER_SET` `DataAutoRenewed` events emitted at the expiry block;
-///   zero `AutoRenewalFailed` events.
-/// - `mand` weight at the expiry block is `≤ BlockWeights::max_block`.
+/// `Hooks::on_initialize` cleans up `TransactionByContentHash` for non-auto-renewed items
+/// and lets auto-renewed items survive via the `apply_block_inherents` drain, both at the
+/// same retention boundary.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	const TEST: &str = "para_on_init_cleanup";
@@ -2134,7 +1806,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
-	// Authorize Alice for 1 store + 1 renewal per set-1 item, with safety margin.
 	let bytes_per_item = TEST_DATA_SIZE as u64;
 	let total_items = ON_INIT_CLEANUP_ITEMS_PER_SET * 2;
 	authorize_account_via_sudo(
@@ -2147,7 +1818,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	.await?;
 	nonce += 1;
 
-	// Generate two distinct sets of payloads.
 	let set1: Vec<Vec<u8>> = (0..ON_INIT_CLEANUP_ITEMS_PER_SET)
 		.map(|i| {
 			let mut p = b"ON_INIT_CLEANUP_RENEW_".to_vec();
@@ -2165,7 +1835,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let set1_hashes: Vec<[u8; 32]> = set1.iter().map(|d| blake2_256(d)).collect();
 	let set2_hashes: Vec<[u8; 32]> = set2.iter().map(|d| blake2_256(d)).collect();
 
-	// Submit all stores to the pool in parallel.
 	let alice = dev::alice();
 	let pre_store_block = current_best_block(&client).await?.number() as u64;
 	log::info!(
@@ -2192,10 +1861,8 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
 	log::info!("All {} stores accepted into pool", total_items);
 
-	// Wait until inclusion has settled, then walk backwards to find which block each set landed in.
 	wait_for_block_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	// All stores submitted in parallel land in 1-2 blocks. We just need the earliest.
 	let mut store_block: u64 = 0;
 	{
 		let poll_timeout = std::time::Duration::from_secs(60);
@@ -2236,7 +1903,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	}
 	log::info!("Stores landed at (or before) block {}", store_block);
 
-	// Enable auto-renew for set 1 only.
 	log::info!("Enabling auto-renew for {} items (set 1)", ON_INIT_CLEANUP_ITEMS_PER_SET);
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
@@ -2259,7 +1925,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
 	let _ = nonce;
 
-	// Wait until the expiry block is finalized.
 	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
 	log::info!(
 		"Waiting for expiry block {} (= store_block {} + RP {} + 1)",
@@ -2283,7 +1948,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		}
 	}
 
-	// Resolve the expiry block's hash for storage queries.
 	let expiry_hash = {
 		let mut current = current_best_block(&client).await?;
 		while (current.number() as u64) > expiry_block {
@@ -2294,8 +1958,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		current.hash()
 	};
 
-	// Assertion 1: Transactions[store_block] should be None at the expiry block (was taken
-	// by on_initialize).
+	// Transactions[store_block] is None at expiry block (taken by on_initialize).
 	{
 		let addr = subxt::dynamic::storage(
 			"TransactionStorage",
@@ -2312,7 +1975,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		log::info!("✓ Transactions[{}] is None at expiry block {}", store_block, expiry_block);
 	}
 
-	// Assertion 2: set-1 hashes (auto-renew) — TransactionByContentHash points at expiry_block.
+	// set-1 (auto-renew) — TransactionByContentHash still points at the expiry block.
 	let mut set1_renewed = 0u32;
 	for (i, hash) in set1_hashes.iter().enumerate() {
 		let addr = subxt::dynamic::storage(
@@ -2324,7 +1987,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		match value {
 			Some(v) => {
 				let v = v.to_value()?;
-				// Decoded as a tuple (block_number, index). We just check it's Some.
 				log::trace!("set1[{}] hash={} → {:?}", i, hex::encode(hash), v);
 				set1_renewed += 1;
 			},
@@ -2345,7 +2007,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	);
 	log::info!("✓ All {} set-1 (auto-renew) items still indexed at expiry block", set1_renewed);
 
-	// Assertion 3: set-2 hashes (no auto-renew) — TransactionByContentHash should be None.
+	// set-2 (no auto-renew) — TransactionByContentHash removed by on_initialize.
 	let mut set2_cleaned = 0u32;
 	for (i, hash) in set2_hashes.iter().enumerate() {
 		let addr = subxt::dynamic::storage(
@@ -2380,7 +2042,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		set2_cleaned
 	);
 
-	// Assertion 4: events at the expiry block — exactly N DataAutoRenewed, zero AutoRenewalFailed.
 	let expiry_block_obj = client.blocks().at(expiry_hash).await?;
 	let events = expiry_block_obj.events().await?;
 	let auto_renewed = events
@@ -2413,7 +2074,6 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		expiry_block
 	);
 
-	// Assertion 5: mandatory weight ≤ max_block at expiry block.
 	let (max_block_ref, max_block_pov) = fetch_max_block_weight(&client).await?;
 	let block_weight_addr = subxt::dynamic::storage("System", "BlockWeight", Vec::<Value>::new());
 	let weight_value = client
@@ -2454,32 +2114,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	Ok(())
 }
 
-/// Number of items used by [`parachain_on_initialize_no_renewals_weight_test`]. Sourced from
-/// the pallet so the weight reading reflects the worst-case expiry sweep at whatever
-/// `MaxBlockTransactions` the runtime is currently configured for.
 const ON_INIT_NO_RENEWALS_ITEMS: u32 =
 	pallet_bulletin_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS;
 
-/// Isolate `Hooks::on_initialize` cost from `apply_block_inherents` drain cost. Stores
-/// [`ON_INIT_NO_RENEWALS_ITEMS`] items WITHOUT enabling auto-renewal, so at the expiry
-/// block:
-/// - on_initialize takes `Transactions[store_block]` and iterates every entry through the
-///   discriminator (which always finds `AutoRenewals[hash] = None` and so does NOT push to
-///   pending);
-/// - `apply_block_inherents` is emitted with `proof = Some, pending = empty` → drain runs over an
-///   empty queue (essentially free).
-///
-/// `mand` at this block is therefore `on_init_with_expiry_extra + apply_proof_only +
-/// constant per-block mandatory contributions`. Subtracting `mand` at an idle baseline
-/// block (no expiry, no proof needed) cancels the constant contributions and gives:
-///
-///   `on_init_with_expiry_extra + apply_proof_only`
-///
-/// The proof-only portion is approximately constant (~0.9 G ref_time on Westend per the
-/// test #6 measurements). This test does NOT subtract it — it just logs the difference and
-/// asserts the total fits within `max_block`. The diagnostic value is in seeing the
-/// magnitude of `on_initialize_with_expiry(MAX)` empirically, which the in-pallet
-/// `ensure_weight_sanity` test only validates against the declared (placeholder) weight.
+/// Isolate `Hooks::on_initialize` cost from `apply_block_inherents` drain by storing the
+/// worst-case item count without auto-renewal. Logs the (expiry - idle baseline) mand
+/// weight delta and asserts it fits within `max_block`.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	const TEST: &str = "para_on_init_no_renewals";
@@ -2514,7 +2154,6 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	.await?;
 	nonce += 1;
 
-	// Generate ON_INIT_NO_RENEWALS_ITEMS distinct payloads.
 	let items: Vec<Vec<u8>> = (0..ON_INIT_NO_RENEWALS_ITEMS)
 		.map(|i| {
 			let mut p = b"ON_INIT_NO_RENEW_".to_vec();
@@ -2523,7 +2162,6 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 		})
 		.collect();
 
-	// Submit all stores to the pool in parallel.
 	let alice = dev::alice();
 	let pre_store_block = current_best_block(&client).await?.number() as u64;
 	log::info!(
@@ -2548,7 +2186,6 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
 	log::info!("All {} stores accepted into pool", ON_INIT_NO_RENEWALS_ITEMS);
 
-	// Find the store block.
 	wait_for_block_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	{
 		let poll_timeout = std::time::Duration::from_secs(60);
@@ -2590,11 +2227,9 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	}
 	log::info!("Stores landed at block {}", store_block);
 
-	// Wait past the expiry block.
 	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
 	wait_for_block_height(collator1, expiry_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	// Walk the chain backward to record block hashes for the window we want to inspect.
 	let stats_range_start = store_block.saturating_sub(2).max(1);
 	let stats_range_end = expiry_block + 2;
 	let head = {
@@ -2685,7 +2320,6 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 			marker
 		);
 
-		// Bound assertion.
 		if mand.0 > max_block_ref {
 			weight_violations.push(format!(
 				"block {block_n}: mandatory ref_time={} exceeds max_block ref_time={}",
@@ -2699,9 +2333,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 			));
 		}
 
-		// Capture isolation values: idle baseline = block AFTER expiry (no expiry, no
-		// pending, no proof needed at that block since target is store_block + 1 which
-		// has nothing).
+		// Idle baseline: block after expiry has no expiry/pending/proof contribution.
 		if block_n == expiry_block + 2 {
 			idle_baseline_ref = Some(mand.0);
 			idle_baseline_pov = Some(mand.1);
@@ -2719,7 +2351,6 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 		);
 	}
 
-	// Diagnostic: empirical on_init+proof cost = expiry_mand - idle_baseline.
 	if let (Some(em), Some(idle_ref), Some(idle_pov)) =
 		(expiry_mand, idle_baseline_ref, idle_baseline_pov)
 	{
@@ -2745,29 +2376,14 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	Ok(())
 }
 
-// ===========================================================================================
-// Long-running pruning soak test
-// ===========================================================================================
-
-/// 60 minutes wall-clock soak.
 const SOAK_DURATION_SECS: u64 = 60 * 60;
-/// `--blocks-pruning` for soak collators. Larger than retention, so the chain progresses
-/// normally; pruning only kicks in once a block has aged past 15.
 const SOAK_BLOCKS_PRUNING: u32 = 15;
-/// Pallet retention period. Items not renewed within this window have their pallet-state
-/// (`Transactions[N]`, `TransactionByContentHash[hash]`) cleared at `N + RP + 1`.
 const SOAK_RETENTION_PERIOD: u32 = 10;
-/// Verification cadence — every N produced blocks, sample one item that should be pruned and
-/// confirm bitswap returns `DONT_HAVE`.
 const SOAK_VERIFY_INTERVAL_BLOCKS: u64 = 30;
-/// Minimum blocks since an item's last touch (store or renew) before we expect col11 eviction.
-/// `pruning(15) + retention/finality_lag(10) = 25` is a comfortable lower bound.
+/// Minimum blocks since last touch before we expect col11 eviction:
+/// `pruning(15) + retention/finality_lag(10)`.
 const SOAK_PRUNED_AGE_THRESHOLD: u64 = 25;
-/// Tighter bitswap timeout for soak verification — keeps the per-cycle overhead under 10s
-/// even when DONT_HAVE takes a moment to round-trip.
 const SOAK_BITSWAP_TIMEOUT_SECS: u64 = 10;
-/// Pre-authorize generously so we never run out during the 60-min soak.
-/// 60 min × ~10 blocks/min × 1.5 ops/block = ~900 ops; 3× safety = 2700; round to 3000.
 const SOAK_AUTH_TX_SLOTS: u32 = 3000;
 
 #[derive(Clone)]
@@ -2777,7 +2393,6 @@ struct SoakItem {
 	last_touch_block: u64,
 }
 
-/// xorshift PRNG seeded by block number for deterministic-but-varied test choices.
 fn pseudo_random(seed: u64) -> u64 {
 	let mut x = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
 	x ^= x << 13;
@@ -2786,13 +2401,8 @@ fn pseudo_random(seed: u64) -> u64 {
 	x
 }
 
-/// Long-running soak test on a 3-collator parachain network with `--blocks-pruning=15`
-/// (greater than `RetentionPeriod=10`). Drives a steady stream of `store` and
-/// `renew_content_hash` extrinsics via collator-1, then periodically verifies that data
-/// older than the pruning window is no longer served via bitswap.
-///
-/// Runs for [`SOAK_DURATION_SECS`] (60 min). Logs PJS links for each collator at startup so
-/// you can attach polkadot.js Apps in a browser to watch live.
+/// 60-minute soak on a 3-collator network: drive steady `store` / `renew_content_hash`
+/// traffic, periodically verify that data older than the pruning window is no longer served.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	const TEST: &str = "para_pruning_soak";
@@ -2851,9 +2461,6 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	.await?;
 	nonce += 1;
 
-	// Drive the soak. Subscribe to best blocks; each new block, submit one store and (with
-	// 50% probability) one renew of a recent item. Every SOAK_VERIFY_INTERVAL_BLOCKS, run a
-	// pruning verification on one old item.
 	let mut sub = client.blocks().subscribe_best().await?;
 	let start_time = std::time::Instant::now();
 	let mut stored: Vec<SoakItem> = Vec::new();
@@ -2888,11 +2495,8 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 			);
 		}
 
-		// Periodically check chain nonce, but only sync UP. Chain's account_nonce reflects
-		// only included extrinsics, so a few of our pool-pending txs always make local lead
-		// chain — that's normal. Syncing local to chain in that case wipes the in-flight
-		// txs' nonces and causes pool dedup. We only sync forward if chain somehow leads
-		// us (e.g., recovery after a previous wrong sync).
+		// Only sync the nonce forward: chain's `account_nonce` lags pool-pending txs and
+		// syncing local-to-chain would wipe in-flight nonces and trigger pool dedup.
 		if block_n.is_multiple_of(10) {
 			match client.tx().account_nonce(&dev::alice().public_key().to_account_id()).await {
 				Ok(chain_nonce) =>
@@ -2908,8 +2512,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 			}
 		}
 
-		// Submit a fresh store — fire-and-forget. We don't wait for InBestBlock; the
-		// pruning verification later uses bitswap directly to confirm chain effects.
+		// Fire-and-forget; the pruning verification step uses bitswap to confirm effects.
 		let pattern: Vec<u8> = format!("SOAK_{:06}_", total_stores).into_bytes();
 		let data = generate_test_data(TEST_DATA_SIZE, &pattern);
 		let content_hash = blake2_256(&data);
@@ -2924,7 +2527,6 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 			Err(e) => log::warn!("[soak] store at block {} failed: {}", block_n, e),
 		}
 
-		// 50% chance to renew a recent item (last touched within RP-1 of current block).
 		if pseudo_random(block_n).is_multiple_of(2) {
 			let cutoff = block_n.saturating_sub(SOAK_RETENTION_PERIOD as u64 - 1);
 			let candidates: Vec<usize> = stored
@@ -2953,8 +2555,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 			}
 		}
 
-		// Verify pruning for an old item every SOAK_VERIFY_INTERVAL_BLOCKS blocks. Rotate
-		// across collators so we exercise all three.
+		// Rotate verification across all three collators.
 		if block_n.is_multiple_of(SOAK_VERIFY_INTERVAL_BLOCKS) && block_n > 0 {
 			let pruning_age = block_n.saturating_sub(SOAK_PRUNED_AGE_THRESHOLD);
 			let target = stored.iter().find(|i| i.last_touch_block < pruning_age).cloned();
@@ -3012,25 +2613,12 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	Ok(())
 }
 
-// ===========================================================================================
-// Node-level: --blocks-pruning compatibility on restart (manual SIGTERM + re-spawn)
-// ===========================================================================================
-//
-// zombienet-sdk-0.3.13 has no API to restart a node with modified args
-// (`NetworkNode::restart()` reuses the original args; args are stored immutably). To exercise
-// "restart with new --blocks-pruning on the same data dir", we:
-// 1. Spawn the network normally with `initial_pruning`.
-// 2. Wait for blocks so the DB has real state.
-// 3. Read the collator's args via `NetworkNode::args()`.
-// 4. Find the collator process by `--base-path` substring via `ps -ef`, send SIGTERM.
-// 5. Manually `polkadot-omni-node` directly with same args except `--blocks-pruning` modified.
-// 6. Capture stderr/stdout for ~12s, log relevant lines.
-// 7. Network teardown handles the rest.
+// Restart-with-modified-args scenarios. zombienet-sdk-0.3.13 has no API to restart a node
+// with modified args (`NetworkNode::restart()` reuses the original), so we SIGTERM the
+// collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
 
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
 
-/// Find the value of an argument whose name occurs in the given list, in either
-/// `--name=value` or `--name value` form. Returns `None` if not found.
 fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
 	let prefix_eq = format!("{}=", name);
 	for (i, a) in args.iter().enumerate() {
@@ -3044,7 +2632,6 @@ fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
 	None
 }
 
-/// Find the running parachain collator's PID by grepping `ps -ef` for the unique base_path.
 fn find_pid_by_base_path(base_path: &str) -> Option<u32> {
 	let output = std::process::Command::new("ps").args(["-ef"]).output().ok()?;
 	let stdout = String::from_utf8_lossy(&output.stdout);
@@ -3060,13 +2647,11 @@ fn find_pid_by_base_path(base_path: &str) -> Option<u32> {
 	None
 }
 
-/// Send SIGTERM to the given PID via `kill`, wait briefly for the process to exit.
 async fn sigterm_and_wait(pid: u32) -> Result<()> {
 	let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
-	// Wait up to 5 s for the process to actually exit and release file locks.
+	// Wait up to 5s for the process to release file locks.
 	for _ in 0..10 {
 		tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-		// Check if the process is still alive (kill -0 returns 0 if alive).
 		let still_alive = std::process::Command::new("kill")
 			.args(["-0", &pid.to_string()])
 			.status()
@@ -3076,31 +2661,26 @@ async fn sigterm_and_wait(pid: u32) -> Result<()> {
 			return Ok(());
 		}
 	}
-	// Hard kill if still running.
 	let _ = std::process::Command::new("kill").args(["-9", &pid.to_string()]).status();
 	tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 	Ok(())
 }
 
-/// Build a fresh argument list for the manual omni-node respawn: take the original args, drop
-/// any existing `--blocks-pruning` flag (in `--name=value` or `--name value` form), and inject
-/// the new one (or omit it for archive mode). All ports are forced to 0 so the OS picks
-/// fresh ones (avoiding any lingering port collision with the killed process).
+/// Re-spawn args with any existing `--blocks-pruning` stripped, the new one injected before
+/// `--`, and all ports forced to 0 to avoid colliding with the killed process.
 fn build_respawn_args(orig: &[String], new_pruning: Option<u32>) -> Vec<String> {
 	let mut out = Vec::with_capacity(orig.len() + 4);
 	let mut i = 0;
 	while i < orig.len() {
 		let a = &orig[i];
-		// Drop existing --blocks-pruning forms.
 		if a == "--blocks-pruning" {
-			i += 2; // skip name + value
+			i += 2;
 			continue;
 		}
 		if a.starts_with("--blocks-pruning=") {
 			i += 1;
 			continue;
 		}
-		// Force port 0 on RPC/p2p/prometheus.
 		if matches!(a.as_str(), "--rpc-port" | "--port" | "--prometheus-port") {
 			out.push(a.clone());
 			out.push("0".to_string());
@@ -3110,7 +2690,6 @@ fn build_respawn_args(orig: &[String], new_pruning: Option<u32>) -> Vec<String> 
 		out.push(a.clone());
 		i += 1;
 	}
-	// Inject new --blocks-pruning right before the `--` separator (parachain-side flag).
 	if let Some(n) = new_pruning {
 		if let Some(idx) = out.iter().position(|a| a == "--") {
 			out.insert(idx, format!("--blocks-pruning={}", n));
@@ -3121,8 +2700,6 @@ fn build_respawn_args(orig: &[String], new_pruning: Option<u32>) -> Vec<String> 
 	out
 }
 
-/// Spawn `polkadot-omni-node` with the given args, capture combined stdout+stderr for the
-/// duration, kill, return (exit_code, captured_log).
 async fn spawn_omni_node_capture(
 	binary: &str,
 	args: &[String],
@@ -3175,8 +2752,6 @@ async fn spawn_omni_node_capture(
 	Ok((exit_code, log))
 }
 
-/// Filter captured output to lines that mention pruning, archive, DB, error, panic, warn —
-/// the only signals we care about for substrate's DB-config compatibility check.
 fn pruning_related_lines(log: &str) -> String {
 	log.lines()
 		.filter(|line| {
@@ -3195,14 +2770,6 @@ fn pruning_related_lines(log: &str) -> String {
 		.join("\n")
 }
 
-/// Drives the full restart-with-modified-pruning scenario.
-///
-/// 1. Spin up 3-relay + 1-collator network with `initial_pruning`.
-/// 2. Wait for `PRUNE_RESTART_INITIAL_BLOCKS_TARGET` blocks so the DB has real state.
-/// 3. Capture the collator's args.
-/// 4. SIGTERM the collator process.
-/// 5. Manually re-spawn `polkadot-omni-node` with same args + new `--blocks-pruning`.
-/// 6. Capture & log relevant output.
 async fn run_pruning_restart_scenario(
 	scenario: &str,
 	initial_pruning: Option<u32>,
@@ -3234,20 +2801,17 @@ async fn run_pruning_restart_scenario(
 	)
 	.await?;
 
-	// Read original args.
 	let orig_args: Vec<String> = collator1.args().iter().map(|s| s.to_string()).collect();
 	let base_path = extract_arg_value(&orig_args, "--base-path")
 		.ok_or_else(|| anyhow::anyhow!("collator-1 args do not contain --base-path"))?;
 	log::info!("[{}] collator-1 base_path = {}", scenario, base_path);
 
-	// Find PID and SIGTERM the collator.
 	let pid = find_pid_by_base_path(&base_path)
 		.ok_or_else(|| anyhow::anyhow!("could not find collator-1 PID via ps"))?;
 	log::info!("[{}] sending SIGTERM to collator-1 pid={}", scenario, pid);
 	sigterm_and_wait(pid).await?;
 	log::info!("[{}] collator-1 process terminated", scenario);
 
-	// Build modified args. The collator's stored args don't include the binary itself.
 	let respawn_args = build_respawn_args(&orig_args, restart_pruning);
 	log::info!("[{}] re-spawning with --blocks-pruning = {:?}", scenario, restart_pruning);
 
@@ -3302,11 +2866,8 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 	Ok(())
 }
 
-/// Drive `do_process_auto_renewals` into the `AutoRenewalFailed` branch by sizing Alice's
-/// `bytes_allowance` so the per-account `has_permanent_capacity` cap is hit on cycle 3.
-/// `authorize_and_store_data` grants `bytes_allowance = 2 * data.len()` and we intentionally
-/// skip the usual `top_up_alice_authorization`, so cycles 1 and 2 fit (the cap is inclusive)
-/// and cycle 3 trips `PERMANENT_ALLOWANCE_EXCEEDED`.
+/// Cycles 1 and 2 fit Alice's `bytes_allowance`; cycle 3 trips `PERMANENT_ALLOWANCE_EXCEEDED`
+/// and the pallet emits `AutoRenewalFailed`, removing the entry from `AutoRenewals`.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_quota_exhaustion";
@@ -3329,10 +2890,8 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "post-store").await?;
 
-	// The `local_testnet` genesis preset pre-authorizes Alice with `(100 tx, 10 MiB)`, and
-	// `authorize_account` is additive on the unexpired path — so after `authorize_and_store_data`
-	// Alice's real `bytes_allowance` is ~10 MiB, not `2 * data.len()`. Overwrite the entry
-	// directly so the per-account cap actually trips after a known number of cycles.
+	// Alice's genesis authorization is ~10 MiB and `authorize_account` is additive — overwrite
+	// the entry directly so the per-account cap trips after a known number of cycles.
 	let l = data.len() as u64;
 	override_alice_authorization(
 		client,
@@ -3363,7 +2922,6 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	let r2 = store_block + 2 * cadence;
 	let r3 = store_block + 3 * cadence;
 
-	// Cycles 1 and 2 must succeed.
 	for (cycle, renewal_block) in [(1u64, r1), (2, r2)] {
 		let wait_until = renewal_block + 1;
 		log::info!(
@@ -3401,7 +2959,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		log::info!("[cycle {}] ✓ DataAutoRenewed at block {}", cycle, renewal_block);
 	}
 
-	// Cycle 3 must fail: bytes_permanent (= 2L) + L > bytes_allowance (= 2L).
+	// Cycle 3: bytes_permanent (= 2L) + L > bytes_allowance (= 2L).
 	let wait_until = r3 + 1;
 	log::info!("[cycle 3] Waiting for block {} (renewal at {}) — expected to fail", wait_until, r3);
 	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
@@ -3423,9 +2981,8 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	);
 	log::info!("[cycle 3] ✓ AutoRenewalFailed at block {}", r3);
 
-	// AutoRenewals[content_hash] must be removed by the failure branch. Query at the
-	// renewal block's hash, not `at_latest`, because `at_latest` reads finalized state and
-	// cumulus finality lags ~10s behind best-block production.
+	// Query at the renewal block's hash, not `at_latest` (which reads finalized state and
+	// lags ~10s behind best on cumulus).
 	let auto_renewals_addr = subxt::dynamic::storage(
 		"TransactionStorage",
 		"AutoRenewals",
@@ -3444,7 +3001,6 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	Ok(())
 }
 
-/// Walk best-chain headers backwards to find the block at the given height and return its hash.
 async fn block_hash_at(
 	client: &OnlineClient<SubstrateConfig>,
 	target: u64,
@@ -3460,19 +3016,8 @@ async fn block_hash_at(
 	Ok(current.hash())
 }
 
-/// Count `TransactionStorage` events of the given variant in a block's event list.
-fn count_event(events: &subxt::events::Events<SubstrateConfig>, variant: &str) -> u32 {
-	events
-		.iter()
-		.filter_map(|e| e.ok())
-		.filter(|e| e.pallet_name() == "TransactionStorage" && e.variant_name() == variant)
-		.count() as u32
-}
-
-/// Diagnostic helper for single-item renewal tests: log the actual chain head plus
-/// `DataAutoRenewed` / `AutoRenewalFailed` counts at `r-1`, `r`, `r+1`, `r+2`. Used to
-/// distinguish "renewal fired in a different block" from "renewal never fired" when the
-/// post-store renewal assertion fails on the shared harness.
+/// Log event counts at `r-1..=r+2` so a failed assertion can distinguish "renewal fired in
+/// a different block" from "renewal never fired".
 async fn dump_renewal_window(
 	client: &OnlineClient<SubstrateConfig>,
 	r: u64,
@@ -3513,12 +3058,9 @@ async fn dump_renewal_window(
 	Ok(())
 }
 
-/// Authorization expires between auto-renew cycles. The runtime's `AuthorizationPeriod`
-/// (`14 * DAYS`) is unreachable on a test timescale, so we directly overwrite Alice's
-/// `Authorizations` entry via `sudo(System::set_storage(..))` to install a short expiration.
-/// Cycle 1 renews; cycle 2 trips the expired branch in `check_authorization` →
-/// `AutoRenewalFailed`. Re-authorizing then exercises the expired-but-present reset path
-/// (counters zeroed): we store a fresh item and run one more cycle to prove the reset took.
+/// Authorization expires between auto-renew cycles: cycle 1 succeeds, cycle 2 trips the
+/// expired branch and emits `AutoRenewalFailed`, then re-authorizing exercises the
+/// expired-but-present reset path (counters zeroed) for a fresh item.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_auth_expires_mid_cycle";
@@ -3545,8 +3087,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	let r1 = store_block + cadence;
 	let r2 = store_block + 2 * cadence;
 
-	// `expired()` is `now >= expiration`, so any value in `(r1, r2]` works; halfway gives
-	// slack for off-by-one between block scheduling and apply_block_inherents.
+	// `expired()` is `now >= expiration`; midpoint of (r1, r2] gives slack.
 	let override_expiration: u32 = ((r1 + r2) / 2) as u32;
 	log::info!(
 		"Overriding Alice's authorization expiration: r1={}, r2={}, expiration={}",
@@ -3555,9 +3096,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 		override_expiration
 	);
 
-	// Write fresh counters with generous allowances so the renewal gate only fails on expiry,
-	// not on the per-account `has_permanent_capacity` cap. After store, real counters are
-	// `transactions=1, bytes=data.len()`; we overwrite to those + plenty of headroom.
+	// Generous allowances so the renewal gate only fails on expiry, not the per-account cap.
 	let l = data.len() as u64;
 	override_alice_authorization(
 		client,
@@ -3579,7 +3118,6 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	nonce += 1;
 	log::info!("Auto-renewal enabled");
 
-	// Cycle 1: success.
 	wait_for_block_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	dump_renewal_window(client, r1, "auth_expires cycle 1").await?;
 	let r1_hash = block_hash_at(client, r1).await?;
@@ -3598,7 +3136,6 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 	log::info!("[cycle 1] ✓ DataAutoRenewed at block {}", r1);
 
-	// Cycle 2: AutoRenewalFailed because auth has expired.
 	wait_for_block_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	let r2_hash = block_hash_at(client, r2).await?;
 	let r2_events = client.blocks().at(r2_hash).await?.events().await?;
@@ -3630,9 +3167,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 	log::info!("[cycle 2] ✓ AutoRenewalFailed at block {}; AutoRenewals[hash] removed", r2);
 
-	// Re-authorize Alice. Because the entry is expired-but-present, the pallet hits the
-	// expired-reset branch and zeroes `bytes`, `bytes_permanent`, and `transactions` while
-	// installing a fresh expiration of `now + AuthorizationPeriod`.
+	// Expired-but-present: the pallet zeroes counters and installs a fresh expiration.
 	let alice_pk = subxt_signer::sr25519::dev::alice().public_key().0;
 	authorize_account_via_sudo(
 		client,
@@ -3645,11 +3180,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	nonce += 1;
 	log::info!("Re-authorized Alice — expects expired-reset branch to zero counters");
 
-	// Store a fresh item and enable auto-renew on it. This is the end-to-end proof that the
-	// reset really took effect: if `bytes_permanent` had carried over, the snapshot check in
-	// `enable_auto_renew` (`has_permanent_capacity(size)`) would still see room (since we
-	// authorized 4L of cap, vs L of carried-over `bytes_permanent`), but the renewal at cycle 1
-	// for the new item would fail. We assert the renewal succeeds.
+	// End-to-end proof the reset took: a fresh store + auto-renew cycle must succeed; if
+	// `bytes_permanent` had carried over, the cycle-1 renewal would trip the per-account cap.
 	let data2 = {
 		let mut pattern = PARACHAIN_TEST_DATA_PATTERN.to_vec();
 		pattern.extend_from_slice(b"_AFTER_REAUTH_");
@@ -3684,10 +3216,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "post-reauth cycle 1").await?;
 	log::info!("✓ Post-reauth cycle 1 succeeded — counters reset");
 
-	// Cleanup: remove `data2` from `AutoRenewals` so the shared `archive` harness doesn't
-	// keep renewing it for the rest of the harness lifetime. `data` was already cleaned up
-	// by the cycle-2 expiration path (the pallet removes failed entries). `data2` doesn't
-	// have a natural exhaustion in scope here, so disable it explicitly.
+	// Shared-harness cleanup: `data` was removed by the cycle-2 failure path; disable `data2`
+	// explicitly so it doesn't keep renewing for the rest of the harness lifetime.
 	let nonce_after_enable = nonce + 1;
 	disable_auto_renew(client, &content_hash2, nonce_after_enable).await?;
 	log::info!("✓ Disabled auto-renew for data2 — chain idle for the next test");

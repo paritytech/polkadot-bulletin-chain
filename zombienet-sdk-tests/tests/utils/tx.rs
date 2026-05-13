@@ -61,9 +61,8 @@ pub async fn wait_for_finalized(
 	anyhow::bail!("Transaction stream ended without InFinalizedBlock status")
 }
 
-/// Submit `sudo(System::set_storage([(key, value)]))` signed by Alice. Used to write to
-/// runtime storage that has no public extrinsic — RetentionPeriod, Authorizations, etc.
-/// `wait_for_finality` selects in-best-block vs finalized progress wait.
+/// Submit `sudo(System::set_storage([(key, value)]))` signed by Alice — writes runtime
+/// storage that has no public extrinsic.
 async fn sudo_set_storage_item(
 	client: &OnlineClient<SubstrateConfig>,
 	key: &[u8],
@@ -282,10 +281,8 @@ pub async fn authorize_and_store_data(
 		.await
 		.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	// Read the authoritative block from `TransactionByContentHash` at the inclusion block —
-	// subxt's `tx_in_block.block_hash()` can name a block whose `block.number()` is one ahead
-	// of the canonical key in `Transactions[N]` (the latter is what `on_initialize` uses to
-	// schedule auto-renewal). See `canonical_store_block` for the full rationale.
+	// subxt's `tx_in_block.block_hash()` can name a block whose number is one ahead of the
+	// canonical `Transactions[N]` key — see `canonical_store_block`.
 	let content_hash = blake2_256(data);
 	let block_number = canonical_store_block(&client, block_hash, &content_hash).await?;
 
@@ -352,16 +349,7 @@ pub async fn authorize_and_store_data_finalized(
 	Ok((block_number, nonce))
 }
 
-/// Submit a sudo'd `TransactionStorage::authorize_account` for `who` with the given capacity,
-/// adding to any existing authorization. Each successful store/renew consumes one transaction
-/// slot and `data.len()` bytes from this allowance. Signed by Alice (the sudo key).
-///
-/// `wait_for_finality` selects in-best-block vs finalized progress wait. Use the finalized
-/// variant whenever the next step is a signed extrinsic from `who` and the pool's
-/// `validate_signed` would otherwise see a stale (pre-authorize) finalized state and reject
-/// the tx with `InvalidTransaction`. The non-finalized variant is fine when `who` already
-/// had authorization (top-up scenarios), when the next dependent action is many blocks away,
-/// or when the caller batches a finalization wait afterward.
+/// Sudo'd `TransactionStorage::authorize_account` for `who`. Additive on the unexpired path.
 pub async fn authorize_account_via_sudo(
 	client: &OnlineClient<SubstrateConfig>,
 	who: &[u8; 32],
@@ -372,9 +360,9 @@ pub async fn authorize_account_via_sudo(
 	authorize_account_via_sudo_inner(client, who, transactions, bytes, nonce, false).await
 }
 
-/// Same as [`authorize_account_via_sudo`] but blocks until the authorize tx is finalized.
-/// Use when the immediate next step is a signed extrinsic from `who` (e.g. a fresh account
-/// whose first tx would otherwise race the pool's finalized-state validation).
+/// Like [`authorize_account_via_sudo`] but waits for finality — required when `who`'s next
+/// step is its first signed extrinsic, since the pool's `validate_signed` reads finalized
+/// state.
 pub async fn authorize_account_via_sudo_finalized(
 	client: &OnlineClient<SubstrateConfig>,
 	who: &[u8; 32],
@@ -438,7 +426,6 @@ async fn authorize_account_via_sudo_inner(
 	Ok(())
 }
 
-/// Convenience wrapper around [`authorize_account_via_sudo`] for Alice.
 pub async fn top_up_alice_authorization(
 	client: &OnlineClient<SubstrateConfig>,
 	transactions: u32,
@@ -449,9 +436,8 @@ pub async fn top_up_alice_authorization(
 	authorize_account_via_sudo(client, &alice_pk, transactions, bytes, nonce).await
 }
 
-/// Submit a single `TransactionStorage::store(data)` signed by Alice. Caller is responsible
-/// for ensuring Alice has sufficient pre-existing authorization. Returns the inclusion block
-/// number.
+/// Signed `store(data)` from Alice; caller ensures Alice is authorized. Returns the
+/// canonical inclusion block number (see [`canonical_store_block`]).
 pub async fn submit_store_signed(
 	client: &OnlineClient<SubstrateConfig>,
 	data: &[u8],
@@ -472,22 +458,17 @@ pub async fn submit_store_signed(
 		.await
 		.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	// See `authorize_and_store_data` / `canonical_store_block` for why we read the canonical
-	// block at the inclusion block hash instead of trusting subxt's reported block number.
 	let content_hash = blake2_256(data);
 	let block_number = canonical_store_block(client, block_hash, &content_hash).await?;
 	log::info!("Store transaction included at canonical block {}", block_number);
 	Ok(block_number)
 }
 
-/// Read `TransactionByContentHash[content_hash]` at the supplied block hash and return the
-/// canonical block number where the store/renewal was indexed. Reading AT the inclusion
-/// block (not `at_latest`) avoids the case where subxt's chainHead_v2 backend's latest view
-/// is still pinned to a finalized block that doesn't yet reflect the just-included tx. The
-/// pallet stores `(frame_system::block_number(), index)` at extrinsic-execution time, so
-/// reading at the inclusion block's state always returns the authoritative block number —
-/// even if subxt's `tx_in_block.block_hash()` later turns out to name a short-lived fork
-/// candidate, the storage map at the SAME block-hash references is internally consistent.
+/// Canonical store/renew block number, read from `TransactionByContentHash` at the
+/// inclusion-block hash. subxt's `tx_in_block.block_hash()` can name a block whose
+/// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to
+/// schedule auto-renewal; reading at the inclusion-block state returns the authoritative
+/// number.
 pub async fn canonical_store_block(
 	client: &OnlineClient<SubstrateConfig>,
 	at_block_hash: subxt::utils::H256,
@@ -524,12 +505,9 @@ pub async fn canonical_store_block(
 	Ok(block_number as u64)
 }
 
-/// Submit two `TransactionStorage::renew(block, index)` extrinsics back-to-back, signed by
-/// **Alice and Bob respectively**. The pallet's `validate_signed` adds a `provides((who,
-/// content_hash))` tag, so two renews of the same data from the **same** signer would
-/// conflict in the pool — using two distinct signers avoids the conflict so both can sit in
-/// the pool simultaneously and land in the same block. Caller must have authorized Bob for at
-/// least one renew worth of capacity. Returns each renew's inclusion block number.
+/// Two `renew` calls signed by Alice and Bob respectively. `validate_signed` tags renewals
+/// with `(who, content_hash)`, so two renews of the same data from the same signer would
+/// conflict in the pool.
 pub async fn submit_renew_pair(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
@@ -576,17 +554,6 @@ pub async fn submit_renew_pair(
 	.await
 	.map_err(|_| anyhow!("bob renew timed out"))??;
 
-	// As with `submit_store_signed` / `authorize_and_store_data`, don't trust subxt's
-	// reported block number for `wait_for_in_best_block` — it can be one off from the
-	// canonical block where `do_renew` -> `push_renewal_in_memory` re-keyed
-	// `TransactionByContentHash` at `Self::now()`. That mismatch is what previously made
-	// `parachain_renew_twice_within_block_with_pruning_test` flaky: pruning math built on
-	// `client.blocks().at(hash).number()` could overshoot the canonical renew block by 1,
-	// the +1 buffer used to wait for finality didn't reach the canonical pruning boundary,
-	// and col11 stayed populated past the test's `expect_bitswap_dont_have` window.
-	// `canonical_store_block` reads `TransactionByContentHash` at the inclusion-block hash,
-	// which the pallet updates with the canonical `(Self::now(), index)` of the renewal —
-	// the same authoritative number `on_initialize`'s pruning hook uses.
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
 	log::info!(
@@ -599,8 +566,7 @@ pub async fn submit_renew_pair(
 	Ok((block_alice, block_bob))
 }
 
-/// Submit `TransactionStorage::enable_auto_renew(content_hash)` signed by Alice. The
-/// account must already have authorization sufficient for one renewal cycle.
+/// Signed `enable_auto_renew(content_hash)` from Alice.
 pub async fn enable_auto_renew(
 	client: &OnlineClient<SubstrateConfig>,
 	content_hash: &[u8; 32],
@@ -628,11 +594,8 @@ pub async fn enable_auto_renew(
 	Ok(())
 }
 
-/// Submit `TransactionStorage::disable_auto_renew(content_hash)` signed by Alice. Removes
-/// the content hash from `AutoRenewals` so the auto-renew inherent stops processing it on
-/// subsequent renewal blocks. Use at the end of shared-harness tests that called
-/// `enable_auto_renew`: without this the chain keeps re-storing the item until Alice's
-/// authorization runs out, polluting state for later tests in the group.
+/// Signed `disable_auto_renew(content_hash)` from Alice. Required at the end of
+/// shared-harness tests to avoid renewals consuming Alice's authorization indefinitely.
 pub async fn disable_auto_renew(
 	client: &OnlineClient<SubstrateConfig>,
 	content_hash: &[u8; 32],
@@ -668,8 +631,7 @@ pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	Ok(nonce)
 }
 
-/// Fields to write into Alice's `Authorization` entry; mirrors the pallet's
-/// `Authorization<BlockNumber>` SCALE layout (encoded as a tuple in that order).
+/// Mirrors the pallet's `Authorization<BlockNumber>` SCALE layout (encoded as a tuple).
 pub struct AuthorizationOverride {
 	pub transactions: u32,
 	pub transactions_allowance: u32,
@@ -679,11 +641,8 @@ pub struct AuthorizationOverride {
 	pub expiration: u32,
 }
 
-/// Overwrite Alice's `Authorizations[Account(alice)]` entry via `sudo(System::set_storage(..))`.
-/// There is no extrinsic that lets a caller set a custom expiration block on an authorization,
-/// so tests that need a short expiration (vs. the runtime's `AuthorizationPeriod = 14 * DAYS`)
-/// must write the storage entry directly. The key is computed from metadata via
-/// `address_bytes`, so the correct `Blake2_128Concat` hasher is applied automatically.
+/// Overwrite Alice's `Authorizations[Account(alice)]` entry via `sudo(System::set_storage)`.
+/// `authorize_account` cannot shrink an existing entry or set a custom expiration block.
 pub async fn override_alice_authorization(
 	client: &OnlineClient<SubstrateConfig>,
 	auth: AuthorizationOverride,

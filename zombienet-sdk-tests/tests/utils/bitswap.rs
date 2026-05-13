@@ -472,18 +472,9 @@ pub async fn expect_all_items_bitswap_dont_have(
 	Ok(())
 }
 
-/// Expect DONT_HAVE - state/warp synced nodes don't have indexed transactions.
-/// Poll bitswap until it returns DONT_HAVE for `expected_data`, or `timeout_secs` elapses.
-///
-/// Single-shot probing is racy after a `wait_for_finalized_height` wait: the collator's
-/// finalized-height metric crosses the target as soon as the chain finalizes the relevant
-/// block, but the **physical** `--blocks-pruning` deletion + col11 refcount-zero eviction
-/// runs asynchronously a moment later. A test that probes immediately after finality can
-/// catch col11 still holding the entry.
-///
-/// We poll once per second with a short per-probe budget — return Ok the moment the node
-/// reports DONT_HAVE, error only if it's still serving the block (or surfacing some other
-/// unexpected error) after the full `timeout_secs`.
+/// Poll bitswap until it returns DONT_HAVE or `timeout_secs` elapses. The physical
+/// `--blocks-pruning` deletion + col11 refcount-zero eviction runs asynchronously a moment
+/// after the finalized-height metric crosses, so single-shot probing is racy.
 pub async fn expect_bitswap_dont_have(
 	node: &zombienet_sdk::NetworkNode,
 	expected_data: &[u8],
@@ -497,7 +488,6 @@ pub async fn expect_bitswap_dont_have(
 	loop {
 		match verify_bitswap_fetch(multiaddr, expected_data, per_probe_secs).await {
 			Ok(_) => {
-				// Still serving the block — eviction hasn't completed yet.
 				if std::time::Instant::now() >= deadline {
 					anyhow::bail!(
 						"Bitswap on {} still serves the block after polling for {}s; col11 \
@@ -517,7 +507,6 @@ pub async fn expect_bitswap_dont_have(
 					);
 					return Ok(());
 				}
-				// Other transient error (e.g. transport hiccup) — keep polling.
 				if std::time::Instant::now() >= deadline {
 					return Err(e).with_context(|| {
 						format!(
