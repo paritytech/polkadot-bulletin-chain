@@ -78,10 +78,10 @@ pub fn generate_test_data(size: usize, pattern: &[u8]) -> Vec<u8> {
 /// Verify data fetched via bitswap matches expected content. Used by bitswap module.
 pub fn verify_data_matches(fetched: &[u8], expected: &[u8]) -> Result<bool> {
 	if fetched == expected {
-		log::info!("Bitswap fetch successful - data matches ({} bytes)", fetched.len());
+		tracing::info!("Bitswap fetch successful - data matches ({} bytes)", fetched.len());
 		Ok(true)
 	} else {
-		log::error!(
+		tracing::error!(
 			"Bitswap fetch data mismatch: expected {} bytes, got {} bytes",
 			expected.len(),
 			fetched.len()
