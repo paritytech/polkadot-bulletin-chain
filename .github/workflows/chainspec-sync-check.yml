@@ -8,6 +8,7 @@ on:
     paths:
       - 'chainspecs/**'
       - '.github/workflows/chainspec-sync-check.yml'
+      - '.github/env'
   workflow_dispatch:
 
 concurrency:
@@ -17,16 +18,17 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  POLKADOT_NODE_VERSION: polkadot-stable2603
-  POLKADOT_OMNI_NODE_SHA256: a96cb007f3e32de3b0d77dc25cab324d7067cca26f1a5aad4d05d748cf89e323
-  POLKADOT_BINARIES_DIR: ${{ github.workspace }}/.polkadot-binaries
-
 jobs:
+  set-image:
+    uses: ./.github/workflows/set-image.yml
+
   sync-check:
+    needs: [set-image]
     name: Sync (${{ matrix.name }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +49,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
       - uses: ./.github/actions/install-just
 
       - name: Cache polkadot-node binaries
@@ -63,7 +68,6 @@ jobs:
       - name: Resolve binary directory
         run: |
           POLKADOT_DIR="$(just binaries-polkadot)"
-          echo "POLKADOT_DIR=$POLKADOT_DIR" >> "$GITHUB_ENV"
           echo "$POLKADOT_DIR" >> "$GITHUB_PATH"
 
       - name: Sync a few blocks
