@@ -3108,19 +3108,27 @@ async fn block_hash_at(
 }
 
 /// Locate the canonical block at `target` by walking back from the latest finalized block.
-/// Caller is responsible for ensuring finalized has reached `target` first
-/// (e.g. via `wait_for_finalized_height`).
+/// Polls until finality reaches `target` so callers can chain it directly after a best-block
+/// wait without manually re-waiting on finality.
 async fn finalized_block_hash_at(
 	client: &OnlineClient<SubstrateConfig>,
 	target: u64,
 ) -> Result<subxt::utils::H256> {
+	const POLL_INTERVAL_SECS: u64 = 2;
+	const POLL_TIMEOUT_SECS: u64 = 120;
+	let start = std::time::Instant::now();
 	let mut current = current_finalized_block(client).await?;
-	if (current.number() as u64) < target {
-		anyhow::bail!(
-			"finalized height {} has not reached target {}; wait for finalization first",
-			current.number(),
-			target
-		);
+	while (current.number() as u64) < target {
+		if start.elapsed().as_secs() > POLL_TIMEOUT_SECS {
+			anyhow::bail!(
+				"finalized height {} did not reach target {} within {}s",
+				current.number(),
+				target,
+				POLL_TIMEOUT_SECS
+			);
+		}
+		tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+		current = current_finalized_block(client).await?;
 	}
 	while (current.number() as u64) > target {
 		let parent_hash = current.header().parent_hash;
