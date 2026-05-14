@@ -18,12 +18,21 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   set-image:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     uses: ./.github/workflows/set-image.yml
 
   prepare-binaries:
+    if: needs.changes.outputs.should-run == 'true'
     name: Fetch polkadot binaries + bulletin chain specs
-    needs: [set-image]
+    needs: [changes, set-image]
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
