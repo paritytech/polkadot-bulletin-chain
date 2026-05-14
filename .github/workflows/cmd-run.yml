@@ -176,22 +176,19 @@ jobs:
         if: startsWith(github.event.inputs.cmd, 'bench')
         run: grep -v '^#' .github/env | grep '=' >> $GITHUB_ENV
 
+      - uses: ./.github/actions/install-just
+        if: startsWith(github.event.inputs.cmd, 'bench')
+
       - name: Cache frame-omni-bencher
-        id: cache-bencher
         if: startsWith(github.event.inputs.cmd, 'bench')
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: /usr/local/bin/frame-omni-bencher
-          key: frame-omni-bencher-${{ env.POLKADOT_SDK_VERSION }}
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
+          key: polkadot-binaries-${{ runner.os }}-${{ env.FRAME_OMNI_BENCHER_VERSION }}
 
-      - name: Download frame-omni-bencher
-        if: startsWith(github.event.inputs.cmd, 'bench') && steps.cache-bencher.outputs.cache-hit != 'true'
-        run: |
-          url="https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/frame-omni-bencher"
-          curl -fL -o /tmp/frame-omni-bencher "$url"
-          echo "${FRAME_OMNI_BENCHER_SHA256} /tmp/frame-omni-bencher" | sha256sum -c -
-          chmod +x /tmp/frame-omni-bencher
-          mv /tmp/frame-omni-bencher /usr/local/bin/frame-omni-bencher
+      - name: Resolve frame-omni-bencher + add to PATH
+        if: startsWith(github.event.inputs.cmd, 'bench')
+        run: echo "$(just binaries-bencher)" >> "$GITHUB_PATH"
 
       - name: Run cmd
         id: cmd
