@@ -34,8 +34,7 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Ensure `just` is available
-        run: command -v just || ./scripts/install_just.sh
+      - uses: ./.github/actions/install-just
 
       - name: Cache polkadot-sdk binaries
         id: cache-binaries
@@ -97,8 +96,7 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Ensure `just` is available
-        run: command -v just || ./scripts/install_just.sh
+      - uses: ./.github/actions/install-just
 
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
@@ -167,8 +165,7 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Ensure `just` is available
-        run: command -v just || ./scripts/install_just.sh
+      - uses: ./.github/actions/install-just
 
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2

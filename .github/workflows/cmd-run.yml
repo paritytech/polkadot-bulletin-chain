@@ -176,9 +176,8 @@ jobs:
         if: startsWith(github.event.inputs.cmd, 'bench')
         run: grep -v '^#' .github/env | grep '=' >> $GITHUB_ENV
 
-      - name: Ensure `just` is available
+      - uses: ./.github/actions/install-just
         if: startsWith(github.event.inputs.cmd, 'bench')
-        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache frame-omni-bencher
         if: startsWith(github.event.inputs.cmd, 'bench')

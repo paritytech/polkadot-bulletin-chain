@@ -74,9 +74,8 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Ensure `just` is available
+      - uses: ./.github/actions/install-just
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache try-runtime CLI
         if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -165,8 +164,7 @@ jobs:
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
-      - name: Ensure `just` is available
-        run: command -v just || ./scripts/install_just.sh
+      - uses: ./.github/actions/install-just
 
       - name: Cache try-runtime CLI
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5

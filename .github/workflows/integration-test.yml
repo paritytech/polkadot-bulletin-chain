@@ -42,8 +42,7 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Ensure `just` is available
-        run: command -v just || ./scripts/install_just.sh
+      - uses: ./.github/actions/install-just
 
       - name: Cache polkadot-sdk + zombienet binaries
         id: cache-binaries
@@ -114,8 +113,7 @@ jobs:
             examples/package.json
             console-ui/package-lock.json
 
-      - name: Ensure `just` is available
-        run: command -v just || ./scripts/install_just.sh
+      - uses: ./.github/actions/install-just
 
       - name: Install subxt-cli
         run: |
