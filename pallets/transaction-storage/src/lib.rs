@@ -1938,10 +1938,6 @@ pub mod pallet {
 pub mod extension;
 
 /// Bridge for cross-pallet renewal flows (most notably `pallet-storage-auto-renewal`).
-///
-/// `do_renew` re-encodes `BlockTransactions` on every call (O(n²) for `n` renewals in a
-/// block). At the configured `MaxBlockTransactions = 512` this is acceptable; if a batch
-/// processor ever needs amortized O(n) it should be added as a separate trait method.
 impl<T: Config> crate::traits::StorageRenewer<T::AccountId> for Pallet<T> {
 	fn transaction_info_for_content_hash(content_hash: ContentHash) -> Option<TransactionInfo> {
 		let (block, index) = TransactionByContentHash::<T>::get(content_hash)?;
@@ -1952,18 +1948,78 @@ impl<T: Config> crate::traits::StorageRenewer<T::AccountId> for Pallet<T> {
 		Self::account_authorization_extent(who.clone())
 	}
 
-	fn try_consume_account_authorization(who: &T::AccountId, size: u32) -> bool {
-		Self::check_authorization(
-			&AuthorizationScope::Account(who.clone()),
-			size,
-			/* consume */ true,
-			/* is_renew */ true,
-		)
-		.is_ok()
-	}
+	/// Amortized O(n): one read and one write of `BlockTransactions` for the whole batch.
+	/// Per-item operations (`check_authorization`, `transaction_index::renew`,
+	/// `TransactionByContentHash` insert) remain O(1).
+	fn renew_batch(
+		items: &[(T::AccountId, TransactionInfo)],
+	) -> alloc::vec::Vec<Result<u32, DispatchError>> {
+		let mut results = alloc::vec::Vec::with_capacity(items.len());
 
-	fn do_renew(info: TransactionInfo) -> Result<u32, DispatchError> {
-		Self::do_renew(info).map_err(Into::into)
+		let extrinsic_index = match <frame_system::Pallet<T>>::extrinsic_index() {
+			Some(idx) => idx,
+			None => {
+				for _ in items {
+					results.push(Err(Error::<T>::BadContext.into()));
+				}
+				return results;
+			},
+		};
+
+		let mut transactions = <BlockTransactions<T>>::get();
+		let mut cumulative_chunks = TransactionInfo::total_chunks(&transactions);
+		let mut appended_hashes: alloc::vec::Vec<(ContentHash, u32)> =
+			alloc::vec::Vec::with_capacity(items.len());
+
+		for (account, info) in items {
+			// Debit `1` transaction + `info.size` bytes of permanent capacity. Mirrors
+			// the per-item path that used to be `try_consume_account_authorization`.
+			if Self::check_authorization(
+				&AuthorizationScope::Account(account.clone()),
+				info.size,
+				/* consume */ true,
+				/* is_renew */ true,
+			)
+			.is_err()
+			{
+				results.push(Err(DispatchError::Other("renew_batch: insufficient authorization")));
+				continue;
+			}
+
+			let block_chunks = cumulative_chunks + num_chunks(info.size);
+			let new_index = transactions.len() as u32;
+			let push_result = transactions.try_push(TransactionInfo {
+				chunk_root: info.chunk_root,
+				size: info.size,
+				content_hash: info.content_hash,
+				hashing: info.hashing,
+				cid_codec: info.cid_codec,
+				extrinsic_index,
+				block_chunks,
+				kind: TransactionKind::Renew,
+			});
+			if push_result.is_err() {
+				// Authorization has already been debited; the bound is rare in practice
+				// because `process_auto_renewals` runs as a mandatory inherent on an
+				// empty `BlockTransactions`.
+				results.push(Err(Error::<T>::TooManyTransactions.into()));
+				continue;
+			}
+
+			cumulative_chunks = block_chunks;
+			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
+			appended_hashes.push((info.content_hash, new_index));
+			results.push(Ok(new_index));
+		}
+
+		<BlockTransactions<T>>::put(transactions);
+
+		let block = Self::now();
+		for (hash, index) in appended_hashes {
+			TransactionByContentHash::<T>::insert(hash, (block, index));
+		}
+
+		results
 	}
 }
 

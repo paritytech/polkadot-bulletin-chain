@@ -20,6 +20,7 @@
 //! traits — never via direct `Pallet::<T>::...` calls.
 
 use crate::{AuthorizationExtent, TransactionInfo};
+use alloc::vec::Vec;
 use bulletin_transaction_storage_primitives::ContentHash;
 use polkadot_sdk_frame::prelude::{DispatchError, Weight};
 
@@ -67,16 +68,18 @@ pub trait StorageRenewer<AccountId> {
 	/// Returns the (unused and unexpired) authorization extent for the given account.
 	fn account_authorization_extent(who: &AccountId) -> AuthorizationExtent;
 
-	/// Atomically validate and consume one transaction's worth of `who`'s account
-	/// authorization (debiting `1` transaction and `size` bytes of permanent capacity).
+	/// Renew a batch of previously-stored transactions in a single `BlockTransactions`
+	/// mutate. For each input, consumes the account's authorization (one transaction
+	/// plus `size` bytes of permanent capacity) and, on success, appends the renewal
+	/// to the current block.
 	///
-	/// Returns `true` if the authorization existed, was unexpired, was sufficient,
-	/// and was consumed. Returns `false` otherwise (in which case no state has been
-	/// mutated).
-	fn try_consume_account_authorization(who: &AccountId, size: u32) -> bool;
-
-	/// Renew a previously-stored transaction by re-indexing it into the current
-	/// block. Returns the new transaction index within the block on success, or
-	/// a `DispatchError` if the block is full or the call is made out of context.
-	fn do_renew(info: TransactionInfo) -> Result<u32, DispatchError>;
+	/// Returns one outcome per input, in order:
+	/// - `Ok(new_index)` on a successful renewal.
+	/// - `Err(_)` if the account had insufficient authorization, the block is full, or the call is
+	///   made out of context. State is left unchanged for that item.
+	///
+	/// Implementors must perform at most one read and one write of the underlying
+	/// block-transactions queue across the whole batch (amortized O(n) for n items),
+	/// rather than per-item O(n²) re-encoding.
+	fn renew_batch(items: &[(AccountId, TransactionInfo)]) -> Vec<Result<u32, DispatchError>>;
 }

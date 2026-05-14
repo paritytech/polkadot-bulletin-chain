@@ -257,24 +257,18 @@ pub mod pallet {
 			ensure_none(origin)?;
 			let pending = PendingAutoRenewals::<T>::take();
 
-			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
-				let consumed = T::StorageRenewer::try_consume_account_authorization(
-					&renewal_data.account,
-					tx_info.size,
-				);
+			// One batched call amortizes the `BlockTransactions` re-encode across the
+			// whole queue (O(n) total vs. O(n²) for per-item `do_renew`).
+			let items: alloc::vec::Vec<_> = pending
+				.iter()
+				.map(|(_, info, data)| (data.account.clone(), info.clone()))
+				.collect();
+			let outcomes = T::StorageRenewer::renew_batch(&items);
 
-				if !consumed {
-					// Insufficient authorization — remove the registration so the chain
-					// doesn't try (and fail) to renew it again next cycle.
-					AutoRenewals::<T>::remove(content_hash);
-					Self::deposit_event(Event::AutoRenewalFailed {
-						content_hash,
-						account: renewal_data.account,
-					});
-					continue;
-				}
-
-				match T::StorageRenewer::do_renew(tx_info) {
+			for ((content_hash, _tx_info, renewal_data), outcome) in
+				pending.into_iter().zip(outcomes)
+			{
+				match outcome {
 					Ok(new_index) => {
 						Self::deposit_event(Event::DataAutoRenewed {
 							index: new_index,
@@ -283,8 +277,8 @@ pub mod pallet {
 						});
 					},
 					Err(_) => {
-						// Block is full or other dispatch error — remove the registration.
-						// The data will expire; the user can re-register if desired.
+						// Authorization shortfall or block-full — drop the registration so
+						// the chain doesn't retry next cycle.
 						AutoRenewals::<T>::remove(content_hash);
 						Self::deposit_event(Event::AutoRenewalFailed {
 							content_hash,
