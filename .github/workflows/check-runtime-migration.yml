@@ -81,7 +81,7 @@ jobs:
         if: steps.cache-restore.outputs.cache-matched-key == ''
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
           key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
 
       - name: Resolve try-runtime + add to PATH
@@ -169,7 +169,7 @@ jobs:
       - name: Cache try-runtime CLI
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
           key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
 
       - name: Resolve try-runtime + add to PATH

@@ -183,7 +183,7 @@ jobs:
         if: startsWith(github.event.inputs.cmd, 'bench')
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
           key: polkadot-binaries-${{ runner.os }}-${{ env.FRAME_OMNI_BENCHER_VERSION }}
 
       - name: Resolve frame-omni-bencher + add to PATH
