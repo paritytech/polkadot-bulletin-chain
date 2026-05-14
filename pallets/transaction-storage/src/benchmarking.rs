@@ -156,7 +156,7 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn renew() -> Result<(), BenchmarkError> {
+	fn force_renew() -> Result<(), BenchmarkError> {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
@@ -166,6 +166,25 @@ mod benchmarks {
 		_(RawOrigin::None, BlockNumberFor::<T>::zero(), 0);
 
 		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn renew() -> Result<(), BenchmarkError> {
+		// One-shot scheduler. Stores data, then schedules a one-shot auto-renewal as
+		// `caller` — measures the dispatch path (a single `AutoRenewals::insert`).
+		let caller: T::AccountId = whitelisted_caller();
+		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
+		let content_hash = sp_io::hashing::blake2_256(&data);
+		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
+		run_to_block::<T>(1u32.into());
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(caller.clone()), BlockNumberFor::<T>::zero(), 0);
+
+		assert_last_event::<T>(
+			Event::RenewalEnabled { content_hash, who: caller, recurring: false }.into(),
+		);
 		Ok(())
 	}
 
@@ -409,7 +428,7 @@ mod benchmarks {
 
 		let ext = ValidateStorageCalls::<T>::default();
 		let call: RuntimeCallOf<T> =
-			Call::<T>::renew { block: BlockNumberFor::<T>::zero(), index: 0 }.into();
+			Call::<T>::force_renew { block: BlockNumberFor::<T>::zero(), index: 0 }.into();
 		let info = DispatchInfo::default();
 		let len = 0_usize;
 
@@ -454,7 +473,9 @@ mod benchmarks {
 		#[extrinsic_call]
 		_(RawOrigin::Signed(caller.clone()), content_hash);
 
-		assert_last_event::<T>(Event::AutoRenewalEnabled { content_hash, who: caller }.into());
+		assert_last_event::<T>(
+			Event::RenewalEnabled { content_hash, who: caller, recurring: true }.into(),
+		);
 		Ok(())
 	}
 
@@ -576,7 +597,7 @@ mod benchmarks {
 					block_chunks: 0,
 					kind: TransactionKind::Store,
 				};
-				let renewal_data = AutoRenewalData { account: caller };
+				let renewal_data = RenewalData { account: caller, recurring: true };
 				pending
 					.try_push((content_hash, tx_info, renewal_data))
 					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
@@ -653,7 +674,7 @@ mod benchmarks {
 			// populated by the real `store()` call above).
 			AutoRenewals::<T>::insert(
 				template.content_hash,
-				AutoRenewalData { account: caller.clone() },
+				RenewalData { account: caller.clone(), recurring: true },
 			);
 
 			// Distinct `content_hash` per entry so the on_initialize loop's
@@ -678,7 +699,7 @@ mod benchmarks {
 					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));
 					AutoRenewals::<T>::insert(
 						unique_hash,
-						AutoRenewalData { account: caller.clone() },
+						RenewalData { account: caller.clone(), recurring: true },
 					);
 				}
 				Ok(())

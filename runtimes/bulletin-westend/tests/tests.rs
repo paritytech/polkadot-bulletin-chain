@@ -349,10 +349,11 @@ fn authorized_storage_transactions_are_for_free() {
 			advance_block();
 
 			// Renew should also work without funding (feeless).
-			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-				block: stored_block,
-				index: 0,
-			});
+			let renew_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+					block: stored_block,
+					index: 0,
+				});
 			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
@@ -438,7 +439,7 @@ fn allowance_based_priority_works() {
 			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
 
 			// `renew` carries `Origin::Authorized` too, but must not be boosted.
-			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
 				block: 1,
 				index: 0,
 			});
@@ -1267,7 +1268,7 @@ fn renew_must_be_direct_extrinsic() {
 
 		advance_block();
 
-		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
 			block: stored_block,
 			index: 0,
 		});

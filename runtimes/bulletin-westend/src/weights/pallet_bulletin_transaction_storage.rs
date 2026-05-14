@@ -67,13 +67,19 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Placeholder weight for the one-shot `renew` scheduler. Reuses the
+	/// `enable_auto_renew` envelope (same storage operations: read Transactions,
+	/// read/write AutoRenewals).
+	fn renew() -> Weight {
+		<Self as pallet_bulletin_transaction_storage::WeightInfo>::enable_auto_renew()
+	}
 	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
 	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:1)
 	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	fn renew() -> Weight {
+	fn force_renew() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `367`
 		//  Estimated: `47519`
@@ -355,5 +361,12 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
+	}
+	/// Placeholder weight for the v3→v4 migration step (one `AutoRenewals` entry per
+	/// iteration). Re-benchmark once stable.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }
