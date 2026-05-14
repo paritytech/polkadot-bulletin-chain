@@ -179,20 +179,60 @@ jobs:
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-
           fail-on-cache-miss: true
 
+      # Resolve the external commit sha and key the WASM cache on it so subsequent
+      # runs skip the multi-minute out-of-tree build.
+      - name: Resolve external runtime ref
+        if: ${{ matrix.runtime.external_runtime != null }}
+        id: external-runtime
+        run: |
+          REPO='${{ matrix.runtime.external_runtime.repo }}'
+          REF='${{ matrix.runtime.external_runtime.ref }}'
+          SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+          if [ -z "$SHA" ]; then
+            echo "❌ Failed to resolve $REF in $REPO"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Cache external runtime build (try-runtime)
+        if: ${{ matrix.runtime.external_runtime != null }}
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: target/external-runtimes/${{ matrix.runtime.name }}-try-runtime
+          key: external-runtime-try-runtime-${{ matrix.runtime.name }}-${{ steps.external-runtime.outputs.sha }}
+
+      - name: Install just
+        if: ${{ matrix.runtime.external_runtime != null }}
+        run: cargo install just --locked || true
+
+      - name: Build external runtime (try-runtime)
+        if: ${{ matrix.runtime.external_runtime != null }}
+        working-directory: examples
+        run: just build-external-runtime ${{ matrix.runtime.name }} "try-runtime" > /dev/null
+
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          RUNTIME_NAME: ${{ matrix.runtime.name }}
+          IS_EXTERNAL: ${{ matrix.runtime.external_runtime != null }}
           TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
           TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
-          FEATURES="try-runtime"
-          echo "Setting features: ${FEATURES}"
-          cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
-
           RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
-          RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
+
+          if [ "$IS_EXTERNAL" = "true" ]; then
+            # External runtime was built by the previous step; locate the WASM
+            # in the external checkout's target directory.
+            RUNTIME_BLOB_PATH="./target/external-runtimes/${RUNTIME_NAME}-try-runtime/target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
+          else
+            FEATURES="try-runtime"
+            echo "Setting features: ${FEATURES}"
+            cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
+            RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
+          fi
+
           export RUST_LOG=remote-ext=debug,runtime=trace
 
           (set -x; try-runtime \

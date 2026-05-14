@@ -197,13 +197,15 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
 # Build a runtime that lives in an external (Fellows) repo.
 # Reads `external_runtime.{repo,ref,path}` and `package` from
 # scripts/runtimes-matrix.json for the given matrix `name`. Clones into
-# {{ justfile_directory() }}/../target/external-runtimes/<name>, builds the
-# runtime package, and prints the path to the compressed WASM on stdout.
+# {{ justfile_directory() }}/../target/external-runtimes/<name>[-<features>],
+# builds the runtime package (optionally with the given comma-separated
+# `features`), and prints the path to the compressed WASM on stdout.
 #
-# In CI, cache `target/external-runtimes/<name>` keyed by the resolved
-# Fellows commit sha (use `git ls-remote <repo> <ref>` to resolve) to skip
-# the rebuild on cache hit.
-build-external-runtime name:
+# In CI, cache `target/external-runtimes/<name>[-<features>]` keyed by the
+# resolved Fellows commit sha (use `git ls-remote <repo> <ref>` to resolve)
+# to skip the rebuild on cache hit. Different feature sets get separate
+# checkouts so caches don't collide.
+build-external-runtime name features="":
     #!/usr/bin/env bash
     set -e
     ROOT_DIR="{{ justfile_directory() }}/.."
@@ -214,10 +216,16 @@ build-external-runtime name:
     SUBPATH=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.path' "$MATRIX")
     PACKAGE=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .package' "$MATRIX")
 
-    CHECKOUT_DIR="$ROOT_DIR/target/external-runtimes/{{ name }}"
+    FEATURES="{{ features }}"
+    if [ -n "$FEATURES" ]; then
+        VARIANT_SUFFIX="-$(echo "$FEATURES" | tr ',' '-' | tr -cd 'a-zA-Z0-9-')"
+    else
+        VARIANT_SUFFIX=""
+    fi
+    CHECKOUT_DIR="$ROOT_DIR/target/external-runtimes/{{ name }}${VARIANT_SUFFIX}"
     WASM_PATH="$CHECKOUT_DIR/target/release/wbuild/$PACKAGE/${PACKAGE//-/_}.compact.compressed.wasm"
 
-    >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $REF ($SUBPATH)"
+    >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $REF ($SUBPATH) [features=${FEATURES:-default}]"
 
     mkdir -p "$(dirname "$CHECKOUT_DIR")"
     if [ ! -d "$CHECKOUT_DIR/.git" ]; then
@@ -231,9 +239,14 @@ build-external-runtime name:
     git -C "$CHECKOUT_DIR" fetch --depth 1 origin "$REF" >&2
     git -C "$CHECKOUT_DIR" checkout -q FETCH_HEAD
 
+    BUILD_ARGS=(--release -p "$PACKAGE")
+    if [ -n "$FEATURES" ]; then
+        BUILD_ARGS+=(--features "$FEATURES")
+    fi
+
     if [ ! -f "$WASM_PATH" ]; then
-        >&2 echo "🔨 Building $PACKAGE..."
-        (cd "$CHECKOUT_DIR/$SUBPATH" && cargo build --release -p "$PACKAGE" >&2)
+        >&2 echo "🔨 Building $PACKAGE [features=${FEATURES:-default}]..."
+        (cd "$CHECKOUT_DIR/$SUBPATH" && cargo build "${BUILD_ARGS[@]}" >&2)
     else
         >&2 echo "♻️  Reusing cached WASM at $WASM_PATH"
     fi

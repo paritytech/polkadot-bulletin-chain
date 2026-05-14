@@ -39,6 +39,9 @@
       "wss://bulletin-rpc.polkadot.io"
     ],
     "integration_tests": true,
+    "try_runtime": {
+        "extra_flags": "--blocktime 24000 --disable-spec-version-check"
+    },
     "external_runtime": {
       "repo": "https://github.com/bkontur/runtimes.git",
       "ref": "bko-bulletin-stage1",
