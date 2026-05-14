@@ -38,7 +38,7 @@ jobs:
 
       - name: Cache polkadot-sdk binaries
         id: cache-binaries
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           # Cache only the resolved binaries (~333 MB); skip `.polkadot-binaries/_src/`
           # which holds the polkadot-sdk clone + cargo target (~11 GB) from cold builds.
@@ -56,7 +56,7 @@ jobs:
       # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
       - name: Cache bulletin chain specs
         id: cache-specs
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             zombienet/bulletin-westend-spec.json
@@ -106,7 +106,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore polkadot binaries cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
@@ -115,7 +115,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Restore bulletin chain specs cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             zombienet/bulletin-westend-spec.json
@@ -175,7 +175,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore polkadot binaries cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
@@ -184,7 +184,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Restore bulletin chain specs cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             zombienet/bulletin-westend-spec.json
