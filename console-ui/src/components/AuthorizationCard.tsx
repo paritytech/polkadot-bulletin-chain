@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { RefreshCw, Shield, AlertCircle } from "lucide-react";
+import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
 import { useAuthorization, useAuthorizationLoading, useAuthorizationError, fetchAccountAuthorization } from "@/state/storage.state";
 import { useApi } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
@@ -68,10 +69,7 @@ export function AuthorizationCard({ className }: { className?: string }) {
             <Spinner />
           </div>
         ) : error ? (
-          <div className="flex items-center gap-2 text-destructive">
-            <AlertCircle className="h-4 w-4" />
-            <span className="text-sm">{error}</span>
-          </div>
+          <PalletUnavailableNotice pallet="TransactionStorage" details={error} />
         ) : authorization ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">

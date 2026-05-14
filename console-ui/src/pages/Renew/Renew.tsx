@@ -72,7 +72,7 @@ export function Renew() {
   const networkHistory = allHistory.filter((e) => e.networkId === network.id);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<string>("block-index");
+  const [activeTab, setActiveTab] = useState<string>("by-cid");
 
   // Form inputs (block+index tab)
   const [blockInput, setBlockInput] = useState("");
@@ -471,8 +471,8 @@ export function Renew() {
             <CardContent>
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="mb-4">
-                  <TabsTrigger value="block-index">By Block + Index</TabsTrigger>
                   <TabsTrigger value="by-cid">By CID</TabsTrigger>
+                  <TabsTrigger value="block-index">By Block + Index</TabsTrigger>
                 </TabsList>
 
                 {/* Tab 1: Block + Index (existing flow) */}

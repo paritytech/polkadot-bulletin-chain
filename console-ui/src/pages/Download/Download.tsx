@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { formatBytes, bytesToHex, estimateBlockDate, formatBlockDuration, formatBlockNumber } from "@/utils/format";
-import { CID, parseCid } from "@parity/bulletin-sdk";
+import { CID, CidCodec, HashAlgorithm, parseCid } from "@parity/bulletin-sdk";
+import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
 import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
@@ -124,12 +125,21 @@ function OnChainStatusContent({
     <div className="space-y-3 text-sm">
       <div className="flex justify-between">
         <span className="text-muted-foreground">Stored at block</span>
-        <span className="font-mono">{formatBlockNumber(cidLookup.blockNumber)}</span>
+        <span className="font-mono">{formatBlockNumber(cidLookup.blockNumber)} (idx {cidLookup.index})</span>
       </div>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Upload date</span>
         <span>{estimateBlockDate(cidLookup.blockNumber, currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
       </div>
+      {cidLookup.hashing && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Hashing / Codec</span>
+          <span className="font-mono text-xs">
+            {cidLookup.hashing}
+            {cidLookup.cidCodec !== undefined ? ` / 0x${cidLookup.cidCodec.toString(16)}` : ""}
+          </span>
+        </div>
+      )}
       <div className="flex justify-between">
         <span className="text-muted-foreground">Expires at block</span>
         <span className="font-mono">{formatBlockNumber(expiresAtBlock)}</span>
@@ -173,6 +183,12 @@ export function Download() {
   const [cidInput, setCidInput] = useState(searchParams.get("cid") || "");
   const [isCidValid, setIsCidValid] = useState(false);
   const [parsedCid, setParsedCid] = useState<CID | undefined>();
+
+  const [cidInputMode, setCidInputMode] = useState<"cid" | "content-hash">("cid");
+  const [contentHashInput, setContentHashInput] = useState("");
+  const [hashAlgo, setHashAlgo] = useState<HashAlgorithm>(HashAlgorithm.Blake2b256);
+  const [cidCodec, setCidCodec] = useState<CidCodec>(CidCodec.Raw);
+  const [contentHashError, setContentHashError] = useState<string | null>(null);
 
   const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network.id));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
@@ -309,6 +325,50 @@ export function Download() {
     setFetchResult(null);
     setFetchError(null);
   };
+
+  useEffect(() => {
+    if (cidInputMode !== "content-hash") return;
+
+    if (!contentHashInput.trim()) {
+      setContentHashError(null);
+      setCidInput("");
+      setIsCidValid(false);
+      setParsedCid(undefined);
+      setFetchResult(null);
+      setFetchError(null);
+      return;
+    }
+
+    try {
+      const cleaned = contentHashInput.trim().replace(/^0x/i, "");
+      if (!/^[0-9a-fA-F]+$/.test(cleaned) || cleaned.length % 2 !== 0) {
+        throw new Error("Content hash must be hex");
+      }
+      const bytes = new Uint8Array(cleaned.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
+      }
+      if (bytes.length !== 32) {
+        throw new Error("Content hash must be 32 bytes");
+      }
+      // multiformats `digest.create` types `digest` as `Uint8Array<ArrayBufferLike>`
+      // but `CID.createV1` wants `Uint8Array<ArrayBuffer>`; cast through `any`
+      // at this single seam rather than rewriting the call site.
+      const mh = digest.create(hashAlgo, bytes) as any;
+      const cid = CID.createV1(cidCodec, mh);
+      setContentHashError(null);
+      setCidInput(cid.toString());
+      setIsCidValid(true);
+      setParsedCid(cid);
+      setFetchResult(null);
+      setFetchError(null);
+    } catch (e) {
+      setContentHashError(e instanceof Error ? e.message : String(e));
+      setCidInput("");
+      setIsCidValid(false);
+      setParsedCid(undefined);
+    }
+  }, [cidInputMode, contentHashInput, hashAlgo, cidCodec]);
 
   const handleHistorySelect = (cid: string) => {
     if (cid === "none") return;
@@ -776,14 +836,101 @@ export function Download() {
                   </span>
                 </div>
               )}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">CID</label>
-                <CidInput
-                  value={cidInput}
-                  onChange={handleCidChange}
-                  disabled={isFetching || !canFetch}
-                />
-              </div>
+              <Tabs
+                value={cidInputMode}
+                onValueChange={(v) => {
+                  setCidInputMode(v as "cid" | "content-hash");
+                  setFetchError(null);
+                  setFetchResult(null);
+                  setContentHashError(null);
+                }}
+              >
+                <TabsList>
+                  <TabsTrigger value="cid">By CID</TabsTrigger>
+                  <TabsTrigger value="content-hash">By ContentHash</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="cid" className="mt-4 space-y-2">
+                  <label className="text-sm font-medium">CID</label>
+                  <CidInput
+                    value={cidInput}
+                    onChange={handleCidChange}
+                    disabled={isFetching || !canFetch}
+                  />
+                </TabsContent>
+
+                <TabsContent value="content-hash" className="mt-4 space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Hashing algorithm</label>
+                      <Select
+                        value={String(hashAlgo)}
+                        onValueChange={(v) => setHashAlgo(Number(v) as HashAlgorithm)}
+                        disabled={isFetching || !canFetch}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={String(HashAlgorithm.Blake2b256)}>Blake2b-256</SelectItem>
+                          <SelectItem value={String(HashAlgorithm.Sha2_256)}>SHA2-256</SelectItem>
+                          <SelectItem value={String(HashAlgorithm.Keccak256)}>Keccak-256</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Codec</label>
+                      <Select
+                        value={String(cidCodec)}
+                        onValueChange={(v) => setCidCodec(Number(v) as CidCodec)}
+                        disabled={isFetching || !canFetch}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={String(CidCodec.Raw)}>Raw (0x55)</SelectItem>
+                          <SelectItem value={String(CidCodec.DagPb)}>DAG-PB (0x70)</SelectItem>
+                          <SelectItem value={String(CidCodec.DagCbor)}>DAG-CBOR (0x71)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Content hash</label>
+                    <input
+                      type="text"
+                      value={contentHashInput}
+                      onChange={(e) => setContentHashInput(e.target.value)}
+                      placeholder="0x… (32-byte hex digest)"
+                      disabled={isFetching || !canFetch}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                    />
+                    {contentHashError ? (
+                      <p className="text-xs text-destructive">{contentHashError}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Pre-computed digest produced by the selected hashing algorithm.
+                      </p>
+                    )}
+                  </div>
+
+                  {isCidValid && cidInput && (
+                    <div className="space-y-2 border-t pt-3">
+                      <label className="text-sm font-medium">Computed CID</label>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs bg-secondary p-2 rounded-md break-all">
+                          {cidInput}
+                        </code>
+                        <Button variant="outline" size="sm" onClick={() => copyToClipboard(cidInput)}>
+                          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
 
               <Button
                 onClick={handleFetch}
