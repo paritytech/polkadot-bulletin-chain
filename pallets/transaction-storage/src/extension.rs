@@ -148,9 +148,10 @@ where
 	}
 }
 
-/// Accumulated state from a wrapper-tree walk performed by [`classify_wrapper`].
-/// The fields are independent flags / counters; the validate-time decision rules
-/// are applied to the whole struct after the walk completes.
+/// Accumulated state from a wrapper-tree walk performed by
+/// [`ValidateStorageCalls::classify_wrapper`]. The fields are independent flags / counters;
+/// the validate-time decision rules are applied to the whole struct after the walk
+/// completes.
 #[derive(Default)]
 struct WrapperWalkState {
 	/// A `store` / `store_with_cid_config` was found anywhere in the tree.
@@ -166,70 +167,6 @@ struct WrapperWalkState {
 	/// A non-storage-mutating TransactionStorage call (`authorize_*`,
 	/// `refresh_*`, `remove_expired_*`, …) was found in the tree.
 	found_management: bool,
-}
-
-/// Walks a wrapper tree, validates the storage calls we'll accept, and records
-/// classification flags into `state`. Returns errors only for inner
-/// `validate_signed` failures or for exceeding `MAX_WRAPPER_DEPTH`. Final
-/// accept/reject is decided by the caller from `state`.
-fn classify_wrapper<T, I>(
-	call: &RuntimeCallOf<T>,
-	depth: u32,
-	in_pure_batch_path: bool,
-	state: &mut WrapperWalkState,
-	who: &T::AccountId,
-	combined_valid: &mut ValidTransaction,
-) -> Result<(), TransactionValidityError>
-where
-	T: Config,
-	I: CallInspector<T>,
-	RuntimeCallOf<T>: IsSubType<Call<T>>,
-{
-	if let Some(inner) = call.is_sub_type() {
-		match inner {
-			Call::store { .. } | Call::store_with_cid_config { .. } => {
-				// Mark and stop — store inside a wrapper is unconditionally rejected.
-				// Skip validate_signed: the caller returns InvalidTransaction::Call
-				// regardless of whether auth would have passed.
-				state.found_store = true;
-			},
-			Call::renew { .. } | Call::renew_content_hash { .. } => {
-				if !in_pure_batch_path {
-					// Reached via a non-list-batch wrapper somewhere above — reject.
-					state.found_renew_outside_batch = true;
-				} else {
-					state.renew_in_batch_count = state.renew_in_batch_count.saturating_add(1);
-					// Once the per-block cap has been exceeded the caller will reject the
-					// transaction anyway; skip the per-call auth check to avoid wasted work.
-					if state.renew_in_batch_count <= T::MaxBlockTransactions::get() {
-						let (valid_tx, _scope) = Pallet::<T>::validate_signed(who, inner)?;
-						*combined_valid = core::mem::take(combined_valid).combine_with(valid_tx);
-					}
-				}
-			},
-			_ => {
-				// Management call (authorize_*, refresh_*, remove_expired_*, ...).
-				state.found_management = true;
-				let (valid_tx, _scope) = Pallet::<T>::validate_signed(who, inner)?;
-				*combined_valid = core::mem::take(combined_valid).combine_with(valid_tx);
-			},
-		}
-		return Ok(());
-	}
-	if depth >= MAX_WRAPPER_DEPTH {
-		tracing::debug!(
-			target: LOG_TARGET,
-			"Wrapper recursion limit exceeded (depth: {depth}), rejecting call",
-		);
-		return Err(InvalidTransaction::ExhaustsResources.into());
-	}
-	if let Some(inner_calls) = I::inspect_wrapper(call) {
-		let next_in_pure = in_pure_batch_path && I::is_list_batch_wrapper(call);
-		for inner in inner_calls {
-			classify_wrapper::<T, I>(inner, depth + 1, next_in_pure, state, who, combined_valid)?;
-		}
-	}
-	Ok(())
 }
 
 /// Transaction extension that validates signed TransactionStorage calls.
@@ -338,11 +275,12 @@ where
 			return Ok((valid_tx, Some(who), origin));
 		}
 
-		// Wrapper call. Walk the tree once: classify every inner storage call,
-		// validate the ones we'll accept, accumulate a combined ValidTransaction.
+		// Wrapper call. Pass 1: classify the tree (no side effects, no validate_signed).
+		// Decide accept/reject from the resulting state. Pass 2 (validation) runs only
+		// for accepted shapes, so a reject reason is reported before any per-call check
+		// has a chance to surface its own error.
 		let mut state = WrapperWalkState::default();
-		let mut combined_valid = ValidTransaction::default();
-		classify_wrapper::<T, I>(call, 0, true, &mut state, &who, &mut combined_valid)?;
+		Self::classify_wrapper(call, 0, true, &mut state)?;
 
 		if state.found_store || state.found_renew_outside_batch {
 			return Err(InvalidTransaction::Call.into());
@@ -354,19 +292,31 @@ where
 			// A batch with more renews than the per-block cap can never fit a block.
 			return Err(InvalidTransaction::ExhaustsResources.into());
 		}
+
+		let has_storage = state.renew_in_batch_count > 0 || state.found_management;
+		if !has_storage {
+			// No TransactionStorage calls found in wrapper.
+			return Ok((ValidTransaction::default(), None, origin));
+		}
+
+		// Pass 2: validate each accepted inner storage call and accumulate the combined
+		// ValidTransaction. `traverse_storage_calls` visits every TransactionStorage sub-type
+		// leaf — exactly the calls pass 1 already approved.
+		let mut combined_valid = ValidTransaction::default();
+		I::traverse_storage_calls(call, 0, &mut |inner_call| {
+			let (valid_tx, _scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
+			combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
+			Ok(())
+		})?;
+
 		if state.renew_in_batch_count > 0 {
 			// Pure-renew batch: rewrite the outer origin so each inner renew dispatch
 			// sees `Origin::AuthorizedBatch` (Utility::batch* propagates the outer origin).
 			origin.set_caller_from(Origin::<T>::AuthorizedBatch { who: who.clone() });
-			return Ok((combined_valid, Some(who), origin));
 		}
-		if state.found_management {
-			// Pure-management batch: origin stays Signed (Authorizer check expects it).
-			return Ok((combined_valid, Some(who), origin));
-		}
-
-		// No TransactionStorage calls found in wrapper.
-		Ok((ValidTransaction::default(), None, origin))
+		// Pure-management batches leave origin as `Signed` — that's what
+		// `Authorizer::ensure_origin` expects at dispatch.
+		Ok((combined_valid, Some(who), origin))
 	}
 
 	fn prepare(
@@ -385,6 +335,63 @@ where
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
 		})?;
 
+		Ok(())
+	}
+}
+
+impl<T: Config + Send + Sync, I: CallInspector<T>> ValidateStorageCalls<T, I>
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+{
+	/// Pass-1 wrapper walk: classify every TransactionStorage leaf into the buckets
+	/// tracked by [`WrapperWalkState`]. Pure inspection — no [`Pallet::validate_signed`]
+	/// calls, no origin rewrite. The caller applies the decision table to `state` and
+	/// only runs a second (validating) pass for accepted shapes; that way a reject
+	/// reason is reported before any per-call validation has a chance to surface its
+	/// own error.
+	///
+	/// `in_pure_batch_path` is `true` iff every wrapper from the extrinsic root down to
+	/// the current node is a list-batch (per [`CallInspector::is_list_batch_wrapper`]).
+	/// Once a non-list-batch wrapper is entered the flag flips to `false` for the rest
+	/// of the recursion — a renew can only be reached "in batch" via an unbroken chain
+	/// of list-batches.
+	fn classify_wrapper(
+		call: &RuntimeCallOf<T>,
+		depth: u32,
+		in_pure_batch_path: bool,
+		state: &mut WrapperWalkState,
+	) -> Result<(), TransactionValidityError> {
+		if let Some(inner) = call.is_sub_type() {
+			match inner {
+				Call::store { .. } | Call::store_with_cid_config { .. } => {
+					state.found_store = true;
+				},
+				Call::renew { .. } | Call::renew_content_hash { .. } =>
+					if in_pure_batch_path {
+						state.renew_in_batch_count = state.renew_in_batch_count.saturating_add(1);
+					} else {
+						state.found_renew_outside_batch = true;
+					},
+				_ => {
+					// Management call (authorize_*, refresh_*, remove_expired_*, ...).
+					state.found_management = true;
+				},
+			}
+			return Ok(());
+		}
+		if depth >= MAX_WRAPPER_DEPTH {
+			tracing::debug!(
+				target: LOG_TARGET,
+				"Wrapper recursion limit exceeded (depth: {depth}), rejecting call",
+			);
+			return Err(InvalidTransaction::ExhaustsResources.into());
+		}
+		if let Some(inner_calls) = I::inspect_wrapper(call) {
+			let next_in_pure = in_pure_batch_path && I::is_list_batch_wrapper(call);
+			for inner in inner_calls {
+				Self::classify_wrapper(inner, depth + 1, next_in_pure, state)?;
+			}
+		}
 		Ok(())
 	}
 }

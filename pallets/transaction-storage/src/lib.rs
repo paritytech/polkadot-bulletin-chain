@@ -1332,10 +1332,7 @@ pub mod pallet {
 		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
 		/// - [`Origin::AuthorizedBatch`] (set by [`extension::ValidateStorageCalls`] on the
-		///   list-batch wrapper path) → [`AuthorizedCaller::Signed`] with a placeholder
-		///   `Account(who)` scope. No current dispatcher reads `scope` on this path; if one is
-		///   added, prefer introducing a distinct [`AuthorizedCaller`] variant over forging a scope
-		///   here.
+		///   list-batch wrapper path) → [`AuthorizedCaller::SignedBatch`]
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
 		///
@@ -1344,24 +1341,18 @@ pub mod pallet {
 		pub fn ensure_authorized(
 			origin: OriginFor<T>,
 		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
-			// 1. Try pallet::Origin::Authorized (set by ValidateStorageCalls extension)
-			let caller = origin.clone().into_caller();
-			if let Ok(Origin::Authorized { who, scope }) = caller.clone().try_into() {
-				return Ok(AuthorizedCaller::Signed { who, scope });
-			}
-			if let Ok(Origin::AuthorizedBatch { who }) = caller.try_into() {
-				return Ok(AuthorizedCaller::Signed {
-					who: who.clone(),
-					scope: AuthorizationScope::Account(who),
-				});
+			match origin.clone().into_caller().try_into() {
+				Ok(Origin::Authorized { who, scope }) =>
+					return Ok(AuthorizedCaller::Signed { who, scope }),
+				Ok(Origin::AuthorizedBatch { who }) =>
+					return Ok(AuthorizedCaller::SignedBatch { who }),
+				Err(_) => {},
 			}
 
-			// 2. Try root
 			if ensure_root(origin.clone()).is_ok() {
 				return Ok(AuthorizedCaller::Root);
 			}
 
-			// 3. Try none (unsigned)
 			ensure_none(origin)?;
 			Ok(AuthorizedCaller::Unsigned)
 		}
