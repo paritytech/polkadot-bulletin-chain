@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink } from "lucide-react";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X } from "lucide-react";
 
 // Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
 const GithubIcon = ({ className }: { className?: string }) => (
@@ -17,11 +17,14 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { Badge } from "@/components/ui/Badge";
+import * as SelectPrimitive from "@radix-ui/react-select";
 import {
   useChainState,
   connectToNetwork,
   switchStorageType,
   STORAGE_CONFIGS,
+  getCustomNetworkUrl,
+  clearCustomNetworkUrl,
   type NetworkId,
   type StorageType,
 } from "@/state/chain.state";
@@ -123,23 +126,103 @@ function AuthorizationStatus() {
 
 function NetworkSwitcher() {
   const { network, networks } = useChainState();
+  const isCustom = network.id === "custom";
+  const activeCustomUrl = isCustom ? network.endpoints[0] : undefined;
+  const [customUrl, setCustomUrl] = useState(() => activeCustomUrl ?? getCustomNetworkUrl());
+
+  useEffect(() => {
+    if (isCustom && activeCustomUrl) setCustomUrl(activeCustomUrl);
+  }, [isCustom, activeCustomUrl]);
 
   const handleNetworkChange = (value: string) => {
+    if (value === "custom") {
+      const saved = getCustomNetworkUrl();
+      connectToNetwork("custom", saved || undefined);
+      if (saved) setCustomUrl(saved);
+      return;
+    }
     connectToNetwork(value as NetworkId);
   };
 
+  const handleCustomConnect = () => {
+    const url = customUrl.trim();
+    if (!url || url === activeCustomUrl) return;
+    connectToNetwork("custom", url);
+  };
+
+  const handleClearCustom = () => {
+    setCustomUrl("");
+    clearCustomNetworkUrl();
+  };
+
+  const selectItems = Object.values(networks).map((net) => (
+    <SelectItem
+      key={net.id}
+      value={net.id}
+      disabled={net.id !== "custom" && net.endpoints.length === 0}
+    >
+      {net.name}
+    </SelectItem>
+  ));
+
+  if (!isCustom) {
+    return (
+      <Select value={network.id} onValueChange={handleNetworkChange}>
+        <SelectTrigger className="w-[260px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>{selectItems}</SelectContent>
+      </Select>
+    );
+  }
+
+  // In custom mode the trigger collapses into a single 260px-wide pill:
+  // [ wss URL input | ✕ | ▾ ]. The chevron is the Radix SelectTrigger so the
+  // dropdown still works to switch back to a preset network.
+  const dirty = customUrl.trim() !== "" && customUrl.trim() !== activeCustomUrl;
   return (
     <Select value={network.id} onValueChange={handleNetworkChange}>
-      <SelectTrigger className="w-[260px]">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {Object.values(networks).map((net) => (
-          <SelectItem key={net.id} value={net.id} disabled={net.endpoints.length === 0}>
-            {net.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
+      <div className="flex h-10 w-[260px] items-center rounded-md border-2 border-primary/60 bg-background pl-2 pr-1 ring-offset-background focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30 focus-within:ring-offset-2">
+        <input
+          value={customUrl}
+          onChange={(e) => setCustomUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleCustomConnect();
+            }
+          }}
+          placeholder="wss://…"
+          className="min-w-0 flex-1 bg-transparent text-sm font-mono placeholder:text-muted-foreground focus:outline-none"
+        />
+        {dirty && (
+          <button
+            type="button"
+            onClick={handleCustomConnect}
+            className="ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary hover:bg-primary/10"
+            title="Connect to this URL"
+          >
+            Go
+          </button>
+        )}
+        {(activeCustomUrl || customUrl) && (
+          <button
+            type="button"
+            onClick={handleClearCustom}
+            className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Remove custom URL"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <SelectPrimitive.Trigger
+          className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          title="Pick another network"
+        >
+          <ChevronDown className="h-4 w-4 opacity-70" />
+        </SelectPrimitive.Trigger>
+      </div>
+      <SelectContent>{selectItems}</SelectContent>
     </Select>
   );
 }
