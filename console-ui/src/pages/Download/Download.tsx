@@ -351,7 +351,10 @@ export function Download() {
       if (bytes.length !== 32) {
         throw new Error("Content hash must be 32 bytes");
       }
-      const mh = digest.create(hashAlgo, bytes);
+      // multiformats `digest.create` types `digest` as `Uint8Array<ArrayBufferLike>`
+      // but `CID.createV1` wants `Uint8Array<ArrayBuffer>`; cast through `any`
+      // at this single seam rather than rewriting the call site.
+      const mh = digest.create(hashAlgo, bytes) as any;
       const cid = CID.createV1(cidCodec, mh);
       setContentHashError(null);
       setCidInput(cid.toString());
