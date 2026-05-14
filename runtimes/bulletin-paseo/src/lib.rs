@@ -986,17 +986,23 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl pallet_bulletin_transaction_storage_runtime_api::TransactionStorageAuthorizationApi<Block, AccountId, BlockNumber> for Runtime {
+	impl pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi<Block, AccountId, BlockNumber> for Runtime {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			let expires_at = pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization_expires_at(account.clone())?;
-			let extent = pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization_extent(account);
-			Some(pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization {
-				expires_at,
-				priority_bytes: extent.bytes_allowance.saturating_sub(extent.bytes),
-				renew_bytes: extent.bytes_allowance,
-			})
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+		}
+
+		fn can_store(account: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+		}
+
+		fn can_renew(account: AccountId, content_hash: [u8; 32]) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, content_hash)
+		}
+
+		fn can_enable_auto_renew(account: AccountId, content_hash: [u8; 32]) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_enable_auto_renew(&account, content_hash)
 		}
 	}
 

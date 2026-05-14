@@ -1,39 +1,53 @@
-//! Runtime API for querying transaction-storage authorizations.
+//! Runtime API for the Bulletin Chain transaction-storage pallet.
+//!
+//! Exposes one summary call and three boolean predicates that mirror the
+//! validation logic of `store`, `renew_content_hash`, and `enable_auto_renew`.
+//! Clients can use these to preview whether a call will be accepted before
+//! signing it.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use bulletin_transaction_storage_primitives::ContentHash;
 use codec::{Codec, Decode, Encode};
 use scale_info::TypeInfo;
 
-/// Summary of an account's storage authorization. Lets a client answer the
-/// three questions an app actually has:
-///
-/// - **Is the authorization still valid?** — `expires_at` is the block at which it lapses; the API
-///   returns `None` for accounts with no active authorization.
-/// - **Will my next `store` call be high-priority?** — yes, iff `size <= priority_bytes` (and a
-///   transaction slot is still available). Stores that exceed `priority_bytes` still validate, just
-///   at base priority.
-/// - **Can I renew?** — yes, iff `size <= renew_bytes`.
+/// Active-authorization summary for an account. Returned by
+/// [`BulletinTransactionStorageApi::account_authorization`] when the account
+/// has an unexpired authorization entry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Encode, Decode, TypeInfo)]
 pub struct AccountAuthorization<BlockNumber> {
 	/// Block at which this account's authorization expires.
 	pub expires_at: BlockNumber,
-	/// Bytes that fit inside the high-priority window for `store` calls
-	/// (`bytes_allowance - bytes`).
-	pub priority_bytes: u64,
-	/// Bytes available for `renew` calls (`bytes_allowance - bytes_permanent`).
-	pub renew_bytes: u64,
+	/// Total byte cap granted by the authorizer.
+	pub bytes_allowance: u64,
+	/// Bytes already consumed by `store` calls.
+	pub bytes_used: u64,
+	/// Bytes already consumed by `renew` calls (counts against the same
+	/// `bytes_allowance` cap).
+	pub bytes_permanent_used: u64,
 }
 
 sp_api::decl_runtime_apis! {
-	/// Runtime API for querying transaction-storage authorizations.
-	pub trait TransactionStorageAuthorizationApi<AccountId, BlockNumber>
+	/// Runtime API for the Bulletin Chain transaction-storage pallet.
+	pub trait BulletinTransactionStorageApi<AccountId, BlockNumber>
 	where
 		AccountId: Codec,
 		BlockNumber: Codec,
 	{
 		/// Authorization summary for `account`, or `None` if the account has
-		/// no active authorization.
+		/// no unexpired authorization.
 		fn account_authorization(account: AccountId) -> Option<AccountAuthorization<BlockNumber>>;
+
+		/// Returns `true` iff a `store(data)` call where `data.len() == data_len`
+		/// would currently pass transaction validation for `account`.
+		fn can_store(account: AccountId, data_len: u32) -> bool;
+
+		/// Returns `true` iff a `renew_content_hash(content_hash)` call would
+		/// currently pass transaction validation for `account`.
+		fn can_renew(account: AccountId, content_hash: ContentHash) -> bool;
+
+		/// Returns `true` iff an `enable_auto_renew(content_hash)` call would
+		/// currently succeed for `account`.
+		fn can_enable_auto_renew(account: AccountId, content_hash: ContentHash) -> bool;
 	}
 }

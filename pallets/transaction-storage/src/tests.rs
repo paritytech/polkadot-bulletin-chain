@@ -64,6 +64,8 @@ type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
+mod runtime_api;
+
 #[test]
 fn discards_data() {
 	new_test_ext().execute_with(|| {

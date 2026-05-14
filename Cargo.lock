@@ -8065,6 +8065,7 @@ dependencies = [
  "array-bytes 6.2.3",
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
@@ -8076,6 +8077,7 @@ dependencies = [
 name = "pallet-bulletin-transaction-storage-runtime-api"
 version = "0.1.0"
 dependencies = [
+ "bulletin-transaction-storage-primitives",
  "parity-scale-codec",
  "scale-info",
  "sp-api",
