@@ -26,7 +26,7 @@ To pin a different polkadot-sdk version for one session, override the env var:
 ```bash
 POLKADOT_NODE_VERSION=polkadot-stable2603 just binaries-polkadot
 # OR by commit hash (source-built):
-POLKADOT_NODE_VERSION=afba6ccb0a75908f2181ed0e849ddf827c71c501 just binaries-polkadot
+POLKADOT_NODE_VERSION=d6a4f5977b39bf5e5152e2f2bb6719ea92b992ea just binaries-polkadot
 ```
 
 To use a different parachain ID for the spec, set `PARACHAIN_ID`:

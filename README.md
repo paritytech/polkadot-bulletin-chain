@@ -204,7 +204,7 @@ Override at the shell to pin a different version for one session:
 
 ```bash
 POLKADOT_NODE_VERSION=polkadot-stable2603 just binaries-polkadot
-POLKADOT_NODE_VERSION=afba6ccb0a75908f2181ed0e849ddf827c71c501 just binaries-polkadot
+POLKADOT_NODE_VERSION=d6a4f5977b39bf5e5152e2f2bb6719ea92b992ea just binaries-polkadot
 ```
 
 Useful recipes:
