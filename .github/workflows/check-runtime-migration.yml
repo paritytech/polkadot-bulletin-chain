@@ -3,22 +3,15 @@ name: Check Runtime Migrations
 # If you modify more jobs, ensure that you add them as required to the job "confirmMigrationsPassed"
 # which is located at the end of this file (more info in the job)
 
-# Controls when the action will run.
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
   push:
     branches: [main, "release-*"]
   pull_request:
     branches: [main, "release-*"]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-
   schedule:
     - cron: '0 5 * * *'  # Daily at 5 AM UTC
 
-# Cancel a currently running workflow from the same PR, branch or tag when a new workflow is
-# triggered (ref https://stackoverflow.com/a/72408109)
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -81,13 +74,19 @@ jobs:
       - name: Load common environment variables via env file
         run: cat .github/env >> $GITHUB_ENV
 
-      - name: Install try-runtime-cli
+      - uses: ./.github/actions/install-just
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
+
+      - name: Cache try-runtime CLI
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
+          key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
+
+      - name: Resolve try-runtime + add to PATH
+        if: steps.cache-restore.outputs.cache-matched-key == ''
+        run: echo "$(just binaries-try-runtime)" >> "$GITHUB_PATH"
 
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -165,12 +164,16 @@ jobs:
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
-      - name: Install try-runtime-cli
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
+      - uses: ./.github/actions/install-just
+
+      - name: Cache try-runtime CLI
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
+          key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
+
+      - name: Resolve try-runtime + add to PATH
+        run: echo "$(just binaries-try-runtime)" >> "$GITHUB_PATH"
 
       - name: Restore snapshot from cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -200,10 +203,6 @@ jobs:
         with:
           path: target/external-runtimes/${{ matrix.runtime.name }}-try-runtime
           key: external-runtime-try-runtime-${{ matrix.runtime.name }}-${{ steps.external-runtime.outputs.sha }}
-
-      - name: Install just
-        if: ${{ matrix.runtime.external_runtime != null }}
-        run: cargo install just --locked || true
 
       - name: Build external runtime (try-runtime)
         if: ${{ matrix.runtime.external_runtime != null }}

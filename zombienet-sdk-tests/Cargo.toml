@@ -1,0 +1,49 @@
+[package]
+name = "bulletin-chain-zombienet-sdk-tests"
+version = "0.1.0"
+description = "Zombienet-sdk tests for Polkadot Bulletin Chain"
+authors.workspace = true
+edition.workspace = true
+publish = false
+autotests = false
+
+[[test]]
+name = "tests"
+path = "tests/tests.rs"
+
+[dependencies]
+anyhow = "1"
+blake2 = "0.10"
+cid = { workspace = true, features = ["std"] }
+hex.workspace = true
+multihash = "0.19"
+prost = "0.13"
+serde_json = { workspace = true, features = ["std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tracing = { workspace = true, default-features = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+twox-hash = "2"
+
+# Zombienet SDK
+zombienet-sdk = "0.3.13"
+zombienet-orchestrator = "0.3.13"
+
+# Subxt for transaction submission (must match zombienet-sdk's version)
+subxt = { version = "0.43", default-features = false, features = ["jsonrpsee", "native"] }
+subxt-signer = { version = "0.43", features = ["sr25519"] }
+
+# For bitswap client
+litep2p = { workspace = true, features = ["websocket"] }
+futures.workspace = true
+async-trait = "0.1"
+bytes = "1"
+
+# Source compile-time limits (e.g. `DEFAULT_MAX_BLOCK_TRANSACTIONS`) from the pallet.
+pallet-bulletin-transaction-storage = { path = "../pallets/transaction-storage", default-features = false, features = ["std"] }
+
+[features]
+zombie-sync-tests = []
+zombie-auto-renew-tests = []
+
+[build-dependencies]
+prost-build = "0.13"

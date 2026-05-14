@@ -29,12 +29,17 @@ use super::{
 		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
-	AuthorizationExtent, AuthorizationScope, AuthorizedCaller, Event, TransactionInfo,
-	TransactionKind, AUTHORIZATION_NOT_EXPIRED, BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED,
-	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED,
-	PERMANENT_STORAGE_NEAR_CAP_PERCENT,
+	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
+	AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo, TransactionKind,
+	AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
+	CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
-use crate::migrations::v1::OldTransactionInfo;
+
+use crate::{
+	migrations::{v1::OldTransactionInfo, PopulateAllowedAuthorizersIfEmpty},
+	mock::RuntimeGenesisConfig,
+};
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 use codec::Encode;
 use polkadot_sdk_frame::{
@@ -61,6 +66,14 @@ type PermanentStorageUsed = super::PermanentStorageUsed<Test>;
 type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
 type TransactionByContentHash = super::TransactionByContentHash<Test>;
+
+fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
+	AuthorizerBudget {
+		quota: Some(Quota { transactions, bytes }),
+		authorization_period: None,
+		valid_until: None,
+	}
+}
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
@@ -1811,6 +1824,139 @@ type AutoRenewals = super::AutoRenewals<Test>;
 type PendingAutoRenewals = super::PendingAutoRenewals<Test>;
 
 #[test]
+fn add_authorizer_inserts_overwrites_and_emits_event() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		// First insert.
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			test_budget(100, 1024),
+		));
+		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap(), test_budget(100, 1024));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AuthorizerAdded { who }));
+
+		// Second call with a different budget overwrites the first.
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			test_budget(200, 2048),
+		));
+		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap(), test_budget(200, 2048));
+	});
+}
+
+#[test]
+fn remove_authorizer_removes_emits_event_and_ignores_absent() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(100, 1024));
+
+		// Present → remove, emits event.
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AuthorizerRemoved {
+			who,
+		}));
+
+		// Absent → no-op success, no phantom event (state unchanged).
+		let events_before = System::events().len();
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+		assert_eq!(System::events().len(), events_before);
+	});
+}
+
+#[test]
+fn add_remove_authorizer_reject_non_manager_origin() {
+	new_test_ext().execute_with(|| {
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(100, 1024));
+		assert_noop!(
+			TransactionStorage::add_authorizer(
+				RuntimeOrigin::signed(1),
+				who,
+				test_budget(100, 1024),
+			),
+			DispatchError::BadOrigin,
+		);
+		assert_noop!(
+			TransactionStorage::remove_authorizer(RuntimeOrigin::signed(1), who),
+			DispatchError::BadOrigin,
+		);
+	});
+}
+
+#[test]
+fn ensure_allowed_authorizers_origin_rules() {
+	new_test_ext().execute_with(|| {
+		let registered = 7u64;
+		AllowedAuthorizers::<Test>::insert(registered, test_budget(100, 1024));
+		// Signed by a registered account → accepted, returns the account.
+		assert_eq!(
+			EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(registered)).ok(),
+			Some(registered),
+		);
+		// Signed by an unregistered account, Root, and None all rejected.
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(99)).is_err());
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::root()).is_err());
+		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::none()).is_err());
+	});
+}
+
+#[test]
+fn genesis_populates_allowed_authorizers() {
+	let t = RuntimeGenesisConfig {
+		system: Default::default(),
+		transaction_storage: crate::GenesisConfig::<Test> {
+			retention_period: 10,
+			byte_fee: 2,
+			entry_fee: 200,
+			account_authorizations: vec![],
+			preimage_authorizations: vec![],
+			allowed_authorizers: vec![(1, 100, 1024), (2, 200, 2048)],
+		},
+	}
+	.build_storage()
+	.unwrap();
+	TestExternalities::new(t).execute_with(|| {
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
+		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), test_budget(100, 1024));
+		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), test_budget(200, 2048));
+	});
+}
+
+#[test]
+fn populate_allowed_authorizers_migration_behavior() {
+	parameter_types! {
+		pub Seed: Vec<u64> = vec![10, 20];
+		pub MigrationBudget: AuthorizerBudget<u64> = test_budget(500, 5000);
+	}
+
+	// 1. Empty storage → seeds the configured accounts with the configured budget.
+	new_test_ext().execute_with(|| {
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 0);
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
+		assert_eq!(AllowedAuthorizers::<Test>::get(10).unwrap(), test_budget(500, 5000));
+
+		// 2. Idempotent: rerun on the now-populated storage is a no-op.
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
+	});
+
+	// 3. Non-empty storage (existing unrelated entry) → migration skips entirely.
+	new_test_ext().execute_with(|| {
+		AllowedAuthorizers::<Test>::insert(99u64, test_budget(100, 1024));
+		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
+		assert!(AllowedAuthorizers::<Test>::contains_key(99));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(10));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(20));
+	});
+}
+
+#[test]
 fn enable_auto_renew_works() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -2416,8 +2562,7 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 			Some(Call::apply_block_inherents { proof: None }) => {},
 			other => panic!(
 				"expected Some(apply_block_inherents {{ proof: None }}) when only pending renewals \
-				 are present, got {:?}",
-				other
+				 are present, got {other:?}"
 			),
 		}
 	});
@@ -2891,8 +3036,7 @@ fn migrate_v2_to_v3_insufficient_weight_returns_err() {
 		let res = MigrateV2ToV3::<Test>::step(None, &mut meter);
 		assert!(
 			matches!(res, Err(SteppedMigrationError::InsufficientWeight { .. })),
-			"expected InsufficientWeight, got {:?}",
-			res,
+			"expected InsufficientWeight, got {res:?}"
 		);
 	});
 }
@@ -3375,6 +3519,268 @@ fn transactions_at_handles_mixed_v2_and_v3_entries() {
 	});
 }
 
+// ---- Authorizer budget tests ----
+
+#[test]
+fn remove_exhausted_authorizer_removes_zero_budget_entries() {
+	// Any of: both zero, transactions zero, bytes zero — all qualify as "exhausted".
+	for (tx, bytes) in [(0, 0), (0, 1000), (100, 0)] {
+		new_test_ext().execute_with(|| {
+			run_to_block(1, || None);
+			let who = 42u64;
+			AllowedAuthorizers::<Test>::insert(who, test_budget(tx, bytes));
+
+			let call = Call::remove_exhausted_authorizer { who };
+			assert_ok!(TransactionStorage::pre_dispatch(&call));
+			assert_ok!(
+				TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who,)
+			);
+			assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+			System::assert_has_event(RuntimeEvent::TransactionStorage(
+				Event::ExhaustedAuthorizerRemoved { who },
+			));
+		});
+	}
+}
+
+#[test]
+fn remove_exhausted_authorizer_rejects_when_not_removable() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+
+		// Missing entry → AuthorizerNotFound (mempool + dispatch agree).
+		let call = Call::remove_exhausted_authorizer { who: 99u64 };
+		assert_noop!(TransactionStorage::pre_dispatch(&call), AUTHORIZER_NOT_FOUND);
+		assert_noop!(
+			TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), 99u64),
+			Error::AuthorizerNotFound,
+		);
+
+		// Present with non-zero budget + no expiry → AuthorizerBudgetNotExhausted.
+		let who = 42u64;
+		AllowedAuthorizers::<Test>::insert(who, test_budget(10, 1000));
+		let call = Call::remove_exhausted_authorizer { who };
+		assert_noop!(TransactionStorage::pre_dispatch(&call), AUTHORIZATION_NOT_EXHAUSTED);
+		assert_noop!(
+			TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who),
+			Error::AuthorizerBudgetNotExhausted,
+		);
+		assert!(AllowedAuthorizers::<Test>::contains_key(who));
+	});
+}
+
+#[test]
+fn add_authorizer_authorization_period_override() {
+	// Mock's `AuthorizationPeriod = 10`. Override must satisfy `0 < period < 10`.
+	new_test_ext().execute_with(|| {
+		let who = 42u64;
+		let ok = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 1024) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, ok));
+		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap().authorization_period, Some(5));
+
+		// Reject 0, 10, 11 — anything outside the strict-open `(0, 10)` interval.
+		for period in [0, 10, 11] {
+			let bad =
+				AuthorizerBudget { authorization_period: Some(period), ..test_budget(100, 1024) };
+			assert_noop!(
+				TransactionStorage::add_authorizer(RuntimeOrigin::root(), 43u64, bad),
+				Error::InvalidAuthorizationPeriodOverride,
+			);
+		}
+		assert!(!AllowedAuthorizers::<Test>::contains_key(43u64));
+	});
+}
+
+#[test]
+fn add_authorizer_valid_until() {
+	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		// `valid_until` is absolute and must be strictly in the future.
+		let ok = AuthorizerBudget { valid_until: Some(25), ..test_budget(100, 1024) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, ok));
+		assert_eq!(AllowedAuthorizers::<Test>::get(42u64).unwrap().valid_until, Some(25));
+
+		// Reject `== now` (expired immediately) and `< now` (already past).
+		for t in [5, 0] {
+			let bad = AuthorizerBudget { valid_until: Some(t), ..test_budget(100, 1024) };
+			assert_noop!(
+				TransactionStorage::add_authorizer(RuntimeOrigin::root(), 99u64, bad),
+				Error::InvalidValidUntil,
+			);
+		}
+		assert!(!AllowedAuthorizers::<Test>::contains_key(99u64));
+	});
+}
+
+#[test]
+fn expired_authorizer_cannot_authorize() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		// `valid_until = 6` → authorizes through block 5, expires at block 6.
+		let budget = AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 10_000) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), authorizer, budget,));
+		let call = Call::authorize_account { who: 1, transactions: 1, bytes: 1000 };
+
+		// Still valid at block 5.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&authorizer, &call));
+
+		// Expired at block 6 (now >= valid_until).
+		run_to_block(6, || None);
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&authorizer, &call),
+			InvalidTransaction::BadSigner,
+		);
+	});
+}
+
+#[test]
+fn remove_exhausted_authorizer_works_for_expired() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 42u64;
+		// Has budget but expires at block 6.
+		let budget = AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 1000) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, budget));
+
+		// Before expiry: removal rejected (budget present, not expired).
+		assert_noop!(
+			TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who),
+			Error::AuthorizerBudgetNotExhausted,
+		);
+
+		// After expiry: removal succeeds.
+		run_to_block(6, || None);
+		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
+		assert!(!AllowedAuthorizers::<Test>::contains_key(who));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::ExhaustedAuthorizerRemoved { who },
+		));
+	});
+}
+
+#[test]
+fn authorizer_budget_decrements_on_authorize() {
+	// `authorize_account` consumes `(transactions, bytes)`; `authorize_preimage` is
+	// equivalent to consuming `(1, max_size)`. Budget consumption happens inside
+	// the dispatch body, so we dispatch via `Signed(authorizer)` directly.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(5, 10_000));
+
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			1,
+			2,
+			4000,
+		));
+		assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap(), test_budget(3, 6000));
+
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::signed(authorizer),
+			[0u8; 32],
+			3000,
+		));
+		assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap(), test_budget(2, 3000));
+	});
+}
+
+#[test]
+fn authorizer_budget_insufficient_rejects_without_writing() {
+	// Both axes (transactions, bytes) gate independently; on rejection the budget
+	// must be unchanged (`try_mutate` rolls back when the closure returns Err).
+	let scenarios = [
+		// (initial_budget, transactions, bytes)
+		(test_budget(1, 10_000), 5, 1000),
+		(test_budget(100, 500), 1, 1000),
+	];
+	for (initial, transactions, bytes) in scenarios {
+		new_test_ext().execute_with(|| {
+			run_to_block(1, || None);
+			let authorizer = 10u64;
+			AllowedAuthorizers::<Test>::insert(authorizer, initial.clone());
+			assert_noop!(
+				TransactionStorage::authorize_account(
+					RuntimeOrigin::signed(authorizer),
+					1,
+					transactions,
+					bytes,
+				),
+				Error::InsufficientAuthorizerBudget,
+			);
+			assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap(), initial);
+		});
+	}
+}
+
+#[test]
+fn root_bypasses_authorizer_budget() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		// Root can authorize without being in AllowedAuthorizers
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), 1, 10, 10_000));
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(1),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 10_000,
+				transactions: 0,
+				transactions_allowance: 10,
+			},
+		);
+	});
+}
+
+#[test]
+fn authorization_period_override_applied_at_dispatch() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		// Authorizer with custom 5-block period (default is 10)
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
+				authorization_period: Some(5),
+				valid_until: None,
+			},
+		);
+
+		let who = 1u64;
+		// Dispatch signed by the authorizer — `authorize_account` reads the override
+		// directly from `AllowedAuthorizers` at dispatch time.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			who,
+			1,
+			1000,
+		));
+
+		// The authorization should expire at block 1 + 5 = 6 (not 1 + 10 = 11)
+		// Check: at block 5, authorization still valid
+		run_to_block(5, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 1000,
+				transactions: 0,
+				transactions_allowance: 1,
+			},
+		);
+		// At block 6, authorization expired — extent reads as zeros.
+		run_to_block(6, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
 #[test]
 fn store_records_extrinsic_index_in_transaction_info() {
 	new_test_ext().execute_with(|| {
@@ -3447,4 +3853,332 @@ fn transaction_info_projects_into_upstream_runtime_api_type() {
 	assert_eq!(projected.hashing, HashingAlgorithm::Blake2b256);
 	assert_eq!(projected.cid_codec, RAW_CID_CODEC);
 	assert_eq!(projected.extrinsic_index, 7);
+}
+
+// ============================================================================
+// Auto-renew coverage gap-closing tests
+// ============================================================================
+
+/// `enable_auto_renew` rejects a second call for the same content hash, even from the
+/// same account, with `AutoRenewalAlreadyEnabled`.
+#[test]
+fn enable_auto_renew_rejects_already_enabled() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+		assert_noop!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
+			Error::AutoRenewalAlreadyEnabled,
+		);
+	});
+}
+
+/// `enable_auto_renew` rejects when the caller's authorization has expired
+/// (`expired()` is `now >= expiration`). Folds into `AuthorizationNotFound`.
+#[test]
+fn enable_auto_renew_rejects_expired_authorization() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		// Finalize block 1 so its `BlockTransactions` lands in `Transactions[1]` (on_finalize
+		// runs at the *start* of the next `run_to_block`).
+		run_to_block(2, || None);
+
+		// AuthorizationPeriod = 10; the auth granted at block 1 expires at block 11. Use
+		// `init_block` to skip the on_finalize proof check at block 11 (Transactions[1]
+		// is now populated and would otherwise require a proof we don't want to construct).
+		init_block(11);
+
+		assert_noop!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
+			Error::AuthorizationNotFound,
+		);
+	});
+}
+
+/// `enable_auto_renew` snapshot-checks `has_permanent_capacity(tx_info.size)`. When the
+/// per-account `bytes_allowance` cannot fit one more renewal, the call is rejected
+/// (folded into `AuthorizationNotFound`).
+#[test]
+fn enable_auto_renew_rejects_insufficient_capacity() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// bytes_allowance = 1000 < data.len() = 2000 → snapshot check `0 + 2000 ≤ 1000`
+		// fails. `store` via unsigned origin does not consume the per-account counter,
+		// so `bytes_permanent` stays at 0 going into `enable_auto_renew`.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 1000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		assert_noop!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
+			Error::AuthorizationNotFound,
+		);
+	});
+}
+
+/// `disable_auto_renew` dispatched in the same block as the renewal does NOT prevent the
+/// renewal. `on_initialize` captures the entry into `PendingAutoRenewals` as a snapshot;
+/// `do_process_auto_renewals` then iterates that vec without re-reading
+/// `AutoRenewals[hash]`. So disabling between `on_initialize` and `apply_block_inherents`
+/// in the renewal block is a no-op for the in-flight cycle — the caller still sees one
+/// final `DataAutoRenewed` event. Subsequent cycles are correctly suppressed because
+/// `AutoRenewals[hash]` is gone for the next on_initialize sweep.
+#[test]
+fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		// Renewal block: on_initialize captures the entry into PendingAutoRenewals.
+		init_block(12);
+		assert_eq!(PendingAutoRenewals::get().len(), 1);
+
+		// Refresh authorization (original expired at block 11).
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+
+		// Disable in the normal section — after on_initialize, before the inherent.
+		assert_ok!(TransactionStorage::disable_auto_renew(
+			RuntimeOrigin::signed(who),
+			content_hash,
+		));
+		assert!(AutoRenewals::get(content_hash).is_none(), "disable cleared the registration");
+
+		// The mandatory inherent still iterates the captured pending vec and renews.
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: who,
+		}));
+		// AutoRenewals stays gone after the block — no further cycles.
+		assert!(AutoRenewals::get(content_hash).is_none());
+	});
+}
+
+/// `do_process_auto_renewals` emits `AutoRenewalFailed` when `check_authorization`
+/// returns `CHAIN_PERMANENT_CAP_REACHED` — i.e. the chain-wide `PermanentStorageUsed`
+/// counter would exceed `MaxPermanentStorageSize` — even if the per-account budget is
+/// fine.
+#[test]
+fn auto_renewal_fails_on_chain_wide_permanent_cap() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Per-account budget comfortably large — chain-wide cap is the only gate.
+		MaxPermanentStorageSize::set(&3000);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			10,
+			1_000_000,
+		));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			10,
+			1_000_000,
+		));
+		// Push the chain-wide counter just under cap so the 2000-byte renewal overshoots
+		// (2000 + 2000 > 3000).
+		PermanentStorageUsed::put(2000);
+
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash,
+			account: who,
+		}));
+		assert!(AutoRenewals::get(content_hash).is_none());
+		// Per-account counters untouched — failure happened before consume.
+		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 0,);
+	});
+}
+
+/// `RetentionPeriod` change mid-cycle shifts the `obsolete = n - RP - 1` window. Raising
+/// RP after auto-renew is enabled defers the renewal block — the OLD renewal point
+/// becomes a normal block (no pending), and the renewal fires later at the NEW window
+/// boundary.
+#[test]
+fn auto_renew_obeys_updated_retention_period() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		// Extend RetentionPeriod from 10 → 20.
+		RetentionPeriod::put(20u64);
+
+		// Block 12 was the OLD renewal boundary. With RP=20, `obsolete = 12 - 21 = 0`
+		// (saturating). Transactions[1] must NOT be pulled.
+		init_block(12);
+		assert!(
+			PendingAutoRenewals::get().is_empty(),
+			"RP change should push the obsolete boundary out",
+		);
+		assert!(Transactions::get(1).is_some(), "Transactions[1] still present at block 12");
+
+		// Block 22 is the NEW renewal boundary (`obsolete = 22 - 21 = 1`).
+		init_block(22);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_eq!(PendingAutoRenewals::get().len(), 1);
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: who,
+		}));
+	});
+}
+
+/// `enable_auto_renew` is signed by the *registrant*, who may not be the storer.
+/// `do_process_auto_renewals` consumes the registrant's authorization for each cycle,
+/// not the storer's. Verifies: Bob registers auto-renew on data Alice stored, and Bob's
+/// `bytes_permanent` is consumed.
+#[test]
+fn auto_renew_consumes_registrant_authorization_not_storer() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let alice = 1;
+		let bob = 2;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		// Bob — not Alice — enables auto-renew.
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(bob), content_hash,)
+		);
+		assert_eq!(AutoRenewals::get(content_hash).unwrap().account, bob);
+
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
+		// Alice's `bytes_permanent` is untouched; Bob's was consumed.
+		assert_eq!(TransactionStorage::account_authorization_extent(alice).bytes_permanent, 0);
+		assert_eq!(TransactionStorage::account_authorization_extent(bob).bytes_permanent, 2000);
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: bob,
+		}));
+	});
+}
+
+/// `refresh_account_authorization` only extends `expiration`. If `bytes_permanent` is
+/// already at or near the per-account cap, refreshing does NOT reset counters, so the
+/// next auto-renew cycle still fails on the per-account axis (not on expiration).
+#[test]
+fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// Tight cap: one renewal fits, the second exceeds it.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 3000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(
+			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		);
+
+		// Cycle 1: succeeds, `bytes_permanent → 2000`. Re-auth resets the fresh expired
+		// entry (this overwrites the original since AuthorizationPeriod = 10 expired at
+		// block 11), but new bytes_allowance is still 3000.
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 3000));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		let after_cycle_1 = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(after_cycle_1.bytes_permanent, 2000);
+		assert!(AutoRenewals::get(content_hash).is_some());
+
+		// Carry BlockTransactions[12] → Transactions[12].
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
+
+		// Refresh at block 22 (the re-auth's expiration boundary), extending expiration
+		// to 32 so block 23's renewal sees an unexpired auth — but counters must NOT
+		// reset.
+		init_block(22);
+		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who,));
+		let after_refresh = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(after_refresh, after_cycle_1, "refresh must not touch the extent");
+
+		// Cycle 2 at block 23: per-account cap (3000) cannot fit another 2000-byte
+		// renewal on top of the consumed 2000 → AutoRenewalFailed on the per-account
+		// axis (not on expiration — refresh kept it alive).
+		init_block(23);
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash,
+			account: who,
+		}));
+		assert!(AutoRenewals::get(content_hash).is_none());
+	});
 }
