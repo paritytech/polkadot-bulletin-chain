@@ -8,7 +8,7 @@ use crate::{
 	test_log,
 	utils::{
 		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
-		blake2_256, build_parachain_network_config_single_collator, content_hash_and_cid,
+		blake2_256, build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		count_event, disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have,
 		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
 		set_retention_period, set_retention_period_finalized, submit_renew_pair,
@@ -44,6 +44,14 @@ async fn current_best_block(
 		.await
 		.ok_or_else(|| anyhow::anyhow!("subscribe_best stream empty"))??;
 	Ok(block)
+}
+
+/// Fetch the latest finalized block. Use this when event/storage reads must be stable —
+/// best-view can briefly follow a non-canonical branch as chainHead_v2 resolves.
+async fn current_finalized_block(
+	client: &OnlineClient<SubstrateConfig>,
+) -> Result<subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>> {
+	Ok(client.blocks().at_latest().await?)
 }
 
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
@@ -135,7 +143,10 @@ async fn spawn_shared_harness(
 ) -> Result<std::sync::Arc<SharedHarness>> {
 	tracing::info!("[{}] spawning shared zombienet network", label);
 	verify_parachain_binaries()?;
-	let config = build_parachain_network_config_single_collator(para_node_args)?;
+	// 3 relay validators give a fault-tolerant GRANDPA quorum; with only 2, any brief stall
+	// halts finality and widens the best-vs-finalized window, which leaks into event-reading
+	// race conditions.
+	let config = build_parachain_network_config_three_relay_validators(para_node_args)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 	let relay_alice = network
@@ -342,7 +353,7 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_LESS_THAN_RETENTION);
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -417,7 +428,7 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_LESS_THAN_RETENTION);
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -1290,11 +1301,12 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		exhaustion_block,
 		last_renewal_block
 	);
-	wait_for_block_height(collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
 	let mut total_failed: u32 = 0;
 	let mut total_renewed_post_window: u32 = 0;
 	for n in exhaustion_block..=exhaustion_block + 1 {
-		let hash = block_hash_at(client, n).await?;
+		let hash = finalized_block_hash_at(client, n).await?;
 		let events = client.blocks().at(hash).await?.events().await?;
 		total_failed += count_event(&events, "AutoRenewalFailed");
 		total_renewed_post_window += count_event(&events, "DataAutoRenewed");
@@ -1344,7 +1356,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 
 	verify_parachain_binaries()?;
 
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
+	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -1858,7 +1870,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	);
 
 	verify_parachain_binaries()?;
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
+	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 	let relay_alice = network.get_node("alice").context("relay alice")?;
@@ -2200,7 +2212,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	);
 
 	verify_parachain_binaries()?;
-	let config = build_parachain_network_config_single_collator(get_para_node_args())?;
+	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 	let relay_alice = network.get_node("alice").context("relay alice")?;
@@ -2853,7 +2865,7 @@ async fn run_pruning_restart_scenario(
 		Some(n) => get_para_node_args_with_pruning(n),
 		None => get_para_node_args(),
 	};
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -3095,14 +3107,37 @@ async fn block_hash_at(
 	Ok(current.hash())
 }
 
+/// Locate the canonical block at `target` by walking back from the latest finalized block.
+/// Caller is responsible for ensuring finalized has reached `target` first
+/// (e.g. via `wait_for_finalized_height`).
+async fn finalized_block_hash_at(
+	client: &OnlineClient<SubstrateConfig>,
+	target: u64,
+) -> Result<subxt::utils::H256> {
+	let mut current = current_finalized_block(client).await?;
+	if (current.number() as u64) < target {
+		anyhow::bail!(
+			"finalized height {} has not reached target {}; wait for finalization first",
+			current.number(),
+			target
+		);
+	}
+	while (current.number() as u64) > target {
+		let parent_hash = current.header().parent_hash;
+		current = client.blocks().at(parent_hash).await?;
+	}
+	Ok(current.hash())
+}
+
 /// Assert exactly one `ProofChecked` event at the given block; verifies the storage-proof
 /// step of `apply_block_inherents` actually ran for `Transactions[block - RetentionPeriod]`.
+/// Reads at the canonical (finalized) block — caller must ensure finality has reached `block`.
 async fn assert_proof_checked_at(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u64,
 	context: &str,
 ) -> Result<()> {
-	let hash = block_hash_at(client, block).await?;
+	let hash = finalized_block_hash_at(client, block).await?;
 	let events = client.blocks().at(hash).await?.events().await?;
 	let count = count_event(&events, "ProofChecked");
 	assert_eq!(count, 1, "{}: expected 1 ProofChecked at block {}, saw {}", context, block, count);
@@ -3211,11 +3246,11 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	nonce += 1;
 	tracing::info!("Auto-renewal enabled");
 
-	wait_for_block_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	// Proof for the original store fires at `r1 - 1 = store_block + RP`.
 	assert_proof_checked_at(client, r1 - 1, "auth_expires cycle 1").await?;
 	dump_renewal_window(client, r1, "auth_expires cycle 1").await?;
-	let r1_hash = block_hash_at(client, r1).await?;
+	let r1_hash = finalized_block_hash_at(client, r1).await?;
 	let r1_events = client.blocks().at(r1_hash).await?.events().await?;
 	assert_eq!(
 		count_event(&r1_events, "DataAutoRenewed"),
@@ -3231,10 +3266,10 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 	tracing::info!("[cycle 1] ✓ DataAutoRenewed at block {}", r1);
 
-	wait_for_block_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	// Proof for the cycle-1 renewal at r1 fires at `r2 - 1 = r1 + RP`.
 	assert_proof_checked_at(client, r2 - 1, "auth_expires cycle 2").await?;
-	let r2_hash = block_hash_at(client, r2).await?;
+	let r2_hash = finalized_block_hash_at(client, r2).await?;
 	let r2_events = client.blocks().at(r2_hash).await?.events().await?;
 	assert_eq!(
 		count_event(&r2_events, "AutoRenewalFailed"),
@@ -3295,10 +3330,10 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	tracing::info!("Auto-renewal enabled for second item");
 
 	let r1_after = store2_block + cadence;
-	wait_for_block_height(collator1, r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	// Proof for the second store fires at `r1_after - 1 = store2_block + RP`.
 	assert_proof_checked_at(client, r1_after - 1, "post-reauth cycle 1").await?;
-	let r1_after_hash = block_hash_at(client, r1_after).await?;
+	let r1_after_hash = finalized_block_hash_at(client, r1_after).await?;
 	let r1_after_events = client.blocks().at(r1_after_hash).await?.events().await?;
 	assert_eq!(
 		count_event(&r1_after_events, "DataAutoRenewed"),
