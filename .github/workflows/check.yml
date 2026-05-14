@@ -171,7 +171,7 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache frame-omni-bencher
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5

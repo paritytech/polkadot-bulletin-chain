@@ -76,7 +76,7 @@ jobs:
 
       - name: Ensure `just` is available
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache try-runtime CLI
         if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -166,7 +166,7 @@ jobs:
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache try-runtime CLI
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5

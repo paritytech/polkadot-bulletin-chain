@@ -178,7 +178,7 @@ jobs:
 
       - name: Ensure `just` is available
         if: startsWith(github.event.inputs.cmd, 'bench')
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache frame-omni-bencher
         if: startsWith(github.event.inputs.cmd, 'bench')

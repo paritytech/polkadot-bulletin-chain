@@ -51,7 +51,7 @@ binaries-all: binaries-polkadot binaries-bencher binaries-chain-spec-builder bin
 chain-spec runtime="westend":
     #!/usr/bin/env bash
     set -euo pipefail
-    CSB_DIR="$(./scripts/get_polkadot_binaries.sh chain-spec-builder)"
+    CSB_DIR="$(just binaries-chain-spec-builder)"
     export PATH="$CSB_DIR:$PATH"
     ./scripts/create_bulletin_{{runtime}}_spec.sh
 
@@ -74,8 +74,8 @@ test-pallets:
 test-zombienet-auto-renew runtime="westend" group="all":
     #!/usr/bin/env bash
     set -euo pipefail
-    POLKADOT_BIN_DIR="$(./scripts/get_polkadot_binaries.sh polkadot-node)"
-    CSB_DIR="$(./scripts/get_polkadot_binaries.sh chain-spec-builder)"
+    POLKADOT_BIN_DIR="$(just binaries-polkadot)"
+    CSB_DIR="$(just binaries-chain-spec-builder)"
     export PATH="$CSB_DIR:$PATH"
     ./scripts/create_bulletin_{{runtime}}_spec.sh
     export ZOMBIE_PROVIDER=native
@@ -124,8 +124,8 @@ test-zombienet-auto-renew runtime="westend" group="all":
 test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     #!/usr/bin/env bash
     set -euo pipefail
-    POLKADOT_BIN_DIR="$(./scripts/get_polkadot_binaries.sh polkadot-node)"
-    CSB_DIR="$(./scripts/get_polkadot_binaries.sh chain-spec-builder)"
+    POLKADOT_BIN_DIR="$(just binaries-polkadot)"
+    CSB_DIR="$(just binaries-chain-spec-builder)"
     export PATH="$CSB_DIR:$PATH"
     ./scripts/create_bulletin_{{runtime}}_spec.sh
     export ZOMBIE_PROVIDER=native
@@ -148,7 +148,7 @@ test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
 bench *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    BENCH_DIR="$(./scripts/get_polkadot_binaries.sh frame-omni-bencher)"
+    BENCH_DIR="$(just binaries-bencher)"
     exec "$BENCH_DIR/frame-omni-bencher" "$@"
 
 # ---------------------------------------------------------------------------
@@ -159,5 +159,5 @@ bench *args:
 try-runtime *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    TR_DIR="$(./scripts/get_polkadot_binaries.sh try-runtime)"
+    TR_DIR="$(just binaries-try-runtime)"
     exec "$TR_DIR/try-runtime" "$@"

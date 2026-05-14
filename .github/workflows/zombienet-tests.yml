@@ -35,7 +35,7 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache polkadot-sdk binaries
         id: cache-binaries
@@ -98,7 +98,7 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
@@ -168,7 +168,7 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2

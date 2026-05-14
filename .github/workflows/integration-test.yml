@@ -43,7 +43,7 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Cache polkadot-sdk + zombienet binaries
         id: cache-binaries
@@ -115,7 +115,7 @@ jobs:
             console-ui/package-lock.json
 
       - name: Ensure `just` is available
-        run: command -v just || cargo install just --locked
+        run: command -v just || ./scripts/install_just.sh
 
       - name: Install subxt-cli
         run: |
@@ -139,8 +139,6 @@ jobs:
           echo "$POLKADOT_DIR" >> "$GITHUB_PATH"
           echo "$CSB_DIR" >> "$GITHUB_PATH"
           echo "$ZN_DIR" >> "$GITHUB_PATH"
-          echo "SKIP_PARACHAIN_SETUP=1" >> "$GITHUB_ENV"
-          echo "ZOMBIENET_BINARY=zombienet" >> "$GITHUB_ENV"
 
       - name: Start services
         working-directory: examples
