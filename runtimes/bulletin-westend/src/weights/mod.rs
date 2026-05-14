@@ -30,6 +30,7 @@ pub mod pallet_bulletin_transaction_storage;
 pub mod pallet_collator_selection;
 pub mod pallet_message_queue;
 pub mod pallet_session;
+pub mod pallet_storage_auto_renewal;
 pub mod pallet_timestamp;
 pub mod pallet_transaction_payment;
 pub mod pallet_utility;

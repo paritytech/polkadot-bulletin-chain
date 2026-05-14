@@ -149,7 +149,7 @@ pub enum TransactionKind {
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct TransactionInfo {
 	/// Chunk trie root.
-	pub(crate) chunk_root: <BlakeTwo256 as Hash>::Output,
+	pub chunk_root: <BlakeTwo256 as Hash>::Output,
 
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
@@ -169,7 +169,7 @@ pub struct TransactionInfo {
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
 	/// total chunks.
-	pub(crate) block_chunks: ChunkIndex,
+	pub block_chunks: ChunkIndex,
 
 	/// Whether the entry was created by a `store` (temporary) or a `renew` (permanent).
 	/// Used by the obsolete-block cleanup in `on_initialize` to decrement the chain-wide

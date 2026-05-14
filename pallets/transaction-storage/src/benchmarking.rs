@@ -432,89 +432,20 @@ mod benchmarks {
 		Ok(())
 	}
 
+	/// Worst-case benchmark for the `check_proof` mandatory inherent. Verifies a storage
+	/// proof for a block that holds `MaxBlockTransactions` zero-filled transactions of
+	/// `MaxTransactionSize` bytes.
 	#[benchmark]
-	fn enable_auto_renew() -> Result<(), BenchmarkError> {
-		let origin = T::Authorizer::try_successful_origin()
-			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let caller: T::AccountId = whitelisted_caller();
-		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
-		let content_hash = sp_io::hashing::blake2_256(&data);
-
-		// Authorize account and store data
-		TransactionStorage::<T>::authorize_account(
-			origin as T::RuntimeOrigin,
-			caller.clone(),
-			10,
-			T::MaxTransactionSize::get() as u64 * 10,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
-		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
-		run_to_block::<T>(1u32.into());
-
-		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
-
-		assert_last_event::<T>(Event::AutoRenewalEnabled { content_hash, who: caller }.into());
-		Ok(())
-	}
-
-	#[benchmark]
-	fn disable_auto_renew() -> Result<(), BenchmarkError> {
-		let origin = T::Authorizer::try_successful_origin()
-			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let caller: T::AccountId = whitelisted_caller();
-		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
-		let content_hash = sp_io::hashing::blake2_256(&data);
-
-		// Authorize, store, advance, then enable auto-renew
-		TransactionStorage::<T>::authorize_account(
-			origin as T::RuntimeOrigin,
-			caller.clone(),
-			10,
-			T::MaxTransactionSize::get() as u64 * 10,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
-		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
-		run_to_block::<T>(1u32.into());
-		TransactionStorage::<T>::enable_auto_renew(
-			RawOrigin::Signed(caller.clone()).into(),
-			content_hash,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
-
-		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
-
-		assert_last_event::<T>(Event::AutoRenewalDisabled { content_hash, who: caller }.into());
-		Ok(())
-	}
-
-	/// Worst-case benchmark for the composite mandatory inherent: a storage proof to
-	/// verify AND `n` pending auto-renewals to drain in the same block. The intercept
-	/// captures the proof-check + drain-dispatch overhead; the slope captures per-item
-	/// renewal cost. The dispatchable always declares `apply_block_inherents(MAX)`,
-	/// so blocks where only one branch has work are conservatively over-charged.
-	#[benchmark]
-	fn apply_block_inherents(
-		n: Linear<0, { T::MaxBlockTransactions::get() }>,
-	) -> Result<(), BenchmarkError> {
+	fn check_proof() -> Result<(), BenchmarkError> {
 		// Override the default retention period (DEFAULT_RETENTION_PERIOD = ~14 days
-		// of blocks) with a tiny value so `run_to_block` only iterates ~10 blocks of
-		// `on_initialize`/`on_finalize` per benchmark step. The cost of the inherent
-		// itself does not depend on the retention period — it only governs which
-		// block's payload the proof verifies.
+		// of blocks) with a tiny value so `run_to_block` only iterates ~10 blocks per
+		// step. The cost of the inherent does not depend on the retention period —
+		// it only governs which block's payload the proof verifies.
 		const BENCH_RETENTION: u32 = 10;
 		RetentionPeriod::<T>::put(BlockNumberFor::<T>::from(BENCH_RETENTION));
 
-		// Step 1: prime block 1 with `MaxBlockTransactions` entries. Going through
-		// `store()` 512 times costs ~12 minutes per benchmark step because each call
-		// does a `blake2_256_ordered_root` over ~8K chunks of zero-data. Optimization:
-		// call `store()` once to populate column TRANSACTION + capture the canonical
-		// `TransactionInfo`, then clone that entry into `BlockTransactions` 511 more
-		// times with updated cumulative `block_chunks`. The proof verification only
-		// reads `Transactions[target]` (and the chunk_root field of each entry), so
-		// every entry must carry the correct chunk_root — but the heavy Merkle root
-		// computation only needs to happen once.
+		// Prime block 1 with `MaxBlockTransactions` entries — see auto-renewal
+		// benchmark history for why we store once and clone the rest.
 		run_to_block::<T>(1u32.into());
 		TransactionStorage::<T>::store(
 			RawOrigin::None.into(),
@@ -535,58 +466,10 @@ mod benchmarks {
 			Ok(())
 		})?;
 
-		// Step 2: advance to the proof-check block (1 + RetentionPeriod). `run_to_block`
-		// stops after on_initialize of the target block, so on_finalize of the target
-		// block has NOT run yet — the dispatchable will satisfy its proof + pending
-		// invariants before that ever happens. The first `run_to_block` step here also
-		// finalizes block 1, moving `BlockTransactions` → `Transactions[1]`.
+		// Advance to the proof-check block.
 		run_to_block::<T>(crate::Pallet::<T>::retention_period() + BlockNumberFor::<T>::one());
 
-		// Step 3: pre-populate `n` PendingAutoRenewals entries. The drain loop calls
-		// `do_renew` for each, which pushes a `TransactionInfo` into `BlockTransactions`,
-		// updates `TransactionByContentHash`, and bumps the column-TRANSACTION refcount
-		// via `transaction_index::renew`. Synthetic content hashes are sufficient — none
-		// of those operations validate against existing storage.
-		if n > 0 {
-			let mut pending = PendingAutoRenewals::<T>::get();
-			for i in 0..n {
-				// Unique caller per item so each `check_authorization` hits a distinct
-				// `Authorizations` key — shared callers collapse into a single cache hit
-				// and undercharge the per-item write.
-				let caller: T::AccountId = account("rn_caller", i, 0);
-				let origin = T::Authorizer::try_successful_origin()
-					.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-				TransactionStorage::<T>::authorize_account(
-					origin,
-					caller.clone(),
-					10,
-					T::MaxTransactionSize::get() as u64 * 10,
-				)
-				.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
-
-				let content_hash = sp_io::hashing::blake2_256(&i.to_le_bytes());
-				let tx_info = TransactionInfo {
-					chunk_root: Default::default(),
-					size: 1,
-					content_hash,
-					hashing: HashingAlgorithm::Blake2b256,
-					cid_codec: RAW_CODEC,
-					extrinsic_index: 0,
-					block_chunks: 0,
-					kind: TransactionKind::Store,
-				};
-				let renewal_data = AutoRenewalData { account: caller };
-				pending
-					.try_push((content_hash, tx_info, renewal_data))
-					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
-			}
-			PendingAutoRenewals::<T>::put(&pending);
-		}
-
-		// Step 4: pin ParentHash to T::Hash::default() — the proof returned by
-		// `T::BenchmarkHelper::encoded_check_proof` was built against random_hash =
-		// `T::Hash::default()`. The runtime's `random_chunk(parent_hash, total_chunks)`
-		// must use the same value to pick the chunk the proof was built for.
+		// Pin ParentHash to T::Hash::default() — see helper docs.
 		let random_hash = T::Hash::default();
 		frame_support::storage::unhashed::put(
 			&sp_io::hashing::twox_128(b"System")
@@ -600,10 +483,8 @@ mod benchmarks {
 		let proof = TransactionStorageProof::decode(&mut encoded.as_slice()).unwrap();
 
 		#[extrinsic_call]
-		_(RawOrigin::None, Some(proof));
+		_(RawOrigin::None, proof);
 
-		assert!(PendingAutoRenewals::<T>::get().is_empty());
-		// Proof check ran (event order varies depending on `n` — drains emit later events).
 		let proof_checked: <T as frame_system::Config>::RuntimeEvent =
 			<T as Config>::RuntimeEvent::from(Event::<T>::ProofChecked).into();
 		assert!(
@@ -615,15 +496,15 @@ mod benchmarks {
 
 	/// Worst-case benchmark for the `Hooks::on_initialize` expiry sweep.
 	///
-	/// Each iteration of the per-tx loop reads `TransactionByContentHash` and
-	/// `AutoRenewals` once; on the cleanup path it also writes
-	/// `TransactionByContentHash`. Half of the prepared items have auto-renewal
-	/// registered so both branches of the discriminator are exercised across `n`.
+	/// Each iteration of the per-tx loop reads `TransactionByContentHash` once and
+	/// (on the cleanup path) writes it. The `T::OnTransactionExpiring::on_expiring`
+	/// hook contributes its own weight via `on_expiring_weight(n)` charged separately.
 	///
-	/// Setup uses the same store-once-clone-rest trick as `apply_block_inherents`:
-	/// one real `store()` to populate column TRANSACTION + capture the canonical
-	/// `TransactionInfo`, then `n - 1` direct clones into `BlockTransactions`. The
-	/// hot path being measured is on_initialize, not the setup, so this is sound.
+	/// Setup uses the same store-once-clone-rest trick that the historic
+	/// `apply_block_inherents` benchmark used: one real `store()` to populate column
+	/// TRANSACTION + capture the canonical `TransactionInfo`, then `n - 1` direct
+	/// clones into `BlockTransactions`. The hot path being measured is on_initialize,
+	/// not the setup, so this is sound.
 	#[benchmark]
 	fn on_initialize_with_expiry(
 		n: Linear<0, { T::MaxBlockTransactions::get() }>,
@@ -646,18 +527,10 @@ mod benchmarks {
 				.cloned()
 				.ok_or(BenchmarkError::Stop("first store did not populate BlockTransactions"))?;
 			let chunks_per_tx = template.block_chunks;
-			let caller: T::AccountId = whitelisted_caller();
-
-			// Register the first entry's auto-renewal (its `TransactionByContentHash` was
-			// populated by the real `store()` call above).
-			AutoRenewals::<T>::insert(
-				template.content_hash,
-				AutoRenewalData { account: caller.clone() },
-			);
 
 			// Distinct `content_hash` per entry so the on_initialize loop's
-			// `TransactionByContentHash::get` and `AutoRenewals::get` each hit a unique
-			// storage key — sharing a hash collapses into cache hits and undercharges PoV.
+			// `TransactionByContentHash::get` hits a unique storage key — sharing a
+			// hash collapses into cache hits and undercharges PoV.
 			//
 			// Mark the synthetic entries as `TransactionKind::Renew` so on_initialize's
 			// `renewed_sum` aggregation runs and `update_permanent_storage_used` fires —
@@ -675,10 +548,6 @@ mod benchmarks {
 						.map_err(|_| BenchmarkError::Stop("BlockTransactions overflow"))?;
 					// Mirror the storage state a real `store()` would have produced.
 					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));
-					AutoRenewals::<T>::insert(
-						unique_hash,
-						AutoRenewalData { account: caller.clone() },
-					);
 				}
 				Ok(())
 			})?;
