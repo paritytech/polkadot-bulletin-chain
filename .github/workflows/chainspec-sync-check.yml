@@ -71,6 +71,7 @@ jobs:
           echo "$POLKADOT_DIR" >> "$GITHUB_PATH"
 
       - name: Sync a few blocks
+        shell: bash
         env:
           CHAINSPEC: ${{ matrix.chainspec }}
           RELAY_RPC: ${{ matrix.relay_rpc }}
