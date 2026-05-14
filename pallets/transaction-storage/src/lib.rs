@@ -272,6 +272,13 @@ pub mod pallet {
 		/// A signed transaction that has been authorized to store data.
 		/// Contains the signer and the scope of authorization that was consumed.
 		Authorized { who: T::AccountId, scope: AuthorizationScopeFor<T> },
+		/// A signed transaction whose inner renew calls were validated and authorized
+		/// individually by [`extension::ValidateStorageCalls`] inside a list-batch
+		/// wrapper (`Utility::batch` / `batch_all` / `force_batch`). Carries no scope:
+		/// inner renews may have used different buckets, and renew dispatch does not
+		/// read scope. Not accepted by `T::Authorizer::ensure_origin`, so management
+		/// calls cannot be mixed with renews in the same wrapper.
+		AuthorizedBatch { who: T::AccountId },
 	}
 
 	#[pallet::hooks]
@@ -1324,6 +1331,11 @@ pub mod pallet {
 		///
 		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
+		/// - [`Origin::AuthorizedBatch`] (set by [`extension::ValidateStorageCalls`] on the
+		///   list-batch wrapper path) → [`AuthorizedCaller::Signed`] with a placeholder
+		///   `Account(who)` scope. No current dispatcher reads `scope` on this path; if one is
+		///   added, prefer introducing a distinct [`AuthorizedCaller`] variant over forging a scope
+		///   here.
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
 		///
@@ -1333,8 +1345,15 @@ pub mod pallet {
 			origin: OriginFor<T>,
 		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
 			// 1. Try pallet::Origin::Authorized (set by ValidateStorageCalls extension)
-			if let Ok(Origin::Authorized { who, scope }) = origin.clone().into_caller().try_into() {
+			let caller = origin.clone().into_caller();
+			if let Ok(Origin::Authorized { who, scope }) = caller.clone().try_into() {
 				return Ok(AuthorizedCaller::Signed { who, scope });
+			}
+			if let Ok(Origin::AuthorizedBatch { who }) = caller.try_into() {
+				return Ok(AuthorizedCaller::Signed {
+					who: who.clone(),
+					scope: AuthorizationScope::Account(who),
+				});
 			}
 
 			// 2. Try root

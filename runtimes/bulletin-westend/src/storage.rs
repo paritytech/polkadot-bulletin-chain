@@ -91,6 +91,17 @@ impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCall
 			_ => None,
 		}
 	}
+
+	fn is_list_batch_wrapper(call: &RuntimeCall) -> bool {
+		matches!(
+			call,
+			RuntimeCall::Utility(
+				pallet_utility::Call::batch { .. } |
+					pallet_utility::Call::batch_all { .. } |
+					pallet_utility::Call::force_batch { .. }
+			)
+		)
+	}
 }
 
 /// Returns `true` for storage-mutating TransactionStorage calls (store, store_with_cid_config,
