@@ -8,7 +8,6 @@ on:
     paths:
       - 'chainspecs/**'
       - '.github/workflows/chainspec-sync-check.yml'
-      - '.github/env'
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +18,9 @@ permissions:
   contents: read
 
 env:
-  POLKADOT_SDK_BIN_DIR: ${{ github.workspace }}/.polkadot-sdk-bin
+  OMNI_NODE_VERSION: polkadot-stable2603
+  OMNI_NODE_SHA256: a96cb007f3e32de3b0d77dc25cab324d7067cca26f1a5aad4d05d748cf89e323
+  OMNI_NODE_BIN_DIR: ${{ github.workspace }}/.omni-node-bin
 
 jobs:
   sync-check:
@@ -46,24 +47,21 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
       - name: Cache polkadot-omni-node
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         id: omni-node-cache
         with:
-          path: ${{ env.POLKADOT_SDK_BIN_DIR }}
-          key: omni-node-${{ env.POLKADOT_SDK_VERSION }}
+          path: ${{ env.OMNI_NODE_BIN_DIR }}
+          key: omni-node-${{ env.OMNI_NODE_VERSION }}
 
       - name: Download polkadot-omni-node
         if: steps.omni-node-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$POLKADOT_SDK_BIN_DIR"
-          cd "$POLKADOT_SDK_BIN_DIR"
+          mkdir -p "$OMNI_NODE_BIN_DIR"
+          cd "$OMNI_NODE_BIN_DIR"
           curl -fL -o polkadot-omni-node \
-            "https://github.com/paritytech/polkadot-sdk/releases/download/${POLKADOT_SDK_VERSION}/polkadot-omni-node"
-          echo "${POLKADOT_OMNI_NODE_SHA256}  polkadot-omni-node" | sha256sum -c -
+            "https://github.com/paritytech/polkadot-sdk/releases/download/${OMNI_NODE_VERSION}/polkadot-omni-node"
+          echo "${OMNI_NODE_SHA256}  polkadot-omni-node" | sha256sum -c -
           chmod +x polkadot-omni-node
 
       - name: Sync a few blocks
@@ -72,7 +70,7 @@ jobs:
           RELAY_RPC: ${{ matrix.relay_rpc }}
         run: |
           set -euo pipefail
-          BIN="$POLKADOT_SDK_BIN_DIR/polkadot-omni-node"
+          BIN="$OMNI_NODE_BIN_DIR/polkadot-omni-node"
           LOG="omni-node.log"
           TARGET_BLOCKS=3
           TIMEOUT_SECONDS=600
