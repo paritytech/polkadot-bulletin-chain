@@ -172,23 +172,12 @@ jobs:
           repository: ${{ env.REPO }}
           ref: ${{ env.PR_BRANCH }}
 
-      - name: Load .github/env
+      - name: Set up Polkadot binaries
         if: startsWith(github.event.inputs.cmd, 'bench')
-        run: grep -v '^#' .github/env | grep '=' >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
-        if: startsWith(github.event.inputs.cmd, 'bench')
-
-      - name: Cache frame-omni-bencher
-        if: startsWith(github.event.inputs.cmd, 'bench')
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
-          key: polkadot-binaries-${{ runner.os }}-${{ env.FRAME_OMNI_BENCHER_VERSION }}
-
-      - name: Resolve frame-omni-bencher + add to PATH
-        if: startsWith(github.event.inputs.cmd, 'bench')
-        run: echo "$(just binaries-bencher)" >> "$GITHUB_PATH"
+          groups: frame-omni-bencher
+          mode: prepare
 
       - name: Run cmd
         id: cmd
