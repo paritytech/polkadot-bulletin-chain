@@ -80,10 +80,10 @@ impl LdbColumnDump {
 	}
 
 	pub fn log(&self, label: &str) {
-		log::info!("{}: {} keys in column", label, self.key_count);
+		tracing::info!("{}: {} keys in column", label, self.key_count);
 		for entry in &self.entries {
 			if entry.is_refcount() {
-				log::info!(
+				tracing::info!(
 					"  [REFCOUNT] {} => {} (count: {})",
 					entry.key,
 					entry.value,
@@ -95,7 +95,7 @@ impl LdbColumnDump {
 				} else {
 					entry.value.clone()
 				};
-				log::info!("  [DATA] {} => {}", entry.key, data_preview);
+				tracing::info!("  [DATA] {} => {}", entry.key, data_preview);
 			}
 		}
 	}
@@ -107,7 +107,12 @@ pub fn ldb_dump_column(db_path: &Path, column: &str) -> Result<LdbColumnDump> {
 	let ldb_path = get_ldb_path();
 	let db_path_str = db_path.to_string_lossy();
 
-	log::debug!("Running: {} --db={} --column_family={} dump --hex", ldb_path, db_path_str, column);
+	tracing::debug!(
+		"Running: {} --db={} --column_family={} dump --hex",
+		ldb_path,
+		db_path_str,
+		column
+	);
 
 	let output = Command::new(&ldb_path)
 		.args([
