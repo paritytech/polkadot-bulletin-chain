@@ -77,13 +77,16 @@ const HALT_DETECTION_TIMEOUT_SECS: u64 = 120;
 /// enough for pruning to actually evict col11. Bumping retention to 20 pushes the proof
 /// block out past the (finality + pruning) lag so col11 is reliably empty.
 const RETENTION_PERIOD_FOR_PRUNING_HALT: u32 = 20;
-/// Tests that submit a bulk batch of `enable_auto_renew` after `wait_for_finalized_height`
-/// on the store block (`parachain_on_initialize_cleanup_test`,
-/// `parachain_auto_renew_many_items_test`, `parachain_auto_renew_many_items_worst_case_test`)
-/// race finality lag. On CI, lag is commonly ~6-10 blocks, which pushes best past
-/// `store_block + RP` before enables get submitted; the enables then land in a block where
-/// `Transactions[store_block]` has already been swept and every dispatch returns
-/// `RenewedNotFound`. RP=30 gives ~15-block margin over the observed lag.
+/// Standalone tests that submit a bulk batch of `enable_auto_renew` after
+/// `wait_for_finalized_height` on the store block (`parachain_on_initialize_cleanup_test`,
+/// `parachain_auto_renew_many_items_worst_case_test`) race finality lag. On CI, lag is
+/// commonly ~6-10 blocks, which pushes best past `store_block + RP` before enables get
+/// submitted; the enables then land in a block where `Transactions[store_block]` has already
+/// been swept and every dispatch returns `RenewedNotFound`. RP=30 gives ~15-block margin.
+///
+/// `parachain_auto_renew_many_items_test` shares `archive_harness` with siblings and can't
+/// safely bump RP mid-chain (prior tests' stored data + new RP produces an inherent/proof
+/// mismatch and finality halts), so it stays on `RETENTION_PERIOD` and accepts the risk.
 const BULK_ENABLE_RETENTION_PERIOD: u32 = 30;
 const MANY_ITEMS_COUNT: u32 = pallet_bulletin_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS;
 const RENEWAL_CYCLES_TO_OBSERVE: u32 = 3;
@@ -840,13 +843,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	let mut nonce = get_alice_nonce(collator1).await?;
 
-	// Bump RP locally: the shared archive_harness initializes RP=RETENTION_PERIOD, but the
-	// bulk `store → wait_for_finalized → enable` flow needs extra headroom over finality lag
-	// (see `BULK_ENABLE_RETENTION_PERIOD`). Restored at the success path below so siblings
-	// in the archive group still observe RETENTION_PERIOD.
-	set_retention_period(client, BULK_ENABLE_RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
-
 	// Overwrite the Authorizations entry so cycle N+1 reliably trips
 	// `PERMANENT_ALLOWANCE_EXCEEDED` (drains `AutoRenewals`, leaving the shared harness idle).
 	// `authorize_account` is additive on the unexpired path, so it can't shrink the existing
@@ -1079,7 +1075,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	// Pairwise diffs of `substrate_proposer_block_constructed_{sum,count}` give per-block
 	// wall-clock construction time, independent of the runtime's declared weight.
-	let renewal_cadence = BULK_ENABLE_RETENTION_PERIOD as u64 + 1;
+	let renewal_cadence = RETENTION_PERIOD as u64 + 1;
 	let first_renewal_block = earliest_store + renewal_cadence;
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let wait_until = last_renewal_block + 1;
@@ -1348,10 +1344,6 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		exhaustion_block,
 		exhaustion_block + 1,
 	);
-
-	// Restore RP so sibling tests in the archive_harness group see RETENTION_PERIOD.
-	let restore_nonce = get_alice_nonce(collator1).await?;
-	set_retention_period(client, RETENTION_PERIOD, restore_nonce).await?;
 
 	test_log!(TEST, "=== Auto-renew {} items PASSED ===", MANY_ITEMS_COUNT);
 	Ok(())
