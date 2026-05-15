@@ -109,7 +109,7 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_and_store_data, authorize_and_store_data_finalized, authorize_and_store_items,
+		authorize_and_store_data, authorize_and_store_items,
 		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		expect_all_items_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path,
 		get_para_id, get_parachain_binary_path, get_parachain_chain_id, initialize_network,
@@ -1067,7 +1067,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	// === Step 2: First store - verify refcount = 1 and content hash matches ===
 	test_log!(TEST, "=== Step 2: First store - expecting refcount = 1 ===");
 	let (first_store_block, next_nonce) =
-		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
+		authorize_and_store_data(collator1, &test_data, nonce).await?;
 	nonce = next_nonce;
 	tracing::info!("First store completed at block {}", first_store_block);
 
@@ -1101,8 +1101,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// === Step 3: Second store (same data) - verify refcount = 2, still 2 keys ===
 	test_log!(TEST, "=== Step 3: Second store - expecting refcount = 2, still 2 keys ===");
-	let (second_store_block, _) =
-		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
+	let (second_store_block, _) = authorize_and_store_data(collator1, &test_data, nonce).await?;
 	tracing::info!("Second store completed at block {}", second_store_block);
 
 	let dump = verify_col11(&collator_db_path, "col11 AFTER second store")?;
