@@ -1955,6 +1955,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	tracing::info!("Stores landed at (or before) block {}", store_block);
 
 	tracing::info!("Enabling auto-renew for {} items (set 1)", ON_INIT_CLEANUP_ITEMS_PER_SET);
+	let pre_enable_block = current_finalized_block(&client).await?.number() as u64;
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
 		let call = tx(
@@ -1975,6 +1976,60 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	nonce += ON_INIT_CLEANUP_ITEMS_PER_SET as u64;
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
 	let _ = nonce;
+
+	// Verify every enable_auto_renew landed before the items expire. If the test's pre-enable
+	// finality wait gives the chain time to advance past `store_block + RP`, enables would
+	// silently fail (the item has already expired) → no renewals → assertion below sees 0/N.
+	wait_for_finalized_height(collator1, pre_enable_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let mut enabled_count = 0usize;
+	let mut latest_enable_block = pre_enable_block;
+	{
+		let mut current = current_finalized_block(&client).await?;
+		while current.number() as u64 > pre_enable_block {
+			let block_n = current.number() as u64;
+			let events = current.events().await?;
+			let count = events
+				.iter()
+				.filter_map(|e| e.ok())
+				.filter(|e| {
+					e.pallet_name() == "TransactionStorage" &&
+						e.variant_name() == "AutoRenewalEnabled"
+				})
+				.count();
+			if count > 0 && block_n > latest_enable_block {
+				latest_enable_block = block_n;
+			}
+			enabled_count += count;
+			if block_n == 0 {
+				break;
+			}
+			let parent_hash = current.header().parent_hash;
+			current = client.blocks().at(parent_hash).await?;
+		}
+	}
+	if enabled_count != ON_INIT_CLEANUP_ITEMS_PER_SET as usize {
+		anyhow::bail!(
+			"Expected {} AutoRenewalEnabled events, found {} (latest enable at block {})",
+			ON_INIT_CLEANUP_ITEMS_PER_SET,
+			enabled_count,
+			latest_enable_block
+		);
+	}
+	tracing::info!(
+		"Auto-renew enabled for all {} set-1 items (latest enable at block {})",
+		ON_INIT_CLEANUP_ITEMS_PER_SET,
+		latest_enable_block
+	);
+	if latest_enable_block >= store_block + RETENTION_PERIOD as u64 {
+		anyhow::bail!(
+			"Auto-renew enables landed at block {} >= store_block ({}) + RP ({}); items would \
+			 already be expired. Need a longer RP or earlier enables for this test to be valid.",
+			latest_enable_block,
+			store_block,
+			RETENTION_PERIOD
+		);
+	}
 
 	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
 	tracing::info!(
