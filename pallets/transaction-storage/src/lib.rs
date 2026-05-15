@@ -1331,8 +1331,8 @@ pub mod pallet {
 		///
 		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
-		/// - [`Origin::AuthorizedBatch`] (set by [`extension::ValidateStorageCalls`] on the
-		///   batch wrapper path) → [`AuthorizedCaller::SignedBatch`]
+		/// - [`Origin::AuthorizedBatch`] (set by [`extension::ValidateStorageCalls`] on the batch
+		///   wrapper path) → [`AuthorizedCaller::SignedBatch`]
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
 		///
