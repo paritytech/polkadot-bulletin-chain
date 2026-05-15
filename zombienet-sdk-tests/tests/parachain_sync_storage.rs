@@ -92,11 +92,16 @@
 //!
 //! ## Running Tests
 //!
+//! Easiest: `just test-zombienet-sync westend parachain_fast_sync_test` from the repo
+//! root. It fetches binaries, generates the chain spec, and invokes cargo. To run cargo
+//! directly:
+//!
 //! ```bash
-//! POLKADOT_RELAY_BINARY_PATH=~/local_bulletin_testing/bin/polkadot \
-//! POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node \
+//! BIN_DIR=$(just binaries-polkadot)
+//! POLKADOT_RELAY_BINARY_PATH=$BIN_DIR/polkadot \
+//! POLKADOT_PARACHAIN_BINARY_PATH=$BIN_DIR/polkadot-omni-node \
 //! PARACHAIN_CHAIN_SPEC_PATH=./zombienet/bulletin-westend-spec.json \
-//!   cargo test -p bulletin-chain-zombienet-sdk-tests \
+//!   cargo test --release -p bulletin-chain-zombienet-sdk-tests \
 //!   --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
 //!   parachain_fast_sync_test
 //! ```
@@ -119,7 +124,6 @@ use crate::{
 	},
 };
 use anyhow::{anyhow, Context, Result};
-use env_logger::Env;
 use futures::try_join;
 use subxt::{config::substrate::SubstrateConfig, OnlineClient};
 use zombienet_orchestrator::AddCollatorOptions;
@@ -156,10 +160,10 @@ fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_fast_sync_test() -> Result<()> {
 	const TEST: &str = "para_fast_sync";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (without pruning) ===");
-	log::info!("This test verifies fast sync with 1 collator and a sync node");
+	tracing::info!("This test verifies fast sync with 1 collator and a sync node");
 
 	// Early validation of required binaries
 	verify_parachain_binaries()?;
@@ -174,7 +178,7 @@ async fn parachain_fast_sync_test() -> Result<()> {
 
 	// Wait for first session change - this is when validators get assigned to the parachain
 	// and collators can start producing backed blocks
-	log::info!(
+	tracing::info!(
 		"Waiting for relay chain session change (required for parachain block production)..."
 	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
@@ -190,7 +194,7 @@ async fn parachain_fast_sync_test() -> Result<()> {
 		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
 			.await?;
 	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
-	log::info!("All {} items stored, last at block {}", stored_items.len(), last_store_block);
+	tracing::info!("All {} items stored, last at block {}", stored_items.len(), last_store_block);
 
 	// Verify all items can be fetched from collator1 via bitswap
 	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
@@ -198,14 +202,14 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	// Wait for enough blocks and finality before adding sync node
 	// State sync triggers when: finalized_number + 8 >= network_median
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
 	// Add a sync node with fast sync
-	log::info!("Adding sync-node with --sync=fast");
+	tracing::info!("Adding sync-node with --sync=fast");
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
@@ -225,7 +229,7 @@ async fn parachain_fast_sync_test() -> Result<()> {
 
 	// Wait for the sync node to sync
 	wait_for_fullnode(sync_node).await?;
-	log::info!("Verifying sync-node's sync progress (target: block {})", target_block);
+	tracing::info!("Verifying sync-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
 	// Verify state sync was used
@@ -234,7 +238,7 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	// Verify bitswap returns DONT_HAVE for all items from sync-node
 	// This is expected because state sync does not download indexed transaction data.
 	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "sync-node").await?;
-	log::info!("Note: sync-node doesn't have indexed transactions - this is expected for state-synced nodes");
+	tracing::info!("Note: sync-node doesn't have indexed transactions - this is expected for state-synced nodes");
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (without pruning) PASSED ===");
 	network.destroy().await?;
@@ -246,10 +250,10 @@ const PRUNING_BLOCKS: u32 = 5;
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	const TEST: &str = "para_fast_sync_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (with pruning) ===");
-	log::info!(
+	tracing::info!(
 		"Using 1 collator with --blocks-pruning={}, retention-period={}",
 		PRUNING_BLOCKS,
 		RETENTION_PERIOD
@@ -267,7 +271,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change...");
+	tracing::info!("Waiting for relay chain session change...");
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -275,7 +279,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
 	// Set retention period and store multiple data items
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
+	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 	let mut nonce = get_alice_nonce(collator1).await?;
 
@@ -292,14 +296,14 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
 	// Add sync node with fast sync and pruning
-	log::info!("Adding sync-node with --sync=fast and --blocks-pruning");
+	tracing::info!("Adding sync-node with --sync=fast and --blocks-pruning");
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
@@ -325,7 +329,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	// With pruning enabled on all nodes, historical blocks are unavailable.
 	// sync-node cannot sync because blocks 1-N are pruned on peers.
 	// We expect to see "BlockResponse ... with 0 blocks" - peers don't have the blocks.
-	log::info!("Expecting sync-node sync to fail (historical blocks are pruned on peers)");
+	tracing::info!("Expecting sync-node sync to fail (historical blocks are pruned on peers)");
 
 	// Wait for the telltale sign: peers responding with 0 blocks (they don't have them)
 	let zero_blocks_response = sync_node
@@ -338,7 +342,9 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 
 	match zero_blocks_response {
 		Ok(result) if result.success() => {
-			log::info!("✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks");
+			tracing::info!(
+				"✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks"
+			);
 		},
 		_ => {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
@@ -346,7 +352,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	}
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (with pruning) PASSED ===");
-	log::info!(
+	tracing::info!(
 		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
 	);
 	network.destroy().await?;
@@ -356,10 +362,10 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_warp_sync_test() -> Result<()> {
 	const TEST: &str = "para_warp_sync";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Warp Sync Test ===");
-	log::info!("This test requires 3 relay validators for GRANDPA finality");
+	tracing::info!("This test requires 3 relay validators for GRANDPA finality");
 
 	// Early validation of required binaries
 	verify_parachain_binaries()?;
@@ -373,7 +379,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change...");
+	tracing::info!("Waiting for relay chain session change...");
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -393,7 +399,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -404,7 +410,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// cumulus's wait_for_finalized_para_head (cumulus/client/service/src/lib.rs) races
 	// the embedded relay's cold start and locks in target = parachain genesis, which
 	// neuters warp sync.
-	log::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
+	tracing::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
 	let para_binary = get_parachain_binary_path();
 	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
@@ -426,7 +432,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Wait for the node to be up first
 	wait_for_fullnode(sync_node).await?;
 
-	log::info!("Verifying sync-node's progress (target: block {})", target_block);
+	tracing::info!("Verifying sync-node's progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node failed to sync via warp sync")?;
@@ -437,7 +443,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
 	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "Sync-node").await?;
-	log::info!(
+	tracing::info!(
 		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
 	);
 
@@ -451,10 +457,10 @@ const WARP_PRUNING_BLOCKS: u32 = 10;
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	const TEST: &str = "para_warp_sync_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Warp Sync Test (with block pruning) ===");
-	log::info!(
+	tracing::info!(
 		"Collator will use --blocks-pruning={}, retention-period={}",
 		WARP_PRUNING_BLOCKS,
 		RETENTION_PERIOD
@@ -472,7 +478,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change...");
+	tracing::info!("Waiting for relay chain session change...");
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -481,7 +487,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
 	// Set retention period and store data (blocks are produced in parallel)
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
+	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 	let mut nonce = get_alice_nonce(collator1).await?;
 
@@ -499,7 +505,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -509,7 +515,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// alice's already-synced RPC instead of running an embedded relay client. Otherwise
 	// cumulus's wait_for_finalized_para_head races the embedded relay's cold start and
 	// locks in target = parachain genesis, which neuters warp sync.
-	log::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
+	tracing::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
 	let para_binary = get_parachain_binary_path();
 	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
@@ -532,7 +538,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	wait_for_fullnode(sync_node).await?;
 
 	// Wait for warp sync to complete
-	log::info!("Verifying sync-node's progress (target: block {})", target_block);
+	tracing::info!("Verifying sync-node's progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node failed to sync via warp sync")?;
@@ -543,7 +549,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// Warp sync gap fill downloads block bodies but does not execute them.
 	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
 	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "Sync-node").await?;
-	log::info!(
+	tracing::info!(
 		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
 	);
 
@@ -555,10 +561,10 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_full_sync_test() -> Result<()> {
 	const TEST: &str = "para_full_sync";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Full Sync Test (without pruning) ===");
-	log::info!("This test verifies full sync with 1 collator and a sync node");
+	tracing::info!("This test verifies full sync with 1 collator and a sync node");
 
 	// Early validation of required binaries
 	verify_parachain_binaries()?;
@@ -572,7 +578,7 @@ async fn parachain_full_sync_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!(
+	tracing::info!(
 		"Waiting for relay chain session change (required for parachain block production)..."
 	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
@@ -594,14 +600,14 @@ async fn parachain_full_sync_test() -> Result<()> {
 
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
 	// Add a sync node with full sync
-	log::info!("Adding sync-node with --sync=full");
+	tracing::info!("Adding sync-node with --sync=full");
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
@@ -621,13 +627,13 @@ async fn parachain_full_sync_test() -> Result<()> {
 
 	// Wait for the sync node to sync
 	wait_for_fullnode(sync_node).await?;
-	log::info!("Verifying sync-node's sync progress (target: block {})", target_block);
+	tracing::info!("Verifying sync-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
 	// Verify all items via bitswap from sync-node
 	// Full sync downloads all blocks including indexed body, so bitswap should work
 	verify_all_items_bitswap(sync_node, &stored_items, 30, "sync-node").await?;
-	log::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
+	tracing::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
 
 	test_log!(TEST, "=== Parachain Full Sync Test (without pruning) PASSED ===");
 	network.destroy().await?;
@@ -637,10 +643,10 @@ async fn parachain_full_sync_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	const TEST: &str = "para_full_sync_pruning";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Full Sync Test (with pruning) ===");
-	log::info!(
+	tracing::info!(
 		"Using 1 collator with --blocks-pruning={}, retention-period={}",
 		PRUNING_BLOCKS,
 		RETENTION_PERIOD
@@ -658,7 +664,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change...");
+	tracing::info!("Waiting for relay chain session change...");
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -666,7 +672,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
 	// Set retention period and store multiple data items
-	log::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
+	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 	let mut nonce = get_alice_nonce(collator1).await?;
 
@@ -683,14 +689,14 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
 	// Add sync node with full sync and pruning
-	log::info!("Adding sync-node with --sync=full and --blocks-pruning");
+	tracing::info!("Adding sync-node with --sync=full and --blocks-pruning");
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
@@ -715,7 +721,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	// With pruning enabled on all nodes, historical blocks are unavailable.
 	// sync-node cannot sync because blocks 1-N are pruned on peers.
 	// We expect to see "BlockResponse ... with 0 blocks" - peers don't have the blocks.
-	log::info!("Expecting sync-node sync to fail (historical blocks are pruned on peers)");
+	tracing::info!("Expecting sync-node sync to fail (historical blocks are pruned on peers)");
 
 	// Wait for the telltale sign: peers responding with 0 blocks (they don't have them)
 	let zero_blocks_response = sync_node
@@ -728,7 +734,9 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 
 	match zero_blocks_response {
 		Ok(result) if result.success() => {
-			log::info!("✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks");
+			tracing::info!(
+				"✓ Detected 'BlockResponse with 0 blocks' - peers don't have pruned blocks"
+			);
 		},
 		_ => {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
@@ -736,7 +744,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	}
 
 	test_log!(TEST, "=== Parachain Full Sync Test (with pruning) PASSED ===");
-	log::info!(
+	tracing::info!(
 		"Note: This test verifies that sync cannot complete when historical blocks are pruned"
 	);
 	network.destroy().await?;
@@ -752,11 +760,11 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	const TEST: &str = "para_full_sync_relay_warp";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain Full Sync + Relay Warp Sync Test ===");
-	log::info!("Parachain: --sync=full, Embedded relay chain: --sync=warp");
-	log::info!("Requires 3 relay validators for GRANDPA finality (warp sync proofs)");
+	tracing::info!("Parachain: --sync=full, Embedded relay chain: --sync=warp");
+	tracing::info!("Requires 3 relay validators for GRANDPA finality (warp sync proofs)");
 
 	// Early validation of required binaries
 	verify_parachain_binaries()?;
@@ -770,7 +778,7 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!("Waiting for relay chain session change...");
+	tracing::info!("Waiting for relay chain session change...");
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
 		.await
 		.context("Failed to detect session change on relay chain")?;
@@ -790,14 +798,14 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	log::info!("Waiting for block {} and finality", target_block);
+	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
 
 	// Add a sync node with full sync for parachain + warp sync for embedded relay chain
-	log::info!("Adding sync-node with --sync=full (parachain) + --sync=warp (relay chain)");
+	tracing::info!("Adding sync-node with --sync=full (parachain) + --sync=warp (relay chain)");
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
@@ -821,12 +829,12 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	wait_for_fullnode(sync_node).await?;
 
 	// Wait for the sync node's embedded relay chain to sync via warp sync.
-	log::info!("Waiting for sync-node's embedded relay chain to warp sync...");
+	tracing::info!("Waiting for sync-node's embedded relay chain to warp sync...");
 	wait_for_relay_chain_to_sync(sync_node, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node's embedded relay chain did not sync via warp")?;
 
-	log::info!(
+	tracing::info!(
 		"Verifying sync-node's parachain full sync progress (target: block {})",
 		target_block
 	);
@@ -836,7 +844,7 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 
 	// Full sync downloads all blocks including indexed body, so bitswap should work
 	verify_all_items_bitswap(sync_node, &stored_items, 30, "sync-node").await?;
-	log::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
+	tracing::info!("✓ Bitswap works from sync-node - full sync downloads indexed transactions");
 
 	test_log!(TEST, "=== Parachain Full Sync + Relay Warp Sync Test PASSED ===");
 	network.destroy().await?;
@@ -859,10 +867,10 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	const TEST: &str = "para_rpc_node";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain RPC Node Bitswap Test ===");
-	log::info!("This test verifies a non-collator RPC node can serve data via bitswap");
+	tracing::info!("This test verifies a non-collator RPC node can serve data via bitswap");
 
 	// Early validation of required binaries
 	verify_parachain_binaries()?;
@@ -876,7 +884,7 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!(
+	tracing::info!(
 		"Waiting for relay chain session change (required for parachain block production)..."
 	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
@@ -893,14 +901,14 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 			authorize_and_store_items(collator1, b"PARA_RPC_HISTORICAL_", &ITEM_SIZES, nonce)
 				.await?;
 		let last_store_block = items.iter().map(|i| i.block_number).max().unwrap();
-		log::info!("Historical items stored, last at block {}", last_store_block);
+		tracing::info!("Historical items stored, last at block {}", last_store_block);
 
 		// Verify all items can be fetched from collator1 via bitswap
 		verify_all_items_bitswap(collator1, &items, 30, "Collator-1 (historical)").await?;
 
 		// Wait for enough blocks and finality before adding RPC node
 		let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-		log::info!("Waiting for block {} and finality", target_block);
+		tracing::info!("Waiting for block {} and finality", target_block);
 		try_join!(
 			wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 			wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -910,7 +918,7 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	};
 
 	// Add RPC node: non-collator with full sync and ipfs-server
-	log::info!("Adding rpc-node with --sync=full --ipfs-server (non-collator)");
+	tracing::info!("Adding rpc-node with --sync=full --ipfs-server (non-collator)");
 	let para_binary = get_parachain_binary_path();
 	let rpc_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
@@ -932,23 +940,23 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 
 	// Wait for the RPC node to sync
 	wait_for_fullnode(rpc_node).await?;
-	log::info!("Verifying rpc-node's sync progress (target: block {})", target_block);
+	tracing::info!("Verifying rpc-node's sync progress (target: block {})", target_block);
 	wait_for_block_height(rpc_node, target_block, SYNC_TIMEOUT_SECS).await?;
 
 	// Verify RPC node can serve all historical items via bitswap
 	verify_all_items_bitswap(rpc_node, &historical_items, 30, "rpc-node (historical)").await?;
-	log::info!("✓ RPC node serves all historical items via bitswap after full sync");
+	tracing::info!("✓ RPC node serves all historical items via bitswap after full sync");
 
 	// Now store NEW data by submitting the transaction THROUGH the RPC node.
 	// This is the realistic production pattern: users submit extrinsics to an RPC node,
 	// which gossips them to collators for inclusion in blocks.
 	let live_data = generate_test_data(TEST_DATA_SIZE, b"PARA_RPC_LIVE_DATA_");
 	let (live_hash, live_cid) = content_hash_and_cid(&live_data);
-	log::info!("Storing live data via RPC node: {} bytes", live_data.len());
-	log::info!("Live content hash: {}, CID: {}", live_hash, live_cid);
+	tracing::info!("Storing live data via RPC node: {} bytes", live_data.len());
+	tracing::info!("Live content hash: {}, CID: {}", live_hash, live_cid);
 
 	let (live_store_block, _) = authorize_and_store_data(rpc_node, &live_data, nonce).await?;
-	log::info!("Live data stored at block {} (submitted via RPC node)", live_store_block);
+	tracing::info!("Live data stored at block {} (submitted via RPC node)", live_store_block);
 
 	// Verify collator has the live data (it was included by collator even though
 	// the transaction was submitted through the RPC node)
@@ -957,11 +965,11 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 
 	// Verify RPC node can also serve the data it helped submit
 	let rpc_node = network.get_node("rpc-node").context("Failed to get rpc-node")?;
-	log::info!("Waiting for rpc-node to catch up to block {}", live_store_block);
+	tracing::info!("Waiting for rpc-node to catch up to block {}", live_store_block);
 	wait_for_block_height(rpc_node, live_store_block, SYNC_TIMEOUT_SECS).await?;
 
 	verify_node_bitswap(rpc_node, &live_data, 30, "rpc-node (live)").await?;
-	log::info!("✓ RPC node serves live data via bitswap (tx submitted through RPC node)");
+	tracing::info!("✓ RPC node serves live data via bitswap (tx submitted through RPC node)");
 
 	test_log!(TEST, "=== Parachain RPC Node Bitswap Test PASSED ===");
 	network.destroy().await?;
@@ -974,18 +982,20 @@ const LDB_TEST_RETENTION_PERIOD: u32 = 20;
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	const TEST: &str = "para_ldb_storage";
-	let _ = env_logger::Builder::from_env(Env::default().default_filter_or("info")).try_init();
+	crate::utils::init_logging();
 
 	test_log!(TEST, "=== Parachain LDB Storage Verification Test ===");
-	log::info!("This test verifies transaction storage database behavior using rocksdb_ldb tool");
-	log::info!(
+	tracing::info!(
+		"This test verifies transaction storage database behavior using rocksdb_ldb tool"
+	);
+	tracing::info!(
 		"Using --blocks-pruning={} and retention-period={}",
 		LDB_TEST_RETENTION_PERIOD,
 		LDB_TEST_RETENTION_PERIOD
 	);
 
 	// === Early validation of required external tools ===
-	log::info!("=== Verifying required external tools ===");
+	tracing::info!("=== Verifying required external tools ===");
 	verify_ldb_tool()?;
 	verify_parachain_binaries()?;
 
@@ -1005,7 +1015,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
 
 	// Wait for first session change - required for parachain block production
-	log::info!(
+	tracing::info!(
 		"Waiting for relay chain session change (required for parachain block production)..."
 	);
 	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
@@ -1015,7 +1025,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
 	// Wait for parachain to start producing blocks after session change
-	log::info!("Waiting for parachain to produce blocks...");
+	tracing::info!("Waiting for parachain to produce blocks...");
 	wait_for_block_height(collator1, 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Get client and fetch initial nonce for Alice
@@ -1024,7 +1034,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// Set short retention period for fast testing
 	// NOTE: LDB test uses finalized transactions for database consistency
-	log::info!(
+	tracing::info!(
 		"Setting RetentionPeriod to {} blocks for fast expiration testing",
 		LDB_TEST_RETENTION_PERIOD
 	);
@@ -1038,7 +1048,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		.to_string();
 	let parachain_chain_id = get_parachain_chain_id();
 	let collator_db_path = get_db_path(&base_dir, "collator-1", &parachain_chain_id);
-	log::info!("Collator-1 DB path: {:?}", collator_db_path);
+	tracing::info!("Collator-1 DB path: {:?}", collator_db_path);
 
 	// === Step 1: Verify col11 is empty before store ===
 	test_log!(TEST, "=== Step 1: Verify col11 is empty BEFORE store ===");
@@ -1046,21 +1056,21 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	if !dump.is_empty() {
 		anyhow::bail!("Expected col11 to be empty before store, but found {} keys", dump.key_count);
 	}
-	log::info!("✓ col11 is empty as expected before store");
+	tracing::info!("✓ col11 is empty as expected before store");
 
 	// Generate test data and calculate expected content hash
 	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
 	let (expected_hash, expected_cid) = content_hash_and_cid(&test_data);
-	log::info!("Generated {} bytes of test data", test_data.len());
-	log::info!("Expected content hash: {}", expected_hash);
-	log::info!("Expected CID: {}", expected_cid);
+	tracing::info!("Generated {} bytes of test data", test_data.len());
+	tracing::info!("Expected content hash: {}", expected_hash);
+	tracing::info!("Expected CID: {}", expected_cid);
 
 	// === Step 2: First store - verify refcount = 1 and content hash matches ===
 	test_log!(TEST, "=== Step 2: First store - expecting refcount = 1 ===");
 	let (first_store_block, next_nonce) =
 		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
 	nonce = next_nonce;
-	log::info!("First store completed at block {}", first_store_block);
+	tracing::info!("First store completed at block {}", first_store_block);
 
 	let dump = verify_col11(&collator_db_path, "col11 AFTER first store")?;
 	if dump.key_count != 2 {
@@ -1080,7 +1090,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	if !stored_hash.eq_ignore_ascii_case(&expected_hash) {
 		anyhow::bail!("Content hash mismatch! Expected: {}, Got: {}", expected_hash, stored_hash);
 	}
-	log::info!("✓ Content hash matches: {}", stored_hash);
+	tracing::info!("✓ Content hash matches: {}", stored_hash);
 
 	let refcount = dump
 		.get_refcount(stored_hash)
@@ -1088,13 +1098,13 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	if refcount != 1 {
 		anyhow::bail!("Expected refcount=1 after first store, found refcount={}", refcount);
 	}
-	log::info!("✓ Reference count is 1 as expected after first store");
+	tracing::info!("✓ Reference count is 1 as expected after first store");
 
 	// === Step 3: Second store (same data) - verify refcount = 2, still 2 keys ===
 	test_log!(TEST, "=== Step 3: Second store - expecting refcount = 2, still 2 keys ===");
 	let (second_store_block, _) =
 		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
-	log::info!("Second store completed at block {}", second_store_block);
+	tracing::info!("Second store completed at block {}", second_store_block);
 
 	let dump = verify_col11(&collator_db_path, "col11 AFTER second store")?;
 	if dump.key_count != 2 {
@@ -1103,7 +1113,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 			dump.key_count
 		);
 	}
-	log::info!("✓ Still only 2 keys in col11 - no duplicate data rows");
+	tracing::info!("✓ Still only 2 keys in col11 - no duplicate data rows");
 
 	let data_entries = dump.data_entries();
 	let data_entry = data_entries
@@ -1116,15 +1126,18 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	if refcount != 2 {
 		anyhow::bail!("Expected refcount=2 after second store, found refcount={}", refcount);
 	}
-	log::info!("✓ Reference count is 2 as expected after second store");
+	tracing::info!("✓ Reference count is 2 as expected after second store");
 
 	// === Step 4: Wait for retention period and verify col11 is empty ===
-	log::info!("=== Step 4: Wait for data expiration ({} blocks) ===", LDB_TEST_RETENTION_PERIOD);
+	tracing::info!(
+		"=== Step 4: Wait for data expiration ({} blocks) ===",
+		LDB_TEST_RETENTION_PERIOD
+	);
 
 	// Calculate when both stores should have expired
 	let expiration_block = second_store_block + LDB_TEST_RETENTION_PERIOD as u64 + 2; // +2 for safety margin
 
-	log::info!(
+	tracing::info!(
 		"Waiting for block {} (second_store_block {} + retention {} + margin 2)",
 		expiration_block,
 		second_store_block,
@@ -1141,19 +1154,19 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	test_log!(TEST, "=== Verify col11 is empty AFTER retention period ===");
 	let dump = verify_col11(&collator_db_path, "col11 AFTER retention period")?;
 	if !dump.is_empty() {
-		log::error!(
+		tracing::error!(
 			"Expected col11 to be empty after retention period, but found {} keys:",
 			dump.key_count
 		);
 		for entry in &dump.entries {
-			log::error!("  Key: {}", entry.key);
+			tracing::error!("  Key: {}", entry.key);
 		}
 		anyhow::bail!(
 			"Data did not expire after retention period! Found {} keys in col11",
 			dump.key_count
 		);
 	}
-	log::info!("✓ col11 is empty as expected - data expired after retention period");
+	tracing::info!("✓ col11 is empty as expected - data expired after retention period");
 
 	test_log!(TEST, "=== Parachain LDB Storage Verification Test PASSED ===");
 	network.destroy().await?;
