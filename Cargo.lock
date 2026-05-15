@@ -2000,6 +2000,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletin-chain-zombienet-sdk-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blake2",
+ "bytes",
+ "cid",
+ "futures",
+ "hex",
+ "litep2p",
+ "multihash 0.19.3",
+ "pallet-bulletin-transaction-storage",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "serde_json",
+ "subxt 0.43.1",
+ "subxt-signer 0.43.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.19",
+ "twox-hash 2.1.2",
+ "zombienet-orchestrator",
+ "zombienet-sdk",
+]
+
+[[package]]
 name = "bulletin-pallets-common"
 version = "0.1.0"
 dependencies = [
