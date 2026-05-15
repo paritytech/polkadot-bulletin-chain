@@ -10,9 +10,9 @@ use crate::{
 		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
 		blake2_256, build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		count_event, disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have,
-		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
-		set_retention_period, set_retention_period_finalized, submit_renew_pair,
-		submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
+		finalized_store_block_for_hash, generate_test_data, get_alice_nonce, initialize_network,
+		override_alice_authorization, set_retention_period, set_retention_period_finalized,
+		submit_renew_pair, submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
 		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
 		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
@@ -743,16 +743,20 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	let (store_block, next_nonce) =
 		authorize_and_store_data(collator1, &data_renewed, nonce).await?;
 	nonce = next_nonce;
-	tracing::info!("data_renewed stored at block {}", store_block);
+	tracing::info!("data_renewed stored at block {} (best, pre-finality)", store_block);
 
 	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
 	nonce += 1;
 
 	let data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
 	nonce += 1;
-	tracing::info!("data_not_renewed stored at block {}", data_not_renewed_block);
+	tracing::info!(
+		"data_not_renewed stored at block {} (best, pre-finality)",
+		data_not_renewed_block
+	);
 
 	let content_hash_renewed = blake2_256(&data_renewed);
+	let content_hash_not_renewed = blake2_256(&data_not_renewed);
 	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
 	tracing::info!("Auto-renewal enabled for data_renewed");
 
@@ -781,6 +785,19 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		store_block
 	);
 	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Re-resolve canonical store blocks from the finalized chain — if a reorg between
+	// best-inclusion and finality moved either store to a different block, the captured
+	// best-chain numbers above would point at orphans and `assert_proof_checked_at` would
+	// read the wrong finalized block.
+	let store_block = finalized_store_block_for_hash(client, &content_hash_renewed).await?;
+	let data_not_renewed_block =
+		finalized_store_block_for_hash(client, &content_hash_not_renewed).await?;
+	tracing::info!(
+		"Canonical (finalized) store blocks: data_renewed={}, data_not_renewed={}",
+		store_block,
+		data_not_renewed_block
+	);
 
 	// Proof for each store-block (one per store, since they landed in different blocks)
 	// fires at `block + RP`. Single ProofChecked event per source-block.
@@ -933,9 +950,14 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		tracing::info!("Submitted 1 proof-decoy store (no auto-renew enabled)");
 	}
 
+	// Use BEST not FINALIZED here: with RP=10 from the shared archive_harness, waiting for
+	// finality (~6-10 block lag) plus `+5` would push `pre_enable_block` past `store_block + RP`
+	// and every `enable_auto_renew` below would land after expiry. Bumping RP locally would
+	// break sibling archive_harness tests (mid-chain RP change halts finality). Reading store
+	// blocks from the best chain is fine — the cycle math below only needs earliest/latest
+	// store-block as anchors, not stable finalized values.
 	let store_inclusion_target = pre_store_block + 5;
-	wait_for_finalized_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
-		.await?;
+	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Walk chain backward counting `Stored` events — avoids per-submission block lookups
 	// which race against chainHead pinning when done concurrently.
@@ -943,19 +965,19 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
 		loop {
-			let head = current_finalized_block(client).await?;
+			let head = current_best_block(client).await?;
 			if head.number() as u64 >= store_inclusion_target {
 				break head.number() as u64;
 			}
 			if start.elapsed() > poll_timeout {
-				anyhow::bail!("Timed out waiting for finalized >= {}", store_inclusion_target);
+				anyhow::bail!("Timed out waiting for best >= {}", store_inclusion_target);
 			}
 			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 		}
 	};
 	let mut store_blocks: Vec<u64> = Vec::with_capacity(items.len());
 	{
-		let mut current = current_finalized_block(client).await?;
+		let mut current = current_best_block(client).await?;
 		while current.number() as u64 > pre_store_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;

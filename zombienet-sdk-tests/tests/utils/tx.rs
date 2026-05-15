@@ -230,10 +230,88 @@ pub async fn authorize_and_store_items(
 }
 
 /// Returns (block_number, next_nonce). Waits for best block.
-/// Waits for finality of both the authorize and store extrinsics before returning. See
-/// [`submit_store_signed`] for why best-only inclusion is unsafe for callers that later
-/// read finalized state.
+/// Best-only inclusion for both the authorize and store extrinsics — caller gets fast
+/// turnaround (~1 block) so any follow-up like `enable_auto_renew` can land before
+/// `store_block + RP`. Returns the canonical inclusion block number read at the
+/// inclusion-block hash. Callers that later assert against finalized state must resolve
+/// canonicality with [`finalized_store_block_for_hash`] to survive reorgs.
 pub async fn authorize_and_store_data(
+	node: &zombienet_sdk::NetworkNode,
+	data: &[u8],
+	mut nonce: u64,
+) -> Result<(u64, u64)> {
+	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
+	let signer = dev::alice();
+	let bytes_to_authorize = (data.len() as u64) * 2;
+
+	let authorize_call = subxt::tx::dynamic(
+		"Sudo",
+		"sudo",
+		vec![value! {
+			TransactionStorage(authorize_account {
+				who: Value::from_bytes(signer.public_key().0),
+				transactions: 10u32,
+				bytes: bytes_to_authorize
+			})
+		}],
+	);
+
+	tracing::info!("Submitting authorization transaction (nonce={})...", nonce);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+	nonce += 1;
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress =
+			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("authorization transaction timed out"))??;
+
+	tracing::info!("Authorization transaction included in block");
+
+	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+
+	tracing::info!("Submitting store transaction (nonce={})...", nonce);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+	nonce += 1;
+
+	let (block_hash, _events) =
+		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+			let progress =
+				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
+			wait_for_in_best_block(progress).await
+		})
+		.await
+		.map_err(|_| anyhow!("store transaction timed out"))??;
+
+	// subxt's `tx_in_block.block_hash()` can name a block whose number is one ahead of the
+	// canonical `Transactions[N]` key — see `canonical_store_block`.
+	let content_hash = blake2_256(data);
+	let block_number = canonical_store_block(&client, block_hash, &content_hash).await?;
+
+	tracing::info!("Store transaction included at canonical block {}", block_number);
+	Ok((block_number, nonce))
+}
+
+/// Read the canonical store block number for `content_hash` from the **finalized** chain.
+/// Use this *after* finality has caught up past the store, so callers that later assert
+/// against finalized state survive reorgs that moved the store extrinsic to a different
+/// block on the new canonical chain.
+pub async fn finalized_store_block_for_hash(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+) -> Result<u64> {
+	let finalized_hash = client.blocks().at_latest().await?.hash();
+	canonical_store_block(client, finalized_hash, content_hash).await
+}
+
+/// Returns (block_number, next_nonce). Waits for finalization (for LDB / sync tests where
+/// the captured block number must be on the canonical chain *before* the test proceeds).
+/// Auto-renew flows should keep using [`authorize_and_store_data`] + a late
+/// [`finalized_store_block_for_hash`] so they don't burn the RP window on finality.
+pub async fn authorize_and_store_data_finalized(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
 	mut nonce: u64,
@@ -284,12 +362,10 @@ pub async fn authorize_and_store_data(
 		.await
 		.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	// subxt's `tx_in_block.block_hash()` can name a block whose number is one ahead of the
-	// canonical `Transactions[N]` key — see `canonical_store_block`.
-	let content_hash = blake2_256(data);
-	let block_number = canonical_store_block(&client, block_hash, &content_hash).await?;
+	let block = client.blocks().at(block_hash).await?;
+	let block_number = block.number() as u64;
 
-	tracing::info!("Store transaction finalized at canonical block {}", block_number);
+	tracing::info!("Store transaction finalized at block {}", block_number);
 	Ok((block_number, nonce))
 }
 
@@ -381,11 +457,9 @@ pub async fn top_up_alice_authorization(
 }
 
 /// Signed `store(data)` from Alice; caller ensures Alice is authorized. Returns the
-/// canonical inclusion block number (see [`canonical_store_block`]), waiting for finality
-/// before reading. Best-only inclusion is unsafe here: a reorg between inclusion and the
-/// caller's later assertion would leave the captured block number pointing at an orphaned
-/// chain while `finalized_block_hash_at` reads the new canonical chain, producing flakes
-/// like "expected 1 ProofChecked at block X, saw 0".
+/// canonical inclusion block number (see [`canonical_store_block`]). Waits for best-only
+/// inclusion — callers that later read finalized state must resolve canonicality with
+/// [`finalized_store_block_for_hash`] to survive reorgs.
 pub async fn submit_store_signed(
 	client: &OnlineClient<SubstrateConfig>,
 	data: &[u8],
@@ -395,20 +469,20 @@ pub async fn submit_store_signed(
 	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	tracing::info!("Submitting store (finalized, nonce={}, {} bytes)...", nonce, data.len());
+	tracing::info!("Submitting store (nonce={}, {} bytes)...", nonce, data.len());
 
 	let (block_hash, _events) =
-		tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
+		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
 			let progress =
 				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
-			wait_for_finalized(progress).await
+			wait_for_in_best_block(progress).await
 		})
 		.await
 		.map_err(|_| anyhow!("store transaction timed out"))??;
 
 	let content_hash = blake2_256(data);
 	let block_number = canonical_store_block(client, block_hash, &content_hash).await?;
-	tracing::info!("Store transaction finalized at canonical block {}", block_number);
+	tracing::info!("Store transaction included at canonical block {}", block_number);
 	Ok(block_number)
 }
 
