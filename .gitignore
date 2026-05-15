@@ -55,3 +55,4 @@ console-ui/playwright/.cache/
 zombienet/bulletin-westend-spec.json
 zombienet/bulletin-paseo-spec.json
 zombienet/westend-local-spec.json
+zombienet/paseo-local-spec.json

@@ -9,12 +9,14 @@
 #   frame-omni-bencher   → frame-omni-bencher
 #   chain-spec-builder   → chain-spec-builder
 #   try-runtime          → try-runtime
-#   zombienet            → zombienet  (release-tag only; source-build not supported)
-#   relay-runtime        → westend_runtime.compact.compressed.wasm (source-build only)
+#   zombienet              → zombienet  (release-tag only; source-build not supported)
+#   westend-relay-runtime  → westend_runtime.compact.compressed.wasm (source-build only)
+#   paseo-relay-runtime    → paseo_runtime.compact.compressed.wasm   (source-build only)
 #
 # Each group reads `<GROUP>_VERSION` env (uppercase, dashes → underscores):
 #   POLKADOT_NODE_VERSION, FRAME_OMNI_BENCHER_VERSION, CHAIN_SPEC_BUILDER_VERSION,
-#   TRY_RUNTIME_VERSION, ZOMBIENET_VERSION, RELAY_RUNTIME_VERSION
+#   TRY_RUNTIME_VERSION, ZOMBIENET_VERSION,
+#   WESTEND_RELAY_RUNTIME_VERSION, PASEO_RELAY_RUNTIME_VERSION
 #
 # Value semantics:
 #   * 40-char hex commit hash → clone+build from source.
@@ -105,15 +107,22 @@ configure_group() {
 			SOURCE_URL=""
 			SOURCE_DIR=""
 			;;
-		relay-runtime)
-			VERSION_VAR="RELAY_RUNTIME_VERSION"
+		westend-relay-runtime)
+			VERSION_VAR="WESTEND_RELAY_RUNTIME_VERSION"
 			BINARIES="westend_runtime.compact.compressed.wasm"
 			RELEASE_REPO=""
 			SOURCE_URL="https://github.com/paritytech/polkadot-sdk.git"
 			SOURCE_DIR="polkadot-sdk"
 			;;
+		paseo-relay-runtime)
+			VERSION_VAR="PASEO_RELAY_RUNTIME_VERSION"
+			BINARIES="paseo_runtime.compact.compressed.wasm"
+			RELEASE_REPO=""
+			SOURCE_URL="https://github.com/paseo-network/runtimes.git"
+			SOURCE_DIR="paseo-runtimes"
+			;;
 		*)
-			die "unknown group: $1 (expected one of: polkadot-node, frame-omni-bencher, chain-spec-builder, try-runtime, zombienet, relay-runtime)"
+			die "unknown group: $1 (expected: polkadot-node, frame-omni-bencher, chain-spec-builder, try-runtime, zombienet, westend-relay-runtime, paseo-relay-runtime)"
 			;;
 	esac
 }
@@ -169,8 +178,8 @@ CACHE_DIR="$CACHE_ROOT/$GROUP/$REF/$PLATFORM"
 
 # WASM artifacts aren't executable; existence-only check.
 case "$GROUP" in
-	relay-runtime) cache_check_op="-f" ;;
-	*)             cache_check_op="-x" ;;
+	westend-relay-runtime|paseo-relay-runtime) cache_check_op="-f" ;;
+	*)                                         cache_check_op="-x" ;;
 esac
 all_present=true
 for bin in $BINARIES; do
@@ -253,6 +262,10 @@ else
 		cd "$WORKTREE_PATH"
 		# Per-SHA target dir — divergent SHAs keep their incremental caches.
 		export CARGO_TARGET_DIR="$TARGET_DIR"
+		# Tell substrate-wasm-builder which workspace it's building in. Without this,
+		# its find_cargo_lock walks up from OUT_DIR (under our external TARGET_DIR)
+		# and picks up the *bulletin chain* Cargo.lock — which lacks paseo-runtime.
+		export WASM_BUILD_WORKSPACE_HINT="$WORKTREE_PATH"
 		# macOS: libclang.dylib often isn't found; nudge the linker.
 		if [ "$PLATFORM" = darwin-aarch64 ] && command -v brew >/dev/null 2>&1; then
 			llvm_prefix="$(brew --prefix llvm 2>/dev/null || true)"
@@ -271,13 +284,18 @@ else
 				cp "$CARGO_TARGET_DIR/release/$bin" "$CACHE_DIR/$bin"
 				chmod +x "$CACHE_DIR/$bin"
 			done <<< "$(build_targets_for_group "$GROUP")"
-		elif [ "$GROUP" = "relay-runtime" ]; then
+		elif [ "$GROUP" = "westend-relay-runtime" ] || [ "$GROUP" = "paseo-relay-runtime" ]; then
 			# fast-runtime cuts epoch/session durations to test-friendly values.
-			log "  cargo build --release --locked -p westend-runtime --features fast-runtime"
-			cargo build --release --locked -p westend-runtime --features fast-runtime
-			wasm_src="$CARGO_TARGET_DIR/release/wbuild/westend-runtime/westend_runtime.compact.compressed.wasm"
+			case "$GROUP" in
+				westend-relay-runtime) runtime_crate="westend-runtime" ;;
+				paseo-relay-runtime)   runtime_crate="paseo-runtime" ;;
+			esac
+			wasm_name="${runtime_crate//-/_}.compact.compressed.wasm"
+			log "  cargo build --release --locked -p $runtime_crate --features fast-runtime"
+			cargo build --release --locked -p "$runtime_crate" --features fast-runtime
+			wasm_src="$CARGO_TARGET_DIR/release/wbuild/$runtime_crate/$wasm_name"
 			[ -f "$wasm_src" ] || die "expected $wasm_src not produced by cargo"
-			cp "$wasm_src" "$CACHE_DIR/westend_runtime.compact.compressed.wasm"
+			cp "$wasm_src" "$CACHE_DIR/$wasm_name"
 		else
 			targets="$(build_targets_for_group "$GROUP")"
 			crates_to_build=""

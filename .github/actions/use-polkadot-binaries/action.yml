@@ -8,13 +8,14 @@ description: |
     consume  — restore-only with fail-on-cache-miss. Use in matrix legs / consumers.
 
   Versions are read from .github/env (POLKADOT_NODE_VERSION, CHAIN_SPEC_BUILDER_VERSION,
-  ZOMBIENET_VERSION, TRY_RUNTIME_VERSION, FRAME_OMNI_BENCHER_VERSION, RELAY_RUNTIME_VERSION).
-  The action loads that file into $GITHUB_ENV and installs `just` for you — callers only
-  need to checkout the repo first.
+  ZOMBIENET_VERSION, TRY_RUNTIME_VERSION, FRAME_OMNI_BENCHER_VERSION,
+  WESTEND_RELAY_RUNTIME_VERSION, PASEO_RELAY_RUNTIME_VERSION). The action loads that
+  file into $GITHUB_ENV and installs `just` for you — callers only need to checkout
+  the repo first.
 
 inputs:
   groups:
-    description: Space-separated binary groups. Supported - polkadot-node, chain-spec-builder, zombienet, try-runtime, frame-omni-bencher, relay-runtime.
+    description: Space-separated binary groups. Supported - polkadot-node, chain-spec-builder, zombienet, try-runtime, frame-omni-bencher, westend-relay-runtime, paseo-relay-runtime.
     required: true
   mode:
     description: prepare (populate + save, non-matrix job) or consume (restore-only).
@@ -38,7 +39,7 @@ runs:
           echo "::error::use-polkadot-binaries: groups must be a non-empty space-separated list"
           exit 1
         fi
-        VALID="polkadot-node chain-spec-builder zombienet try-runtime frame-omni-bencher relay-runtime"
+        VALID="polkadot-node chain-spec-builder zombienet try-runtime frame-omni-bencher westend-relay-runtime paseo-relay-runtime"
         for g in $INPUT_GROUPS; do
           case " $VALID " in
             *" $g "*) ;;
@@ -234,25 +235,49 @@ runs:
         just binaries-bencher >> "$GITHUB_PATH"
 
     # ============================================================
-    # relay-runtime (WASM artifact, not an executable; no PATH append)
+    # westend-relay-runtime (WASM artifact; no PATH append)
     # ============================================================
-    - name: Cache relay-runtime WASM
-      id: cache-relay-runtime
-      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' relay-runtime ')
+    - name: Cache westend-relay-runtime WASM
+      id: cache-westend-relay-runtime
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' westend-relay-runtime ')
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
-        path: ${{ env.POLKADOT_BINARIES_DIR }}/relay-runtime
-        key: polkadot-binaries-${{ runner.os }}-relay-runtime-${{ env.RELAY_RUNTIME_VERSION }}
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/westend-relay-runtime
+        key: polkadot-binaries-${{ runner.os }}-westend-relay-runtime-${{ env.WESTEND_RELAY_RUNTIME_VERSION }}
 
-    - name: Populate relay-runtime WASM
-      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' relay-runtime ') && steps.cache-relay-runtime.outputs.cache-hit != 'true'
+    - name: Populate westend-relay-runtime WASM
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' westend-relay-runtime ') && steps.cache-westend-relay-runtime.outputs.cache-hit != 'true'
       shell: bash
-      run: just binaries-relay-runtime > /dev/null
+      run: just binaries-westend-relay-runtime > /dev/null
 
-    - name: Restore relay-runtime WASM
-      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' relay-runtime ')
+    - name: Restore westend-relay-runtime WASM
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' westend-relay-runtime ')
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
-        path: ${{ env.POLKADOT_BINARIES_DIR }}/relay-runtime
-        key: polkadot-binaries-${{ runner.os }}-relay-runtime-${{ env.RELAY_RUNTIME_VERSION }}
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/westend-relay-runtime
+        key: polkadot-binaries-${{ runner.os }}-westend-relay-runtime-${{ env.WESTEND_RELAY_RUNTIME_VERSION }}
+        fail-on-cache-miss: true
+
+    # ============================================================
+    # paseo-relay-runtime (WASM artifact; no PATH append)
+    # ============================================================
+    - name: Cache paseo-relay-runtime WASM
+      id: cache-paseo-relay-runtime
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' paseo-relay-runtime ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/paseo-relay-runtime
+        key: polkadot-binaries-${{ runner.os }}-paseo-relay-runtime-${{ env.PASEO_RELAY_RUNTIME_VERSION }}
+
+    - name: Populate paseo-relay-runtime WASM
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' paseo-relay-runtime ') && steps.cache-paseo-relay-runtime.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-paseo-relay-runtime > /dev/null
+
+    - name: Restore paseo-relay-runtime WASM
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' paseo-relay-runtime ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/paseo-relay-runtime
+        key: polkadot-binaries-${{ runner.os }}-paseo-relay-runtime-${{ env.PASEO_RELAY_RUNTIME_VERSION }}
         fail-on-cache-miss: true

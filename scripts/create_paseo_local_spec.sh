@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Build westend-local relay chain-spec from the cached westend-runtime WASM.
+# Build paseo-local relay chain-spec from the cached paseo-runtime WASM.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SPEC_PATH="$ROOT_DIR/zombienet/westend-local-spec.json"
+SPEC_PATH="$ROOT_DIR/zombienet/paseo-local-spec.json"
 
-RELAY_RUNTIME_DIR="$(cd "$ROOT_DIR" && just binaries-westend-relay-runtime)"
-WASM_PATH="$RELAY_RUNTIME_DIR/westend_runtime.compact.compressed.wasm"
-[ -f "$WASM_PATH" ] || { echo "relay-runtime WASM not found at $WASM_PATH" >&2; exit 1; }
+RELAY_RUNTIME_DIR="$(cd "$ROOT_DIR" && just binaries-paseo-relay-runtime)"
+WASM_PATH="$RELAY_RUNTIME_DIR/paseo_runtime.compact.compressed.wasm"
+[ -f "$WASM_PATH" ] || { echo "paseo-relay-runtime WASM not found at $WASM_PATH" >&2; exit 1; }
 
 # Skip when spec is newer than WASM; FORCE_REBUILD_RELAY_SPEC=1 to override.
 if [ -f "$SPEC_PATH" ] \
@@ -24,8 +24,8 @@ PRESET="${RELAY_SPEC_PRESET:-local_testnet}"
 mkdir -p "$ROOT_DIR/zombienet"
 cd "$ROOT_DIR"
 chain-spec-builder create \
-	-n "Westend Local" \
-	-i westend_local \
+	-n "Paseo Local" \
+	-i paseo_local \
 	-t local \
 	-r "$WASM_PATH" \
 	named-preset "$PRESET"

@@ -42,7 +42,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder zombienet
+          groups: polkadot-node chain-spec-builder zombienet westend-relay-runtime paseo-relay-runtime
           mode: prepare
 
   runtime-matrix:
@@ -84,7 +84,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder zombienet
+          groups: polkadot-node chain-spec-builder zombienet westend-relay-runtime paseo-relay-runtime
           mode: consume
 
       - name: Rust cache (Bulletin)

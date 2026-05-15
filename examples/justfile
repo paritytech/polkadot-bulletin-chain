@@ -90,21 +90,24 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     ZOMBIENET_BIN="$ZOMBIENET_BIN_DIR/zombienet"
 
-    # Pick spec script + zombienet TOML based on the runtime
+    # Pick spec scripts + zombienet TOML based on the runtime
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
         SPEC_SCRIPT="create_bulletin_westend_spec.sh"
+        RELAY_SPEC_SCRIPT="create_westend_local_spec.sh"
         ZOMBIENET_TOML="zombienet/bulletin-westend-local.toml"
     elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
         SPEC_SCRIPT="create_bulletin_paseo_spec.sh"
+        RELAY_SPEC_SCRIPT="create_paseo_local_spec.sh"
         ZOMBIENET_TOML="zombienet/bulletin-paseo-local.toml"
     else
         echo "❌ Unhandled runtime: {{ runtime }}"
         exit 1
     fi
 
-    echo "   Creating chain spec for {{ runtime }}..."
+    echo "   Creating chain specs for {{ runtime }}..."
     CSB_DIR="$(cd "$ROOT_DIR" && just binaries-chain-spec-builder)"
     PATH="$CSB_DIR:$PATH" "$ROOT_DIR/scripts/$SPEC_SCRIPT"
+    PATH="$CSB_DIR:$PATH" "$ROOT_DIR/scripts/$RELAY_SPEC_SCRIPT"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
