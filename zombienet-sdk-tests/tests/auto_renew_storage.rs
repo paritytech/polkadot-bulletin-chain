@@ -77,6 +77,14 @@ const HALT_DETECTION_TIMEOUT_SECS: u64 = 120;
 /// enough for pruning to actually evict col11. Bumping retention to 20 pushes the proof
 /// block out past the (finality + pruning) lag so col11 is reliably empty.
 const RETENTION_PERIOD_FOR_PRUNING_HALT: u32 = 20;
+/// Tests that submit a bulk batch of `enable_auto_renew` after `wait_for_finalized_height`
+/// on the store block (`parachain_on_initialize_cleanup_test`,
+/// `parachain_auto_renew_many_items_test`, `parachain_auto_renew_many_items_worst_case_test`)
+/// race finality lag. On CI, lag is commonly ~6-10 blocks, which pushes best past
+/// `store_block + RP` before enables get submitted; the enables then land in a block where
+/// `Transactions[store_block]` has already been swept and every dispatch returns
+/// `RenewedNotFound`. RP=30 gives ~15-block margin over the observed lag.
+const BULK_ENABLE_RETENTION_PERIOD: u32 = 30;
 const MANY_ITEMS_COUNT: u32 = pallet_bulletin_transaction_storage::DEFAULT_MAX_BLOCK_TRANSACTIONS;
 const RENEWAL_CYCLES_TO_OBSERVE: u32 = 3;
 
@@ -832,6 +840,13 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	let mut nonce = get_alice_nonce(collator1).await?;
 
+	// Bump RP locally: the shared archive_harness initializes RP=RETENTION_PERIOD, but the
+	// bulk `store → wait_for_finalized → enable` flow needs extra headroom over finality lag
+	// (see `BULK_ENABLE_RETENTION_PERIOD`). Restored at the success path below so siblings
+	// in the archive group still observe RETENTION_PERIOD.
+	set_retention_period(client, BULK_ENABLE_RETENTION_PERIOD, nonce).await?;
+	nonce += 1;
+
 	// Overwrite the Authorizations entry so cycle N+1 reliably trips
 	// `PERMANENT_ALLOWANCE_EXCEEDED` (drains `AutoRenewals`, leaving the shared harness idle).
 	// `authorize_account` is additive on the unexpired path, so it can't shrink the existing
@@ -1064,7 +1079,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	// Pairwise diffs of `substrate_proposer_block_constructed_{sum,count}` give per-block
 	// wall-clock construction time, independent of the runtime's declared weight.
-	let renewal_cadence = RETENTION_PERIOD as u64 + 1;
+	let renewal_cadence = BULK_ENABLE_RETENTION_PERIOD as u64 + 1;
 	let first_renewal_block = earliest_store + renewal_cadence;
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let wait_until = last_renewal_block + 1;
@@ -1334,6 +1349,10 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		exhaustion_block + 1,
 	);
 
+	// Restore RP so sibling tests in the archive_harness group see RETENTION_PERIOD.
+	let restore_nonce = get_alice_nonce(collator1).await?;
+	set_retention_period(client, RETENTION_PERIOD, restore_nonce).await?;
+
 	test_log!(TEST, "=== Auto-renew {} items PASSED ===", MANY_ITEMS_COUNT);
 	Ok(())
 }
@@ -1369,8 +1388,8 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	let mut alice_nonce = get_alice_nonce(collator1).await?;
-	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
-	set_retention_period(&client, RETENTION_PERIOD, alice_nonce).await?;
+	tracing::info!("Setting RetentionPeriod to {} blocks", BULK_ENABLE_RETENTION_PERIOD);
+	set_retention_period(&client, BULK_ENABLE_RETENTION_PERIOD, alice_nonce).await?;
 	alice_nonce += 1;
 
 	let workers: Vec<Keypair> = (0..WORST_CASE_WORKERS)
@@ -1598,7 +1617,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	wait_for_finalized_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await?;
 
-	let renewal_cadence = RETENTION_PERIOD as u64 + 1;
+	let renewal_cadence = BULK_ENABLE_RETENTION_PERIOD as u64 + 1;
 	let first_renewal_block = earliest_store + renewal_cadence;
 	let last_renewal_block = latest_store + renewal_cadence * RENEWAL_CYCLES_TO_OBSERVE as u64;
 	let wait_until = last_renewal_block + 1;
@@ -1867,7 +1886,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	set_retention_period(&client, RETENTION_PERIOD, nonce).await?;
+	set_retention_period(&client, BULK_ENABLE_RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
 	let bytes_per_item = TEST_DATA_SIZE as u64;
@@ -1981,28 +2000,31 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 
 	// Verify every enable_auto_renew landed before the items expire. If the test's pre-enable
 	// finality wait gives the chain time to advance past `store_block + RP`, enables would
-	// silently fail (the item has already expired) → no renewals → assertion below sees 0/N.
+	// fail with `RenewedNotFound` (the item has already expired) → no renewals → assertion
+	// below sees 0/N. We also count `frame_system::ExtrinsicFailed` so the diagnostic
+	// distinguishes "enables never landed" from "enables landed but were rejected".
 	wait_for_finalized_height(collator1, pre_enable_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await?;
 	let mut enabled_count = 0usize;
+	let mut extrinsic_failed_count = 0usize;
 	let mut latest_enable_block = pre_enable_block;
 	{
 		let mut current = current_finalized_block(&client).await?;
 		while current.number() as u64 > pre_enable_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
-			let count = events
-				.iter()
-				.filter_map(|e| e.ok())
-				.filter(|e| {
-					e.pallet_name() == "TransactionStorage" &&
-						e.variant_name() == "AutoRenewalEnabled"
-				})
-				.count();
-			if count > 0 && block_n > latest_enable_block {
-				latest_enable_block = block_n;
+			for ev in events.iter().filter_map(|e| e.ok()) {
+				if ev.pallet_name() == "TransactionStorage" &&
+					ev.variant_name() == "AutoRenewalEnabled"
+				{
+					enabled_count += 1;
+					if block_n > latest_enable_block {
+						latest_enable_block = block_n;
+					}
+				} else if ev.pallet_name() == "System" && ev.variant_name() == "ExtrinsicFailed" {
+					extrinsic_failed_count += 1;
+				}
 			}
-			enabled_count += count;
 			if block_n == 0 {
 				break;
 			}
@@ -2012,10 +2034,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	}
 	if enabled_count != ON_INIT_CLEANUP_ITEMS_PER_SET as usize {
 		anyhow::bail!(
-			"Expected {} AutoRenewalEnabled events, found {} (latest enable at block {})",
+			"Expected {} AutoRenewalEnabled events, found {} (latest enable at block {}, \
+			 {} ExtrinsicFailed events observed in same window)",
 			ON_INIT_CLEANUP_ITEMS_PER_SET,
 			enabled_count,
-			latest_enable_block
+			latest_enable_block,
+			extrinsic_failed_count
 		);
 	}
 	tracing::info!(
@@ -2026,22 +2050,22 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	// Renewal at `n = store_block + RP + 1` is driven by `on_initialize`, which reads
 	// `AutoRenewals` *before* any extrinsics in block `n`. So enables must be in a block
 	// ≤ `store_block + RP` — strict equality is fine.
-	if latest_enable_block > store_block + RETENTION_PERIOD as u64 {
+	if latest_enable_block > store_block + BULK_ENABLE_RETENTION_PERIOD as u64 {
 		anyhow::bail!(
 			"Auto-renew enables landed at block {} > store_block ({}) + RP ({}); items would \
 			 already be expired. Need a longer RP or earlier enables for this test to be valid.",
 			latest_enable_block,
 			store_block,
-			RETENTION_PERIOD
+			BULK_ENABLE_RETENTION_PERIOD
 		);
 	}
 
-	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
+	let expiry_block = store_block + BULK_ENABLE_RETENTION_PERIOD as u64 + 1;
 	tracing::info!(
 		"Waiting for expiry block {} (= store_block {} + RP {} + 1)",
 		expiry_block,
 		store_block,
-		RETENTION_PERIOD
+		BULK_ENABLE_RETENTION_PERIOD
 	);
 	wait_for_finalized_height(collator1, expiry_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
