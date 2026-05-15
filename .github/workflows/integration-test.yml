@@ -238,9 +238,13 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
-      - name: Test HOP
+      - name: Test HOP promotion
         working-directory: examples
-        run: just run-test-hop-protocol "$TEST_DIR"
+        run: just run-test-hop-promotion "$TEST_DIR"
+
+      - name: Test HOP round trip
+        working-directory: examples
+        run: just run-test-hop-promotion "$TEST_DIR"
 
       - name: Test chopsticks compatibility
         working-directory: examples
