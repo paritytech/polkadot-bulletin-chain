@@ -2023,9 +2023,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		ON_INIT_CLEANUP_ITEMS_PER_SET,
 		latest_enable_block
 	);
-	if latest_enable_block >= store_block + RETENTION_PERIOD as u64 {
+	// Renewal at `n = store_block + RP + 1` is driven by `on_initialize`, which reads
+	// `AutoRenewals` *before* any extrinsics in block `n`. So enables must be in a block
+	// ≤ `store_block + RP` — strict equality is fine.
+	if latest_enable_block > store_block + RETENTION_PERIOD as u64 {
 		anyhow::bail!(
-			"Auto-renew enables landed at block {} >= store_block ({}) + RP ({}); items would \
+			"Auto-renew enables landed at block {} > store_block ({}) + RP ({}); items would \
 			 already be expired. Need a longer RP or earlier enables for this test to be valid.",
 			latest_enable_block,
 			store_block,
