@@ -142,9 +142,7 @@ pub fn build_parachain_network_config_single_collator(
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
 			relaychain
-				// `with_chain` is required to transition the typestate builder; the actual
-				// genesis comes from `with_chain_spec_path` below (the chain-name string is
-				// only used as a label / for path derivation).
+				// `with_chain` is required by the typestate; the spec below provides genesis.
 				.with_chain(get_relay_chain().as_str())
 				.with_chain_spec_path(relay_chain_spec.as_str())
 				.with_default_command(relay_binary.as_str())
@@ -200,9 +198,7 @@ pub fn build_parachain_network_config_three_relay_validators(
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
 			relaychain
-				// `with_chain` is required to transition the typestate builder; the actual
-				// genesis comes from `with_chain_spec_path` below (the chain-name string is
-				// only used as a label / for path derivation).
+				// `with_chain` is required by the typestate; the spec below provides genesis.
 				.with_chain(get_relay_chain().as_str())
 				.with_chain_spec_path(relay_chain_spec.as_str())
 				.with_default_command(relay_binary.as_str())
@@ -255,9 +251,7 @@ pub fn build_parachain_network_config_three_collators(
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
 			relaychain
-				// `with_chain` is required to transition the typestate builder; the actual
-				// genesis comes from `with_chain_spec_path` below (the chain-name string is
-				// only used as a label / for path derivation).
+				// `with_chain` is required by the typestate; the spec below provides genesis.
 				.with_chain(get_relay_chain().as_str())
 				.with_chain_spec_path(relay_chain_spec.as_str())
 				.with_default_command(relay_binary.as_str())

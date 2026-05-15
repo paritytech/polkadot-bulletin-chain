@@ -30,10 +30,9 @@
 #
 # Cache layout (rooted at $POLKADOT_BINARIES_DIR, default `./.polkadot-binaries`):
 #   <root>/<group>/<ref>/<platform>/<binary>
-#   <root>/_src/<repo>.git/                   bare clone, objects shared across worktrees
-#   <root>/_src/worktrees/<ref>/              per-SHA worktree checkout
-#   <root>/_src/target/<ref>/                 per-SHA cargo target dir (avoids
-#                                             invalidation when SHAs alternate)
+#   <root>/_src/<repo>.git/        bare clone, shared across worktrees
+#   <root>/_src/worktrees/<ref>/   per-SHA worktree
+#   <root>/_src/target/<ref>/      per-SHA cargo target dir
 
 set -euo pipefail
 
@@ -168,7 +167,7 @@ REF="${!VERSION_VAR:-}"
 
 CACHE_DIR="$CACHE_ROOT/$GROUP/$REF/$PLATFORM"
 
-# WASM artifacts (relay-runtime) aren't executable — check existence only.
+# WASM artifacts aren't executable; existence-only check.
 case "$GROUP" in
 	relay-runtime) cache_check_op="-f" ;;
 	*)             cache_check_op="-x" ;;
@@ -236,12 +235,11 @@ else
 		log "  cloning $SOURCE_URL → $BARE_PATH (bare)"
 		git clone --bare "$SOURCE_URL" "$BARE_PATH" >&2
 	fi
-	# Permissive fetch: only when ref isn't reachable in the bare repo.
+	# Fetch only when ref is missing.
 	if ! git --git-dir="$BARE_PATH" cat-file -e "$REF^{commit}" 2>/dev/null; then
 		log "  fetching $REF into $BARE_PATH"
 		git --git-dir="$BARE_PATH" fetch --quiet origin
 	fi
-	# GC any worktrees the user deleted by hand (e.g. via `rm -rf`).
 	git --git-dir="$BARE_PATH" worktree prune
 	WORKTREE_PATH="$SRC_ROOT/worktrees/$REF"
 	if [ ! -d "$WORKTREE_PATH" ]; then
@@ -253,8 +251,7 @@ else
 	mkdir -p "$TARGET_DIR"
 	(
 		cd "$WORKTREE_PATH"
-		# Per-SHA target dir so divergent groups (e.g. relay-runtime at a newer SHA
-		# than polkadot-node) don't trash each other's incremental cache.
+		# Per-SHA target dir — divergent SHAs keep their incremental caches.
 		export CARGO_TARGET_DIR="$TARGET_DIR"
 		# macOS: libclang.dylib often isn't found; nudge the linker.
 		if [ "$PLATFORM" = darwin-aarch64 ] && command -v brew >/dev/null 2>&1; then
@@ -264,8 +261,7 @@ else
 			fi
 		fi
 		if [ "$GROUP" = "polkadot-node" ]; then
-			# The relay runtime is supplied via the `relay-runtime` group + chain-spec,
-			# so the node doesn't need its native runtime — skip the wasm-builder.
+			# Runtime is delivered via chain-spec; no native runtime needed.
 			log "  SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot"
 			SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot
 			log "  SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node"
@@ -276,9 +272,7 @@ else
 				chmod +x "$CACHE_DIR/$bin"
 			done <<< "$(build_targets_for_group "$GROUP")"
 		elif [ "$GROUP" = "relay-runtime" ]; then
-			# Drives the substrate-wasm-builder via cargo build of the runtime crate.
-			# `--features fast-runtime` cuts epoch / session durations to test-friendly
-			# values, which is the whole reason we build it ourselves.
+			# fast-runtime cuts epoch/session durations to test-friendly values.
 			log "  cargo build --release --locked -p westend-runtime --features fast-runtime"
 			cargo build --release --locked -p westend-runtime --features fast-runtime
 			wasm_src="$CARGO_TARGET_DIR/release/wbuild/westend-runtime/westend_runtime.compact.compressed.wasm"

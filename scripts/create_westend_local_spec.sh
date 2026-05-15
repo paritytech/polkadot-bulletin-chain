@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Generate a westend-local relay chain-spec from the source-built westend-runtime WASM.
-# Lets us decouple the polkadot node binary (POLKADOT_NODE_VERSION) from the relay
-# runtime (RELAY_RUNTIME_VERSION) — see CLAUDE.md / the relay-WASM split notes.
+# Build westend-local relay chain-spec from the cached westend-runtime WASM.
 
 set -euo pipefail
 
@@ -9,14 +7,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SPEC_PATH="$ROOT_DIR/zombienet/westend-local-spec.json"
 
-# `just binaries-relay-runtime` resolves to the directory holding the cached WASM
-# (sourced from .polkadot-binaries/relay-runtime/${REV}/${PLATFORM}).
 RELAY_RUNTIME_DIR="$(cd "$ROOT_DIR" && just binaries-relay-runtime)"
 WASM_PATH="$RELAY_RUNTIME_DIR/westend_runtime.compact.compressed.wasm"
 [ -f "$WASM_PATH" ] || { echo "relay-runtime WASM not found at $WASM_PATH" >&2; exit 1; }
 
-# Skip regeneration when the spec is at least as new as the WASM. Set
-# FORCE_REBUILD_RELAY_SPEC=1 to override (e.g. when iterating on the preset).
+# Skip when spec is newer than WASM; FORCE_REBUILD_RELAY_SPEC=1 to override.
 if [ -f "$SPEC_PATH" ] \
 		&& [ "$SPEC_PATH" -nt "$WASM_PATH" ] \
 		&& [ "${FORCE_REBUILD_RELAY_SPEC:-0}" != "1" ]; then
