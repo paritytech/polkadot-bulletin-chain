@@ -1,0 +1,118 @@
+name: Chainspec sync check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'chainspecs/**'
+      - '.github/workflows/chainspec-sync-check.yml'
+      - '.github/env'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  set-image:
+    uses: ./.github/workflows/set-image.yml
+
+  # Pre-warm the binary cache once so matrix legs hit the cache instead of
+  # each one source-building polkadot-omni-node independently.
+  setup:
+    needs: [set-image]
+    name: Setup
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - uses: ./.github/actions/install-just
+
+      - name: Cache polkadot-node binaries
+        id: cache-binaries
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+          key: polkadot-node-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}
+
+      - name: Populate cache
+        if: steps.cache-binaries.outputs.cache-hit != 'true'
+        run: just binaries-polkadot
+
+  sync-check:
+    needs: [set-image, setup]
+    name: Sync (${{ matrix.name }})
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: polkadot
+            chainspec: chainspecs/polkadot-chainspec.json
+            relay_rpc: wss://rpc.polkadot.io
+          - name: westend
+            chainspec: chainspecs/westend-chainspec.json
+            relay_rpc: wss://westend-rpc.polkadot.io
+          - name: paseo-next
+            chainspec: chainspecs/paseo-next-chainspec.json
+            relay_rpc: wss://paseo.dotters.network
+          - name: paseo-next-v2
+            chainspec: chainspecs/paseo-next-v2-chainspec.json
+            relay_rpc: wss://paseo.dotters.network
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables via env file
+        run: cat .github/env >> $GITHUB_ENV
+
+      - uses: ./.github/actions/install-just
+
+      - name: Restore binary cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+          key: polkadot-node-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}
+          fail-on-cache-miss: true
+
+      - name: Resolve binary directory
+        run: |
+          POLKADOT_DIR="$(just binaries-polkadot)"
+          echo "$POLKADOT_DIR" >> "$GITHUB_PATH"
+
+      - name: Sync a few blocks
+        run: ./scripts/chainspec_sync_check.sh "${{ matrix.chainspec }}" "${{ matrix.relay_rpc }}"
+
+      - name: Upload omni-node log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: omni-node-${{ matrix.name }}.log
+          path: omni-node.log
+          retention-days: 7
+
+  sync-check-complete:
+    name: All chainspec sync checks passed
+    needs: [sync-check]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "Chainspec sync check failed or was cancelled"
+          exit 1
