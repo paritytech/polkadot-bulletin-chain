@@ -67,6 +67,9 @@ pub trait WeightInfo {
 	fn disable_auto_renew() -> Weight;
 	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
+	fn add_authorizer() -> Weight;
+	fn remove_authorizer() -> Weight;
+	fn remove_exhausted_authorizer() -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
 	fn migrate_v3_to_v4_step() -> Weight;
 }
@@ -179,7 +182,42 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(2_u64))
 			.saturating_add(T::DbWeight::get().writes(1_u64))
 	}
-	// TODO: update weights
+	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:0 w:1)
+	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
+	fn add_authorizer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 6_914_000 picoseconds.
+		Weight::from_parts(7_415_000, 0)
+			.saturating_add(Weight::from_parts(0, 0))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:0 w:1)
+	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
+	fn remove_authorizer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 6_564_000 picoseconds.
+		Weight::from_parts(7_033_000, 0)
+			.saturating_add(Weight::from_parts(0, 0))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:1)
+	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
+	fn remove_exhausted_authorizer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `290`
+		//  Estimated: `3530`
+		// Minimum execution time: 13_425_000 picoseconds.
+		Weight::from_parts(14_304_000, 0)
+			.saturating_add(Weight::from_parts(0, 3530))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
+	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(80), added: 2555, mode: `MaxEncodedLen`)
 	fn disable_auto_renew() -> Weight {
 		Weight::from_parts(10_000_000, 1_000)
 			.saturating_add(T::DbWeight::get().reads(1_u64))
@@ -309,6 +347,22 @@ impl WeightInfo for () {
 		Weight::from_parts(10_000_000, 1_000)
 			.saturating_add(RocksDbWeight::get().reads(1_u64))
 			.saturating_add(RocksDbWeight::get().writes(1_u64))
+	}
+	fn add_authorizer() -> Weight {
+		Weight::from_parts(7_415_000, 0)
+			.saturating_add(Weight::from_parts(0, 0))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn remove_authorizer() -> Weight {
+		Weight::from_parts(7_033_000, 0)
+			.saturating_add(Weight::from_parts(0, 0))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn remove_exhausted_authorizer() -> Weight {
+		Weight::from_parts(14_304_000, 0)
+			.saturating_add(Weight::from_parts(0, 3530))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
 	}
 	fn validate_store(l: u32) -> Weight {
 		RocksDbWeight::get().reads_writes(6, 2)

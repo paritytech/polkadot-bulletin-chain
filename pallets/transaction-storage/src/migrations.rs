@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Config, RetentionPeriod, LOG_TARGET};
+use crate::{AllowedAuthorizers, AuthorizerBudgetFor, Config, RetentionPeriod, LOG_TARGET};
 use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::marker::PhantomData;
@@ -27,6 +27,58 @@ use polkadot_sdk_frame::{
 /// our `SteppedMigration` impls must share this constant — only the version
 /// pair distinguishes one from the next.
 const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
+/// Runtime migration that seeds `AllowedAuthorizers` with the given accounts
+/// **only if the storage is currently empty**.
+///
+/// Idempotent: safe to run multiple times. Skips if any authorizers already
+/// exist (e.g., set via genesis on a fresh chain, or by a previous run).
+pub struct PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>(
+	PhantomData<(T, Accounts, Budget)>,
+);
+impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFor<T>>>
+	OnRuntimeUpgrade for PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>
+{
+	fn on_runtime_upgrade() -> Weight {
+		let weight = T::DbWeight::get().reads(1);
+
+		if AllowedAuthorizers::<T>::iter_keys().next().is_some() {
+			tracing::info!(
+				target: LOG_TARGET,
+				"[PopulateAllowedAuthorizersIfEmpty] AllowedAuthorizers non-empty, skipping",
+			);
+			return weight;
+		}
+
+		let accounts = Accounts::get();
+		let count = accounts.len() as u64;
+		for who in accounts {
+			AllowedAuthorizers::<T>::insert(&who, Budget::get());
+		}
+
+		tracing::warn!(
+			target: LOG_TARGET,
+			count,
+			"[PopulateAllowedAuthorizersIfEmpty] seeded AllowedAuthorizers",
+		);
+
+		weight.saturating_add(T::DbWeight::get().writes(count))
+	}
+
+	#[cfg(feature = "try-runtime")]
+	fn post_upgrade(
+		_state: alloc::vec::Vec<u8>,
+	) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::DispatchError> {
+		for who in Accounts::get() {
+			polkadot_sdk_frame::prelude::ensure!(
+				AllowedAuthorizers::<T>::contains_key(&who),
+				"expected authorizer missing from AllowedAuthorizers after migration",
+			);
+		}
+		tracing::info!(target: LOG_TARGET, "PopulateAllowedAuthorizersIfEmpty is OK!");
+		Ok(())
+	}
+}
 
 /// Runtime migration that sets the `RetentionPeriod` storage item to a
 /// non-zero `NewValue` value **only if it is currently zero**.
@@ -637,15 +689,14 @@ pub mod v3 {
 			mut cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-			use polkadot_sdk_frame::prelude::{frame_system, Saturating};
+			use polkadot_sdk_frame::prelude::Saturating;
 
 			let required = T::WeightInfo::migrate_v2_to_v3_step();
 			if meter.remaining().any_lt(required) {
 				return Err(SteppedMigrationError::InsufficientWeight { required });
 			}
 
-			let oldest_valid = frame_system::Pallet::<T>::block_number()
-				.saturating_sub(RetentionPeriod::<T>::get());
+			let oldest_valid = Pallet::<T>::now().saturating_sub(RetentionPeriod::<T>::get());
 
 			loop {
 				if meter.try_consume(required).is_err() {

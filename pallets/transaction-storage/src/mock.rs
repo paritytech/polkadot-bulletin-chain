@@ -18,25 +18,44 @@
 //! Test environment for transaction-storage pallet.
 
 use crate::{
-	self as pallet_bulletin_transaction_storage, TransactionStorageProof,
+	self as pallet_bulletin_transaction_storage, EnsureAllowedAuthorizers, TransactionStorageProof,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
-	deps::sp_runtime::traits::BlockNumberProvider, prelude::*, runtime::prelude::*,
+	deps::{frame_support, frame_system, sp_runtime::traits::BlockNumberProvider},
+	prelude::*,
+	runtime::prelude::*,
 	testing_prelude::*,
+	traits::EitherOfDiverse,
 };
 
 type Block = MockBlock<Test>;
 
 // Configure a mock runtime to test the pallet.
-construct_runtime!(
-	pub enum Test
-	{
-		System: frame_system,
-		TransactionStorage: pallet_bulletin_transaction_storage,
-	}
-);
+#[frame_support::runtime]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Test;
+
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+
+	#[runtime::pallet_index(1)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+}
 
 parameter_types! {
 	pub const TestDbWeight: polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight =
@@ -108,7 +127,8 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxStartsAtFuture = MaxStartsAtFuture;
 	type MaxAuthorizationSlots = MaxAuthorizationSlots;
 	type RelayChainBlockNumberProvider = MockRelayBlockNumberProvider;
-	type Authorizer = EnsureRoot<Self::AccountId>;
+	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
+	type Authorizer = EitherOfDiverse<EnsureRoot<Self::AccountId>, EnsureAllowedAuthorizers<Self>>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
@@ -126,6 +146,7 @@ pub fn new_test_ext() -> TestExternalities {
 			entry_fee: 200,
 			account_authorizations: vec![],
 			preimage_authorizations: vec![],
+			allowed_authorizers: vec![],
 		},
 	}
 	.build_storage()

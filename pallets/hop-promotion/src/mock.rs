@@ -17,20 +17,45 @@
 
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
-use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
+use polkadot_sdk_frame::{
+	deps::{frame_support, frame_system},
+	prelude::*,
+	runtime::prelude::*,
+	testing_prelude::*,
+};
 use sp_runtime::{traits::IdentityLookup, AccountId32};
 
 type Block = MockBlock<Test>;
 
-construct_runtime!(
-	pub enum Test
-	{
-		System: frame_system,
-		Timestamp: pallet_timestamp,
-		TransactionStorage: pallet_bulletin_transaction_storage,
-		HopPromotion: pallet_bulletin_hop_promotion,
-	}
-);
+#[frame_support::runtime]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Test;
+
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+
+	#[runtime::pallet_index(1)]
+	pub type Timestamp = pallet_timestamp;
+
+	#[runtime::pallet_index(2)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+
+	#[runtime::pallet_index(3)]
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
+}
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
@@ -50,11 +75,34 @@ impl pallet_timestamp::Config for Test {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
+	/// Default slot window length in mock relay blocks.
+	pub const DefaultAuthorizationWindow: u32 = 10;
+	pub const MaxStartsAtFuture: u32 = 100;
+	pub const MaxAuthorizationSlots: u32 = 8;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	/// Storage-backed mock relay-chain block number.
+	pub storage MockRelayBlockNumber: u32 = 1;
+}
+
+/// Test-side `BlockNumberProvider` for the slot model. Defaults to relay block
+/// `1` so `ensure_relay_now()` clears the genesis sentinel.
+pub struct MockRelayBlockNumberProvider;
+impl polkadot_sdk_frame::deps::sp_runtime::traits::BlockNumberProvider
+	for MockRelayBlockNumberProvider
+{
+	type BlockNumber = u32;
+
+	fn current_block_number() -> u32 {
+		MockRelayBlockNumber::get()
+	}
+
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	fn set_block_number(n: u32) {
+		MockRelayBlockNumber::set(&n);
+	}
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -77,7 +125,11 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider = MockRelayBlockNumberProvider;
+	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
@@ -102,6 +154,7 @@ pub fn new_test_ext() -> TestExternalities {
 			entry_fee: 0,
 			account_authorizations: vec![],
 			preimage_authorizations: vec![],
+			allowed_authorizers: vec![],
 		},
 	}
 	.build_storage()
