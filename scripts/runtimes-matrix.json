@@ -43,8 +43,8 @@
         "extra_flags": "--blocktime 24000 --disable-spec-version-check"
     },
     "external_runtime": {
-      "repo": "https://github.com/bkontur/runtimes.git",
-      "ref": "bko-bulletin-stage1",
+      "repo": "https://github.com/x3c41a/runtimes.git",
+      "ref": "ndk/port-pr405",
       "path": "./system-parachains/bulletin/bulletin-polkadot"
     }
   }
