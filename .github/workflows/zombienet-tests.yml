@@ -43,7 +43,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder
+          groups: polkadot-node chain-spec-builder relay-runtime
           mode: prepare
 
       # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
@@ -89,7 +89,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder
+          groups: polkadot-node chain-spec-builder relay-runtime
           mode: consume
 
       - name: Rust cache
@@ -147,7 +147,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder
+          groups: polkadot-node chain-spec-builder relay-runtime
           mode: consume
 
       - name: Rust cache

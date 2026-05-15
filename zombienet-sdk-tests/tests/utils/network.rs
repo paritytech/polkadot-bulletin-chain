@@ -40,6 +40,11 @@ pub fn get_relay_chain() -> String {
 	env_or_default(RELAY_CHAIN_ENV, DEFAULT_RELAY_CHAIN)
 }
 
+pub fn get_relay_chain_spec() -> String {
+	let path_str = env_or_default(RELAY_CHAIN_SPEC_ENV, DEFAULT_RELAY_CHAIN_SPEC);
+	resolve_binary_path(&path_str)
+}
+
 pub fn get_para_id() -> u32 {
 	std::env::var(PARA_ID_ENV)
 		.ok()
@@ -129,15 +134,19 @@ pub fn build_parachain_network_config_single_collator(
 
 	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
 
-	let relay_chain = get_relay_chain();
+	let relay_chain_spec = get_relay_chain_spec();
 	let para_id = get_para_id();
-	tracing::info!("Relay chain: {}", relay_chain);
+	tracing::info!("Relay chain spec: {}", relay_chain_spec);
 	tracing::info!("Parachain ID: {}", para_id);
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
 			relaychain
-				.with_chain(relay_chain.as_str())
+				// `with_chain` is required to transition the typestate builder; the actual
+				// genesis comes from `with_chain_spec_path` below (the chain-name string is
+				// only used as a label / for path derivation).
+				.with_chain(get_relay_chain().as_str())
+				.with_chain_spec_path(relay_chain_spec.as_str())
 				.with_default_command(relay_binary.as_str())
 				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
 				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
@@ -183,15 +192,19 @@ pub fn build_parachain_network_config_three_relay_validators(
 
 	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
 
-	let relay_chain = get_relay_chain();
+	let relay_chain_spec = get_relay_chain_spec();
 	let para_id = get_para_id();
-	tracing::info!("Relay chain: {}", relay_chain);
+	tracing::info!("Relay chain spec: {}", relay_chain_spec);
 	tracing::info!("Parachain ID: {}", para_id);
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
 			relaychain
-				.with_chain(relay_chain.as_str())
+				// `with_chain` is required to transition the typestate builder; the actual
+				// genesis comes from `with_chain_spec_path` below (the chain-name string is
+				// only used as a label / for path derivation).
+				.with_chain(get_relay_chain().as_str())
+				.with_chain_spec_path(relay_chain_spec.as_str())
 				.with_default_command(relay_binary.as_str())
 				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
 				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
@@ -236,13 +249,17 @@ pub fn build_parachain_network_config_three_collators(
 	let para_args2 = para_args.clone();
 	let para_args3 = para_args.clone();
 
-	let relay_chain = get_relay_chain();
+	let relay_chain_spec = get_relay_chain_spec();
 	let para_id = get_para_id();
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
 			relaychain
-				.with_chain(relay_chain.as_str())
+				// `with_chain` is required to transition the typestate builder; the actual
+				// genesis comes from `with_chain_spec_path` below (the chain-name string is
+				// only used as a label / for path derivation).
+				.with_chain(get_relay_chain().as_str())
+				.with_chain_spec_path(relay_chain_spec.as_str())
 				.with_default_command(relay_binary.as_str())
 				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
 				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))

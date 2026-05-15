@@ -10,10 +10,11 @@
 #   chain-spec-builder   → chain-spec-builder
 #   try-runtime          → try-runtime
 #   zombienet            → zombienet  (release-tag only; source-build not supported)
+#   relay-runtime        → westend_runtime.compact.compressed.wasm (source-build only)
 #
 # Each group reads `<GROUP>_VERSION` env (uppercase, dashes → underscores):
 #   POLKADOT_NODE_VERSION, FRAME_OMNI_BENCHER_VERSION, CHAIN_SPEC_BUILDER_VERSION,
-#   TRY_RUNTIME_VERSION, ZOMBIENET_VERSION
+#   TRY_RUNTIME_VERSION, ZOMBIENET_VERSION, RELAY_RUNTIME_VERSION
 #
 # Value semantics:
 #   * 40-char hex commit hash → clone+build from source.
@@ -29,7 +30,10 @@
 #
 # Cache layout (rooted at $POLKADOT_BINARIES_DIR, default `./.polkadot-binaries`):
 #   <root>/<group>/<ref>/<platform>/<binary>
-#   <root>/_src/<repo>/                       (one git clone, reused)
+#   <root>/_src/<repo>.git/                   bare clone, objects shared across worktrees
+#   <root>/_src/worktrees/<ref>/              per-SHA worktree checkout
+#   <root>/_src/target/<ref>/                 per-SHA cargo target dir (avoids
+#                                             invalidation when SHAs alternate)
 
 set -euo pipefail
 
@@ -102,8 +106,15 @@ configure_group() {
 			SOURCE_URL=""
 			SOURCE_DIR=""
 			;;
+		relay-runtime)
+			VERSION_VAR="RELAY_RUNTIME_VERSION"
+			BINARIES="westend_runtime.compact.compressed.wasm"
+			RELEASE_REPO=""
+			SOURCE_URL="https://github.com/paritytech/polkadot-sdk.git"
+			SOURCE_DIR="polkadot-sdk"
+			;;
 		*)
-			die "unknown group: $1 (expected one of: polkadot-node, frame-omni-bencher, chain-spec-builder, try-runtime, zombienet)"
+			die "unknown group: $1 (expected one of: polkadot-node, frame-omni-bencher, chain-spec-builder, try-runtime, zombienet, relay-runtime)"
 			;;
 	esac
 }
@@ -157,9 +168,14 @@ REF="${!VERSION_VAR:-}"
 
 CACHE_DIR="$CACHE_ROOT/$GROUP/$REF/$PLATFORM"
 
+# WASM artifacts (relay-runtime) aren't executable — check existence only.
+case "$GROUP" in
+	relay-runtime) cache_check_op="-f" ;;
+	*)             cache_check_op="-x" ;;
+esac
 all_present=true
 for bin in $BINARIES; do
-	if [ ! -x "$CACHE_DIR/$bin" ]; then
+	if [ ! $cache_check_op "$CACHE_DIR/$bin" ]; then
 		all_present=false
 		break
 	fi
@@ -214,20 +230,32 @@ else
 	[ -n "$SOURCE_URL" ] || die "source-build is not supported for group '$GROUP'; pass a release tag in $VERSION_VAR instead"
 
 	log "$GROUP $REF: building from source"
-	mkdir -p "$SRC_ROOT"
-	SRC_PATH="$SRC_ROOT/$SOURCE_DIR"
-	if [ ! -d "$SRC_PATH/.git" ]; then
-		log "  cloning $SOURCE_URL → $SRC_PATH"
-		git clone "$SOURCE_URL" "$SRC_PATH" >&2
+	mkdir -p "$SRC_ROOT/worktrees" "$SRC_ROOT/target"
+	BARE_PATH="$SRC_ROOT/$SOURCE_DIR.git"
+	if [ ! -d "$BARE_PATH" ]; then
+		log "  cloning $SOURCE_URL → $BARE_PATH (bare)"
+		git clone --bare "$SOURCE_URL" "$BARE_PATH" >&2
 	fi
+	# Permissive fetch: only when ref isn't reachable in the bare repo.
+	if ! git --git-dir="$BARE_PATH" cat-file -e "$REF^{commit}" 2>/dev/null; then
+		log "  fetching $REF into $BARE_PATH"
+		git --git-dir="$BARE_PATH" fetch --quiet origin
+	fi
+	# GC any worktrees the user deleted by hand (e.g. via `rm -rf`).
+	git --git-dir="$BARE_PATH" worktree prune
+	WORKTREE_PATH="$SRC_ROOT/worktrees/$REF"
+	if [ ! -d "$WORKTREE_PATH" ]; then
+		log "  adding worktree at $WORKTREE_PATH"
+		git --git-dir="$BARE_PATH" -c advice.detachedHead=false \
+			worktree add --detach --quiet "$WORKTREE_PATH" "$REF"
+	fi
+	TARGET_DIR="$SRC_ROOT/target/$REF"
+	mkdir -p "$TARGET_DIR"
 	(
-		cd "$SRC_PATH"
-		# Be permissive: only fetch if the ref isn't present locally yet.
-		if ! git cat-file -e "$REF^{commit}" 2>/dev/null; then
-			log "  fetching $REF"
-			git fetch --quiet origin
-		fi
-		git -c advice.detachedHead=false checkout --quiet "$REF"
+		cd "$WORKTREE_PATH"
+		# Per-SHA target dir so divergent groups (e.g. relay-runtime at a newer SHA
+		# than polkadot-node) don't trash each other's incremental cache.
+		export CARGO_TARGET_DIR="$TARGET_DIR"
 		# macOS: libclang.dylib often isn't found; nudge the linker.
 		if [ "$PLATFORM" = darwin-aarch64 ] && command -v brew >/dev/null 2>&1; then
 			llvm_prefix="$(brew --prefix llvm 2>/dev/null || true)"
@@ -235,16 +263,29 @@ else
 				export DYLD_FALLBACK_LIBRARY_PATH="$llvm_prefix/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
 			fi
 		fi
-		targets="$(build_targets_for_group "$GROUP")"
 		if [ "$GROUP" = "polkadot-node" ]; then
-			# `--features fast-runtime` enables zombienet's `westend-development` preset
-			# with short epochs; not a feature of polkadot-omni-node, so split builds.
-			log "  cargo build --release --locked -p polkadot --features fast-runtime"
-			cargo build --release --locked -p polkadot --features fast-runtime
-			# omni-node loads runtime from the chain spec.
+			# The relay runtime is supplied via the `relay-runtime` group + chain-spec,
+			# so the node doesn't need its native runtime — skip the wasm-builder.
+			log "  SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot"
+			SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot
 			log "  SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node"
 			SKIP_WASM_BUILD=1 cargo build --release --locked -p polkadot-omni-node
+			while IFS=: read -r crate bin; do
+				[ -x "$CARGO_TARGET_DIR/release/$bin" ] || die "expected $CARGO_TARGET_DIR/release/$bin not produced by cargo"
+				cp "$CARGO_TARGET_DIR/release/$bin" "$CACHE_DIR/$bin"
+				chmod +x "$CACHE_DIR/$bin"
+			done <<< "$(build_targets_for_group "$GROUP")"
+		elif [ "$GROUP" = "relay-runtime" ]; then
+			# Drives the substrate-wasm-builder via cargo build of the runtime crate.
+			# `--features fast-runtime` cuts epoch / session durations to test-friendly
+			# values, which is the whole reason we build it ourselves.
+			log "  cargo build --release --locked -p westend-runtime --features fast-runtime"
+			cargo build --release --locked -p westend-runtime --features fast-runtime
+			wasm_src="$CARGO_TARGET_DIR/release/wbuild/westend-runtime/westend_runtime.compact.compressed.wasm"
+			[ -f "$wasm_src" ] || die "expected $wasm_src not produced by cargo"
+			cp "$wasm_src" "$CACHE_DIR/westend_runtime.compact.compressed.wasm"
 		else
+			targets="$(build_targets_for_group "$GROUP")"
 			crates_to_build=""
 			while IFS=: read -r crate bin; do
 				case " $crates_to_build " in
@@ -255,17 +296,17 @@ else
 			log "  SKIP_WASM_BUILD=1 cargo build --release --locked${crates_to_build// / -p}"
 			# shellcheck disable=SC2086
 			SKIP_WASM_BUILD=1 cargo build --release --locked $(printf -- '-p %s ' $crates_to_build)
+			while IFS=: read -r crate bin; do
+				[ -x "$CARGO_TARGET_DIR/release/$bin" ] || die "expected $CARGO_TARGET_DIR/release/$bin not produced by cargo"
+				cp "$CARGO_TARGET_DIR/release/$bin" "$CACHE_DIR/$bin"
+				chmod +x "$CACHE_DIR/$bin"
+			done <<< "$targets"
 		fi
-		while IFS=: read -r crate bin; do
-			[ -x "target/release/$bin" ] || die "expected target/release/$bin not produced by cargo"
-			cp "target/release/$bin" "$CACHE_DIR/$bin"
-			chmod +x "$CACHE_DIR/$bin"
-		done <<< "$targets"
 	)
 fi
 
 for bin in $BINARIES; do
-	[ -x "$CACHE_DIR/$bin" ] || die "$bin missing from $CACHE_DIR after fetch"
+	[ $cache_check_op "$CACHE_DIR/$bin" ] || die "$bin missing from $CACHE_DIR after fetch"
 done
 
 log "$GROUP $REF: ready at $CACHE_DIR"

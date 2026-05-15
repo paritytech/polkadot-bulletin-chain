@@ -8,13 +8,13 @@ description: |
     consume  — restore-only with fail-on-cache-miss. Use in matrix legs / consumers.
 
   Versions are read from .github/env (POLKADOT_NODE_VERSION, CHAIN_SPEC_BUILDER_VERSION,
-  ZOMBIENET_VERSION, TRY_RUNTIME_VERSION, FRAME_OMNI_BENCHER_VERSION). The action loads
-  that file into $GITHUB_ENV and installs `just` for you — callers only need to checkout
-  the repo first.
+  ZOMBIENET_VERSION, TRY_RUNTIME_VERSION, FRAME_OMNI_BENCHER_VERSION, RELAY_RUNTIME_VERSION).
+  The action loads that file into $GITHUB_ENV and installs `just` for you — callers only
+  need to checkout the repo first.
 
 inputs:
   groups:
-    description: Space-separated binary groups. Supported - polkadot-node, chain-spec-builder, zombienet, try-runtime, frame-omni-bencher.
+    description: Space-separated binary groups. Supported - polkadot-node, chain-spec-builder, zombienet, try-runtime, frame-omni-bencher, relay-runtime.
     required: true
   mode:
     description: prepare (populate + save, non-matrix job) or consume (restore-only).
@@ -38,7 +38,7 @@ runs:
           echo "::error::use-polkadot-binaries: groups must be a non-empty space-separated list"
           exit 1
         fi
-        VALID="polkadot-node chain-spec-builder zombienet try-runtime frame-omni-bencher"
+        VALID="polkadot-node chain-spec-builder zombienet try-runtime frame-omni-bencher relay-runtime"
         for g in $INPUT_GROUPS; do
           case " $VALID " in
             *" $g "*) ;;
@@ -232,3 +232,27 @@ runs:
           chmod -R +x "${POLKADOT_BINARIES_DIR}/frame-omni-bencher"
         fi
         just binaries-bencher >> "$GITHUB_PATH"
+
+    # ============================================================
+    # relay-runtime (WASM artifact, not an executable; no PATH append)
+    # ============================================================
+    - name: Cache relay-runtime WASM
+      id: cache-relay-runtime
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' relay-runtime ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/relay-runtime
+        key: polkadot-binaries-${{ runner.os }}-relay-runtime-${{ env.RELAY_RUNTIME_VERSION }}
+
+    - name: Populate relay-runtime WASM
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' relay-runtime ') && steps.cache-relay-runtime.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-relay-runtime > /dev/null
+
+    - name: Restore relay-runtime WASM
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' relay-runtime ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/relay-runtime
+        key: polkadot-binaries-${{ runner.os }}-relay-runtime-${{ env.RELAY_RUNTIME_VERSION }}
+        fail-on-cache-miss: true

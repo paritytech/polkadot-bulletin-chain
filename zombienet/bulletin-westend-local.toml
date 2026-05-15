@@ -11,6 +11,7 @@ node_spawn_timeout = 240
 default_command = "{{POLKADOT_BINARY_PATH}}"
 default_args = ["-lruntime=debug,xcm=trace"]
 chain = "westend-local"
+chain_spec_path = "./zombienet/westend-local-spec.json"
 
 [[relaychain.nodes]]
 name = "alice"
