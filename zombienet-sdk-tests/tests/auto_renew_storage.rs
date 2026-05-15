@@ -761,14 +761,15 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	.await?;
 	tracing::info!("✓ Both items fetchable shortly after upload");
 
-	// Pruning fires off FINALIZED head; with ~3-5 block finality lag, S + RP + 15 is past it.
-	let wait_until = store_block + RETENTION_PERIOD as u64 + 15;
+	// Pruning is gated on FINALIZED crossing store_block + RP; +5 buffer covers the async
+	// col11 refcount cleanup that follows pruning.
+	let wait_until = store_block + RETENTION_PERIOD as u64 + 5;
 	tracing::info!(
-		"Waiting for block {} (store + RP + 15) so block {} is pruned",
+		"Waiting for FINALIZED block {} (store + RP + 5) so block {} is pruned",
 		wait_until,
 		store_block
 	);
-	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Proof for each store-block (one per store, since they landed in different blocks)
 	// fires at `block + RP`. Single ProofChecked event per source-block.
@@ -922,7 +923,8 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 
 	let store_inclusion_target = pre_store_block + 5;
-	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
 
 	// Walk chain backward counting `Stored` events — avoids per-submission block lookups
 	// which race against chainHead pinning when done concurrently.
@@ -930,19 +932,19 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
 		loop {
-			let head = current_best_block(client).await?;
+			let head = current_finalized_block(client).await?;
 			if head.number() as u64 >= store_inclusion_target {
 				break head.number() as u64;
 			}
 			if start.elapsed() > poll_timeout {
-				anyhow::bail!("Timed out waiting for at_latest >= {}", store_inclusion_target);
+				anyhow::bail!("Timed out waiting for finalized >= {}", store_inclusion_target);
 			}
 			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 		}
 	};
 	let mut store_blocks: Vec<u64> = Vec::with_capacity(items.len());
 	{
-		let mut current = current_best_block(client).await?;
+		let mut current = current_finalized_block(client).await?;
 		while current.number() as u64 > pre_store_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
@@ -1014,25 +1016,25 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	tracing::info!("All {} enable_auto_renew calls accepted into pool", MANY_ITEMS_COUNT);
 
 	let enable_inclusion_target = pre_enable_block + 5;
-	wait_for_block_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
+	wait_for_finalized_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await?;
 	{
 		let poll_timeout = std::time::Duration::from_secs(60);
 		let start = std::time::Instant::now();
 		loop {
-			let head = current_best_block(client).await?;
+			let head = current_finalized_block(client).await?;
 			if head.number() as u64 >= enable_inclusion_target {
 				break;
 			}
 			if start.elapsed() > poll_timeout {
-				anyhow::bail!("Timed out waiting for at_latest >= {}", enable_inclusion_target);
+				anyhow::bail!("Timed out waiting for finalized >= {}", enable_inclusion_target);
 			}
 			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 		}
 	}
 	let mut enabled_count = 0usize;
 	{
-		let mut current = current_best_block(client).await?;
+		let mut current = current_finalized_block(client).await?;
 		while current.number() as u64 > pre_enable_block {
 			let events = current.events().await?;
 			enabled_count += events
@@ -1526,12 +1528,13 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	tracing::info!("All {} stores accepted into pool", WORST_CASE_WORKERS);
 
 	let store_inclusion_target = pre_store_block + 5;
-	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
 
-	let post_store_head_n = current_best_block(&client).await?.number() as u64;
+	let post_store_head_n = current_finalized_block(&client).await?.number() as u64;
 	let mut store_blocks: Vec<u64> = Vec::with_capacity(items.len());
 	{
-		let mut current = current_best_block(&client).await?;
+		let mut current = current_finalized_block(&client).await?;
 		while current.number() as u64 > pre_store_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
@@ -1592,7 +1595,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	tracing::info!("All {} enable_auto_renew calls accepted into pool", WORST_CASE_WORKERS);
 
 	let enable_inclusion_target = pre_enable_block + 5;
-	wait_for_block_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
+	wait_for_finalized_height(collator1, enable_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await?;
 
 	let renewal_cadence = RETENTION_PERIOD as u64 + 1;
@@ -1647,24 +1650,8 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		);
 	}
 
-	let head = {
-		let poll_timeout = std::time::Duration::from_secs(60);
-		let start = std::time::Instant::now();
-		loop {
-			let head = current_best_block(&client).await?;
-			if head.number() as u64 >= wait_until {
-				break head;
-			}
-			if start.elapsed() > poll_timeout {
-				anyhow::bail!(
-					"Timed out waiting for at_latest() to see block {} (last seen: {})",
-					wait_until,
-					head.number()
-				);
-			}
-			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-		}
-	};
+	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	let head = current_finalized_block(&client).await?;
 	let stats_range_start = first_renewal_block.saturating_sub(15).max(1);
 	let stats_range_end = last_renewal_block + 2;
 
@@ -1803,11 +1790,12 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		exhaustion_block,
 		last_renewal_block
 	);
-	wait_for_block_height(collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, exhaustion_wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
 	let mut total_failed: u32 = 0;
 	let mut total_renewed_post_window: u32 = 0;
 	for n in exhaustion_block..=exhaustion_block + 1 {
-		let hash = block_hash_at(&client, n).await?;
+		let hash = finalized_block_hash_at(&client, n).await?;
 		let events = client.blocks().at(hash).await?.events().await?;
 		total_failed += count_event(&events, "AutoRenewalFailed");
 		total_renewed_post_window += count_event(&events, "DataAutoRenewed");
@@ -1937,25 +1925,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
 	tracing::info!("All {} stores accepted into pool", total_items);
 
-	wait_for_block_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
 
 	let mut store_block: u64 = 0;
 	{
-		let poll_timeout = std::time::Duration::from_secs(60);
-		let start = std::time::Instant::now();
-		loop {
-			let head = current_best_block(&client).await?;
-			if head.number() as u64 >= pre_store_block + 5 {
-				break;
-			}
-			if start.elapsed() > poll_timeout {
-				anyhow::bail!("Timed out waiting for at_latest >= {}", pre_store_block + 5);
-			}
-			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-		}
-	}
-	{
-		let mut current = current_best_block(&client).await?;
+		let mut current = current_finalized_block(&client).await?;
 		while current.number() as u64 > pre_store_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
@@ -2008,35 +1983,13 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		store_block,
 		RETENTION_PERIOD
 	);
-	wait_for_block_height(collator1, expiry_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, expiry_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Proof for the store-block fires at `store_block + RP = expiry_block - 1`, one block
 	// before `on_initialize` takes `Transactions[store_block]`.
 	assert_proof_checked_at(&client, expiry_block - 1, "on_init_cleanup post-store").await?;
-	{
-		let poll_timeout = std::time::Duration::from_secs(60);
-		let start = std::time::Instant::now();
-		loop {
-			let head = current_best_block(&client).await?;
-			if head.number() as u64 > expiry_block {
-				break;
-			}
-			if start.elapsed() > poll_timeout {
-				anyhow::bail!("Timed out waiting for at_latest >= {}", expiry_block + 1);
-			}
-			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-		}
-	}
 
-	let expiry_hash = {
-		let mut current = current_best_block(&client).await?;
-		while (current.number() as u64) > expiry_block {
-			let parent_hash = current.header().parent_hash;
-			current = client.blocks().at(parent_hash).await?;
-		}
-		assert_eq!(current.number() as u64, expiry_block);
-		current.hash()
-	};
+	let expiry_hash = finalized_block_hash_at(&client, expiry_block).await?;
 
 	// Transactions[store_block] is None at expiry block (taken by on_initialize).
 	{
@@ -2266,24 +2219,11 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(futs).await?;
 	tracing::info!("All {} stores accepted into pool", ON_INIT_NO_RENEWALS_ITEMS);
 
-	wait_for_block_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	{
-		let poll_timeout = std::time::Duration::from_secs(60);
-		let start = std::time::Instant::now();
-		loop {
-			let head = current_best_block(&client).await?;
-			if head.number() as u64 >= pre_store_block + 5 {
-				break;
-			}
-			if start.elapsed() > poll_timeout {
-				anyhow::bail!("Timed out waiting for at_latest >= {}", pre_store_block + 5);
-			}
-			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-		}
-	}
+	wait_for_finalized_height(collator1, pre_store_block + 5, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
 	let mut store_block: u64 = 0;
 	{
-		let mut current = current_best_block(&client).await?;
+		let mut current = current_finalized_block(&client).await?;
 		while current.number() as u64 > pre_store_block {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
@@ -2308,7 +2248,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	tracing::info!("Stores landed at block {}", store_block);
 
 	let expiry_block = store_block + RETENTION_PERIOD as u64 + 1;
-	wait_for_block_height(collator1, expiry_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, expiry_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Proof for the stores fires at `store_block + RP = expiry_block - 1`, one block before
 	// `on_initialize` takes `Transactions[store_block]` as obsolete.
@@ -2316,24 +2256,7 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 
 	let stats_range_start = store_block.saturating_sub(2).max(1);
 	let stats_range_end = expiry_block + 2;
-	let head = {
-		let poll_timeout = std::time::Duration::from_secs(60);
-		let start = std::time::Instant::now();
-		loop {
-			let head = current_best_block(&client).await?;
-			if head.number() as u64 >= stats_range_end {
-				break head;
-			}
-			if start.elapsed() > poll_timeout {
-				anyhow::bail!(
-					"Timed out waiting for at_latest >= {} (last seen: {})",
-					stats_range_end,
-					head.number()
-				);
-			}
-			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-		}
-	};
+	let head = current_finalized_block(&client).await?;
 	let mut block_hashes_by_number: HashMap<u64, subxt::utils::H256> = HashMap::new();
 	let mut current = head;
 	loop {
@@ -3014,14 +2937,14 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 			wait_until,
 			renewal_block
 		);
-		wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+		wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 		dump_renewal_window(client, renewal_block, &format!("quota_exhaustion cycle {}", cycle))
 			.await?;
 
 		// Proof for cycle k's source tx_info lands at `renewal_block - 1`.
 		assert_proof_checked_at(client, renewal_block - 1, &format!("cycle {}", cycle)).await?;
 
-		let renewal_hash = block_hash_at(client, renewal_block).await?;
+		let renewal_hash = finalized_block_hash_at(client, renewal_block).await?;
 		let events = client.blocks().at(renewal_hash).await?.events().await?;
 		let renewed = count_event(&events, "DataAutoRenewed");
 		let failed = count_event(&events, "AutoRenewalFailed");
@@ -3049,13 +2972,13 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	// Cycle 3: bytes_permanent (= 2L) + L > bytes_allowance (= 2L).
 	let wait_until = r3 + 1;
 	tracing::info!(
-		"[cycle 3] Waiting for block {} (renewal at {}) — expected to fail",
+		"[cycle 3] Waiting for FINALIZED block {} (renewal at {}) — expected to fail",
 		wait_until,
 		r3
 	);
-	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	let r3_hash = block_hash_at(client, r3).await?;
+	let r3_hash = finalized_block_hash_at(client, r3).await?;
 	let events = client.blocks().at(r3_hash).await?.events().await?;
 	let failed = count_event(&events, "AutoRenewalFailed");
 	let renewed = count_event(&events, "DataAutoRenewed");
