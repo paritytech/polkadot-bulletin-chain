@@ -78,8 +78,8 @@ parameter_types! {
 /// authorization.
 ///
 /// Inspects only `Utility` wrappers (sudo is intentionally not inspected). Marks
-/// `Utility::batch` / `batch_all` / `force_batch` as list-batches via
-/// [`is_list_batch_wrapper`](pallet_bulletin_transaction_storage::CallInspector::is_list_batch_wrapper)
+/// `Utility::batch` / `batch_all` / `force_batch` as batches via
+/// [`is_batch_wrapper`](pallet_bulletin_transaction_storage::CallInspector::is_batch_wrapper)
 /// — the only wrappers permitted to enclose `renew` / `renew_content_hash` calls.
 ///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
@@ -100,7 +100,7 @@ impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCall
 		}
 	}
 
-	fn is_list_batch_wrapper(call: &RuntimeCall) -> bool {
+	fn is_batch_wrapper(call: &RuntimeCall) -> bool {
 		matches!(
 			call,
 			RuntimeCall::Utility(

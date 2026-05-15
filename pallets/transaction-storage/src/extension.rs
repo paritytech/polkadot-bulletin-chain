@@ -57,13 +57,13 @@ where
 	/// Returns `None` for non-wrapper calls.
 	fn inspect_wrapper(call: &RuntimeCallOf<T>) -> Option<Vec<&RuntimeCallOf<T>>>;
 
-	/// Returns `true` if `call` is a list-style batch wrapper that dispatches its inner
-	/// calls independently using the outer origin (`Utility::batch` / `batch_all` /
+	/// Returns `true` if `call` is a batch wrapper that dispatches its inner calls
+	/// independently using the outer origin (`Utility::batch` / `batch_all` /
 	/// `force_batch`). `renew` / `renew_content_hash` may be batched inside these
 	/// wrappers; any other wrapper variant rejects them.
 	///
-	/// Default is `false` (no list-batch support).
-	fn is_list_batch_wrapper(_call: &RuntimeCallOf<T>) -> bool {
+	/// Default is `false` (no batch support).
+	fn is_batch_wrapper(_call: &RuntimeCallOf<T>) -> bool {
 		false
 	}
 
@@ -158,10 +158,10 @@ struct WrapperWalkState {
 	/// Wrapped stores are never accepted.
 	found_store: bool,
 	/// A `renew` / `renew_content_hash` was found via a path that included at
-	/// least one non-list-batch wrapper (`as_derivative`, `if_else`, etc.).
+	/// least one non-batch wrapper (`as_derivative`, `if_else`, etc.).
 	found_renew_outside_batch: bool,
 	/// Number of `renew` / `renew_content_hash` calls found via a pure
-	/// list-batch path. Used both as the "renews present" flag (`> 0`) and to
+	/// batch path. Used both as the "renews present" flag (`> 0`) and to
 	/// enforce the `MaxBlockTransactions` cap at validate time.
 	renew_in_batch_count: u32,
 	/// A non-storage-mutating TransactionStorage call (`authorize_*`,
@@ -186,8 +186,8 @@ struct WrapperWalkState {
 ///   [`Config::Authorizer`]. May appear directly or inside any wrapper that contains only
 ///   management calls; origin is not rewritten.
 /// - **Wrappers** (e.g. `Utility::batch`, `Sudo::sudo`): inspected via `I: CallInspector`. The
-///   runtime's [`CallInspector::is_list_batch_wrapper`] marks `Utility::batch` / `batch_all` /
-///   `force_batch` as list-batches — the only wrappers permitted to enclose renews.
+///   runtime's [`CallInspector::is_batch_wrapper`] marks `Utility::batch` / `batch_all` /
+///   `force_batch` as batches — the only wrappers permitted to enclose renews.
 ///
 /// The `I` type parameter controls wrapper inspection. Use `()` (the default) for no wrapper
 /// support, or provide a runtime-specific [`CallInspector`] implementation to enable recursive
@@ -351,10 +351,10 @@ where
 	/// own error.
 	///
 	/// `in_pure_batch_path` is `true` iff every wrapper from the extrinsic root down to
-	/// the current node is a list-batch (per [`CallInspector::is_list_batch_wrapper`]).
-	/// Once a non-list-batch wrapper is entered the flag flips to `false` for the rest
+	/// the current node is a batch (per [`CallInspector::is_batch_wrapper`]).
+	/// Once a non-batch wrapper is entered the flag flips to `false` for the rest
 	/// of the recursion — a renew can only be reached "in batch" via an unbroken chain
-	/// of list-batches.
+	/// of batches.
 	fn classify_wrapper(
 		call: &RuntimeCallOf<T>,
 		depth: u32,
@@ -387,7 +387,7 @@ where
 			return Err(InvalidTransaction::ExhaustsResources.into());
 		}
 		if let Some(inner_calls) = I::inspect_wrapper(call) {
-			let next_in_pure = in_pure_batch_path && I::is_list_batch_wrapper(call);
+			let next_in_pure = in_pure_batch_path && I::is_batch_wrapper(call);
 			for inner in inner_calls {
 				Self::classify_wrapper(inner, depth + 1, next_in_pure, state)?;
 			}

@@ -107,7 +107,7 @@ pub enum AuthorizedCaller<AccountId> {
 	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
 	/// A signed transaction whose origin was transformed to
 	/// [`crate::pallet::Origin::AuthorizedBatch`] by [`crate::extension::ValidateStorageCalls`]
-	/// on the list-batch wrapper path. Carries no scope: a batch may contain renews authorized
+	/// on the batch wrapper path. Carries no scope: a batch may contain renews authorized
 	/// under different buckets.
 	SignedBatch { who: AccountId },
 	/// A root call (e.g. via `sudo`).

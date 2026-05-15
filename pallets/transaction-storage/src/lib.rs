@@ -273,7 +273,7 @@ pub mod pallet {
 		/// Contains the signer and the scope of authorization that was consumed.
 		Authorized { who: T::AccountId, scope: AuthorizationScopeFor<T> },
 		/// A signed transaction whose inner renew calls were validated and authorized
-		/// individually by [`extension::ValidateStorageCalls`] inside a list-batch
+		/// individually by [`extension::ValidateStorageCalls`] inside a batch
 		/// wrapper (`Utility::batch` / `batch_all` / `force_batch`). Carries no scope:
 		/// inner renews may have used different buckets, and renew dispatch does not
 		/// read scope. Not accepted by `T::Authorizer::ensure_origin`, so management
@@ -1332,7 +1332,7 @@ pub mod pallet {
 		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
 		/// - [`Origin::AuthorizedBatch`] (set by [`extension::ValidateStorageCalls`] on the
-		///   list-batch wrapper path) → [`AuthorizedCaller::SignedBatch`]
+		///   batch wrapper path) → [`AuthorizedCaller::SignedBatch`]
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
 		///

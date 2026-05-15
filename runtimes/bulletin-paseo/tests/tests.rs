@@ -1305,7 +1305,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 /// `renew` is allowed directly and inside `Utility::batch` / `batch_all` /
 /// `force_batch`. It is rejected inside any other wrapper variant.
 #[test]
-fn renew_direct_and_list_batch_allowed() {
+fn renew_direct_and_batch_allowed() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
@@ -1351,7 +1351,7 @@ fn renew_direct_and_list_batch_allowed() {
 		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
 		advance_block();
 
-		// Each list-batch variant accepts a single renew.
+		// Each batch variant accepts a single renew.
 		for (wrapped, name) in [
 			(
 				RuntimeCall::Utility(pallet_utility::Call::batch {
@@ -1390,7 +1390,7 @@ fn renew_direct_and_list_batch_allowed() {
 			},
 		);
 
-		// as_derivative is not a list-batch — renew inside it must still be rejected.
+		// as_derivative is not a batch — renew inside it must still be rejected.
 		let as_derivative_call = RuntimeCall::Utility(pallet_utility::Call::as_derivative {
 			index: 0,
 			call: Box::new(renew_call.clone()),
@@ -1630,10 +1630,10 @@ fn mixed_batch_renew_and_store_rejected() {
 	});
 }
 
-/// Nested list-batches still accept renews; nesting an as_derivative anywhere on
+/// Nested batches still accept renews; nesting an as_derivative anywhere on
 /// the path back to a renew is still rejected.
 #[test]
-fn nested_list_batch_renew_allowed_non_batch_nested_rejected() {
+fn nested_batch_renew_allowed_non_batch_nested_rejected() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
@@ -1673,7 +1673,7 @@ fn nested_list_batch_renew_allowed_non_batch_nested_rejected() {
 		});
 
 		// batch_all([ batch([renew]), renew ]) — both renews are reached through
-		// purely list-batch wrappers, so both are accepted.
+		// purely batch wrappers, so both are accepted.
 		let nested = RuntimeCall::Utility(pallet_utility::Call::batch_all {
 			calls: vec![
 				RuntimeCall::Utility(pallet_utility::Call::batch {
@@ -1686,7 +1686,7 @@ fn nested_list_batch_renew_allowed_non_batch_nested_rejected() {
 		advance_block();
 
 		// batch_all([ as_derivative(renew) ]) — the as_derivative leg breaks the
-		// purely-list-batch chain, so this is rejected.
+		// purely-batch chain, so this is rejected.
 		let mixed_wrapper = RuntimeCall::Utility(pallet_utility::Call::batch_all {
 			calls: vec![RuntimeCall::Utility(pallet_utility::Call::as_derivative {
 				index: 0,
