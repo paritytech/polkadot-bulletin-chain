@@ -1955,7 +1955,9 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	tracing::info!("Stores landed at (or before) block {}", store_block);
 
 	tracing::info!("Enabling auto-renew for {} items (set 1)", ON_INIT_CLEANUP_ITEMS_PER_SET);
-	let pre_enable_block = current_finalized_block(&client).await?.number() as u64;
+	// BEST not FINALIZED — otherwise `+5` is short by the finality lag and the walk misses
+	// enables that landed in best blocks not yet finalized.
+	let pre_enable_block = current_best_block(&client).await?.number() as u64;
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
 		let call = tx(
