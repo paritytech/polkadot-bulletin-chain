@@ -526,13 +526,14 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
 
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
-        RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
         # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
         # and the containing directory by the collator name used in each toml.
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
             PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1010.json"
         elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
+            RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/paseo-local.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/paseo-local-1501.json"
         else
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
@@ -737,11 +738,12 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
         # Parachain: relay chain (required) + parachain spec (optional).
         # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
         # and the containing directory by the collator name used in each toml.
-        RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
             PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1010.json"
         elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
+            RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/paseo-local.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/paseo-local-1501.json"
         else
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
