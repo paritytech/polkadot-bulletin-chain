@@ -472,6 +472,52 @@ pub async fn submit_store_signed(
 	Ok(block_number)
 }
 
+/// Resolve the canonical store block by walking the **finalized** chain backward from the
+/// latest finalized block until a `TransactionStorage::Stored` event whose payload contains
+/// `content_hash` is found. Robust against best-vs-finalized reorgs: subxt's
+/// `wait_for_in_best_block` can name an inclusion block that gets orphaned, so the eager
+/// `canonical_store_block` reading at that hash returns a number not on the new canonical
+/// chain. This walk re-anchors against finality.
+///
+/// Caller must already have waited for finality to cover the expected store block (e.g. via
+/// `wait_for_finalized_height`). `search_from_inclusive` bounds how far back the walk
+/// descends — pass the best-reported store block minus a small reorg-depth buffer.
+pub async fn resolve_canonical_store_block(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	search_from_inclusive: u64,
+) -> Result<u64> {
+	// 32-byte sliding-window match against the event's scale-encoded field bytes —
+	// `Stored { index: u32, content_hash: [u8; 32], cid: Option<Cid> }`. Random collisions
+	// at 32 bytes are astronomically unlikely.
+	let mut current = client.blocks().at_latest().await?;
+	loop {
+		let block_n = current.number() as u64;
+		if block_n < search_from_inclusive {
+			break;
+		}
+		let events = current.events().await?;
+		for ev in events.iter().filter_map(|e| e.ok()) {
+			if ev.pallet_name() == "TransactionStorage" &&
+				ev.variant_name() == "Stored" &&
+				ev.field_bytes().windows(32).any(|w| w == content_hash)
+			{
+				return Ok(block_n);
+			}
+		}
+		if block_n == 0 {
+			break;
+		}
+		let parent_hash = current.header().parent_hash;
+		current = client.blocks().at(parent_hash).await?;
+	}
+	anyhow::bail!(
+		"Stored event for content_hash 0x{} not found on finalized chain at/above block {}",
+		hex::encode(content_hash),
+		search_from_inclusive,
+	)
+}
+
 /// Canonical store/renew block number, read from `TransactionByContentHash` at the
 /// inclusion-block hash. subxt's `tx_in_block.block_hash()` can name a block whose
 /// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to

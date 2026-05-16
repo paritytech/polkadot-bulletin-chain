@@ -11,8 +11,8 @@ use crate::{
 		blake2_256, build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		count_event, disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have,
 		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
-		set_retention_period, set_retention_period_finalized, submit_renew_pair,
-		submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
+		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
+		submit_renew_pair, submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
 		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
 		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
@@ -276,8 +276,8 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	tracing::info!("Test data: {} bytes, hash={}, CID={}", data.len(), hash_hex, cid);
 
 	let nonce = get_alice_nonce(collator1).await?;
-	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	tracing::info!("Data stored at block {}", store_block);
+	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
@@ -294,6 +294,23 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	enable_auto_renew(client, &content_hash, nonce).await?;
 	nonce += 1;
 	tracing::info!("Auto-renewal enabled for content_hash {}", hash_hex);
+
+	// Re-anchor `store_block` against the finalized chain — `authorize_and_store_data` reads
+	// the canonical block at the best-block inclusion hash, which a reorg between inclusion
+	// and finality can leave pointing at an orphan. All cycle math + `assert_proof_checked_at`
+	// reads downstream are gated on the finalized chain, so they need the finalized value.
+	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	if store_block != best_store_block {
+		tracing::info!(
+			"Canonical store block on finalized chain is {} (best-chain reported {})",
+			store_block,
+			best_store_block
+		);
+	}
 
 	// Renewal cadence is `RP + 1`; wait one extra block so the inherent is observable.
 	let cadence = RETENTION_PERIOD as u64 + 1;
@@ -740,19 +757,20 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	let data_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_RENEWED_");
 	let data_not_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_NOT_RENEWED_");
 
-	let (store_block, next_nonce) =
+	let (best_store_block, next_nonce) =
 		authorize_and_store_data(collator1, &data_renewed, nonce).await?;
 	nonce = next_nonce;
-	tracing::info!("data_renewed stored at block {}", store_block);
+	tracing::info!("data_renewed stored at best-chain block {}", best_store_block);
 
 	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
 	nonce += 1;
 
-	let data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
+	let best_data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
 	nonce += 1;
-	tracing::info!("data_not_renewed stored at block {}", data_not_renewed_block);
+	tracing::info!("data_not_renewed stored at best-chain block {}", best_data_not_renewed_block);
 
 	let content_hash_renewed = blake2_256(&data_renewed);
+	let content_hash_not_renewed = blake2_256(&data_not_renewed);
 	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
 	tracing::info!("Auto-renewal enabled for data_renewed");
 
@@ -774,13 +792,34 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 
 	// Pruning is gated on FINALIZED crossing store_block + RP; +5 buffer covers the async
 	// col11 refcount cleanup that follows pruning.
-	let wait_until = store_block + RETENTION_PERIOD as u64 + 5;
+	let wait_until = best_store_block + RETENTION_PERIOD as u64 + 5;
 	tracing::info!(
 		"Waiting for FINALIZED block {} (store + RP + 5) so block {} is pruned",
 		wait_until,
-		store_block
+		best_store_block
 	);
 	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Re-anchor both store blocks on the finalized chain: a reorg between best-block
+	// inclusion and finality can leave the captured best-chain numbers pointing at orphans
+	// while the assertions below read the finalized chain.
+	let store_block = resolve_canonical_store_block(
+		client,
+		&content_hash_renewed,
+		best_store_block.saturating_sub(3),
+	)
+	.await?;
+	let data_not_renewed_block = resolve_canonical_store_block(
+		client,
+		&content_hash_not_renewed,
+		best_data_not_renewed_block.saturating_sub(3),
+	)
+	.await?;
+	tracing::info!(
+		"Canonical (finalized) store blocks: data_renewed={}, data_not_renewed={}",
+		store_block,
+		data_not_renewed_block
+	);
 
 	// Proof for each store-block (one per store, since they landed in different blocks)
 	// fires at `block + RP`. Single ProofChecked event per source-block.
