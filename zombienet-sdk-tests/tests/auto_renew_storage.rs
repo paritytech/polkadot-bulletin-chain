@@ -10,9 +10,9 @@ use crate::{
 		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
 		blake2_256, build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		count_event, disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have,
-		finalized_store_block_for_hash, generate_test_data, get_alice_nonce, initialize_network,
-		override_alice_authorization, set_retention_period, set_retention_period_finalized,
-		submit_renew_pair, submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
+		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
+		set_retention_period, set_retention_period_finalized, submit_renew_pair,
+		submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
 		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
 		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
@@ -743,20 +743,16 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	let (store_block, next_nonce) =
 		authorize_and_store_data(collator1, &data_renewed, nonce).await?;
 	nonce = next_nonce;
-	tracing::info!("data_renewed stored at block {} (best, pre-finality)", store_block);
+	tracing::info!("data_renewed stored at block {}", store_block);
 
 	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
 	nonce += 1;
 
 	let data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
 	nonce += 1;
-	tracing::info!(
-		"data_not_renewed stored at block {} (best, pre-finality)",
-		data_not_renewed_block
-	);
+	tracing::info!("data_not_renewed stored at block {}", data_not_renewed_block);
 
 	let content_hash_renewed = blake2_256(&data_renewed);
-	let content_hash_not_renewed = blake2_256(&data_not_renewed);
 	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
 	tracing::info!("Auto-renewal enabled for data_renewed");
 
@@ -785,19 +781,6 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		store_block
 	);
 	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-
-	// Re-resolve canonical store blocks from the finalized chain — if a reorg between
-	// best-inclusion and finality moved either store to a different block, the captured
-	// best-chain numbers above would point at orphans and `assert_proof_checked_at` would
-	// read the wrong finalized block.
-	let store_block = finalized_store_block_for_hash(client, &content_hash_renewed).await?;
-	let data_not_renewed_block =
-		finalized_store_block_for_hash(client, &content_hash_not_renewed).await?;
-	tracing::info!(
-		"Canonical (finalized) store blocks: data_renewed={}, data_not_renewed={}",
-		store_block,
-		data_not_renewed_block
-	);
 
 	// Proof for each store-block (one per store, since they landed in different blocks)
 	// fires at `block + RP`. Single ProofChecked event per source-block.

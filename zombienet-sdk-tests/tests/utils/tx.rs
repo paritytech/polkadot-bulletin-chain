@@ -233,8 +233,9 @@ pub async fn authorize_and_store_items(
 /// Best-only inclusion for both the authorize and store extrinsics — caller gets fast
 /// turnaround (~1 block) so any follow-up like `enable_auto_renew` can land before
 /// `store_block + RP`. Returns the canonical inclusion block number read at the
-/// inclusion-block hash. Callers that later assert against finalized state must resolve
-/// canonicality with [`finalized_store_block_for_hash`] to survive reorgs.
+/// inclusion-block hash. Callers that later assert against finalized state accept that a
+/// rare reorg between best-inclusion and finality can leave the captured block number
+/// pointing at an orphaned chain.
 pub async fn authorize_and_store_data(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
@@ -295,22 +296,8 @@ pub async fn authorize_and_store_data(
 	Ok((block_number, nonce))
 }
 
-/// Read the canonical store block number for `content_hash` from the **finalized** chain.
-/// Use this *after* finality has caught up past the store, so callers that later assert
-/// against finalized state survive reorgs that moved the store extrinsic to a different
-/// block on the new canonical chain.
-pub async fn finalized_store_block_for_hash(
-	client: &OnlineClient<SubstrateConfig>,
-	content_hash: &[u8; 32],
-) -> Result<u64> {
-	let finalized_hash = client.blocks().at_latest().await?.hash();
-	canonical_store_block(client, finalized_hash, content_hash).await
-}
-
 /// Returns (block_number, next_nonce). Waits for finalization (for LDB / sync tests where
 /// the captured block number must be on the canonical chain *before* the test proceeds).
-/// Auto-renew flows should keep using [`authorize_and_store_data`] + a late
-/// [`finalized_store_block_for_hash`] so they don't burn the RP window on finality.
 pub async fn authorize_and_store_data_finalized(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
@@ -458,8 +445,7 @@ pub async fn top_up_alice_authorization(
 
 /// Signed `store(data)` from Alice; caller ensures Alice is authorized. Returns the
 /// canonical inclusion block number (see [`canonical_store_block`]). Waits for best-only
-/// inclusion — callers that later read finalized state must resolve canonicality with
-/// [`finalized_store_block_for_hash`] to survive reorgs.
+/// inclusion; callers accept the rare-reorg risk on later finalized-state reads.
 pub async fn submit_store_signed(
 	client: &OnlineClient<SubstrateConfig>,
 	data: &[u8],
