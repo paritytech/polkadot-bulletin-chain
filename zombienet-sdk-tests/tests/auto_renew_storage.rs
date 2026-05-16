@@ -539,9 +539,9 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	nonce = next_nonce;
-	tracing::info!("Data stored at block {}", store_block);
+	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	// `validate_signed` tags renewals with `(who, content_hash)`, so two renews from the
 	// same signer would conflict in the pool — use Bob as a second signer. Bob has no prior
@@ -556,6 +556,18 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		.await?;
 
 	let content_hash = blake2_256(&data);
+	// Re-anchor against the finalized chain (Bob's authorize_via_sudo_finalized already
+	// pushed finality forward, so the resolver should find the Stored event immediately).
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	if store_block != best_store_block {
+		tracing::info!(
+			"Canonical store block on finalized chain is {} (best-chain reported {})",
+			store_block,
+			best_store_block
+		);
+	}
 	let (renew_block_a, renew_block_b) =
 		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
 	if renew_block_a != renew_block_b {
@@ -639,9 +651,9 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	tracing::info!("data1 hash={}", content_hash_and_cid(&data1).0);
 	tracing::info!("data2 hash={}", content_hash_and_cid(&data2).0);
 
-	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data1, nonce).await?;
+	let (best_store_block, next_nonce) = authorize_and_store_data(collator1, &data1, nonce).await?;
 	nonce = next_nonce;
-	tracing::info!("data1 stored at block {}", store_block);
+	tracing::info!("data1 stored at best-chain block {}", best_store_block);
 
 	top_up_alice_authorization(client, 5, 4 * data1.len() as u64, nonce).await?;
 	nonce += 1;
@@ -650,6 +662,25 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	enable_auto_renew(client, &content_hash_data1, nonce).await?;
 	nonce += 1;
 	tracing::info!("Auto-renewal enabled for data1");
+
+	// Re-anchor store_block on the finalized chain so the renewal_block computation below
+	// uses the canonical value — a reorg between best-inclusion and finality would otherwise
+	// shift renewal_block by ±1 and break the "data2 lands in renewal block" timing assert.
+	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let store_block = resolve_canonical_store_block(
+		client,
+		&content_hash_data1,
+		best_store_block.saturating_sub(3),
+	)
+	.await?;
+	if store_block != best_store_block {
+		tracing::info!(
+			"Canonical store block on finalized chain is {} (best-chain reported {})",
+			store_block,
+			best_store_block
+		);
+	}
 
 	// Submit data2 at R-1 so it lands in the renewal block R = S + RetentionPeriod + 1.
 	let renewal_block = store_block + RETENTION_PERIOD as u64 + 1;
@@ -3014,7 +3045,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let nonce = get_alice_nonce(collator1).await?;
-	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "post-store").await?;
 
 	// Alice's genesis authorization is ~10 MiB and `authorize_account` is additive — overwrite
@@ -3035,14 +3066,30 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	.await?;
 	nonce += 1;
 	tracing::info!(
-		"Data stored at block {}; authorization pinned to bytes_allowance = 2 × {}",
-		store_block,
+		"Data stored at best-chain block {}; authorization pinned to bytes_allowance = 2 × {}",
+		best_store_block,
 		data.len()
 	);
 
 	let content_hash = blake2_256(&data);
 	enable_auto_renew(client, &content_hash, nonce).await?;
 	tracing::info!("Auto-renewal enabled for {}", hash_hex);
+
+	// Re-anchor against the finalized chain so cycle math + `assert_proof_checked_at` reads
+	// the right canonical blocks even if a reorg moved the store between best-inclusion and
+	// finality.
+	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	if store_block != best_store_block {
+		tracing::info!(
+			"Canonical store block on finalized chain is {} (best-chain reported {})",
+			store_block,
+			best_store_block
+		);
+	}
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
 	let r1 = store_block + cadence;
@@ -3259,19 +3306,25 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let nonce = get_alice_nonce(collator1).await?;
-	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	tracing::info!("Data stored at block {}", store_block);
+	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
-	let r1 = store_block + cadence;
-	let r2 = store_block + 2 * cadence;
+	// Best-chain estimates for the override and the cycle-1 wait. After finality covers the
+	// store we re-resolve to the canonical block (`resolve_canonical_store_block`) so the
+	// downstream assertions land on the right finalized blocks even after a reorg between
+	// best-inclusion and finality.
+	let est_r1 = best_store_block + cadence;
+	let est_r2 = best_store_block + 2 * cadence;
 
-	// `expired()` is `now >= expiration`; midpoint of (r1, r2] gives slack.
-	let override_expiration: u32 = ((r1 + r2) / 2) as u32;
+	// `expired()` is `now >= expiration`; midpoint of (r1, r2] gives slack — generous enough
+	// that an off-by-one between best and canonical doesn't flip cycle 1 from "renews" to
+	// "fails", or cycle 2 from "fails" to "renews".
+	let override_expiration: u32 = ((est_r1 + est_r2) / 2) as u32;
 	tracing::info!(
-		"Overriding Alice's authorization expiration: r1={}, r2={}, expiration={}",
-		r1,
-		r2,
+		"Overriding Alice's authorization expiration: est_r1={}, est_r2={}, expiration={}",
+		est_r1,
+		est_r2,
 		override_expiration
 	);
 
@@ -3297,7 +3350,25 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	nonce += 1;
 	tracing::info!("Auto-renewal enabled");
 
-	wait_for_finalized_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	wait_for_finalized_height(collator1, est_r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	// Re-anchor against the finalized chain so the cycle math + assertions don't read the
+	// wrong canonical block if a reorg moved the store.
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	if store_block != best_store_block {
+		tracing::info!(
+			"Canonical store block on finalized chain is {} (best-chain reported {})",
+			store_block,
+			best_store_block
+		);
+	}
+	let r1 = store_block + cadence;
+	let r2 = store_block + 2 * cadence;
+	// est_r1's finality wait above may not cover canonical r1 if canonical > best — wait again.
+	if r1 + 1 > est_r1 + 1 {
+		wait_for_finalized_height(collator1, r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	}
 	// Proof for the original store fires at `r1 - 1 = store_block + RP`.
 	assert_proof_checked_at(client, r1 - 1, "auth_expires cycle 1").await?;
 	dump_renewal_window(client, r1, "auth_expires cycle 1").await?;
@@ -3372,16 +3443,35 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	};
 	let (hash2_hex, _) = content_hash_and_cid(&data2);
 
-	let store2_block = submit_store_signed(client, &data2, nonce).await?;
+	let best_store2_block = submit_store_signed(client, &data2, nonce).await?;
 	nonce += 1;
-	tracing::info!("Stored second item at block {} (hash={})", store2_block, hash2_hex);
+	tracing::info!(
+		"Stored second item at best-chain block {} (hash={})",
+		best_store2_block,
+		hash2_hex
+	);
 
 	let content_hash2 = blake2_256(&data2);
 	enable_auto_renew(client, &content_hash2, nonce).await?;
 	tracing::info!("Auto-renewal enabled for second item");
 
+	let est_r1_after = best_store2_block + cadence;
+	wait_for_finalized_height(collator1, est_r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	// Re-anchor on the finalized chain for the same reorg reasons as above.
+	let store2_block =
+		resolve_canonical_store_block(client, &content_hash2, best_store2_block.saturating_sub(3))
+			.await?;
+	if store2_block != best_store2_block {
+		tracing::info!(
+			"Canonical store2 block on finalized chain is {} (best-chain reported {})",
+			store2_block,
+			best_store2_block
+		);
+	}
 	let r1_after = store2_block + cadence;
-	wait_for_finalized_height(collator1, r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	if r1_after + 1 > est_r1_after + 1 {
+		wait_for_finalized_height(collator1, r1_after + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	}
 	// Proof for the second store fires at `r1_after - 1 = store2_block + RP`.
 	assert_proof_checked_at(client, r1_after - 1, "post-reauth cycle 1").await?;
 	let r1_after_hash = finalized_block_hash_at(client, r1_after).await?;
