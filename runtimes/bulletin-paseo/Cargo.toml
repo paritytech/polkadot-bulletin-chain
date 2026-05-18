@@ -43,6 +43,7 @@ pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-bulletin-transaction-storage = { workspace = true }
 pallet-bulletin-hop-promotion = { workspace = true }
+pallet-storage-auto-renewal = { workspace = true }
 bulletin-pallets-common = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
@@ -126,6 +127,7 @@ std = [
 	"pallet-migrations/std",
 	"pallet-session/std",
 	"pallet-skip-feeless-payment/std",
+	"pallet-storage-auto-renewal/std",
 	"pallet-sudo/std",
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
@@ -183,6 +185,7 @@ runtime-benchmarks = [
 	"pallet-migrations/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
 	"pallet-skip-feeless-payment/runtime-benchmarks",
+	"pallet-storage-auto-renewal/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
@@ -219,6 +222,7 @@ try-runtime = [
 	"pallet-migrations/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-skip-feeless-payment/try-runtime",
+	"pallet-storage-auto-renewal/try-runtime",
 	"pallet-sudo/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",

@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -15,13 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test environment for transaction-storage pallet.
+//! Test environment for `pallet-storage-auto-renewal`.
+//!
+//! Wires together a real `pallet-bulletin-transaction-storage` plus this pallet so the
+//! full expiring → enqueue → process_auto_renewals → finalize cycle can be exercised.
 
-use crate::{
-	self as pallet_bulletin_transaction_storage, EnsureAllowedAuthorizers, TransactionStorageProof,
-	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
-};
+use crate as pallet_storage_auto_renewal;
 use bulletin_pallets_common::NoCurrency;
+use pallet_bulletin_transaction_storage::{
+	EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+};
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
 	prelude::*,
@@ -32,7 +33,6 @@ use polkadot_sdk_frame::{
 
 type Block = MockBlock<Test>;
 
-// Configure a mock runtime to test the pallet.
 #[frame_support::runtime]
 mod runtime {
 	#[runtime::runtime]
@@ -55,6 +55,9 @@ mod runtime {
 
 	#[runtime::pallet_index(1)]
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+
+	#[runtime::pallet_index(2)]
+	pub type AutoRenewal = pallet_storage_auto_renewal;
 }
 
 parameter_types! {
@@ -99,9 +102,17 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
-	type OnTransactionExpiring = ();
+	type OnTransactionExpiring = AutoRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper = crate::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper =
+		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+impl pallet_storage_auto_renewal::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = ();
+	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
+	type StorageRenewer = TransactionStorage;
 }
 
 pub fn new_test_ext() -> TestExternalities {
@@ -119,15 +130,4 @@ pub fn new_test_ext() -> TestExternalities {
 	.build_storage()
 	.unwrap();
 	t.into()
-}
-
-pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 'static) {
-	System::run_to_block_with::<AllPalletsWithSystem>(
-		n,
-		RunToBlockHooks::default().before_finalize(|_| {
-			if let Some(proof) = f() {
-				TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-			}
-		}),
-	);
 }
