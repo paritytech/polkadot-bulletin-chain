@@ -1208,12 +1208,14 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Drain [`PendingAutoRenewals`], renewing each entry whose owner has sufficient
-		/// authorization. Returns the count drained.
+		/// Drain [`PendingAutoRenewals`] and return the count drained.
 		///
-		/// Batches the [`BlockTransactions`] read/write across all `n` renewals. Calling
-		/// [`Self::do_renew`] in the loop would re-encode the full vec per iteration (O(n²)),
-		/// which a linear weight model underestimates by ~17% at saturation.
+		/// Wraps the loop in a single [`BlockTransactions`] `mutate` so all renewals
+		/// share one encode/decode pass; a per-item `try_mutate` would be O(n²).
+		///
+		/// Cap rejections, expired auth, and a full block all fail the same way:
+		/// drop the registration, emit [`Event::AutoRenewalFailed`], let the data
+		/// expire on its existing `RetentionPeriod`.
 		pub(super) fn do_process_auto_renewals() -> u32 {
 			let pending = PendingAutoRenewals::<T>::take();
 			let n_actual = pending.len() as u32;
@@ -1236,41 +1238,40 @@ pub mod pallet {
 					return n_actual;
 				},
 			};
-			let mut transactions = <BlockTransactions<T>>::get();
+			<BlockTransactions<T>>::mutate(|transactions| {
+				for (content_hash, tx_info, renewal_data) in pending.into_iter() {
+					let scope = AuthorizationScope::Account(renewal_data.account.clone());
+					let new_index =
+						if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
+							Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
+						} else {
+							None
+						};
 
-			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
-				let scope = AuthorizationScope::Account(renewal_data.account.clone());
-				let new_index =
-					if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
-						Self::push_renewal_in_memory(&mut transactions, &tx_info, extrinsic_index)
+					if let Some(new_index) = new_index {
+						Self::deposit_event(Event::DataAutoRenewed {
+							index: new_index,
+							content_hash,
+							account: renewal_data.account,
+						});
 					} else {
-						None
-					};
-
-				if let Some(new_index) = new_index {
-					Self::deposit_event(Event::DataAutoRenewed {
-						index: new_index,
-						content_hash,
-						account: renewal_data.account,
-					});
-				} else {
-					AutoRenewals::<T>::remove(content_hash);
-					Self::deposit_event(Event::AutoRenewalFailed {
-						content_hash,
-						account: renewal_data.account,
-					});
+						AutoRenewals::<T>::remove(content_hash);
+						Self::deposit_event(Event::AutoRenewalFailed {
+							content_hash,
+							account: renewal_data.account,
+						});
+					}
 				}
-			}
-
-			<BlockTransactions<T>>::put(transactions);
+			});
 			n_actual
 		}
 
-		/// Push `info` into an in-memory accumulator, call `transaction_index::renew`, and
-		/// insert into `TransactionByContentHash`. Returns `None` at capacity. Lets
-		/// [`Self::do_process_auto_renewals`] amortize the [`BlockTransactions`] storage
-		/// round-trip across all `n` renewals.
-		fn push_renewal_in_memory(
+		/// Push a `kind = Renew` entry onto the in-memory accumulator and update
+		/// [`TransactionByContentHash`]. Returns `None` at `MaxBlockTransactions`.
+		///
+		/// Cap accounting is the caller's job — [`Self::check_authorization`] handles
+		/// it before this runs.
+		fn do_renew_in_memory(
 			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 			info: &TransactionInfo,
 			extrinsic_index: u32,
@@ -1399,22 +1400,15 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Shared `renew` / `renew_content_hash` / auto-renewal entry point.
+		/// Single-call wrapper around [`Self::do_renew_in_memory`] for `renew` /
+		/// `renew_content_hash`. Auto-renewals batch via [`Self::do_process_auto_renewals`].
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let content_hash = info.content_hash;
-			let new_index = Self::append_to_block_transactions(
-				info.chunk_root,
-				info.size,
-				info.content_hash,
-				info.hashing,
-				info.cid_codec,
-				extrinsic_index,
-				TransactionKind::Renew,
-			)?;
-			sp_io::transaction_index::renew(extrinsic_index, content_hash);
-			Ok(new_index)
+			<BlockTransactions<T>>::try_mutate(|transactions| {
+				Self::do_renew_in_memory(transactions, &info, extrinsic_index)
+					.ok_or(Error::<T>::TooManyTransactions)
+			})
 		}
 
 		/// Append a new entry to [`BlockTransactions`] (with the cumulative `block_chunks`)
@@ -1430,22 +1424,23 @@ pub mod pallet {
 			extrinsic_index: u32,
 			kind: TransactionKind,
 		) -> Result<u32, Error<T>> {
-			let mut transactions = <BlockTransactions<T>>::get();
-			let block_chunks = TransactionInfo::total_chunks(&transactions) + num_chunks(size);
-			let new_index = transactions.len() as u32;
-			transactions
-				.try_push(TransactionInfo {
-					chunk_root,
-					size,
-					content_hash,
-					hashing,
-					cid_codec,
-					extrinsic_index,
-					block_chunks,
-					kind,
-				})
-				.map_err(|_| Error::<T>::TooManyTransactions)?;
-			<BlockTransactions<T>>::put(transactions);
+			let new_index = <BlockTransactions<T>>::try_mutate(|transactions| {
+				let block_chunks = TransactionInfo::total_chunks(transactions) + num_chunks(size);
+				let new_index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root,
+						size,
+						content_hash,
+						hashing,
+						cid_codec,
+						extrinsic_index,
+						block_chunks,
+						kind,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)?;
+				Ok::<_, Error<T>>(new_index)
+			})?;
 			TransactionByContentHash::<T>::insert(content_hash, (Self::now(), new_index));
 			Ok(new_index)
 		}
