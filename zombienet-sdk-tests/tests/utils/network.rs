@@ -112,59 +112,6 @@ pub fn verify_parachain_binaries() -> Result<()> {
 	Ok(())
 }
 
-/// Parachain network: 2 relay validators (alice, bob) + 1 collator.
-pub fn build_parachain_network_config_single_collator(
-	para_node_args: Vec<String>,
-) -> Result<NetworkConfig> {
-	let relay_binary = get_relay_binary_path();
-	let para_binary = get_parachain_binary_path();
-	let para_chain_spec = get_parachain_chain_spec();
-
-	tracing::info!("Relay binary: {}", relay_binary);
-	tracing::info!("Parachain binary: {}", para_binary);
-	tracing::info!("Parachain chain spec: {}", para_chain_spec);
-
-	let relay_args: Vec<_> = vec!["-lruntime=debug"].into_iter().map(|s| s.into()).collect();
-	let relay_args2 = relay_args.clone();
-
-	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
-
-	let relay_chain = get_relay_chain();
-	let para_id = get_para_id();
-	tracing::info!("Relay chain: {}", relay_chain);
-	tracing::info!("Parachain ID: {}", para_id);
-
-	NetworkConfigBuilder::new()
-		.with_relaychain(|relaychain| {
-			relaychain
-				.with_chain(relay_chain.as_str())
-				.with_default_command(relay_binary.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
-		})
-		.with_parachain(|parachain| {
-			parachain
-				.with_id(para_id)
-				.with_chain_spec_path(para_chain_spec.as_str())
-				.cumulus_based(true)
-				.with_collator(|c| {
-					c.with_name("collator-1")
-						.validator(true)
-						.with_command(para_binary.as_str())
-						.with_args(para_args)
-				})
-		})
-		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
-			Ok(val) => gs.with_base_dir(val),
-			_ => gs,
-		})
-		.build()
-		.map_err(|errs| {
-			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
-			anyhow!("config errs: {message}")
-		})
-}
-
 /// Parachain network: 3 relay validators (for stable GRANDPA finality) + 1 collator.
 pub fn build_parachain_network_config_three_relay_validators(
 	para_node_args: Vec<String>,

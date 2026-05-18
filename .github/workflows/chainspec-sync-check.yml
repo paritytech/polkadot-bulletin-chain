@@ -34,21 +34,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
-
-      - name: Cache polkadot-node binaries
-        id: cache-binaries
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-          key: polkadot-node-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}
-
-      - name: Populate cache
-        if: steps.cache-binaries.outputs.cache-hit != 'true'
-        run: just binaries-polkadot
+          groups: polkadot-node
+          mode: prepare
 
   sync-check:
     needs: [set-image, setup]
@@ -77,25 +67,17 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
-
-      - name: Restore binary cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-          key: polkadot-node-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}
-          fail-on-cache-miss: true
-
-      - name: Resolve binary directory
-        run: |
-          POLKADOT_DIR="$(just binaries-polkadot)"
-          echo "$POLKADOT_DIR" >> "$GITHUB_PATH"
+          groups: polkadot-node
+          mode: consume
 
       - name: Sync a few blocks
-        run: ./scripts/chainspec_sync_check.sh "${{ matrix.chainspec }}" "${{ matrix.relay_rpc }}"
+        env:
+          CHAINSPEC: ${{ matrix.chainspec }}
+          RELAY_RPC: ${{ matrix.relay_rpc }}
+        run: ./scripts/chainspec_sync_check.sh "$CHAINSPEC" "$RELAY_RPC"
 
       - name: Upload omni-node log on failure
         if: failure()
@@ -107,7 +89,7 @@ jobs:
 
   sync-check-complete:
     name: All chainspec sync checks passed
-    needs: [sync-check]
+    needs: [setup, sync-check]
     if: always()
     runs-on: ubuntu-latest
     steps:
