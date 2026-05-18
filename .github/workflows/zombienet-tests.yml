@@ -118,7 +118,17 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
-          path: /tmp/zombie-*/**/*.log
+          # Parachain collator's RocksDB only — relay validators don't carry col11. The
+          # `*.log` glob brings in both stdout logs and WAL fragments; `CURRENT`,
+          # `MANIFEST-*`, `OPTIONS-*`, `IDENTITY`, and `*.sst` are the rest of the rocksdb
+          # surface needed for `rocksdb_ldb` to open the DB post-mortem.
+          path: |
+            /tmp/zombie-*/**/*.log
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/CURRENT
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/MANIFEST-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/OPTIONS-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/IDENTITY
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/*.sst
           retention-days: 14
 
   zombienet-sync-tests:
@@ -178,5 +188,11 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/CURRENT
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/MANIFEST-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/OPTIONS-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/IDENTITY
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/*.sst
           retention-days: 14

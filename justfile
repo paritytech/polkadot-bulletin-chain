@@ -93,6 +93,7 @@ test-zombienet-auto-renew runtime="westend" group="all":
     export POLKADOT_RELAY_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
+    export RELAY_CHAIN="{{runtime}}-local"
     export RELAY_CHAIN_SPEC_PATH="$PWD/zombienet/{{runtime}}-local-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
     declare -a filter_args
@@ -146,6 +147,7 @@ test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     export POLKADOT_RELAY_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
+    export RELAY_CHAIN="{{runtime}}-local"
     export RELAY_CHAIN_SPEC_PATH="$PWD/zombienet/{{runtime}}-local-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
