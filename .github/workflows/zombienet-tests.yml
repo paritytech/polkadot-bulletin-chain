@@ -40,27 +40,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
-
-      - name: Cache polkadot-sdk binaries
-        id: cache-binaries
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          # Cache only the resolved binaries (~333 MB); skip `.polkadot-binaries/_src/`
-          # which holds the polkadot-sdk clone + cargo target (~11 GB) from cold builds.
-          path: |
-            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
-          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
-
-      - name: Fetch / build polkadot binaries
-        if: steps.cache-binaries.outputs.cache-hit != 'true'
-        run: |
-          just binaries-polkadot
-          just binaries-chain-spec-builder
+          groups: polkadot-node chain-spec-builder
+          mode: prepare
 
       # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
       - name: Cache bulletin chain specs
@@ -102,10 +86,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
 
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
@@ -113,15 +98,6 @@ jobs:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Restore polkadot binaries cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: |
-            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
-          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
-          fail-on-cache-miss: true
 
       - name: Restore bulletin chain specs cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -131,9 +107,6 @@ jobs:
             zombienet/bulletin-paseo-spec.json
           key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
           fail-on-cache-miss: true
-
-      - name: Mark binaries executable
-        run: chmod -R +x "$POLKADOT_BINARIES_DIR"
 
       - name: Run zombienet auto-renew tests
         env:
@@ -171,10 +144,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
 
       - name: Rust cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
@@ -182,15 +156,6 @@ jobs:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Restore polkadot binaries cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: |
-            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
-          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
-          fail-on-cache-miss: true
 
       - name: Restore bulletin chain specs cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -200,9 +165,6 @@ jobs:
             zombienet/bulletin-paseo-spec.json
           key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
           fail-on-cache-miss: true
-
-      - name: Mark binaries executable
-        run: chmod -R +x "$POLKADOT_BINARIES_DIR"
 
       - name: Run zombienet sync tests
         env:
