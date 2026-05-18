@@ -612,11 +612,8 @@ pub async fn create_connected_bitswap_client(multiaddr_str: &str) -> Result<Bits
 	}
 
 	let event_task = tokio::spawn(async move {
-		loop {
-			match litep2p.next_event().await {
-				Some(event) => tracing::trace!("litep2p event: {:?}", event),
-				None => break,
-			}
+		while let Some(event) = litep2p.next_event().await {
+			tracing::trace!("litep2p event: {:?}", event);
 		}
 	});
 
