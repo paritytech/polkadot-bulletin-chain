@@ -1096,6 +1096,19 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	for (b, n) in hist_entries {
 		tracing::info!("  block {}: {} stores", b, n);
 	}
+	// The test premise is "MAX_BLOCK_TRANSACTIONS stores all land in one block, so the
+	// auto-renew inherent at `block + RP + 1` re-indexes the full set in one call". If
+	// stores spanned multiple blocks, the renewal load is split and we're not stressing
+	// the same-block scenario the test claims.
+	if store_block_histogram.len() != 1 {
+		anyhow::bail!(
+			"Expected all {} stores in a single block (= MAX_BLOCK_TRANSACTIONS), but they \
+			 spanned {} blocks. Histogram: {:?}",
+			MANY_ITEMS_COUNT,
+			store_block_histogram.len(),
+			store_block_histogram
+		);
+	}
 
 	let pre_enable_block = current_best_block(client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
@@ -1165,6 +1178,26 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 	tracing::info!("Auto-renewal enabled for all {} items", MANY_ITEMS_COUNT);
 	let _ = nonce; // last use
+
+	// Per-item bitswap probe: catches the case where `Stored` + `AutoRenewalEnabled` events
+	// fire on-chain but col11 didn't actually receive the chunks (or chunks have wrong hash).
+	// Sequential keeps the collator's bitswap server from queueing up `MANY_ITEMS_COUNT`
+	// requests at once.
+	tracing::info!(
+		"Verifying bitswap availability of all {} items (post-store, post-enable)...",
+		MANY_ITEMS_COUNT
+	);
+	for (i, data) in items.iter().enumerate() {
+		verify_node_bitswap(
+			collator1,
+			data,
+			BITSWAP_TIMEOUT_SECS,
+			&format!("post-enable item {}/{}", i + 1, MANY_ITEMS_COUNT),
+		)
+		.await
+		.with_context(|| format!("post-enable: item {i} not bitswap-fetchable"))?;
+	}
+	tracing::info!("✓ All {} items bitswap-fetchable post-enable", MANY_ITEMS_COUNT);
 
 	// Pairwise diffs of `substrate_proposer_block_constructed_{sum,count}` give per-block
 	// wall-clock construction time, independent of the runtime's declared weight.
@@ -1438,6 +1471,26 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		exhaustion_block + 1,
 	);
 
+	// Final bitswap sweep: after `RENEWAL_CYCLES_TO_OBSERVE` successful renewals + the
+	// exhaustion cycle, the chunks should still be col11-resident keyed to the latest
+	// successful renewal's block. Archive mode, so no pruning would have evicted them; any
+	// missing item here is a runtime/indexing bug we'd want to catch.
+	tracing::info!(
+		"Verifying bitswap availability of all {} items (post-exhaustion)...",
+		MANY_ITEMS_COUNT
+	);
+	for (i, data) in items.iter().enumerate() {
+		verify_node_bitswap(
+			collator1,
+			data,
+			BITSWAP_TIMEOUT_SECS,
+			&format!("post-exhaustion item {}/{}", i + 1, MANY_ITEMS_COUNT),
+		)
+		.await
+		.with_context(|| format!("post-exhaustion: item {i} not bitswap-fetchable"))?;
+	}
+	tracing::info!("✓ All {} items bitswap-fetchable post-exhaustion", MANY_ITEMS_COUNT);
+
 	test_log!(TEST, "=== Auto-renew {} items PASSED ===", MANY_ITEMS_COUNT);
 	Ok(())
 }
@@ -1679,6 +1732,18 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		latest_store,
 		store_block_histogram.len()
 	);
+	// The worst-case PoV model requires all WORST_CASE_WORKERS=MAX_BLOCK_TRANSACTIONS stores
+	// in one block, so the renewal inherent at `block + RP + 1` re-indexes the full set in
+	// one call and exercises the per-worker `Authorizations` lookup at saturation.
+	if store_block_histogram.len() != 1 {
+		anyhow::bail!(
+			"Expected all {} stores in a single block, but they spanned {} blocks. \
+			 Histogram: {:?}",
+			WORST_CASE_WORKERS,
+			store_block_histogram.len(),
+			store_block_histogram
+		);
+	}
 
 	let pre_enable_block = current_best_block(&client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
@@ -1940,6 +2005,234 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		tokio::time::sleep(std::time::Duration::from_secs(inspect_hold_secs)).await;
 	}
 
+	network.destroy().await?;
+	Ok(())
+}
+
+/// Pruning window for the many-items eviction test. Must be > `BULK_ENABLE_RETENTION_PERIOD`
+/// or the proof inherent halts when `--blocks-pruning` evicts a store-block before its
+/// `store + RP` proof block fires.
+const PRUNE_EVICTION_BLOCKS_PRUNING: u32 = 35;
+/// After item 0 evicts, the remaining items should be near-instant — col11 cleanup is
+/// batched. 30s/item bounds the test if something else goes wrong.
+const PRUNE_EVICTION_PER_ITEM_TIMEOUT_SECS: u64 = 30;
+
+/// Verify pruning evicts col11 entries for all `MANY_ITEMS_COUNT` items after auto-renewal
+/// exhausts. The bulk variant: `MANY_ITEMS_COUNT` items stored + auto-renewed by Alice.
+/// Authorization is sized for exactly one renewal cycle, so cycle 2 fails for every item
+/// and the latest col11-anchoring block is cycle 1's renewal block. Once finalized crosses
+/// that block + `PRUNE_EVICTION_BLOCKS_PRUNING`, every chunk should age out and bitswap
+/// should return DONT_HAVE for all items.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
+	const TEST: &str = "para_auto_renew_many_prune_eviction";
+	crate::utils::init_logging();
+
+	test_log!(
+		TEST,
+		"=== Auto-renew {} items + pruning eviction (blocks-pruning={}, retention={}) ===",
+		MANY_ITEMS_COUNT,
+		PRUNE_EVICTION_BLOCKS_PRUNING,
+		BULK_ENABLE_RETENTION_PERIOD,
+	);
+
+	verify_parachain_binaries()?;
+	let config = build_parachain_network_config_three_relay_validators(
+		get_para_node_args_with_pruning(PRUNE_EVICTION_BLOCKS_PRUNING),
+	)?;
+	let network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+	let relay_alice = network.get_node("alice").context("relay alice")?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
+	let collator1 = network.get_node("collator-1").context("collator-1")?;
+	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+
+	let mut nonce = get_alice_nonce(collator1).await?;
+	set_retention_period(&client, BULK_ENABLE_RETENTION_PERIOD, nonce).await?;
+	nonce += 1;
+
+	// Authorization for EXACTLY one renewal cycle (so cycle 2 fails for every item, draining
+	// `AutoRenewals` and leaving the chain idle for the pruning wait).
+	let bytes_per_item = TEST_DATA_SIZE as u64;
+	let bytes_allowance = bytes_per_item * MANY_ITEMS_COUNT as u64;
+	let transactions_allowance = MANY_ITEMS_COUNT * 2; // 1 store + 1 renewal each
+	override_alice_authorization(
+		&client,
+		AuthorizationOverride {
+			transactions: 0,
+			transactions_allowance,
+			bytes: 0,
+			bytes_permanent: 0,
+			bytes_allowance,
+			expiration: u32::MAX,
+		},
+		nonce,
+	)
+	.await?;
+	nonce += 1;
+
+	let items: Vec<Vec<u8>> = (0..MANY_ITEMS_COUNT)
+		.map(|i| {
+			let mut pattern = b"AUTO_RENEW_PRUNE_EVICTION_".to_vec();
+			pattern.extend_from_slice(format!("{:04}_", i).as_bytes());
+			generate_test_data(TEST_DATA_SIZE, &pattern)
+		})
+		.collect();
+	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
+
+	// Submit MANY_ITEMS_COUNT stores in parallel.
+	let alice = dev::alice();
+	let pre_store_block = current_best_block(&client).await?.number() as u64;
+	tracing::info!("Submitting {} stores (pre-block={})", MANY_ITEMS_COUNT, pre_store_block);
+	let mut store_futs = Vec::with_capacity(items.len());
+	for (i, data) in items.iter().enumerate() {
+		let call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce + i as u64).build();
+		let signer = alice.clone();
+		let cli = client.clone();
+		store_futs.push(async move {
+			cli.tx()
+				.sign_and_submit(&call, &signer, params)
+				.await
+				.map_err(anyhow::Error::from)
+		});
+	}
+	nonce += MANY_ITEMS_COUNT as u64;
+	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(store_futs).await?;
+	tracing::info!("All {} stores accepted into pool", MANY_ITEMS_COUNT);
+
+	// Wait for stores to land on best chain. Capture a histogram so we can assert all
+	// MANY_ITEMS_COUNT = MAX_BLOCK_TRANSACTIONS stores landed in a single block — the test
+	// premise is that the on-init renewal at `block + RP + 1` re-indexes the full set in
+	// one inherent call.
+	let store_inclusion_target = pre_store_block + 5;
+	wait_for_block_height(collator1, store_inclusion_target, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	let mut store_block_histogram: HashMap<u64, u32> = HashMap::new();
+	{
+		let mut current = current_best_block(&client).await?;
+		while current.number() as u64 > pre_store_block {
+			let block_n = current.number() as u64;
+			let events = current.events().await?;
+			let stored_count = events
+				.iter()
+				.filter_map(|e| e.ok())
+				.filter(|e| e.pallet_name() == "TransactionStorage" && e.variant_name() == "Stored")
+				.count() as u32;
+			if stored_count > 0 {
+				store_block_histogram.insert(block_n, stored_count);
+			}
+			if block_n == 0 {
+				break;
+			}
+			let parent_hash = current.header().parent_hash;
+			current = client.blocks().at(parent_hash).await?;
+		}
+	}
+	let total_stored: u32 = store_block_histogram.values().sum();
+	if total_stored != MANY_ITEMS_COUNT {
+		anyhow::bail!(
+			"Expected {} Stored events, found {}. Histogram: {:?}",
+			MANY_ITEMS_COUNT,
+			total_stored,
+			store_block_histogram
+		);
+	}
+	if store_block_histogram.len() != 1 {
+		anyhow::bail!(
+			"Expected all {} stores in a single block (= MAX_BLOCK_TRANSACTIONS), but they \
+			 spanned {} blocks. Histogram: {:?}",
+			MANY_ITEMS_COUNT,
+			store_block_histogram.len(),
+			store_block_histogram
+		);
+	}
+	let latest_store = *store_block_histogram.keys().next().unwrap();
+	tracing::info!("All {} stores landed at block {}", MANY_ITEMS_COUNT, latest_store);
+
+	// Submit MANY_ITEMS_COUNT enable_auto_renew in parallel.
+	let mut enable_futs = Vec::with_capacity(content_hashes.len());
+	for (i, content_hash) in content_hashes.iter().enumerate() {
+		let call = tx(
+			"TransactionStorage",
+			"enable_auto_renew",
+			vec![Value::from_bytes(content_hash.as_slice())],
+		);
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce + i as u64).build();
+		let signer = alice.clone();
+		let cli = client.clone();
+		enable_futs.push(async move {
+			cli.tx()
+				.sign_and_submit(&call, &signer, params)
+				.await
+				.map_err(anyhow::Error::from)
+		});
+	}
+	nonce += MANY_ITEMS_COUNT as u64;
+	let _: Vec<subxt::utils::H256> = futures::future::try_join_all(enable_futs).await?;
+	let _ = nonce;
+	tracing::info!("All {} enable_auto_renew calls accepted into pool", MANY_ITEMS_COUNT);
+
+	// Sanity: at least 1 AutoRenewalEnabled event must appear before items expire. If 0,
+	// fail fast — pruning_window > RP timing got broken.
+	let cadence = BULK_ENABLE_RETENTION_PERIOD as u64 + 1;
+	let cycle1_block = latest_store + cadence;
+	let exhaustion_block = cycle1_block + cadence;
+	let pruning_eligible_finalized = cycle1_block + PRUNE_EVICTION_BLOCKS_PRUNING as u64 + 5;
+	tracing::info!(
+		"cycle1={}, exhaustion={}, wait_finalized={} (last_renewal + pruning + 5)",
+		cycle1_block,
+		exhaustion_block,
+		pruning_eligible_finalized
+	);
+
+	// Wait for finalized to cross the pruning boundary of the cycle-1 renewal block. By then,
+	// cycle 2 has fired and failed for every item (exhausted authorization), and the chain
+	// has been idle from `AutoRenewals` for a while — col11 cleanup has had time to run.
+	// Custom timeout: pruning_eligible_finalized is ~71 blocks past store (cadence + pruning
+	// + buffer); at 6s/block + finality lag this is ~7-8 min, more than the default 300s.
+	const LONG_FINALIZED_WAIT_SECS: u64 = 600;
+	wait_for_finalized_height(collator1, pruning_eligible_finalized, LONG_FINALIZED_WAIT_SECS)
+		.await?;
+
+	// First item: full timeout — col11 async cleanup may lag the finalized-height metric
+	// crossing by tens of seconds (paseo CI observed up to ~5min in the worst case).
+	expect_bitswap_dont_have(
+		collator1,
+		&items[0],
+		BITSWAP_EVICTION_TIMEOUT_SECS,
+		&format!("item 1/{}", MANY_ITEMS_COUNT),
+	)
+	.await
+	.context(
+		"first item never evicted — col11 cleanup isn't propagating past pruning, indicates \
+		 a refcount/release bug or pruning isn't actually firing for the renewal block",
+	)?;
+
+	// Once the first item evicts, the rest should be fast (cleanup is batched). 30s per
+	// remaining item bounds the test if something else goes wrong.
+	tracing::info!(
+		"Verifying eviction of remaining {} items (short timeout each)...",
+		MANY_ITEMS_COUNT - 1
+	);
+	for (i, data) in items.iter().enumerate().skip(1) {
+		expect_bitswap_dont_have(
+			collator1,
+			data,
+			PRUNE_EVICTION_PER_ITEM_TIMEOUT_SECS,
+			&format!("item {}/{}", i + 1, MANY_ITEMS_COUNT),
+		)
+		.await
+		.with_context(|| {
+			format!(
+				"item {} still served after item 0 was evicted — partial col11 cleanup is a \
+				 stronger smoking-gun than full failure",
+				i
+			)
+		})?;
+	}
+	tracing::info!("✓ All {} items evicted via bitswap DONT_HAVE", MANY_ITEMS_COUNT);
+
+	test_log!(TEST, "=== Auto-renew {} items + pruning eviction PASSED ===", MANY_ITEMS_COUNT);
 	network.destroy().await?;
 	Ok(())
 }
