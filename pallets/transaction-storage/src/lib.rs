@@ -1301,8 +1301,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Drain [`PendingAutoRenewals`], renewing each entry whose owner still has
-		/// authorization. Returns the count drained.
+		/// Drain [`PendingAutoRenewals`] and return the count drained.
 		///
 		/// Batches the [`BlockTransactions`] read/write across all `n` renewals by threading
 		/// an in-memory accumulator through repeated [`Self::do_renew_in_memory`] calls.
@@ -1399,10 +1398,8 @@ pub mod pallet {
 			n_actual
 		}
 
-		/// Renewal mechanics shared by the manual and auto-renewal paths: stamp
-		/// `kind = Renew`, push onto the in-memory accumulator, call
-		/// `transaction_index::renew`, update [`TransactionByContentHash`]. Returns `None`
-		/// at the `MaxBlockTransactions` cap.
+		/// Push a `kind = Renew` entry onto the in-memory accumulator and update
+		/// [`TransactionByContentHash`]. Returns `None` at `MaxBlockTransactions`.
 		///
 		/// Called by:
 		/// - [`Self::do_renew`] for the single-renewal manual flow (`force_renew`).
