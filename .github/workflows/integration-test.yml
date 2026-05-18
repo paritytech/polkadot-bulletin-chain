@@ -39,27 +39,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
-
-      - name: Cache polkadot-sdk + zombienet binaries
-        id: cache-binaries
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          path: |
-            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
-            ${{ env.POLKADOT_BINARIES_DIR }}/zombienet
-          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}-${{ env.ZOMBIENET_VERSION }}
-
-      - name: Populate cache
-        if: steps.cache-binaries.outputs.cache-hit != 'true'
-        run: |
-          just binaries-polkadot
-          just binaries-chain-spec-builder
-          just binaries-zombienet
+          groups: polkadot-node chain-spec-builder zombienet
+          mode: prepare
 
   runtime-matrix:
     if: needs.changes.outputs.should-run == 'true'
@@ -97,8 +81,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder zombienet
+          mode: consume
 
       - name: Rust cache (Bulletin)
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -116,8 +103,6 @@ jobs:
             examples/package.json
             console-ui/package-lock.json
 
-      - uses: ./.github/actions/install-just
-
       - name: Install subxt-cli
         run: |
           if ! command -v subxt &> /dev/null; then
@@ -125,25 +110,6 @@ jobs:
           else
             echo "subxt-cli already installed"
           fi
-
-      - name: Restore binary cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: |
-            ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
-            ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
-            ${{ env.POLKADOT_BINARIES_DIR }}/zombienet
-          key: polkadot-binaries-${{ runner.os }}-${{ env.POLKADOT_NODE_VERSION }}-${{ env.CHAIN_SPEC_BUILDER_VERSION }}-${{ env.ZOMBIENET_VERSION }}
-          fail-on-cache-miss: true
-
-      - name: Resolve binary directories + add to PATH
-        run: |
-          POLKADOT_DIR="$(just binaries-polkadot)"
-          CSB_DIR="$(just binaries-chain-spec-builder)"
-          ZN_DIR="$(just binaries-zombienet)"
-          echo "$POLKADOT_DIR" >> "$GITHUB_PATH"
-          echo "$CSB_DIR" >> "$GITHUB_PATH"
-          echo "$ZN_DIR" >> "$GITHUB_PATH"
 
       - name: Start services
         working-directory: examples
