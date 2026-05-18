@@ -185,7 +185,7 @@ jobs:
 
       - name: Test HOP round trip
         working-directory: examples
-        run: just run-test-hop-promotion "$TEST_DIR"
+        run: just run-test-hop-round-trip "$TEST_DIR"
 
       - name: Test chopsticks compatibility
         working-directory: examples
