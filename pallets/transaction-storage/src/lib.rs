@@ -1208,17 +1208,14 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Drain [`PendingAutoRenewals`], renewing each entry whose owner still has
-		/// authorization. Returns the count drained.
+		/// Drain [`PendingAutoRenewals`] and return the count drained.
 		///
-		/// Threads one [`BlockTransactions`] read/write across all renewals via
-		/// [`Self::do_renew_in_memory`]; calling [`Self::do_renew`] per item would re-encode
-		/// the full vec each iteration (O(n²)).
+		/// Wraps the loop in a single [`BlockTransactions`] `mutate` so all renewals
+		/// share one encode/decode pass; a per-item `try_mutate` would be O(n²).
 		///
-		/// A renewal fails — registration removed, [`Event::AutoRenewalFailed`] emitted,
-		/// data expires on its existing `RetentionPeriod` — if [`Self::check_authorization`]
-		/// rejects (expired/missing auth, per-account or chain-wide cap) or if the per-block
-		/// `MaxBlockTransactions` slot cap is hit.
+		/// Cap rejections, expired auth, and a full block all fail the same way:
+		/// drop the registration, emit [`Event::AutoRenewalFailed`], let the data
+		/// expire on its existing `RetentionPeriod`.
 		pub(super) fn do_process_auto_renewals() -> u32 {
 			let pending = PendingAutoRenewals::<T>::take();
 			let n_actual = pending.len() as u32;
@@ -1269,15 +1266,11 @@ pub mod pallet {
 			n_actual
 		}
 
-		/// Renewal mechanics shared by the manual and auto-renewal paths: stamp
-		/// `kind = Renew`, push onto the in-memory accumulator, call
-		/// `transaction_index::renew`, update [`TransactionByContentHash`]. Returns `None`
-		/// at the `MaxBlockTransactions` cap.
+		/// Push a `kind = Renew` entry onto the in-memory accumulator and update
+		/// [`TransactionByContentHash`]. Returns `None` at `MaxBlockTransactions`.
 		///
-		/// Hard-cap accounting (per-account `bytes_permanent`, chain-wide
-		/// [`PermanentStorageUsed`]) is the caller's responsibility — done by
-		/// [`Self::check_authorization`] in the extension's `pre_dispatch` (manual) or
-		/// inline in [`Self::do_process_auto_renewals`] (auto).
+		/// Cap accounting is the caller's job — [`Self::check_authorization`] handles
+		/// it before this runs.
 		fn do_renew_in_memory(
 			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 			info: &TransactionInfo,
@@ -1407,9 +1400,8 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Single-renewal wrapper around [`Self::do_renew_in_memory`] for the manual
-		/// `renew` / `renew_content_hash` dispatchables. Auto-renewals batch the
-		/// [`BlockTransactions`] read/write in [`Self::do_process_auto_renewals`] instead.
+		/// Single-call wrapper around [`Self::do_renew_in_memory`] for `renew` /
+		/// `renew_content_hash`. Auto-renewals batch via [`Self::do_process_auto_renewals`].
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
