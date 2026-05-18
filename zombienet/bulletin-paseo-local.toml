@@ -27,6 +27,13 @@ p2p_port = 30433
 rpc_port = 9943
 balance = 2000000000000
 
+[[relaychain.nodes]]
+name = "charlie"
+validator = true
+p2p_port = 30533
+rpc_port = 9944
+balance = 2000000000000
+
 [[parachains]]
 id = 1501
 chain_spec_path = "./zombienet/bulletin-paseo-spec.json"
