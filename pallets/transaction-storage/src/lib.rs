@@ -806,10 +806,12 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
+			// TODO: make sure this is latest
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
+			// TODO: this is doing on-shot or direct?
 			let new_index = Self::do_renew(info)?;
 			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
 
@@ -823,12 +825,12 @@ pub mod pallet {
 
 		/// Disable automatic renewal for a piece of data.
 		///
-		/// Can only be called by the account that originally enabled auto-renewal.
+		/// Signed: the caller must be the account that originally enabled the renewal.
+		/// Root: bypasses the owner check (governance/cleanup).
 		///
-		/// Feeless: no token fee and no authorization is consumed. Spam is bounded
-		/// because [`check_signed`](Self::check_signed) admits the call only when
-		/// `AutoRenewals[content_hash].account == who`, so a caller can issue at most
-		/// one successful `disable_auto_renew` per registration it owns.
+		/// Feeless: no token fee and no authorization is consumed. Signed admission is
+		/// gated in [`check_signed`](Self::check_signed) on ownership, so a caller can
+		/// issue at most one successful `disable_auto_renew` per registration it owns.
 		///
 		/// Emits [`AutoRenewalDisabled`](Event::AutoRenewalDisabled) when successful.
 		#[pallet::call_index(13)]
@@ -838,14 +840,22 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
 		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-
+			let caller = Self::ensure_authorized(origin)?;
 			let renewal_data =
 				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
-			ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
+			match caller {
+				AuthorizedCaller::Signed { who, .. } => {
+					ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
+				},
+				AuthorizedCaller::Root => {},
+				AuthorizedCaller::Unsigned => return Err(DispatchError::BadOrigin),
+			}
 
 			AutoRenewals::<T>::remove(content_hash);
-			Self::deposit_event(Event::AutoRenewalDisabled { content_hash, who });
+			Self::deposit_event(Event::AutoRenewalDisabled {
+				content_hash,
+				who: renewal_data.account,
+			});
 			Ok(())
 		}
 
@@ -2209,23 +2219,23 @@ pub mod pallet {
 					));
 				},
 				Call::<T>::disable_auto_renew { content_hash } => {
-					// `disable_auto_renew` is feeless and does not consume authorization. To
-					// bound spam (no token fee is charged), gate admission on ownership: the
-					// registration must exist and `who` must be its owner. A caller can
-					// therefore admit at most one `disable_auto_renew` per registration it
-					// owns — the same cap that bounds successful dispatch.
+					// Feeless. Pool admission is gated on ownership so spam is bounded even
+					// without a token fee: the registration must exist and `who` must be
+					// its owner. `Some(scope)` triggers the origin rewrite to
+					// `Origin::Authorized` expected by the dispatch's `ensure_authorized`.
 					let renewal_data =
 						AutoRenewals::<T>::get(content_hash).ok_or(AUTO_RENEWAL_NOT_ENABLED)?;
 					if &renewal_data.account != who {
 						return Err(NOT_AUTO_RENEWAL_OWNER.into());
 					}
+					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
 							priority: T::StoreRenewPriority::get(),
 							longevity: T::StoreRenewLongevity::get(),
 							..Default::default()
 						}),
-						None,
+						Some(scope),
 					));
 				},
 				_ => return Err(InvalidTransaction::Call.into()),

@@ -92,6 +92,15 @@ fn enable_auto_renew_via_extension(who: u64, content_hash: super::ContentHash) -
 	TransactionStorage::enable_auto_renew(origin, content_hash)
 }
 
+/// Sibling of `enable_auto_renew_via_extension` for `disable_auto_renew`. Builds the
+/// rewritten `Origin::Authorized` directly (skips `pre_dispatch_signed`), since most
+/// disable tests want to exercise dispatch-level errors after admission.
+fn disable_auto_renew_via_extension(who: u64, content_hash: super::ContentHash) -> DispatchResult {
+	let origin: RuntimeOrigin =
+		Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
+	TransactionStorage::disable_auto_renew(origin, content_hash)
+}
+
 /// Simulate `on_finalize`'s `BlockTransactions` → `Transactions[n]` flush for the
 /// current block. Tests that do work (e.g. force-renew via `enable_auto_renew`) in
 /// the current block and then jump to a later block via `init_block` need this so
@@ -2094,18 +2103,43 @@ fn disable_auto_renew_works() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
 
-		// Another user cannot disable
+		// Another user cannot disable (dispatch-level owner check).
 		assert_noop!(
-			TransactionStorage::disable_auto_renew(RuntimeOrigin::signed(other), content_hash),
+			disable_auto_renew_via_extension(other, content_hash),
 			Error::NotAutoRenewalOwner,
 		);
 
-		// Owner can disable
-		assert_ok!(TransactionStorage::disable_auto_renew(
-			RuntimeOrigin::signed(owner),
-			content_hash,
-		));
+		// Owner can disable.
+		assert_ok!(disable_auto_renew_via_extension(owner, content_hash));
 
+		assert!(AutoRenewals::get(content_hash).is_none());
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalDisabled {
+			content_hash,
+			who: owner,
+		}));
+	});
+}
+
+/// Root bypasses the owner check (governance/cleanup path).
+#[test]
+fn disable_auto_renew_root_override() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let owner = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			owner,
+			10,
+			100_000
+		));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
+
+		assert_ok!(TransactionStorage::disable_auto_renew(RuntimeOrigin::root(), content_hash));
 		assert!(AutoRenewals::get(content_hash).is_none());
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalDisabled {
 			content_hash,
@@ -2122,7 +2156,7 @@ fn disable_auto_renew_fails_if_not_enabled() {
 		let content_hash = blake2_256(&[99u8; 100]);
 
 		assert_noop!(
-			TransactionStorage::disable_auto_renew(RuntimeOrigin::signed(who), content_hash),
+			disable_auto_renew_via_extension(who, content_hash),
 			Error::AutoRenewalNotEnabled,
 		);
 	});
@@ -2454,10 +2488,7 @@ fn auto_renew_permissionless_transfer() {
 		assert_eq!(renewal.account, alice);
 
 		// Alice disables auto-renew.
-		assert_ok!(TransactionStorage::disable_auto_renew(
-			RuntimeOrigin::signed(alice),
-			content_hash,
-		));
+		assert_ok!(disable_auto_renew_via_extension(alice, content_hash));
 		assert!(AutoRenewals::get(content_hash).is_none());
 
 		// Flush BlockTransactions so Bob's force-renew can `transaction_info(...)`
@@ -4218,10 +4249,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 
 		// Disable in the normal section — after on_initialize, before the inherent.
-		assert_ok!(TransactionStorage::disable_auto_renew(
-			RuntimeOrigin::signed(who),
-			content_hash,
-		));
+		assert_ok!(disable_auto_renew_via_extension(who, content_hash));
 		assert!(AutoRenewals::get(content_hash).is_none(), "disable cleared the registration");
 
 		// The mandatory inherent still iterates the captured pending vec and renews.
