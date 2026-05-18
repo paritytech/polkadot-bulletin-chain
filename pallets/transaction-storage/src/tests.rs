@@ -31,9 +31,9 @@ use super::{
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
 	AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo, TransactionKind,
-	AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
-	CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
-	PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
+	TransactionRef, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND,
+	BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
 
 use crate::{
@@ -215,7 +215,7 @@ fn uses_preimage_authorization() {
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
 		// Renew also uses the same preimage auth; it bumps `bytes_permanent` rather than `bytes`.
-		let call = Call::force_renew { block: 1, index: 0 };
+		let call = Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch(&call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
@@ -373,8 +373,7 @@ fn renews_data() {
 		run_to_block(6, || None);
 		assert_ok!(TransactionStorage::force_renew(
 			RuntimeOrigin::none(),
-			1, // block
-			0, // transaction
+			TransactionRef::Position { block: 1, index: 0 },
 		));
 		let proof_provider = || {
 			let block_num = System::block_number();
@@ -655,35 +654,47 @@ fn stores_various_sizes_with_account_authorization() {
 	});
 }
 
+/// `renew_content_hash` is a one-shot scheduler keyed by content hash — same shape
+/// as `renew(block, index)` with a different input format.
 #[test]
-fn renew_content_hash_works() {
+fn renew_content_hash_schedules_one_shot() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
 
-		// Renewing a non-existent content hash should fail
+		// Unknown content hash is rejected.
 		let bogus_hash = [0u8; 32];
 		assert_noop!(
-			TransactionStorage::renew_content_hash(RuntimeOrigin::none(), bogus_hash),
+			TransactionStorage::renew_content_hash(RuntimeOrigin::signed(who), bogus_hash),
 			Error::RenewedNotFound,
 		);
 
-		let data = vec![0u8; 2000];
-		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
 
-		// Verify the content hash map was populated
-		assert_eq!(TransactionByContentHash::get(content_hash), Some((1, 0)));
+		assert_ok!(TransactionStorage::renew_content_hash(
+			RuntimeOrigin::signed(who),
+			content_hash
+		));
 
-		run_to_block(6, || None);
-		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+		let entry = AutoRenewals::get(content_hash).unwrap();
+		assert_eq!(entry.account, who);
+		assert!(!entry.recurring, "renew_content_hash should register a one-shot entry");
 
-		// Map should now point to the new block
-		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
-
-		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::Renewed {
-			index: 0,
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::RenewalEnabled {
 			content_hash,
+			who,
+			recurring: false,
 		}));
+
+		// Second registration for the same hash is rejected.
+		assert_noop!(
+			TransactionStorage::renew_content_hash(RuntimeOrigin::signed(who), content_hash),
+			Error::AutoRenewalAlreadyEnabled,
+		);
 	});
 }
 
@@ -691,13 +702,11 @@ fn renew_content_hash_works() {
 fn storage_calls_reject_plain_signed_origin() {
 	// Storage-mutating calls must gate on `ensure_authorized` (accepts `Authorized` /
 	// `Root` / `None` only). A plain `Signed` origin bypasses the extension pipeline and
-	// must be rejected. Catches the class of bug where the gate is dropped on a refactor
-	// (as happened for `renew_content_hash` before this fix).
+	// must be rejected. Catches the class of bug where the gate is dropped on a refactor.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let signed = RuntimeOrigin::signed(42);
 		let data = vec![0u8; 2000];
-		let content_hash = blake2_256(&data);
 		let cid_config = CidConfig { codec: 0x55, hashing: HashingAlgorithm::Blake2b256 };
 
 		assert_noop!(
@@ -709,11 +718,10 @@ fn storage_calls_reject_plain_signed_origin() {
 			DispatchError::BadOrigin,
 		);
 		assert_noop!(
-			TransactionStorage::force_renew(signed.clone(), 1, 0),
-			DispatchError::BadOrigin,
-		);
-		assert_noop!(
-			TransactionStorage::renew_content_hash(signed, content_hash),
+			TransactionStorage::force_renew(
+				signed,
+				TransactionRef::Position { block: 1, index: 0 },
+			),
 			DispatchError::BadOrigin,
 		);
 	});
@@ -916,7 +924,8 @@ fn signed_renew_uses_account_authorization() {
 		run_to_block(3, || None);
 
 		// No preimage authorization exists for the content hash — renew uses account auth.
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 
 		assert_eq!(
@@ -943,7 +952,10 @@ fn content_hash_map_not_cleaned_if_renewed() {
 
 		// Renew at block 6, which updates the map to point to block 6
 		run_to_block(6, || None);
-		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+		assert_ok!(TransactionStorage::force_renew(
+			RuntimeOrigin::none(),
+			TransactionRef::ContentHash(content_hash),
+		));
 		assert_eq!(TransactionByContentHash::get(content_hash), Some((6, 0)));
 
 		let proof_provider = || {
@@ -1024,7 +1036,8 @@ fn signed_renew_prefers_preimage_authorization() {
 		);
 
 		// Renew using signed transaction - should prefer preimage authorization
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 
 		assert_eq!(
@@ -1175,7 +1188,8 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 
 		// Renew with the sha2 preimage auth still present — succeeds, accumulates on
 		// `bytes_permanent` while leaving `bytes` (store-only) untouched.
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch(&renew_call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(sha2_hash),
@@ -1574,7 +1588,8 @@ fn try_state_passes_after_renew() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RuntimeOrigin::none()));
 		// Force the renewed entry into the persistent `Transactions` map by advancing a
@@ -2977,7 +2992,8 @@ fn refresh_does_not_reset_consumed_counters() {
 		run_to_block(3, || None);
 
 		// Renew: bumps `bytes_permanent` and `transactions`; `bytes` untouched.
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
@@ -3091,7 +3107,8 @@ fn renew_bumps_permanent_used_and_records_kind() {
 
 		run_to_block(3, || None);
 
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RuntimeOrigin::none()));
 
@@ -3126,7 +3143,8 @@ fn renew_rejects_when_per_account_allowance_exceeded() {
 
 		run_to_block(3, || None);
 
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_noop!(
 			TransactionStorage::pre_dispatch_signed(&who, &renew_call),
 			PERMANENT_ALLOWANCE_EXCEEDED,
@@ -3288,7 +3306,8 @@ fn renew_rejects_when_chain_wide_cap_reached() {
 
 		run_to_block(3, || None);
 
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_noop!(
 			TransactionStorage::pre_dispatch_signed(&who, &renew_call),
 			CHAIN_PERMANENT_CAP_REACHED,
@@ -3402,7 +3421,8 @@ fn chain_wide_cap_self_corrects_after_age_out() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 		run_to_block(2, || None);
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(RuntimeOrigin::none()));
 		assert_eq!(PermanentStorageUsed::get(), 2000);
@@ -3413,7 +3433,8 @@ fn chain_wide_cap_self_corrects_after_age_out() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call_b));
 		assert_ok!(Into::<RuntimeCall>::into(store_call_b).dispatch(RuntimeOrigin::none()));
 		run_to_block(4, || None);
-		let renew_call_b = Call::force_renew { block: 3, index: 0 };
+		let renew_call_b =
+			Call::force_renew { entry: TransactionRef::Position { block: 3, index: 0 } };
 		assert_noop!(
 			TransactionStorage::pre_dispatch_signed(&who, &renew_call_b),
 			CHAIN_PERMANENT_CAP_REACHED,
@@ -3444,7 +3465,8 @@ fn chain_wide_cap_self_corrects_after_age_out() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call_c));
 		assert_ok!(Into::<RuntimeCall>::into(store_call_c).dispatch(RuntimeOrigin::none()));
 		run_to_block(15, proof_provider);
-		let renew_call_c = Call::force_renew { block: 14, index: 0 };
+		let renew_call_c =
+			Call::force_renew { entry: TransactionRef::Position { block: 14, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call_c));
 		assert_ok!(Into::<RuntimeCall>::into(renew_call_c).dispatch(RuntimeOrigin::none()));
 		assert_eq!(PermanentStorageUsed::get(), 500);
@@ -3466,7 +3488,8 @@ fn renew_emits_permanent_storage_used_updated() {
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
 
-		let renew_call = Call::force_renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 
 		System::assert_has_event(RuntimeEvent::TransactionStorage(
@@ -3543,7 +3566,9 @@ fn permanent_storage_near_cap_fires_on_rising_edge_only() {
 			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 			assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 			run_to_block(store_block + 1, || None);
-			let renew_call = Call::force_renew { block: store_block, index: 0 };
+			let renew_call = Call::force_renew {
+				entry: TransactionRef::Position { block: store_block, index: 0 },
+			};
 			assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		};
 

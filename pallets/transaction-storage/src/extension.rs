@@ -58,8 +58,8 @@ where
 	fn inspect_wrapper(call: &RuntimeCallOf<T>) -> Option<Vec<&RuntimeCallOf<T>>>;
 
 	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
-	/// store_with_cid_config, renew, renew_content_hash) — either directly or nested
-	/// inside wrappers.
+	/// store_with_cid_config, force_renew) — either directly or nested inside
+	/// wrappers.
 	///
 	/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
 	/// [`CallInspector`] provides the wrapper-recursion logic, so this function
@@ -70,10 +70,7 @@ where
 		if let Some(inner_call) = call.is_sub_type() {
 			return matches!(
 				inner_call,
-				Call::store { .. } |
-					Call::store_with_cid_config { .. } |
-					Call::force_renew { .. } |
-					Call::renew_content_hash { .. }
+				Call::store { .. } | Call::store_with_cid_config { .. } | Call::force_renew { .. }
 			);
 		}
 		if depth >= MAX_WRAPPER_DEPTH {

@@ -30,7 +30,7 @@ use frame_support::{
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
-	Origin as TxStorageOrigin,
+	Origin as TxStorageOrigin, TransactionRef,
 };
 use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
@@ -351,8 +351,7 @@ fn authorized_storage_transactions_are_for_free() {
 			// Renew should also work without funding (feeless).
 			let renew_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
-					block: stored_block,
-					index: 0,
+					entry: TransactionRef::Position { block: stored_block, index: 0 },
 				});
 			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
 			assert_ok!(res);
@@ -440,8 +439,7 @@ fn allowance_based_priority_works() {
 
 			// `renew` carries `Origin::Authorized` too, but must not be boosted.
 			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
-				block: 1,
-				index: 0,
+				entry: TransactionRef::Position { block: 1, index: 0 },
 			});
 			assert_eq!(allowance_based_priority(origin, &renew), 0);
 		});
@@ -1269,8 +1267,7 @@ fn renew_must_be_direct_extrinsic() {
 		advance_block();
 
 		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
-			block: stored_block,
-			index: 0,
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 
 		// Direct renew succeeds with the existing account authorization.
