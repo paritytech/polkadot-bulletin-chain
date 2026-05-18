@@ -188,17 +188,15 @@ async fn spawn_shared_harness(
 }
 
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// Extends NODE_LOG_CONFIG with pruning-side targets so a "bitswap still has data after
-	// pruning should have fired" failure has the corresponding node events to read:
+	// Drop the chattiest network/sync trace targets (~500 lines/s, no pruning signal)
+	// and keep only the diagnostics we actually read on a failure:
+	//   - `transaction-storage`, `bitswap` at trace: pallet + IPFS request paths.
 	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (the
-	//     pruning-actually-fired confirmation)
-	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
+	//     pruning-actually-fired confirmation).
+	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin.
 	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets = format!(
-		"{},db=debug,state-db=debug,state-db::pin=debug",
-		// Strip the leading "-l" so we can append more comma-separated targets.
-		NODE_LOG_CONFIG.strip_prefix("-l").unwrap_or(NODE_LOG_CONFIG)
-	);
+	let log_targets = "sync=info,sub-libp2p=info,litep2p=info,request-response=info,\
+		transaction-storage=trace,bitswap=trace,db=debug,state-db=debug,state-db::pin=debug";
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
