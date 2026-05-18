@@ -48,8 +48,23 @@ jobs:
           TASKS=$(echo $TASKS | jq -c .)
           echo "runtime=$TASKS" >> $GITHUB_OUTPUT
 
+  prepare-try-runtime:
+    name: Prepare try-runtime
+    needs: [changes]
+    if: needs.changes.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: prepare
+
   prepare-snapshots:
-    needs: [runtime-matrix]
+    needs: [runtime-matrix, prepare-try-runtime]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -59,6 +74,12 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      # Snapshot lookup uses a deliberately-non-matching primary `key:` so
+      # `restore-keys` always falls through to the most recent dated entry.
+      # With `lookup-only` the snapshot isn't restored — we just decide
+      # whether to regenerate. `cache-matched-key` is empty iff nothing was
+      # found, which is also the case on the daily `schedule` (lookup
+      # skipped) so the snapshot is force-refreshed nightly.
       - name: Check if snapshot exists in cache
         id: cache-restore
         if: github.event_name != 'schedule'
@@ -71,22 +92,12 @@ jobs:
             try-runtime-snapshot-${{ matrix.runtime.name }}-
           fail-on-cache-miss: false
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
+      - name: Set up Polkadot binaries
         if: steps.cache-restore.outputs.cache-matched-key == ''
-
-      - name: Cache try-runtime CLI
-        if: steps.cache-restore.outputs.cache-matched-key == ''
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
-          key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
-
-      - name: Resolve try-runtime + add to PATH
-        if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: echo "$(just binaries-try-runtime)" >> "$GITHUB_PATH"
+          groups: try-runtime
+          mode: consume
 
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -134,7 +145,7 @@ jobs:
 
 
   check-migrations:
-    needs: [runtime-matrix, prepare-snapshots]
+    needs: [runtime-matrix, prepare-try-runtime, prepare-snapshots]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -154,8 +165,11 @@ jobs:
           git remote add upstream "https://github.com/${BASE_REPO}.git"
           git fetch upstream --tags
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: consume
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
@@ -163,17 +177,6 @@ jobs:
           targets: "wasm32v1-none"
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
-
-      - uses: ./.github/actions/install-just
-
-      - name: Cache try-runtime CLI
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
-        with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
-          key: polkadot-binaries-${{ runner.os }}-${{ env.TRY_RUNTIME_VERSION }}
-
-      - name: Resolve try-runtime + add to PATH
-        run: echo "$(just binaries-try-runtime)" >> "$GITHUB_PATH"
 
       - name: Restore snapshot from cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -249,7 +252,7 @@ jobs:
     runs-on: ubuntu-latest
     name: All migrations passed
     if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [changes, check-migrations]
+    needs: [changes, prepare-try-runtime, prepare-snapshots, check-migrations]
     steps:
       - name: Decide outcome
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

@@ -142,11 +142,27 @@ jobs:
       - name: Run tests
         run: ${{ matrix.target.cmd }}
 
+  prepare-bencher:
+    name: Prepare frame-omni-bencher
+    needs: [set-image, check-fmt]
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: frame-omni-bencher
+          mode: prepare
+
   benchmarks:
     name: Check Benchmarks (${{ matrix.runtime.name }})
     runs-on: parity-large
     timeout-minutes: 60
-    needs: [set-image, check-fmt]
+    needs: [set-image, check-fmt, prepare-bencher]
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     strategy:
@@ -167,19 +183,11 @@ jobs:
           shared-key: "bulletin-cache-benchmarks-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - uses: ./.github/actions/install-just
-
-      - name: Cache frame-omni-bencher
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
         with:
-          path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
-          key: polkadot-binaries-${{ runner.os }}-${{ env.FRAME_OMNI_BENCHER_VERSION }}
-
-      - name: Resolve frame-omni-bencher + add to PATH
-        run: echo "$(just binaries-bencher)" >> "$GITHUB_PATH"
+          groups: frame-omni-bencher
+          mode: consume
 
       - name: Run benchmarks (${{ matrix.runtime.name }})
         run: |
@@ -192,7 +200,7 @@ jobs:
   all-tests-passed:
     name: All tests passed
     if: always()
-    needs: [changes, check-fmt, clippy, test, benchmarks]
+    needs: [changes, check-fmt, clippy, test, prepare-bencher, benchmarks]
     runs-on: ubuntu-latest
     steps:
       - name: Decide outcome
