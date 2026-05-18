@@ -25,6 +25,12 @@
       "metadata": ".papi/metadata/bulletin_paseo_next_v2.scale",
       "genesis": "0x8cfe6717dc4becfda2e13c488a1e2061ff2dfee96e7d031157f72d36716c0a22",
       "codeHash": "0x4fe167698d8a654b0d832ffa2b22471689331b278d93e1802b4f3d469b807d5a"
+    },
+    "bulletin_polkadot": {
+      "wsUrl": "wss://bulletin-rpc.polkadot.io",
+      "metadata": ".papi/metadata/bulletin_polkadot.scale",
+      "genesis": "0x2761c95259d59e55ae3daf756c1413b46e45a5a2987299f8ef8e5d8e4776cbc4",
+      "codeHash": "0xad57082d2d342a06f487fd0d7f2d21e0e03b8a48432a2d9cc8b876fa27c43967"
     }
   }
 }

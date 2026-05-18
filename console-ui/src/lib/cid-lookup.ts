@@ -7,6 +7,10 @@ import { Binary, type HexString, type SizedHex, type TypedApi } from "polkadot-a
 export interface OnChainTransaction {
   blockNumber: number;
   index: number;
+  size?: number;
+  kind?: "Store" | "Renew";
+  cidCodec?: number;
+  hashing?: string;
 }
 
 /** A CID resolved (or attempted) against the chain. */
@@ -48,10 +52,29 @@ async function locateContentHashes(
     ),
   );
 
+  const infoHits = await Promise.all(
+    indexHits.map((hit) =>
+      hit
+        ? api.query.TransactionStorage.Transactions.getValue(hit[0]!).catch(() => null)
+        : Promise.resolve(null),
+    ),
+  );
+
   for (let i = 0; i < hashes.length; i++) {
     const hit = indexHits[i];
     if (!hit) continue;
-    out.set(hashes[i]!, { blockNumber: hit[0]!, index: hit[1]! });
+    const blockNumber = hit[0]!;
+    const txIndex = hit[1]!;
+    const infos = infoHits[i];
+    const info = Array.isArray(infos) ? infos[txIndex] : undefined;
+    out.set(hashes[i]!, {
+      blockNumber,
+      index: txIndex,
+      size: info?.size != null ? Number(info.size) : undefined,
+      kind: info?.kind?.type,
+      cidCodec: info?.cid_codec != null ? Number(info.cid_codec) : undefined,
+      hashing: info?.hashing?.type,
+    });
   }
   return out;
 }
