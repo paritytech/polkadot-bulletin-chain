@@ -157,13 +157,14 @@ mod benchmarks {
 
 	#[benchmark]
 	fn force_renew() -> Result<(), BenchmarkError> {
+		// Worst-case: `ContentHash` variant pays one extra `TransactionByContentHash` read.
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::None, BlockNumberFor::<T>::zero(), 0);
+		_(RawOrigin::None, TransactionRef::ContentHash(content_hash));
 
 		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
 		Ok(())
@@ -190,15 +191,19 @@ mod benchmarks {
 
 	#[benchmark]
 	fn renew_content_hash() -> Result<(), BenchmarkError> {
+		// One-shot scheduler by content hash. Mirrors the `renew` benchmark.
+		let caller: T::AccountId = whitelisted_caller();
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::None, content_hash);
+		_(RawOrigin::Signed(caller.clone()), content_hash);
 
-		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
+		assert_last_event::<T>(
+			Event::RenewalEnabled { content_hash, who: caller, recurring: false }.into(),
+		);
 		Ok(())
 	}
 
@@ -427,8 +432,10 @@ mod benchmarks {
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		let ext = ValidateStorageCalls::<T>::default();
-		let call: RuntimeCallOf<T> =
-			Call::<T>::force_renew { block: BlockNumberFor::<T>::zero(), index: 0 }.into();
+		let call: RuntimeCallOf<T> = Call::<T>::force_renew {
+			entry: TransactionRef::Position { block: BlockNumberFor::<T>::zero(), index: 0 },
+		}
+		.into();
 		let info = DispatchInfo::default();
 		let len = 0_usize;
 
