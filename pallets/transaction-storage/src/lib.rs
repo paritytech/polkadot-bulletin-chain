@@ -1614,7 +1614,7 @@ pub mod pallet {
 		/// the account has no authorization or its only authorization has expired.
 		pub fn account_authorization_expires_at(who: T::AccountId) -> Option<BlockNumberFor<T>> {
 			let authorization = Authorizations::<T>::get(AuthorizationScope::Account(who))?;
-			(!Self::expired(authorization.expiration)).then_some(authorization.expiration)
+			(!authorization.expired(Self::now())).then_some(authorization.expiration)
 		}
 
 		/// Active-authorization summary for `who`, shaped for the
@@ -1627,7 +1627,7 @@ pub mod pallet {
 			who: T::AccountId,
 		) -> Option<AccountAuthorization<BlockNumberFor<T>>> {
 			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who))?;
-			(!Self::expired(auth.expiration)).then_some(AccountAuthorization {
+			(!auth.expired(Self::now())).then_some(AccountAuthorization {
 				expires_at: auth.expiration,
 				bytes_allowance: auth.extent.bytes_allowance,
 				bytes_used: auth.extent.bytes,
@@ -1676,7 +1676,7 @@ pub mod pallet {
 			else {
 				return false;
 			};
-			if Self::expired(auth.expiration) {
+			if auth.expired(Self::now()) {
 				return false;
 			}
 			let size: u64 = info.size.into();
@@ -1708,7 +1708,7 @@ pub mod pallet {
 			else {
 				return false;
 			};
-			!Self::expired(auth.expiration) && auth.extent.has_permanent_capacity(info.size as u64)
+			!auth.expired(Self::now()) && auth.extent.has_permanent_capacity(info.size as u64)
 		}
 
 		/// Returns `true` if `who` has an authorization entry that has not yet expired,
