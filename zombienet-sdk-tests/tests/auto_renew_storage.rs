@@ -9,14 +9,15 @@ use crate::{
 	utils::{
 		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
 		blake2_256, build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-		count_event, disable_auto_renew, enable_auto_renew, expect_bitswap_dont_have,
+		count_event, disable_auto_renew, enable_auto_renew,
+		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
 		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
 		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
-		submit_renew_pair, submit_store_signed, top_up_alice_authorization, verify_node_bitswap,
-		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
-		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		submit_renew_pair, submit_store_signed, top_up_alice_authorization,
+		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
+		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
+		wait_for_session_change_on_node, AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS,
+		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -57,6 +58,11 @@ async fn current_finalized_block(
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
 const BITSWAP_TIMEOUT_SECS: u64 = 30;
+/// Per-test concurrency for batched bitswap probes over persistent litep2p connections.
+/// Each connection handles `MANY_ITEMS_COUNT / N` items sequentially; 16 keeps the collator's
+/// bitswap server load reasonable while avoiding the transport-service exhaustion that hit
+/// the previous per-item fresh-litep2p loop.
+const BITSWAP_VERIFY_CONCURRENCY: usize = 16;
 /// `--blocks-pruning` deletion + col11 refcount-zero cleanup runs asynchronously after the
 /// finalized-height metric crosses; under CI load that lag can be tens of seconds (paseo runs
 /// observed >180s before eviction). 300s gives margin without making fast-cleanup runs slow.
@@ -1181,23 +1187,17 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 
 	// Per-item bitswap probe: catches the case where `Stored` + `AutoRenewalEnabled` events
 	// fire on-chain but col11 didn't actually receive the chunks (or chunks have wrong hash).
-	// Sequential keeps the collator's bitswap server from queueing up `MANY_ITEMS_COUNT`
-	// requests at once.
-	tracing::info!(
-		"Verifying bitswap availability of all {} items (post-store, post-enable)...",
-		MANY_ITEMS_COUNT
-	);
-	for (i, data) in items.iter().enumerate() {
-		verify_node_bitswap(
-			collator1,
-			data,
-			BITSWAP_TIMEOUT_SECS,
-			&format!("post-enable item {}/{}", i + 1, MANY_ITEMS_COUNT),
-		)
-		.await
-		.with_context(|| format!("post-enable: item {i} not bitswap-fetchable"))?;
-	}
-	tracing::info!("✓ All {} items bitswap-fetchable post-enable", MANY_ITEMS_COUNT);
+	// `BITSWAP_VERIFY_CONCURRENCY` persistent connections each handle ~`MANY_ITEMS_COUNT/N`
+	// items — sequential per-item fetches over a fresh litep2p each (the original loop)
+	// exhausted litep2p's transport service around item 310/512.
+	verify_all_items_bitswap_concurrent(
+		collator1,
+		&items,
+		BITSWAP_VERIFY_CONCURRENCY,
+		BITSWAP_TIMEOUT_SECS,
+		"post-enable",
+	)
+	.await?;
 
 	// Pairwise diffs of `substrate_proposer_block_constructed_{sum,count}` give per-block
 	// wall-clock construction time, independent of the runtime's declared weight.
@@ -1475,21 +1475,14 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	// exhaustion cycle, the chunks should still be col11-resident keyed to the latest
 	// successful renewal's block. Archive mode, so no pruning would have evicted them; any
 	// missing item here is a runtime/indexing bug we'd want to catch.
-	tracing::info!(
-		"Verifying bitswap availability of all {} items (post-exhaustion)...",
-		MANY_ITEMS_COUNT
-	);
-	for (i, data) in items.iter().enumerate() {
-		verify_node_bitswap(
-			collator1,
-			data,
-			BITSWAP_TIMEOUT_SECS,
-			&format!("post-exhaustion item {}/{}", i + 1, MANY_ITEMS_COUNT),
-		)
-		.await
-		.with_context(|| format!("post-exhaustion: item {i} not bitswap-fetchable"))?;
-	}
-	tracing::info!("✓ All {} items bitswap-fetchable post-exhaustion", MANY_ITEMS_COUNT);
+	verify_all_items_bitswap_concurrent(
+		collator1,
+		&items,
+		BITSWAP_VERIFY_CONCURRENCY,
+		BITSWAP_TIMEOUT_SECS,
+		"post-exhaustion",
+	)
+	.await?;
 
 	test_log!(TEST, "=== Auto-renew {} items PASSED ===", MANY_ITEMS_COUNT);
 	Ok(())
@@ -2195,7 +2188,8 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 		.await?;
 
 	// First item: full timeout — col11 async cleanup may lag the finalized-height metric
-	// crossing by tens of seconds (paseo CI observed up to ~5min in the worst case).
+	// crossing by tens of seconds (paseo CI observed up to ~5min in the worst case). Single
+	// fresh-litep2p probe here is fine — it's just one fetch.
 	expect_bitswap_dont_have(
 		collator1,
 		&items[0],
@@ -2208,29 +2202,17 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 		 a refcount/release bug or pruning isn't actually firing for the renewal block",
 	)?;
 
-	// Once the first item evicts, the rest should be fast (cleanup is batched). 30s per
-	// remaining item bounds the test if something else goes wrong.
-	tracing::info!(
-		"Verifying eviction of remaining {} items (short timeout each)...",
-		MANY_ITEMS_COUNT - 1
-	);
-	for (i, data) in items.iter().enumerate().skip(1) {
-		expect_bitswap_dont_have(
-			collator1,
-			data,
-			PRUNE_EVICTION_PER_ITEM_TIMEOUT_SECS,
-			&format!("item {}/{}", i + 1, MANY_ITEMS_COUNT),
-		)
-		.await
-		.with_context(|| {
-			format!(
-				"item {} still served after item 0 was evicted — partial col11 cleanup is a \
-				 stronger smoking-gun than full failure",
-				i
-			)
-		})?;
-	}
-	tracing::info!("✓ All {} items evicted via bitswap DONT_HAVE", MANY_ITEMS_COUNT);
+	// Once the first item evicts, the rest should be fast (cleanup is batched). Probe the
+	// remaining items via `BITSWAP_VERIFY_CONCURRENCY` persistent connections — sequential
+	// per-item fresh-litep2p (the original loop) exhausts the transport service.
+	expect_all_items_bitswap_dont_have_concurrent(
+		collator1,
+		&items[1..],
+		BITSWAP_VERIFY_CONCURRENCY,
+		PRUNE_EVICTION_PER_ITEM_TIMEOUT_SECS,
+		"post-pruning",
+	)
+	.await?;
 
 	test_log!(TEST, "=== Auto-renew {} items + pruning eviction PASSED ===", MANY_ITEMS_COUNT);
 	network.destroy().await?;

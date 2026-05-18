@@ -528,3 +528,260 @@ pub async fn expect_bitswap_dont_have(
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Persistent bitswap client (port of `bulletin-stress-test/src/bitswap.rs`).
+//
+// `fetch_via_bitswap` spawns a fresh litep2p per call. After ~300 calls in a single test
+// (e.g. bulk 512-item verification) litep2p's transport service exhausts with "Dial failure"
+// / "transport service closed", causing the tail of items to fail. The persistent client
+// keeps one litep2p alive across many fetches and opens a new substream per call.
+// ---------------------------------------------------------------------------
+
+/// Persistent bitswap client. Owns a litep2p instance running in a background task with a
+/// long-lived connection to one peer; each `fetch_block` call opens a new substream rather
+/// than dialing fresh.
+pub struct BitswapClient {
+	cmd_tx: mpsc::Sender<BitswapClientCommand>,
+	peer_id: PeerId,
+	_event_task: tokio::task::JoinHandle<()>,
+}
+
+impl BitswapClient {
+	/// Fetch one item by content hash. Sequential per client — for parallelism, create
+	/// multiple clients.
+	pub async fn fetch_block(&self, data_hash: &[u8; 32], timeout: Duration) -> Result<Vec<u8>> {
+		let cid_bytes = hash_to_cid_bytes(data_hash);
+		let (response_tx, response_rx) = oneshot::channel();
+		self.cmd_tx
+			.send(BitswapClientCommand::Fetch { peer: self.peer_id, cid_bytes, response_tx })
+			.await
+			.map_err(|_| anyhow!("BitswapClient protocol task closed"))?;
+		tokio::time::timeout(timeout, response_rx)
+			.await
+			.map_err(|_| anyhow!("Bitswap fetch timed out"))?
+			.map_err(|_| anyhow!("Response channel closed"))?
+	}
+}
+
+/// Dial `multiaddr_str`, wait for the connection to establish, then return a ready-to-use
+/// `BitswapClient`. The litep2p instance is moved into a background tokio task that pumps
+/// its event loop until the client is dropped.
+pub async fn create_connected_bitswap_client(multiaddr_str: &str) -> Result<BitswapClient> {
+	let multiaddr: Multiaddr = multiaddr_str.parse().context("parse multiaddr")?;
+	let peer_id_multihash = multiaddr
+		.iter()
+		.find_map(|p| {
+			if let litep2p::types::multiaddr::Protocol::P2p(peer_id) = p {
+				Some(peer_id)
+			} else {
+				None
+			}
+		})
+		.ok_or_else(|| anyhow!("multiaddr does not contain peer ID"))?;
+	let peer_id = PeerId::from_multihash(peer_id_multihash)
+		.map_err(|_| anyhow!("invalid peer ID in multiaddr"))?;
+
+	let (cmd_tx, cmd_rx) = mpsc::channel(32);
+	let protocol = BitswapClientProtocol::new(cmd_rx);
+
+	let config = Litep2pConfigBuilder::new()
+		.with_keypair(Keypair::generate())
+		.with_user_protocol(Box::new(protocol))
+		.with_websocket(WebSocketConfig {
+			listen_addresses: vec!["/ip4/127.0.0.1/tcp/0/ws".parse().unwrap()],
+			..Default::default()
+		})
+		.with_keep_alive_timeout(Duration::from_secs(60))
+		.build();
+
+	let mut litep2p =
+		Litep2p::new(config).map_err(|e| anyhow!("failed to create litep2p: {:?}", e))?;
+
+	litep2p
+		.dial_address(multiaddr.clone())
+		.await
+		.map_err(|e| anyhow!("failed to dial {multiaddr}: {:?}", e))?;
+
+	let connected =
+		tokio::time::timeout(Duration::from_secs(30), wait_for_connection(&mut litep2p, peer_id))
+			.await
+			.map_err(|_| anyhow!("timeout waiting for bitswap connection to {multiaddr}"))?;
+	if !connected {
+		anyhow::bail!("failed to establish bitswap connection to {multiaddr}");
+	}
+
+	let event_task = tokio::spawn(async move {
+		loop {
+			match litep2p.next_event().await {
+				Some(event) => tracing::trace!("litep2p event: {:?}", event),
+				None => break,
+			}
+		}
+	});
+
+	Ok(BitswapClient { cmd_tx, peer_id, _event_task: event_task })
+}
+
+/// Fetch + verify all `items` against `node` via bitswap using `concurrency` persistent
+/// connections in parallel (each handles `items.len() / concurrency` items sequentially).
+/// Caches every item's blake2_256 hash in advance to avoid re-hashing per fetch.
+pub async fn verify_all_items_bitswap_concurrent(
+	node: &zombienet_sdk::NetworkNode,
+	items: &[Vec<u8>],
+	concurrency: usize,
+	per_item_timeout_secs: u64,
+	label: &str,
+) -> Result<()> {
+	use std::sync::Arc;
+	let multiaddr = node.multiaddr();
+	tracing::info!(
+		"=== Verifying bitswap fetch of {} items via {} persistent connections (label={}) ===",
+		items.len(),
+		concurrency,
+		label
+	);
+
+	let mut clients = Vec::with_capacity(concurrency);
+	for i in 0..concurrency {
+		let c = create_connected_bitswap_client(multiaddr).await.with_context(|| {
+			format!("{label}: failed to create bitswap client {i}/{concurrency}")
+		})?;
+		clients.push(Arc::new(c));
+	}
+
+	let timeout = Duration::from_secs(per_item_timeout_secs);
+	let chunk_size = items.len().div_ceil(concurrency);
+	let mut handles = Vec::new();
+	for (client_idx, chunk_start) in (0..items.len()).step_by(chunk_size).enumerate() {
+		let chunk_end = (chunk_start + chunk_size).min(items.len());
+		let client = Arc::clone(&clients[client_idx]);
+		let chunk: Vec<(usize, Vec<u8>)> = items[chunk_start..chunk_end]
+			.iter()
+			.enumerate()
+			.map(|(i, d)| (chunk_start + i, d.clone()))
+			.collect();
+		let label = label.to_string();
+		let total = items.len();
+		handles.push(tokio::spawn(async move {
+			for (item_idx, data) in chunk {
+				let hash = blake2_256(&data);
+				let fetched = client.fetch_block(&hash, timeout).await.with_context(|| {
+					format!("{label}: item {} ({}/{}) fetch failed", item_idx, item_idx + 1, total)
+				})?;
+				if fetched != data {
+					anyhow::bail!(
+						"{label}: item {} ({}/{}) data mismatch (got {} bytes, expected {})",
+						item_idx,
+						item_idx + 1,
+						total,
+						fetched.len(),
+						data.len()
+					);
+				}
+			}
+			Ok::<_, anyhow::Error>(())
+		}));
+	}
+
+	for handle in handles {
+		handle.await.map_err(|e| anyhow!("bitswap worker task panicked: {e}"))??;
+	}
+
+	tracing::info!("✓ All {} items bitswap-fetchable from {}", items.len(), label);
+	Ok(())
+}
+
+/// Concurrent variant of [`expect_bitswap_dont_have`]. Polls all `items` against `node`
+/// across `concurrency` persistent connections until every probe returns DONT_HAVE or the
+/// per-item timeout elapses on any worker.
+pub async fn expect_all_items_bitswap_dont_have_concurrent(
+	node: &zombienet_sdk::NetworkNode,
+	items: &[Vec<u8>],
+	concurrency: usize,
+	per_item_timeout_secs: u64,
+	label: &str,
+) -> Result<()> {
+	use std::sync::Arc;
+	let multiaddr = node.multiaddr();
+	tracing::info!(
+		"=== Expecting bitswap DONT_HAVE for {} items via {} persistent connections (label={}) ===",
+		items.len(),
+		concurrency,
+		label
+	);
+
+	let mut clients = Vec::with_capacity(concurrency);
+	for i in 0..concurrency {
+		let c = create_connected_bitswap_client(multiaddr).await.with_context(|| {
+			format!("{label}: failed to create bitswap client {i}/{concurrency}")
+		})?;
+		clients.push(Arc::new(c));
+	}
+
+	let timeout = Duration::from_secs(per_item_timeout_secs);
+	let chunk_size = items.len().div_ceil(concurrency);
+	let mut handles = Vec::new();
+	for (client_idx, chunk_start) in (0..items.len()).step_by(chunk_size).enumerate() {
+		let chunk_end = (chunk_start + chunk_size).min(items.len());
+		let client = Arc::clone(&clients[client_idx]);
+		let chunk: Vec<(usize, Vec<u8>)> = items[chunk_start..chunk_end]
+			.iter()
+			.enumerate()
+			.map(|(i, d)| (chunk_start + i, d.clone()))
+			.collect();
+		let label = label.to_string();
+		let total = items.len();
+		handles.push(tokio::spawn(async move {
+			for (item_idx, data) in chunk {
+				let hash = blake2_256(&data);
+				let deadline = std::time::Instant::now() + timeout;
+				loop {
+					match client.fetch_block(&hash, Duration::from_secs(3)).await {
+						Ok(_) => {
+							if std::time::Instant::now() >= deadline {
+								anyhow::bail!(
+									"{label}: item {} ({}/{}) still served after {}s — col11 \
+									 entry not evicted as expected",
+									item_idx,
+									item_idx + 1,
+									total,
+									per_item_timeout_secs
+								);
+							}
+							tokio::time::sleep(Duration::from_secs(1)).await;
+						},
+						Err(e) => {
+							let msg = e.to_string();
+							if msg.contains("Peer does not have the block") ||
+								msg.contains("DONT_HAVE")
+							{
+								break;
+							}
+							if std::time::Instant::now() >= deadline {
+								return Err(e).with_context(|| {
+									format!(
+										"{label}: item {} ({}/{}) probe kept failing for {}s",
+										item_idx,
+										item_idx + 1,
+										total,
+										per_item_timeout_secs
+									)
+								});
+							}
+							tokio::time::sleep(Duration::from_secs(1)).await;
+						},
+					}
+				}
+			}
+			Ok::<_, anyhow::Error>(())
+		}));
+	}
+
+	for handle in handles {
+		handle.await.map_err(|e| anyhow!("bitswap worker task panicked: {e}"))??;
+	}
+
+	tracing::info!("✓ All {} items returned DONT_HAVE from {}", items.len(), label);
+	Ok(())
+}
