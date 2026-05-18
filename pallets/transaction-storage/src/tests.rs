@@ -663,10 +663,10 @@ fn stores_various_sizes_with_account_authorization() {
 	});
 }
 
-/// `renew_content_hash` is a one-shot scheduler keyed by content hash — same shape
-/// as `renew(block, index)` with a different input format.
+/// `renew` accepts a content-hash variant of [`TransactionRef`] equivalently to
+/// the position variant.
 #[test]
-fn renew_content_hash_schedules_one_shot() {
+fn renew_by_content_hash_schedules_one_shot() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
@@ -676,7 +676,10 @@ fn renew_content_hash_schedules_one_shot() {
 		// Unknown content hash is rejected.
 		let bogus_hash = [0u8; 32];
 		assert_noop!(
-			TransactionStorage::renew_content_hash(RuntimeOrigin::signed(who), bogus_hash),
+			TransactionStorage::renew(
+				RuntimeOrigin::signed(who),
+				TransactionRef::ContentHash(bogus_hash),
+			),
 			Error::RenewedNotFound,
 		);
 
@@ -684,26 +687,20 @@ fn renew_content_hash_schedules_one_shot() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert_ok!(TransactionStorage::renew_content_hash(
+		assert_ok!(TransactionStorage::renew(
 			RuntimeOrigin::signed(who),
-			content_hash
+			TransactionRef::ContentHash(content_hash),
 		));
 
 		let entry = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
-		assert!(!entry.recurring, "renew_content_hash should register a one-shot entry");
+		assert!(!entry.recurring);
 
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::RenewalEnabled {
 			content_hash,
 			who,
 			recurring: false,
 		}));
-
-		// Second registration for the same hash is rejected.
-		assert_noop!(
-			TransactionStorage::renew_content_hash(RuntimeOrigin::signed(who), content_hash),
-			Error::AutoRenewalAlreadyEnabled,
-		);
 	});
 }
 
@@ -2620,7 +2617,10 @@ fn renew_schedules_one_shot() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert_ok!(TransactionStorage::renew(RuntimeOrigin::signed(who), 1, 0));
+		assert_ok!(TransactionStorage::renew(
+			RuntimeOrigin::signed(who),
+			TransactionRef::Position { block: 1, index: 0 }
+		));
 
 		let entry = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
@@ -2647,7 +2647,10 @@ fn one_shot_fires_once_then_unregisters() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
-		assert_ok!(TransactionStorage::renew(RuntimeOrigin::signed(who), 1, 0));
+		assert_ok!(TransactionStorage::renew(
+			RuntimeOrigin::signed(who),
+			TransactionRef::Position { block: 1, index: 0 }
+		));
 
 		// Fire the renewal cycle.
 		init_block(12);
@@ -2682,11 +2685,17 @@ fn renew_and_enable_auto_renew_conflict() {
 		run_to_block(2, || None);
 
 		// Schedule one-shot.
-		assert_ok!(TransactionStorage::renew(RuntimeOrigin::signed(who), 1, 0));
+		assert_ok!(TransactionStorage::renew(
+			RuntimeOrigin::signed(who),
+			TransactionRef::Position { block: 1, index: 0 }
+		));
 
 		// Second `renew` for the same hash: rejected (registration already exists).
 		assert_noop!(
-			TransactionStorage::renew(RuntimeOrigin::signed(who), 1, 0),
+			TransactionStorage::renew(
+				RuntimeOrigin::signed(who),
+				TransactionRef::Position { block: 1, index: 0 }
+			),
 			Error::AutoRenewalAlreadyEnabled,
 		);
 
@@ -2709,12 +2718,13 @@ fn renew_rejects_unsigned_and_root_origin() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
+		let entry = TransactionRef::Position { block: 1, index: 0 };
 		assert_noop!(
-			TransactionStorage::renew(RuntimeOrigin::none(), 1, 0),
+			TransactionStorage::renew(RuntimeOrigin::none(), entry.clone()),
 			DispatchError::BadOrigin,
 		);
 		assert_noop!(
-			TransactionStorage::renew(RuntimeOrigin::root(), 1, 0),
+			TransactionStorage::renew(RuntimeOrigin::root(), entry),
 			DispatchError::BadOrigin,
 		);
 	});

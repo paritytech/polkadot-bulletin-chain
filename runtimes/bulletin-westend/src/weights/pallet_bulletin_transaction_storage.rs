@@ -89,22 +89,6 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:1)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	fn renew_content_hash() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `412`
-		//  Estimated: `47519`
-		// Minimum execution time: 30_387_000 picoseconds.
-		Weight::from_parts(32_819_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(2))
-	}
 	/// Storage: `TransactionStorage::PendingAuthorizationPeriod` (r:1 w:0)
 	/// Proof: `TransactionStorage::PendingAuthorizationPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)

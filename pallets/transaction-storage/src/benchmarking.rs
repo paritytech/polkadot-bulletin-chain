@@ -172,8 +172,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn renew() -> Result<(), BenchmarkError> {
-		// One-shot scheduler. Stores data, then schedules a one-shot auto-renewal as
-		// `caller` — measures the dispatch path (a single `AutoRenewals::insert`).
+		// Worst-case: `ContentHash` variant pays one extra `TransactionByContentHash` read.
 		let caller: T::AccountId = whitelisted_caller();
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
@@ -181,25 +180,7 @@ mod benchmarks {
 		run_to_block::<T>(1u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), BlockNumberFor::<T>::zero(), 0);
-
-		assert_last_event::<T>(
-			Event::RenewalEnabled { content_hash, who: caller, recurring: false }.into(),
-		);
-		Ok(())
-	}
-
-	#[benchmark]
-	fn renew_content_hash() -> Result<(), BenchmarkError> {
-		// One-shot scheduler by content hash. Mirrors the `renew` benchmark.
-		let caller: T::AccountId = whitelisted_caller();
-		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
-		let content_hash = sp_io::hashing::blake2_256(&data);
-		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
-		run_to_block::<T>(1u32.into());
-
-		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
+		_(RawOrigin::Signed(caller.clone()), TransactionRef::ContentHash(content_hash));
 
 		assert_last_event::<T>(
 			Event::RenewalEnabled { content_hash, who: caller, recurring: false }.into(),

@@ -36,7 +36,6 @@ pub trait WeightInfo {
 	fn store(l: u32, ) -> Weight;
 	fn renew() -> Weight;
 	fn force_renew() -> Weight;
-	fn renew_content_hash() -> Weight;
 	fn apply_block_inherents(n: u32) -> Weight;
 	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn authorize_account() -> Weight;
@@ -97,22 +96,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(28_675_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(T::DbWeight::get().reads(2))
-			.saturating_add(T::DbWeight::get().writes(2))
-	}
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:1)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	fn renew_content_hash() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `412`
-		//  Estimated: `47519`
-		// Minimum execution time: 32_305_000 picoseconds.
-		Weight::from_parts(34_128_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
 	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
@@ -402,12 +385,6 @@ impl WeightInfo for () {
 		Weight::from_parts(28_675_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(RocksDbWeight::get().reads(2))
-			.saturating_add(RocksDbWeight::get().writes(2))
-	}
-	fn renew_content_hash() -> Weight {
-		Weight::from_parts(34_128_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
 	fn apply_block_inherents(n: u32) -> Weight {
