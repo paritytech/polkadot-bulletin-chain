@@ -145,18 +145,10 @@ jobs:
   prepare-bencher:
     name: Prepare frame-omni-bencher
     needs: [set-image, check-fmt]
-    runs-on: parity-large
-    container:
+    uses: ./.github/workflows/prepare-polkadot-binaries.yml
+    with:
+      groups: frame-omni-bencher
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set up Polkadot binaries
-        uses: ./.github/actions/use-polkadot-binaries
-        with:
-          groups: frame-omni-bencher
-          mode: prepare
 
   benchmarks:
     name: Check Benchmarks (${{ matrix.runtime.name }})

@@ -1,0 +1,39 @@
+name: Prepare polkadot binaries
+
+# Centralizes the `use-polkadot-binaries` prepare path so all callers share one
+# cache write per (group, SHA) pair. The concurrency group serializes prepare
+# jobs across every workflow on the same commit — only one runner compiles;
+# the rest hit cache afterwards.
+
+on:
+  workflow_call:
+    inputs:
+      groups:
+        type: string
+        required: true
+        description: Space-separated binary groups (forwarded to use-polkadot-binaries).
+      image:
+        type: string
+        required: true
+        description: Container image (passed by the caller, typically set-image.outputs.CI_IMAGE).
+
+concurrency:
+  group: prep-bin-${{ github.event.pull_request.head.sha || github.sha }}-${{ inputs.groups }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: parity-large
+    container:
+      image: ${{ inputs.image }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: ${{ inputs.groups }}
+          mode: prepare

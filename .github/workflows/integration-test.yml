@@ -26,24 +26,16 @@ jobs:
     needs: [changes]
     uses: ./.github/workflows/set-image.yml
 
-  # Pre-warm the binary cache once before the matrix fan-out so all matrix
-  # legs hit the cache instead of racing to download/build.
+  # Pre-warm the binary cache once before the matrix fan-out. Cross-workflow
+  # concurrency lives in the reusable workflow so PR-wide prepares for the
+  # same SHA serialize.
   setup:
     if: needs.changes.outputs.should-run == 'true'
     needs: [changes, set-image]
-    name: Setup
-    runs-on: parity-large
-    container:
+    uses: ./.github/workflows/prepare-polkadot-binaries.yml
+    with:
+      groups: polkadot-node chain-spec-builder zombienet westend-relay-runtime paseo-relay-runtime
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set up Polkadot binaries
-        uses: ./.github/actions/use-polkadot-binaries
-        with:
-          groups: polkadot-node chain-spec-builder zombienet westend-relay-runtime paseo-relay-runtime
-          mode: prepare
 
   runtime-matrix:
     if: needs.changes.outputs.should-run == 'true'
