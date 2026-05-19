@@ -559,9 +559,9 @@ pub async fn canonical_store_block(
 	Ok(block_number as u64)
 }
 
-/// Two `renew` calls signed by Alice and Bob respectively. `validate_signed` tags renewals
-/// with `(who, content_hash)`, so two renews of the same data from the same signer would
-/// conflict in the pool.
+/// Two `force_renew` calls signed by Alice and Bob respectively — synchronous immediate
+/// renewals (each emits `Renewed`). `validate_signed` tags renewals with
+/// `(who, content_hash)`, so two from the same signer would conflict in the pool.
 pub async fn submit_renew_pair(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
@@ -579,12 +579,12 @@ pub async fn submit_renew_pair(
 			("index".to_string(), Value::u128(index as u128)),
 		],
 	);
-	let renew_call = tx("TransactionStorage", "renew", vec![entry]);
+	let renew_call = tx("TransactionStorage", "force_renew", vec![entry]);
 	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
 	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
 
 	tracing::info!(
-		"Submitting two renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
+		"Submitting two force_renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
 		block,
 		index,
 		alice_nonce,
@@ -614,7 +614,7 @@ pub async fn submit_renew_pair(
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
 	tracing::info!(
-		"renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
+		"force_renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
 		block,
 		index,
 		block_alice,

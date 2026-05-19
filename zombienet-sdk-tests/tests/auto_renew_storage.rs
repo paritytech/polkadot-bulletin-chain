@@ -2850,8 +2850,8 @@ fn pseudo_random(seed: u64) -> u64 {
 	x
 }
 
-/// 60-minute soak on a 3-collator network: drive steady `store` / `renew_content_hash`
-/// traffic, periodically verify that data older than the pruning window is no longer served.
+/// 60-minute soak on a 3-collator network: drive steady `store` / `force_renew` traffic,
+/// periodically verify that data older than the pruning window is no longer served.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	const TEST: &str = "para_pruning_soak";
@@ -2989,8 +2989,8 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				let hash = stored[idx].content_hash;
 				let renew_call = tx(
 					"TransactionStorage",
-					"renew_content_hash",
-					vec![Value::from_bytes(hash.as_slice())],
+					"force_renew",
+					vec![Value::unnamed_variant("ContentHash", [Value::from_bytes(hash.as_slice())])],
 				);
 				let renew_params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 				match client.tx().sign_and_submit(&renew_call, &dev::alice(), renew_params).await {
