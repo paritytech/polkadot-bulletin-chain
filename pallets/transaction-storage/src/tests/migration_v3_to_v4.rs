@@ -91,10 +91,6 @@ fn translates_active_account_auth() {
 		assert_eq!(slot.extent.bytes_permanent, 0);
 		assert_eq!(slot.extent.transactions, 0);
 		assert_eq!(System::providers(&who), 1);
-		// In-place rewrite: the key now holds v4 bytes under the shared
-		// `"Authorizations"` prefix. We don't probe the legacy view here —
-		// any 40-byte v3 slice can decode degenerately as v4 and vice versa,
-		// so the meaningful check is the v4 state above.
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 	});
 }
@@ -200,11 +196,7 @@ fn bails_on_relay_now_zero() {
 		let mut meter = WeightMeter::new();
 		let result = MigrateV3ToV4::<Test>::step(None, &mut meter);
 		assert!(matches!(result, Err(SteppedMigrationError::Failed)));
-		// Storage untouched: the v3 entry still decodes under the legacy
-		// view. We don't probe the v4 view here — v3 bytes can decode
-		// degenerately under the v4 schema (`0x00` length prefix → empty
-		// slots), which is harmless because the runtime only reads
-		// `Authorizations` once `on_chain_storage_version == 4`.
+		// Storage untouched: v3 entry still decodes under the legacy view.
 		assert!(LegacyAuthorizations::get(&scope).is_some());
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 	});
@@ -239,9 +231,6 @@ fn version_bumps_only_after_drain() {
 
 #[test]
 fn rewrites_all_entries_in_place() {
-	// In-place rewrite leaves keys at the shared `"Authorizations"` prefix,
-	// just with v4-encoded bytes. The semantic check is that every key now
-	// decodes as a valid `Authorization<T>` with the translated state.
 	new_test_ext().execute_with(|| {
 		setup_v3();
 		let parachain_now = System::block_number();

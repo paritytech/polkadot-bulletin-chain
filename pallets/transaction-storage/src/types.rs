@@ -144,16 +144,9 @@ impl TimedAuthorization {
 }
 
 /// Per-scope authorization: a bounded vec of [`TimedAuthorization`] slots.
-///
-/// The wrapper exists so that the storage value has its own name and we can
-/// add fields later (a cached aggregate, an authorizer ref) without renaming
-/// the storage item or rewriting accessors.
 #[derive(Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct Authorization<T: Config> {
-	/// Per-scope slots, sorted by `expiration` ascending (tiebreak `starts_at`).
-	/// See [`TimedAuthorization`] for the per-slot fields and the sorting/merging
-	/// invariant.
 	pub slots: BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
 }
 
@@ -167,6 +160,12 @@ impl<T: Config> Default for Authorization<T> {
 }
 
 impl<T: Config> Authorization<T> {
+	/// `true` when every slot has expired at `relay_now` — i.e. no slot is
+	/// still active, even drained ones.
+	pub fn all_expired(&self, relay_now: u32) -> bool {
+		self.slots.iter().all(|s| s.expiration <= relay_now)
+	}
+
 	/// Folded extent across active slots at `relay_now`. Per-slot `bytes` and
 	/// `transactions` are clamped at their own caps before summing — `store()`
 	/// saturates them without gating, so a low-priority over-cap store on one

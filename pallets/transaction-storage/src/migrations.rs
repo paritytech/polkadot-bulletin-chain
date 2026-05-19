@@ -439,28 +439,19 @@ pub mod v2 {
 }
 
 /// Migration v3→v4: translate the legacy single-window `Authorizations` map
-/// into the slot-based [`crate::pallet::Authorizations`] map **in place**.
+/// into the slot-based [`crate::pallet::Authorizations`] map **in place** — v3
+/// and v4 share the `"Authorizations"` storage prefix, so [`MigrateV3ToV4`]
+/// rewrites each key from a `LegacyAuthorization` into an [`Authorization<T>`].
 ///
-/// Stepped (multi-block) migration. Each step processes one legacy entry: a
-/// still-active entry is overwritten with an [`Authorization<T>`] whose single
-/// slot inherits the legacy allowances (used counters reset to `0`); an
-/// already-expired entry — or one with `bytes_allowance == 0` — is removed.
-/// Storage version flips to `4` once the legacy iterator is exhausted.
+/// Stepped: each step processes one entry. Still-active legacy entries become
+/// a single fresh slot inheriting the allowances (used counters reset);
+/// expired or zero-allowance entries are removed. Storage version flips to
+/// `4` once the legacy iterator is exhausted.
 ///
-/// **In-place rewrite.** v3 stored entries at the `"Authorizations"` storage
-/// prefix; v4 keeps the same prefix. The legacy alias and the new pallet
-/// storage are two views onto the same on-chain keys, just with different
-/// value decoders. Each step uses [`IterableStorageMap::translate_next`] to
-/// (a) read the next entry as `LegacyAuthorization`, (b) overwrite it with an
-/// `Authorization<T>` value, or (c) remove it. The hashed-key cursor advances
-/// monotonically, so the legacy decoder never re-encounters a key we have
-/// already rewritten.
-///
-/// The legacy `Authorization::expiration` was a parachain block number; the
-/// slot model uses relay block numbers. The two clocks aren't aligned, so we
-/// don't try to translate the original deadline — every still-valid entry gets
-/// a fresh `T::DefaultAuthorizationWindow`-block window starting at
-/// `relay_now`. Pre-existing renewed bytes from the old window remain in
+/// The legacy `expiration` was a parachain block; the slot model uses relay
+/// blocks. The clocks aren't aligned, so every still-valid entry gets a fresh
+/// `T::DefaultAuthorizationWindow`-block window starting at `relay_now`.
+/// Pre-existing renewed bytes from the old window remain in
 /// `PermanentStorageUsed` and age out via `on_initialize`, so the per-account
 /// `bytes_permanent` reset does not double-count chain-wide footprint.
 pub mod v4 {
@@ -519,12 +510,14 @@ pub mod v4 {
 	/// Stepped migration from storage version 3 to 4.
 	pub struct MigrateV3ToV4<T: Config>(PhantomData<T>);
 
+	/// Upper bound on the migration cursor's hashed-key length.
+	/// `Blake2_128Concat` produces `16 + encoded_key` bytes; the encoded
+	/// `AuthorizationScope` (Account 32B / Preimage 32B plus 1B discriminator)
+	/// fits well inside this.
+	const CURSOR_MAX_LEN: u32 = 128;
+
 	impl<T: Config> SteppedMigration for MigrateV3ToV4<T> {
-		/// Bounded hashed key of the last processed entry. `Blake2_128Concat`
-		/// produces `16 + encoded_key` bytes; the encoded `AuthorizationScope`
-		/// (Account 32B / Preimage 32B plus 1B discriminator) fits well inside
-		/// 128.
-		type Cursor = BoundedVec<u8, ConstU32<128>>;
+		type Cursor = BoundedVec<u8, ConstU32<CURSOR_MAX_LEN>>;
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
@@ -566,20 +559,15 @@ pub mod v4 {
 					break;
 				}
 
-				// `translate_next` on the new `Authorizations` storage decodes
-				// each entry as `LegacyAuthorization` (the `O` parameter) and
-				// writes back the closure's `Option<Authorization<T>>`. The
-				// new storage shares the on-chain prefix with the v3 legacy
-				// map, so this is a true in-place rewrite — the closure sees
-				// v3 bytes and writes v4 bytes at the same key.
+				// In-place rewrite: `translate_next` reads each entry under the
+				// v3 decoder (`LegacyAuthorization`) and writes v4 bytes
+				// (`Authorization<T>`) at the same key.
 				let next = Authorizations::<T>::translate_next::<
 					LegacyAuthorization<BlockNumberFor<T>>,
 					_,
 				>(prev_key.take(), |scope, legacy| {
-					// Skip filter: drop legacy entries that are already
-					// expired (under the v3 parachain clock) or have a zero
-					// allowance. `translate_next` removes the key when the
-					// closure returns `None`.
+					// Drop already-expired entries (under the v3 parachain
+					// clock) or zero-allowance entries.
 					if legacy.expiration <= parachain_now || legacy.extent.bytes_allowance == 0 {
 						return None;
 					}
@@ -594,15 +582,12 @@ pub mod v4 {
 						starts_at: relay_now,
 						expiration: new_expiration,
 					};
-					let auth = Authorization::<T> {
-						slots:
-							BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::try_from(
-								alloc::vec![slot],
-							)
-							.expect(
-								"MaxAuthorizationSlots > 0 by integrity_test; one slot fits; qed",
-							),
-					};
+					let mut slots =
+						BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::new();
+					slots
+						.try_push(slot)
+						.expect("MaxAuthorizationSlots > 0 by integrity_test; one slot fits; qed");
+					let auth = Authorization::<T> { slots };
 					// `inc_providers` lives on the System pallet so it does
 					// not touch the key being rewritten and is safe to call
 					// from inside the `translate_next` closure.

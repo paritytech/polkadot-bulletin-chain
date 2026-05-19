@@ -934,13 +934,11 @@ pub mod pallet {
 		PermanentStorageNearCap { used: u64, cap: u64 },
 	}
 
-	/// Per-scope [`Authorization`] entries. The inner `slots` vec is sorted by
-	/// `expiration` ascending (tiebreak `starts_at`). Lazily pruned: every read
-	/// or mutate that goes through [`Pallet::prune_expired`] drops **expired**
-	/// slots (`expiration <= relay_now`). Drained slots are intentionally kept
-	/// — they can still serve low-priority `store()` calls until they expire.
-	/// An entry with an empty `slots` vec is removed and the entry's
-	/// provider-ref (for `Account` scope) is decremented.
+	/// Per-scope [`Authorization`] entries. Lazily pruned: every read or
+	/// mutate that goes through [`Pallet::prune_expired`] drops **expired**
+	/// slots (`expiration <= relay_now`). When the inner `slots` vec becomes
+	/// empty the entry is removed and the provider-ref (for `Account` scope)
+	/// is decremented.
 	#[pallet::storage]
 	pub(super) type Authorizations<T: Config> =
 		StorageMap<_, Blake2_128Concat, AuthorizationScopeFor<T>, Authorization<T>, OptionQuery>;
@@ -1723,11 +1721,7 @@ pub mod pallet {
 		/// without waiting for the next mutate.
 		fn remove_expired_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
 			let auth = Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
-			let relay_now = Self::relay_now();
-			ensure!(
-				auth.slots.iter().all(|s| s.expiration <= relay_now),
-				Error::<T>::AuthorizationNotExpired
-			);
+			ensure!(auth.all_expired(Self::relay_now()), Error::<T>::AuthorizationNotExpired);
 			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
@@ -2024,8 +2018,7 @@ pub mod pallet {
 			let Some(auth) = Authorizations::<T>::get(scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
-			let relay_now = Self::relay_now();
-			if !auth.slots.iter().all(|s| s.expiration <= relay_now) {
+			if !auth.all_expired(Self::relay_now()) {
 				return Err(AUTHORIZATION_NOT_EXPIRED.into());
 			}
 			Ok(())
