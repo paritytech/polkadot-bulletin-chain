@@ -19,7 +19,6 @@
 # Node.js
 **/node_modules/
 tsconfig.tsbuildinfo
-.papi
 
 # Python
 __pycache__
