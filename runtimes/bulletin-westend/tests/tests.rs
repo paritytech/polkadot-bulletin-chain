@@ -375,6 +375,46 @@ fn authorized_storage_transactions_are_for_free() {
 		});
 }
 
+/// One-shot `renew` pre-pays the renewal at registration time. Verify that
+/// `bytes_permanent` advances by `info.size` at the runtime level.
+#[test]
+fn renew_one_shot_prepays_bytes_permanent() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let account = Sr25519Keyring::Bob;
+			let who: AccountId = account.to_account_id();
+			let data = vec![0u8; 24];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				2,
+				48,
+			));
+			assert_ok!(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: data.clone(),
+				}),
+			)
+			.unwrap());
+			advance_block();
+
+			let before = TransactionStorage::account_authorization_extent(who.clone());
+			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				entry: TransactionRef::ContentHash(content_hash),
+			});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+
+			let after = TransactionStorage::account_authorization_extent(who);
+			assert_eq!(after.bytes_permanent, before.bytes_permanent + data.len() as u64);
+			assert_eq!(after.transactions, before.transactions + 1);
+		});
+}
+
 /// Run `AllowanceBasedPriority::validate` and return the contributed priority.
 fn allowance_based_priority(
 	origin: RuntimeOrigin,

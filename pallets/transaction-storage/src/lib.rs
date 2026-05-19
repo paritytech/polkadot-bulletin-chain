@@ -1305,13 +1305,17 @@ pub mod pallet {
 			let mut transactions = <BlockTransactions<T>>::get();
 
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
-				let scope = AuthorizationScope::Account(renewal_data.account.clone());
-				let new_index =
+				// One-shot was pre-paid at registration; recurring pays per cycle.
+				let new_index = if renewal_data.recurring {
+					let scope = AuthorizationScope::Account(renewal_data.account.clone());
 					if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
 						Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
 					} else {
 						None
-					};
+					}
+				} else {
+					Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
+				};
 
 				if let Some(new_index) = new_index {
 					// One-shot registrations: remove now that the single renewal has fired.
@@ -2101,29 +2105,15 @@ pub mod pallet {
 					));
 				},
 				Call::<T>::renew { entry } => {
-					// Feeless one-shot registration. Validates the snapshot precondition
-					// (auth exists, unexpired, has room for one more renewal of
-					// `info.size`) and consumes one tx slot as the registration fee.
-					// The dispatch body writes `AutoRenewals[hash]` and emits the event.
+					// Pre-paid one-shot: charges the same as `force_renew`. Cycle delivers
+					// without re-charging (see `do_process_auto_renewals`).
 					let info =
 						Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
-					let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
-						.ok_or(AUTHORIZATION_NOT_FOUND)?;
-					if auth.expired(Self::now()) {
-						return Err(AUTHORIZATION_NOT_FOUND.into());
-					}
-					if !auth.extent.has_permanent_capacity(info.size as u64) {
-						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
-					}
-					// `size = 0, is_renew = false`: only the tx counter is charged.
-					// `bytes_permanent` and the chain-wide `PermanentStorageUsed`
-					// counter are charged on the eventual renewal cycle by
-					// `do_process_auto_renewals`.
 					Self::check_authorization(
 						&AuthorizationScope::Account(who.clone()),
-						0,
+						info.size,
 						context.consume_authorization(),
-						false,
+						true,
 					)?;
 					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((

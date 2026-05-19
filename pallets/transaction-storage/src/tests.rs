@@ -2632,6 +2632,80 @@ fn one_shot_fires_once_then_unregisters() {
 	});
 }
 
+/// `renew` (one-shot) charges `bytes_permanent` + `PermanentStorageUsed` + 1 tx slot
+/// at registration — same hard-cap accounting as `force_renew`.
+#[test]
+fn renew_prepays_at_registration() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		run_to_block(2, || None);
+
+		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
+
+		let auth = Authorizations::get(AuthorizationScope::Account(who)).unwrap();
+		assert_eq!(auth.extent.bytes_permanent, 2000);
+		assert_eq!(auth.extent.transactions, 1);
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+	});
+}
+
+/// Pre-payment caps spam: a second one-shot that would push `bytes_permanent` past
+/// `bytes_allowance` is rejected at pool ingress.
+#[test]
+fn renew_rejects_when_quota_exhausted() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let hash_a = blake2_256(&[0u8; 2000][..]);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 2000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![1u8; 2000]));
+		run_to_block(2, || None);
+
+		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(hash_a)));
+
+		let call = Call::renew { entry: TransactionRef::Position { block: 1, index: 1 } };
+		assert_eq!(
+			TransactionStorage::validate_signed(&who, &call).map(|_| ()),
+			Err(crate::PERMANENT_ALLOWANCE_EXCEEDED.into()),
+		);
+	});
+}
+
+/// One-shot cycle delivers the Renew entry without re-charging auth (slot pre-paid
+/// at registration). Contrast with recurring `enable_auto_renew` which charges
+/// per cycle — see `auto_renewal_consumes_authorization`.
+#[test]
+fn one_shot_cycle_does_not_recharge_auth() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
+
+		// Read raw `Authorizations` directly — the public extent helper masks expired entries.
+		let before = Authorizations::get(AuthorizationScope::Account(who)).unwrap();
+		init_block(12);
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: who,
+		}));
+		let after = Authorizations::get(AuthorizationScope::Account(who)).unwrap();
+		assert_eq!((after.extent, after.expiration), (before.extent, before.expiration));
+	});
+}
+
 /// Once a registration exists (one-shot or recurring), neither `renew` nor
 /// `enable_auto_renew` for the same hash may overwrite it.
 #[test]
