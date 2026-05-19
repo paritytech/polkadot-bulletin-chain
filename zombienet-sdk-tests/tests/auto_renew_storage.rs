@@ -3843,17 +3843,25 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 		submit_renew_expecting_filtered(client, store_block as u32, 0, nonce).await;
 	nonce += 1;
 
-	// Whitelist regression: pausing anything outside the renew family must fail with
-	// `Unpausable`. The sudo extrinsic itself succeeds (sudo just dispatches the inner call),
-	// but the inner `TxPause::pause` returns `Unpausable`. Surface that as a Sudid event with
-	// a module error. We just submit + observe at the subxt level; a successful inclusion of
-	// the sudo extrinsic is enough — the tx-pause storage stays empty for these names.
-	let attempt_pause_system_storage =
-		sudo_tx_pause(client, b"System", b"set_storage", nonce).await;
+	// Whitelist regression: the outer sudo always succeeds (the inner error becomes a
+	// `Sudid` event payload), so successful inclusion proves nothing. The real check is
+	// that `TxPause::PausedCalls((System, set_storage))` stays absent.
+	let _ = sudo_tx_pause(client, b"System", b"set_storage", nonce).await;
 	nonce += 1;
-	if let Err(e) = &attempt_pause_system_storage {
-		tracing::info!("sudo(TxPause::pause(System.set_storage)) error: {} (expected)", e);
-	}
+	let paused_key = subxt::dynamic::storage(
+		"TxPause",
+		"PausedCalls",
+		vec![Value::unnamed_composite([
+			Value::from_bytes(&b"System"[..]),
+			Value::from_bytes(&b"set_storage"[..]),
+		])],
+	);
+	let entry = client.storage().at_latest().await?.fetch(&paused_key).await?;
+	anyhow::ensure!(
+		entry.is_none(),
+		"TxPause::PausedCalls((System, set_storage)) must be empty after whitelisted attempt"
+	);
+	tracing::info!("✓ Whitelist held: non-renew call did not enter PausedCalls");
 
 	// Unpause renew, regardless of the assertion result above, so subsequent tests in the
 	// shared harness can renew normally.

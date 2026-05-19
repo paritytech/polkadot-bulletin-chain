@@ -21,6 +21,7 @@ polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 ] }
 pallet-proxy = { workspace = true }
 pallet-sudo = { workspace = true }
+pallet-tx-pause = { workspace = true }
 pallet-utility = { workspace = true }
 
 [features]
@@ -28,6 +29,7 @@ default = ["std"]
 runtime-benchmarks = [
 	"pallet-proxy/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
+	"pallet-tx-pause/runtime-benchmarks",
 	"pallet-utility/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 ]
@@ -35,6 +37,7 @@ std = [
 	"codec/std",
 	"pallet-proxy/std",
 	"pallet-sudo/std",
+	"pallet-tx-pause/std",
 	"pallet-utility/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
@@ -42,6 +45,7 @@ std = [
 try-runtime = [
 	"pallet-proxy/try-runtime",
 	"pallet-sudo/try-runtime",
+	"pallet-tx-pause/try-runtime",
 	"pallet-utility/try-runtime",
 	"polkadot-sdk-frame/try-runtime",
 ]

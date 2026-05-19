@@ -5,7 +5,10 @@
 //! `BaseCallFilter`; everything else is whitelisted and rejected by
 //! `ensure_can_pause`.
 
-use crate::{AccountId, Runtime, RuntimeCall, RuntimeOrigin, TxPauseMaxNameLen, TxPauseWhitelist};
+use crate::{
+	AccountId, Runtime, RuntimeCall, RuntimeOrigin, TransactionStorage, TxPauseMaxNameLen,
+};
+type TxPauseWhitelist = bulletin_pallets_common::TxPauseWhitelist<Runtime, TransactionStorage>;
 use codec::Encode;
 use frame_support::{
 	assert_noop, assert_ok,
