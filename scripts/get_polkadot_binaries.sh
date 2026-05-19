@@ -32,9 +32,9 @@
 #
 # Cache layout (rooted at $POLKADOT_BINARIES_DIR, default `./.polkadot-binaries`):
 #   <root>/<group>/<ref>/<platform>/<binary>
-#   <root>/_src/<repo>.git/        bare clone, shared across worktrees
-#   <root>/_src/worktrees/<ref>/   per-SHA worktree
-#   <root>/_src/target/<ref>/      per-SHA cargo target dir
+#   <root>/_src/<repo>.git/                  bare clone, shared across worktrees
+#   <root>/_src/worktrees/<repo>/<ref>/      per-(repo, SHA) worktree
+#   <root>/_src/target/<repo>/<ref>/         per-(repo, SHA) cargo target dir
 
 set -euo pipefail
 
@@ -238,7 +238,9 @@ else
 	[ -n "$SOURCE_URL" ] || die "source-build is not supported for group '$GROUP'; pass a release tag in $VERSION_VAR instead"
 
 	log "$GROUP $REF: building from source"
-	mkdir -p "$SRC_ROOT/worktrees" "$SRC_ROOT/target"
+	# Worktree + target dirs are namespaced by $SOURCE_DIR (not just $REF) so two
+	# repos that happen to share a SHA value don't collide on `_src/worktrees/<sha>/`.
+	mkdir -p "$SRC_ROOT/worktrees/$SOURCE_DIR" "$SRC_ROOT/target/$SOURCE_DIR"
 	BARE_PATH="$SRC_ROOT/$SOURCE_DIR.git"
 	if [ ! -d "$BARE_PATH" ]; then
 		log "  cloning $SOURCE_URL → $BARE_PATH (bare)"
@@ -250,13 +252,13 @@ else
 		git --git-dir="$BARE_PATH" fetch --quiet origin
 	fi
 	git --git-dir="$BARE_PATH" worktree prune
-	WORKTREE_PATH="$SRC_ROOT/worktrees/$REF"
+	WORKTREE_PATH="$SRC_ROOT/worktrees/$SOURCE_DIR/$REF"
 	if [ ! -d "$WORKTREE_PATH" ]; then
 		log "  adding worktree at $WORKTREE_PATH"
 		git --git-dir="$BARE_PATH" -c advice.detachedHead=false \
 			worktree add --detach --quiet "$WORKTREE_PATH" "$REF"
 	fi
-	TARGET_DIR="$SRC_ROOT/target/$REF"
+	TARGET_DIR="$SRC_ROOT/target/$SOURCE_DIR/$REF"
 	mkdir -p "$TARGET_DIR"
 	(
 		cd "$WORKTREE_PATH"
