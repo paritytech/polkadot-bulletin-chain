@@ -3827,6 +3827,8 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	tracing::info!("Stored at block {}", store_block);
 	top_up_alice_authorization(client, 5, 5 * data.len() as u64, nonce).await?;
 	nonce += 1;
+	// Finalize past the topup so the next renew can't race a best-block reorg.
+	wait_for_finalized_height(collator1, store_block + 3, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Sanity: renew works before pausing.
 	submit_signed_renew(client, store_block as u32, 0, nonce).await?;
