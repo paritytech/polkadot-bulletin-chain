@@ -3065,7 +3065,9 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 // with modified args (`NetworkNode::restart()` reuses the original), so we SIGTERM the
 // collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
 
-const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
+// 40 not 50: ~9 parachain blocks/min under paseo's 60s epochs (one backing pause per
+// session change) puts 50 right at the 300s timeout. 40 gives "enough state" with margin.
+const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 40;
 
 fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
 	let prefix_eq = format!("{}=", name);
