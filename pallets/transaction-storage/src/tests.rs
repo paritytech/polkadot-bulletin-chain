@@ -4125,18 +4125,18 @@ fn enable_auto_renew_rejects_already_enabled() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
-		);
-		assert_noop!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
-			Error::AutoRenewalAlreadyEnabled,
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		// Second call rejected at the extension (pool-level).
+		let call = Call::enable_auto_renew { content_hash };
+		assert_eq!(
+			TransactionStorage::validate_signed(&who, &call).map(|_| ()),
+			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
 		);
 	});
 }
 
-/// `enable_auto_renew` rejects when the caller's authorization has expired
-/// (`expired()` is `now >= expiration`). Folds into `AuthorizationNotFound`.
+/// Expired authorization rejects at the extension's snapshot check with
+/// `AUTHORIZATION_NOT_FOUND` (`expired()` is `now >= expiration`).
 #[test]
 fn enable_auto_renew_rejects_expired_authorization() {
 	new_test_ext().execute_with(|| {
@@ -4147,25 +4147,21 @@ fn enable_auto_renew_rejects_expired_authorization() {
 
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
-		// Finalize block 1 so its `BlockTransactions` lands in `Transactions[1]` (on_finalize
-		// runs at the *start* of the next `run_to_block`).
 		run_to_block(2, || None);
 
-		// AuthorizationPeriod = 10; the auth granted at block 1 expires at block 11. Use
-		// `init_block` to skip the on_finalize proof check at block 11 (Transactions[1]
-		// is now populated and would otherwise require a proof we don't want to construct).
+		// AuthorizationPeriod = 10; the auth granted at block 1 expires at block 11.
 		init_block(11);
 
-		assert_noop!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
-			Error::AuthorizationNotFound,
+		let call = Call::enable_auto_renew { content_hash };
+		assert_eq!(
+			TransactionStorage::validate_signed(&who, &call).map(|_| ()),
+			Err(crate::AUTHORIZATION_NOT_FOUND.into()),
 		);
 	});
 }
 
-/// `enable_auto_renew` snapshot-checks `has_permanent_capacity(tx_info.size)`. When the
-/// per-account `bytes_allowance` cannot fit one more renewal, the call is rejected
-/// (folded into `AuthorizationNotFound`).
+/// Insufficient byte capacity rejects at the extension with
+/// `PERMANENT_ALLOWANCE_EXCEEDED` when `bytes_permanent + size > bytes_allowance`.
 #[test]
 fn enable_auto_renew_rejects_insufficient_capacity() {
 	new_test_ext().execute_with(|| {
@@ -4174,16 +4170,14 @@ fn enable_auto_renew_rejects_insufficient_capacity() {
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// bytes_allowance = 1000 < data.len() = 2000 → snapshot check `0 + 2000 ≤ 1000`
-		// fails. `store` via unsigned origin does not consume the per-account counter,
-		// so `bytes_permanent` stays at 0 going into `enable_auto_renew`.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 1000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert_noop!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash),
-			Error::AuthorizationNotFound,
+		let call = Call::enable_auto_renew { content_hash };
+		assert_eq!(
+			TransactionStorage::validate_signed(&who, &call).map(|_| ()),
+			Err(PERMANENT_ALLOWANCE_EXCEEDED.into()),
 		);
 	});
 }
@@ -4206,9 +4200,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
-		);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
 		// Renewal block: on_initialize captures the entry into PendingAutoRenewals.
 		init_block(12);
@@ -4255,9 +4247,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
-		);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
@@ -4297,9 +4287,7 @@ fn auto_renew_obeys_updated_retention_period() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
-		);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
 		// Extend RetentionPeriod from 10 → 20.
 		RetentionPeriod::put(20u64);
@@ -4350,9 +4338,7 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		run_to_block(2, || None);
 
 		// Bob — not Alice — enables auto-renew.
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(bob), content_hash,)
-		);
+		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
 		assert_eq!(AutoRenewals::get(content_hash).unwrap().account, bob);
 
 		init_block(12);
@@ -4391,9 +4377,7 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 3000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
-		);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
 		// Cycle 1: succeeds, `bytes_permanent → 2000`. Re-auth resets the fresh expired
 		// entry (this overwrites the original since AuthorizationPeriod = 10 expired at
