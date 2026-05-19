@@ -783,14 +783,15 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// TODO: make sure this is latest
+			// Defensive content-hash existence check. The snapshot precondition
+			// (auth exists, unexpired, has room for `info.size`) and the one-tx-slot
+			// charge run in the extension's `check_signed` for this call. The
+			// renewal itself fires later via `do_process_auto_renewals` — registering
+			// here must not call `do_renew`, otherwise `bytes_permanent` would be
+			// double-charged (once by the cycle, once by the synchronous renew).
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
-			let info = Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
-
-			// TODO: this is doing on-shot or direct?
-			let new_index = Self::do_renew(info)?;
-			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
+			Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
 			AutoRenewals::<T>::insert(
 				content_hash,
@@ -2137,41 +2138,34 @@ pub mod pallet {
 					));
 				},
 				Call::<T>::enable_auto_renew { content_hash } => {
-					// Force-renew + schedule. `enable_auto_renew` charges as a real renewal
-					// (per-account `bytes_permanent`, chain-wide `PermanentStorageUsed`,
-					// and one tx slot) and dispatch performs the renewal here-and-now in
-					// addition to registering the auto-renewal. Bounding spam against the
-					// renew hard caps (rather than a free snapshot check) means a caller
-					// cannot register more auto-renewals than `bytes_allowance` would
-					// support — the cost is paid upfront and is consistent with how a
-					// regular `renew` is charged.
-					//
-					// Account scope only: `AutoRenewals[hash].account` is set to the
-					// signer, so the signer's own authorization must cover the cost.
-					// Preimage authorization is not accepted here because the
-					// registration is account-scoped — letting anyone with preimage
-					// rights tie up a slot under their own name doesn't match the
-					// registration semantics.
+					// Feeless recurring registration. Mirrors `renew`'s snapshot model:
+					// auth must exist, be unexpired, and have headroom for one more
+					// renewal of `info.size` (`bytes_permanent + size ≤ bytes_allowance`).
+					// Only one tx slot is consumed; `bytes_permanent`, the chain-wide
+					// `PermanentStorageUsed` counter, and the actual Renew entry are
+					// produced later by `do_process_auto_renewals` at the retention
+					// boundary.
 					if AutoRenewals::<T>::contains_key(*content_hash) {
 						return Err(AUTO_RENEWAL_ALREADY_ENABLED.into());
 					}
-
 					let (block, index) = TransactionByContentHash::<T>::get(*content_hash)
 						.ok_or(RENEWED_NOT_FOUND)?;
 					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
 
-					if !Self::data_size_ok(info.size as usize) {
-						return Err(BAD_DATA_SIZE.into());
+					let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
+						.ok_or(AUTHORIZATION_NOT_FOUND)?;
+					if auth.expired(Self::now()) {
+						return Err(AUTHORIZATION_NOT_FOUND.into());
 					}
-					if Self::block_transactions_full() {
-						return Err(InvalidTransaction::ExhaustsResources.into());
+					if !auth.extent.has_permanent_capacity(info.size as u64) {
+						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
 					}
-
+					// `size = 0, is_renew = false`: only the tx counter is charged.
 					Self::check_authorization(
 						&AuthorizationScope::Account(who.clone()),
-						info.size,
+						0,
 						context.consume_authorization(),
-						true,
+						false,
 					)?;
 
 					let scope = AuthorizationScope::Account(who.clone());

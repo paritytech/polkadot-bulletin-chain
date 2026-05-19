@@ -113,17 +113,6 @@ fn renew_via_extension(who: u64, entry: super::TransactionRef<u64>) -> DispatchR
 	TransactionStorage::renew(origin, entry)
 }
 
-/// Simulate `on_finalize`'s `BlockTransactions` → `Transactions[n]` flush for the
-/// current block. Tests that do work (e.g. force-renew via `enable_auto_renew`) in
-/// the current block and then jump to a later block via `init_block` need this so
-/// the renewed entries are visible to subsequent reads of `Transactions`.
-fn flush_block_transactions_to_current_block() {
-	let block_txs = BlockTransactions::take();
-	if !block_txs.is_empty() {
-		Transactions::insert(System::block_number(), &block_txs);
-	}
-}
-
 #[test]
 fn discards_data() {
 	new_test_ext().execute_with(|| {
@@ -2070,11 +2059,9 @@ fn enable_auto_renew_rejects_invalid() {
 			Err(crate::RENEWED_NOT_FOUND.into()),
 		);
 
-		// Enabling without account authorization fails. Auth validation lives in
-		// the extension's `check_signed` for this call (the standard renew path
-		// in `check_authorization` returns `InvalidTransaction::Payment` when the
-		// caller has no authorization entry), so we exercise it via
-		// `validate_signed` rather than calling dispatch directly.
+		// Enabling without account authorization fails. The snapshot check in
+		// `check_signed` reads `Authorizations[Account(who)]` directly and folds a
+		// missing entry into `AUTHORIZATION_NOT_FOUND`.
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
@@ -2084,7 +2071,7 @@ fn enable_auto_renew_rejects_invalid() {
 		let call = Call::enable_auto_renew { content_hash };
 		assert_eq!(
 			TransactionStorage::validate_signed(&unauthorized_user, &call).map(|_| ()),
-			Err(InvalidTransaction::Payment.into()),
+			Err(crate::AUTHORIZATION_NOT_FOUND.into()),
 		);
 	});
 }
@@ -2224,13 +2211,12 @@ fn auto_renewal_lifecycle() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// force_renew pushed a Renew entry into the current block; the original
-		// `Store` entry from block 1 is still on chain too, but
-		// `TransactionByContentHash` now points to the new (latest) entry.
-		assert_eq!(TransactionByContentHash::get(content_hash), Some((2, 0)));
+		// Registration is feeless and does not move the data: `TransactionByContentHash`
+		// still points at the original `Store` at block 1.
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((1, 0)));
 		assert!(Transactions::get(1).is_some());
 
-		// Build proof provider for both the original block and the renewal block
+		// Build proof provider for the retention boundary.
 		let proof_provider = move || {
 			let block_num = System::block_number();
 			let period: u64 = RetentionPeriod::get();
@@ -2245,21 +2231,15 @@ fn auto_renewal_lifecycle() {
 			}
 		};
 
-		// Advance to block 12 — `run_to_block` handles proofs and on_finalize for
-		// each block (incl. flushing BlockTransactions for block 2 into
-		// `Transactions[2]`). At block 12's on_initialize, obsolete = 1; under
-		// the latest-entry guard the original `Store` entry is *not* the latest
-		// (the force-renew at block 2 took over) and the auto-renewal is skipped.
-		run_to_block(12, proof_provider);
+		// Advance up to (but not including) block 12 — `run_to_block` handles
+		// proofs and on_finalize for each block. The block-1 entry expires at
+		// block 12; we want to stop before its on_initialize so we can drive
+		// `apply_block_inherents` manually below.
+		run_to_block(11, proof_provider);
 
-		// Block-1 data has expired (no longer the latest), but the force-renewed
-		// entry at block 2 is still on chain.
-		assert!(Transactions::get(1).is_none());
-		assert!(Transactions::get(2).is_some());
-
-		// Advance to block 13 manually. Now obsolete = 2 and the force-renewed
-		// entry *is* the latest, so on_initialize schedules the auto-renewal.
-		init_block(13);
+		// Block 12: on_initialize takes `Transactions[1]` and schedules the
+		// auto-renewal into `PendingAutoRenewals`.
+		init_block(12);
 
 		// Verify PendingAutoRenewals was populated
 		let pending = PendingAutoRenewals::get();
@@ -2275,8 +2255,8 @@ fn auto_renewal_lifecycle() {
 		// Verify PendingAutoRenewals is now empty
 		assert!(PendingAutoRenewals::get().is_empty());
 
-		// Verify data was renewed into the current block
-		assert_eq!(TransactionByContentHash::get(content_hash), Some((13, 0)));
+		// Data was renewed into the current block.
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((12, 0)));
 
 		// Verify event
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
@@ -2285,10 +2265,10 @@ fn auto_renewal_lifecycle() {
 			account: who,
 		}));
 
-		// Verify old block-2 entry was taken in on_initialize.
-		assert!(Transactions::get(2).is_none());
+		// Old block-1 entry was taken in on_initialize.
+		assert!(Transactions::get(1).is_none());
 
-		// Auto-renewal registration should still exist
+		// Recurring registration should still exist
 		assert!(AutoRenewals::get(content_hash).is_some());
 	});
 }
@@ -2302,41 +2282,35 @@ fn auto_renewal_consumes_authorization() {
 		let content_hash = blake2_256(&data);
 
 		// `store` is unsigned, so it does not consume authorization.
-		// `enable_auto_renew` force-renews via the extension: charges `size`
-		// bytes_permanent + 1 tx slot at registration time. Each subsequent
-		// auto-renewal cycle then charges another `size` + 1 tx slot.
+		// `enable_auto_renew` is feeless: consumes only one tx slot at registration
+		// time; `bytes_permanent` is charged at the eventual auto-renewal cycle.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Registration force-renewed: one renewal already charged.
+		// Registration cost is one tx slot only — no bytes consumed yet.
 		let initial_extent = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(
 			initial_extent,
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 2000,
+				bytes_permanent: 0,
 				bytes_allowance: 6000,
 				transactions: 1,
 				transactions_allowance: 3,
 			},
 		);
 
-		// With the latest-entry guard, the original `Store` entry at block 1 does
-		// not trigger an auto-renewal when it expires (the latest reference now
-		// lives at block 2 from the force-renew). The first auto-renewal fires
-		// only when the force-renewed entry itself ages out at block 13. Flush
-		// the force-renewed entry into `Transactions[2]` (mimics on_finalize),
-		// then refresh auth (the block-1 authorization expired at block 11; the
-		// refresh resets `bytes_permanent` to 0 for a new quota window).
-		flush_block_transactions_to_current_block();
-		init_block(13);
+		// First auto-renewal cycle fires when `Transactions[1]` ages out at
+		// block 12. Refresh the authorization first since the block-1 grant
+		// expired at block 11; the re-grant resets the consumed counters.
+		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
-		// Auto-renewal charged another `size` + 1 tx slot against the refreshed
-		// authorization (which started fresh at 0 / 0).
+		// Auto-renewal charged `size` bytes_permanent + 1 tx slot against the
+		// refreshed authorization (which started fresh at 0/0).
 		let after_extent = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(
 			after_extent,
@@ -2359,21 +2333,16 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Authorize with enough headroom that the force-renew at registration time
-		// succeeds (2000 bytes_permanent). The first auto-renewal cycle then runs
-		// against a refreshed authorization with only 1 op of headroom — enough
-		// for one renewal but not two.
+		// Authorize generously initially; the second cycle will run against a
+		// refreshed authorization with only 1 op of headroom — enough for one
+		// renewal but not two.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Force-renew put the latest entry at block 2. With the latest-entry guard,
-		// the original `Store` at block 1 expires at block 12 *without* scheduling
-		// auto-renew. Flush so the renewed entry is visible in `Transactions[2]`,
-		// then the first auto-renewal fires when that entry ages out at block 13.
-		flush_block_transactions_to_current_block();
-		init_block(13);
+		// First auto-renewal cycle fires at block 12 (block-1 entry ages out).
+		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
@@ -2390,17 +2359,17 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 			},
 		);
 
-		// Data was renewed at block 13.
-		assert_eq!(TransactionByContentHash::get(content_hash), Some((13, 0)));
+		// Data was renewed into block 12.
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((12, 0)));
 
-		// Simulate on_finalize: move BlockTransactions → Transactions(13)
+		// Simulate on_finalize: move BlockTransactions → Transactions(12)
 		let block_txs = BlockTransactions::take();
 		if !block_txs.is_empty() {
-			Transactions::insert(13u64, &block_txs);
+			Transactions::insert(12u64, &block_txs);
 		}
 
-		// Next renewal at block 24 (13 + 10 + 1) — should fail.
-		init_block(24);
+		// Next renewal at block 23 (12 + 10 + 1) — should fail.
+		init_block(23);
 		let pending = PendingAutoRenewals::get();
 		assert_eq!(pending.len(), 1, "Should have pending renewal");
 
@@ -2454,11 +2423,9 @@ fn pending_auto_renewals_populated_only_for_registered_items() {
 		// Only enable auto-renew for hash1, not hash2
 		assert_ok!(enable_auto_renew_via_extension(who, hash1));
 
-		// Flush the force-renewed entry into Transactions[2]. With the guard, the
-		// original `Store` at block 1 is no longer the latest reference, so only
-		// the block-2 entry's expiry at block 13 schedules.
-		flush_block_transactions_to_current_block();
-		init_block(13);
+		// Block 12: block-1 entries age out. on_initialize iterates them and
+		// schedules only the entry with an `AutoRenewals` registration.
+		init_block(12);
 
 		let pending = PendingAutoRenewals::get();
 		assert_eq!(pending.len(), 1, "Only hash1 should be pending");
@@ -2487,7 +2454,8 @@ fn auto_renew_permissionless_transfer() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		// Alice enables auto-renew (force-renews into BlockTransactions).
+		// Alice enables auto-renew (feeless registration — no `BlockTransactions`
+		// write).
 		assert_ok!(enable_auto_renew_via_extension(alice, content_hash));
 		let renewal = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(renewal.account, alice);
@@ -2496,12 +2464,7 @@ fn auto_renew_permissionless_transfer() {
 		assert_ok!(disable_auto_renew_via_extension(alice, content_hash));
 		assert!(AutoRenewals::get(content_hash).is_none());
 
-		// Flush BlockTransactions so Bob's force-renew can `transaction_info(...)`
-		// the entry Alice just renewed (otherwise Transactions[current_block] is
-		// still empty until on_finalize).
-		flush_block_transactions_to_current_block();
-
-		// Bob authorizes and enables auto-renew for the same content
+		// Bob authorizes and enables auto-renew for the same content.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000));
 		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
 
@@ -2541,19 +2504,16 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 		}
 		run_to_block(2, || None);
 
-		// Enable auto-renew for all three. Each force-renews into the current
-		// block's `BlockTransactions`, so the latest reference for each hash now
-		// lives there (and the old `Store` entries at block 1 are stale shadows).
+		// Enable auto-renew for all three (feeless registration — only consumes
+		// one tx slot each).
 		for hash in &hashes {
 			assert_ok!(enable_auto_renew_via_extension(who, *hash));
 		}
 
-		// Flush the force-renewed entries into Transactions[2]. The block-1
-		// `Store` entries expire at block 12 but the latest-entry guard skips
-		// them. The first auto-renewals fire when the force-renewed entries age
-		// out at block 13.
-		flush_block_transactions_to_current_block();
-		init_block(13);
+		// Block-1 entries age out at block 12; on_initialize schedules each as
+		// a pending auto-renewal. Refresh authorization (block-1 grant expired
+		// at block 11).
+		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who,
