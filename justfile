@@ -93,7 +93,8 @@ test-zombienet-auto-renew runtime="westend" group="all":
                 auto_renew_storage::parachain_auto_renew_test \
                 auto_renew_storage::parachain_auto_renew_many_items_test \
                 auto_renew_storage::parachain_auto_renew_quota_exhaustion_test \
-                auto_renew_storage::parachain_auto_renew_authorization_expires_mid_cycle_test)
+                auto_renew_storage::parachain_auto_renew_authorization_expires_mid_cycle_test \
+                auto_renew_storage::parachain_pause_renew_filters_dispatch_test)
             ;;
         pruning)
             filter_args=(--exact \

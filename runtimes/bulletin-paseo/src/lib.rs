@@ -30,6 +30,8 @@ pub mod fast_runtime_binary {
 mod genesis_config_presets;
 pub mod paseo_constants;
 pub mod storage;
+#[cfg(test)]
+mod tx_pause_tests;
 mod weights;
 pub mod xcm_config;
 
@@ -52,7 +54,7 @@ use frame_support::{
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin},
+	traits::{ConstBool, ConstU32, ConstU64, ConstU8, Contains, EitherOfDiverse, TransformOrigin},
 	weights::{ConstantMultiplier, Weight},
 	PalletId,
 };
@@ -253,6 +255,9 @@ parameter_types! {
 // Configure FRAME pallets to include in runtime.
 #[derive_impl(frame_system::config_preludes::ParaChainDefaultConfig)]
 impl frame_system::Config for Runtime {
+	/// Dynamic call filter via `pallet_tx_pause`. Renew calls are pausable; everything
+	/// else is whitelisted in `TxPauseWhitelist` and cannot be paused.
+	type BaseCallFilter = TxPause;
 	/// The identifier used to distinguish between accounts.
 	type AccountId = AccountId;
 	/// The nonce type for storing how many extrinsics an account has signed.
@@ -539,6 +544,40 @@ impl pallet_utility::Config for Runtime {
 	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
 }
 
+parameter_types! {
+	// Bounds the byte length of pallet and call names tracked in `pallet_tx_pause::PausedCalls`.
+	// Names exceeding this length cannot be encoded into `RuntimeCallNameOf` and are therefore
+	// treated as paused by the pallet's `Contains<RuntimeCall>` filter.
+	pub const TxPauseMaxNameLen: u32 = 256;
+}
+
+/// Whitelist for `pallet_tx_pause`: returns `true` if a call **cannot** be paused.
+/// Only the renew family of `pallet_bulletin_transaction_storage` is pausable; everything
+/// else in the runtime is permanently whitelisted, so a misuse of `txPause.pause` cannot
+/// affect any non-renew call.
+pub struct TxPauseWhitelist;
+impl Contains<pallet_tx_pause::RuntimeCallNameOf<Runtime>> for TxPauseWhitelist {
+	fn contains(name: &pallet_tx_pause::RuntimeCallNameOf<Runtime>) -> bool {
+		!matches!(
+			(name.0.as_slice(), name.1.as_slice()),
+			(b"TransactionStorage", b"renew") |
+				(b"TransactionStorage", b"renew_content_hash") |
+				(b"TransactionStorage", b"enable_auto_renew") |
+				(b"TransactionStorage", b"disable_auto_renew")
+		)
+	}
+}
+
+impl pallet_tx_pause::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type PauseOrigin = EnsureRoot<AccountId>;
+	type UnpauseOrigin = EnsureRoot<AccountId>;
+	type WhitelistedCalls = TxPauseWhitelist;
+	type MaxNameLen = TxPauseMaxNameLen;
+	type WeightInfo = pallet_tx_pause::weights::SubstrateWeight<Runtime>;
+}
+
 impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
 where
 	RuntimeCall: From<C>,
@@ -630,6 +669,8 @@ mod runtime {
 	pub type Utility = pallet_utility;
 	#[runtime::pallet_index(7)]
 	pub type MultiBlockMigrations = pallet_migrations;
+	#[runtime::pallet_index(8)]
+	pub type TxPause = pallet_tx_pause;
 
 	// Monetary stuff.
 	#[runtime::pallet_index(10)]
@@ -693,6 +734,7 @@ mod benches {
 		[pallet_xcm_benchmarks::generic, XcmGeneric]
 		[cumulus_pallet_weight_reclaim, WeightReclaim]
 		[pallet_utility, Utility]
+		[pallet_tx_pause, TxPause]
 	);
 }
 
