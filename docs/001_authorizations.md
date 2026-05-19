@@ -24,16 +24,23 @@ Accept over-allowance `store` calls at a lower priority instead. In-budget users
 
 ### 2. Unbounded renewed storage on collators (hard)
 
-`renew` re-anchors an existing stored item: when the original entry's `RetentionPeriod` is about to elapse, a `renew` lands a fresh `Transactions[block]` entry pointing at the same content, and the *renewed* entry's own `RetentionPeriod` clock starts from that block. Repeat indefinitely and a single piece of content can stay on chain forever.
+A renew (`force_renew` / `enable_auto_renew` / auto-renewal cycle) re-anchors an existing stored item: when the original entry's `RetentionPeriod` is about to elapse, it lands a fresh `Transactions[block]` entry pointing at the same content, and the *renewed* entry's own `RetentionPeriod` clock starts from that block. Repeat indefinitely and a single piece of content can stay on chain forever.
 
 Without bounds, at sustained-peak block usage one window of fresh `store` data alone is ~1.73 TiB, and re-renewals stack on top. ⇒ motivates a **hard limit** on renewed storage (per account and chain-wide).
 
 ## Storage types
 
 - **Temporary storage** — happens through the `store` call. Lives on chain for one `RetentionPeriod` from its `store` block.
-- **Renewed storage** — happens through the `renew` call. The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
+- **Renewed storage** — happens through `force_renew` (sync, at dispatch time) or via the auto-renewal cycle (`enable_auto_renew` + `do_process_auto_renewals`). The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
 
-`store`, `store_with_cid_config`, `renew`, and `renew_content_hash` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
+The renew-family extrinsics:
+
+- `force_renew(entry: TransactionRef)` — synchronous renewal. `TransactionRef::Position { block, index }` or `TransactionRef::ContentHash(_)`.
+- `renew(entry: TransactionRef)` — one-shot scheduler. Pre-pays the renewal at registration (same charge as `force_renew`); cycle delivers without re-charging.
+- `enable_auto_renew(content_hash)` — recurring scheduler. Snapshot check + one tx slot at registration; bytes are charged per cycle.
+- `disable_auto_renew(content_hash)` — cancels the registration. Pre-paid one-shots are forfeit on cancel.
+
+`store`, `store_with_cid_config`, `force_renew`, `renew`, `enable_auto_renew`, and `disable_auto_renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
 Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`. The kind is what `on_initialize`'s obsolete-block cleanup uses to tell which entries should decrement the chain-wide renewed-bytes counter when they age out — see [Hard limit on renewed storage](#hard-limit-on-renewed-storage).
 
@@ -42,13 +49,13 @@ Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`.
 PoP grants two numbers per account: `bytes_allowance` (size budget) and `transactions_allowance` (count budget). The same `bytes_allowance` is reused on the soft and hard sides, with different semantics.
 
 - **Soft (temporary)** — `bytes_allowance` and `transactions_allowance` are priority thresholds only. The boost stays on while in-budget on both axes (`bytes <= bytes_allowance` *and* `transactions <= transactions_allowance`) and drops to `0` once *either* is strictly over cap. A missing or `0`-allowance grant also yields no boost. `store` calls are never rejected; they queue behind in-budget signers when over.
-- **Hard (renewed)** — `bytes_allowance` is a real cap on the per-window renew quota. `renew` is **rejected** when `bytes_permanent + size > bytes_allowance`. The transaction-count axis does not gate renew. A separate chain-wide cap (`MaxPermanentStorageSize`) bounds the total renewed bytes on chain across all signers.
+- **Hard (renewed)** — `bytes_allowance` is a real cap on the per-window renew quota. `force_renew`, the `renew` one-shot at registration, and recurring auto-renewal cycles reject with `PermanentAllowanceExceeded` when `bytes_permanent + size > bytes_allowance`. The transaction-count axis does not gate renew. A separate chain-wide cap (`MaxPermanentStorageSize`) bounds the total renewed bytes on chain across all signers.
 
 ### Authorization storage
 
 - One `AuthorizationExtent` per scope is kept in `Authorizations`, keyed by `AuthorizationScope::{Account, Preimage}`.
 - `AuthorizationExtent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }` holds the soft-side counters (`bytes`, `transactions`), the per-window renew quota (`bytes_permanent`), and the caps.
-- `bytes` and `transactions` bump on `store` / `store_with_cid_config`. `bytes_permanent` bumps on `renew`. The `transactions` axis bumps on both, since both consume a transaction slot.
+- `bytes` and `transactions` bump on `store` / `store_with_cid_config`. `bytes_permanent` bumps on `force_renew`, on the `renew` one-shot scheduler at registration, and on each recurring auto-renewal cycle in `do_process_auto_renewals`. The `transactions` axis bumps on all of those plus `enable_auto_renew`'s registration (one tx slot only — bytes are charged per cycle).
 
 ### `authorize_account` semantics
 
@@ -69,7 +76,7 @@ Extends `expiration` by another `AuthorizationPeriod` and leaves all consumed co
 Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a runtime-selected `BoostStrategy`:
 
 - `check_authorization` saturates `bytes` and `transactions` upward and never rejects.
-- The boost only applies to **signed account-scoped `store` / `store_with_cid_config`**. `renew` and preimage-scoped stores get `0`.
+- The boost only applies to **signed account-scoped `store` / `store_with_cid_config`**. All renew flavours and preimage-scoped stores get `0`.
 - The strategy is fed the **post-this-tx** extent so the decision is "would this leave the holder in-budget on both axes?".
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while in-budget, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
@@ -82,9 +89,14 @@ In-budget `store` txs sort strictly above over-budget ones. Pool nonce / arrival
 
 The hard cap is enforced at two levels, and a renewal that would breach **either** is rejected.
 
+"Renew" here means any path that consumes the per-window renew quota: `force_renew`,
+`enable_auto_renew`'s force-renew step, and each auto-renewal cycle in
+`do_process_auto_renewals`. The one-shot `renew` scheduler does **not** consume this
+quota at registration time — only at cycle time (via `do_process_auto_renewals`).
+
 ### Per-account quota
 
-`renew` of `size` bytes for scope `S` is rejected with `Error::PermanentAllowanceExceeded` when
+A renew of `size` bytes for scope `S` is rejected with `Error::PermanentAllowanceExceeded` when
 
 ```
 S.bytes_permanent + size > S.bytes_allowance
@@ -94,13 +106,13 @@ S.bytes_permanent + size > S.bytes_allowance
 
 ### Chain-wide cap
 
-`renew` is rejected with `Error::ChainPermanentCapReached` when
+A renew is rejected with `Error::ChainPermanentCapReached` when
 
 ```
 PermanentStorageUsed + size > T::MaxPermanentStorageSize::get()
 ```
 
-`PermanentStorageUsed` is bumped on every successful `renew`. It is decremented in `on_initialize` (mandatory weight, bounded by `MaxBlockTransactions`) when an obsolete block is removed: each `Transactions[obsolete][i]` with `kind == Renew` contributes its `size` to a single saturating decrement, then `Transactions[obsolete]` is removed.
+`PermanentStorageUsed` is bumped on every successful renew. It is decremented in `on_initialize` (mandatory weight, bounded by `MaxBlockTransactions`) when an obsolete block is removed: each `Transactions[obsolete][i]` with `kind == Renew` contributes its `size` to a single saturating decrement, then `Transactions[obsolete]` is removed.
 
 That obsolete-block cleanup is the only path that ever decrements `PermanentStorageUsed`. `Transactions` is the authoritative record of which renewed bytes are still on chain; the counter is just a precomputed sum maintained alongside it.
 
@@ -108,7 +120,7 @@ That obsolete-block cleanup is the only path that ever decrements `PermanentStor
 
 ### Capacity planning signals
 
-- `Event::PermanentStorageUsedUpdated { used }` fires once per change to `PermanentStorageUsed`: once per successful `renew` (increment), and once per obsolete-block cleanup that ages out at least one `kind == Renew` entry (decrement).
+- `Event::PermanentStorageUsedUpdated { used }` fires once per change to `PermanentStorageUsed`: once per successful renew (increment), and once per obsolete-block cleanup that ages out at least one `kind == Renew` entry (decrement).
 - `Event::PermanentStorageNearCap { used, cap }` fires on the rising edge across `PERMANENT_STORAGE_NEAR_CAP_PERCENT` (80%) of `MaxPermanentStorageSize`. Off-chain consumers can use this as a "raise the cap or coordinate another bulletin chain" trigger.
 
 ## Why renewed bytes can't grow unboundedly
@@ -125,28 +137,28 @@ PoP authorizes Alice for `bytes_allowance = 10 MiB`. Alice does:
 
 | Block | Action | `bytes_permanent` | `PermanentStorageUsed` | Outcome |
 |---:|---|---:|---:|---|
-| 1 | `store` 5 MiB; `renew` it | 5 MiB | 5 MiB | OK (within quota) |
-| 2 | `store` 5 MiB; `renew` it | 10 MiB | 10 MiB | OK (at quota) |
-| 3 | `store` 1 MiB; `renew` it | — | — | **`PermanentAllowanceExceeded`** |
+| 1 | `store` 5 MiB; `force_renew` it | 5 MiB | 5 MiB | OK (within quota) |
+| 2 | `store` 5 MiB; `force_renew` it | 10 MiB | 10 MiB | OK (at quota) |
+| 3 | `store` 1 MiB; `force_renew` it | — | — | **`PermanentAllowanceExceeded`** |
 
 The per-account cap holds: at most `bytes_allowance` bytes renewed per window.
 
 ### Example 2 — single user, lifecycle across one `AuthorizationPeriod`
 
-`AuthorizationPeriod = RetentionPeriod = 14 days`. PoP authorizes Alice with `bytes_allowance = 10 MiB` at block `0`. Alice stores 10 MiB and renews it at block `1`. The authorization is `expired` from block `14 days` onward (`now >= expiration`); the renewed entry was indexed at block `1`, so its `RetentionPeriod` clock fires at block `1 + 14 days + 1` (the `on_initialize` cleanup once `obsolete` reaches `1`).
+`AuthorizationPeriod = RetentionPeriod = 14 days`. PoP authorizes Alice with `bytes_allowance = 10 MiB` at block `0`. Alice stores 10 MiB and `force_renew`s it at block `1`. The authorization is `expired` from block `14 days` onward (`now >= expiration`); the renewed entry was indexed at block `1`, so its `RetentionPeriod` clock fires at block `1 + 14 days + 1` (the `on_initialize` cleanup once `obsolete` reaches `1`).
 
 | Block | Authorization state | `bytes_permanent` | Alice's on-chain renewed bytes | `PermanentStorageUsed` |
 |---:|---|---:|---:|---:|
 | 0 | unexpired (expires `14 days`) | 0 | 0 | 0 |
-| 1 | unexpired; Alice: `store(10 MiB)` + `renew` | 10 MiB | 10 MiB | 10 MiB |
+| 1 | unexpired; Alice: `store(10 MiB)` + `force_renew` | 10 MiB | 10 MiB | 10 MiB |
 | 1 → `14 days − 1` | unexpired, idle | 10 MiB | 10 MiB | 10 MiB |
-| `14 days` | **expired-but-present**; Alice's further `store` / `renew` reject with `InvalidTransaction::Payment` | 10 MiB | 10 MiB | 10 MiB |
+| `14 days` | **expired-but-present**; Alice's further `store` / `force_renew` reject with `InvalidTransaction::Payment` | 10 MiB | 10 MiB | 10 MiB |
 | `14 days + 2` | expired-but-present; `on_initialize` ages out the renew (`obsolete = 1`) | 10 MiB *(stale)* | 0 | 0 |
 
 From here Alice's path branches:
 
-- **PoP re-authorizes** (`authorize_account` on the expired-but-present path) — the caps are re-granted and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) reset to `0`. Alice gets a fresh window and can `store` / `renew` again. Repeating the pattern every window gives steady-state on-chain footprint = `bytes_allowance` per account (= 10 MiB).
-- **PoP does not re-authorize** — the authorization sits expired-but-present until anyone calls `remove_expired_account_authorization`. Alice cannot `store` or `renew`. Her renewed data has already aged out.
+- **PoP re-authorizes** (`authorize_account` on the expired-but-present path) — the caps are re-granted and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) reset to `0`. Alice gets a fresh window and can `store` / `force_renew` again. Repeating the pattern every window gives steady-state on-chain footprint = `bytes_allowance` per account (= 10 MiB).
+- **PoP does not re-authorize** — the authorization sits expired-but-present until anyone calls `remove_expired_account_authorization`. Alice cannot `store` or `force_renew`. Her renewed data has already aged out.
 
 Two things worth noting:
 
@@ -155,15 +167,15 @@ Two things worth noting:
 
 ### Example 3 — single user, end-of-window renew (worst case)
 
-Worst case for per-account on-chain footprint: renew right at the end of one window, re-claim immediately at the start of the next, renew again. Both renewals overlap on chain until the older one ages out.
+Worst case for per-account on-chain footprint: `force_renew` right at the end of one window, re-claim immediately at the start of the next, `force_renew` again. Both renewals overlap on chain until the older one ages out.
 
 | Day | Action | `bytes_permanent` | On-chain renewed bytes |
 |---:|---|---:|---:|
-| 13 | renew 10 MiB | 10 MiB | 10 MiB |
-| 14 | window 1 expired; re-claim → `bytes_permanent = 0`; renew 10 MiB | 10 MiB | **20 MiB** |
+| 13 | `force_renew` 10 MiB | 10 MiB | 10 MiB |
+| 14 | window 1 expired; re-claim → `bytes_permanent = 0`; `force_renew` 10 MiB | 10 MiB | **20 MiB** |
 | 15–26 | both batches on chain | 10 MiB | 20 MiB |
 | 27 | day 13's batch ages out (cleanup decrements) | 10 MiB | 10 MiB |
-| 28 | day 14's batch ages out; re-claim; new renew | … | … |
+| 28 | day 14's batch ages out; re-claim; new `force_renew` | … | … |
 
 Peak on-chain bytes per account: `2 × bytes_allowance`. Generalising, with `RetentionPeriod / AuthorizationPeriod = K`, the bound is `(K + 1) × bytes_allowance`: at any moment up to `K + 1` consecutive windows can overlap on chain (the current window's renew plus up to `K` earlier windows still inside their `RetentionPeriod`). Aligned periods (Westend / Paseo) give `K = 1`, so peak = `2 × bytes_allowance` (during overlap windows).
 
@@ -187,7 +199,7 @@ A user across many accounts (Sybil-like) is bounded by the chain-wide cap (Examp
 
 ## Migration
 
-`STORAGE_VERSION = 3`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3}` modules for the wiring.
+`STORAGE_VERSION = 4`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4}` modules for the wiring. The v4 step re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring }` (all pre-existing entries were written by the old `enable_auto_renew`, so they migrate as `recurring: true`).
 
 ## Capacity planning operational steps
 
@@ -198,17 +210,15 @@ When `PermanentStorageNearCap` fires governance can either:
 
 ## Auto-renewal
 
-Whatever auto-renewal mechanism lands must reuse the manual `renew` code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. No separate accounting path.
+Auto-renewal reuses the manual renew code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. Hard-cap checks live in `check_authorization` (called by the extension's `check_signed` for the manual flow and by `do_process_auto_renewals` for the auto flow); the unified renewal mechanics live in `do_renew_in_memory` (called by `do_renew` and by the auto-renewal drain loop).
+
+Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::AutoRenewalFailed` is emitted, and the data expires normally.
+
+The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` or the force-renew inside `enable_auto_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
 
 ## TODO
 
-### Align with auto-renewal ([PR #313](https://github.com/paritytech/polkadot-bulletin-chain/pull/313))
-
-PR #313 introduces `TransactionByContentHash`, `AutoRenewals`, `PendingAutoRenewals`, and `process_auto_renewals`. Items to resolve at merge time:
-
-- **Centralize accounting in `do_renew`.** Hard-cap checks (per-account, chain-wide) and the `kind = Renew` stamp must live in `do_renew`, called by `renew`, `renew_content_hash`, and `process_auto_renewals`.
-- **Specify `process_auto_renewals` behavior on chain-wide cap rejection.** If `do_renew` rejects an auto-renewal because of `MaxPermanentStorageSize`, treat it the same as PR #313's "block full" path: remove the registration, emit `AutoRenewalFailed`, let the data expire normally.
-- **Drop the snapshot check in `enable_auto_renew`** (or replace with a real reservation). The current check (`extent.transactions > 0 && extent.bytes >= tx_info.size`) is misleading and the per-window quota framing makes it even less meaningful — it suggests "this will work" while making no guarantees beyond the current block.
-- **Reserve block-transaction slots for user txs.** `process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store`/`renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
-- **Per-content dedup of re-renewals (nice-to-have).** On `renew(X)`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.
+- **Reserve block-transaction slots for user txs.** `do_process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store` / `force_renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
+- **Per-content dedup of re-renewals (nice-to-have).** On a renew of `X`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.
+- **Promote the `enable_auto_renew` snapshot to a real reservation (nice-to-have).** The recurring scheduler's snapshot check is non-consuming, so a caller can over-schedule past `bytes_allowance / size` and have later cycles fail with `AutoRenewalFailed`. `renew` (one-shot) already pre-pays.
 

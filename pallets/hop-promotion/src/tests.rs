@@ -449,8 +449,12 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		// Advance so the stored transaction is available for renew.
 		run_to_block(3);
 
-		let renew_call =
-			pallet_bulletin_transaction_storage::Call::<Test>::renew { block: 1, index: 0 };
+		let renew_call = pallet_bulletin_transaction_storage::Call::<Test>::renew {
+			entry: pallet_bulletin_transaction_storage::TransactionRef::Position {
+				block: 1,
+				index: 0,
+			},
+		};
 		let (renew_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
 			&alice,
 			&renew_call,
