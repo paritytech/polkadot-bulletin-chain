@@ -49,7 +49,7 @@ Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`.
 PoP grants two numbers per account: `bytes_allowance` (size budget) and `transactions_allowance` (count budget). The same `bytes_allowance` is reused on the soft and hard sides, with different semantics.
 
 - **Soft (temporary)** — `bytes_allowance` and `transactions_allowance` are priority thresholds only. The boost stays on while in-budget on both axes (`bytes <= bytes_allowance` *and* `transactions <= transactions_allowance`) and drops to `0` once *either* is strictly over cap. A missing or `0`-allowance grant also yields no boost. `store` calls are never rejected; they queue behind in-budget signers when over.
-- **Hard (renewed)** — `bytes_allowance` is a real cap on the per-window renew quota. `renew` is **rejected** when `bytes_permanent + size > bytes_allowance`. The transaction-count axis does not gate renew. A separate chain-wide cap (`MaxPermanentStorageSize`) bounds the total renewed bytes on chain across all signers.
+- **Hard (renewed)** — `bytes_allowance` is a real cap on the per-window renew quota. `force_renew` / `enable_auto_renew` / auto-renewal cycles reject with `PermanentAllowanceExceeded` when `bytes_permanent + size > bytes_allowance`. The transaction-count axis does not gate renew. A separate chain-wide cap (`MaxPermanentStorageSize`) bounds the total renewed bytes on chain across all signers.
 
 ### Authorization storage
 
@@ -137,28 +137,28 @@ PoP authorizes Alice for `bytes_allowance = 10 MiB`. Alice does:
 
 | Block | Action | `bytes_permanent` | `PermanentStorageUsed` | Outcome |
 |---:|---|---:|---:|---|
-| 1 | `store` 5 MiB; `renew` it | 5 MiB | 5 MiB | OK (within quota) |
-| 2 | `store` 5 MiB; `renew` it | 10 MiB | 10 MiB | OK (at quota) |
-| 3 | `store` 1 MiB; `renew` it | — | — | **`PermanentAllowanceExceeded`** |
+| 1 | `store` 5 MiB; `force_renew` it | 5 MiB | 5 MiB | OK (within quota) |
+| 2 | `store` 5 MiB; `force_renew` it | 10 MiB | 10 MiB | OK (at quota) |
+| 3 | `store` 1 MiB; `force_renew` it | — | — | **`PermanentAllowanceExceeded`** |
 
 The per-account cap holds: at most `bytes_allowance` bytes renewed per window.
 
 ### Example 2 — single user, lifecycle across one `AuthorizationPeriod`
 
-`AuthorizationPeriod = RetentionPeriod = 14 days`. PoP authorizes Alice with `bytes_allowance = 10 MiB` at block `0`. Alice stores 10 MiB and renews it at block `1`. The authorization is `expired` from block `14 days` onward (`now >= expiration`); the renewed entry was indexed at block `1`, so its `RetentionPeriod` clock fires at block `1 + 14 days + 1` (the `on_initialize` cleanup once `obsolete` reaches `1`).
+`AuthorizationPeriod = RetentionPeriod = 14 days`. PoP authorizes Alice with `bytes_allowance = 10 MiB` at block `0`. Alice stores 10 MiB and `force_renew`s it at block `1`. The authorization is `expired` from block `14 days` onward (`now >= expiration`); the renewed entry was indexed at block `1`, so its `RetentionPeriod` clock fires at block `1 + 14 days + 1` (the `on_initialize` cleanup once `obsolete` reaches `1`).
 
 | Block | Authorization state | `bytes_permanent` | Alice's on-chain renewed bytes | `PermanentStorageUsed` |
 |---:|---|---:|---:|---:|
 | 0 | unexpired (expires `14 days`) | 0 | 0 | 0 |
-| 1 | unexpired; Alice: `store(10 MiB)` + `renew` | 10 MiB | 10 MiB | 10 MiB |
+| 1 | unexpired; Alice: `store(10 MiB)` + `force_renew` | 10 MiB | 10 MiB | 10 MiB |
 | 1 → `14 days − 1` | unexpired, idle | 10 MiB | 10 MiB | 10 MiB |
-| `14 days` | **expired-but-present**; Alice's further `store` / `renew` reject with `InvalidTransaction::Payment` | 10 MiB | 10 MiB | 10 MiB |
+| `14 days` | **expired-but-present**; Alice's further `store` / `force_renew` reject with `InvalidTransaction::Payment` | 10 MiB | 10 MiB | 10 MiB |
 | `14 days + 2` | expired-but-present; `on_initialize` ages out the renew (`obsolete = 1`) | 10 MiB *(stale)* | 0 | 0 |
 
 From here Alice's path branches:
 
-- **PoP re-authorizes** (`authorize_account` on the expired-but-present path) — the caps are re-granted and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) reset to `0`. Alice gets a fresh window and can `store` / `renew` again. Repeating the pattern every window gives steady-state on-chain footprint = `bytes_allowance` per account (= 10 MiB).
-- **PoP does not re-authorize** — the authorization sits expired-but-present until anyone calls `remove_expired_account_authorization`. Alice cannot `store` or `renew`. Her renewed data has already aged out.
+- **PoP re-authorizes** (`authorize_account` on the expired-but-present path) — the caps are re-granted and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) reset to `0`. Alice gets a fresh window and can `store` / `force_renew` again. Repeating the pattern every window gives steady-state on-chain footprint = `bytes_allowance` per account (= 10 MiB).
+- **PoP does not re-authorize** — the authorization sits expired-but-present until anyone calls `remove_expired_account_authorization`. Alice cannot `store` or `force_renew`. Her renewed data has already aged out.
 
 Two things worth noting:
 
@@ -167,15 +167,15 @@ Two things worth noting:
 
 ### Example 3 — single user, end-of-window renew (worst case)
 
-Worst case for per-account on-chain footprint: renew right at the end of one window, re-claim immediately at the start of the next, renew again. Both renewals overlap on chain until the older one ages out.
+Worst case for per-account on-chain footprint: `force_renew` right at the end of one window, re-claim immediately at the start of the next, `force_renew` again. Both renewals overlap on chain until the older one ages out.
 
 | Day | Action | `bytes_permanent` | On-chain renewed bytes |
 |---:|---|---:|---:|
-| 13 | renew 10 MiB | 10 MiB | 10 MiB |
-| 14 | window 1 expired; re-claim → `bytes_permanent = 0`; renew 10 MiB | 10 MiB | **20 MiB** |
+| 13 | `force_renew` 10 MiB | 10 MiB | 10 MiB |
+| 14 | window 1 expired; re-claim → `bytes_permanent = 0`; `force_renew` 10 MiB | 10 MiB | **20 MiB** |
 | 15–26 | both batches on chain | 10 MiB | 20 MiB |
 | 27 | day 13's batch ages out (cleanup decrements) | 10 MiB | 10 MiB |
-| 28 | day 14's batch ages out; re-claim; new renew | … | … |
+| 28 | day 14's batch ages out; re-claim; new `force_renew` | … | … |
 
 Peak on-chain bytes per account: `2 × bytes_allowance`. Generalising, with `RetentionPeriod / AuthorizationPeriod = K`, the bound is `(K + 1) × bytes_allowance`: at any moment up to `K + 1` consecutive windows can overlap on chain (the current window's renew plus up to `K` earlier windows still inside their `RetentionPeriod`). Aligned periods (Westend / Paseo) give `K = 1`, so peak = `2 × bytes_allowance` (during overlap windows).
 

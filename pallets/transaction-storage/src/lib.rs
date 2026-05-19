@@ -990,7 +990,8 @@ pub mod pallet {
 		ExhaustedAuthorizerRemoved { who: T::AccountId },
 		/// A renewal was enabled for `content_hash` by `who`.
 		RenewalEnabled { content_hash: ContentHash, who: T::AccountId, recurring: bool },
-		/// Auto-renewal was disabled for `content_hash` by `who`.
+		/// Auto-renewal disabled for `content_hash`. `who` is the registration's owner
+		/// (not the caller when Root issued the disable).
 		AutoRenewalDisabled { content_hash: ContentHash, who: T::AccountId },
 		/// Data was automatically renewed at `index` with `content_hash` for `account`.
 		DataAutoRenewed { index: u32, content_hash: ContentHash, account: T::AccountId },
