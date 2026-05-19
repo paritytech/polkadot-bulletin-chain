@@ -99,6 +99,8 @@ pub const CHAIN_PERMANENT_CAP_REACHED: InvalidTransaction = InvalidTransaction::
 pub const AUTHORIZER_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(7);
 /// Authorizer budget has not been exhausted.
 pub const AUTHORIZATION_NOT_EXHAUSTED: InvalidTransaction = InvalidTransaction::Custom(8);
+/// Relay-chain block number not yet available (genesis sentinel `0`).
+pub const RELAY_CHAIN_TIME_UNAVAILABLE: InvalidTransaction = InvalidTransaction::Custom(9);
 
 /// Percent of `MaxPermanentStorageSize` at which the pallet emits
 /// [`Event::PermanentStorageNearCap`] (rising-edge only). Off-chain governance consumers
@@ -152,9 +154,22 @@ pub mod pallet {
 		/// all authorizations. Tracks chain-wide capacity for permanent data.
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
-		/// Authorizations expire after this many blocks.
+		/// Default window length, in **relay** blocks, used by
+		/// [`Self::authorize_account`] / [`Self::authorize_preimage`] when the caller
+		/// does not specify an explicit window.
 		#[pallet::constant]
-		type AuthorizationPeriod: Get<BlockNumberFor<Self>>;
+		type DefaultAuthorizationWindow: Get<u32>;
+		/// Maximum allowed `effective_starts_at - relay_now` for the `_window`
+		/// extrinsics. Caps how far into the future a slot may be scheduled.
+		#[pallet::constant]
+		type MaxStartsAtFuture: Get<u32>;
+		/// Maximum number of overlapping authorization slots stored per scope.
+		#[pallet::constant]
+		type MaxAuthorizationSlots: Get<u32>;
+		/// Provides the current relay-chain block number. On parachains this is
+		/// [`cumulus_pallet_parachain_system::RelaychainDataProvider`]; on tests a
+		/// simple advance-able u32 storage value.
+		type RelayChainBlockNumberProvider: BlockNumberProvider<BlockNumber = u32>;
 		/// The origin that manages the authorizer list.
 		type AuthorizerRegistrarOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 		/// The origin that can authorize data storage.
@@ -225,10 +240,17 @@ pub mod pallet {
 		AutoRenewalNotEnabled,
 		/// Caller is not the owner of the auto-renewal registration.
 		NotAutoRenewalOwner,
-		/// Authorizer's `authorization_period` override is zero or `>= T::AuthorizationPeriod`.
-		/// The override is intended to shorten an authorizer's window; to grant the default
-		/// length, pass `None` instead.
-		InvalidAuthorizationPeriodOverride,
+		/// Push of a new authorization slot would exceed
+		/// [`Config::MaxAuthorizationSlots`] (after the lazy prune).
+		TooManySlots,
+		/// `(starts_at, expiration)` is not a valid window: `expiration <= starts_at`,
+		/// `expiration <= relay_now`, or `starts_at` is more than
+		/// [`Config::MaxStartsAtFuture`] blocks into the future. A `starts_at`
+		/// in the past is accepted (treated as already-active).
+		InvalidWindow,
+		/// The relay-chain block number is unavailable (genesis sentinel `0`,
+		/// before the parachain system inherent has populated validation data).
+		RelayChainTimeUnavailable,
 		/// `valid_until` supplied to `add_authorizer` is in the past (`<= now`, would
 		/// expire immediately). Pass `None` for no expiration.
 		InvalidValidUntil,
@@ -238,7 +260,7 @@ pub mod pallet {
 		InsufficientAuthorizerBudget,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(3);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(4);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -306,18 +328,23 @@ pub mod pallet {
 				if let Some(transactions) = <Transactions<T>>::take(obsolete) {
 					num_expiring = transactions.len() as u32;
 
-					// Single pass: sum renewed sizes, clean up `TransactionByContentHash`,
-					// and schedule auto-renewals.
+					// Decrement the chain-wide permanent counter for any renewed bytes that
+					// just aged out (covers entries flagged `TransactionKind::Renew`).
+					let renewed_sum: u64 = transactions
+						.iter()
+						.filter(|t| matches!(t.kind, TransactionKind::Renew))
+						.fold(0u64, |acc, t| acc.saturating_add(t.size as u64));
+					if renewed_sum > 0 {
+						Self::update_permanent_storage_used(|used| {
+							used.saturating_sub(renewed_sum)
+						});
+					}
+
+					// Before removing, collect any transactions that are registered for
+					// auto-renewal and schedule them for processing this block.
 					let mut pending = PendingAutoRenewals::<T>::get();
-					let mut renewed_sum: u64 = 0;
-					for tx_info in transactions.into_iter() {
+					for tx_info in transactions.iter() {
 						let hash: ContentHash = tx_info.content_hash;
-
-						// Sum renewed sizes for the chain-wide permanent counter decrement.
-						if matches!(tx_info.kind, TransactionKind::Renew) {
-							renewed_sum = renewed_sum.saturating_add(tx_info.size as u64);
-						}
-
 						// Only remove TransactionByContentHash if this entry still points to
 						// the obsolete block (otherwise the entry has been re-stored or
 						// renewed elsewhere and points at a different block).
@@ -329,14 +356,8 @@ pub mod pallet {
 						// `try_push` cannot overflow: `pending` is empty per `on_finalize`'s
 						// drain invariant, and `transactions.len() <= MaxBlockTransactions`.
 						if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
-							let _ = pending.try_push((hash, tx_info, renewal_data));
+							let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
 						}
-					}
-
-					if renewed_sum > 0 {
-						Self::update_permanent_storage_used(|used| {
-							used.saturating_sub(renewed_sum)
-						});
 					}
 					if !pending.is_empty() {
 						PendingAutoRenewals::<T>::put(&pending);
@@ -425,8 +446,12 @@ pub mod pallet {
 				"GenesisConfig.retention_period must match DEFAULT_RETENTION_PERIOD"
 			);
 			assert!(
-				!T::AuthorizationPeriod::get().is_zero(),
-				"AuthorizationPeriod must be greater than zero"
+				!T::DefaultAuthorizationWindow::get().is_zero(),
+				"DefaultAuthorizationWindow must be greater than zero"
+			);
+			assert!(
+				!T::MaxAuthorizationSlots::get().is_zero(),
+				"MaxAuthorizationSlots must be greater than zero"
 			);
 		}
 	}
@@ -507,16 +532,17 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Authorize an account to store up to `bytes` of arbitrary data in `transactions`
-		/// boost-tier transactions. The authorization will expire after a configured number
-		/// of blocks.
+		/// Authorize an account to store up to `bytes` of arbitrary data in
+		/// `transactions` boost-tier transactions, with the default authorization
+		/// window applied: `starts_at = relay_now`,
+		/// `expiration = relay_now + DefaultAuthorizationWindow`.
 		///
-		/// If the account already has an unexpired authorization, this call **adds** `bytes`
-		/// and `transactions` to the existing `bytes_allowance` and `transactions_allowance`
-		/// caps (both saturating); the expiration block is **not** pushed back, and the
-		/// consumed counters are preserved. Once the authorization has expired, the next call
-		/// replaces it with a fresh entry (consumed counters reset to `0`, allowances set to
-		/// the new values, expiry = `now + AuthorizationPeriod`).
+		/// If a slot with that exact window already exists for the account, the
+		/// new caps are **added** to it (existing used counters preserved).
+		/// Otherwise a new slot is appended; if the bounded vec is already full
+		/// (after the lazy prune), the call fails with
+		/// [`Error::TooManySlots`]. To target a specific window, use
+		/// [`Self::authorize_account_window`].
 		///
 		/// Parameters:
 		///
@@ -534,41 +560,52 @@ pub mod pallet {
 			transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
-			let authorization_period_override = Self::authorization_period_override_for(&origin);
-			// Capture the signer (if any) before `ensure_origin` consumes the origin —
-			// we use it post-check to charge their `AllowedAuthorizers` budget. Root /
-			// XCM origins have no signer and no budget to consume.
-			let signer = frame_system::ensure_signed(origin.clone()).ok();
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			if let Some(signer) = signer {
-				Self::consume_authorizer_budget(&signer, transactions, bytes)?;
-			}
-			Self::authorize(
-				AuthorizationScope::Account(who.clone()),
-				transactions,
-				bytes,
-				authorization_period_override,
-			);
-			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
-			Ok(())
+			Self::do_authorize_account(origin, who, transactions, bytes, None, None)
 		}
 
-		/// Authorize anyone to store a preimage of the given content hash. The authorization will
-		/// expire after a configured number of blocks.
+		/// Authorize an account with an explicit `(starts_at, expiration)` slot
+		/// window expressed in **relay** block numbers.
 		///
-		/// If authorization already exists for a preimage of the given hash to be stored, the
-		/// maximum size of the preimage will be increased to `max_size`. The expiration block
-		/// is **not** pushed back; use
-		/// [`refresh_preimage_authorization`](Self::refresh_preimage_authorization) to extend
-		/// expiry.
+		/// `starts_at = None` means "active immediately" (`relay_now`). The
+		/// effective `starts_at` must be `>= relay_now`, no more than
+		/// [`Config::MaxStartsAtFuture`] blocks ahead, and strictly less than
+		/// `expiration`. If a slot with the same exact window already exists,
+		/// the call is **additive** (caps merged, used counters preserved);
+		/// otherwise a new slot is pushed.
 		///
-		/// Parameters:
+		/// The origin must be the pallet's `Authorizer`. Emits
+		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
+		#[pallet::call_index(7)]
+		#[pallet::weight(T::WeightInfo::authorize_account_window())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64, _starts_at: &Option<u32>, _expiration: &u32| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
+		pub fn authorize_account_window(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+			transactions: u32,
+			bytes: u64,
+			starts_at: Option<u32>,
+			expiration: u32,
+		) -> DispatchResult {
+			Self::do_authorize_account(
+				origin,
+				who,
+				transactions,
+				bytes,
+				starts_at,
+				Some(expiration),
+			)
+		}
+
+		/// Authorize anyone to store a preimage of the given content hash with
+		/// the default authorization window.
 		///
-		/// - `content_hash`: The hash of the data to be submitted. For [`store`](Self::store) this
-		///   is the BLAKE2b-256 hash; for [`store_with_cid_config`](Self::store_with_cid_config)
-		///   this is the hash produced by the CID config's hashing algorithm.
-		/// - `max_size`: The maximum size, in bytes, of the preimage.
+		/// If a slot with the default window already exists for this hash, the
+		/// new `max_size` is **added** to its `bytes_allowance` (additive).
+		/// Otherwise a new slot is pushed; preimage slots carry
+		/// `transactions_allowance = 1`. To target a specific window use
+		/// [`Self::authorize_preimage_window`].
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
 		/// [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
@@ -579,22 +616,26 @@ pub mod pallet {
 			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
-			let authorization_period_override = Self::authorization_period_override_for(&origin);
-			let signer = frame_system::ensure_signed(origin.clone()).ok();
-			T::Authorizer::ensure_origin(origin)?;
-			ensure!(max_size > 0, Error::<T>::BadDataSize);
-			// Preimage scope is single-use, so the per-grant tx budget is `1`.
-			if let Some(signer) = signer {
-				Self::consume_authorizer_budget(&signer, 1, max_size)?;
-			}
-			Self::authorize(
-				AuthorizationScope::Preimage(content_hash),
-				1,
-				max_size,
-				authorization_period_override,
-			);
-			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
-			Ok(())
+			Self::do_authorize_preimage(origin, content_hash, max_size, None, None)
+		}
+
+		/// Authorize a preimage with an explicit `(starts_at, expiration)` slot
+		/// window. Same validation rules as [`Self::authorize_account_window`].
+		///
+		/// Emits [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
+		#[pallet::call_index(8)]
+		#[pallet::weight(T::WeightInfo::authorize_preimage_window())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _content_hash: &ContentHash, _max_size: &u64, _starts_at: &Option<u32>, _expiration: &u32| -> bool {
+			T::Authorizer::try_origin(origin.clone()).is_ok()
+		})]
+		pub fn authorize_preimage_window(
+			origin: OriginFor<T>,
+			content_hash: ContentHash,
+			max_size: u64,
+			starts_at: Option<u32>,
+			expiration: u32,
+		) -> DispatchResult {
+			Self::do_authorize_preimage(origin, content_hash, max_size, starts_at, Some(expiration))
 		}
 
 		/// Remove an expired account authorization from storage. Anyone can call this.
@@ -636,61 +677,6 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Refresh the expiration of an existing authorization for an account.
-		///
-		/// Only the expiration block is updated — consumed counters (`bytes`,
-		/// `transactions`) and the granted caps (`bytes_allowance`,
-		/// `transactions_allowance`) are left untouched. To extend the caps, call
-		/// `authorize_account` instead (additive on the unexpired path).
-		///
-		/// If the account does not have an authorization, the call will fail.
-		///
-		/// Parameters:
-		///
-		/// - `who`: The account to be credited with an authorization to store data.
-		///
-		/// The origin for this call must be the pallet's `Authorizer`. Emits
-		/// [`AccountAuthorizationRefreshed`](Event::AccountAuthorizationRefreshed) when successful.
-		#[pallet::call_index(7)]
-		#[pallet::weight(T::WeightInfo::refresh_account_authorization())]
-		pub fn refresh_account_authorization(
-			origin: OriginFor<T>,
-			who: T::AccountId,
-		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			Self::refresh_authorization(AuthorizationScope::Account(who.clone()))?;
-			Self::deposit_event(Event::AccountAuthorizationRefreshed { who });
-			Ok(())
-		}
-
-		/// Refresh the expiration of an existing authorization for a preimage of a BLAKE2b hash.
-		///
-		/// Only the expiration block is updated — consumed counters (`bytes`,
-		/// `transactions`) and the granted caps (`bytes_allowance`,
-		/// `transactions_allowance`) are left untouched. To raise the cap, call
-		/// `authorize_preimage` instead.
-		///
-		/// If the preimage does not have an authorization, the call will fail.
-		///
-		/// Parameters:
-		///
-		/// - `content_hash`: The BLAKE2b hash of the data to be submitted.
-		///
-		/// The origin for this call must be the pallet's `Authorizer`. Emits
-		/// [`PreimageAuthorizationRefreshed`](Event::PreimageAuthorizationRefreshed) when
-		/// successful.
-		#[pallet::call_index(8)]
-		#[pallet::weight(T::WeightInfo::refresh_preimage_authorization())]
-		pub fn refresh_preimage_authorization(
-			origin: OriginFor<T>,
-			content_hash: ContentHash,
-		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			Self::refresh_authorization(AuthorizationScope::Preimage(content_hash))?;
-			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
-			Ok(())
-		}
-
 		/// Renew previously stored data by content hash. The content hash is the BLAKE2b hash
 		/// of the original data, as emitted in the [`Stored`](Event::Stored) or
 		/// [`Renewed`](Event::Renewed) event.
@@ -701,7 +687,6 @@ pub mod pallet {
 		/// Emits [`Renewed`](Event::Renewed) when successful.
 		#[pallet::call_index(10)]
 		#[pallet::weight((T::WeightInfo::renew_content_hash(), DispatchClass::Operational))]
-		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
 		pub fn renew_content_hash(
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
@@ -722,15 +707,10 @@ pub mod pallet {
 
 		/// Enable automatic renewal for a previously stored piece of data.
 		///
-		/// Snapshot check: the caller's authorization must have enough remaining
-		/// renew-window quota (`bytes_permanent + tx_info.size <= bytes_allowance`) to
-		/// fit one more renewal. This mirrors the per-account hard cap that
-		/// `check_authorization` enforces at renewal time, on the correct axis
-		/// (`bytes_permanent`, not `bytes`). It does **not** guarantee the renewal will
-		/// succeed at process time — `bytes_permanent` may have advanced (other
-		/// renewals), the auth may have expired and been re-granted (counters reset),
-		/// or the chain-wide cap may have been hit. The actual gate is
-		/// `do_process_auto_renewals`.
+		/// `who` must have sufficient account authorization (transactions > 0 and bytes >=
+		/// data size). The authorization is **not** consumed here; it is consumed each time
+		/// the data is auto-renewed (every `StoragePeriod` blocks).
+		/// Authorization is checked here but might still be missing when actually renewed.
 		///
 		/// Emits [`AutoRenewalEnabled`](Event::AutoRenewalEnabled) when successful.
 		#[pallet::call_index(12)]
@@ -746,21 +726,17 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// Verify the content hash refers to currently-stored data and look up its
-			// size; we need it for the per-account quota check below.
+			// Verify the content hash exists and the account has sufficient authorization.
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 			let tx_info =
 				Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
-
-			// Mirror `check_authorization`: the authorization must exist, be unexpired,
-			// and have room for one more renewal of `tx_info.size`.
-			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
-				.ok_or(Error::<T>::AuthorizationNotFound)?;
+			let extent = Self::authorization_extent(AuthorizationScope::Account(who.clone()));
+			let bytes_remaining = extent.bytes_allowance.saturating_sub(extent.bytes);
 			ensure!(
-				!auth.expired(Self::now()) &&
-					auth.extent.has_permanent_capacity(tx_info.size as u64),
-				Error::<T>::AuthorizationNotFound,
+				extent.transactions_allowance > extent.transactions &&
+					bytes_remaining >= tx_info.size as u64,
+				Error::<T>::AuthorizationNotFound
 			);
 
 			AutoRenewals::<T>::insert(content_hash, AutoRenewalData { account: who.clone() });
@@ -831,9 +807,6 @@ pub mod pallet {
 		///
 		/// `budget` constraints:
 		///
-		/// - `authorization_period`: when `Some(p)`, must satisfy `0 < p <
-		///   T::AuthorizationPeriod::get()`; intended to *shorten* the default window. Pass `None`
-		///   to use the default.
 		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`; the entry stops authorizing
 		///   once `now >= t` and becomes eligible for permissionless cleanup via
 		///   [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
@@ -848,12 +821,6 @@ pub mod pallet {
 			budget: AuthorizerBudget<BlockNumberFor<T>>,
 		) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
-			if let Some(period) = budget.authorization_period {
-				ensure!(
-					!period.is_zero() && period < T::AuthorizationPeriod::get(),
-					Error::<T>::InvalidAuthorizationPeriodOverride,
-				);
-			}
 			ensure!(!budget.is_expired(Self::now()), Error::<T>::InvalidValidUntil);
 			AllowedAuthorizers::<T>::insert(&who, budget);
 			Self::deposit_event(Event::AuthorizerAdded { who });
@@ -923,15 +890,22 @@ pub mod pallet {
 		/// Storage proof was successfully checked.
 		ProofChecked,
 		/// An account `who` was authorized to store `bytes` bytes in `transactions` boost-tier
-		/// transactions.
-		AccountAuthorized { who: T::AccountId, transactions: u32, bytes: u64 },
-		/// An authorization for account `who` was refreshed.
-		AccountAuthorizationRefreshed { who: T::AccountId },
+		/// transactions over the slot window `[starts_at, expiration)` (relay block numbers).
+		AccountAuthorized {
+			who: T::AccountId,
+			transactions: u32,
+			bytes: u64,
+			starts_at: u32,
+			expiration: u32,
+		},
 		/// Authorization was given for a preimage of `content_hash` (not exceeding `max_size`) to
-		/// be stored by anyone.
-		PreimageAuthorized { content_hash: ContentHash, max_size: u64 },
-		/// An authorization for a preimage of `content_hash` was refreshed.
-		PreimageAuthorizationRefreshed { content_hash: ContentHash },
+		/// be stored by anyone over the slot window `[starts_at, expiration)`.
+		PreimageAuthorized {
+			content_hash: ContentHash,
+			max_size: u64,
+			starts_at: u32,
+			expiration: u32,
+		},
 		/// An expired account authorization was removed.
 		ExpiredAccountAuthorizationRemoved { who: T::AccountId },
 		/// An expired preimage authorization was removed.
@@ -960,10 +934,14 @@ pub mod pallet {
 		PermanentStorageNearCap { used: u64, cap: u64 },
 	}
 
-	/// Authorizations, keyed by scope.
+	/// Per-scope [`Authorization`] entries. Lazily pruned: every read or
+	/// mutate that goes through [`Pallet::prune_expired`] drops **expired**
+	/// slots (`expiration <= relay_now`). When the inner `slots` vec becomes
+	/// empty the entry is removed and the provider-ref (for `Account` scope)
+	/// is decremented.
 	#[pallet::storage]
 	pub(super) type Authorizations<T: Config> =
-		StorageMap<_, Blake2_128Concat, AuthorizationScopeFor<T>, AuthorizationFor<T>, OptionQuery>;
+		StorageMap<_, Blake2_128Concat, AuthorizationScopeFor<T>, Authorization<T>, OptionQuery>;
 
 	/// List of accounts allowed to give authorizations.
 	#[pallet::storage]
@@ -1075,48 +1053,40 @@ pub mod pallet {
 			ByteFee::<T>::put(self.byte_fee);
 			EntryFee::<T>::put(self.entry_fee);
 			RetentionPeriod::<T>::put(self.retention_period);
-			let expiration = T::AuthorizationPeriod::get();
+			// Genesis runs before the parachain inherent populates validation data,
+			// so `RelayChainBlockNumberProvider::current_block_number()` returns the
+			// default `0`. We accept `0` here on purpose: genesis-supplied slots
+			// are a build-time convenience for dev/test chains, and a `starts_at`
+			// of `0` simply means "active immediately".
+			let starts_at: u32 = T::RelayChainBlockNumberProvider::current_block_number();
+			let expiration = starts_at.saturating_add(T::DefaultAuthorizationWindow::get());
 			for (who, transactions_allowance, bytes_allowance) in &self.account_authorizations {
-				let scope = AuthorizationScope::Account(who.clone());
-				Authorizations::<T>::insert(
-					&scope,
-					Authorization {
-						extent: AuthorizationExtent {
-							bytes: 0,
-							bytes_permanent: 0,
-							bytes_allowance: *bytes_allowance,
-							transactions: 0,
-							transactions_allowance: *transactions_allowance,
-						},
-						expiration,
-					},
-				);
-				Pallet::<T>::authorization_added(&scope);
+				Pallet::<T>::add_slot(
+					AuthorizationScope::Account(who.clone()),
+					*transactions_allowance,
+					*bytes_allowance,
+					starts_at,
+					expiration,
+				)
+				.expect("genesis account authorization fits in MaxAuthorizationSlots; qed");
 			}
 			for (content_hash, max_size) in &self.preimage_authorizations {
-				let scope = AuthorizationScope::Preimage(*content_hash);
-				Authorizations::<T>::insert(
-					&scope,
-					Authorization {
-						extent: AuthorizationExtent {
-							bytes: 0,
-							bytes_permanent: 0,
-							bytes_allowance: *max_size,
-							transactions: 0,
-							transactions_allowance: 1,
-						},
-						expiration,
-					},
-				);
+				Pallet::<T>::add_slot(
+					AuthorizationScope::Preimage(*content_hash),
+					1,
+					*max_size,
+					starts_at,
+					expiration,
+				)
+				.expect("genesis preimage authorization fits in MaxAuthorizationSlots; qed");
 			}
 			for (account, transactions, bytes) in &self.allowed_authorizers {
 				AllowedAuthorizers::<T>::insert(
 					account,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: *transactions, bytes: *bytes }),
-						// Genesis authorizers default to the pallet's `AuthorizationPeriod` and
-						// never expire; root can re-add them later to set overrides.
-						authorization_period: None,
+						// Genesis authorizers never expire; root can re-add them later to set
+						// a `valid_until` if needed.
 						valid_until: None,
 					},
 				);
@@ -1450,12 +1420,150 @@ pub mod pallet {
 			Ok(new_index)
 		}
 
-		/// Current block number — local shorthand for `frame_system::Pallet::<T>::block_number()`.
+		/// Returns the current relay-chain block number reported by
+		/// [`Config::RelayChainBlockNumberProvider`]. `0` is the genesis sentinel
+		/// (validation data not yet populated by `set_validation_data`); callers
+		/// that need a real time should go through [`Self::ensure_relay_now`].
+		pub(crate) fn relay_now() -> u32 {
+			T::RelayChainBlockNumberProvider::current_block_number()
+		}
+
+		/// Current parachain block number — used for authorizer validity checks
+		/// (`AuthorizerBudget::valid_until`). Slot windows use [`Self::relay_now`].
 		pub(crate) fn now() -> BlockNumberFor<T> {
 			frame_system::Pallet::<T>::block_number()
 		}
 
-		fn authorization_added(scope: &AuthorizationScopeFor<T>) {
+		/// Like [`Self::relay_now`] but rejects the genesis sentinel `0` with
+		/// [`Error::RelayChainTimeUnavailable`] / [`RELAY_CHAIN_TIME_UNAVAILABLE`].
+		pub(crate) fn ensure_relay_now() -> Result<u32, Error<T>> {
+			let n = Self::relay_now();
+			if n == 0 {
+				return Err(Error::<T>::RelayChainTimeUnavailable);
+			}
+			Ok(n)
+		}
+
+		/// Validate an `(effective_starts_at, expiration)` slot window against
+		/// the current relay block:
+		///
+		/// - The window must be non-empty: `expiration > effective_starts_at`.
+		/// - The window must not be already expired: `expiration > relay_now`.
+		/// - A future `starts_at` may not be more than [`Config::MaxStartsAtFuture`] blocks ahead.
+		///   A `starts_at` in the past is **accepted** — semantically it just means "already
+		///   active".
+		fn ensure_valid_window(
+			relay_now: u32,
+			effective_starts_at: u32,
+			expiration: u32,
+		) -> Result<(), Error<T>> {
+			ensure!(expiration > effective_starts_at, Error::<T>::InvalidWindow);
+			ensure!(expiration > relay_now, Error::<T>::InvalidWindow);
+			ensure!(
+				effective_starts_at.saturating_sub(relay_now) <= T::MaxStartsAtFuture::get(),
+				Error::<T>::InvalidWindow
+			);
+			Ok(())
+		}
+
+		/// Resolve `(starts_at, expiration)` for an authorize call: when
+		/// `expiration` is `None` the caller wants the default window
+		/// (`relay_now + DefaultAuthorizationWindow`); otherwise the explicit
+		/// window is validated via [`Self::ensure_valid_window`].
+		fn resolve_window(
+			relay_now: u32,
+			starts_at: Option<u32>,
+			expiration: Option<u32>,
+		) -> Result<(u32, u32), Error<T>> {
+			match expiration {
+				None =>
+					Ok((relay_now, relay_now.saturating_add(T::DefaultAuthorizationWindow::get()))),
+				Some(expiration) => {
+					let effective_starts_at = starts_at.unwrap_or(relay_now);
+					Self::ensure_valid_window(relay_now, effective_starts_at, expiration)?;
+					Ok((effective_starts_at, expiration))
+				},
+			}
+		}
+
+		/// Shared body for [`Self::authorize_account`] and
+		/// [`Self::authorize_account_window`]. `expiration = None` selects the
+		/// default window; `Some` runs full window validation.
+		fn do_authorize_account(
+			origin: OriginFor<T>,
+			who: T::AccountId,
+			transactions: u32,
+			bytes: u64,
+			starts_at: Option<u32>,
+			expiration: Option<u32>,
+		) -> DispatchResult {
+			// Capture the signer (if any) before `ensure_origin` consumes the origin —
+			// we use it post-check to charge their `AllowedAuthorizers` budget. Root /
+			// XCM origins have no signer and no budget to consume.
+			let signer = frame_system::ensure_signed(origin.clone()).ok();
+			T::Authorizer::ensure_origin(origin)?;
+			ensure!(bytes > 0, Error::<T>::BadDataSize);
+			if let Some(signer) = signer {
+				Self::consume_authorizer_budget(&signer, transactions, bytes)?;
+			}
+			let relay_now = Self::ensure_relay_now()?;
+			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
+			Self::add_slot(
+				AuthorizationScope::Account(who.clone()),
+				transactions,
+				bytes,
+				starts_at,
+				expiration,
+			)?;
+			Self::deposit_event(Event::AccountAuthorized {
+				who,
+				transactions,
+				bytes,
+				starts_at,
+				expiration,
+			});
+			Ok(())
+		}
+
+		/// Shared body for [`Self::authorize_preimage`] and
+		/// [`Self::authorize_preimage_window`]. Preimage slots carry a
+		/// `transactions_allowance` of `2` so the canonical "store-then-renew"
+		/// flow fits — the slot model gates the tx-counter axis hard and a
+		/// single-tx budget would block the renew. The authorizer's budget is
+		/// charged `(1, max_size)` per grant — preimage scope is single-use from
+		/// the authorizer's perspective.
+		fn do_authorize_preimage(
+			origin: OriginFor<T>,
+			content_hash: ContentHash,
+			max_size: u64,
+			starts_at: Option<u32>,
+			expiration: Option<u32>,
+		) -> DispatchResult {
+			let signer = frame_system::ensure_signed(origin.clone()).ok();
+			T::Authorizer::ensure_origin(origin)?;
+			ensure!(max_size > 0, Error::<T>::BadDataSize);
+			if let Some(signer) = signer {
+				Self::consume_authorizer_budget(&signer, 1, max_size)?;
+			}
+			let relay_now = Self::ensure_relay_now()?;
+			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
+			Self::add_slot(
+				AuthorizationScope::Preimage(content_hash),
+				2,
+				max_size,
+				starts_at,
+				expiration,
+			)?;
+			Self::deposit_event(Event::PreimageAuthorized {
+				content_hash,
+				max_size,
+				starts_at,
+				expiration,
+			});
+			Ok(())
+		}
+
+		pub(crate) fn authorization_added(scope: &AuthorizationScopeFor<T>) {
 			match scope {
 				AuthorizationScope::Account(who) => {
 					// Allow nonce storage for transaction replay protection
@@ -1483,144 +1591,175 @@ pub mod pallet {
 			}
 		}
 
-		/// Authorize data storage for a scope. Behaviour for an existing entry:
-		/// - **Expired-but-present**: re-grant the caps and reset **all** consumed counters
-		///   (`bytes`, `bytes_permanent`, `transactions`) to `0`. The new window is fully
-		///   independent of the old one. Pre-existing renewed bytes from the old window are tracked
-		///   by the chain-wide [`PermanentStorageUsed`] counter and aged out by `on_initialize`
-		///   when their `Transactions` block becomes obsolete; they do not spend the new window's
-		///   quota.
-		/// - **Unexpired Account**: caps are additive — `claim_long_term_storage` (and similar
-		///   flows on caller chains) calls this once per claim and expects each to extend the caps.
-		///   Consumed counters (`bytes`, `bytes_permanent`, `transactions`) are preserved. Expiry
-		///   is left untouched until the authorization expires, at which point the next call
-		///   (above) restarts the window.
-		/// - **Unexpired Preimage**: caps are replaced (preimage grants are point-in-time);
-		///   consumed counters preserved.
-		/// - **Missing**: create a fresh entry with all counters at `0`.
+		/// Read the slots vec for a scope, drop **expired** slots, and write
+		/// back the result. If the vec becomes empty the entry is removed and
+		/// [`Self::authorization_removed`] is called (decrementing the
+		/// provider-ref for `Account` scope).
 		///
-		/// The window length is `authorization_period_override` if `Some` (used when the
-		/// dispatching authorizer is an `AllowedAuthorizers` entry with a per-authorizer period
-		/// set), else `T::AuthorizationPeriod::get()`.
-		fn authorize(
-			scope: AuthorizationScopeFor<T>,
-			transactions_allowance: u32,
-			bytes_allowance: u64,
-			authorization_period_override: Option<BlockNumberFor<T>>,
-		) {
-			let now = Self::now();
-			let period = authorization_period_override.unwrap_or_else(T::AuthorizationPeriod::get);
-			let expiration = now.saturating_add(period);
-
-			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
-				if let Some(authorization) = maybe_authorization {
-					if authorization.expired(now) {
-						// Expired-but-present: re-grant the caps, reset all consumed counters.
-						// The new window's `bytes_permanent` quota is independent of any
-						// renewed bytes still on chain from the old window.
-						authorization.expiration = expiration;
-						authorization.extent.bytes = 0;
-						authorization.extent.bytes_permanent = 0;
-						authorization.extent.transactions = 0;
-						authorization.extent.bytes_allowance = bytes_allowance;
-						authorization.extent.transactions_allowance = transactions_allowance;
-					} else {
-						match scope {
-							// Account grants are additive within an unexpired window:
-							// `claim_long_term_storage` (and similar flows on caller chains)
-							// calls this once per claim and expects each to extend the caps.
-							// Expiry is left untouched until the authorization expires, at
-							// which point the next call (above) creates a fresh entry.
-							AuthorizationScope::Account(_) => {
-								authorization.extent.bytes_allowance = authorization
-									.extent
-									.bytes_allowance
-									.saturating_add(bytes_allowance);
-								authorization.extent.transactions_allowance = authorization
-									.extent
-									.transactions_allowance
-									.saturating_add(transactions_allowance);
-							},
-							AuthorizationScope::Preimage(_) => {
-								authorization.extent.bytes_allowance = bytes_allowance;
-								authorization.extent.transactions_allowance =
-									transactions_allowance;
-							},
-						}
-					}
-				} else {
-					*maybe_authorization = Some(Authorization {
-						extent: AuthorizationExtent {
-							bytes: 0,
-							bytes_permanent: 0,
-							bytes_allowance,
-							transactions: 0,
-							transactions_allowance,
-						},
-						expiration,
-					});
-					Self::authorization_added(&scope);
+		/// Drained slots — those whose `bytes`, `bytes_permanent`, or
+		/// `transactions` counters have hit the corresponding allowance — are
+		/// intentionally **not** pruned. `store()` never gates on the byte or
+		/// tx caps (those drive only the priority boost), so a drained slot can
+		/// still serve low-priority stores until it expires.
+		///
+		/// Every read or mutate path that exposes slot state should go through
+		/// this helper first so the "no expired slots remain" lazy invariant
+		/// holds for the rest of the call.
+		pub(crate) fn prune_expired(scope: &AuthorizationScopeFor<T>) {
+			let relay_now = Self::relay_now();
+			// `mutate_exists` writes back unconditionally when the value is
+			// `Some` after the closure, so guard with a cheap read so the
+			// no-prune-needed path on every store/renew validate avoids
+			// pointless storage churn.
+			let needs_prune = Authorizations::<T>::get(scope)
+				.is_some_and(|auth| auth.slots.iter().any(|s| s.expiration <= relay_now));
+			if !needs_prune {
+				return;
+			}
+			Authorizations::<T>::mutate_exists(scope, |maybe_auth| {
+				let Some(auth) = maybe_auth.as_mut() else {
+					return;
+				};
+				auth.slots.retain(|slot| slot.expiration > relay_now);
+				if auth.slots.is_empty() {
+					*maybe_auth = None;
+					Self::authorization_removed(scope);
 				}
 			});
 		}
 
-		/// Refresh an existing authorization by extending its expiration. Consumed counters
-		/// (`bytes`, `bytes_permanent`, `transactions`) are left untouched — refresh does not
-		/// grant additional capacity. To extend the caps, call `authorize_account` (additive
-		/// on the unexpired path); to start a fresh quota window, let the authorization
-		/// expire and re-authorize.
-		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
-			let expiration = Self::now().saturating_add(T::AuthorizationPeriod::get());
+		/// Insert a slot into the bounded vec, keeping it sorted by `expiration`
+		/// ascending (tiebreak `starts_at`). The new caps are **added** to an
+		/// existing slot when:
+		///
+		/// 1. the windows match exactly (`starts_at` and `expiration` equal), or
+		/// 2. both slots share the same `expiration` AND are **already active**
+		///    (`existing.starts_at <= relay_now` AND `new.starts_at <= relay_now`). A `starts_at`
+		///    in the past is observationally equivalent to `relay_now` for an active slot, so two
+		///    such slots that expire at the same time can be folded with no semantic loss.
+		///
+		/// Otherwise push; surfaces [`Error::TooManySlots`] when the bounded
+		/// vec is full after the lazy prune.
+		fn add_slot(
+			scope: AuthorizationScopeFor<T>,
+			transactions_allowance: u32,
+			bytes_allowance: u64,
+			starts_at: u32,
+			expiration: u32,
+		) -> DispatchResult {
+			Self::prune_expired(&scope);
+			let relay_now = Self::relay_now();
 
-			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
-				if let Some(authorization) = maybe_authorization {
-					authorization.expiration = expiration;
-					Ok(())
-				} else {
-					// No previous authorization to refresh.
-					Err(Error::<T>::AuthorizationNotFound.into())
+			Authorizations::<T>::try_mutate(&scope, |maybe_auth| -> DispatchResult {
+				let was_empty = maybe_auth.is_none();
+				let auth = maybe_auth.get_or_insert_with(Authorization::<T>::default);
+
+				// Additive merge: exact match, or both slots already active.
+				let new_is_active = starts_at <= relay_now;
+				if let Some(existing) = auth.slots.iter_mut().find(|s| {
+					s.expiration == expiration &&
+						(s.starts_at == starts_at || (new_is_active && s.starts_at <= relay_now))
+				}) {
+					// Pre-clamp the saturating axes (`bytes`, `transactions`)
+					// to the **old** caps before widening the allowance. The
+					// merge is then a pure simplification — the folded extent
+					// matches what it would have been if the new slot were
+					// stored separately:
+					//   two-slot view:  bytes = min(existing.bytes, old_alw) + 0
+					//   merged view:    bytes = min(existing.bytes, old_alw + new)
+					// pre-clamping ensures both equal `min(existing.bytes,
+					// old_alw)`. `bytes_permanent` is already bounded by the
+					// renew hard cap, so no clamp is needed there.
+					existing.extent.bytes =
+						existing.extent.bytes.min(existing.extent.bytes_allowance);
+					existing.extent.transactions =
+						existing.extent.transactions.min(existing.extent.transactions_allowance);
+					existing.extent.bytes_allowance =
+						existing.extent.bytes_allowance.saturating_add(bytes_allowance);
+					existing.extent.transactions_allowance = existing
+						.extent
+						.transactions_allowance
+						.saturating_add(transactions_allowance);
+					return Ok(());
 				}
+
+				let new_slot = TimedAuthorization {
+					extent: AuthorizationExtent {
+						bytes: 0,
+						bytes_permanent: 0,
+						bytes_allowance,
+						transactions: 0,
+						transactions_allowance,
+					},
+					starts_at,
+					expiration,
+				};
+
+				let insert_at = auth
+					.slots
+					.iter()
+					.position(|s| {
+						s.expiration > expiration ||
+							(s.expiration == expiration && s.starts_at > starts_at)
+					})
+					.unwrap_or(auth.slots.len());
+
+				auth.slots
+					.try_insert(insert_at, new_slot)
+					.map_err(|_| Error::<T>::TooManySlots)?;
+
+				if was_empty {
+					Self::authorization_added(&scope);
+				}
+				Ok(())
 			})
 		}
 
-		/// Remove an expired authorization.
+		/// Remove the entry if every slot in it has expired. Anyone-callable
+		/// cleanup; lazy maintenance already drops expired/drained slots on every
+		/// read or mutate, so this just lets a pool-only path reclaim provider-ref
+		/// without waiting for the next mutate.
 		fn remove_expired_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
-			let authorization =
-				Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
-			ensure!(authorization.expired(Self::now()), Error::<T>::AuthorizationNotExpired);
+			let auth = Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
+			ensure!(auth.all_expired(Self::relay_now()), Error::<T>::AuthorizationNotExpired);
 			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
 		}
 
+		/// Returns the **effective extent** for `scope` at the current relay
+		/// block. Prunes expired slots, loads the entry, and delegates the fold
+		/// to [`Authorization::extent`]. The consumption path picks a single
+		/// slot atomically (see [`Self::check_authorization`]); this folded
+		/// view is for external queries and the priority boost.
 		fn authorization_extent(scope: AuthorizationScopeFor<T>) -> AuthorizationExtent {
-			let Some(authorization) = Authorizations::<T>::get(&scope) else {
+			Self::prune_expired(&scope);
+			let Some(auth) = Authorizations::<T>::get(&scope) else {
 				return AuthorizationExtent::default();
 			};
-			if authorization.expired(Self::now()) {
-				AuthorizationExtent::default()
-			} else {
-				authorization.extent
-			}
+			auth.extent(Self::relay_now())
 		}
 
-		/// Returns the (unused and unexpired) authorization extent for the given account.
+		/// Returns the (folded, active-only) authorization extent for `who`.
 		pub fn account_authorization_extent(who: T::AccountId) -> AuthorizationExtent {
 			Self::authorization_extent(AuthorizationScope::Account(who))
 		}
 
-		/// Returns `true` if `who` has an authorization entry that has not yet expired,
-		/// regardless of how much of the extent remains. The entry is only cleared when
-		/// its expiration is reached and someone calls
-		/// [`remove_expired_account_authorization`], so a fully-consumed-but-in-window
-		/// account still counts as active here. HOP promotion uses this to keep
-		/// promoting blobs for an account that has spent all of its store/renew quota.
+		/// Returns `true` if `who` has at least one slot active at the current
+		/// relay block (`starts_at <= relay_now < expiration`). Future-only
+		/// slots (`starts_at > relay_now`) and expired slots both report
+		/// `false`. Drained-but-active slots count — they can still serve
+		/// low-priority `store()` calls.
 		pub fn account_has_active_authorization(who: &T::AccountId) -> bool {
-			Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
-				.is_some_and(|a| !a.expired(Self::now()))
+			let scope = AuthorizationScope::Account(who.clone());
+			Self::prune_expired(&scope);
+			let relay_now = Self::relay_now();
+			Authorizations::<T>::get(&scope)
+				.is_some_and(|auth| auth.slots.iter().any(|s| s.is_active(relay_now)))
 		}
 
-		/// Returns the (unused and unexpired) authorization extent for the given content hash.
+		/// Returns the (folded, active-only) authorization extent for the given
+		/// content hash.
 		pub fn preimage_authorization_extent(hash: ContentHash) -> AuthorizationExtent {
 			Self::authorization_extent(AuthorizationScope::Preimage(hash))
 		}
@@ -1746,81 +1885,122 @@ pub mod pallet {
 				.is_some_and(|len| len >= T::MaxBlockTransactions::get() as usize)
 		}
 
-		/// Check that authorization exists for data of the given size.
+		/// Find the index of the earliest-expiring **active** slot to consume.
 		///
-		/// Always rejects if the authorization entry is missing or expired.
+		/// - For `store` (`is_renew == false`): any active slot is acceptable. `bytes` and
+		///   `transactions` are soft counters — they saturate upward and only drive the priority
+		///   boost. Returns the first active slot in expiration order.
+		/// - For `renew` (`is_renew == true`): the per-slot hard cap requires `bytes_permanent +
+		///   size <= bytes_allowance`. Returns the first active slot satisfying this; no cross-slot
+		///   subsidy. The chain-wide cap is checked separately by the caller.
+		fn pick_slot_for_consumption(
+			slots: &[TimedAuthorization],
+			relay_now: u32,
+			size: u64,
+			is_renew: bool,
+		) -> Option<usize> {
+			// Slots are stored sorted by `expiration` ascending; first match is
+			// earliest-expiring.
+			slots.iter().position(|slot| {
+				if !slot.is_active(relay_now) {
+					return false;
+				}
+				if is_renew {
+					// Per-slot hard cap on the renew axis only.
+					return slot.extent.bytes_permanent.saturating_add(size) <=
+						slot.extent.bytes_allowance;
+				}
+				true
+			})
+		}
+
+		/// Check that authorization exists for data of the given size at the
+		/// current relay block and (optionally) consume capacity from the
+		/// earliest-expiring active slot.
 		///
-		/// For `store` (`is_renew == false`): never rejects on insufficient allowance —
-		/// `bytes` and `transactions` saturate upward and the
-		/// [`extension::AllowanceBasedPriority`] boost is what handles the overshoot (soft
-		/// limit).
+		/// `store` (`is_renew == false`) never gates on byte or transaction
+		/// counters — they are soft and saturate upward. Rejects only when no
+		/// active slot exists (`InvalidTransaction::Payment`).
 		///
-		/// For `renew` (`is_renew == true`): hard cap. Rejects with
-		/// [`PERMANENT_ALLOWANCE_EXCEEDED`] if the per-account check fails
-		/// (`bytes_permanent + size > bytes_allowance`) or with
-		/// [`CHAIN_PERMANENT_CAP_REACHED`] if the chain-wide check fails
-		/// (`PermanentStorageUsed + size > MaxPermanentStorageSize`).
+		/// `renew` (`is_renew == true`) is gated by two hard caps:
+		///   * Per-slot: `bytes_permanent + size <= bytes_allowance`. If no active slot satisfies
+		///     this, returns [`PERMANENT_ALLOWANCE_EXCEEDED`].
+		///   * Chain-wide: `PermanentStorageUsed + size <= MaxPermanentStorageSize` — checked
+		///     first, returns [`CHAIN_PERMANENT_CAP_REACHED`].
 		///
-		/// If `consume` is `true` and the checks pass, increments either `bytes` (store) or
-		/// `bytes_permanent` (renew) by `size`, and `transactions` by 1 (all saturating).
-		/// For renew, the chain-wide `PermanentStorageUsed` counter is also bumped; the
-		/// matching decrement happens in `on_initialize` when the obsolete `Transactions`
-		/// entry is removed.
+		/// On `consume`: increments the chosen slot's `bytes` (store) or
+		/// `bytes_permanent` (renew) by `size`, and `transactions` by 1, all
+		/// saturating. The `transactions` counter is bumped on **every**
+		/// consume — including low-priority (over-cap) stores and every renew
+		/// — because it feeds the priority boost; consumption itself never
+		/// gates on it. For renew, also bumps the chain-wide
+		/// `PermanentStorageUsed` counter; the matching decrement happens in
+		/// `on_initialize` when the obsolete `Transactions[block]` is removed.
 		fn check_authorization(
 			scope: &AuthorizationScopeFor<T>,
 			size: u32,
 			consume: bool,
 			is_renew: bool,
 		) -> Result<(), TransactionValidityError> {
+			let relay_now = Self::relay_now();
+			if relay_now == 0 {
+				return Err(RELAY_CHAIN_TIME_UNAVAILABLE.into());
+			}
 			let chain_used = PermanentStorageUsed::<T>::get();
 			let chain_cap = T::MaxPermanentStorageSize::get();
 			let size_u64: u64 = size.into();
-			let now = Self::now();
 
-			let check = |maybe_authorization: &mut Option<Authorization<_>>|
+			// Lazy prune so the chooser sees the current view.
+			Self::prune_expired(scope);
+
+			// Chain-wide hard cap is independent of which slot is chosen — check
+			// it once up-front so a renew can't even probe slot capacity past
+			// the chain's permanent cap.
+			if is_renew && chain_used.saturating_add(size_u64) > chain_cap {
+				return Err(CHAIN_PERMANENT_CAP_REACHED.into());
+			}
+
+			let work = |maybe_auth: &mut Option<Authorization<T>>|
 			 -> Result<(), TransactionValidityError> {
-				let Some(authorization) = maybe_authorization else {
-					return Err(InvalidTransaction::Payment.into())
+				let Some(auth) = maybe_auth.as_mut() else {
+					return Err(InvalidTransaction::Payment.into());
 				};
-				if authorization.expired(now) {
-					return Err(InvalidTransaction::Payment.into())
-				}
-				if is_renew {
-					// Per-account hard cap (per-window quota).
-					if !authorization.extent.has_permanent_capacity(size_u64) {
-						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into())
+
+				let Some(idx) =
+					Self::pick_slot_for_consumption(&auth.slots, relay_now, size_u64, is_renew)
+				else {
+					// Renew with at least one active slot but none with
+					// `bytes_permanent + size <= bytes_allowance` ⇒ per-slot
+					// hard cap. Otherwise (no active slot at all, or store
+					// without any active slot) it's the generic missing-auth
+					// case.
+					if is_renew && auth.slots.iter().any(|s| s.is_active(relay_now)) {
+						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
 					}
-					// Chain-wide hard cap.
-					if chain_used.saturating_add(size_u64) > chain_cap {
-						return Err(CHAIN_PERMANENT_CAP_REACHED.into())
-					}
-				}
+					return Err(InvalidTransaction::Payment.into());
+				};
+
 				if consume {
+					let slot = &mut auth.slots[idx];
 					if is_renew {
-						authorization.extent.bytes_permanent = authorization
-							.extent
-							.bytes_permanent
-							.saturating_add(size_u64);
+						slot.extent.bytes_permanent =
+							slot.extent.bytes_permanent.saturating_add(size_u64);
 					} else {
-						authorization.extent.bytes =
-							authorization.extent.bytes.saturating_add(size_u64);
+						slot.extent.bytes = slot.extent.bytes.saturating_add(size_u64);
 					}
-					authorization.extent.transactions =
-						authorization.extent.transactions.saturating_add(1);
+					slot.extent.transactions = slot.extent.transactions.saturating_add(1);
 				}
 				Ok(())
 			};
 
 			let result = if consume {
-				Authorizations::<T>::mutate(scope, check)
+				Authorizations::<T>::mutate(scope, work)
 			} else {
-				let mut authorization = Authorizations::<T>::get(scope);
-				check(&mut authorization)
+				let mut auth = Authorizations::<T>::get(scope);
+				work(&mut auth)
 			};
 
-			// On a successful renew consume: bump the chain-wide counter. The matching
-			// decrement happens in `on_initialize` when the renewed entry's block becomes
-			// obsolete and `Transactions[obsolete]` is removed.
+			// On a successful renew consume: bump the chain-wide counter.
 			if result.is_ok() && consume && is_renew {
 				Self::update_permanent_storage_used(|used| used.saturating_add(size_u64));
 			}
@@ -1828,17 +2008,17 @@ pub mod pallet {
 			result
 		}
 
-		/// Check that authorization with the given scope exists in storage, has expired, and
-		/// has no outstanding permanent storage. Mirrors the dispatch-time guard in
-		/// [`remove_expired_authorization`] so that `remove_expired_*` calls are rejected at
-		/// pool ingress when they cannot succeed (no pool pollution from soon-to-fail txs).
+		/// Check that authorization with the given scope exists in storage and
+		/// every slot in the entry has expired. Mirrors the dispatch-time guard
+		/// in [`remove_expired_authorization`] so that `remove_expired_*` calls
+		/// are rejected at pool ingress when they cannot succeed.
 		fn check_authorization_expired(
 			scope: &AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
-			let Some(authorization) = Authorizations::<T>::get(scope) else {
+			let Some(auth) = Authorizations::<T>::get(scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
-			if !authorization.expired(Self::now()) {
+			if !auth.all_expired(Self::relay_now()) {
 				return Err(AUTHORIZATION_NOT_EXPIRED.into());
 			}
 			Ok(())
@@ -1985,8 +2165,8 @@ pub mod pallet {
 				},
 				Call::<T>::authorize_account { .. } |
 				Call::<T>::authorize_preimage { .. } |
-				Call::<T>::refresh_account_authorization { .. } |
-				Call::<T>::refresh_preimage_authorization { .. } => {
+				Call::<T>::authorize_account_window { .. } |
+				Call::<T>::authorize_preimage_window { .. } => {
 					// Verify that the signer satisfies the Authorizer origin. Budget
 					// consumption (for `AllowedAuthorizers` signers on `authorize_*`)
 					// happens inside the dispatch body, not here.
@@ -2146,21 +2326,11 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Per-authorizer `authorization_period` override, if the dispatching origin is a
-		/// `Signed(_)` account present in [`AllowedAuthorizers`] and has set one. Returns
-		/// `None` for Root, XCM, or any signer without an override.
 		/// `true` if the authorizer entry is eligible for permissionless cleanup —
 		/// either its budget is zero on at least one axis, or its `valid_until` has
 		/// elapsed.
 		fn authorizer_removable(budget: &AuthorizerBudgetFor<T>) -> bool {
 			budget.is_exhausted() || budget.is_expired(Self::now())
-		}
-
-		fn authorization_period_override_for(origin: &OriginFor<T>) -> Option<BlockNumberFor<T>> {
-			frame_system::ensure_signed(origin.clone())
-				.ok()
-				.and_then(AllowedAuthorizers::<T>::get)
-				.and_then(|b| b.authorization_period)
 		}
 
 		/// Atomically decrement `who`'s [`AllowedAuthorizers`] budget by
@@ -2239,15 +2409,28 @@ impl<T: Config> Pallet<T> {
 		Ok(())
 	}
 
-	/// Verify that stored authorizations have a non-zero `bytes_allowance` cap.
-	/// The `bytes` (used) counter can exceed `bytes_allowance` — that just disables the
-	/// priority boost, it does not remove the entry.
+	/// Verify slot-storage invariants:
+	/// - every entry has a non-empty bounded vec (empty vecs should have been removed by lazy
+	///   maintenance);
+	/// - every slot has `expiration > starts_at` and `bytes_allowance > 0`;
+	/// - slots are sorted by `expiration` ascending (tiebreak `starts_at`).
 	fn check_authorizations_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
-		for (_, authorization) in Authorizations::<T>::iter() {
-			ensure!(
-				authorization.extent.bytes_allowance > 0,
-				"Stored authorization has zero bytes_allowance"
-			);
+		for (_, auth) in Authorizations::<T>::iter() {
+			ensure!(!auth.slots.is_empty(), "Authorizations entry has empty slots");
+			let mut prev: Option<(u32, u32)> = None;
+			for slot in auth.slots.iter() {
+				ensure!(
+					slot.expiration > slot.starts_at,
+					"Stored slot has expiration <= starts_at"
+				);
+				ensure!(slot.extent.bytes_allowance > 0, "Stored slot has zero bytes_allowance");
+				if let Some((p_exp, p_starts)) = prev {
+					let ok = (p_exp < slot.expiration) ||
+						(p_exp == slot.expiration && p_starts <= slot.starts_at);
+					ensure!(ok, "Slots not sorted by (expiration ASC, starts_at ASC)");
+				}
+				prev = Some((slot.expiration, slot.starts_at));
+			}
 		}
 
 		Ok(())

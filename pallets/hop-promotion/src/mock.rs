@@ -75,11 +75,34 @@ impl pallet_timestamp::Config for Test {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
+	/// Default slot window length in mock relay blocks.
+	pub const DefaultAuthorizationWindow: u32 = 10;
+	pub const MaxStartsAtFuture: u32 = 100;
+	pub const MaxAuthorizationSlots: u32 = 8;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	/// Storage-backed mock relay-chain block number.
+	pub storage MockRelayBlockNumber: u32 = 1;
+}
+
+/// Test-side `BlockNumberProvider` for the slot model. Defaults to relay block
+/// `1` so `ensure_relay_now()` clears the genesis sentinel.
+pub struct MockRelayBlockNumberProvider;
+impl polkadot_sdk_frame::deps::sp_runtime::traits::BlockNumberProvider
+	for MockRelayBlockNumberProvider
+{
+	type BlockNumber = u32;
+
+	fn current_block_number() -> u32 {
+		MockRelayBlockNumber::get()
+	}
+
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	fn set_block_number(n: u32) {
+		MockRelayBlockNumber::set(&n);
+	}
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -102,7 +125,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider = MockRelayBlockNumberProvider;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EnsureRoot<Self::AccountId>;
 	type StoreRenewPriority = StoreRenewPriority;

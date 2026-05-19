@@ -23,7 +23,7 @@ use crate::{
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
-	deps::{frame_support, frame_system},
+	deps::{frame_support, frame_system, sp_runtime::traits::BlockNumberProvider},
 	prelude::*,
 	runtime::prelude::*,
 	testing_prelude::*,
@@ -74,12 +74,43 @@ impl frame_system::Config for Test {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
+	/// Default authorization window for `authorize_account` / `authorize_preimage`,
+	/// in **mock relay** blocks. Tests typically advance relay time with
+	/// [`MockRelayBlockNumber::set`] / [`set_relay_now`].
+	pub const DefaultAuthorizationWindow: u32 = 10;
+	/// How far ahead a `_window` extrinsic may schedule a slot to start.
+	pub const MaxStartsAtFuture: u32 = 100;
+	pub const MaxAuthorizationSlots: u32 = 8;
 	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
+	/// Storage-backed mock relay-chain block number. Tests bump this with
+	/// [`set_relay_now`]; the pallet reads it via [`MockRelayBlockNumberProvider`].
+	pub storage MockRelayBlockNumber: u32 = 1;
+}
+
+/// Test-side `BlockNumberProvider` reading [`MockRelayBlockNumber`]. Cumulus's
+/// `RelaychainDataProvider` is overkill for unit tests; we just want an
+/// advance-able u32.
+pub struct MockRelayBlockNumberProvider;
+impl BlockNumberProvider for MockRelayBlockNumberProvider {
+	type BlockNumber = u32;
+
+	fn current_block_number() -> u32 {
+		MockRelayBlockNumber::get()
+	}
+
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	fn set_block_number(n: u32) {
+		MockRelayBlockNumber::set(&n);
+	}
+}
+
+/// Helper for tests: advance the mock relay block number.
+pub fn set_relay_now(n: u32) {
+	MockRelayBlockNumber::set(&n);
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -92,7 +123,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider = MockRelayBlockNumberProvider;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOfDiverse<EnsureRoot<Self::AccountId>, EnsureAllowedAuthorizers<Self>>;
 	type StoreRenewPriority = StoreRenewPriority;
@@ -117,7 +151,13 @@ pub fn new_test_ext() -> TestExternalities {
 	}
 	.build_storage()
 	.unwrap();
-	t.into()
+	let mut ext: TestExternalities = t.into();
+	// Genesis runs with relay = 0; bump to 1 here so the pallet's
+	// `ensure_relay_now` does not trip on the sentinel inside tests.
+	ext.execute_with(|| {
+		MockRelayBlockNumber::set(&1);
+	});
+	ext
 }
 
 pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 'static) {

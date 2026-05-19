@@ -137,7 +137,7 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn refresh_account_authorization() -> Weight {
+	fn authorize_account_window() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `3550`
@@ -163,7 +163,7 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn refresh_preimage_authorization() -> Weight {
+	fn authorize_preimage_window() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `315`
 		//  Estimated: `3550`
@@ -355,5 +355,14 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
+	}
+	/// Placeholder for the v3→v4 stepped migration. One iteration: read one
+	/// legacy `Authorizations` entry, insert into `AuthorizationSlots`, remove
+	/// the legacy entry, bump the provider-ref (`Account` scope only). Will be
+	/// overwritten by `frame-omni-bencher`.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(50_000_000, 5_500)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(3))
 	}
 }
