@@ -1,9 +1,7 @@
 name: Prepare polkadot binaries
 
-# Centralizes the `use-polkadot-binaries` prepare path so all callers share one
-# cache write per (group, SHA) pair. The concurrency group serializes prepare
-# jobs across every workflow on the same commit — only one runner compiles;
-# the rest hit cache afterwards.
+# Centralizes the `use-polkadot-binaries` prepare path so the contract lives
+# in one file and all callers share the same cache keys.
 
 on:
   workflow_call:
@@ -16,13 +14,6 @@ on:
         type: string
         required: true
         description: Container image (passed by the caller, typically set-image.outputs.CI_IMAGE).
-
-# One queue per SHA across every caller — the first prepare run does the source
-# builds and saves the cache; subsequent runs hit it. Suffixing the group with
-# `inputs.groups` defeats the goal, since each caller passes its own set.
-concurrency:
-  group: prep-bin-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
