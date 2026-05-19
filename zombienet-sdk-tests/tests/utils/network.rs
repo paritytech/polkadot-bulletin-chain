@@ -90,17 +90,17 @@ pub fn verify_ldb_tool() -> Result<String> {
 
 pub fn verify_parachain_binaries() -> Result<()> {
 	let relay_binary = get_relay_binary_path();
-	log::info!("Relay binary: {}", relay_binary);
+	tracing::info!("Relay binary: {}", relay_binary);
 	verify_binary(&relay_binary)
 		.context(format!("Relay binary '{}' ({})", relay_binary, RELAY_BINARY_PATH_ENV))?;
 
 	let para_binary = get_parachain_binary_path();
-	log::info!("Parachain binary: {}", para_binary);
+	tracing::info!("Parachain binary: {}", para_binary);
 	verify_binary(&para_binary)
 		.context(format!("Parachain binary '{}' ({})", para_binary, PARACHAIN_BINARY_PATH_ENV))?;
 
 	let chain_spec = get_parachain_chain_spec();
-	log::info!("Chain spec: {}", chain_spec);
+	tracing::info!("Chain spec: {}", chain_spec);
 	if !PathBuf::from(&chain_spec).exists() {
 		anyhow::bail!(
 			"Chain spec not found at '{}' (set {} to override)",
@@ -112,27 +112,28 @@ pub fn verify_parachain_binaries() -> Result<()> {
 	Ok(())
 }
 
-/// Parachain network: 2 relay validators (alice, bob) + 1 collator.
-pub fn build_parachain_network_config_single_collator(
+/// Parachain network: 3 relay validators (for stable GRANDPA finality) + 1 collator.
+pub fn build_parachain_network_config_three_relay_validators(
 	para_node_args: Vec<String>,
 ) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
 
-	log::info!("Relay binary: {}", relay_binary);
-	log::info!("Parachain binary: {}", para_binary);
-	log::info!("Parachain chain spec: {}", para_chain_spec);
+	tracing::info!("Relay binary: {}", relay_binary);
+	tracing::info!("Parachain binary: {}", para_binary);
+	tracing::info!("Parachain chain spec: {}", para_chain_spec);
 
 	let relay_args: Vec<_> = vec!["-lruntime=debug"].into_iter().map(|s| s.into()).collect();
 	let relay_args2 = relay_args.clone();
+	let relay_args3 = relay_args.clone();
 
 	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
 
 	let relay_chain = get_relay_chain();
 	let para_id = get_para_id();
-	log::info!("Relay chain: {}", relay_chain);
-	log::info!("Parachain ID: {}", para_id);
+	tracing::info!("Relay chain: {}", relay_chain);
+	tracing::info!("Parachain ID: {}", para_id);
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
@@ -141,6 +142,7 @@ pub fn build_parachain_network_config_single_collator(
 				.with_default_command(relay_binary.as_str())
 				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
 				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
+				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
 			parachain
@@ -165,28 +167,24 @@ pub fn build_parachain_network_config_single_collator(
 		})
 }
 
-/// Parachain network: 3 relay validators (for stable GRANDPA finality) + 1 collator.
-pub fn build_parachain_network_config_three_relay_validators(
+/// 3 relay validators + 3 collators, all collators using the same `para_node_args`.
+pub fn build_parachain_network_config_three_collators(
 	para_node_args: Vec<String>,
 ) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
 
-	log::info!("Relay binary: {}", relay_binary);
-	log::info!("Parachain binary: {}", para_binary);
-	log::info!("Parachain chain spec: {}", para_chain_spec);
-
 	let relay_args: Vec<_> = vec!["-lruntime=debug"].into_iter().map(|s| s.into()).collect();
 	let relay_args2 = relay_args.clone();
 	let relay_args3 = relay_args.clone();
 
 	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
+	let para_args2 = para_args.clone();
+	let para_args3 = para_args.clone();
 
 	let relay_chain = get_relay_chain();
 	let para_id = get_para_id();
-	log::info!("Relay chain: {}", relay_chain);
-	log::info!("Parachain ID: {}", para_id);
 
 	NetworkConfigBuilder::new()
 		.with_relaychain(|relaychain| {
@@ -207,6 +205,18 @@ pub fn build_parachain_network_config_three_relay_validators(
 						.validator(true)
 						.with_command(para_binary.as_str())
 						.with_args(para_args)
+				})
+				.with_collator(|c| {
+					c.with_name("collator-2")
+						.validator(true)
+						.with_command(para_binary.as_str())
+						.with_args(para_args2)
+				})
+				.with_collator(|c| {
+					c.with_name("collator-3")
+						.validator(true)
+						.with_command(para_binary.as_str())
+						.with_args(para_args3)
 				})
 		})
 		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {

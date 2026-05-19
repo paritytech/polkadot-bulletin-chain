@@ -80,7 +80,7 @@ impl UserProtocol for BitswapClientProtocol {
 		let mut service = service;
 		use futures::StreamExt;
 
-		log::debug!("Bitswap client protocol started");
+		tracing::debug!("Bitswap client protocol started");
 
 		let mut connected_peers: std::collections::HashSet<PeerId> =
 			std::collections::HashSet::new();
@@ -99,21 +99,21 @@ impl UserProtocol for BitswapClientProtocol {
 				cmd = self.cmd_rx.recv() => {
 					match cmd {
 						Some(BitswapClientCommand::Fetch { peer, cid_bytes, response_tx }) => {
-							log::debug!("Received fetch command for peer {:?}", peer);
+							tracing::debug!("Received fetch command for peer {:?}", peer);
 
 							if connected_peers.contains(&peer) {
 								match service.open_substream(peer) {
 									Ok(substream_id) => {
-										log::debug!("Opening outbound substream {:?} to peer {:?}", substream_id, peer);
+										tracing::debug!("Opening outbound substream {:?} to peer {:?}", substream_id, peer);
 										pending_outbound.insert(substream_id, (cid_bytes, response_tx));
 									}
 									Err(e) => {
-										log::error!("Failed to open substream: {:?}", e);
+										tracing::error!("Failed to open substream: {:?}", e);
 										let _ = response_tx.send(Err(anyhow!("Failed to open substream: {:?}", e)));
 									}
 								}
 							} else {
-								log::debug!("Peer {:?} not connected yet, queueing fetch request", peer);
+								tracing::debug!("Peer {:?} not connected yet, queueing fetch request", peer);
 								pending_connection.push(PendingFetchRequest {
 									peer,
 									cid_bytes,
@@ -122,7 +122,7 @@ impl UserProtocol for BitswapClientProtocol {
 							}
 						}
 						None => {
-							log::debug!("Command channel closed, stopping bitswap client");
+							tracing::debug!("Command channel closed, stopping bitswap client");
 							break;
 						}
 					}
@@ -133,40 +133,40 @@ impl UserProtocol for BitswapClientProtocol {
 						Some(TransportEvent::SubstreamOpened { peer, direction, mut substream, .. }) => {
 							match direction {
 								Direction::Outbound(substream_id) => {
-									log::debug!("Outbound substream {:?} opened to {:?}", substream_id, peer);
+									tracing::debug!("Outbound substream {:?} opened to {:?}", substream_id, peer);
 
 									if let Some((cid_bytes, response_tx)) = pending_outbound.remove(&substream_id) {
 										let wantlist = Self::build_wantlist(&cid_bytes);
-										log::debug!("Sending wantlist ({} bytes) on outbound substream", wantlist.len());
+										tracing::debug!("Sending wantlist ({} bytes) on outbound substream", wantlist.len());
 
 										match substream.send_framed(Bytes::from(wantlist)).await {
 											Ok(()) => {
-												log::debug!("Wantlist sent successfully");
+												tracing::debug!("Wantlist sent successfully");
 												waiting_response = Some((peer, response_tx));
 											}
 											Err(e) => {
-												log::error!("Failed to send wantlist: {:?}", e);
+												tracing::error!("Failed to send wantlist: {:?}", e);
 												let _ = response_tx.send(Err(anyhow!("Failed to send wantlist: {:?}", e)));
 											}
 										}
 									}
 								}
 								Direction::Inbound => {
-									log::debug!("Inbound substream from {:?}", peer);
+									tracing::debug!("Inbound substream from {:?}", peer);
 
 									if let Some((waiting_peer, response_tx)) = waiting_response.take() {
 										if waiting_peer == peer {
 											match substream.next().await {
 												Some(Ok(data)) => {
-													log::debug!("Received {} bytes on inbound substream", data.len());
+													tracing::debug!("Received {} bytes on inbound substream", data.len());
 
 													match bitswap_schema::Message::decode(data.as_ref()) {
 														Ok(msg) => {
-															log::debug!("Parsed bitswap response: {} payload blocks, {} block_presences",
+															tracing::debug!("Parsed bitswap response: {} payload blocks, {} block_presences",
 																msg.payload.len(), msg.block_presences.len());
 
 															if let Some(block) = msg.payload.first() {
-																log::info!("Received block: {} bytes", block.data.len());
+																tracing::info!("Received block: {} bytes", block.data.len());
 																let _ = response_tx.send(Ok(block.data.clone()));
 															} else if !msg.block_presences.is_empty() {
 																let presence = &msg.block_presences[0];
@@ -180,51 +180,51 @@ impl UserProtocol for BitswapClientProtocol {
 															}
 														}
 														Err(e) => {
-															log::error!("Failed to decode bitswap message: {:?}", e);
+															tracing::error!("Failed to decode bitswap message: {:?}", e);
 															let _ = response_tx.send(Err(anyhow!("Failed to decode response: {:?}", e)));
 														}
 													}
 												}
 												Some(Err(e)) => {
-													log::error!("Error reading from inbound substream: {:?}", e);
+													tracing::error!("Error reading from inbound substream: {:?}", e);
 													let _ = response_tx.send(Err(anyhow!("Substream error: {:?}", e)));
 												}
 												None => {
-													log::warn!("Inbound substream closed without data");
+													tracing::warn!("Inbound substream closed without data");
 													let _ = response_tx.send(Err(anyhow!("Substream closed")));
 												}
 											}
 										} else {
 											waiting_response = Some((waiting_peer, response_tx));
-											log::debug!("Unexpected inbound substream from {:?}, expected {:?}", peer, waiting_response.as_ref().map(|(p, _)| p));
+											tracing::debug!("Unexpected inbound substream from {:?}, expected {:?}", peer, waiting_response.as_ref().map(|(p, _)| p));
 										}
 									} else {
-										log::debug!("Unexpected inbound substream from {:?}, no pending request", peer);
+										tracing::debug!("Unexpected inbound substream from {:?}, no pending request", peer);
 									}
 								}
 							}
 						}
 						Some(TransportEvent::SubstreamOpenFailure { substream, error }) => {
-							log::error!("Substream open failure {:?}: {:?}", substream, error);
+							tracing::error!("Substream open failure {:?}: {:?}", substream, error);
 							if let Some((_, response_tx)) = pending_outbound.remove(&substream) {
 								let _ = response_tx.send(Err(anyhow!("Substream open failed: {:?}", error)));
 							}
 						}
 						Some(TransportEvent::ConnectionEstablished { peer, .. }) => {
-							log::debug!("Connection established with {:?}", peer);
+							tracing::debug!("Connection established with {:?}", peer);
 							connected_peers.insert(peer);
 
 							let mut remaining = Vec::new();
 							for req in pending_connection.drain(..) {
 								if req.peer == peer {
-									log::debug!("Processing queued fetch for peer {:?}", peer);
+									tracing::debug!("Processing queued fetch for peer {:?}", peer);
 									match service.open_substream(peer) {
 										Ok(substream_id) => {
-											log::debug!("Opening outbound substream {:?} to peer {:?}", substream_id, peer);
+											tracing::debug!("Opening outbound substream {:?} to peer {:?}", substream_id, peer);
 											pending_outbound.insert(substream_id, (req.cid_bytes, req.response_tx));
 										}
 										Err(e) => {
-											log::error!("Failed to open substream: {:?}", e);
+											tracing::error!("Failed to open substream: {:?}", e);
 											let _ = req.response_tx.send(Err(anyhow!("Failed to open substream: {:?}", e)));
 										}
 									}
@@ -235,7 +235,7 @@ impl UserProtocol for BitswapClientProtocol {
 							pending_connection = remaining;
 						}
 						Some(TransportEvent::ConnectionClosed { peer }) => {
-							log::debug!("Connection closed with {:?}", peer);
+							tracing::debug!("Connection closed with {:?}", peer);
 							connected_peers.remove(&peer);
 
 							if let Some((waiting_peer, response_tx)) = waiting_response.take() {
@@ -257,10 +257,10 @@ impl UserProtocol for BitswapClientProtocol {
 							pending_connection = remaining;
 						}
 						Some(TransportEvent::DialFailure { peer, .. }) => {
-							log::error!("Dial failure for {:?}", peer);
+							tracing::error!("Dial failure for {:?}", peer);
 						}
 						None => {
-							log::debug!("Transport service closed");
+							tracing::debug!("Transport service closed");
 							break;
 						}
 					}
@@ -278,7 +278,7 @@ pub async fn fetch_via_bitswap(
 	data_hash: &[u8; 32],
 	timeout_secs: u64,
 ) -> Result<Vec<u8>> {
-	log::info!(
+	tracing::info!(
 		"Fetching via bitswap from {} for hash 0x{}",
 		node_multiaddr,
 		hex::encode(data_hash)
@@ -300,7 +300,7 @@ pub async fn fetch_via_bitswap(
 	let peer_id = PeerId::from_multihash(peer_id_multihash)
 		.map_err(|_| anyhow!("Invalid peer ID in multiaddr"))?;
 
-	log::debug!("Target peer ID: {:?}", peer_id);
+	tracing::debug!("Target peer ID: {:?}", peer_id);
 
 	let (cmd_tx, cmd_rx) = mpsc::channel(8);
 
@@ -319,7 +319,7 @@ pub async fn fetch_via_bitswap(
 	let mut litep2p =
 		Litep2p::new(config).map_err(|e| anyhow!("Failed to create litep2p: {:?}", e))?;
 
-	log::debug!("Dialing {}", multiaddr);
+	tracing::debug!("Dialing {}", multiaddr);
 	litep2p
 		.dial_address(multiaddr.clone())
 		.await
@@ -334,7 +334,7 @@ pub async fn fetch_via_bitswap(
 		anyhow::bail!("Failed to establish connection");
 	}
 
-	log::info!("Connected to peer, sending bitswap request");
+	tracing::info!("Connected to peer, sending bitswap request");
 
 	let cid_bytes = hash_to_cid_bytes(data_hash);
 
@@ -356,7 +356,7 @@ pub async fn fetch_via_bitswap(
 			tokio::select! {
 				event = litep2p.next_event() => {
 					match event {
-						Some(e) => log::trace!("litep2p event: {:?}", e),
+						Some(e) => tracing::trace!("litep2p event: {:?}", e),
 						None => {
 							return Err(anyhow!("litep2p event loop ended"));
 						}
@@ -383,16 +383,16 @@ async fn wait_for_connection(litep2p: &mut Litep2p, target_peer: PeerId) -> bool
 		match litep2p.next_event().await {
 			Some(Litep2pEvent::ConnectionEstablished { peer, .. }) =>
 				if peer == target_peer {
-					log::debug!("Connection established with target peer");
+					tracing::debug!("Connection established with target peer");
 					return true;
 				},
 			Some(Litep2pEvent::ConnectionClosed { peer, .. }) =>
 				if peer == target_peer {
-					log::error!("Connection closed before established");
+					tracing::error!("Connection closed before established");
 					return false;
 				},
 			Some(Litep2pEvent::DialFailure { address, .. }) => {
-				log::error!("Dial failure for {:?}", address);
+				tracing::error!("Dial failure for {:?}", address);
 				return false;
 			},
 			Some(_) => continue,
@@ -408,7 +408,7 @@ pub async fn verify_bitswap_fetch(
 ) -> Result<bool> {
 	let hash = blake2_256(expected_data);
 	let (hash_hex, cid) = content_hash_and_cid(expected_data);
-	log::info!("Verifying bitswap fetch for content hash: {}, CID: {}", hash_hex, cid);
+	tracing::info!("Verifying bitswap fetch for content hash: {}, CID: {}", hash_hex, cid);
 
 	let fetched = fetch_via_bitswap(node_multiaddr, &hash, timeout_secs).await?;
 	verify_data_matches(&fetched, expected_data)
@@ -420,7 +420,7 @@ pub async fn verify_node_bitswap(
 	timeout_secs: u64,
 	node_name: &str,
 ) -> Result<()> {
-	log::info!("=== Verifying bitswap fetch from {} ===", node_name);
+	tracing::info!("=== Verifying bitswap fetch from {} ===", node_name);
 	let multiaddr = node.multiaddr();
 	let result = verify_bitswap_fetch(multiaddr, expected_data, timeout_secs)
 		.await
@@ -428,7 +428,7 @@ pub async fn verify_node_bitswap(
 	if !result {
 		anyhow::bail!("Bitswap fetch from {} returned wrong data", node_name);
 	}
-	log::info!("✓ Data successfully fetched from {} via bitswap", node_name);
+	tracing::info!("✓ Data successfully fetched from {} via bitswap", node_name);
 	Ok(())
 }
 
@@ -439,13 +439,17 @@ pub async fn verify_all_items_bitswap(
 	timeout_secs: u64,
 	node_name: &str,
 ) -> Result<()> {
-	log::info!("=== Verifying bitswap fetch of {} items from {} ===", items.len(), node_name);
+	tracing::info!("=== Verifying bitswap fetch of {} items from {} ===", items.len(), node_name);
 	for (i, item) in items.iter().enumerate() {
-		log::info!("Verifying item {} ({} bytes) from {}", i, item.data.len(), node_name);
+		tracing::info!("Verifying item {} ({} bytes) from {}", i, item.data.len(), node_name);
 		verify_node_bitswap(node, &item.data, timeout_secs, &format!("{} item {}", node_name, i))
 			.await?;
 	}
-	log::info!("✓ All {} items successfully verified from {} via bitswap", items.len(), node_name);
+	tracing::info!(
+		"✓ All {} items successfully verified from {} via bitswap",
+		items.len(),
+		node_name
+	);
 	Ok(())
 }
 
@@ -457,9 +461,13 @@ pub async fn expect_all_items_bitswap_dont_have(
 	timeout_secs: u64,
 	node_name: &str,
 ) -> Result<()> {
-	log::info!("=== Expecting bitswap DONT_HAVE for {} items from {} ===", items.len(), node_name);
+	tracing::info!(
+		"=== Expecting bitswap DONT_HAVE for {} items from {} ===",
+		items.len(),
+		node_name
+	);
 	for (i, item) in items.iter().enumerate() {
-		log::info!("Verifying DONT_HAVE for item {} from {}", i, node_name);
+		tracing::info!("Verifying DONT_HAVE for item {} from {}", i, node_name);
 		expect_bitswap_dont_have(
 			node,
 			&item.data,
@@ -468,42 +476,309 @@ pub async fn expect_all_items_bitswap_dont_have(
 		)
 		.await?;
 	}
-	log::info!("✓ All {} items correctly returned DONT_HAVE from {}", items.len(), node_name);
+	tracing::info!("✓ All {} items correctly returned DONT_HAVE from {}", items.len(), node_name);
 	Ok(())
 }
 
-/// Expect DONT_HAVE - state/warp synced nodes don't have indexed transactions.
+/// Poll bitswap until it returns DONT_HAVE or `timeout_secs` elapses. The physical
+/// `--blocks-pruning` deletion + col11 refcount-zero eviction runs asynchronously a moment
+/// after the finalized-height metric crosses, so single-shot probing is racy.
 pub async fn expect_bitswap_dont_have(
 	node: &zombienet_sdk::NetworkNode,
 	expected_data: &[u8],
 	timeout_secs: u64,
 	node_name: &str,
 ) -> Result<()> {
-	log::info!("=== Expecting bitswap DONT_HAVE from {} ===", node_name);
+	tracing::info!("=== Expecting bitswap DONT_HAVE from {} ===", node_name);
 	let multiaddr = node.multiaddr();
-	match verify_bitswap_fetch(multiaddr, expected_data, timeout_secs).await {
-		Ok(_) => {
-			anyhow::bail!(
-				"Expected bitswap to fail with DONT_HAVE from {}, but it succeeded",
-				node_name
-			);
-		},
-		Err(e) => {
-			let error_msg = e.to_string();
-			if error_msg.contains("Peer does not have the block") || error_msg.contains("DONT_HAVE")
-			{
-				log::info!(
-					"✓ Bitswap correctly returned DONT_HAVE from {} (expected for synced nodes)",
-					node_name
-				);
-				Ok(())
-			} else {
-				anyhow::bail!(
-					"Bitswap failed with unexpected error from {}: {}. Expected 'Peer does not have the block'",
-					node_name,
-					error_msg
-				);
-			}
-		},
+	let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+	let per_probe_secs: u64 = 3;
+	loop {
+		match verify_bitswap_fetch(multiaddr, expected_data, per_probe_secs).await {
+			Ok(_) => {
+				if std::time::Instant::now() >= deadline {
+					anyhow::bail!(
+						"Bitswap on {} still serves the block after polling for {}s; col11 \
+						 entry was not evicted as expected",
+						node_name,
+						timeout_secs
+					);
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			},
+			Err(e) => {
+				let msg = e.to_string();
+				if msg.contains("Peer does not have the block") || msg.contains("DONT_HAVE") {
+					tracing::info!(
+						"✓ Bitswap correctly returned DONT_HAVE from {} (expected for synced nodes)",
+						node_name
+					);
+					return Ok(());
+				}
+				if std::time::Instant::now() >= deadline {
+					return Err(e).with_context(|| {
+						format!(
+							"bitswap probe to {} kept returning unexpected errors over {}s",
+							node_name, timeout_secs
+						)
+					});
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			},
+		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Persistent bitswap client (port of `bulletin-stress-test/src/bitswap.rs`).
+//
+// `fetch_via_bitswap` spawns a fresh litep2p per call. After ~300 calls in a single test
+// (e.g. bulk 512-item verification) litep2p's transport service exhausts with "Dial failure"
+// / "transport service closed", causing the tail of items to fail. The persistent client
+// keeps one litep2p alive across many fetches and opens a new substream per call.
+// ---------------------------------------------------------------------------
+
+/// Persistent bitswap client. Owns a litep2p instance running in a background task with a
+/// long-lived connection to one peer; each `fetch_block` call opens a new substream rather
+/// than dialing fresh.
+pub struct BitswapClient {
+	cmd_tx: mpsc::Sender<BitswapClientCommand>,
+	peer_id: PeerId,
+	_event_task: tokio::task::JoinHandle<()>,
+}
+
+impl BitswapClient {
+	/// Fetch one item by content hash. Sequential per client — for parallelism, create
+	/// multiple clients.
+	pub async fn fetch_block(&self, data_hash: &[u8; 32], timeout: Duration) -> Result<Vec<u8>> {
+		let cid_bytes = hash_to_cid_bytes(data_hash);
+		let (response_tx, response_rx) = oneshot::channel();
+		self.cmd_tx
+			.send(BitswapClientCommand::Fetch { peer: self.peer_id, cid_bytes, response_tx })
+			.await
+			.map_err(|_| anyhow!("BitswapClient protocol task closed"))?;
+		tokio::time::timeout(timeout, response_rx)
+			.await
+			.map_err(|_| anyhow!("Bitswap fetch timed out"))?
+			.map_err(|_| anyhow!("Response channel closed"))?
+	}
+}
+
+/// Dial `multiaddr_str`, wait for the connection to establish, then return a ready-to-use
+/// `BitswapClient`. The litep2p instance is moved into a background tokio task that pumps
+/// its event loop until the client is dropped.
+pub async fn create_connected_bitswap_client(multiaddr_str: &str) -> Result<BitswapClient> {
+	let multiaddr: Multiaddr = multiaddr_str.parse().context("parse multiaddr")?;
+	let peer_id_multihash = multiaddr
+		.iter()
+		.find_map(|p| {
+			if let litep2p::types::multiaddr::Protocol::P2p(peer_id) = p {
+				Some(peer_id)
+			} else {
+				None
+			}
+		})
+		.ok_or_else(|| anyhow!("multiaddr does not contain peer ID"))?;
+	let peer_id = PeerId::from_multihash(peer_id_multihash)
+		.map_err(|_| anyhow!("invalid peer ID in multiaddr"))?;
+
+	let (cmd_tx, cmd_rx) = mpsc::channel(32);
+	let protocol = BitswapClientProtocol::new(cmd_rx);
+
+	let config = Litep2pConfigBuilder::new()
+		.with_keypair(Keypair::generate())
+		.with_user_protocol(Box::new(protocol))
+		.with_websocket(WebSocketConfig {
+			listen_addresses: vec!["/ip4/127.0.0.1/tcp/0/ws".parse().unwrap()],
+			..Default::default()
+		})
+		.with_keep_alive_timeout(Duration::from_secs(60))
+		.build();
+
+	let mut litep2p =
+		Litep2p::new(config).map_err(|e| anyhow!("failed to create litep2p: {:?}", e))?;
+
+	litep2p
+		.dial_address(multiaddr.clone())
+		.await
+		.map_err(|e| anyhow!("failed to dial {multiaddr}: {:?}", e))?;
+
+	let connected =
+		tokio::time::timeout(Duration::from_secs(30), wait_for_connection(&mut litep2p, peer_id))
+			.await
+			.map_err(|_| anyhow!("timeout waiting for bitswap connection to {multiaddr}"))?;
+	if !connected {
+		anyhow::bail!("failed to establish bitswap connection to {multiaddr}");
+	}
+
+	let event_task = tokio::spawn(async move {
+		while let Some(event) = litep2p.next_event().await {
+			tracing::trace!("litep2p event: {:?}", event);
+		}
+	});
+
+	Ok(BitswapClient { cmd_tx, peer_id, _event_task: event_task })
+}
+
+/// Fetch + verify all `items` against `node` via bitswap using `concurrency` persistent
+/// connections in parallel (each handles `items.len() / concurrency` items sequentially).
+/// Caches every item's blake2_256 hash in advance to avoid re-hashing per fetch.
+pub async fn verify_all_items_bitswap_concurrent(
+	node: &zombienet_sdk::NetworkNode,
+	items: &[Vec<u8>],
+	concurrency: usize,
+	per_item_timeout_secs: u64,
+	label: &str,
+) -> Result<()> {
+	use std::sync::Arc;
+	let multiaddr = node.multiaddr();
+	tracing::info!(
+		"=== Verifying bitswap fetch of {} items via {} persistent connections (label={}) ===",
+		items.len(),
+		concurrency,
+		label
+	);
+
+	let mut clients = Vec::with_capacity(concurrency);
+	for i in 0..concurrency {
+		let c = create_connected_bitswap_client(multiaddr).await.with_context(|| {
+			format!("{label}: failed to create bitswap client {i}/{concurrency}")
+		})?;
+		clients.push(Arc::new(c));
+	}
+
+	let timeout = Duration::from_secs(per_item_timeout_secs);
+	let chunk_size = items.len().div_ceil(concurrency);
+	let mut handles = Vec::new();
+	for (client_idx, chunk_start) in (0..items.len()).step_by(chunk_size).enumerate() {
+		let chunk_end = (chunk_start + chunk_size).min(items.len());
+		let client = Arc::clone(&clients[client_idx]);
+		let chunk: Vec<(usize, Vec<u8>)> = items[chunk_start..chunk_end]
+			.iter()
+			.enumerate()
+			.map(|(i, d)| (chunk_start + i, d.clone()))
+			.collect();
+		let label = label.to_string();
+		let total = items.len();
+		handles.push(tokio::spawn(async move {
+			for (item_idx, data) in chunk {
+				let hash = blake2_256(&data);
+				let fetched = client.fetch_block(&hash, timeout).await.with_context(|| {
+					format!("{label}: item {} ({}/{}) fetch failed", item_idx, item_idx + 1, total)
+				})?;
+				if fetched != data {
+					anyhow::bail!(
+						"{label}: item {} ({}/{}) data mismatch (got {} bytes, expected {})",
+						item_idx,
+						item_idx + 1,
+						total,
+						fetched.len(),
+						data.len()
+					);
+				}
+			}
+			Ok::<_, anyhow::Error>(())
+		}));
+	}
+
+	for handle in handles {
+		handle.await.map_err(|e| anyhow!("bitswap worker task panicked: {e}"))??;
+	}
+
+	tracing::info!("✓ All {} items bitswap-fetchable from {}", items.len(), label);
+	Ok(())
+}
+
+/// Concurrent variant of [`expect_bitswap_dont_have`]. Polls all `items` against `node`
+/// across `concurrency` persistent connections until every probe returns DONT_HAVE or the
+/// per-item timeout elapses on any worker.
+pub async fn expect_all_items_bitswap_dont_have_concurrent(
+	node: &zombienet_sdk::NetworkNode,
+	items: &[Vec<u8>],
+	concurrency: usize,
+	per_item_timeout_secs: u64,
+	label: &str,
+) -> Result<()> {
+	use std::sync::Arc;
+	let multiaddr = node.multiaddr();
+	tracing::info!(
+		"=== Expecting bitswap DONT_HAVE for {} items via {} persistent connections (label={}) ===",
+		items.len(),
+		concurrency,
+		label
+	);
+
+	let mut clients = Vec::with_capacity(concurrency);
+	for i in 0..concurrency {
+		let c = create_connected_bitswap_client(multiaddr).await.with_context(|| {
+			format!("{label}: failed to create bitswap client {i}/{concurrency}")
+		})?;
+		clients.push(Arc::new(c));
+	}
+
+	let timeout = Duration::from_secs(per_item_timeout_secs);
+	let chunk_size = items.len().div_ceil(concurrency);
+	let mut handles = Vec::new();
+	for (client_idx, chunk_start) in (0..items.len()).step_by(chunk_size).enumerate() {
+		let chunk_end = (chunk_start + chunk_size).min(items.len());
+		let client = Arc::clone(&clients[client_idx]);
+		let chunk: Vec<(usize, Vec<u8>)> = items[chunk_start..chunk_end]
+			.iter()
+			.enumerate()
+			.map(|(i, d)| (chunk_start + i, d.clone()))
+			.collect();
+		let label = label.to_string();
+		let total = items.len();
+		handles.push(tokio::spawn(async move {
+			for (item_idx, data) in chunk {
+				let hash = blake2_256(&data);
+				let deadline = std::time::Instant::now() + timeout;
+				loop {
+					match client.fetch_block(&hash, Duration::from_secs(3)).await {
+						Ok(_) => {
+							if std::time::Instant::now() >= deadline {
+								anyhow::bail!(
+									"{label}: item {} ({}/{}) still served after {}s — col11 \
+									 entry not evicted as expected",
+									item_idx,
+									item_idx + 1,
+									total,
+									per_item_timeout_secs
+								);
+							}
+							tokio::time::sleep(Duration::from_secs(1)).await;
+						},
+						Err(e) => {
+							let msg = e.to_string();
+							if msg.contains("Peer does not have the block") ||
+								msg.contains("DONT_HAVE")
+							{
+								break;
+							}
+							if std::time::Instant::now() >= deadline {
+								return Err(e).with_context(|| {
+									format!(
+										"{label}: item {} ({}/{}) probe kept failing for {}s",
+										item_idx,
+										item_idx + 1,
+										total,
+										per_item_timeout_secs
+									)
+								});
+							}
+							tokio::time::sleep(Duration::from_secs(1)).await;
+						},
+					}
+				}
+			}
+			Ok::<_, anyhow::Error>(())
+		}));
+	}
+
+	for handle in handles {
+		handle.await.map_err(|e| anyhow!("bitswap worker task panicked: {e}"))??;
+	}
+
+	tracing::info!("✓ All {} items returned DONT_HAVE from {}", items.len(), label);
+	Ok(())
 }

@@ -3,7 +3,10 @@
 
 #![allow(clippy::uninlined_format_args)]
 
-#[cfg(feature = "zombie-sync-tests")]
+// Both suites compile together so shared `utils/` helpers don't trip dead-code warnings.
+#[cfg(any(feature = "zombie-sync-tests", feature = "zombie-auto-renew-tests"))]
+mod auto_renew_storage;
+#[cfg(any(feature = "zombie-sync-tests", feature = "zombie-auto-renew-tests"))]
 mod parachain_sync_storage;
-#[cfg(feature = "zombie-sync-tests")]
+#[cfg(any(feature = "zombie-sync-tests", feature = "zombie-auto-renew-tests"))]
 mod utils;

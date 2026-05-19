@@ -39,7 +39,13 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
   },
   polkadot: {
     id: "polkadot",
-    name: "Bulletin Polkadot (not released yet)",
+    name: "Bulletin Polkadot",
+    endpoints: ["wss://bulletin-rpc.polkadot.io"],
+    lightClient: false,
+  },
+  custom: {
+    id: "custom",
+    name: "Custom WS URL…",
     endpoints: [],
     lightClient: false,
   },
