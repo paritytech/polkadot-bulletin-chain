@@ -2990,7 +2990,10 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				let renew_call = tx(
 					"TransactionStorage",
 					"force_renew",
-					vec![Value::unnamed_variant("ContentHash", [Value::from_bytes(hash.as_slice())])],
+					vec![Value::unnamed_variant(
+						"ContentHash",
+						[Value::from_bytes(hash.as_slice())],
+					)],
 				);
 				let renew_params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 				match client.tx().sign_and_submit(&renew_call, &dev::alice(), renew_params).await {
