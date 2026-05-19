@@ -748,8 +748,7 @@ pub async fn submit_signed_renew(
 	tracing::info!("Submitting renew(block={}, index={}) (nonce={})", block, index, nonce);
 
 	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress =
-			client.tx().sign_and_submit_then_watch(&renew_call, &signer, params).await?;
+		let progress = client.tx().sign_and_submit_then_watch(&renew_call, &signer, params).await?;
 		wait_for_in_best_block(progress).await?;
 		Ok::<_, anyhow::Error>(())
 	})
