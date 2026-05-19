@@ -789,6 +789,36 @@ mod benchmarks {
 		Ok(())
 	}
 
+	/// Benchmarks one outer-loop iteration of the v3→v4 multi-block migration:
+	/// fetch one v3-shape `AutoRenewals` entry, decode, re-encode as v4 with
+	/// `recurring: true`, and re-insert.
+	#[benchmark]
+	fn migrate_v3_to_v4_step() -> Result<(), BenchmarkError> {
+		use crate::migrations::v4::{MigrateV3ToV4, V3AutoRenewalData};
+		use polkadot_sdk_frame::deps::{
+			frame_support::{migrations::SteppedMigration, weights::WeightMeter},
+			sp_runtime::traits::{BlakeTwo256, Hash},
+		};
+
+		let caller: T::AccountId = whitelisted_caller();
+		let content_hash: ContentHash = BlakeTwo256::hash(b"v3-to-v4-bench").into();
+		let raw_key = AutoRenewals::<T>::hashed_key_for(content_hash);
+		sp_io::storage::set(&raw_key, &V3AutoRenewalData { account: caller.clone() }.encode());
+
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			MigrateV3ToV4::<T>::step(None, &mut meter).expect("step must succeed");
+		}
+
+		let v4 = AutoRenewals::<T>::get(content_hash).expect("entry exists");
+		assert_eq!(v4.account, caller);
+		assert!(v4.recurring);
+
+		Ok(())
+	}
+
 	impl_benchmark_test_suite!(TransactionStorage, crate::mock::new_test_ext(), crate::mock::Test);
 }
 
