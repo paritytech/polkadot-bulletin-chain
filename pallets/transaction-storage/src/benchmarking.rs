@@ -179,8 +179,17 @@ mod benchmarks {
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
+		// `renew` dispatch requires `Origin::Authorized` (set by `ValidateStorageCalls`
+		// at runtime); construct it directly here.
+		let origin: <T as frame_system::Config>::RuntimeOrigin =
+			crate::pallet::Origin::<T>::Authorized {
+				who: caller.clone(),
+				scope: AuthorizationScope::Account(caller.clone()),
+			}
+			.into();
+
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), TransactionRef::ContentHash(content_hash));
+		_(origin, TransactionRef::ContentHash(content_hash));
 
 		assert_last_event::<T>(
 			Event::RenewalEnabled { content_hash, who: caller, recurring: false }.into(),
@@ -458,8 +467,15 @@ mod benchmarks {
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
+		let authorized_origin: <T as frame_system::Config>::RuntimeOrigin =
+			crate::pallet::Origin::<T>::Authorized {
+				who: caller.clone(),
+				scope: AuthorizationScope::Account(caller.clone()),
+			}
+			.into();
+
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
+		_(authorized_origin, content_hash);
 
 		assert_last_event::<T>(
 			Event::RenewalEnabled { content_hash, who: caller, recurring: true }.into(),
@@ -475,7 +491,8 @@ mod benchmarks {
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
-		// Authorize, store, advance, then enable auto-renew
+		// Authorize, store, advance, then enable auto-renew via the rewritten authorized
+		// origin (the dispatch path expects `Origin::Authorized`).
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
@@ -485,14 +502,17 @@ mod benchmarks {
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
-		TransactionStorage::<T>::enable_auto_renew(
-			RawOrigin::Signed(caller.clone()).into(),
-			content_hash,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
+		let authorized_origin: <T as frame_system::Config>::RuntimeOrigin =
+			crate::pallet::Origin::<T>::Authorized {
+				who: caller.clone(),
+				scope: AuthorizationScope::Account(caller.clone()),
+			}
+			.into();
+		TransactionStorage::<T>::enable_auto_renew(authorized_origin.clone(), content_hash)
+			.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
+		_(authorized_origin, content_hash);
 
 		assert_last_event::<T>(Event::AutoRenewalDisabled { content_hash, who: caller }.into());
 		Ok(())
