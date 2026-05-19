@@ -361,4 +361,11 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Placeholder weight for the v3→v4 stepped migration. Replace with a
+	/// benchmarked value when ready.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 }
