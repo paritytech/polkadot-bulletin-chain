@@ -572,11 +572,14 @@ pub async fn submit_renew_pair(
 ) -> Result<(u64, u64)> {
 	let alice = dev::alice();
 	let bob = dev::bob();
-	let renew_call = tx(
-		"TransactionStorage",
-		"renew",
-		vec![Value::u128(block as u128), Value::u128(index as u128)],
+	let entry = Value::named_variant(
+		"Position",
+		[
+			("block".to_string(), Value::u128(block as u128)),
+			("index".to_string(), Value::u128(index as u128)),
+		],
 	);
+	let renew_call = tx("TransactionStorage", "renew", vec![entry]);
 	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
 	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
 
