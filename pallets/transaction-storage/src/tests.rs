@@ -101,6 +101,18 @@ fn disable_auto_renew_via_extension(who: u64, content_hash: super::ContentHash) 
 	TransactionStorage::disable_auto_renew(origin, content_hash)
 }
 
+/// Sibling of `enable_auto_renew_via_extension` for `renew` (one-shot scheduler).
+/// Runs `pre_dispatch_signed` (charges the tx slot) and then dispatches with the
+/// rewritten `Origin::Authorized`.
+fn renew_via_extension(who: u64, entry: super::TransactionRef<u64>) -> DispatchResult {
+	let call = Call::renew { entry: entry.clone() };
+	TransactionStorage::pre_dispatch_signed(&who, &call)
+		.expect("pre_dispatch_signed must succeed for the via-extension test helper");
+	let origin: RuntimeOrigin =
+		Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
+	TransactionStorage::renew(origin, entry)
+}
+
 /// Simulate `on_finalize`'s `BlockTransactions` → `Transactions[n]` flush for the
 /// current block. Tests that do work (e.g. force-renew via `enable_auto_renew`) in
 /// the current block and then jump to a later block via `init_block` need this so
@@ -673,13 +685,12 @@ fn renew_by_content_hash_schedules_one_shot() {
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Unknown content hash is rejected.
+		// Unknown content hash is rejected at dispatch (after origin admission).
 		let bogus_hash = [0u8; 32];
+		let origin: RuntimeOrigin =
+			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
 		assert_noop!(
-			TransactionStorage::renew(
-				RuntimeOrigin::signed(who),
-				TransactionRef::ContentHash(bogus_hash),
-			),
+			TransactionStorage::renew(origin, TransactionRef::ContentHash(bogus_hash)),
 			Error::RenewedNotFound,
 		);
 
@@ -687,10 +698,7 @@ fn renew_by_content_hash_schedules_one_shot() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert_ok!(TransactionStorage::renew(
-			RuntimeOrigin::signed(who),
-			TransactionRef::ContentHash(content_hash),
-		));
+		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
 
 		let entry = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
@@ -2617,10 +2625,7 @@ fn renew_schedules_one_shot() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert_ok!(TransactionStorage::renew(
-			RuntimeOrigin::signed(who),
-			TransactionRef::Position { block: 1, index: 0 }
-		));
+		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
 
 		let entry = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
@@ -2647,10 +2652,7 @@ fn one_shot_fires_once_then_unregisters() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
-		assert_ok!(TransactionStorage::renew(
-			RuntimeOrigin::signed(who),
-			TransactionRef::Position { block: 1, index: 0 }
-		));
+		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
 
 		// Fire the renewal cycle.
 		init_block(12);
@@ -2685,17 +2687,14 @@ fn renew_and_enable_auto_renew_conflict() {
 		run_to_block(2, || None);
 
 		// Schedule one-shot.
-		assert_ok!(TransactionStorage::renew(
-			RuntimeOrigin::signed(who),
-			TransactionRef::Position { block: 1, index: 0 }
-		));
+		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
 
-		// Second `renew` for the same hash: rejected (registration already exists).
+		// Second `renew` for the same hash: rejected at dispatch (registration exists).
+		// Bypass the pool (pre_dispatch_signed) to land in dispatch with `Origin::Authorized`.
+		let origin: RuntimeOrigin =
+			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
 		assert_noop!(
-			TransactionStorage::renew(
-				RuntimeOrigin::signed(who),
-				TransactionRef::Position { block: 1, index: 0 }
-			),
+			TransactionStorage::renew(origin, TransactionRef::Position { block: 1, index: 0 }),
 			Error::AutoRenewalAlreadyEnabled,
 		);
 
@@ -2708,8 +2707,8 @@ fn renew_and_enable_auto_renew_conflict() {
 	});
 }
 
-/// `renew` is signed-only: `ensure_signed` rejects unsigned/root origin. (Distinct
-/// from `force_renew`, which uses `ensure_authorized` and accepts all three.)
+/// `renew` requires an authorized-signed origin: Root and Unsigned are rejected with
+/// `BadOrigin` (registration would have no account to record).
 #[test]
 fn renew_rejects_unsigned_and_root_origin() {
 	new_test_ext().execute_with(|| {

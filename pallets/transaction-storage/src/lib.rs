@@ -516,7 +516,10 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			entry: TransactionRef<BlockNumberFor<T>>,
 		) -> DispatchResult {
-			let who = ensure_signed(origin)?;
+			let AuthorizedCaller::Signed { who, scope: _ } = Self::ensure_authorized(origin)?
+			else {
+				return Err(DispatchError::BadOrigin);
+			};
 			let info = Self::resolve_transaction_ref(&entry)?;
 			let content_hash = info.content_hash;
 
@@ -2104,10 +2107,11 @@ pub mod pallet {
 						Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
 					let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
 						.ok_or(AUTHORIZATION_NOT_FOUND)?;
-					if auth.expired(Self::now()) ||
-						!auth.extent.has_permanent_capacity(info.size as u64)
-					{
+					if auth.expired(Self::now()) {
 						return Err(AUTHORIZATION_NOT_FOUND.into());
+					}
+					if !auth.extent.has_permanent_capacity(info.size as u64) {
+						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
 					}
 					// `size = 0, is_renew = false`: only the tx counter is charged.
 					// `bytes_permanent` and the chain-wide `PermanentStorageUsed`
@@ -2119,13 +2123,16 @@ pub mod pallet {
 						context.consume_authorization(),
 						false,
 					)?;
+					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((
-						context.want_valid_transaction().then(|| ValidTransaction {
-							priority: T::StoreRenewPriority::get(),
-							longevity: T::StoreRenewLongevity::get(),
-							..Default::default()
+						context.want_valid_transaction().then(|| {
+							ValidTransaction::with_tag_prefix("TransactionStorageRenew")
+								.and_provides((who.clone(), info.content_hash))
+								.priority(T::StoreRenewPriority::get())
+								.longevity(T::StoreRenewLongevity::get())
+								.into()
 						}),
-						None,
+						Some(scope),
 					));
 				},
 				Call::<T>::enable_auto_renew { content_hash } => {
@@ -2169,7 +2176,7 @@ pub mod pallet {
 					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((
 						context.want_valid_transaction().then(|| {
-							ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+							ValidTransaction::with_tag_prefix("TransactionStorageRenew")
 								.and_provides((who.clone(), info.content_hash))
 								.priority(T::StoreRenewPriority::get())
 								.longevity(T::StoreRenewLongevity::get())
@@ -2241,8 +2248,15 @@ pub mod pallet {
 						AuthorizationScope::Preimage(content_hash),
 					)
 				} else {
+					// Tag prefix differs per family so store and renew operations don't
+					// dedup against each other in the pool.
+					let prefix = if is_renew {
+						"TransactionStorageRenew"
+					} else {
+						"TransactionStorageStore"
+					};
 					(
-						ValidTransaction::with_tag_prefix("TransactionStorageCheckedSigned")
+						ValidTransaction::with_tag_prefix(prefix)
 							.and_provides((who, content_hash))
 							.priority(T::StoreRenewPriority::get())
 							.longevity(T::StoreRenewLongevity::get())
