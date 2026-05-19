@@ -425,13 +425,24 @@ where
 	StoragePallet: frame_support::traits::PalletInfoAccess,
 {
 	fn contains(name: &pallet_tx_pause::RuntimeCallNameOf<T>) -> bool {
-		if name.0.as_slice() != StoragePallet::name().as_bytes() {
-			return true;
+		// Bench harness constructs synthetic names that wouldn't pass our inverted
+		// whitelist; let everything through so `pause`/`unpause` benches can run.
+		#[cfg(feature = "runtime-benchmarks")]
+		{
+			let _ = name;
+			false
 		}
-		!matches!(
-			name.1.as_slice(),
-			b"renew" | b"renew_content_hash" | b"enable_auto_renew" | b"disable_auto_renew"
-		)
+		#[cfg(not(feature = "runtime-benchmarks"))]
+		{
+			let is_renew_call = name.0.as_slice() == StoragePallet::name().as_bytes() &&
+				matches!(
+					name.1.as_slice(),
+					b"renew" |
+						b"renew_content_hash" | b"enable_auto_renew" |
+						b"disable_auto_renew"
+				);
+			!is_renew_call
+		}
 	}
 }
 

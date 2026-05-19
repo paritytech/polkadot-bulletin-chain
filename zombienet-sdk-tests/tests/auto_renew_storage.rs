@@ -3799,7 +3799,9 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 /// Also confirms whitelisted (non-renew) calls cannot be paused at all.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
-	use crate::utils::{submit_renew_expecting_filtered, sudo_tx_pause, sudo_tx_unpause};
+	use crate::utils::{
+		submit_renew_expecting_filtered, submit_signed_renew, sudo_tx_pause, sudo_tx_unpause,
+	};
 
 	const TEST: &str = "para_pause_renew";
 	crate::utils::init_logging();
@@ -3817,19 +3819,17 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	// Authorize + store (consumes one tx and ~data.len() bytes of Alice's allowance; the
-	// helper authorizes 2x the bytes so a follow-up renew still fits).
+	// Authorize + store, then top up so Alice has headroom for the three renew attempts
+	// below. Renew is validate-time gated on `bytes_permanent + size <= bytes_allowance`,
+	// so even the to-be-filtered renew needs auth available to reach dispatch.
 	let nonce = get_alice_nonce(collator1).await?;
 	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Stored at block {}", store_block);
+	top_up_alice_authorization(client, 5, 5 * data.len() as u64, nonce).await?;
+	nonce += 1;
 
-	// Sanity: renew works before pausing. Submit one and wait for inclusion; the helper
-	// pair-submits to dodge the `(who, content_hash)` pool dedup the validation extension
-	// applies — Alice's signed renew sits alongside Bob's, both at the same block/idx.
-	let content_hash = blake2_256(&data);
-	let alice_nonce = nonce;
-	let bob_nonce = client.tx().account_nonce(&dev::bob().public_key().to_account_id()).await?;
-	submit_renew_pair(client, store_block as u32, 0, &content_hash, alice_nonce, bob_nonce).await?;
+	// Sanity: renew works before pausing.
+	submit_signed_renew(client, store_block as u32, 0, nonce).await?;
 	nonce += 1;
 	tracing::info!("✓ Renew works before pause");
 
@@ -3873,9 +3873,7 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	tracing::info!("✓ Renew rejected while paused");
 
 	// Final check: renew succeeds again post-unpause.
-	let alice_nonce = nonce;
-	let bob_nonce = client.tx().account_nonce(&dev::bob().public_key().to_account_id()).await?;
-	submit_renew_pair(client, store_block as u32, 0, &content_hash, alice_nonce, bob_nonce).await?;
+	submit_signed_renew(client, store_block as u32, 0, nonce).await?;
 	tracing::info!("✓ Renew works again after unpause");
 
 	test_log!(TEST, "=== Parachain Pause Renew via sudo(TxPause) Test PASSED ===");

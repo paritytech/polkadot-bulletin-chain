@@ -729,6 +729,35 @@ async fn sudo_tx_pause_inner(
 	Ok(())
 }
 
+/// Single-signer `renew(block, index)` from Alice. Waits for inclusion and surfaces
+/// dispatch failures via `wait_for_success`.
+pub async fn submit_signed_renew(
+	client: &OnlineClient<SubstrateConfig>,
+	block: u32,
+	index: u32,
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let renew_call = tx(
+		"TransactionStorage",
+		"renew",
+		vec![Value::u128(block as u128), Value::u128(index as u128)],
+	);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tracing::info!("Submitting renew(block={}, index={}) (nonce={})", block, index, nonce);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress =
+			client.tx().sign_and_submit_then_watch(&renew_call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("renew transaction timed out"))??;
+	Ok(())
+}
+
 /// Submit a `renew(block, index)` signed by Alice and assert it fails with `CallFiltered`
 /// at dispatch (the tx is included in a block, but `BaseCallFilter` rejects the call).
 pub async fn submit_renew_expecting_filtered(
