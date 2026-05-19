@@ -934,20 +934,16 @@ pub mod pallet {
 		PermanentStorageNearCap { used: u64, cap: u64 },
 	}
 
-	/// Per-scope authorization slots, sorted by `expiration` ascending (tiebreak
-	/// `starts_at`). Lazily pruned: every read or mutate that goes through
-	/// [`Pallet::prune_expired`] drops **expired** slots (`expiration <=
-	/// relay_now`). Drained slots are intentionally kept — they can still serve
-	/// low-priority `store()` calls until they expire. An empty bounded vec is
-	/// removed and the entry's provider-ref (for `Account` scope) is decremented.
+	/// Per-scope [`Authorization`] entries. The inner `slots` vec is sorted by
+	/// `expiration` ascending (tiebreak `starts_at`). Lazily pruned: every read
+	/// or mutate that goes through [`Pallet::prune_expired`] drops **expired**
+	/// slots (`expiration <= relay_now`). Drained slots are intentionally kept
+	/// — they can still serve low-priority `store()` calls until they expire.
+	/// An entry with an empty `slots` vec is removed and the entry's
+	/// provider-ref (for `Account` scope) is decremented.
 	#[pallet::storage]
-	pub(super) type AuthorizationSlots<T: Config> = StorageMap<
-		_,
-		Blake2_128Concat,
-		AuthorizationScopeFor<T>,
-		BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
-		OptionQuery,
-	>;
+	pub(super) type Authorizations<T: Config> =
+		StorageMap<_, Blake2_128Concat, AuthorizationScopeFor<T>, Authorization<T>, OptionQuery>;
 
 	/// List of accounts allowed to give authorizations.
 	#[pallet::storage]
@@ -1597,14 +1593,6 @@ pub mod pallet {
 			}
 		}
 
-		/// Returns `true` if `slot` is currently active at relay block `relay_now`:
-		/// `starts_at <= relay_now < expiration`. The `expiration` boundary is
-		/// exclusive so that a slot expiring at `n` is *inactive* at block `n` —
-		/// keeps the lazy prune predicate (`expiration <= relay_now`) symmetric.
-		fn slot_is_active(slot: &TimedAuthorization, relay_now: u32) -> bool {
-			slot.starts_at <= relay_now && relay_now < slot.expiration
-		}
-
 		/// Read the slots vec for a scope, drop **expired** slots, and write
 		/// back the result. If the vec becomes empty the entry is removed and
 		/// [`Self::authorization_removed`] is called (decrementing the
@@ -1625,18 +1613,18 @@ pub mod pallet {
 			// `Some` after the closure, so guard with a cheap read so the
 			// no-prune-needed path on every store/renew validate avoids
 			// pointless storage churn.
-			let needs_prune = AuthorizationSlots::<T>::get(scope)
-				.is_some_and(|slots| slots.iter().any(|s| s.expiration <= relay_now));
+			let needs_prune = Authorizations::<T>::get(scope)
+				.is_some_and(|auth| auth.slots.iter().any(|s| s.expiration <= relay_now));
 			if !needs_prune {
 				return;
 			}
-			AuthorizationSlots::<T>::mutate_exists(scope, |maybe_slots| {
-				let Some(slots) = maybe_slots.as_mut() else {
+			Authorizations::<T>::mutate_exists(scope, |maybe_auth| {
+				let Some(auth) = maybe_auth.as_mut() else {
 					return;
 				};
-				slots.retain(|slot| slot.expiration > relay_now);
-				if slots.is_empty() {
-					*maybe_slots = None;
+				auth.slots.retain(|slot| slot.expiration > relay_now);
+				if auth.slots.is_empty() {
+					*maybe_auth = None;
 					Self::authorization_removed(scope);
 				}
 			});
@@ -1664,13 +1652,13 @@ pub mod pallet {
 			Self::prune_expired(&scope);
 			let relay_now = Self::relay_now();
 
-			AuthorizationSlots::<T>::try_mutate(&scope, |maybe_slots| -> DispatchResult {
-				let was_empty = maybe_slots.is_none();
-				let slots = maybe_slots.get_or_insert_with(Default::default);
+			Authorizations::<T>::try_mutate(&scope, |maybe_auth| -> DispatchResult {
+				let was_empty = maybe_auth.is_none();
+				let auth = maybe_auth.get_or_insert_with(Authorization::<T>::default);
 
 				// Additive merge: exact match, or both slots already active.
 				let new_is_active = starts_at <= relay_now;
-				if let Some(existing) = slots.iter_mut().find(|s| {
+				if let Some(existing) = auth.slots.iter_mut().find(|s| {
 					s.expiration == expiration &&
 						(s.starts_at == starts_at || (new_is_active && s.starts_at <= relay_now))
 				}) {
@@ -1709,15 +1697,18 @@ pub mod pallet {
 					expiration,
 				};
 
-				let insert_at = slots
+				let insert_at = auth
+					.slots
 					.iter()
 					.position(|s| {
 						s.expiration > expiration ||
 							(s.expiration == expiration && s.starts_at > starts_at)
 					})
-					.unwrap_or(slots.len());
+					.unwrap_or(auth.slots.len());
 
-				slots.try_insert(insert_at, new_slot).map_err(|_| Error::<T>::TooManySlots)?;
+				auth.slots
+					.try_insert(insert_at, new_slot)
+					.map_err(|_| Error::<T>::TooManySlots)?;
 
 				if was_empty {
 					Self::authorization_added(&scope);
@@ -1731,60 +1722,28 @@ pub mod pallet {
 		/// read or mutate, so this just lets a pool-only path reclaim provider-ref
 		/// without waiting for the next mutate.
 		fn remove_expired_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
-			let slots =
-				AuthorizationSlots::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
+			let auth = Authorizations::<T>::get(&scope).ok_or(Error::<T>::AuthorizationNotFound)?;
 			let relay_now = Self::relay_now();
 			ensure!(
-				slots.iter().all(|s| s.expiration <= relay_now),
+				auth.slots.iter().all(|s| s.expiration <= relay_now),
 				Error::<T>::AuthorizationNotExpired
 			);
-			AuthorizationSlots::<T>::remove(&scope);
+			Authorizations::<T>::remove(&scope);
 			Self::authorization_removed(&scope);
 			Ok(())
 		}
 
-		/// Returns the **effective extent** (per-slot fields summed across
-		/// active slots) for `scope` at the current relay block. The
-		/// consumption path picks a single slot atomically (see
-		/// [`Self::check_authorization`]); this folded view is for external
-		/// queries and the priority boost.
-		///
-		/// `bytes` and `transactions` are clamped per slot at their own caps
-		/// before summing — `store()` saturates them without gating, so a
-		/// low-priority over-cap store on slot A would otherwise inflate the
-		/// folded `bytes` past the folded `bytes_allowance` and mask slot B's
-		/// remaining room from the priority boost. `bytes_permanent` is
-		/// already bounded per slot by the renew hard cap (`bytes_permanent +
-		/// size <= bytes_allowance` in [`Self::check_authorization`]), so no
-		/// clamp is needed there.
+		/// Returns the **effective extent** for `scope` at the current relay
+		/// block. Prunes expired slots, loads the entry, and delegates the fold
+		/// to [`Authorization::extent`]. The consumption path picks a single
+		/// slot atomically (see [`Self::check_authorization`]); this folded
+		/// view is for external queries and the priority boost.
 		fn authorization_extent(scope: AuthorizationScopeFor<T>) -> AuthorizationExtent {
 			Self::prune_expired(&scope);
-			let Some(slots) = AuthorizationSlots::<T>::get(&scope) else {
+			let Some(auth) = Authorizations::<T>::get(&scope) else {
 				return AuthorizationExtent::default();
 			};
-			let relay_now = Self::relay_now();
-
-			let mut acc = AuthorizationExtent::default();
-			for slot in slots.iter() {
-				if !Self::slot_is_active(slot, relay_now) {
-					continue;
-				}
-				acc.bytes_allowance =
-					acc.bytes_allowance.saturating_add(slot.extent.bytes_allowance);
-				// `bytes` saturates without gating → clamp per slot.
-				let slot_bytes = slot.extent.bytes.min(slot.extent.bytes_allowance);
-				acc.bytes = acc.bytes.saturating_add(slot_bytes);
-				// `bytes_permanent` is hard-capped by the renew gate.
-				acc.bytes_permanent =
-					acc.bytes_permanent.saturating_add(slot.extent.bytes_permanent);
-
-				acc.transactions_allowance =
-					acc.transactions_allowance.saturating_add(slot.extent.transactions_allowance);
-				// `transactions` is bumped on every consume → clamp per slot.
-				let slot_tx = slot.extent.transactions.min(slot.extent.transactions_allowance);
-				acc.transactions = acc.transactions.saturating_add(slot_tx);
-			}
-			acc
+			auth.extent(Self::relay_now())
 		}
 
 		/// Returns the (folded, active-only) authorization extent for `who`.
@@ -1801,8 +1760,8 @@ pub mod pallet {
 			let scope = AuthorizationScope::Account(who.clone());
 			Self::prune_expired(&scope);
 			let relay_now = Self::relay_now();
-			AuthorizationSlots::<T>::get(&scope)
-				.is_some_and(|slots| slots.iter().any(|s| Self::slot_is_active(s, relay_now)))
+			Authorizations::<T>::get(&scope)
+				.is_some_and(|auth| auth.slots.iter().any(|s| s.is_active(relay_now)))
 		}
 
 		/// Returns the (folded, active-only) authorization extent for the given
@@ -1949,7 +1908,7 @@ pub mod pallet {
 			// Slots are stored sorted by `expiration` ascending; first match is
 			// earliest-expiring.
 			slots.iter().position(|slot| {
-				if !Self::slot_is_active(slot, relay_now) {
+				if !slot.is_active(relay_now) {
 					return false;
 				}
 				if is_renew {
@@ -2007,30 +1966,28 @@ pub mod pallet {
 				return Err(CHAIN_PERMANENT_CAP_REACHED.into());
 			}
 
-			let work = |maybe_slots: &mut Option<
-				BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
-			>|
+			let work = |maybe_auth: &mut Option<Authorization<T>>|
 			 -> Result<(), TransactionValidityError> {
-				let Some(slots) = maybe_slots.as_mut() else {
+				let Some(auth) = maybe_auth.as_mut() else {
 					return Err(InvalidTransaction::Payment.into());
 				};
 
 				let Some(idx) =
-					Self::pick_slot_for_consumption(slots, relay_now, size_u64, is_renew)
+					Self::pick_slot_for_consumption(&auth.slots, relay_now, size_u64, is_renew)
 				else {
 					// Renew with at least one active slot but none with
 					// `bytes_permanent + size <= bytes_allowance` ⇒ per-slot
 					// hard cap. Otherwise (no active slot at all, or store
 					// without any active slot) it's the generic missing-auth
 					// case.
-					if is_renew && slots.iter().any(|s| Self::slot_is_active(s, relay_now)) {
+					if is_renew && auth.slots.iter().any(|s| s.is_active(relay_now)) {
 						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
 					}
 					return Err(InvalidTransaction::Payment.into());
 				};
 
 				if consume {
-					let slot = &mut slots[idx];
+					let slot = &mut auth.slots[idx];
 					if is_renew {
 						slot.extent.bytes_permanent =
 							slot.extent.bytes_permanent.saturating_add(size_u64);
@@ -2043,10 +2000,10 @@ pub mod pallet {
 			};
 
 			let result = if consume {
-				AuthorizationSlots::<T>::mutate(scope, work)
+				Authorizations::<T>::mutate(scope, work)
 			} else {
-				let mut slots = AuthorizationSlots::<T>::get(scope);
-				work(&mut slots)
+				let mut auth = Authorizations::<T>::get(scope);
+				work(&mut auth)
 			};
 
 			// On a successful renew consume: bump the chain-wide counter.
@@ -2064,11 +2021,11 @@ pub mod pallet {
 		fn check_authorization_expired(
 			scope: &AuthorizationScopeFor<T>,
 		) -> Result<(), TransactionValidityError> {
-			let Some(slots) = AuthorizationSlots::<T>::get(scope) else {
+			let Some(auth) = Authorizations::<T>::get(scope) else {
 				return Err(AUTHORIZATION_NOT_FOUND.into());
 			};
 			let relay_now = Self::relay_now();
-			if !slots.iter().all(|s| s.expiration <= relay_now) {
+			if !auth.slots.iter().all(|s| s.expiration <= relay_now) {
 				return Err(AUTHORIZATION_NOT_EXPIRED.into());
 			}
 			Ok(())
@@ -2465,10 +2422,10 @@ impl<T: Config> Pallet<T> {
 	/// - every slot has `expiration > starts_at` and `bytes_allowance > 0`;
 	/// - slots are sorted by `expiration` ascending (tiebreak `starts_at`).
 	fn check_authorizations_integrity() -> Result<(), sp_runtime::TryRuntimeError> {
-		for (_, slots) in AuthorizationSlots::<T>::iter() {
-			ensure!(!slots.is_empty(), "AuthorizationSlots entry has empty bounded vec");
+		for (_, auth) in Authorizations::<T>::iter() {
+			ensure!(!auth.slots.is_empty(), "Authorizations entry has empty slots");
 			let mut prev: Option<(u32, u32)> = None;
-			for slot in slots.iter() {
+			for slot in auth.slots.iter() {
 				ensure!(
 					slot.expiration > slot.starts_at,
 					"Stored slot has expiration <= starts_at"

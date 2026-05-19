@@ -12,8 +12,8 @@ use polkadot_sdk_frame::deps::frame_support::{
 	weights::WeightMeter,
 };
 
-type AuthorizationSlots = super::AuthorizationSlots;
-type LegacyAuthorizations = crate::migrations::v4::Authorizations<Test>;
+type Authorizations = super::Authorizations;
+type LegacyAuthorizations = crate::migrations::v4::LegacyAuthorizations<Test>;
 
 const RELAY_NOW: u32 = 1_000;
 
@@ -77,7 +77,7 @@ fn translates_active_account_auth() {
 
 		drive_migration();
 
-		let slots = AuthorizationSlots::get(&scope).expect("slot exists").into_inner();
+		let slots = Authorizations::get(&scope).expect("auth exists").slots.into_inner();
 		assert_eq!(slots.len(), 1);
 		let slot = &slots[0];
 		assert_eq!(slot.starts_at, RELAY_NOW);
@@ -91,7 +91,10 @@ fn translates_active_account_auth() {
 		assert_eq!(slot.extent.bytes_permanent, 0);
 		assert_eq!(slot.extent.transactions, 0);
 		assert_eq!(System::providers(&who), 1);
-		assert!(LegacyAuthorizations::get(&scope).is_none());
+		// In-place rewrite: the key now holds v4 bytes under the shared
+		// `"Authorizations"` prefix. We don't probe the legacy view here —
+		// any 40-byte v3 slice can decode degenerately as v4 and vice versa,
+		// so the meaningful check is the v4 state above.
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 	});
 }
@@ -107,7 +110,7 @@ fn drops_expired_account_auth() {
 
 		drive_migration();
 
-		assert!(AuthorizationSlots::get(&scope).is_none());
+		assert!(Authorizations::get(&scope).is_none());
 		assert!(LegacyAuthorizations::get(&scope).is_none());
 		assert_eq!(System::providers(&who), 0);
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
@@ -126,7 +129,7 @@ fn drops_empty_account_auth() {
 
 		drive_migration();
 
-		assert!(AuthorizationSlots::get(&scope).is_none());
+		assert!(Authorizations::get(&scope).is_none());
 		assert!(LegacyAuthorizations::get(&scope).is_none());
 		assert_eq!(System::providers(&who), 0);
 	});
@@ -143,10 +146,9 @@ fn translates_preimage_auth() {
 
 		drive_migration();
 
-		let slots = AuthorizationSlots::get(&scope).expect("slot exists").into_inner();
+		let slots = Authorizations::get(&scope).expect("auth exists").slots.into_inner();
 		assert_eq!(slots.len(), 1);
 		assert_eq!(slots[0].extent.bytes_allowance, 2_000);
-		assert!(LegacyAuthorizations::get(&scope).is_none());
 		// Preimage scope does not bump providers — the storage owner is
 		// the content hash, not an account.
 	});
@@ -178,9 +180,11 @@ fn resumes_across_steps() {
 		}
 		assert!(total_steps >= 2, "expected ≥2 step calls; got {total_steps}");
 
-		let migrated = AuthorizationSlots::iter().count();
+		let migrated = Authorizations::iter().count();
 		assert_eq!(migrated, 10);
-		assert!(LegacyAuthorizations::iter().next().is_none());
+		for (_, auth) in Authorizations::iter() {
+			assert_eq!(auth.slots.len(), 1, "translated entry has one slot");
+		}
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
 	});
 }
@@ -196,9 +200,12 @@ fn bails_on_relay_now_zero() {
 		let mut meter = WeightMeter::new();
 		let result = MigrateV3ToV4::<Test>::step(None, &mut meter);
 		assert!(matches!(result, Err(SteppedMigrationError::Failed)));
-		// Storage untouched.
+		// Storage untouched: the v3 entry still decodes under the legacy
+		// view. We don't probe the v4 view here — v3 bytes can decode
+		// degenerately under the v4 schema (`0x00` length prefix → empty
+		// slots), which is harmless because the runtime only reads
+		// `Authorizations` once `on_chain_storage_version == 4`.
 		assert!(LegacyAuthorizations::get(&scope).is_some());
-		assert!(AuthorizationSlots::get(&scope).is_none());
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
 	});
 }
@@ -218,7 +225,7 @@ fn version_bumps_only_after_drain() {
 			MigrateV3ToV4::<Test>::step(None, &mut meter).expect("first step must not fail");
 		assert!(cursor.is_some(), "cursor still points at last-processed scope");
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
-		assert!(AuthorizationSlots::get(&scope).is_some());
+		assert!(Authorizations::get(&scope).is_some());
 
 		// Step 2: with the legacy map empty, the iter exhausts and the
 		// version bumps to 4.
@@ -231,7 +238,10 @@ fn version_bumps_only_after_drain() {
 }
 
 #[test]
-fn clears_legacy_storage_prefix() {
+fn rewrites_all_entries_in_place() {
+	// In-place rewrite leaves keys at the shared `"Authorizations"` prefix,
+	// just with v4-encoded bytes. The semantic check is that every key now
+	// decodes as a valid `Authorization<T>` with the translated state.
 	new_test_ext().execute_with(|| {
 		setup_v3();
 		let parachain_now = System::block_number();
@@ -242,6 +252,11 @@ fn clears_legacy_storage_prefix() {
 			);
 		}
 		drive_migration();
-		assert!(LegacyAuthorizations::iter().next().is_none());
+		let new_count = Authorizations::iter().count();
+		assert_eq!(new_count, 3);
+		for (_, auth) in Authorizations::iter() {
+			assert_eq!(auth.slots.len(), 1);
+			assert_eq!(auth.slots[0].extent.bytes_allowance, 1_000);
+		}
 	});
 }

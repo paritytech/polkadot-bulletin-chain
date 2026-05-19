@@ -439,12 +439,22 @@ pub mod v2 {
 }
 
 /// Migration v3→v4: translate the legacy single-window `Authorizations` map
-/// into the slot-based `AuthorizationSlots` map.
+/// into the slot-based [`crate::pallet::Authorizations`] map **in place**.
 ///
-/// Stepped (multi-block) migration. Each step drains a few legacy entries; an
-/// active entry becomes a single fresh slot inheriting the original allowances
-/// (used counters reset to `0`); an already-expired entry is dropped.
-/// Storage version flips to `4` once the legacy map is exhausted.
+/// Stepped (multi-block) migration. Each step processes one legacy entry: a
+/// still-active entry is overwritten with an [`Authorization<T>`] whose single
+/// slot inherits the legacy allowances (used counters reset to `0`); an
+/// already-expired entry — or one with `bytes_allowance == 0` — is removed.
+/// Storage version flips to `4` once the legacy iterator is exhausted.
+///
+/// **In-place rewrite.** v3 stored entries at the `"Authorizations"` storage
+/// prefix; v4 keeps the same prefix. The legacy alias and the new pallet
+/// storage are two views onto the same on-chain keys, just with different
+/// value decoders. Each step uses [`IterableStorageMap::translate_next`] to
+/// (a) read the next entry as `LegacyAuthorization`, (b) overwrite it with an
+/// `Authorization<T>` value, or (c) remove it. The hashed-key cursor advances
+/// monotonically, so the legacy decoder never re-encounters a key we have
+/// already rewritten.
 ///
 /// The legacy `Authorization::expiration` was a parachain block number; the
 /// slot model uses relay block numbers. The two clocks aren't aligned, so we
@@ -456,39 +466,53 @@ pub mod v2 {
 pub mod v4 {
 	use super::*;
 	use crate::{
-		pallet::{AuthorizationSlots, Pallet},
-		AuthorizationExtent, AuthorizationScopeFor, TimedAuthorization, WeightInfo,
+		pallet::{Authorizations, Pallet},
+		Authorization, AuthorizationExtent, AuthorizationScopeFor, TimedAuthorization, WeightInfo,
 	};
 	use polkadot_sdk_frame::{
 		deps::{
 			frame_support::{
 				migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
-				storage_alias,
+				storage::types::StorageMap,
+				traits::{ConstU32, StorageInstance},
 				weights::WeightMeter,
 				Blake2_128Concat, BoundedVec,
 			},
 			sp_runtime::traits::BlockNumberProvider,
 		},
-		prelude::{frame_system, StorageVersion},
+		prelude::{frame_system, BlockNumberFor, StorageVersion},
 	};
 
 	/// Legacy `Authorization` shape (v3): single-window per scope. Production
 	/// code only decodes existing entries; the benchmark and tests write it
-	/// via the `Authorizations` storage alias to seed scenarios.
+	/// via the [`LegacyAuthorizations`] storage alias to seed scenarios.
 	#[derive(Encode, Decode, MaxEncodedLen, scale_info::TypeInfo)]
-	pub(crate) struct LegacyAuthorization<BlockNumber> {
+	pub struct LegacyAuthorization<BlockNumber> {
 		pub extent: AuthorizationExtent,
 		pub expiration: BlockNumber,
 	}
 
-	/// Storage alias matching the v3 `Authorizations` storage prefix. Reads
-	/// the live legacy entries during the migration; cleared as we go.
-	#[storage_alias]
-	pub(crate) type Authorizations<T: Config> = StorageMap<
-		Pallet<T>,
+	/// Hand-rolled prefix struct so the legacy alias decouples its Rust type
+	/// name (`LegacyAuthorizations`) from its on-chain prefix (`"Authorizations"`,
+	/// shared with the live `pallet::Authorizations` v4 storage). This is what
+	/// makes the v3→v4 rewrite in-place: the legacy alias and the new pallet
+	/// storage are two decoders for the same on-chain keys.
+	pub struct LegacyAuthorizationsInstance<T>(PhantomData<T>);
+	impl<T: Config> StorageInstance for LegacyAuthorizationsInstance<T> {
+		fn pallet_prefix() -> &'static str {
+			<Pallet<T> as polkadot_sdk_frame::deps::frame_support::traits::PalletInfoAccess>::name()
+		}
+		const STORAGE_PREFIX: &'static str = "Authorizations";
+	}
+
+	/// View over the v3 `"Authorizations"` prefix that decodes values as
+	/// `LegacyAuthorization`. Used by [`MigrateV3ToV4`] to read entries before
+	/// overwriting them with v4 [`Authorization<T>`] values at the same key.
+	pub type LegacyAuthorizations<T> = StorageMap<
+		LegacyAuthorizationsInstance<T>,
 		Blake2_128Concat,
 		AuthorizationScopeFor<T>,
-		LegacyAuthorization<polkadot_sdk_frame::prelude::BlockNumberFor<T>>,
+		LegacyAuthorization<BlockNumberFor<T>>,
 		polkadot_sdk_frame::deps::frame_support::pallet_prelude::OptionQuery,
 	>;
 
@@ -496,7 +520,11 @@ pub mod v4 {
 	pub struct MigrateV3ToV4<T: Config>(PhantomData<T>);
 
 	impl<T: Config> SteppedMigration for MigrateV3ToV4<T> {
-		type Cursor = AuthorizationScopeFor<T>;
+		/// Bounded hashed key of the last processed entry. `Blake2_128Concat`
+		/// produces `16 + encoded_key` bytes; the encoded `AuthorizationScope`
+		/// (Account 32B / Preimage 32B plus 1B discriminator) fits well inside
+		/// 128.
+		type Cursor = BoundedVec<u8, ConstU32<128>>;
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
@@ -504,9 +532,11 @@ pub mod v4 {
 		}
 
 		fn step(
-			mut cursor: Option<Self::Cursor>,
+			cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::IterableStorageMap;
+
 			let relay_now = T::RelayChainBlockNumberProvider::current_block_number();
 			if relay_now == 0 {
 				// The genesis sentinel — only seen on misconfigured try-runtime
@@ -529,63 +559,93 @@ pub mod v4 {
 			let default_window = T::DefaultAuthorizationWindow::get();
 			let new_expiration = relay_now.saturating_add(default_window);
 
+			let mut prev_key: Option<Vec<u8>> = cursor.map(|c| c.into_inner());
+
 			loop {
 				if meter.try_consume(required).is_err() {
 					break;
 				}
 
-				let mut iter = match cursor.as_ref() {
-					None => Authorizations::<T>::iter(),
-					Some(last) =>
-						Authorizations::<T>::iter_from(Authorizations::<T>::hashed_key_for(last)),
-				};
+				// `translate_next` on the new `Authorizations` storage decodes
+				// each entry as `LegacyAuthorization` (the `O` parameter) and
+				// writes back the closure's `Option<Authorization<T>>`. The
+				// new storage shares the on-chain prefix with the v3 legacy
+				// map, so this is a true in-place rewrite — the closure sees
+				// v3 bytes and writes v4 bytes at the same key.
+				let next = Authorizations::<T>::translate_next::<
+					LegacyAuthorization<BlockNumberFor<T>>,
+					_,
+				>(prev_key.take(), |scope, legacy| {
+					// Skip filter: drop legacy entries that are already
+					// expired (under the v3 parachain clock) or have a zero
+					// allowance. `translate_next` removes the key when the
+					// closure returns `None`.
+					if legacy.expiration <= parachain_now || legacy.extent.bytes_allowance == 0 {
+						return None;
+					}
+					let slot = TimedAuthorization {
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							transactions: 0,
+							bytes_allowance: legacy.extent.bytes_allowance,
+							transactions_allowance: legacy.extent.transactions_allowance,
+						},
+						starts_at: relay_now,
+						expiration: new_expiration,
+					};
+					let auth = Authorization::<T> {
+						slots:
+							BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::try_from(
+								alloc::vec![slot],
+							)
+							.expect(
+								"MaxAuthorizationSlots > 0 by integrity_test; one slot fits; qed",
+							),
+					};
+					// `inc_providers` lives on the System pallet so it does
+					// not touch the key being rewritten and is safe to call
+					// from inside the `translate_next` closure.
+					Pallet::<T>::authorization_added(&scope);
+					Some(auth)
+				});
 
-				let Some((scope, old)) = iter.next() else {
-					// Pin to v4 explicitly; `in_code_storage_version` may be
-					// higher if later versions chain on top.
-					StorageVersion::new(4).put::<Pallet<T>>();
-					cursor = None;
-					break;
-				};
-
-				// Move the cursor immediately so we don't get stuck if the
-				// translate branch panics in debug.
-				cursor = Some(scope.clone());
-
-				if old.expiration <= parachain_now || old.extent.bytes_allowance == 0 {
-					Authorizations::<T>::remove(&scope);
-					continue;
-				}
-
-				let slot = TimedAuthorization {
-					extent: AuthorizationExtent {
-						bytes: 0,
-						bytes_permanent: 0,
-						transactions: 0,
-						bytes_allowance: old.extent.bytes_allowance,
-						transactions_allowance: old.extent.transactions_allowance,
+				match next {
+					Some(key) => prev_key = Some(key),
+					None => {
+						// Iteration exhausted. Pin to v4 explicitly;
+						// `in_code_storage_version` may be higher if later
+						// versions chain on top.
+						StorageVersion::new(4).put::<Pallet<T>>();
+						return Ok(None);
 					},
-					starts_at: relay_now,
-					expiration: new_expiration,
-				};
-				let bounded = BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::try_from(
-					alloc::vec![slot],
-				)
-				.expect("MaxAuthorizationSlots > 0 by integrity_test; one slot fits; qed");
-
-				AuthorizationSlots::<T>::insert(&scope, bounded);
-				Authorizations::<T>::remove(&scope);
-				Pallet::<T>::authorization_added(&scope);
+				}
 			}
 
+			let cursor = prev_key
+				.map(BoundedVec::try_from)
+				.transpose()
+				.map_err(|_| SteppedMigrationError::Failed)?;
 			Ok(cursor)
 		}
 
 		#[cfg(feature = "try-runtime")]
 		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
-			let count = Authorizations::<T>::iter().count() as u64;
-			tracing::info!(target: LOG_TARGET, count, "v3->v4 pre_upgrade: legacy entries");
-			Ok(count.encode())
+			let mut total: u32 = 0;
+			let mut zero_allowance: u32 = 0;
+			for (_, legacy) in LegacyAuthorizations::<T>::iter() {
+				total = total.saturating_add(1);
+				if legacy.extent.bytes_allowance == 0 {
+					zero_allowance = zero_allowance.saturating_add(1);
+				}
+			}
+			tracing::info!(
+				target: LOG_TARGET,
+				total,
+				zero_allowance,
+				"v3->v4 pre_upgrade: legacy entries",
+			);
+			Ok((total, zero_allowance).encode())
 		}
 
 		#[cfg(feature = "try-runtime")]
@@ -594,18 +654,17 @@ pub mod v4 {
 		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 			use polkadot_sdk_frame::prelude::GetStorageVersion;
 
-			let old_count =
-				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			let (total, zero_allowance) = <(u32, u32)>::decode(&mut &state[..])
+				.map_err(|_| "Failed to decode pre_upgrade state")?;
 
-			polkadot_sdk_frame::prelude::ensure!(
-				Authorizations::<T>::iter().next().is_none(),
-				"v3->v4 post_upgrade: legacy Authorizations not empty",
-			);
-
-			let mut new_count: u64 = 0;
-			for (_, slots) in AuthorizationSlots::<T>::iter() {
+			let mut new_count: u32 = 0;
+			for (_, auth) in Authorizations::<T>::iter() {
 				new_count = new_count.saturating_add(1);
-				for slot in slots.iter() {
+				polkadot_sdk_frame::prelude::ensure!(
+					!auth.slots.is_empty(),
+					"v3->v4 post_upgrade: Authorization has empty slots",
+				);
+				for slot in auth.slots.iter() {
 					polkadot_sdk_frame::prelude::ensure!(
 						slot.extent.bytes == 0 &&
 							slot.extent.bytes_permanent == 0 &&
@@ -615,8 +674,13 @@ pub mod v4 {
 				}
 			}
 			polkadot_sdk_frame::prelude::ensure!(
-				new_count <= old_count,
-				"v3->v4 post_upgrade: more new slots than legacy entries",
+				new_count <= total,
+				"v3->v4 post_upgrade: more v4 entries than legacy entries",
+			);
+			let drops = total.saturating_sub(new_count);
+			polkadot_sdk_frame::prelude::ensure!(
+				drops >= zero_allowance,
+				"v3->v4 post_upgrade: drops < known zero-allowance drops",
 			);
 			polkadot_sdk_frame::prelude::ensure!(
 				Pallet::<T>::on_chain_storage_version() >= StorageVersion::new(4),
@@ -624,9 +688,10 @@ pub mod v4 {
 			);
 			tracing::info!(
 				target: LOG_TARGET,
-				old_count,
+				total,
 				new_count,
-				dropped = old_count.saturating_sub(new_count),
+				drops,
+				zero_allowance,
 				"v3->v4 post_upgrade: ok",
 			);
 			Ok(())

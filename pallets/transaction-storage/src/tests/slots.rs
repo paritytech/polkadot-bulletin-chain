@@ -1,15 +1,15 @@
-//! Slot-specific behavioural coverage for the per-scope
-//! `BoundedVec<TimedAuthorization, _>` redesign. Window arithmetic uses the
-//! **mock relay** block, advanced via [`crate::mock::set_relay_now`].
+//! Slot-specific behavioural coverage for the per-scope [`crate::Authorization`]
+//! redesign. Window arithmetic uses the **mock relay** block, advanced via
+//! [`crate::mock::set_relay_now`].
 
 use super::*;
 use crate::{mock::set_relay_now, TimedAuthorization};
 
-type AuthorizationSlots = super::AuthorizationSlots;
+type Authorizations = super::Authorizations;
 
-/// Convenience: read the bounded vec for `scope`.
+/// Convenience: read the slots vec for `scope`.
 fn slots_for(scope: AuthorizationScope<u64>) -> Vec<TimedAuthorization> {
-	AuthorizationSlots::get(scope).map(|v| v.into_inner()).unwrap_or_default()
+	Authorizations::get(scope).map(|a| a.slots.into_inner()).unwrap_or_default()
 }
 
 /// Slots are stored sorted by `expiration` ASC (tiebreak `starts_at` ASC),
@@ -328,7 +328,7 @@ fn future_only_slot_is_inactive_until_starts_at() {
 			200,
 		));
 		// Slot exists in storage but is future-only: not active yet.
-		assert!(AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(!TransactionStorage::account_has_active_authorization(&who));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
@@ -367,7 +367,7 @@ fn drained_slot_persists() {
 		assert_eq!(extent.bytes_allowance, 1000);
 		assert_eq!(extent.transactions, 1);
 		assert_eq!(extent.transactions_allowance, 1);
-		assert!(AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert_eq!(System::providers(&who), 1);
 
 		// A second over-cap store still succeeds (saturating); slot stays.
@@ -379,7 +379,7 @@ fn drained_slot_persists() {
 		let extent = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(extent.bytes, 1000);
 		assert_eq!(extent.transactions, 1);
-		assert!(AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 	});
 }
 
@@ -402,7 +402,7 @@ fn expired_slots_pruned_on_read() {
 		// Reading triggers the prune; the now-expired slot is removed.
 		let extent = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(extent, AuthorizationExtent::default());
-		assert!(!AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 	});
 }
 
@@ -424,9 +424,9 @@ fn bytes_permanent_does_not_borrow_across_slots() {
 			Some(100),
 			200,
 		));
-		AuthorizationSlots::mutate(AuthorizationScope::Account(who), |maybe_slots| {
-			let slots = maybe_slots.as_mut().expect("slot exists");
-			let slot_a = slots.iter_mut().find(|s| s.expiration == 200).unwrap();
+		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("auth exists");
+			let slot_a = auth.slots.iter_mut().find(|s| s.expiration == 200).unwrap();
 			slot_a.extent.bytes_permanent = 2000;
 		});
 
@@ -494,13 +494,13 @@ fn provider_ref_lifecycle() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
 		let _ = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(System::providers(&who), 1, "drained slot still holds the provider-ref");
-		assert!(AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 
 		// Advance past expiration; the next read prunes and dec's providers.
 		set_relay_now(200);
 		let _ = TransactionStorage::account_authorization_extent(who);
 		assert_eq!(System::providers(&who), 0);
-		assert!(!AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 	});
 }
 
@@ -522,7 +522,7 @@ fn scale_roundtrip_is_stable() {
 				exp,
 			));
 		}
-		let raw = AuthorizationSlots::get(AuthorizationScope::Account(who)).unwrap().encode();
+		let raw = Authorizations::get(AuthorizationScope::Account(who)).unwrap().encode();
 		let decoded = polkadot_sdk_frame::deps::frame_support::BoundedVec::<
 			TimedAuthorization,
 			<Test as crate::Config>::MaxAuthorizationSlots,
@@ -593,8 +593,9 @@ fn store_and_renew_axes_are_independent() {
 			"low-priority store still increments the transactions counter",
 		);
 		// Direct slot inspection still shows the raw saturated counters.
-		let raw_slot = AuthorizationSlots::get(AuthorizationScope::Account(who))
-			.expect("slot exists")
+		let raw_slot = Authorizations::get(AuthorizationScope::Account(who))
+			.expect("auth exists")
+			.slots
 			.into_inner()
 			.into_iter()
 			.next()
@@ -617,7 +618,7 @@ fn store_and_renew_axes_are_independent() {
 			PERMANENT_ALLOWANCE_EXCEEDED,
 		);
 		// Slot still present (drained ≠ pruned); chain-wide counter unchanged.
-		assert!(AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert_eq!(PermanentStorageUsed::get(), n);
 	});
 }

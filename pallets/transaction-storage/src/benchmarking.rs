@@ -592,7 +592,7 @@ mod benchmarks {
 			let mut pending = PendingAutoRenewals::<T>::get();
 			for i in 0..n {
 				// Unique caller per item so each `check_authorization` hits a distinct
-				// `AuthorizationSlots` key — shared callers collapse into a single cache hit
+				// `Authorizations` key — shared callers collapse into a single cache hit
 				// and undercharge the per-item write.
 				let caller: T::AccountId = account("rn_caller", i, 0);
 				let origin = T::Authorizer::try_successful_origin()
@@ -801,15 +801,14 @@ mod benchmarks {
 	}
 
 	/// Benchmarks one inner-loop iteration of the v3→v4 multi-block migration:
-	/// read one legacy `Authorizations` entry, translate to a `TimedAuthorization`
-	/// slot, insert into `AuthorizationSlots`, remove the legacy entry, bump
-	/// the provider-ref. Active+non-empty entry exercises the translate branch.
+	/// `translate_next` reads one legacy entry, the closure translates it into
+	/// an `Authorization<T>` with a single fresh slot, and the value is
+	/// overwritten in place under the shared `"Authorizations"` prefix. An
+	/// active+non-empty entry exercises the translate branch.
 	#[benchmark]
 	fn migrate_v3_to_v4_step() -> Result<(), BenchmarkError> {
 		use crate::{
-			migrations::v4::{
-				Authorizations as LegacyAuthorizations, LegacyAuthorization, MigrateV3ToV4,
-			},
+			migrations::v4::{LegacyAuthorization, LegacyAuthorizations, MigrateV3ToV4},
 			AuthorizationScope,
 		};
 		use polkadot_sdk_frame::deps::frame_support::{
@@ -844,11 +843,13 @@ mod benchmarks {
 			MigrateV3ToV4::<T>::step(None, &mut meter).expect("step must succeed");
 		}
 
-		// Legacy entry drained; new slot inserted with allowance preserved.
+		// Entry rewritten in place: the legacy decoder no longer sees it, and
+		// the v4 decoder reads back the translated `Authorization` with the
+		// original allowance preserved on its single slot.
 		assert!(LegacyAuthorizations::<T>::get(&scope).is_none());
-		let slots = crate::pallet::AuthorizationSlots::<T>::get(&scope).expect("slot exists");
-		assert_eq!(slots.len(), 1);
-		assert_eq!(slots[0].extent.bytes_allowance, 1024 * 1024);
+		let auth = crate::pallet::Authorizations::<T>::get(&scope).expect("auth exists");
+		assert_eq!(auth.slots.len(), 1);
+		assert_eq!(auth.slots[0].extent.bytes_allowance, 1024 * 1024);
 
 		Ok(())
 	}

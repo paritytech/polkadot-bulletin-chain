@@ -119,9 +119,9 @@ pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::
 /// expressed in **relay-chain** block numbers.
 ///
 /// Slots can overlap. They are stored sorted by `expiration` ascending (tiebreak
-/// `starts_at`) inside [`crate::pallet::AuthorizationSlots`]; the deterministic order
-/// keeps the SCALE encoding stable, lets `try_state` express a simple invariant, and
-/// makes "earliest-expiring active slot with capacity" a single forward scan.
+/// `starts_at`) inside an [`Authorization`]; the deterministic order keeps the
+/// SCALE encoding stable, lets `try_state` express a simple invariant, and makes
+/// "earliest-expiring active slot with capacity" a single forward scan.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
@@ -133,6 +133,64 @@ pub struct TimedAuthorization {
 	pub starts_at: u32,
 	/// Relay block at which this slot ceases to be active (exclusive).
 	pub expiration: u32,
+}
+
+impl TimedAuthorization {
+	/// `starts_at <= relay_now < expiration`. The expiration boundary is exclusive
+	/// so the lazy prune predicate (`expiration <= relay_now`) stays symmetric.
+	pub fn is_active(&self, relay_now: u32) -> bool {
+		self.starts_at <= relay_now && relay_now < self.expiration
+	}
+}
+
+/// Per-scope authorization: a bounded vec of [`TimedAuthorization`] slots.
+///
+/// The wrapper exists so that the storage value has its own name and we can
+/// add fields later (a cached aggregate, an authorizer ref) without renaming
+/// the storage item or rewriting accessors.
+#[derive(Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct Authorization<T: Config> {
+	/// Per-scope slots, sorted by `expiration` ascending (tiebreak `starts_at`).
+	/// See [`TimedAuthorization`] for the per-slot fields and the sorting/merging
+	/// invariant.
+	pub slots: BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
+}
+
+// Hand-written `Default`: the derive adds `T: Default` and
+// `T::MaxAuthorizationSlots: Default` bounds (neither holds for runtime
+// `Config` impls), but an empty `BoundedVec` is always a valid default.
+impl<T: Config> Default for Authorization<T> {
+	fn default() -> Self {
+		Self { slots: BoundedVec::new() }
+	}
+}
+
+impl<T: Config> Authorization<T> {
+	/// Folded extent across active slots at `relay_now`. Per-slot `bytes` and
+	/// `transactions` are clamped at their own caps before summing — `store()`
+	/// saturates them without gating, so a low-priority over-cap store on one
+	/// slot would otherwise inflate the folded counters past the folded
+	/// allowance and mask remaining room on other slots from the priority boost.
+	/// `bytes_permanent` is already bounded per slot by the renew hard cap.
+	pub fn extent(&self, relay_now: u32) -> AuthorizationExtent {
+		let mut acc = AuthorizationExtent::default();
+		for slot in self.slots.iter() {
+			if !slot.is_active(relay_now) {
+				continue;
+			}
+			acc.bytes_allowance = acc.bytes_allowance.saturating_add(slot.extent.bytes_allowance);
+			let slot_bytes = slot.extent.bytes.min(slot.extent.bytes_allowance);
+			acc.bytes = acc.bytes.saturating_add(slot_bytes);
+			acc.bytes_permanent = acc.bytes_permanent.saturating_add(slot.extent.bytes_permanent);
+
+			acc.transactions_allowance =
+				acc.transactions_allowance.saturating_add(slot.extent.transactions_allowance);
+			let slot_tx = slot.extent.transactions.min(slot.extent.transactions_allowance);
+			acc.transactions = acc.transactions.saturating_add(slot_tx);
+		}
+		acc
+	}
 }
 
 /// Distinguishes a stored transaction created by `store` (temporary) from one created by

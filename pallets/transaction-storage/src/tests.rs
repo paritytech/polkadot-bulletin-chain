@@ -60,7 +60,7 @@ use sp_transaction_storage_proof::{
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;
 
-type AuthorizationSlots = super::AuthorizationSlots<Test>;
+type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
 type PermanentStorageUsed = super::PermanentStorageUsed<Test>;
 type RetentionPeriod = super::RetentionPeriod<Test>;
@@ -430,7 +430,7 @@ fn stores_various_sizes_with_account_authorization() {
 				transactions_allowance: sizes.len() as u32,
 			},
 		);
-		assert!(AuthorizationSlots::contains_key(AuthorizationScope::Account(who)));
+		assert!(Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(!System::providers(&who).is_zero());
 
 		// Zero-size data must be rejected
@@ -1318,16 +1318,18 @@ fn try_state_passes_with_active_authorizations() {
 
 #[test]
 fn try_state_detects_zero_authorization_allowance() {
-	// `try_state` rejects an `AuthorizationSlots` entry whose only slot has
+	// `try_state` rejects an `Authorizations` entry whose only slot has
 	// `bytes_allowance == 0` (in addition to the expiration / sort invariants).
-	// Construct one slot with all-zero fields and write it directly.
+	// Construct one slot with all-zero fields and write it directly. SCALE
+	// encodes a single-field struct as its field, so `Authorization<T>` shares
+	// the wire layout with the inner `BoundedVec<TimedAuthorization, _>`.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 
-		// `BoundedVec<TimedAuthorization, _>` SCALE layout: compact length prefix
-		// followed by the slots. One slot of all zeros encodes as: 0x04 (len=1)
-		// then `AuthorizationExtent` (4*0u32 + 3*0u64 → 32 bytes) then
-		// `starts_at: u32` (0) and `expiration: u32` (10).
+		// SCALE layout: compact length prefix followed by the slots. One slot
+		// of all zeros encodes as: 0x04 (len=1) then `AuthorizationExtent`
+		// (4*0u32 + 3*0u64 → 32 bytes) then `starts_at: u32` (0) and
+		// `expiration: u32` (10).
 		let one_slot_zero = (
 			// extent
 			0u32, 0u32, 0u64, 0u64, 0u64, // starts_at, expiration
@@ -1335,7 +1337,7 @@ fn try_state_detects_zero_authorization_allowance() {
 		);
 		let mut encoded = alloc::vec![0x04u8]; // BoundedVec compact len = 1
 		encoded.extend_from_slice(&one_slot_zero.encode());
-		let key = AuthorizationSlots::hashed_key_for(AuthorizationScope::Account(1u64));
+		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &encoded);
 
 		assert_err!(
