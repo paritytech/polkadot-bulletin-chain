@@ -17,8 +17,11 @@ on:
         required: true
         description: Container image (passed by the caller, typically set-image.outputs.CI_IMAGE).
 
+# One queue per SHA across every caller — the first prepare run does the source
+# builds and saves the cache; subsequent runs hit it. Suffixing the group with
+# `inputs.groups` defeats the goal, since each caller passes its own set.
 concurrency:
-  group: prep-bin-${{ github.event.pull_request.head.sha || github.sha }}-${{ inputs.groups }}
+  group: prep-bin-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: false
 
 permissions:
