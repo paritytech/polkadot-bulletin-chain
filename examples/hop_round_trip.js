@@ -1,5 +1,5 @@
 /**
- * Simple HOP round-trip: sender submits, receiver polls + claims + acks.
+ * Simple HOP round-trip: sender submits, receiver poll claims + acks.
  *
  * Assumes the sender account is already authorized for HOP submission.
  * No on-chain calls here — pure HOP protocol over JSON-RPC.
@@ -9,29 +9,38 @@
  *   node examples/hop_round_trip.js ws://localhost:10000 //Alice
  */
 
-import { Keyring } from '@polkadot/keyring';
-import { cryptoWaitReady } from '@polkadot/util-crypto';
+import { HopClient, HopNotFoundError } from 'hop-sdk';
+import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import {
-	hopSubmit,
-	hopClaim,
-	hopAck,
-	HOP_ERROR_NOT_FOUND,
-} from './hop.js';
+	DEV_PHRASE,
+	entropyToMiniSecret,
+	mnemonicToEntropy,
+} from '@polkadot-labs/hdkd-helpers';
 
 const NODE_WS = process.argv[2] || 'ws://localhost:10000';
-const SENDER_SEED = process.argv[3] || '//Alice';
+const DERIVATION_PATH = process.argv[3] || '//Alice';
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_TIMEOUT_MS = 60_000;
 
-/** Poll hop_claim, treating NOT_FOUND as "not yet, retry". */
-async function pollAndClaim(wsUrl, ticket) {
+// HOP needs raw byte signing — never use getPolkadotSigner, which wraps the
+// payload in <Bytes>…</Bytes> and the node would reject the signature.
+function rawSigner(keyPair) {
+	return {
+		publicKey: keyPair.publicKey,
+		signTx: () => Promise.reject(new Error('signTx is not used by HOP')),
+		signBytes: async (data) => keyPair.sign(data),
+	};
+}
+
+/** Poll claim, treating NOT_FOUND as "not yet, retry". */
+async function pollAndClaim(client, ticket) {
 	const deadline = Date.now() + POLL_TIMEOUT_MS;
 	while (Date.now() < deadline) {
 		try {
-			return await hopClaim(wsUrl, ticket);
+			return await client.claim(ticket);
 		} catch (err) {
-			if (err.code !== HOP_ERROR_NOT_FOUND) throw err;
+			if (!(err instanceof HopNotFoundError)) throw err;
 			console.log(`  …not in pool yet, retrying in ${POLL_INTERVAL_MS / 1000}s`);
 			await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
 		}
@@ -40,47 +49,46 @@ async function pollAndClaim(wsUrl, ticket) {
 }
 
 async function main() {
-	await cryptoWaitReady();
-
-	const keyring = new Keyring({ type: 'sr25519' });
-	const sender = keyring.addFromUri(SENDER_SEED);
+	const miniSecret = entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE));
+	const derive = sr25519CreateDerive(miniSecret);
+	const senderKeyPair = derive(DERIVATION_PATH);
 
 	const message = `Hello HOP! ${new Date().toISOString()}`;
 	const data = new TextEncoder().encode(message);
 
-	console.log(`Node    : ${NODE_WS}`);
-	console.log(`Sender  : ${sender.address}`);
-	console.log(`Message : "${message}"`);
+	console.log(`Node       : ${NODE_WS}`);
+	console.log(`Derivation : ${DERIVATION_PATH}`);
+	console.log(`Message    : "${message}"`);
 
-	// 1. Sender submits — sender.sign() returns raw sr25519 bytes (no <Bytes> wrap).
-	console.log('\n[sender] submit');
-	const ticket = await hopSubmit(
-		NODE_WS,
-		data,
-		sender.publicKey,
-		(msg) => sender.sign(msg),
-	);
-	console.log(`  ticket = ${Buffer.from(ticket).toString('hex')}`);
+	const senderClient = HopClient.connectWithAccount(NODE_WS, rawSigner(senderKeyPair), 'sr25519');
+	const receiverClient = HopClient.connect(NODE_WS);
 
-	// 2. Receiver polls hop_claim until the entry appears.
-	console.log('\n[receiver] poll + claim');
-	const received = await pollAndClaim(NODE_WS, ticket);
-	const decoded = new TextDecoder().decode(received);
-	console.log(`  got ${received.length} bytes: "${decoded}"`);
-
-	if (decoded !== message) throw new Error(`mismatch: got "${decoded}"`);
-
-	// 3. Receiver acks — node deletes the entry once every recipient acks.
-	console.log('\n[receiver] ack');
 	try {
-		await hopAck(NODE_WS, ticket);
-		console.log('  ack ok');
-	} catch (err) {
-		if (err.code !== HOP_ERROR_NOT_FOUND) throw err;
-		console.log('  entry already gone (benign)');
-	}
+		console.log('\n[sender] submit');
+		const [ticket] = await senderClient.send(data);
+		console.log(`  ticket = ${Buffer.from(ticket.encode()).toString('hex')}`);
 
-	console.log('\nround-trip ok');
+		console.log('\n[receiver] poll + claim');
+		const received = await pollAndClaim(receiverClient, ticket);
+		const decoded = new TextDecoder().decode(received);
+		console.log(`  got ${received.length} bytes: "${decoded}"`);
+
+		if (decoded !== message) throw new Error(`mismatch: got "${decoded}"`);
+
+		console.log('\n[receiver] ack');
+		try {
+			await receiverClient.ack(ticket);
+			console.log('  ack ok');
+		} catch (err) {
+			if (!(err instanceof HopNotFoundError)) throw err;
+			console.log('  entry already gone (benign)');
+		}
+
+		console.log('\nround-trip ok');
+	} finally {
+		senderClient.destroy();
+		receiverClient.destroy();
+	}
 }
 
 main().catch((err) => {
