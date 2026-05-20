@@ -992,10 +992,6 @@ impl_runtime_apis! {
 		fn can_renew(account: AccountId, content_hash: [u8; 32]) -> bool {
 			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, content_hash)
 		}
-
-		fn can_enable_auto_renew(account: AccountId, content_hash: [u8; 32]) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_enable_auto_renew(&account, content_hash)
-		}
 	}
 
 	#[cfg(feature = "try-runtime")]

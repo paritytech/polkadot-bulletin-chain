@@ -6,7 +6,8 @@ use crate::{
 		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeOrigin, Test,
 		TransactionStorage,
 	},
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	TransactionRef, CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_TRANSACTION_SIZE,
+	PERMANENT_ALLOWANCE_EXCEEDED, RENEWED_NOT_FOUND,
 };
 use polkadot_sdk_frame::{hashing::blake2_256, testing_prelude::*};
 
@@ -48,9 +49,7 @@ fn account_authorization_reports_raw_consumed_bytes() {
 		run_to_block(2, || None);
 
 		let content_hash = blake2_256(&vec![0u8; 1000]);
-		let renew_call = Call::renew_content_hash { content_hash };
-		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
-		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+		assert_ok!(super::renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
 
 		let summary = TransactionStorage::account_authorization(who).expect("active");
 		assert_eq!(summary.bytes_allowance, 4000);
@@ -117,9 +116,9 @@ fn can_renew_matches_renew_extrinsic() {
 		// Grant a tight authorization — exactly one 1000-byte renewal fits.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 1000));
 
-		// Happy path: can_renew agrees with renew_content_hash succeeding.
+		// Happy path: can_renew agrees with renew succeeding.
 		assert!(TransactionStorage::can_renew(&who, content_hash));
-		assert_ok!(TransactionStorage::renew_content_hash(RuntimeOrigin::none(), content_hash));
+		assert_ok!(super::renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
 
 		// After consuming the only slot, per-account permanent capacity is exhausted.
 		assert!(!TransactionStorage::can_renew(&who, content_hash));
@@ -148,54 +147,67 @@ fn can_renew_rejects_when_chain_wide_cap_reached() {
 	});
 }
 
+// `enable_auto_renew` shares the `is_renew = true` extension path with one-shot
+// `renew`, so `can_renew` also predicts its validation outcome.
+
 #[test]
-fn can_enable_auto_renew_matches_extrinsic() {
+fn can_renew_predicts_enable_auto_renew() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
 		let data = vec![0u8; 1000];
 		let content_hash = blake2_256(&data);
+		let call = Call::enable_auto_renew { content_hash };
 
-		// Missing content → false.
-		assert!(!TransactionStorage::can_enable_auto_renew(&who, content_hash));
+		assert!(!TransactionStorage::can_renew(&who, content_hash));
+		assert_noop!(TransactionStorage::pre_dispatch_signed(&who, &call), RENEWED_NOT_FOUND);
 
-		// Authorize tightly: exactly one renewal's worth.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 1000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		// Happy path.
-		assert!(TransactionStorage::can_enable_auto_renew(&who, content_hash));
-		assert_ok!(
-			TransactionStorage::enable_auto_renew(RuntimeOrigin::signed(who), content_hash,)
+		assert!(!TransactionStorage::can_renew(&who, content_hash));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			InvalidTransaction::Payment,
 		);
 
-		// Already enabled → false.
-		assert!(!TransactionStorage::can_enable_auto_renew(&who, content_hash));
+		// Tight authorization: exactly one renewal fits.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 1000));
 
-		// A second user with no authorization can't enable.
-		let other = 2;
-		assert!(!TransactionStorage::can_enable_auto_renew(&other, content_hash));
+		assert!(TransactionStorage::can_renew(&who, content_hash));
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+
+		// Prepay consumed the only slot; both predicates flip in lockstep.
+		assert!(!TransactionStorage::can_renew(&who, content_hash));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			PERMANENT_ALLOWANCE_EXCEEDED,
+		);
 	});
 }
 
 #[test]
-fn can_enable_auto_renew_rejects_when_per_account_cap_exceeded() {
+fn can_renew_predicts_enable_auto_renew_chain_wide_cap() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
-		let small_data = vec![0u8; 100];
-		let small_hash = blake2_256(&small_data);
-		let big_data = vec![1u8; 1500];
-		let big_hash = blake2_256(&big_data);
+		let data = vec![0u8; 1000];
+		let content_hash = blake2_256(&data);
+		let call = Call::enable_auto_renew { content_hash };
 
-		// 1000-byte allowance — fits the small blob but not the big one.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 1000));
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), small_data));
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), big_data));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 10_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		assert!(TransactionStorage::can_enable_auto_renew(&who, small_hash));
-		assert!(!TransactionStorage::can_enable_auto_renew(&who, big_hash));
+		MaxPermanentStorageSize::set(&500);
+		assert!(!TransactionStorage::can_renew(&who, content_hash));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &call),
+			CHAIN_PERMANENT_CAP_REACHED,
+		);
+
+		MaxPermanentStorageSize::set(&u64::MAX);
+		assert!(TransactionStorage::can_renew(&who, content_hash));
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
 	});
 }

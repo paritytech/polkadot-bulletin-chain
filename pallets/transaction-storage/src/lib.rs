@@ -1801,10 +1801,10 @@ pub mod pallet {
 			Self::account_has_active_authorization(who)
 		}
 
-		/// Returns `true` iff a `renew_content_hash(content_hash)` call would
-		/// currently pass transaction validation for `who`.
+		/// Returns `true` iff a `renew(TransactionRef::ContentHash(content_hash))`
+		/// call would currently pass transaction validation for `who`.
 		///
-		/// Mirrors the preconditions enforced by [`Self::renew_content_hash`] +
+		/// Mirrors the preconditions enforced by [`Self::renew`] +
 		/// [`Self::check_authorization`] (`is_renew = true`):
 		///
 		/// - `content_hash` refers to currently-stored data
@@ -1833,30 +1833,6 @@ pub mod pallet {
 			}
 			PermanentStorageUsed::<T>::get().saturating_add(size) <=
 				T::MaxPermanentStorageSize::get()
-		}
-
-		/// Returns `true` iff an `enable_auto_renew(content_hash)` call would
-		/// currently succeed for `who`.
-		///
-		/// Mirrors the preconditions enforced by [`Self::enable_auto_renew`]:
-		///
-		/// - auto-renewal is not already enabled for `content_hash`
-		/// - `content_hash` refers to currently-stored data
-		/// - `who` has an unexpired authorization entry
-		/// - per-account hard cap: `bytes_permanent + size <= bytes_allowance`
-		pub fn can_enable_auto_renew(who: &T::AccountId, content_hash: ContentHash) -> bool {
-			if AutoRenewals::<T>::contains_key(content_hash) {
-				return false;
-			}
-			let Some((block, index)) = TransactionByContentHash::<T>::get(content_hash) else {
-				return false;
-			};
-			let Some(info) = Self::transaction_info(block, index) else { return false };
-			let Some(auth) = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
-			else {
-				return false;
-			};
-			!auth.expired(Self::now()) && auth.extent.has_permanent_capacity(info.size as u64)
 		}
 
 		/// Returns `true` if `who` has an authorization entry that has not yet expired,

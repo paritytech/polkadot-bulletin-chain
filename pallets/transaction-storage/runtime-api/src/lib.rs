@@ -1,9 +1,8 @@
 //! Runtime API for the Bulletin Chain transaction-storage pallet.
 //!
-//! Exposes one summary call and three boolean predicates that mirror the
-//! validation logic of `store`, `renew_content_hash`, and `enable_auto_renew`.
-//! Clients can use these to preview whether a call will be accepted before
-//! signing it.
+//! Exposes one summary call and two boolean predicates that mirror the
+//! validation logic of `store` and `renew`. Clients can use these to preview
+//! whether a call will be accepted before signing it.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -42,12 +41,8 @@ sp_api::decl_runtime_apis! {
 		/// would currently pass transaction validation for `account`.
 		fn can_store(account: AccountId, data_len: u32) -> bool;
 
-		/// Returns `true` iff a `renew_content_hash(content_hash)` call would
-		/// currently pass transaction validation for `account`.
+		/// Returns `true` iff a `renew(TransactionRef::ContentHash(content_hash))`
+		/// call would currently pass transaction validation for `account`.
 		fn can_renew(account: AccountId, content_hash: ContentHash) -> bool;
-
-		/// Returns `true` iff an `enable_auto_renew(content_hash)` call would
-		/// currently succeed for `account`.
-		fn can_enable_auto_renew(account: AccountId, content_hash: ContentHash) -> bool;
 	}
 }
