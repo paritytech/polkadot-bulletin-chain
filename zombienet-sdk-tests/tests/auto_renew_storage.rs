@@ -3836,11 +3836,11 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	nonce += 1;
 	tracing::info!("✓ Renew works before pause");
 
-	// Pause `TransactionStorage::renew`.
-	sudo_tx_pause(client, b"TransactionStorage", b"renew", nonce).await?;
+	// Pause `TransactionStorage::force_renew`.
+	sudo_tx_pause(client, b"TransactionStorage", b"force_renew", nonce).await?;
 	nonce += 1;
 
-	// Renew is now filtered. Submit and assert the dispatch error contains `CallFiltered`.
+	// force_renew is now filtered. Submit and assert dispatch errors with `CallFiltered`.
 	// Cleanup must always run, even if this assertion fails — use a result holder.
 	let filtered_result =
 		submit_renew_expecting_filtered(client, store_block as u32, 0, nonce).await;
@@ -3866,9 +3866,9 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	);
 	tracing::info!("✓ Whitelist held: non-renew call did not enter PausedCalls");
 
-	// Unpause renew, regardless of the assertion result above, so subsequent tests in the
-	// shared harness can renew normally.
-	sudo_tx_unpause(client, b"TransactionStorage", b"renew", nonce).await?;
+	// Unpause force_renew, regardless of the assertion result above, so subsequent tests in
+	// the shared harness can renew normally.
+	sudo_tx_unpause(client, b"TransactionStorage", b"force_renew", nonce).await?;
 	nonce += 1;
 
 	// Now propagate the inner assertion if it failed.

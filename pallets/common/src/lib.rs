@@ -437,7 +437,7 @@ where
 			let is_renew_call = name.0.as_slice() == StoragePallet::name().as_bytes() &&
 				matches!(
 					name.1.as_slice(),
-					b"renew" | b"renew_content_hash" | b"enable_auto_renew" | b"disable_auto_renew"
+					b"renew" | b"force_renew" | b"enable_auto_renew" | b"disable_auto_renew"
 				);
 			!is_renew_call
 		}

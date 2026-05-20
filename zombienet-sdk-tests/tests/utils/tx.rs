@@ -732,8 +732,19 @@ async fn sudo_tx_pause_inner(
 	Ok(())
 }
 
-/// Single-signer `renew(block, index)` from Alice. Waits for inclusion and surfaces
-/// dispatch failures via `wait_for_success`.
+/// Helper: encode a `TransactionRef::Position { block, index }` as a subxt `Value`.
+fn position_entry(block: u32, index: u32) -> Value {
+	Value::named_variant(
+		"Position",
+		[
+			("block".to_string(), Value::u128(block as u128)),
+			("index".to_string(), Value::u128(index as u128)),
+		],
+	)
+}
+
+/// Single-signer `force_renew(Position { block, index })` from Alice. Waits for inclusion
+/// and surfaces dispatch failures via `wait_for_success`.
 pub async fn submit_signed_renew(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
@@ -741,14 +752,10 @@ pub async fn submit_signed_renew(
 	nonce: u64,
 ) -> Result<()> {
 	let signer = dev::alice();
-	let renew_call = tx(
-		"TransactionStorage",
-		"renew",
-		vec![Value::u128(block as u128), Value::u128(index as u128)],
-	);
+	let renew_call = tx("TransactionStorage", "force_renew", vec![position_entry(block, index)]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-	tracing::info!("Submitting renew(block={}, index={}) (nonce={})", block, index, nonce);
+	tracing::info!("Submitting force_renew(block={}, index={}) (nonce={})", block, index, nonce);
 
 	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
 		let progress = client.tx().sign_and_submit_then_watch(&renew_call, &signer, params).await?;
@@ -756,12 +763,13 @@ pub async fn submit_signed_renew(
 		Ok::<_, anyhow::Error>(())
 	})
 	.await
-	.map_err(|_| anyhow!("renew transaction timed out"))??;
+	.map_err(|_| anyhow!("force_renew transaction timed out"))??;
 	Ok(())
 }
 
-/// Submit a `renew(block, index)` signed by Alice and assert it fails with `CallFiltered`
-/// at dispatch (the tx is included in a block, but `BaseCallFilter` rejects the call).
+/// Submit a `force_renew(Position { block, index })` signed by Alice and assert it fails
+/// with `CallFiltered` at dispatch (the tx is included in a block, but `BaseCallFilter`
+/// rejects the call).
 pub async fn submit_renew_expecting_filtered(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
@@ -769,15 +777,11 @@ pub async fn submit_renew_expecting_filtered(
 	nonce: u64,
 ) -> Result<()> {
 	let signer = dev::alice();
-	let renew_call = tx(
-		"TransactionStorage",
-		"renew",
-		vec![Value::u128(block as u128), Value::u128(index as u128)],
-	);
+	let renew_call = tx("TransactionStorage", "force_renew", vec![position_entry(block, index)]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	tracing::info!(
-		"Submitting renew(block={}, index={}) expecting CallFiltered (nonce={})",
+		"Submitting force_renew(block={}, index={}) expecting CallFiltered (nonce={})",
 		block,
 		index,
 		nonce
@@ -788,17 +792,17 @@ pub async fn submit_renew_expecting_filtered(
 		wait_for_in_best_block(progress).await
 	})
 	.await
-	.map_err(|_| anyhow!("renew (expecting CallFiltered) timed out"))?;
+	.map_err(|_| anyhow!("force_renew (expecting CallFiltered) timed out"))?;
 
 	match result {
-		Ok(_) => Err(anyhow!("renew was dispatched while paused; expected CallFiltered")),
+		Ok(_) => Err(anyhow!("force_renew dispatched while paused; expected CallFiltered")),
 		Err(e) => {
 			let msg = format!("{:?}", e);
 			if msg.contains("CallFiltered") {
-				tracing::info!("✓ renew rejected as expected (CallFiltered)");
+				tracing::info!("✓ force_renew rejected as expected (CallFiltered)");
 				Ok(())
 			} else {
-				Err(anyhow!("renew failed, but not with CallFiltered: {}", msg))
+				Err(anyhow!("force_renew failed, but not with CallFiltered: {}", msg))
 			}
 		},
 	}

@@ -36,10 +36,12 @@ fn name(pallet: &[u8], call: &[u8]) -> RuntimeCallNameOf<Runtime> {
 }
 
 const RENEW_CALLS: &[&[u8]] =
-	&[b"renew", b"renew_content_hash", b"enable_auto_renew", b"disable_auto_renew"];
+	&[b"renew", b"force_renew", b"enable_auto_renew", b"disable_auto_renew"];
 
 fn sample_renew_call() -> RuntimeCall {
-	RuntimeCall::TransactionStorage(storage_pallet::Call::renew { block: 0, index: 0 })
+	RuntimeCall::TransactionStorage(storage_pallet::Call::renew {
+		entry: storage_pallet::TransactionRef::Position { block: 0, index: 0 },
+	})
 }
 
 #[test]
