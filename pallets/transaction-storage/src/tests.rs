@@ -2059,9 +2059,9 @@ fn enable_auto_renew_rejects_invalid() {
 			Err(crate::RENEWED_NOT_FOUND.into()),
 		);
 
-		// Enabling without account authorization fails. The snapshot check in
-		// `check_signed` reads `Authorizations[Account(who)]` directly and folds a
-		// missing entry into `AUTHORIZATION_NOT_FOUND`.
+		// Enabling without account authorization fails. `check_authorization`
+		// (with `is_renew = true`) folds both missing and expired authorizations
+		// into `InvalidTransaction::Payment`, matching the one-shot `renew` path.
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
@@ -2071,7 +2071,7 @@ fn enable_auto_renew_rejects_invalid() {
 		let call = Call::enable_auto_renew { content_hash };
 		assert_eq!(
 			TransactionStorage::validate_signed(&unauthorized_user, &call).map(|_| ()),
-			Err(crate::AUTHORIZATION_NOT_FOUND.into()),
+			Err(InvalidTransaction::Payment.into()),
 		);
 	});
 }
@@ -2095,13 +2095,33 @@ fn disable_auto_renew_works() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
 
-		// Another user cannot disable (dispatch-level owner check).
+		// Even the owner cannot disable while the registration is in its prepaid
+		// window: `enable_auto_renew` charges the next cycle up front, and we
+		// don't let that prepayment be reclaimed.
+		assert_noop!(
+			disable_auto_renew_via_extension(owner, content_hash),
+			Error::CannotDisablePrepaidAutoRenewal,
+		);
+
+		// Fire the first cycle to consume the prepayment, after which the
+		// registration sits at `paid = false` and the owner can disable.
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			owner,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid, "cycle should consume prepayment");
+
+		// Non-owner is still rejected after the prepayment is consumed.
 		assert_noop!(
 			disable_auto_renew_via_extension(other, content_hash),
 			Error::NotAutoRenewalOwner,
 		);
 
-		// Owner can disable.
+		// Owner can now disable.
 		assert_ok!(disable_auto_renew_via_extension(owner, content_hash));
 
 		assert!(AutoRenewals::get(content_hash).is_none());
@@ -2112,7 +2132,8 @@ fn disable_auto_renew_works() {
 	});
 }
 
-/// Root bypasses the owner check (governance/cleanup path).
+/// Root bypasses the owner check AND the prepaid-window check (governance/cleanup
+/// path) — even a fresh registration with `paid: true` can be torn down by Root.
 #[test]
 fn disable_auto_renew_root_override() {
 	new_test_ext().execute_with(|| {
@@ -2130,6 +2151,8 @@ fn disable_auto_renew_root_override() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
+		// Registration is still in its prepaid window — Root must override anyway.
+		assert!(AutoRenewals::get(content_hash).unwrap().paid);
 
 		assert_ok!(TransactionStorage::disable_auto_renew(RuntimeOrigin::root(), content_hash));
 		assert!(AutoRenewals::get(content_hash).is_none());
@@ -2157,7 +2180,9 @@ fn disable_auto_renew_fails_if_not_enabled() {
 /// `disable_auto_renew` is feeless: admission is gated in `check_signed` so spam is
 /// bounded even without a token fee. Verify pool-level rejection mirrors the dispatch
 /// errors — unknown content hash returns `AUTO_RENEWAL_NOT_ENABLED`, non-owner returns
-/// `NOT_AUTO_RENEWAL_OWNER`, and the registered owner is admitted.
+/// `NOT_AUTO_RENEWAL_OWNER`, owner during prepaid window returns
+/// `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`, and the owner is admitted only after the
+/// first cycle has consumed the prepayment.
 #[test]
 fn disable_auto_renew_validate_signed_gates_on_ownership() {
 	new_test_ext().execute_with(|| {
@@ -2192,7 +2217,24 @@ fn disable_auto_renew_validate_signed_gates_on_ownership() {
 			Err(crate::NOT_AUTO_RENEWAL_OWNER.into()),
 		);
 
-		// Owner: pool admits.
+		// Owner during the prepaid window: rejected with CANNOT_DISABLE_PREPAID_AUTO_RENEWAL.
+		assert_eq!(
+			TransactionStorage::validate_signed(&owner, &call).map(|_| ()),
+			Err(crate::CANNOT_DISABLE_PREPAID_AUTO_RENEWAL.into()),
+		);
+
+		// Fire the first cycle to consume the prepayment, then re-check pool admission.
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			owner,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+
+		// Owner post-cycle: pool admits.
 		assert_ok!(TransactionStorage::validate_signed(&owner, &call));
 	});
 }
@@ -2282,20 +2324,21 @@ fn auto_renewal_consumes_authorization() {
 		let content_hash = blake2_256(&data);
 
 		// `store` is unsigned, so it does not consume authorization.
-		// `enable_auto_renew` is feeless: consumes only one tx slot at registration
-		// time; `bytes_permanent` is charged at the eventual auto-renewal cycle.
+		// `enable_auto_renew` is feeless but pre-pays the first cycle, mirroring
+		// one-shot `renew`: `bytes_permanent`, the chain-wide
+		// `PermanentStorageUsed`, and one tx slot are all charged at registration.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Registration cost is one tx slot only — no bytes consumed yet.
-		let initial_extent = TransactionStorage::account_authorization_extent(who);
+		// Registration prepaid the first cycle: `bytes_permanent = size` and one
+		// tx slot consumed.
 		assert_eq!(
-			initial_extent,
+			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				bytes_permanent: 2000,
 				bytes_allowance: 6000,
 				transactions: 1,
 				transactions_allowance: 3,
@@ -2303,17 +2346,42 @@ fn auto_renewal_consumes_authorization() {
 		);
 
 		// First auto-renewal cycle fires when `Transactions[1]` ages out at
-		// block 12. Refresh the authorization first since the block-1 grant
-		// expired at block 11; the re-grant resets the consumed counters.
+		// block 12. The block-1 grant expired at block 11, so the re-grant below
+		// replaces it with fresh counters; the cycle then fires free against the
+		// fresh auth thanks to `paid: true`.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
-		// Auto-renewal charged `size` bytes_permanent + 1 tx slot against the
-		// refreshed authorization (which started fresh at 0/0).
-		let after_extent = TransactionStorage::account_authorization_extent(who);
+		// Cycle 1 (prepaid) leaves the fresh authorization untouched.
 		assert_eq!(
-			after_extent,
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 6000,
+				transactions: 0,
+				transactions_allowance: 3,
+			},
+		);
+		// Prepayment is consumed; subsequent cycles charge per-cycle.
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+
+		// Cycle 2: carry `BlockTransactions[12]` → `Transactions[12]` so the
+		// block-12 renew can age out at block 23.
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
+		init_block(23);
+		// The block-12 grant expired at block 22; re-grant fresh counters so the
+		// cycle can charge against a known baseline.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 6000));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
+		// Cycle 2 (paid = false) charged `size` bytes_permanent + 1 tx slot.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_permanent: 2000,
@@ -2333,49 +2401,35 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		let data = vec![0u8; 2000];
 		let content_hash = blake2_256(&data);
 
-		// Authorize generously initially; the second cycle will run against a
-		// refreshed authorization with only 1 op of headroom — enough for one
-		// renewal but not two.
+		// Authorize generously initially so the prepaid registration fits.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 100_000));
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// First auto-renewal cycle fires at block 12 (block-1 entry ages out).
+		// Cycle 1 (prepaid) fires free at block 12. Re-authorize first because
+		// the block-1 grant expired at block 11.
 		init_block(12);
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 2000));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 100_000));
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid, "cycle should consume prepayment");
 
-		// Authorization is now fully consumed on the permanent axis.
-		let extent = TransactionStorage::account_authorization_extent(who);
-		assert_eq!(
-			extent,
-			AuthorizationExtent {
-				bytes: 0,
-				bytes_permanent: 2000,
-				bytes_allowance: 2000,
-				transactions: 1,
-				transactions_allowance: 1,
-			},
-		);
-
-		// Data was renewed into block 12.
-		assert_eq!(TransactionByContentHash::get(content_hash), Some((12, 0)));
-
-		// Simulate on_finalize: move BlockTransactions → Transactions(12)
+		// Carry block-12 renew into Transactions[12] for the next age-out.
 		let block_txs = BlockTransactions::take();
 		if !block_txs.is_empty() {
 			Transactions::insert(12u64, &block_txs);
 		}
 
-		// Next renewal at block 23 (12 + 10 + 1) — should fail.
+		// Cycle 2 at block 23 runs against a refreshed authorization with no
+		// headroom — `bytes_permanent + size > bytes_allowance` fires.
 		init_block(23);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1000));
 		let pending = PendingAutoRenewals::get();
 		assert_eq!(pending.len(), 1, "Should have pending renewal");
 
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 
-		// Should have failed — event emitted and auto-renewal removed
+		// Should have failed — event emitted and auto-renewal removed.
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
 			content_hash,
 			account: who,
@@ -2435,8 +2489,10 @@ fn pending_auto_renewals_populated_only_for_registered_items() {
 
 #[test]
 fn auto_renew_permissionless_transfer() {
-	// Alice stores and enables auto-renew, then disables. Bob enables instead.
-	// Anyone can choose to keep data alive on Bulletin, permissionlessly.
+	// Alice stores and enables auto-renew, waits out the prepaid window so the
+	// first cycle consumes her prepayment, then disables. Bob enables instead.
+	// Anyone can take over keeping data alive on Bulletin, permissionlessly —
+	// but only after the original registrant's pre-paid cycle has fired.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let alice = 1;
@@ -2451,25 +2507,52 @@ fn auto_renew_permissionless_transfer() {
 			10,
 			100_000
 		));
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
 		run_to_block(2, || None);
 
-		// Alice enables auto-renew (feeless registration — no `BlockTransactions`
-		// write).
+		// Alice enables auto-renew (prepays the first cycle).
 		assert_ok!(enable_auto_renew_via_extension(alice, content_hash));
 		let renewal = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(renewal.account, alice);
+		assert!(renewal.paid);
 
-		// Alice disables auto-renew.
+		// Alice cannot disable during the prepaid window.
+		assert_noop!(
+			disable_auto_renew_via_extension(alice, content_hash),
+			Error::CannotDisablePrepaidAutoRenewal,
+		);
+
+		// Fire the first cycle to consume Alice's prepayment.
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+		// Carry the cycle-12 renew out of `BlockTransactions` so the next
+		// `enable_auto_renew` can resolve the `(12, 0)` index against
+		// `Transactions[12]` (mirrors what `on_finalize` does in a live chain).
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
+
+		// Alice can now disable.
 		assert_ok!(disable_auto_renew_via_extension(alice, content_hash));
 		assert!(AutoRenewals::get(content_hash).is_none());
 
-		// Bob authorizes and enables auto-renew for the same content.
+		// Bob authorizes and enables auto-renew for the same content. The renew
+		// at block 12 made `(12, 0)` the latest `TransactionByContentHash` entry,
+		// so `enable_auto_renew` resolves cleanly.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000));
 		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
 
 		let renewal = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(renewal.account, bob, "Bob should now own the auto-renewal");
+		assert!(renewal.paid, "Bob's registration prepays his first cycle");
 
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::RenewalEnabled {
 			content_hash,
@@ -4209,8 +4292,9 @@ fn enable_auto_renew_rejects_already_enabled() {
 	});
 }
 
-/// Expired authorization rejects at the extension's snapshot check with
-/// `AUTHORIZATION_NOT_FOUND` (`expired()` is `now >= expiration`).
+/// Expired authorization rejects through `check_authorization` with
+/// `InvalidTransaction::Payment` — same path one-shot `renew` and `force_renew`
+/// take when `expired()` is `now >= expiration`.
 #[test]
 fn enable_auto_renew_rejects_expired_authorization() {
 	new_test_ext().execute_with(|| {
@@ -4229,7 +4313,7 @@ fn enable_auto_renew_rejects_expired_authorization() {
 		let call = Call::enable_auto_renew { content_hash };
 		assert_eq!(
 			TransactionStorage::validate_signed(&who, &call).map(|_| ()),
-			Err(crate::AUTHORIZATION_NOT_FOUND.into()),
+			Err(InvalidTransaction::Payment.into()),
 		);
 	});
 }
@@ -4263,6 +4347,10 @@ fn enable_auto_renew_rejects_insufficient_capacity() {
 /// in the renewal block is a no-op for the in-flight cycle — the caller still sees one
 /// final `DataAutoRenewed` event. Subsequent cycles are correctly suppressed because
 /// `AutoRenewals[hash]` is gone for the next on_initialize sweep.
+///
+/// This is only reachable once the registration has cleared its prepaid window
+/// (`disable_auto_renew` rejects the owner while `paid: true`), so we exercise it
+/// on cycle 2.
 #[test]
 fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 	new_test_ext().execute_with(|| {
@@ -4276,11 +4364,21 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Renewal block: on_initialize captures the entry into PendingAutoRenewals.
+		// Cycle 1: fire to consume the prepayment so the owner can `disable` later.
 		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
+
+		// Cycle 2 block: on_initialize captures the block-12 renewal into pending.
+		init_block(23);
 		assert_eq!(PendingAutoRenewals::get().len(), 1);
 
-		// Refresh authorization (original expired at block 11).
+		// Refresh authorization for cycle 2 (block-12 grant expired at block 22).
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 
 		// Disable in the normal section — after on_initialize, before the inherent.
@@ -4302,7 +4400,8 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 /// `do_process_auto_renewals` emits `AutoRenewalFailed` when `check_authorization`
 /// returns `CHAIN_PERMANENT_CAP_REACHED` — i.e. the chain-wide `PermanentStorageUsed`
 /// counter would exceed `MaxPermanentStorageSize` — even if the per-account budget is
-/// fine.
+/// fine. The chain-wide gate only applies on cycles that actually charge, so this
+/// scenario is reachable on cycle 2 (the first cycle is prepaid at registration).
 #[test]
 fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 	new_test_ext().execute_with(|| {
@@ -4312,6 +4411,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		let content_hash = blake2_256(&data);
 
 		// Per-account budget comfortably large — chain-wide cap is the only gate.
+		// Pick a cap that fits the registration's prepayment but not a second cycle.
 		MaxPermanentStorageSize::set(&3000);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
@@ -4322,7 +4422,9 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
 
+		// Cycle 1 (prepaid) fires free at block 12 — chain-wide counter is not bumped.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
@@ -4330,8 +4432,21 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 			10,
 			1_000_000,
 		));
-		// Push the chain-wide counter just under cap so the 2000-byte renewal overshoots
-		// (2000 + 2000 > 3000).
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
+
+		// Cycle 2 at block 23 would charge another `size` chain-wide; overshoot the cap.
+		init_block(23);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who,
+			10,
+			1_000_000,
+		));
 		PermanentStorageUsed::put(2000);
 
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
@@ -4389,9 +4504,10 @@ fn auto_renew_obeys_updated_retention_period() {
 }
 
 /// `enable_auto_renew` is signed by the *registrant*, who may not be the storer.
-/// `do_process_auto_renewals` consumes the registrant's authorization for each cycle,
-/// not the storer's. Verifies: Bob registers auto-renew on data Alice stored, and Bob's
-/// `bytes_permanent` is consumed.
+/// The prepayment at registration (and every subsequent cycle's charge) consume
+/// the registrant's authorization, not the storer's. Verifies: Bob registers
+/// auto-renew on data Alice stored, and Bob's `bytes_permanent` is the one that
+/// moves — both at registration time and on cycle 2.
 #[test]
 fn auto_renew_consumes_registrant_authorization_not_storer() {
 	new_test_ext().execute_with(|| {
@@ -4411,10 +4527,14 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		// Bob — not Alice — enables auto-renew.
+		// Bob — not Alice — enables auto-renew. The prepayment lands on Bob.
 		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
 		assert_eq!(AutoRenewals::get(content_hash).unwrap().account, bob);
+		assert_eq!(TransactionStorage::account_authorization_extent(alice).bytes_permanent, 0);
+		assert_eq!(TransactionStorage::account_authorization_extent(bob).bytes_permanent, 2000);
 
+		// Cycle 1 (prepaid) fires free at block 12 — re-authorize both so the
+		// chain state is clean, but the cycle won't charge anyone.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
@@ -4424,8 +4544,23 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		));
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+		let block_txs = BlockTransactions::take();
+		if !block_txs.is_empty() {
+			Transactions::insert(12u64, &block_txs);
+		}
 
-		// Alice's `bytes_permanent` is untouched; Bob's was consumed.
+		// Cycle 2 at block 23 charges per-cycle: again the registrant (Bob) pays.
+		init_block(23);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
 		assert_eq!(TransactionStorage::account_authorization_extent(alice).bytes_permanent, 0);
 		assert_eq!(TransactionStorage::account_authorization_extent(bob).bytes_permanent, 2000);
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
@@ -4439,6 +4574,13 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 /// `refresh_account_authorization` only extends `expiration`. If `bytes_permanent` is
 /// already at or near the per-account cap, refreshing does NOT reset counters, so the
 /// next auto-renew cycle still fails on the per-account axis (not on expiration).
+///
+/// To exercise this, we need to drive `bytes_permanent` close to the cap before
+/// the cycle under test. `enable_auto_renew` pre-pays one cycle's worth at
+/// registration — that registration charge already moves `bytes_permanent` to
+/// `size`. The first cycle fires free (prepaid). The second cycle then has to
+/// charge against an authorization whose `bytes_permanent` was preserved by
+/// `refresh`, not reset.
 #[test]
 fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 	new_test_ext().execute_with(|| {
@@ -4453,33 +4595,45 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Cycle 1: succeeds, `bytes_permanent → 2000`. Re-auth resets the fresh expired
-		// entry (this overwrites the original since AuthorizationPeriod = 10 expired at
-		// block 11), but new bytes_allowance is still 3000.
-		init_block(12);
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 3000));
-		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
-		let after_cycle_1 = TransactionStorage::account_authorization_extent(who);
-		assert_eq!(after_cycle_1.bytes_permanent, 2000);
-		assert!(AutoRenewals::get(content_hash).is_some());
+		// Registration prepaid the first cycle: `bytes_permanent → 2000`.
+		let after_register = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(after_register.bytes_permanent, 2000);
 
-		// Carry BlockTransactions[12] → Transactions[12].
+		// Refresh at block 11 (the original auth's expiration boundary), extending
+		// expiration to 21 so block 12's free cycle and the subsequent paid cycle
+		// at block 23 both see an unexpired auth — but counters must NOT reset.
+		init_block(11);
+		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who,));
+		let after_refresh = TransactionStorage::account_authorization_extent(who);
+		assert_eq!(after_refresh, after_register, "refresh must not touch the extent");
+
+		// Cycle 1 (prepaid) fires free at block 12; carry the renew into
+		// `Transactions[12]` so it can age out for cycle 2.
+		init_block(12);
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).bytes_permanent,
+			2000,
+			"prepaid cycle does not charge again",
+		);
 		let block_txs = BlockTransactions::take();
 		if !block_txs.is_empty() {
 			Transactions::insert(12u64, &block_txs);
 		}
 
-		// Refresh at block 22 (the re-auth's expiration boundary), extending expiration
-		// to 32 so block 23's renewal sees an unexpired auth — but counters must NOT
-		// reset.
-		init_block(22);
+		// Refresh again at block 21 to keep the auth alive past block 23.
+		init_block(21);
 		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who,));
-		let after_refresh = TransactionStorage::account_authorization_extent(who);
-		assert_eq!(after_refresh, after_cycle_1, "refresh must not touch the extent");
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).bytes_permanent,
+			2000,
+			"second refresh must also leave the extent untouched",
+		);
 
-		// Cycle 2 at block 23: per-account cap (3000) cannot fit another 2000-byte
-		// renewal on top of the consumed 2000 → AutoRenewalFailed on the per-account
-		// axis (not on expiration — refresh kept it alive).
+		// Cycle 2 at block 23 must charge another 2000 against a per-account cap
+		// of 3000 already at 2000 → AutoRenewalFailed on the per-account axis (not
+		// on expiration — refresh kept the auth alive).
 		init_block(23);
 		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
