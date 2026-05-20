@@ -1373,14 +1373,15 @@ pub mod pallet {
 						// Recurring: consume the prepayment so subsequent cycles
 						// charge per-cycle, and unblock `disable_auto_renew` for the
 						// owner now that the prepaid renewal has been delivered.
-						AutoRenewals::<T>::insert(
-							content_hash,
-							RenewalData {
-								account: renewal_data.account.clone(),
-								recurring: true,
-								paid: false,
-							},
-						);
+						// `mutate` (not `insert`) so a Root `disable_auto_renew`
+						// executed earlier in the same block — between the
+						// `on_initialize` queue and this inherent — is not silently
+						// re-armed by a fresh insert.
+						AutoRenewals::<T>::mutate(content_hash, |entry| {
+							if let Some(data) = entry {
+								data.paid = false;
+							}
+						});
 					}
 					Self::deposit_event(Event::DataAutoRenewed {
 						index: new_index,
