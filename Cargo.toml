@@ -81,6 +81,7 @@ pallet-sudo = { version = "47.0.0", default-features = false }
 pallet-timestamp = { version = "46.0.0", default-features = false }
 pallet-transaction-payment = { version = "47.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "47.0.0", default-features = false }
+pallet-tx-pause = { version = "28.0.0", default-features = false }
 
 pallet-xcm = { version = "27.0.0", default-features = false }
 xcm = { version = "23.0.0", package = "staging-xcm", default-features = false }

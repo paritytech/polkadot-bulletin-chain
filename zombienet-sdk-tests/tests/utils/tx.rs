@@ -680,6 +680,134 @@ pub async fn disable_auto_renew(
 	Ok(())
 }
 
+/// Submit `sudo(TxPause::pause((pallet, call)))` signed by Alice. The `full_name` is encoded
+/// as a `(BoundedVec<u8>, BoundedVec<u8>)` tuple matching `pallet_tx_pause::RuntimeCallNameOf`.
+pub async fn sudo_tx_pause(
+	client: &OnlineClient<SubstrateConfig>,
+	pallet: &[u8],
+	call: &[u8],
+	nonce: u64,
+) -> Result<()> {
+	sudo_tx_pause_inner(client, pallet, call, nonce, "pause").await
+}
+
+/// Symmetric counterpart to [`sudo_tx_pause`].
+pub async fn sudo_tx_unpause(
+	client: &OnlineClient<SubstrateConfig>,
+	pallet: &[u8],
+	call: &[u8],
+	nonce: u64,
+) -> Result<()> {
+	sudo_tx_pause_inner(client, pallet, call, nonce, "unpause").await
+}
+
+async fn sudo_tx_pause_inner(
+	client: &OnlineClient<SubstrateConfig>,
+	pallet: &[u8],
+	call: &[u8],
+	nonce: u64,
+	method: &'static str,
+) -> Result<()> {
+	let signer = dev::alice();
+	let full_name = Value::unnamed_composite([Value::from_bytes(pallet), Value::from_bytes(call)]);
+	let inner = tx("TxPause", method, vec![full_name]);
+	let sudo_call = tx("Sudo", "sudo", vec![inner.into_value()]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tracing::info!(
+		"Submitting sudo(TxPause::{}((pallet={}, call={}))), nonce={}",
+		method,
+		core::str::from_utf8(pallet).unwrap_or("<non-utf8>"),
+		core::str::from_utf8(call).unwrap_or("<non-utf8>"),
+		nonce,
+	);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&sudo_call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("sudo TxPause::{} timed out", method))??;
+	Ok(())
+}
+
+/// Helper: encode a `TransactionRef::Position { block, index }` as a subxt `Value`.
+fn position_entry(block: u32, index: u32) -> Value {
+	Value::named_variant(
+		"Position",
+		[
+			("block".to_string(), Value::u128(block as u128)),
+			("index".to_string(), Value::u128(index as u128)),
+		],
+	)
+}
+
+/// Single-signer `force_renew(Position { block, index })` from Alice. Waits for inclusion
+/// and surfaces dispatch failures via `wait_for_success`.
+pub async fn submit_signed_renew(
+	client: &OnlineClient<SubstrateConfig>,
+	block: u32,
+	index: u32,
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let renew_call = tx("TransactionStorage", "force_renew", vec![position_entry(block, index)]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tracing::info!("Submitting force_renew(block={}, index={}) (nonce={})", block, index, nonce);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&renew_call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("force_renew transaction timed out"))??;
+	Ok(())
+}
+
+/// Submit `force_renew` signed by Alice and assert it's rejected at dispatch with
+/// `CallFiltered`. The tx is included in a block, `BaseCallFilter` rejects it; the nonce
+/// is consumed.
+pub async fn submit_renew_expecting_filtered(
+	client: &OnlineClient<SubstrateConfig>,
+	block: u32,
+	index: u32,
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let renew_call = tx("TransactionStorage", "force_renew", vec![position_entry(block, index)]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tracing::info!(
+		"Submitting force_renew(block={}, index={}) expecting CallFiltered (nonce={})",
+		block,
+		index,
+		nonce
+	);
+
+	let result = tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&renew_call, &signer, params).await?;
+		wait_for_in_best_block(progress).await
+	})
+	.await
+	.map_err(|_| anyhow!("force_renew (expecting CallFiltered) timed out"))?;
+
+	match result {
+		Ok(_) => Err(anyhow!("force_renew succeeded while paused; expected CallFiltered")),
+		Err(e) => {
+			let msg = format!("{:?}", e);
+			if msg.contains("CallFiltered") {
+				tracing::info!("✓ force_renew rejected at dispatch (CallFiltered)");
+				Ok(())
+			} else {
+				Err(anyhow!("force_renew failed unexpectedly: {}", msg))
+			}
+		},
+	}
+}
+
 pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
 	let alice_account_id = dev::alice().public_key().to_account_id();

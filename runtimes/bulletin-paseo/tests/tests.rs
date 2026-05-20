@@ -22,17 +22,22 @@ use bulletin_paseo_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
-	UncheckedExtrinsic,
+	TxPauseMaxNameLen, UncheckedExtrinsic,
 };
 use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use frame_support::{
-	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
+	assert_err, assert_noop, assert_ok,
+	dispatch::GetDispatchInfo,
+	pallet_prelude::Hooks,
+	traits::{Contains, Get, GetCallMetadata},
+	BoundedVec,
 };
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin, TransactionRef,
 };
+use pallet_tx_pause::{Error as TxPauseError, RuntimeCallNameOf};
 use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
@@ -2109,4 +2114,143 @@ fn non_sudo_cannot_add_authorizer() {
 				.expect("validation passes (balance present)");
 			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin));
 		});
+}
+
+type TxPauseWhitelist = bulletin_pallets_common::TxPauseWhitelist<Runtime, TransactionStorage>;
+
+const RENEW_CALLS: &[&[u8]] =
+	&[b"renew", b"force_renew", b"enable_auto_renew", b"disable_auto_renew"];
+
+fn pause_call_name(pallet: &[u8], call: &[u8]) -> RuntimeCallNameOf<Runtime> {
+	let max = TxPauseMaxNameLen::get() as usize;
+	(
+		BoundedVec::try_from(pallet.to_vec())
+			.unwrap_or_else(|_| panic!("pallet name '{pallet:?}' > MaxNameLen={max}")),
+		BoundedVec::try_from(call.to_vec())
+			.unwrap_or_else(|_| panic!("call name '{call:?}' > MaxNameLen={max}")),
+	)
+}
+
+fn sample_renew_call() -> RuntimeCall {
+	RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+		entry: TransactionRef::Position { block: 0, index: 0 },
+	})
+}
+
+#[test]
+fn tx_pause_renew_call_metadata_fits_in_max_name_len() {
+	let max = TxPauseMaxNameLen::get() as usize;
+	let call = sample_renew_call();
+	let meta = call.get_call_metadata();
+	assert!(meta.pallet_name.len() <= max, "pallet '{}' > MaxNameLen", meta.pallet_name);
+	assert!(meta.function_name.len() <= max, "call '{}' > MaxNameLen", meta.function_name);
+	assert_eq!(meta.pallet_name, "TransactionStorage");
+	for call in RENEW_CALLS {
+		assert!(call.len() <= max);
+	}
+}
+
+#[test]
+fn tx_pause_whitelist_blocks_every_non_renew_call() {
+	for pallet in [&b"System"[..], b"Sudo", b"Balances", b"TxPause", b"PolkadotXcm", b"Utility"] {
+		assert!(
+			TxPauseWhitelist::contains(&pause_call_name(pallet, b"some_call")),
+			"pallet {:?} must be whitelisted",
+			core::str::from_utf8(pallet).unwrap()
+		);
+	}
+	for call in [&b"store"[..], b"add_authorizer", b"apply_block_inherents"] {
+		assert!(
+			TxPauseWhitelist::contains(&pause_call_name(b"TransactionStorage", call)),
+			"TransactionStorage.{} must be whitelisted",
+			core::str::from_utf8(call).unwrap()
+		);
+	}
+}
+
+#[test]
+fn tx_pause_whitelist_allows_renew_family_to_be_paused() {
+	for call in RENEW_CALLS {
+		assert!(
+			!TxPauseWhitelist::contains(&pause_call_name(b"TransactionStorage", call)),
+			"TransactionStorage.{} must be pausable",
+			core::str::from_utf8(call).unwrap()
+		);
+	}
+}
+
+#[test]
+fn tx_pause_pause_renew_via_root_filters_dispatch() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let call = sample_renew_call();
+			assert!(
+				<Runtime as frame_system::Config>::BaseCallFilter::contains(&call),
+				"renew should dispatch when not paused"
+			);
+
+			assert_ok!(pallet_tx_pause::Pallet::<Runtime>::pause(
+				RuntimeOrigin::root(),
+				pause_call_name(b"TransactionStorage", b"renew"),
+			));
+
+			assert!(
+				!<Runtime as frame_system::Config>::BaseCallFilter::contains(&call),
+				"BaseCallFilter must reject renew after pause"
+			);
+
+			assert_ok!(pallet_tx_pause::Pallet::<Runtime>::unpause(
+				RuntimeOrigin::root(),
+				pause_call_name(b"TransactionStorage", b"renew"),
+			));
+			assert!(<Runtime as frame_system::Config>::BaseCallFilter::contains(&call));
+		});
+}
+
+#[test]
+fn tx_pause_pause_non_renew_is_rejected_as_unpausable() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			for (pallet, call) in [
+				(&b"System"[..], &b"set_storage"[..]),
+				(b"Sudo", b"sudo"),
+				(b"Balances", b"transfer_keep_alive"),
+				(b"TransactionStorage", b"store"),
+			] {
+				assert_noop!(
+					pallet_tx_pause::Pallet::<Runtime>::pause(
+						RuntimeOrigin::root(),
+						pause_call_name(pallet, call),
+					),
+					TxPauseError::<Runtime>::Unpausable
+				);
+			}
+		});
+}
+
+#[test]
+fn tx_pause_pause_requires_root_origin() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let signed: RuntimeOrigin =
+				frame_system::RawOrigin::Signed(AccountId::new([1u8; 32])).into();
+			assert!(pallet_tx_pause::Pallet::<Runtime>::pause(
+				signed,
+				pause_call_name(b"TransactionStorage", b"renew"),
+			)
+			.is_err());
+		});
+}
+
+#[test]
+fn tx_pause_paused_call_name_round_trip_fits_storage() {
+	// Belt-and-braces: encode a `RuntimeCallNameOf` for every renew variant so the
+	// `BoundedVec<u8, MaxNameLen>` conversion can't silently regress if MaxNameLen shrinks.
+	let max = TxPauseMaxNameLen::get() as usize;
+	for call in RENEW_CALLS {
+		let key = pause_call_name(b"TransactionStorage", call);
+		let encoded = key.encode();
+		assert!(!encoded.is_empty());
+		assert!(call.len() <= max);
+	}
 }
