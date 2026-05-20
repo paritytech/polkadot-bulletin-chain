@@ -100,7 +100,7 @@ export function AccountSummaryCard({ className }: { className?: string }) {
           ) : authorization ? (
             <>
               <div>
-                <p className="text-sm font-medium mb-2">Used</p>
+                <p className="text-sm font-medium mb-2">Storage Used</p>
                 <div className="grid grid-cols-3 gap-4">
                   <Stat label="Transactions" value={formatNumber(authorization.used.transactions)} />
                   <Stat label="Ephemeral" value={formatBytes(authorization.used.bytesEphemeral)} />

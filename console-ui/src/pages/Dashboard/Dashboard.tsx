@@ -10,7 +10,6 @@ import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
 import { useChainState, useApi, StorageType } from "@/state/chain.state";
 import {
   extentAllowanceBytes,
-  extentAllowanceTransactions,
   type RawTransactionInfo,
 } from "@/state/storage.state";
 import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
@@ -248,6 +247,22 @@ function UsageCard() {
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [palletError, setPalletError] = useState<string | null>(null);
+  const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    api.query.TransactionStorage.RetentionPeriod.getValue()
+      .then((p: bigint | number) => {
+        if (!cancelled) setRetentionPeriod(Number(p));
+      })
+      .catch(() => {
+        /* surfaced via palletError from the main effect */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   useEffect(() => {
     if (!api) return;
@@ -292,7 +307,7 @@ function UsageCard() {
             const extent = value.extent;
             const bytesAllowance = extentAllowanceBytes(extent);
             if (keyArgs[0].type === "Account") {
-              userAuths.count += Number(extentAllowanceTransactions(extent));
+              userAuths.count++;
               userAuths.bytes += bytesAllowance;
             } else if (keyArgs[0].type === "Preimage") {
               preimageAuths.count++;
@@ -360,7 +375,14 @@ function UsageCard() {
         ) : (
           <div className="space-y-4">
             <div>
-              <p className="text-sm font-medium mb-2">Ephemeral</p>
+              <p className="text-sm font-medium mb-2">
+                Ephemeral
+                {retentionPeriod !== null && (
+                  <span className="text-muted-foreground font-normal">
+                    {" "}(RetentionPeriod: {formatNumber(retentionPeriod)})
+                  </span>
+                )}
+              </p>
               <div className="grid grid-cols-2 gap-4">
                 <TotalsStat label="Transactions" value={formatNumber(stats.ephemeral.count)} />
                 <TotalsStat label="Bytes" value={formatBytes(stats.ephemeral.bytes)} />
@@ -383,22 +405,18 @@ function UsageCard() {
               <p className="text-sm font-medium mb-2">Authorizations</p>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Users</p>
-                  <TotalsStat
-                    label="Transactions"
-                    value={formatNumber(stats.userAuths.count)}
-                  />
+                  <p className="text-xs text-muted-foreground">
+                    Users ({formatNumber(stats.userAuths.count)})
+                  </p>
                   <TotalsStat
                     label="Bytes"
                     value={formatBytes(stats.userAuths.bytes)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Preimages</p>
-                  <TotalsStat
-                    label="Count"
-                    value={formatNumber(stats.preimageAuths.count)}
-                  />
+                  <p className="text-xs text-muted-foreground">
+                    Preimages ({formatNumber(stats.preimageAuths.count)})
+                  </p>
                   <TotalsStat
                     label="Bytes"
                     value={formatBytes(stats.preimageAuths.bytes)}
