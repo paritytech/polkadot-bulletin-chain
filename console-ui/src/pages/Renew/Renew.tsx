@@ -353,10 +353,10 @@ export function Renew() {
     setResolveResults((prev) => ({ ...prev, checkedCids: new Set() }));
   };
 
-  // Renew each selected CID with its own signed extrinsic. The chain's
-  // ValidateStorageCalls extension rejects store/renew wrapped in Utility
-  // batches (`pallets/transaction-storage/src/extension.rs:244`), so batching
-  // isn't an option — sequential per-CID renewals are required.
+  // Renew all selected chunks in a single Utility.batch_all extrinsic. The
+  // runtime's CallInspector recognizes batch/batch_all/force_batch as wrappers
+  // for renew calls and validates per-call authorization. Capped at
+  // MaxBlockTransactions (512) per batch.
   const handleBatchRenew = useCallback(async () => {
     if (!api || !selectedAccount?.polkadotSigner) return;
 
@@ -365,47 +365,67 @@ export function Renew() {
     );
     if (targets.length === 0) return;
 
+    const MAX_RENEWS_PER_BATCH = 512;
+    if (targets.length > MAX_RENEWS_PER_BATCH) {
+      setBatchError(
+        `Selected ${targets.length} chunks but the maximum per batch is ${MAX_RENEWS_PER_BATCH}. ` +
+          `Deselect some chunks and renew in multiple steps.`,
+      );
+      return;
+    }
+
     setIsBatchRenewing(true);
     setBatchError(null);
     setBatchResults([]);
-    setBatchProgress(null);
+    setBatchProgress(`Submitting batch renew (${targets.length} chunks)...`);
 
-    const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
-    const results: BatchRenewResult[] = [];
+    try {
+      const calls = targets.map(
+        (t) =>
+          api.tx.TransactionStorage.renew({
+            block: t.location!.blockNumber,
+            index: t.location!.index,
+          }).decodedCall,
+      );
 
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i]!;
-      const cidStr = t.cidString;
-      const shortCid =
-        cidStr.length > 20 ? `${cidStr.slice(0, 10)}...${cidStr.slice(-6)}` : cidStr;
-      setBatchProgress(`Renewing ${i + 1} of ${targets.length}: ${shortCid}`);
+      const batchTx = api.tx.Utility.batch_all({ calls });
 
-      try {
-        // Per-tx InBlock (not Finalized): each renew is idempotent and a
-        // reorg-dropped one can simply be retried. Saves ~6s per CID.
-        const result = await bulletinClient
-          .renew(t.location!.blockNumber, t.location!.index)
-          .withCallback(handleProgress)
-          .withWaitFor(WaitFor.InBlock)
-          .send();
+      const result = await batchTx.signAndSubmit(selectedAccount.polkadotSigner);
 
-        const renewedAtBlock = result.blockNumber ?? currentBlockNumber ?? 0;
-        const newExpiresAt = renewedAtBlock + (retentionPeriod ?? 0);
-        results.push({ cidString: cidStr, success: true, newExpiresAt });
-      } catch (err) {
-        console.error(`Failed to renew ${cidStr}:`, err);
-        results.push({
-          cidString: cidStr,
-          success: false,
-          error: err instanceof Error ? err.message : "Renewal failed",
-        });
+      if (!result.ok) {
+        const errStr =
+          result.dispatchError !== undefined
+            ? JSON.stringify(result.dispatchError)
+            : "Batch renewal reverted";
+        throw new Error(errStr);
       }
-    }
 
-    setBatchResults(results);
-    setIsBatchRenewing(false);
-    setBatchProgress(null);
-    setTxStatus(null);
+      const renewedAtBlock = result.block?.number ?? currentBlockNumber ?? 0;
+      const newExpiresAt = renewedAtBlock + (retentionPeriod ?? 0);
+
+      setBatchResults(
+        targets.map((t) => ({
+          cidString: t.cidString,
+          success: true,
+          newExpiresAt,
+        })),
+      );
+    } catch (err) {
+      console.error("Batch renewal failed:", err);
+      const errorMessage = err instanceof Error ? err.message : "Renewal failed";
+      setBatchError(errorMessage);
+      setBatchResults(
+        targets.map((t) => ({
+          cidString: t.cidString,
+          success: false,
+          error: errorMessage,
+        })),
+      );
+    } finally {
+      setIsBatchRenewing(false);
+      setBatchProgress(null);
+      setTxStatus(null);
+    }
   }, [
     api,
     selectedAccount,
@@ -413,8 +433,6 @@ export function Renew() {
     checkedCids,
     currentBlockNumber,
     retentionPeriod,
-    createBulletinClient,
-    handleProgress,
   ]);
 
   const canRenew =

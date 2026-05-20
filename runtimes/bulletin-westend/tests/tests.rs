@@ -1270,10 +1270,10 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		});
 }
 
-/// `renew` is allowed as a direct extrinsic (consuming the caller's account allowance)
-/// but rejected when nested inside utility/sudo wrappers.
+/// `force_renew` is allowed directly and inside `Utility::batch` / `batch_all` /
+/// `force_batch`. It is rejected inside any other wrapper variant.
 #[test]
-fn renew_must_be_direct_extrinsic() {
+fn force_renew_direct_and_batch_allowed() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
@@ -1292,9 +1292,216 @@ fn renew_must_be_direct_extrinsic() {
 		let who: AccountId = account.to_account_id();
 		let data = vec![42u8; 100];
 
-		// Fund Alice so utility::batch wrappers (not feeless) reach the wrapper rejection
-		// in ValidateStorageCalls instead of failing earlier on payment. Direct store and
-		// renew are themselves feeless, so the funding is irrelevant for those calls.
+		// Fund Alice so utility-wrapper extrinsics (not feeless) clear the payment
+		// check and reach the ValidateStorageCalls logic.
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+		// Allowance for store + four renews (direct + batch + batch_all + force_batch).
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			0,
+			data.len() as u64 * 4
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
+		));
+		let stored_block = System::block_number();
+		advance_block();
+
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
+		});
+
+		// Direct force_renew succeeds with the existing account authorization.
+		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
+		advance_block();
+
+		// Each batch variant accepts a single force_renew.
+		for (wrapped, name) in [
+			(
+				RuntimeCall::Utility(pallet_utility::Call::batch {
+					calls: vec![renew_call.clone()],
+				}),
+				"utility::batch",
+			),
+			(
+				RuntimeCall::Utility(pallet_utility::Call::batch_all {
+					calls: vec![renew_call.clone()],
+				}),
+				"utility::batch_all",
+			),
+			(
+				RuntimeCall::Utility(pallet_utility::Call::force_batch {
+					calls: vec![renew_call.clone()],
+				}),
+				"utility::force_batch",
+			),
+		] {
+			let result = construct_and_apply_extrinsic(Some(account.pair()), wrapped);
+			assert!(result.is_ok(), "renew via {name}: validation failed: {result:?}");
+			assert!(result.unwrap().is_ok(), "renew via {name}: dispatch failed",);
+			advance_block();
+		}
+
+		// All four renews consumed permanent allowance.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who.clone()),
+			AuthorizationExtent {
+				bytes: 100,
+				bytes_permanent: 400,
+				bytes_allowance: 400,
+				transactions: 5,
+				transactions_allowance: 0,
+			},
+		);
+
+		// as_derivative is not a batch — renew inside it must still be rejected.
+		let as_derivative_call = RuntimeCall::Utility(pallet_utility::Call::as_derivative {
+			index: 0,
+			call: Box::new(renew_call.clone()),
+		});
+		assert_eq!(
+			construct_and_apply_extrinsic(Some(account.pair()), as_derivative_call),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+			"renew via utility::as_derivative must be rejected",
+		);
+
+		// sudo_as: passes validation (sudo not inspected) but fails at dispatch
+		// because no sudo key is configured.
+		let sudo_as_result = construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
+				who: sp_runtime::MultiAddress::Id(who),
+				call: Box::new(renew_call),
+			}),
+		);
+		assert!(sudo_as_result.is_ok(), "sudo_as should pass validation");
+		assert!(sudo_as_result.unwrap().is_err(), "sudo_as should fail at dispatch");
+	});
+}
+
+/// A single `batch_all` containing multiple `force_renew`s consumes one renew's worth
+/// of permanent allowance per inner call.
+#[test]
+fn batch_of_multiple_force_renews_consumes_per_call_auth() {
+	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
+		retention_period: 100,
+		byte_fee: 0,
+		entry_fee: 0,
+		account_authorizations: vec![],
+		preimage_authorizations: vec![],
+		allowed_authorizers: vec![],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![42u8; 100];
+
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+		// Three renews + one store.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			0,
+			data.len() as u64 * 3
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
+		));
+		let stored_block = System::block_number();
+		advance_block();
+
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
+		});
+
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::Utility(pallet_utility::Call::batch_all {
+				calls: vec![renew_call.clone(), renew_call.clone(), renew_call],
+			}),
+		));
+
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent {
+				bytes: 100,
+				bytes_permanent: 300,
+				bytes_allowance: 300,
+				transactions: 4,
+				transactions_allowance: 0,
+			},
+		);
+	});
+}
+
+/// A batch with more renews than the per-block cap can never fit a block, so
+/// it must be rejected at validate time.
+#[test]
+fn batch_exceeding_max_block_transactions_rejected() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			advance_block();
+			let account = Sr25519Keyring::Alice;
+			let who: AccountId = account.to_account_id();
+
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+
+			// Use a content-hash variant so we don't need to construct a real
+			// stored transaction — the wrapper-cap check fires before validate_signed
+			// inspects the content hash.
+			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				entry: TransactionRef::ContentHash([0u8; 32]),
+			});
+
+			let max =
+				<Runtime as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions::get(
+				);
+			let too_many: Vec<RuntimeCall> = (0..=max).map(|_| renew_call.clone()).collect();
+
+			assert_eq!(
+				construct_and_apply_extrinsic(
+					Some(account.pair()),
+					RuntimeCall::Utility(pallet_utility::Call::batch_all { calls: too_many }),
+				),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)),
+			);
+		});
+}
+
+/// Mixing renew with management calls (authorize_account) in the same wrapper
+/// is rejected — the outer origin would have to be rewritten to AuthorizedBatch
+/// for renew, but management calls need a plain Signed origin.
+#[test]
+fn mixed_batch_renew_and_authorize_account_rejected() {
+	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
+		retention_period: 100,
+		byte_fee: 0,
+		entry_fee: 0,
+		account_authorizations: vec![],
+		preimage_authorizations: vec![],
+		allowed_authorizers: vec![(Sr25519Keyring::Alice.to_account_id(), 1000, 100 * 1024 * 1024)],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![42u8; 100];
+
 		use frame_support::traits::fungible::Mutate;
 		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
 		assert_ok!(TransactionStorage::authorize_account(
@@ -1308,46 +1515,150 @@ fn renew_must_be_direct_extrinsic() {
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
 		));
 		let stored_block = System::block_number();
+		advance_block();
 
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
+		});
+		let authorize_call =
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+				who: Sr25519Keyring::Bob.to_account_id(),
+				transactions: 10,
+				bytes: 1024,
+			});
+
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::Utility(pallet_utility::Call::batch_all {
+					calls: vec![renew_call, authorize_call],
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+/// Mixing renew with store in the same wrapper is rejected because of the store
+/// (store is never allowed inside a wrapper, regardless of siblings).
+#[test]
+fn mixed_batch_renew_and_store_rejected() {
+	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
+		retention_period: 100,
+		byte_fee: 0,
+		entry_fee: 0,
+		account_authorizations: vec![],
+		preimage_authorizations: vec![],
+		allowed_authorizers: vec![],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![42u8; 100];
+
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			0,
+			data.len() as u64 * 4
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() }),
+		));
+		let stored_block = System::block_number();
+		advance_block();
+
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
+		});
+		let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data });
+
+		assert_eq!(
+			construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::Utility(pallet_utility::Call::batch_all {
+					calls: vec![renew_call, store_call],
+				}),
+			),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
+		);
+	});
+}
+
+/// Nested batches still accept renews; nesting an as_derivative anywhere on
+/// the path back to a renew is still rejected.
+#[test]
+fn nested_batch_renew_allowed_non_batch_nested_rejected() {
+	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
+	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
+		retention_period: 100,
+		byte_fee: 0,
+		entry_fee: 0,
+		account_authorizations: vec![],
+		preimage_authorizations: vec![],
+		allowed_authorizers: vec![],
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	sp_io::TestExternalities::new(t).execute_with(|| {
+		advance_block();
+		let account = Sr25519Keyring::Alice;
+		let who: AccountId = account.to_account_id();
+		let data = vec![42u8; 100];
+
+		use frame_support::traits::fungible::Mutate;
+		Balances::mint_into(&who, 1_000_000_000_000).unwrap();
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			who.clone(),
+			0,
+			data.len() as u64 * 2
+		));
+		assert_ok_ok(construct_and_apply_extrinsic(
+			Some(account.pair()),
+			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data }),
+		));
+		let stored_block = System::block_number();
 		advance_block();
 
 		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
 			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 
-		// Direct renew succeeds with the existing account authorization.
-		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
-			AuthorizationExtent {
-				bytes: 100,
-				bytes_permanent: 100,
-				bytes_allowance: 100,
-				transactions: 2,
-				transactions_allowance: 0,
-			},
-		);
+		// batch_all([ batch([renew]), renew ]) — both renews are reached through
+		// purely batch wrappers, so both are accepted.
+		let nested = RuntimeCall::Utility(pallet_utility::Call::batch_all {
+			calls: vec![
+				RuntimeCall::Utility(pallet_utility::Call::batch {
+					calls: vec![renew_call.clone()],
+				}),
+				renew_call.clone(),
+			],
+		});
+		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), nested));
+		advance_block();
 
-		// Utility wrappers: rejected because renew is not allowed inside wrappers.
-		for (wrapped, name) in wrap_call_utility_variants(renew_call.clone()) {
-			assert_eq!(
-				construct_and_apply_extrinsic(Some(account.pair()), wrapped),
-				Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
-				"renew: via {name}",
-			);
-		}
-
-		// sudo_as: passes validation (sudo not inspected) but fails at dispatch
-		// because no sudo key is configured.
-		let sudo_as_result = construct_and_apply_extrinsic(
-			Some(account.pair()),
-			RuntimeCall::Sudo(pallet_sudo::Call::sudo_as {
-				who: sp_runtime::MultiAddress::Id(who),
+		// batch_all([ as_derivative(renew) ]) — the as_derivative leg breaks the
+		// purely-batch chain, so this is rejected.
+		let mixed_wrapper = RuntimeCall::Utility(pallet_utility::Call::batch_all {
+			calls: vec![RuntimeCall::Utility(pallet_utility::Call::as_derivative {
+				index: 0,
 				call: Box::new(renew_call),
-			}),
+			})],
+		});
+		assert_eq!(
+			construct_and_apply_extrinsic(Some(account.pair()), mixed_wrapper),
+			Err(TransactionValidityError::Invalid(InvalidTransaction::Call)),
 		);
-		assert!(sudo_as_result.is_ok(), "sudo_as should pass validation");
-		assert!(sudo_as_result.unwrap().is_err(), "sudo_as should fail at dispatch");
 	});
 }
 
@@ -1593,11 +1904,11 @@ fn max_recursion_depth_is_enforced() {
 				call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 			}
 
-			// Should fail with Call — store inside wrapper is rejected (the depth limit
-			// in is_storage_mutating_call treats excessively nested calls as storage-mutating).
+			// Should fail with ExhaustsResources — the ValidateStorageCalls walk treats
+			// recursion past MAX_WRAPPER_DEPTH as a resource-exhaustion condition.
 			assert_err!(
 				construct_and_apply_extrinsic(Some(account.pair()), call),
-				TransactionValidityError::Invalid(InvalidTransaction::Call)
+				TransactionValidityError::Invalid(InvalidTransaction::ExhaustsResources)
 			);
 		});
 }

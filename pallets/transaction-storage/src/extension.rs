@@ -57,6 +57,16 @@ where
 	/// Returns `None` for non-wrapper calls.
 	fn inspect_wrapper(call: &RuntimeCallOf<T>) -> Option<Vec<&RuntimeCallOf<T>>>;
 
+	/// Returns `true` if `call` is a batch wrapper that dispatches its inner calls
+	/// independently using the outer origin (`Utility::batch` / `batch_all` /
+	/// `force_batch`). `renew` / `renew_content_hash` may be batched inside these
+	/// wrappers; any other wrapper variant rejects them.
+	///
+	/// Default is `false` (no batch support).
+	fn is_batch_wrapper(_call: &RuntimeCallOf<T>) -> bool {
+		false
+	}
+
 	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
 	/// store_with_cid_config, force_renew) — either directly or nested inside
 	/// wrappers.
@@ -135,22 +145,46 @@ where
 	}
 }
 
+/// Accumulated state from a wrapper-tree walk performed by
+/// [`ValidateStorageCalls::classify_wrapper`]. The fields are independent flags / counters;
+/// the validate-time decision rules are applied to the whole struct after the walk
+/// completes.
+#[derive(Default)]
+struct WrapperWalkState {
+	/// A `store` / `store_with_cid_config` was found anywhere in the tree.
+	/// Wrapped stores are never accepted.
+	found_store: bool,
+	/// A `renew` / `renew_content_hash` was found via a path that included at
+	/// least one non-batch wrapper (`as_derivative`, `if_else`, etc.).
+	found_renew_outside_batch: bool,
+	/// Number of `renew` / `renew_content_hash` calls found via a pure
+	/// batch path. Used both as the "renews present" flag (`> 0`) and to
+	/// enforce the `MaxBlockTransactions` cap at validate time.
+	renew_in_batch_count: u32,
+	/// A non-storage-mutating TransactionStorage call (`authorize_*`,
+	/// `refresh_*`, `remove_expired_*`, …) was found in the tree.
+	found_management: bool,
+}
+
 /// Transaction extension that validates signed TransactionStorage calls.
 ///
-/// This extension handles **signed TransactionStorage transactions** via
-/// [`Pallet::validate_signed`]:
-/// - **Store/renew calls**: Must be submitted as **direct extrinsics** (not wrapped). Validates
-///   authorization in `validate()` and transforms the origin to [`Origin::Authorized`] to carry
-///   authorization info. Then in `prepare()`, it consumes the authorization extent (decrements
-///   remaining transactions/bytes) before the extrinsic executes. This early consumption prevents
-///   large invalid store transactions from propagating through mempools and the network —
-///   authorization is checked and spent at the extension level rather than during dispatch.
-/// - **Authorization management calls** (authorize_*, refresh_*, remove_expired_*): Validates that
-///   the signer satisfies the [`Config::Authorizer`] origin requirement. These calls **can** be
-///   wrapped (e.g. in `Utility::batch`).
-/// - **Wrapper calls** (e.g. `Utility::batch`, `Sudo::sudo`): Uses `I: CallInspector` to
-///   recursively inspect inner calls. Rejects any wrapper containing store/renew calls. Allows
-///   wrappers containing only management calls.
+/// Handles signed TransactionStorage transactions via [`Pallet::validate_signed`]:
+/// - **`store` / `store_with_cid_config`**: must be submitted as direct extrinsics. `validate()`
+///   checks authorization and rewrites the origin to [`Origin::Authorized`]; `prepare()` consumes
+///   the authorization extent before dispatch. Early consumption prevents large invalid store
+///   transactions from propagating through mempools.
+/// - **`renew` / `renew_content_hash`**: accepted either as direct extrinsics (origin rewritten to
+///   [`Origin::Authorized`]) or wrapped in `Utility::batch` / `batch_all` / `force_batch` of
+///   pure-renew calls (outer origin rewritten to [`Origin::AuthorizedBatch`]; each inner renew is
+///   individually validated and its authorization is consumed in `prepare()`). A batch may not mix
+///   renews with management calls and may not contain more than `T::MaxBlockTransactions` renews.
+///   Any other wrapper variant rejects renews.
+/// - **Management calls** (`authorize_*`, `refresh_*`, `remove_expired_*`): validated against
+///   [`Config::Authorizer`]. May appear directly or inside any wrapper that contains only
+///   management calls; origin is not rewritten.
+/// - **Wrappers** (e.g. `Utility::batch`, `Sudo::sudo`): inspected via `I: CallInspector`. The
+///   runtime's [`CallInspector::is_batch_wrapper`] marks `Utility::batch` / `batch_all` /
+///   `force_batch` as batches — the only wrappers permitted to enclose renews.
 ///
 /// The `I` type parameter controls wrapper inspection. Use `()` (the default) for no wrapper
 /// support, or provide a runtime-specific [`CallInspector`] implementation to enable recursive
@@ -239,23 +273,48 @@ where
 			return Ok((valid_tx, Some(who), origin));
 		}
 
-		// Wrapper call — reject if it contains store/renew (must be direct extrinsics),
-		// then validate any management calls (authorize_*, refresh_*, remove_expired_*).
-		if I::is_storage_mutating_call(call, 0) {
+		// Wrapper call. Pass 1: classify the tree (no side effects, no validate_signed).
+		// Decide accept/reject from the resulting state. Pass 2 (validation) runs only
+		// for accepted shapes, so a reject reason is reported before any per-call check
+		// has a chance to surface its own error.
+		let mut state = WrapperWalkState::default();
+		Self::classify_wrapper(call, 0, true, &mut state)?;
+
+		if state.found_store || state.found_renew_outside_batch {
 			return Err(InvalidTransaction::Call.into());
 		}
+		if state.renew_in_batch_count > 0 && state.found_management {
+			return Err(InvalidTransaction::Call.into());
+		}
+		if state.renew_in_batch_count > T::MaxBlockTransactions::get() {
+			// A batch with more renews than the per-block cap can never fit a block.
+			return Err(InvalidTransaction::ExhaustsResources.into());
+		}
+
+		let has_storage = state.renew_in_batch_count > 0 || state.found_management;
+		if !has_storage {
+			// No TransactionStorage calls found in wrapper.
+			return Ok((ValidTransaction::default(), None, origin));
+		}
+
+		// Pass 2: validate each accepted inner storage call and accumulate the combined
+		// ValidTransaction. `traverse_storage_calls` visits every TransactionStorage sub-type
+		// leaf — exactly the calls pass 1 already approved.
 		let mut combined_valid = ValidTransaction::default();
-		let result = I::traverse_storage_calls(call, 0, &mut |inner_call| {
+		I::traverse_storage_calls(call, 0, &mut |inner_call| {
 			let (valid_tx, _scope) = Pallet::<T>::validate_signed(&who, inner_call)?;
 			combined_valid = core::mem::take(&mut combined_valid).combine_with(valid_tx);
 			Ok(())
 		})?;
-		if result.found_storage {
-			return Ok((combined_valid, Some(who), origin));
-		}
 
-		// No TransactionStorage calls found in wrapper.
-		Ok((ValidTransaction::default(), None, origin))
+		if state.renew_in_batch_count > 0 {
+			// Pure-renew batch: rewrite the outer origin so each inner renew dispatch
+			// sees `Origin::AuthorizedBatch` (Utility::batch* propagates the outer origin).
+			origin.set_caller_from(Origin::<T>::AuthorizedBatch { who: who.clone() });
+		}
+		// Pure-management batches leave origin as `Signed` — that's what
+		// `Authorizer::ensure_origin` expects at dispatch.
+		Ok((combined_valid, Some(who), origin))
 	}
 
 	fn prepare(
@@ -274,6 +333,63 @@ where
 			Pallet::<T>::pre_dispatch_signed(&who, inner_call)
 		})?;
 
+		Ok(())
+	}
+}
+
+impl<T: Config + Send + Sync, I: CallInspector<T>> ValidateStorageCalls<T, I>
+where
+	RuntimeCallOf<T>: IsSubType<Call<T>>,
+{
+	/// Pass-1 wrapper walk: classify every TransactionStorage leaf into the buckets
+	/// tracked by [`WrapperWalkState`]. Pure inspection — no [`Pallet::validate_signed`]
+	/// calls, no origin rewrite. The caller applies the decision table to `state` and
+	/// only runs a second (validating) pass for accepted shapes; that way a reject
+	/// reason is reported before any per-call validation has a chance to surface its
+	/// own error.
+	///
+	/// `in_pure_batch_path` is `true` iff every wrapper from the extrinsic root down to
+	/// the current node is a batch (per [`CallInspector::is_batch_wrapper`]).
+	/// Once a non-batch wrapper is entered the flag flips to `false` for the rest
+	/// of the recursion — a renew can only be reached "in batch" via an unbroken chain
+	/// of batches.
+	fn classify_wrapper(
+		call: &RuntimeCallOf<T>,
+		depth: u32,
+		in_pure_batch_path: bool,
+		state: &mut WrapperWalkState,
+	) -> Result<(), TransactionValidityError> {
+		if let Some(inner) = call.is_sub_type() {
+			match inner {
+				Call::store { .. } | Call::store_with_cid_config { .. } => {
+					state.found_store = true;
+				},
+				Call::renew { .. } | Call::force_renew { .. } =>
+					if in_pure_batch_path {
+						state.renew_in_batch_count = state.renew_in_batch_count.saturating_add(1);
+					} else {
+						state.found_renew_outside_batch = true;
+					},
+				_ => {
+					// Management call (authorize_*, refresh_*, remove_expired_*, ...).
+					state.found_management = true;
+				},
+			}
+			return Ok(());
+		}
+		if depth >= MAX_WRAPPER_DEPTH {
+			tracing::debug!(
+				target: LOG_TARGET,
+				"Wrapper recursion limit exceeded (depth: {depth}), rejecting call",
+			);
+			return Err(InvalidTransaction::ExhaustsResources.into());
+		}
+		if let Some(inner_calls) = I::inspect_wrapper(call) {
+			let next_in_pure = in_pure_batch_path && I::is_batch_wrapper(call);
+			for inner in inner_calls {
+				Self::classify_wrapper(inner, depth + 1, next_in_pure, state)?;
+			}
+		}
 		Ok(())
 	}
 }

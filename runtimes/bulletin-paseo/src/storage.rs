@@ -77,6 +77,11 @@ parameter_types! {
 /// storage calls inside wrapper extrinsics so it can recursively validate and consume
 /// authorization.
 ///
+/// Inspects only `Utility` wrappers (sudo is intentionally not inspected). Marks
+/// `Utility::batch` / `batch_all` / `force_batch` as batches via
+/// [`is_batch_wrapper`](pallet_bulletin_transaction_storage::CallInspector::is_batch_wrapper)
+/// — the only wrappers permitted to enclose `renew` / `renew_content_hash` calls.
+///
 /// Also implements [`Contains<RuntimeCall>`] returning `true` for storage-mutating calls
 /// (store, store_with_cid_config, renew). Used with `EverythingBut` as the XCM
 /// `SafeCallFilter` to block these calls from XCM dispatch — they require on-chain
@@ -93,6 +98,17 @@ impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCall
 			// accepted by `ensure_authorized`.
 			_ => None,
 		}
+	}
+
+	fn is_batch_wrapper(call: &RuntimeCall) -> bool {
+		matches!(
+			call,
+			RuntimeCall::Utility(
+				pallet_utility::Call::batch { .. } |
+					pallet_utility::Call::batch_all { .. } |
+					pallet_utility::Call::force_batch { .. }
+			)
+		)
 	}
 }
 

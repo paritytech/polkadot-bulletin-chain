@@ -317,6 +317,13 @@ pub mod pallet {
 		/// A signed transaction that has been authorized to store data.
 		/// Contains the signer and the scope of authorization that was consumed.
 		Authorized { who: T::AccountId, scope: AuthorizationScopeFor<T> },
+		/// A signed transaction whose inner renew calls were validated and authorized
+		/// individually by [`extension::ValidateStorageCalls`] inside a batch
+		/// wrapper (`Utility::batch` / `batch_all` / `force_batch`). Carries no scope:
+		/// inner renews may have used different buckets, and renew dispatch does not
+		/// read scope. Not accepted by `T::Authorizer::ensure_origin`, so management
+		/// calls cannot be mixed with renews in the same wrapper.
+		AuthorizedBatch { who: T::AccountId },
 	}
 
 	#[pallet::hooks]
@@ -546,7 +553,8 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			entry: TransactionRef<BlockNumberFor<T>>,
 		) -> DispatchResult {
-			let AuthorizedCaller::Signed { who, scope: _ } = Self::ensure_authorized(origin)?
+			let (AuthorizedCaller::Signed { who, scope: _ } |
+			AuthorizedCaller::SignedBatch { who }) = Self::ensure_authorized(origin)?
 			else {
 				return Err(DispatchError::BadOrigin);
 			};
@@ -866,7 +874,7 @@ pub mod pallet {
 			let renewal_data =
 				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
 			match caller {
-				AuthorizedCaller::Signed { who, .. } => {
+				AuthorizedCaller::Signed { who, .. } | AuthorizedCaller::SignedBatch { who } => {
 					ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
 					ensure!(!renewal_data.paid, Error::<T>::CannotDisablePrepaidAutoRenewal);
 				},
@@ -1469,6 +1477,8 @@ pub mod pallet {
 		///
 		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
+		/// - [`Origin::AuthorizedBatch`] (set by [`extension::ValidateStorageCalls`] on the batch
+		///   wrapper path) → [`AuthorizedCaller::SignedBatch`]
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
 		///
@@ -1477,17 +1487,18 @@ pub mod pallet {
 		pub fn ensure_authorized(
 			origin: OriginFor<T>,
 		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
-			// 1. Try pallet::Origin::Authorized (set by ValidateStorageCalls extension)
-			if let Ok(Origin::Authorized { who, scope }) = origin.clone().into_caller().try_into() {
-				return Ok(AuthorizedCaller::Signed { who, scope });
+			match origin.clone().into_caller().try_into() {
+				Ok(Origin::Authorized { who, scope }) =>
+					return Ok(AuthorizedCaller::Signed { who, scope }),
+				Ok(Origin::AuthorizedBatch { who }) =>
+					return Ok(AuthorizedCaller::SignedBatch { who }),
+				Err(_) => {},
 			}
 
-			// 2. Try root
 			if ensure_root(origin.clone()).is_ok() {
 				return Ok(AuthorizedCaller::Root);
 			}
 
-			// 3. Try none (unsigned)
 			ensure_none(origin)?;
 			Ok(AuthorizedCaller::Unsigned)
 		}
