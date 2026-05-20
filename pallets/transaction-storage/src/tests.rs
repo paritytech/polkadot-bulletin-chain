@@ -691,7 +691,8 @@ fn renew_by_content_hash_schedules_one_shot() {
 
 		let entry = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
-		assert!(!entry.recurring);
+		assert!(!entry.recurring, "renew should register a one-shot entry");
+		assert!(entry.paid, "one-shot is prepaid at registration");
 
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::RenewalEnabled {
 			content_hash,
@@ -2673,6 +2674,7 @@ fn renew_schedules_one_shot() {
 		let entry = AutoRenewals::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
 		assert!(!entry.recurring, "renew should register a one-shot entry");
+		assert!(entry.paid, "one-shot is prepaid at registration");
 
 		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::RenewalEnabled {
 			content_hash,
@@ -4394,6 +4396,49 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		}));
 		// AutoRenewals stays gone after the block — no further cycles.
 		assert!(AutoRenewals::get(content_hash).is_none());
+	});
+}
+
+/// Root `disable_auto_renew` executed in the same block as a prepaid cycle (between
+/// `on_initialize` and the mandatory inherent) must not be silently undone by the
+/// cycle's `paid: true → false` flip. The flip is implemented as a `mutate`, so a
+/// Root disable that already removed the entry leaves nothing for the cycle to
+/// flip — and no further cycles fire.
+#[test]
+fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert!(AutoRenewals::get(content_hash).unwrap().paid, "registration starts prepaid");
+
+		// Cycle 1 block: on_initialize captures the prepaid entry into pending.
+		init_block(12);
+		assert_eq!(PendingAutoRenewals::get().len(), 1);
+
+		// Root disables in the normal section — bypasses both the owner check and the
+		// prepaid-window check.
+		assert_ok!(TransactionStorage::disable_auto_renew(RuntimeOrigin::root(), content_hash));
+		assert!(AutoRenewals::get(content_hash).is_none(), "Root disable cleared the entry");
+
+		// Mandatory inherent: the captured pending renewal still fires (the prepayment
+		// honestly delivers one cycle), but the post-cycle flip must not reinsert.
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: who,
+		}));
+		assert!(
+			AutoRenewals::get(content_hash).is_none(),
+			"Root's disable must survive the cycle — no silent re-arming via the paid-flip path",
+		);
 	});
 }
 
