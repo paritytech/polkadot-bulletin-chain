@@ -35,7 +35,7 @@ use core::marker::PhantomData;
 pub trait WeightInfo {
 	fn store(l: u32, ) -> Weight;
 	fn renew() -> Weight;
-	fn renew_content_hash() -> Weight;
+	fn force_renew() -> Weight;
 	fn apply_block_inherents(n: u32) -> Weight;
 	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn authorize_account() -> Weight;
@@ -52,6 +52,7 @@ pub trait WeightInfo {
 	fn remove_authorizer() -> Weight;
 	fn remove_exhausted_authorizer() -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
+	fn migrate_v3_to_v4_step() -> Weight;
 }
 
 /// Weights for pallet_bulletin_transaction_storage using the Substrate node and recommended hardware.
@@ -74,13 +75,20 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Placeholder weight for the one-shot scheduler `renew`. Reads `Transactions`
+	/// to derive the size + content hash, reads `AutoRenewals` for the conflict
+	/// check, writes `AutoRenewals` for the registration. Borrows
+	/// `enable_auto_renew`'s envelope — same storage operations.
+	fn renew() -> Weight {
+		<Self as WeightInfo>::enable_auto_renew()
+	}
 	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
 	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:1)
 	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	fn renew() -> Weight {
+	fn force_renew() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `367`
 		//  Estimated: `47519`
@@ -88,22 +96,6 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		Weight::from_parts(28_675_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(T::DbWeight::get().reads(2))
-			.saturating_add(T::DbWeight::get().writes(2))
-	}
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:1)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	fn renew_content_hash() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `412`
-		//  Estimated: `47519`
-		// Minimum execution time: 32_305_000 picoseconds.
-		Weight::from_parts(34_128_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
 	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
@@ -367,6 +359,14 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Worst-case weight for one outer-loop iteration of the v3→v4 multi-block
+	/// migration: 2 reads (iterator step + raw fetch), 1 write (re-insert) per
+	/// `AutoRenewals` entry. Placeholder until benchmarked.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 }
 
 // For backwards compatibility and tests
@@ -379,15 +379,12 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
 	fn renew() -> Weight {
+		<Self as WeightInfo>::enable_auto_renew()
+	}
+	fn force_renew() -> Weight {
 		Weight::from_parts(28_675_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(RocksDbWeight::get().reads(2))
-			.saturating_add(RocksDbWeight::get().writes(2))
-	}
-	fn renew_content_hash() -> Weight {
-		Weight::from_parts(34_128_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
 	fn apply_block_inherents(n: u32) -> Weight {
@@ -492,5 +489,10 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(2))
+	}
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(2))
+			.saturating_add(RocksDbWeight::get().writes(1))
 	}
 }

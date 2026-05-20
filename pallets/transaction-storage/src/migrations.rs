@@ -576,8 +576,11 @@ pub mod v3 {
 				};
 
 				let Some(block_number) = iter.next() else {
-					use polkadot_sdk_frame::prelude::GetStorageVersion;
-					Pallet::<T>::in_code_storage_version().put::<Pallet<T>>();
+					// Write this migration's `version_to` explicitly so that when
+					// chained with v3→v4 the on-chain version progresses one step at
+					// a time and the next migration sees the correct starting version.
+					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(3)
+						.put::<Pallet<T>>();
 					cursor = None;
 					break;
 				};
@@ -682,6 +685,171 @@ pub mod v3 {
 				new_count,
 				pruned = old_count.saturating_sub(new_count),
 				"v2->v3 post_upgrade: valid"
+			);
+			Ok(())
+		}
+	}
+}
+
+/// V3 → V4 migration: re-encode each [`AutoRenewals`] entry from
+/// `{ account }` (v3) to `{ account, recurring: true, paid: false }` (v4).
+///
+/// All existing entries were written by the old fee-paying `enable_auto_renew`,
+/// which:
+///
+/// - is the forever-renewal path, so the entries map to `recurring: true`;
+/// - did **not** pre-pay the next cycle against the owner's authorization, so they map to `paid:
+///   false` — `do_process_auto_renewals` will charge them per-cycle, preserving their on-chain
+///   behaviour across the upgrade.
+///
+/// The new one-shot path (`recurring: false`) and the new prepaid path
+/// (`paid: true`, set by both `renew` and the new `enable_auto_renew`) are only
+/// reachable through the v4 extrinsics, which can't have written any entries
+/// before this migration runs.
+pub mod v4 {
+	use super::*;
+	use crate::{
+		pallet::{AutoRenewals, Pallet},
+		RenewalData, WeightInfo,
+	};
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::{
+		frame_support::{
+			migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
+			weights::WeightMeter,
+		},
+		sp_io,
+	};
+
+	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
+	/// `AutoRenewalData` layout at v3 (no `recurring` field). Used only for
+	/// decoding pre-migration entries; never written.
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V3AutoRenewalData<AccountId> {
+		pub account: AccountId,
+	}
+
+	/// Stepped migration from storage version 3 to 4.
+	pub struct MigrateV3ToV4<T: Config>(PhantomData<T>);
+
+	impl<T: Config> SteppedMigration for MigrateV3ToV4<T> {
+		type Cursor = ContentHash;
+		type Identifier = MigrationId<24>;
+
+		fn id() -> Self::Identifier {
+			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 3, version_to: 4 }
+		}
+
+		fn step(
+			mut cursor: Option<Self::Cursor>,
+			meter: &mut WeightMeter,
+		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			let required = T::WeightInfo::migrate_v3_to_v4_step();
+			if meter.remaining().any_lt(required) {
+				return Err(SteppedMigrationError::InsufficientWeight { required });
+			}
+
+			loop {
+				if meter.try_consume(required).is_err() {
+					break;
+				}
+
+				let mut iter = match cursor.as_ref() {
+					None => AutoRenewals::<T>::iter_keys(),
+					Some(last) =>
+						AutoRenewals::<T>::iter_keys_from(AutoRenewals::<T>::hashed_key_for(last)),
+				};
+
+				let Some(content_hash) = iter.next() else {
+					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(4)
+						.put::<Pallet<T>>();
+					cursor = None;
+					break;
+				};
+
+				let raw_key = AutoRenewals::<T>::hashed_key_for(content_hash);
+
+				let Some(raw) = sp_io::storage::get(&raw_key) else {
+					cursor = Some(content_hash);
+					continue;
+				};
+
+				// Idempotent: if it's already v4, skip.
+				if RenewalData::<T::AccountId>::decode(&mut &raw[..]).is_ok() {
+					cursor = Some(content_hash);
+					continue;
+				}
+
+				let v3 = V3AutoRenewalData::<T::AccountId>::decode(&mut &raw[..])
+					.map_err(|_| SteppedMigrationError::Failed)?;
+
+				AutoRenewals::<T>::insert(
+					content_hash,
+					RenewalData { account: v3.account, recurring: true, paid: false },
+				);
+				cursor = Some(content_hash);
+			}
+
+			Ok(cursor)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+			let prefix = AutoRenewals::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
+				count += 1;
+			}
+			tracing::info!(target: LOG_TARGET, count, "v3->v4 pre_upgrade: AutoRenewals entries");
+			Ok(count.encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+
+			let old_count =
+				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+
+			let prefix = AutoRenewals::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut new_count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key.clone();
+				let raw = sp_io::storage::get(&key)
+					.ok_or("v3->v4 post_upgrade: missing AutoRenewals entry")?;
+				let decoded = RenewalData::<T::AccountId>::decode(&mut &raw[..])
+					.map_err(|_| "v3->v4 post_upgrade: remaining entry is not v4")?;
+				polkadot_sdk_frame::prelude::ensure!(
+					decoded.recurring,
+					"v3->v4 post_upgrade: migrated entry must have recurring=true",
+				);
+				polkadot_sdk_frame::prelude::ensure!(
+					!decoded.paid,
+					"v3->v4 post_upgrade: migrated entry must have paid=false",
+				);
+				new_count += 1;
+			}
+
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count == old_count,
+				"v3->v4 post_upgrade: entry count changed",
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				old_count,
+				new_count,
+				"v3->v4 post_upgrade: valid"
 			);
 			Ok(())
 		}

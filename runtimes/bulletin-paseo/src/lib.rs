@@ -175,8 +175,10 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
+	pub type MbmMigrations = (
+		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+	);
 }
 
 /// Executive: handles dispatch to the various modules.
