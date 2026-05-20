@@ -1,0 +1,234 @@
+name: Set up Polkadot binaries
+description: |
+  Restore or populate the cached polkadot-sdk binaries and add them to PATH.
+
+  Modes:
+    prepare  — populate-on-miss + save-on-end. Must run in a non-matrix job so the
+               cache is built exactly once and shared with downstream consumers.
+    consume  — restore-only with fail-on-cache-miss. Use in matrix legs / consumers.
+
+  Versions are read from .github/env (POLKADOT_NODE_VERSION, CHAIN_SPEC_BUILDER_VERSION,
+  ZOMBIENET_VERSION, TRY_RUNTIME_VERSION, FRAME_OMNI_BENCHER_VERSION). The action loads
+  that file into $GITHUB_ENV and installs `just` for you — callers only need to checkout
+  the repo first.
+
+inputs:
+  groups:
+    description: Space-separated binary groups. Supported - polkadot-node, chain-spec-builder, zombienet, try-runtime, frame-omni-bencher.
+    required: true
+  mode:
+    description: prepare (populate + save, non-matrix job) or consume (restore-only).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate use-polkadot-binaries inputs
+      shell: bash
+      env:
+        INPUT_GROUPS: ${{ inputs.groups }}
+        INPUT_MODE: ${{ inputs.mode }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_MODE" in
+          prepare|consume) ;;
+          *) echo "::error::use-polkadot-binaries: mode must be 'prepare' or 'consume', got '$INPUT_MODE'"; exit 1 ;;
+        esac
+        if [ -z "${INPUT_GROUPS// }" ]; then
+          echo "::error::use-polkadot-binaries: groups must be a non-empty space-separated list"
+          exit 1
+        fi
+        VALID="polkadot-node chain-spec-builder zombienet try-runtime frame-omni-bencher"
+        for g in $INPUT_GROUPS; do
+          case " $VALID " in
+            *" $g "*) ;;
+            *) echo "::error::use-polkadot-binaries: unknown group '$g'. Valid - $VALID"; exit 1 ;;
+          esac
+        done
+
+    - name: Refuse prepare in matrix job
+      if: inputs.mode == 'prepare' && toJSON(matrix) != 'null'
+      shell: bash
+      run: |
+        echo "::error::use-polkadot-binaries: mode=prepare must run in a non-matrix job."
+        echo "::error::Add a dedicated prepare-* job upstream and have matrix legs use mode=consume."
+        exit 1
+
+    - name: Load .github/env
+      shell: bash
+      run: cat .github/env >> "$GITHUB_ENV"
+
+    - name: Install just
+      uses: ./.github/actions/install-just
+
+    # ============================================================
+    # polkadot-node
+    # ============================================================
+    - name: Cache polkadot-node binaries
+      id: cache-polkadot-node
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' polkadot-node ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+        key: polkadot-binaries-${{ runner.os }}-polkadot-node-${{ env.POLKADOT_NODE_VERSION }}
+
+    - name: Populate polkadot-node binaries
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' polkadot-node ') && steps.cache-polkadot-node.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-polkadot > /dev/null
+
+    - name: Restore polkadot-node binaries
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' polkadot-node ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+        key: polkadot-binaries-${{ runner.os }}-polkadot-node-${{ env.POLKADOT_NODE_VERSION }}
+        fail-on-cache-miss: true
+
+    - name: Add polkadot-node to PATH
+      if: contains(format(' {0} ', inputs.groups), ' polkadot-node ')
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Cache extraction can drop the +x bit; restore it before `just` validates
+        # the binaries (its presence check uses [ -x ]).
+        if [ -d "${POLKADOT_BINARIES_DIR}/polkadot-node" ]; then
+          chmod -R +x "${POLKADOT_BINARIES_DIR}/polkadot-node"
+        fi
+        just binaries-polkadot >> "$GITHUB_PATH"
+
+    # ============================================================
+    # chain-spec-builder
+    # ============================================================
+    - name: Cache chain-spec-builder binaries
+      id: cache-chain-spec-builder
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' chain-spec-builder ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
+        key: polkadot-binaries-${{ runner.os }}-chain-spec-builder-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
+
+    - name: Populate chain-spec-builder binaries
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' chain-spec-builder ') && steps.cache-chain-spec-builder.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-chain-spec-builder > /dev/null
+
+    - name: Restore chain-spec-builder binaries
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' chain-spec-builder ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
+        key: polkadot-binaries-${{ runner.os }}-chain-spec-builder-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
+        fail-on-cache-miss: true
+
+    - name: Add chain-spec-builder to PATH
+      if: contains(format(' {0} ', inputs.groups), ' chain-spec-builder ')
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -d "${POLKADOT_BINARIES_DIR}/chain-spec-builder" ]; then
+          chmod -R +x "${POLKADOT_BINARIES_DIR}/chain-spec-builder"
+        fi
+        just binaries-chain-spec-builder >> "$GITHUB_PATH"
+
+    # ============================================================
+    # zombienet
+    # ============================================================
+    - name: Cache zombienet binaries
+      id: cache-zombienet
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' zombienet ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/zombienet
+        key: polkadot-binaries-${{ runner.os }}-zombienet-${{ env.ZOMBIENET_VERSION }}
+
+    - name: Populate zombienet binaries
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' zombienet ') && steps.cache-zombienet.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-zombienet > /dev/null
+
+    - name: Restore zombienet binaries
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' zombienet ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/zombienet
+        key: polkadot-binaries-${{ runner.os }}-zombienet-${{ env.ZOMBIENET_VERSION }}
+        fail-on-cache-miss: true
+
+    - name: Add zombienet to PATH
+      if: contains(format(' {0} ', inputs.groups), ' zombienet ')
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -d "${POLKADOT_BINARIES_DIR}/zombienet" ]; then
+          chmod -R +x "${POLKADOT_BINARIES_DIR}/zombienet"
+        fi
+        just binaries-zombienet >> "$GITHUB_PATH"
+
+    # ============================================================
+    # try-runtime
+    # ============================================================
+    - name: Cache try-runtime binaries
+      id: cache-try-runtime
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' try-runtime ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
+        key: polkadot-binaries-${{ runner.os }}-try-runtime-${{ env.TRY_RUNTIME_VERSION }}
+
+    - name: Populate try-runtime binaries
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' try-runtime ') && steps.cache-try-runtime.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-try-runtime > /dev/null
+
+    - name: Restore try-runtime binaries
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' try-runtime ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
+        key: polkadot-binaries-${{ runner.os }}-try-runtime-${{ env.TRY_RUNTIME_VERSION }}
+        fail-on-cache-miss: true
+
+    - name: Add try-runtime to PATH
+      if: contains(format(' {0} ', inputs.groups), ' try-runtime ')
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -d "${POLKADOT_BINARIES_DIR}/try-runtime" ]; then
+          chmod -R +x "${POLKADOT_BINARIES_DIR}/try-runtime"
+        fi
+        just binaries-try-runtime >> "$GITHUB_PATH"
+
+    # ============================================================
+    # frame-omni-bencher
+    # ============================================================
+    - name: Cache frame-omni-bencher binaries
+      id: cache-frame-omni-bencher
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ')
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
+        key: polkadot-binaries-${{ runner.os }}-frame-omni-bencher-${{ env.FRAME_OMNI_BENCHER_VERSION }}
+
+    - name: Populate frame-omni-bencher binaries
+      if: inputs.mode == 'prepare' && contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ') && steps.cache-frame-omni-bencher.outputs.cache-hit != 'true'
+      shell: bash
+      run: just binaries-bencher > /dev/null
+
+    - name: Restore frame-omni-bencher binaries
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ')
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
+        key: polkadot-binaries-${{ runner.os }}-frame-omni-bencher-${{ env.FRAME_OMNI_BENCHER_VERSION }}
+        fail-on-cache-miss: true
+
+    - name: Add frame-omni-bencher to PATH
+      if: contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ')
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -d "${POLKADOT_BINARIES_DIR}/frame-omni-bencher" ]; then
+          chmod -R +x "${POLKADOT_BINARIES_DIR}/frame-omni-bencher"
+        fi
+        just binaries-bencher >> "$GITHUB_PATH"

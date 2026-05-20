@@ -17,6 +17,8 @@ import {
   usePreimageAuthsLoading,
   fetchAccountAuthorization,
   fetchPreimageAuthorizations,
+  extentRemainingTransactions,
+  extentRemainingBytes,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
 import { getContentHash, HashAlgorithm, WaitFor, BulletinError } from "@parity/bulletin-sdk";
@@ -54,8 +56,8 @@ function AccountAuthorizationsTab() {
         address: searchAddress,
         authorization: auth
           ? {
-              transactions: BigInt(auth.extent.transactions),
-              bytes: auth.extent.bytes,
+              transactions: extentRemainingTransactions(auth.extent),
+              bytes: extentRemainingBytes(auth.extent),
               expiresAt: auth.expiration ?? undefined,
             }
           : null,
@@ -634,8 +636,8 @@ function FaucetAuthorizeAccountPanel() {
         setAuthorization(
           auth
             ? {
-                transactions: BigInt(auth.extent.transactions),
-                bytes: auth.extent.bytes,
+                transactions: extentRemainingTransactions(auth.extent),
+                bytes: extentRemainingBytes(auth.extent),
                 expiresAt: auth.expiration ?? undefined,
               }
             : null
@@ -691,8 +693,8 @@ function FaucetAuthorizeAccountPanel() {
       setAuthorization(
         auth
           ? {
-              transactions: BigInt(auth.extent.transactions),
-              bytes: auth.extent.bytes,
+              transactions: extentRemainingTransactions(auth.extent),
+              bytes: extentRemainingBytes(auth.extent),
               expiresAt: auth.expiration ?? undefined,
             }
           : null

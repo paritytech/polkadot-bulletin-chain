@@ -5,20 +5,6 @@
 # Default recipe - run the complete PAPI workflow test
 default: (run-authorize-and-store "bulletin-westend-runtime" "ws")
 
-# Setup prerequisites for parachain runtime (polkadot and polkadot-omni-node binaries)
-# This recipe clones polkadot-sdk, builds required binaries, and copies them to ~/local_bulletin_testing/bin
-setup-parachain-prerequisites:
-    #!/usr/bin/env bash
-    set -e
-    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
-        echo "⏭️  Skipping parachain prerequisites (SKIP_PARACHAIN_SETUP set)"
-    else
-        ROOT_DIR="{{ justfile_directory() }}/.."
-        cd "$ROOT_DIR"
-        ./scripts/setup_parachain_prerequisites.sh
-        cd -
-    fi
-
 compute-test-dir:
     #!/usr/bin/env bash
     if [ -n "$TEST_DIR" ]; then
@@ -59,32 +45,6 @@ kill-pids test_dir:
         fi
     done
 
-# Resolve the zombienet binary path. Prints the absolute path to stdout.
-# Checks ZOMBIENET_BINARY env var first, then falls back to ../zombienet-*-*.
-_resolve-zombienet-bin:
-    #!/usr/bin/env bash
-    set -e
-    if [ -n "$ZOMBIENET_BINARY" ]; then
-        if command -v "$ZOMBIENET_BINARY" >/dev/null 2>&1; then
-            ZOMBIENET_BIN="$(command -v "$ZOMBIENET_BINARY")"
-        else
-            ZOMBIENET_BIN="$ZOMBIENET_BINARY"
-        fi
-    else
-        ZOMBIENET_BIN=$(ls ../zombienet-*-* 2>/dev/null | head -n 1)
-        if [ -z "$ZOMBIENET_BIN" ]; then
-            echo "❌ Error: Zombienet binary not found" >&2
-            echo "   Set ZOMBIENET_BINARY environment variable or ensure zombienet-* exists in parent directory" >&2
-            exit 1
-        fi
-    fi
-    ZOMBIENET_BIN="$(realpath "$ZOMBIENET_BIN")"
-    if [ ! -x "$ZOMBIENET_BIN" ]; then
-        echo "❌ Error: Zombienet binary not executable: $ZOMBIENET_BIN" >&2
-        exit 1
-    fi
-    echo "$ZOMBIENET_BIN"
-
 # Wait for an RPC endpoint to accept connections, checking that the background process stays alive.
 # Parameters:
 #   pid - PID of the background process to monitor
@@ -123,32 +83,12 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     #!/usr/bin/env bash
     set -e
 
-    ZOMBIENET_BIN="$(just _resolve-zombienet-bin)"
-
-    # Run prerequisites setup first
-    just setup-parachain-prerequisites
-
-    # Set paths to binaries
-    if [ -n "$SKIP_PARACHAIN_SETUP" ]; then
-        # Expect in the PATH
-        POLKADOT_BINARY_PATH=polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=polkadot-omni-node
-    else
-        POLKADOT_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
-        POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
-    fi
-
-    # Verify binaries exist after setup
-    if ! command -v "$POLKADOT_BINARY_PATH"; then
-        echo "❌ Error: Prerequisites setup completed but binaries still not found"
-        echo "   Expected POLKADOT_BINARY_PATH: $POLKADOT_BINARY_PATH"
-        exit 1
-    fi
-    if ! command -v "$POLKADOT_PARACHAIN_BINARY_PATH"; then
-        echo "❌ Error: Prerequisites setup completed but binaries still not found"
-        echo "   Expected POLKADOT_PARACHAIN_BINARY_PATH: $POLKADOT_PARACHAIN_BINARY_PATH"
-        exit 1
-    fi
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    POLKADOT_BIN_DIR="$(cd "$ROOT_DIR" && just binaries-polkadot)"
+    ZOMBIENET_BIN_DIR="$(cd "$ROOT_DIR" && just binaries-zombienet)"
+    POLKADOT_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
+    POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
+    ZOMBIENET_BIN="$ZOMBIENET_BIN_DIR/zombienet"
 
     # Pick spec script + zombienet TOML based on the runtime
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
@@ -162,10 +102,9 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
         exit 1
     fi
 
-    # Create chain spec
     echo "   Creating chain spec for {{ runtime }}..."
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    PATH="$HOME/local_bulletin_testing/bin:$PATH" "$ROOT_DIR/scripts/$SPEC_SCRIPT"
+    CSB_DIR="$(cd "$ROOT_DIR" && just binaries-chain-spec-builder)"
+    PATH="$CSB_DIR:$PATH" "$ROOT_DIR/scripts/$SPEC_SCRIPT"
 
     cat <<EOF
     ⚡ Starting Bulletin chain with zombienet
@@ -644,6 +583,31 @@ run-test-authorize-preimage-and-store test_dir ws_url="ws://127.0.0.1:10000" see
     #!/usr/bin/env bash
     set -e
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+
+# Run auto-renewal Chopsticks test
+# Tests enable/disable auto-renewal and verifies on_initialize scheduling.
+# Builds the Westend runtime WASM by default so auto-renewal code is included.
+# Parameters:
+#   endpoint - WebSocket URL of the Bulletin chain (default: wss://westend-bulletin-rpc.polkadot.io)
+#   wasm_path - Path to runtime WASM override (default: auto-built from source)
+#   skip_build - Set to "true" to skip WASM build (default: false)
+run-test-auto-renew-chopsticks endpoint="wss://westend-bulletin-rpc.polkadot.io" wasm_path="" skip_build="false": npm-install
+    #!/usr/bin/env bash
+    set -e
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    WASM_PATH="{{ wasm_path }}"
+
+    if [ -z "$WASM_PATH" ]; then
+        WASM_PATH="$ROOT_DIR/target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm"
+    fi
+
+    if [ "{{ skip_build }}" != "true" ]; then
+        echo "🔧 Building Westend runtime WASM..."
+        cargo build --release -p bulletin-westend-runtime
+        echo "✅ WASM built: $WASM_PATH"
+    fi
+
+    node check_auto_renew_chopsticks.js "{{ endpoint }}" "$WASM_PATH"
 
 # Run Chopsticks compatibility check (services must already be running or use a live endpoint)
 # Parameters:

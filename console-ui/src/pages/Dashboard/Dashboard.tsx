@@ -6,8 +6,13 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
+import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
 import { useChainState, useApi, StorageType } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
+import {
+  extentAllowanceBytes,
+  extentAllowanceTransactions,
+} from "@/state/storage.state";
 import { formatAddress, formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
 function QuickActions() {
@@ -78,9 +83,16 @@ function ChainInfoCard() {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Network</span>
-            <Badge variant="secondary">{network.name}</Badge>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Network</span>
+              <Badge variant="secondary">{network.name}</Badge>
+            </div>
+            {network.endpoints[0] && (
+              <p className="text-xs text-muted-foreground font-mono mt-1 text-right break-all">
+                {network.endpoints[0]}
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Status</span>
@@ -275,41 +287,60 @@ function UsageCard() {
   const api = useApi();
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [palletError, setPalletError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!api) return;
 
     let cancelled = false;
     setLoading(true);
+    setPalletError(null);
+
+    const recordPalletError = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!cancelled && !palletError) setPalletError(msg);
+    };
 
     Promise.all([
-      api.query.TransactionStorage.Authorizations.getEntries(),
-      api.query.TransactionStorage.Transactions.getEntries(),
+      api.query.TransactionStorage.Authorizations.getEntries().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      api.query.TransactionStorage.Transactions.getEntries().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
     ])
-      .then(([authEntries, txEntries]: [any[], any[]]) => {
+      .then(([authEntries, txEntries]: [any[] | null, any[] | null]) => {
         if (cancelled) return;
 
         const userAuths = { count: 0, bytes: 0n };
         const preimageAuths = { count: 0, bytes: 0n };
 
-        for (const { keyArgs, value } of authEntries) {
-          const extent = value.extent;
-          if (keyArgs[0].type === "Account") {
-            userAuths.count += Number(extent.transactions);
-            userAuths.bytes += BigInt(extent.bytes);
-          } else if (keyArgs[0].type === "Preimage") {
-            preimageAuths.count += Number(extent.transactions);
-            preimageAuths.bytes += BigInt(extent.bytes);
+        if (authEntries) {
+          for (const { keyArgs, value } of authEntries) {
+            const extent = value.extent;
+            const txAllowance = Number(extentAllowanceTransactions(extent));
+            const bytesAllowance = extentAllowanceBytes(extent);
+            if (keyArgs[0].type === "Account") {
+              userAuths.count += txAllowance;
+              userAuths.bytes += bytesAllowance;
+            } else if (keyArgs[0].type === "Preimage") {
+              preimageAuths.count += txAllowance;
+              preimageAuths.bytes += bytesAllowance;
+            }
           }
         }
 
         let txCount = 0;
         let txBytes = 0n;
-        for (const { value } of txEntries) {
-          if (Array.isArray(value)) {
-            for (const info of value) {
-              txCount++;
-              txBytes += BigInt(info.size);
+        if (txEntries) {
+          for (const { value } of txEntries) {
+            if (Array.isArray(value)) {
+              for (const info of value) {
+                txCount++;
+                txBytes += BigInt(info.size);
+              }
             }
           }
         }
@@ -346,6 +377,8 @@ function UsageCard() {
           <div className="flex items-center justify-center py-4">
             <Spinner size="sm" />
           </div>
+        ) : palletError ? (
+          <PalletUnavailableNotice pallet="TransactionStorage" details={palletError} />
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
