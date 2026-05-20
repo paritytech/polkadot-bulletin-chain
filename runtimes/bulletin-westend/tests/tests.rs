@@ -1270,10 +1270,10 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 		});
 }
 
-/// `renew` is allowed directly and inside `Utility::batch` / `batch_all` /
+/// `force_renew` is allowed directly and inside `Utility::batch` / `batch_all` /
 /// `force_batch`. It is rejected inside any other wrapper variant.
 #[test]
-fn renew_direct_and_batch_allowed() {
+fn force_renew_direct_and_batch_allowed() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
@@ -1310,16 +1310,15 @@ fn renew_direct_and_batch_allowed() {
 		let stored_block = System::block_number();
 		advance_block();
 
-		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-			block: stored_block,
-			index: 0,
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 
-		// Direct renew succeeds with the existing account authorization.
+		// Direct force_renew succeeds with the existing account authorization.
 		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
 		advance_block();
 
-		// Each batch variant accepts a single renew.
+		// Each batch variant accepts a single force_renew.
 		for (wrapped, name) in [
 			(
 				RuntimeCall::Utility(pallet_utility::Call::batch {
@@ -1383,10 +1382,10 @@ fn renew_direct_and_batch_allowed() {
 	});
 }
 
-/// A single `batch_all` containing multiple renews consumes one renew's worth of
-/// permanent allowance per inner call.
+/// A single `batch_all` containing multiple `force_renew`s consumes one renew's worth
+/// of permanent allowance per inner call.
 #[test]
-fn batch_of_multiple_renews_consumes_per_call_auth() {
+fn batch_of_multiple_force_renews_consumes_per_call_auth() {
 	let mut t = RuntimeGenesisConfig::default().build_storage().unwrap();
 	pallet_bulletin_transaction_storage::GenesisConfig::<Runtime> {
 		retention_period: 100,
@@ -1421,9 +1420,8 @@ fn batch_of_multiple_renews_consumes_per_call_auth() {
 		let stored_block = System::block_number();
 		advance_block();
 
-		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-			block: stored_block,
-			index: 0,
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 
 		assert_ok_ok(construct_and_apply_extrinsic(
@@ -1459,13 +1457,12 @@ fn batch_exceeding_max_block_transactions_rejected() {
 			use frame_support::traits::fungible::Mutate;
 			Balances::mint_into(&who, 1_000_000_000_000).unwrap();
 
-			// Use a renew_content_hash call so we don't need to construct a real
+			// Use a content-hash variant so we don't need to construct a real
 			// stored transaction — the wrapper-cap check fires before validate_signed
 			// inspects the content hash.
-			let renew_call =
-				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew_content_hash {
-					content_hash: [0u8; 32],
-				});
+			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
+				entry: TransactionRef::ContentHash([0u8; 32]),
+			});
 
 			let max =
 				<Runtime as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions::get(
@@ -1521,8 +1518,7 @@ fn mixed_batch_renew_and_authorize_account_rejected() {
 		advance_block();
 
 		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-			block: stored_block,
-			index: 0,
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 		let authorize_call =
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
@@ -1581,8 +1577,7 @@ fn mixed_batch_renew_and_store_rejected() {
 		advance_block();
 
 		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-			block: stored_block,
-			index: 0,
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 		let store_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data });
 

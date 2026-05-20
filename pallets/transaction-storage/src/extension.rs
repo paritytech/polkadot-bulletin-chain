@@ -364,7 +364,7 @@ where
 				Call::store { .. } | Call::store_with_cid_config { .. } => {
 					state.found_store = true;
 				},
-				Call::renew { .. } | Call::renew_content_hash { .. } =>
+				Call::renew { .. } | Call::force_renew { .. } =>
 					if in_pure_batch_path {
 						state.renew_in_batch_count = state.renew_in_batch_count.saturating_add(1);
 					} else {

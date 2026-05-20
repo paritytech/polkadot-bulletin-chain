@@ -553,7 +553,8 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			entry: TransactionRef<BlockNumberFor<T>>,
 		) -> DispatchResult {
-			let AuthorizedCaller::Signed { who, scope: _ } = Self::ensure_authorized(origin)?
+			let (AuthorizedCaller::Signed { who, scope: _ } |
+			AuthorizedCaller::SignedBatch { who }) = Self::ensure_authorized(origin)?
 			else {
 				return Err(DispatchError::BadOrigin);
 			};
@@ -873,7 +874,7 @@ pub mod pallet {
 			let renewal_data =
 				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
 			match caller {
-				AuthorizedCaller::Signed { who, .. } => {
+				AuthorizedCaller::Signed { who, .. } | AuthorizedCaller::SignedBatch { who } => {
 					ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
 					ensure!(!renewal_data.paid, Error::<T>::CannotDisablePrepaidAutoRenewal);
 				},
