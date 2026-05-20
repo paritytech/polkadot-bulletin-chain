@@ -11,6 +11,7 @@ import { useChainState, useApi, StorageType } from "@/state/chain.state";
 import {
   extentAllowanceBytes,
   extentAllowanceTransactions,
+  type RawTransactionInfo,
 } from "@/state/storage.state";
 import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
@@ -280,7 +281,7 @@ function UsageCard() {
         }
       ),
     ])
-      .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, any[] | null, bigint | null, bigint | null]) => {
+      .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, { value: RawTransactionInfo[] }[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
 
         const userAuths = { count: 0, bytes: 0n };
@@ -289,13 +290,12 @@ function UsageCard() {
         if (authEntries) {
           for (const { keyArgs, value } of authEntries) {
             const extent = value.extent;
-            const txAllowance = Number(extentAllowanceTransactions(extent));
             const bytesAllowance = extentAllowanceBytes(extent);
             if (keyArgs[0].type === "Account") {
-              userAuths.count += txAllowance;
+              userAuths.count += Number(extentAllowanceTransactions(extent));
               userAuths.bytes += bytesAllowance;
             } else if (keyArgs[0].type === "Preimage") {
-              preimageAuths.count += txAllowance;
+              preimageAuths.count++;
               preimageAuths.bytes += bytesAllowance;
             }
           }
@@ -307,11 +307,11 @@ function UsageCard() {
           for (const { value } of txEntries) {
             if (Array.isArray(value)) {
               for (const info of value) {
-                if (info?.kind?.type === "Renew") {
-                  permanentCount.count++;
-                } else {
+                if (info?.kind?.type === "Store") {
                   ephemeral.count++;
                   ephemeral.bytes += BigInt(info.size);
+                } else if (info?.kind?.type === "Renew") {
+                  permanentCount.count++;
                 }
               }
             }
@@ -395,6 +395,10 @@ function UsageCard() {
                 </div>
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">Preimages</p>
+                  <TotalsStat
+                    label="Count"
+                    value={formatNumber(stats.preimageAuths.count)}
+                  />
                   <TotalsStat
                     label="Bytes"
                     value={formatBytes(stats.preimageAuths.bytes)}

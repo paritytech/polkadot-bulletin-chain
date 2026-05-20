@@ -81,11 +81,19 @@ function buildAuthorization(extent: any, expiration: number | null | undefined):
   };
 }
 
+export type TransactionKind = "Store" | "Renew";
+
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
   contentHash: Uint8Array;
   size: number;
   blockChunks: number;
+}
+
+/** Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we read. */
+export interface RawTransactionInfo {
+  size: number;
+  kind: { type: TransactionKind };
 }
 
 // Account authorization state
