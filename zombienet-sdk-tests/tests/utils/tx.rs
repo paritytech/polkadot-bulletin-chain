@@ -767,9 +767,9 @@ pub async fn submit_signed_renew(
 	Ok(())
 }
 
-/// Submit a `force_renew(Position { block, index })` signed by Alice and assert it fails
-/// with `CallFiltered` at dispatch (the tx is included in a block, but `BaseCallFilter`
-/// rejects the call).
+/// Submit `force_renew` signed by Alice and assert it's rejected at dispatch with
+/// `CallFiltered`. The tx is included in a block, `BaseCallFilter` rejects it; the nonce
+/// is consumed.
 pub async fn submit_renew_expecting_filtered(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
@@ -795,14 +795,14 @@ pub async fn submit_renew_expecting_filtered(
 	.map_err(|_| anyhow!("force_renew (expecting CallFiltered) timed out"))?;
 
 	match result {
-		Ok(_) => Err(anyhow!("force_renew dispatched while paused; expected CallFiltered")),
+		Ok(_) => Err(anyhow!("force_renew succeeded while paused; expected CallFiltered")),
 		Err(e) => {
 			let msg = format!("{:?}", e);
 			if msg.contains("CallFiltered") {
-				tracing::info!("✓ force_renew rejected as expected (CallFiltered)");
+				tracing::info!("✓ force_renew rejected at dispatch (CallFiltered)");
 				Ok(())
 			} else {
-				Err(anyhow!("force_renew failed, but not with CallFiltered: {}", msg))
+				Err(anyhow!("force_renew failed unexpectedly: {}", msg))
 			}
 		},
 	}

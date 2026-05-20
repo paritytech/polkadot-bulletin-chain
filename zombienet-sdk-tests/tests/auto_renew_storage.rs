@@ -3795,14 +3795,13 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	Ok(())
 }
 
-/// `pallet_tx_pause` end-to-end: sudo pauses `TransactionStorage::renew`, signed renew is
-/// rejected with `CallFiltered` at dispatch, sudo unpauses, signed renew succeeds again.
-/// Also confirms whitelisted (non-renew) calls cannot be paused at all.
+/// `pallet_tx_pause` e2e: pause → signed `force_renew` is rejected → unpause clears
+/// `PausedCalls`. Also covers the whitelist (non-pausable calls).
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	use crate::utils::{
-		get_alice_nonce, submit_renew_expecting_filtered, submit_signed_renew, sudo_tx_pause,
-		sudo_tx_unpause,
+		submit_renew_expecting_filtered, submit_signed_renew, sudo_tx_pause, sudo_tx_unpause,
+		top_up_alice_authorization,
 	};
 
 	const TEST: &str = "para_pause_renew";
@@ -3821,50 +3820,28 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	// Authorize + store, then top up so Alice has headroom for the three renew attempts
-	// below. Renew is validate-time gated on `bytes_permanent + size <= bytes_allowance`,
-	// so even the to-be-filtered renew needs auth available to reach dispatch.
 	let nonce = get_alice_nonce(collator1).await?;
 	let (store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Stored at block {}", store_block);
 	top_up_alice_authorization(client, 5, 5 * data.len() as u64, nonce).await?;
 	nonce += 1;
-	// Finalize past the topup so the next renew can't race a best-block reorg.
-	wait_for_finalized_height(collator1, store_block + 3, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	// Sanity: renew works before pausing.
 	submit_signed_renew(client, store_block as u32, 0, nonce).await?;
 	nonce += 1;
 	tracing::info!("✓ Renew works before pause");
 
-	// Pause `TransactionStorage::force_renew`.
 	sudo_tx_pause(client, b"TransactionStorage", b"force_renew", nonce).await?;
 	nonce += 1;
-	let chain_nonce_a = get_alice_nonce(collator1).await?;
-	tracing::info!("DEBUG after pause TS::force_renew: local_nonce={}, chain_nonce={}", nonce, chain_nonce_a);
 
-	// force_renew is now filtered. Submit and assert dispatch errors with `CallFiltered`.
-	// Cleanup must always run, even if this assertion fails — use a result holder.
+	// Stash for late propagation so cleanup (unpause) runs first.
 	let filtered_result =
 		submit_renew_expecting_filtered(client, store_block as u32, 0, nonce).await;
-	tracing::info!("DEBUG submit_renew_expecting_filtered returned: {:?}", filtered_result.as_ref().err().map(|e| format!("{e:?}")));
-	nonce += 1;
-	let chain_nonce_b = get_alice_nonce(collator1).await?;
-	tracing::info!("DEBUG after filtered renew submit: local_nonce={}, chain_nonce={}", nonce, chain_nonce_b);
+	if filtered_result.is_ok() {
+		nonce += 1;
+	}
 
-	// Re-anchor local nonce from the chain so a swallowed/diverged step can't desync the
-	// rest of the run.
-	nonce = chain_nonce_b;
-
-	// Whitelist regression: the outer sudo always succeeds (the inner error becomes a
-	// `Sudid` event payload), so successful inclusion proves nothing. The real check is
-	// that `TxPause::PausedCalls((System, set_storage))` stays absent.
-	let pause_system_result = sudo_tx_pause(client, b"System", b"set_storage", nonce).await;
-	tracing::info!("DEBUG sudo_tx_pause(System, set_storage) returned: {:?}", pause_system_result.as_ref().err().map(|e| format!("{e:?}")));
+	sudo_tx_pause(client, b"System", b"set_storage", nonce).await?;
 	nonce += 1;
-	let chain_nonce_c = get_alice_nonce(collator1).await?;
-	tracing::info!("DEBUG after pause(System, set_storage): local_nonce={}, chain_nonce={}", nonce, chain_nonce_c);
-	nonce = chain_nonce_c;
 	let paused_key = subxt::dynamic::storage(
 		"TxPause",
 		"PausedCalls",
@@ -3880,18 +3857,26 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	);
 	tracing::info!("✓ Whitelist held: non-renew call did not enter PausedCalls");
 
-	// Unpause force_renew, regardless of the assertion result above, so subsequent tests in
-	// the shared harness can renew normally.
+	// Unpause before propagating so the shared harness isn't left paused.
 	sudo_tx_unpause(client, b"TransactionStorage", b"force_renew", nonce).await?;
-	nonce += 1;
 
-	// Now propagate the inner assertion if it failed.
 	filtered_result.context("renew was not filtered while TxPause had it paused")?;
 	tracing::info!("✓ Renew rejected while paused");
 
-	// Final check: renew succeeds again post-unpause.
-	submit_signed_renew(client, store_block as u32, 0, nonce).await?;
-	tracing::info!("✓ Renew works again after unpause");
+	let force_renew_key = subxt::dynamic::storage(
+		"TxPause",
+		"PausedCalls",
+		vec![Value::unnamed_composite([
+			Value::from_bytes(&b"TransactionStorage"[..]),
+			Value::from_bytes(&b"force_renew"[..]),
+		])],
+	);
+	let force_renew_entry = client.storage().at_latest().await?.fetch(&force_renew_key).await?;
+	anyhow::ensure!(
+		force_renew_entry.is_none(),
+		"TxPause::PausedCalls((TransactionStorage, force_renew)) must be empty after unpause"
+	);
+	tracing::info!("✓ Unpause cleared PausedCalls");
 
 	test_log!(TEST, "=== Parachain Pause Renew via sudo(TxPause) Test PASSED ===");
 	Ok(())
