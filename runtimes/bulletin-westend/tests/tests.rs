@@ -30,7 +30,7 @@ use frame_support::{
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
-	Origin as TxStorageOrigin,
+	Origin as TxStorageOrigin, TransactionRef,
 };
 use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
@@ -320,8 +320,10 @@ fn authorized_storage_transactions_are_for_free() {
 			// 1. user authorization flow.
 			let account = Sr25519Keyring::Eve;
 			let who: AccountId = account.to_account_id();
+			let data = vec![0u8; 24];
+			let content_hash = sp_io::hashing::blake2_256(&data);
 			let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
-				data: vec![0u8; 24],
+				data: data.clone(),
 			});
 
 			// Not authorized account should fail to store.
@@ -331,7 +333,7 @@ fn authorized_storage_transactions_are_for_free() {
 					InvalidTransaction::Payment
 				)
 			);
-			// Authorize user for two transactions (store + renew).
+			// Authorize user for store + renew + enable_auto_renew.
 			assert_ok!(TransactionStorage::authorize_account(
 				RuntimeOrigin::root(),
 				who.clone(),
@@ -347,13 +349,74 @@ fn authorized_storage_transactions_are_for_free() {
 			advance_block();
 
 			// Renew should also work without funding (feeless).
+			let renew_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+					entry: TransactionRef::Position { block: stored_block, index: 0 },
+				});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+
+			advance_block();
+
+			// `enable_auto_renew` is feeless but pre-pays one cycle at registration
+			// — same hard-cap accounting as `force_renew`. The next cycle fires
+			// free thanks to `paid: true`; subsequent cycles charge per-cycle.
+			let extent_before = TransactionStorage::account_authorization_extent(who.clone());
+			let enable_call =
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::enable_auto_renew {
+					content_hash,
+				});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), enable_call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+			let extent_after = TransactionStorage::account_authorization_extent(who.clone());
+			assert_eq!(extent_after.transactions, extent_before.transactions + 1);
+			assert_eq!(extent_after.bytes, extent_before.bytes);
+			assert_eq!(
+				extent_after.bytes_permanent,
+				extent_before.bytes_permanent + data.len() as u64,
+			);
+		});
+}
+
+/// One-shot `renew` pre-pays the renewal at registration time. Verify that
+/// `bytes_permanent` advances by `info.size` at the runtime level.
+#[test]
+fn renew_one_shot_prepays_bytes_permanent() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let account = Sr25519Keyring::Bob;
+			let who: AccountId = account.to_account_id();
+			let data = vec![0u8; 24];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				2,
+				48,
+			));
+			assert_ok!(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: data.clone(),
+				}),
+			)
+			.unwrap());
+			advance_block();
+
+			let before = TransactionStorage::account_authorization_extent(who.clone());
 			let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-				block: stored_block,
-				index: 0,
+				entry: TransactionRef::ContentHash(content_hash),
 			});
 			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
 			assert_ok!(res);
 			assert_ok!(res.unwrap());
+
+			let after = TransactionStorage::account_authorization_extent(who);
+			assert_eq!(after.bytes_permanent, before.bytes_permanent + data.len() as u64);
+			assert_eq!(after.transactions, before.transactions + 1);
 		});
 }
 
@@ -420,9 +483,8 @@ fn allowance_based_priority_works() {
 			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
 
 			// `renew` carries `Origin::Authorized` too, but must not be boosted.
-			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-				block: 1,
-				index: 0,
+			let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+				entry: TransactionRef::Position { block: 1, index: 0 },
 			});
 			assert_eq!(allowance_based_priority(origin, &renew), 0);
 		});
@@ -1249,9 +1311,8 @@ fn renew_must_be_direct_extrinsic() {
 
 		advance_block();
 
-		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::renew {
-			block: stored_block,
-			index: 0,
+		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 
 		// Direct renew succeeds with the existing account authorization.
