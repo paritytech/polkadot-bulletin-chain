@@ -105,6 +105,10 @@ pub const AUTO_RENEWAL_NOT_ENABLED: InvalidTransaction = InvalidTransaction::Cus
 pub const NOT_AUTO_RENEWAL_OWNER: InvalidTransaction = InvalidTransaction::Custom(10);
 /// `enable_auto_renew`: an auto-renewal is already registered for this content hash.
 pub const AUTO_RENEWAL_ALREADY_ENABLED: InvalidTransaction = InvalidTransaction::Custom(11);
+/// `disable_auto_renew`: the registration has been prepaid for its next cycle and
+/// cannot be disabled by the owner until the cycle fires and consumes the prepayment.
+/// Root can still disable for governance cleanup.
+pub const CANNOT_DISABLE_PREPAID_AUTO_RENEWAL: InvalidTransaction = InvalidTransaction::Custom(12);
 
 /// Percent of `MaxPermanentStorageSize` at which the pallet emits
 /// [`Event::PermanentStorageNearCap`] (rising-edge only). Off-chain governance consumers
@@ -231,6 +235,10 @@ pub mod pallet {
 		AutoRenewalNotEnabled,
 		/// Caller is not the owner of the auto-renewal registration.
 		NotAutoRenewalOwner,
+		/// `disable_auto_renew` rejected: the registration has been prepaid for its next
+		/// cycle. The owner must wait until that cycle consumes the prepayment before
+		/// disabling. Root can disable regardless.
+		CannotDisablePrepaidAutoRenewal,
 		/// Authorizer's `authorization_period` override is zero or `>= T::AuthorizationPeriod`.
 		/// The override is intended to shorten an authorizer's window; to grant the default
 		/// length, pass `None` instead.
@@ -252,10 +260,27 @@ pub mod pallet {
 
 	/// Data associated with a renewal registration in [`AutoRenewals`].
 	///
-	/// Holds the owner account whose authorization is charged each cycle, plus a
-	/// `recurring` flag that decides whether the registration is consumed after a
-	/// single successful renewal (`false`, set by [`Pallet::renew`]) or persists
-	/// forever (`true`, set by [`Pallet::enable_auto_renew`]).
+	/// Holds the owner account, a `recurring` flag that decides whether the
+	/// registration is consumed after a single successful renewal (`false`, set by
+	/// [`Pallet::renew`]) or persists forever (`true`, set by
+	/// [`Pallet::enable_auto_renew`]), and a `paid` flag indicating that the next
+	/// cycle has already been charged against the owner's authorization at
+	/// registration time.
+	///
+	/// Both [`Pallet::renew`] and [`Pallet::enable_auto_renew`] insert with
+	/// `paid: true`: the extension's `check_signed` charges `bytes_permanent`,
+	/// `PermanentStorageUsed`, and one tx slot up front (same as `force_renew`).
+	/// [`Pallet::do_process_auto_renewals`] keys its charge-skip off `paid`: when
+	/// `paid` is true the cycle renews without re-charging and then flips `paid`
+	/// to false (for recurring entries) so subsequent cycles pay per-cycle, as
+	/// before. One-shot entries (`recurring: false`) are removed after the single
+	/// renewal so the flag is inert after that point.
+	///
+	/// While `paid` is true, [`Pallet::disable_auto_renew`] rejects signed callers
+	/// — the owner must wait for the first cycle to consume the prepayment. This
+	/// is what makes `enable_auto_renew` honestly cost a renewal even if the
+	/// owner immediately disables (bytes already left the per-account quota at
+	/// registration). Root can still disable for governance cleanup.
 	#[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 	pub struct RenewalData<AccountId> {
 		/// Account whose authorization will be consumed each time data is auto-renewed.
@@ -264,6 +289,11 @@ pub mod pallet {
 		/// `false` — one-shot: removed from `AutoRenewals` after the first successful
 		/// renewal cycle (set by `renew`).
 		pub recurring: bool,
+		/// `true` — the next renewal cycle has already been charged at registration
+		/// time and will fire free. After the cycle delivers, the flag is flipped to
+		/// `false` for recurring entries; for one-shot entries the registration is
+		/// removed outright.
+		pub paid: bool,
 	}
 
 	/// Custom origin for authorized signed transaction storage operations.
@@ -530,7 +560,7 @@ pub mod pallet {
 
 			AutoRenewals::<T>::insert(
 				content_hash,
-				RenewalData { account: who.clone(), recurring: false },
+				RenewalData { account: who.clone(), recurring: false, paid: true },
 			);
 			Self::deposit_event(Event::RenewalEnabled { content_hash, who, recurring: false });
 			Ok(())
@@ -750,22 +780,28 @@ pub mod pallet {
 
 		/// Enable automatic renewal for a previously stored piece of data.
 		///
-		/// Force-renew + schedule. This call combines a regular renewal (paid up
-		/// front against the caller's account authorization) with a registration in
-		/// [`AutoRenewals`]. Bytes and one tx slot are charged here via the
-		/// extension's `check_signed`, the renewal entry is added to
-		/// [`BlockTransactions`] by [`Self::do_renew`], and future renewal cycles
-		/// fire from [`Self::do_process_auto_renewals`] when the renewed entry
-		/// expires. Bounding the registration against the renew hard cap (rather
-		/// than a free snapshot check) means a caller cannot register more
-		/// auto-renewals than `bytes_allowance` supports.
+		/// **Recurring scheduler with pre-paid first cycle.** The extension's
+		/// `check_signed` charges `bytes_permanent`, `PermanentStorageUsed`, and
+		/// one tx slot at registration (same hard-cap accounting as `force_renew`
+		/// / one-shot `renew`). The registration is inserted as
+		/// [`RenewalData`] `{ recurring: true, paid: true }`. The first renewal
+		/// cycle fires at the next `RetentionPeriod` boundary **without**
+		/// re-charging — the slot is already paid for; the cycle then flips
+		/// `paid` to `false`. From that point on, every subsequent cycle charges
+		/// the owner's authorization in [`Self::do_process_auto_renewals`],
+		/// dropping the registration with [`Event::AutoRenewalFailed`] if the
+		/// quota is exhausted at cycle time.
 		///
-		/// Feeless: no token fee. Spam is bounded by the per-account renew quota
-		/// (`bytes_permanent + size <= bytes_allowance`) and the chain-wide cap
-		/// (`PermanentStorageUsed + size <= MaxPermanentStorageSize`).
+		/// Feeless: no token fee. Spam is bounded structurally by the up-front
+		/// hard-cap charge — the caller cannot over-schedule past their
+		/// `bytes_allowance` or the chain-wide `MaxPermanentStorageSize`.
+		/// [`Self::disable_auto_renew`] additionally rejects the owner while
+		/// `paid` is `true`, so the prepayment cannot be reclaimed before the
+		/// first cycle fires.
 		///
-		/// Emits [`Renewed`](Event::Renewed) for the immediate renewal and
-		/// [`RenewalEnabled`](Event::RenewalEnabled) `{ recurring: true }` for the registration.
+		/// Emits [`RenewalEnabled`](Event::RenewalEnabled) `{ recurring: true }`
+		/// for the registration; the first actual renewal is emitted as
+		/// [`DataAutoRenewed`](Event::DataAutoRenewed) at cycle time.
 		#[pallet::call_index(12)]
 		#[pallet::weight(T::WeightInfo::enable_auto_renew())]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
@@ -783,19 +819,19 @@ pub mod pallet {
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			// Defensive content-hash existence check. The snapshot precondition
-			// (auth exists, unexpired, has room for `info.size`) and the one-tx-slot
-			// charge run in the extension's `check_signed` for this call. The
-			// renewal itself fires later via `do_process_auto_renewals` — registering
-			// here must not call `do_renew`, otherwise `bytes_permanent` would be
-			// double-charged (once by the cycle, once by the synchronous renew).
+			// Defensive content-hash existence check. The hard-cap accounting
+			// (`bytes_permanent`, `PermanentStorageUsed`, one tx slot) is performed by
+			// the extension's `check_signed` for this call with `is_renew = true`,
+			// matching the one-shot `renew`. Registering here must not call
+			// `do_renew`, otherwise `bytes_permanent` would be double-charged (once
+			// by registration, once by `do_process_auto_renewals`'s prepaid cycle).
 			let (block, index) = TransactionByContentHash::<T>::get(content_hash)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 			Self::transaction_info(block, index).ok_or(Error::<T>::RenewedNotFound)?;
 
 			AutoRenewals::<T>::insert(
 				content_hash,
-				RenewalData { account: who.clone(), recurring: true },
+				RenewalData { account: who.clone(), recurring: true, paid: true },
 			);
 			Self::deposit_event(Event::RenewalEnabled { content_hash, who, recurring: true });
 			Ok(())
@@ -803,12 +839,20 @@ pub mod pallet {
 
 		/// Disable automatic renewal for a piece of data.
 		///
-		/// Signed: the caller must be the account that originally enabled the renewal.
-		/// Root: bypasses the owner check (governance/cleanup).
+		/// Signed: the caller must be the account that originally enabled the renewal,
+		/// and the registration must not be in its prepaid window — see
+		/// [`Error::CannotDisablePrepaidAutoRenewal`]. Both registrations from
+		/// [`Pallet::renew`] and [`Pallet::enable_auto_renew`] start with `paid: true`;
+		/// the owner has to wait for the first cycle to consume the prepayment before
+		/// they can disable.
+		///
+		/// Root: bypasses the owner check and the prepaid-window check
+		/// (governance/cleanup).
 		///
 		/// Feeless: no token fee and no authorization is consumed. Signed admission is
-		/// gated in [`check_signed`](Self::check_signed) on ownership, so a caller can
-		/// issue at most one successful `disable_auto_renew` per registration it owns.
+		/// gated in [`check_signed`](Self::check_signed) on ownership and the prepaid
+		/// flag, so a caller can issue at most one successful `disable_auto_renew` per
+		/// registration it owns — and only after the first cycle has fired.
 		///
 		/// Emits [`AutoRenewalDisabled`](Event::AutoRenewalDisabled) when successful.
 		#[pallet::call_index(13)]
@@ -824,6 +868,7 @@ pub mod pallet {
 			match caller {
 				AuthorizedCaller::Signed { who, .. } => {
 					ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
+					ensure!(!renewal_data.paid, Error::<T>::CannotDisablePrepaidAutoRenewal);
 				},
 				AuthorizedCaller::Root => {},
 				AuthorizedCaller::Unsigned => return Err(DispatchError::BadOrigin),
@@ -1305,23 +1350,38 @@ pub mod pallet {
 			let mut transactions = <BlockTransactions<T>>::get();
 
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
-				// One-shot was pre-paid at registration; recurring pays per cycle.
-				let new_index = if renewal_data.recurring {
+				// `paid = true` means the cycle was already charged at registration
+				// (the one-shot `renew` path and the first cycle after
+				// `enable_auto_renew`). All other recurring cycles charge here.
+				let was_paid = renewal_data.paid;
+				let new_index = if was_paid {
+					Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
+				} else {
 					let scope = AuthorizationScope::Account(renewal_data.account.clone());
 					if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
 						Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
 					} else {
 						None
 					}
-				} else {
-					Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
 				};
 
 				if let Some(new_index) = new_index {
-					// One-shot registrations: remove now that the single renewal has fired.
-					// Recurring registrations stay in place to fire again next cycle.
 					if !renewal_data.recurring {
+						// One-shot: registration is consumed.
 						AutoRenewals::<T>::remove(content_hash);
+					} else if was_paid {
+						// Recurring: consume the prepayment so subsequent cycles
+						// charge per-cycle, and unblock `disable_auto_renew` for the
+						// owner now that the prepaid renewal has been delivered.
+						// `mutate` (not `insert`) so a Root `disable_auto_renew`
+						// executed earlier in the same block — between the
+						// `on_initialize` queue and this inherent — is not silently
+						// re-armed by a fresh insert.
+						AutoRenewals::<T>::mutate(content_hash, |entry| {
+							if let Some(data) = entry {
+								data.paid = false;
+							}
+						});
 					}
 					Self::deposit_event(Event::DataAutoRenewed {
 						index: new_index,
@@ -2128,13 +2188,12 @@ pub mod pallet {
 					));
 				},
 				Call::<T>::enable_auto_renew { content_hash } => {
-					// Feeless recurring registration. Mirrors `renew`'s snapshot model:
-					// auth must exist, be unexpired, and have headroom for one more
-					// renewal of `info.size` (`bytes_permanent + size ≤ bytes_allowance`).
-					// Only one tx slot is consumed; `bytes_permanent`, the chain-wide
-					// `PermanentStorageUsed` counter, and the actual Renew entry are
-					// produced later by `do_process_auto_renewals` at the retention
-					// boundary.
+					// Pre-paid recurring registration. Mirrors one-shot `renew`'s
+					// hard-cap charge: `bytes_permanent`, the chain-wide
+					// `PermanentStorageUsed` counter, and one tx slot are all consumed
+					// here. The first cycle then fires free in
+					// `do_process_auto_renewals` (`paid = true` on the inserted
+					// `RenewalData`); subsequent cycles charge per-cycle.
 					if AutoRenewals::<T>::contains_key(*content_hash) {
 						return Err(AUTO_RENEWAL_ALREADY_ENABLED.into());
 					}
@@ -2142,20 +2201,11 @@ pub mod pallet {
 						.ok_or(RENEWED_NOT_FOUND)?;
 					let info = Self::transaction_info(block, index).ok_or(RENEWED_NOT_FOUND)?;
 
-					let auth = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
-						.ok_or(AUTHORIZATION_NOT_FOUND)?;
-					if auth.expired(Self::now()) {
-						return Err(AUTHORIZATION_NOT_FOUND.into());
-					}
-					if !auth.extent.has_permanent_capacity(info.size as u64) {
-						return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
-					}
-					// `size = 0, is_renew = false`: only the tx counter is charged.
 					Self::check_authorization(
 						&AuthorizationScope::Account(who.clone()),
-						0,
+						info.size,
 						context.consume_authorization(),
-						false,
+						true,
 					)?;
 
 					let scope = AuthorizationScope::Account(who.clone());
@@ -2171,14 +2221,19 @@ pub mod pallet {
 					));
 				},
 				Call::<T>::disable_auto_renew { content_hash } => {
-					// Feeless. Pool admission is gated on ownership so spam is bounded even
-					// without a token fee: the registration must exist and `who` must be
-					// its owner. `Some(scope)` triggers the origin rewrite to
+					// Feeless. Pool admission is gated on ownership AND on the prepaid
+					// window — the registration must exist, `who` must be its owner,
+					// and the next cycle must not be pre-paid (otherwise the owner
+					// would be reclaiming a slot they've already charged against their
+					// quota). `Some(scope)` triggers the origin rewrite to
 					// `Origin::Authorized` expected by the dispatch's `ensure_authorized`.
 					let renewal_data =
 						AutoRenewals::<T>::get(content_hash).ok_or(AUTO_RENEWAL_NOT_ENABLED)?;
 					if &renewal_data.account != who {
 						return Err(NOT_AUTO_RENEWAL_OWNER.into());
+					}
+					if renewal_data.paid {
+						return Err(CANNOT_DISABLE_PREPAID_AUTO_RENEWAL.into());
 					}
 					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((

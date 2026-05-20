@@ -510,6 +510,15 @@ mod benchmarks {
 			.into();
 		TransactionStorage::<T>::enable_auto_renew(authorized_origin.clone(), content_hash)
 			.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
+		// `enable_auto_renew` leaves the entry with `paid: true`, which blocks
+		// signed `disable_auto_renew`. Flip to the post-first-cycle state so this
+		// benchmark measures the path real owners actually hit (a Root-disable
+		// would exercise a different branch with different weight).
+		AutoRenewals::<T>::mutate(content_hash, |entry| {
+			if let Some(data) = entry {
+				data.paid = false;
+			}
+		});
 
 		#[extrinsic_call]
 		_(authorized_origin, content_hash);
@@ -605,7 +614,9 @@ mod benchmarks {
 					block_chunks: 0,
 					kind: TransactionKind::Store,
 				};
-				let renewal_data = RenewalData { account: caller, recurring: true };
+				// `paid: false` exercises the per-cycle `check_authorization` charge
+				// path, which is the heavier branch we want to measure.
+				let renewal_data = RenewalData { account: caller, recurring: true, paid: false };
 				pending
 					.try_push((content_hash, tx_info, renewal_data))
 					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
@@ -682,7 +693,7 @@ mod benchmarks {
 			// populated by the real `store()` call above).
 			AutoRenewals::<T>::insert(
 				template.content_hash,
-				RenewalData { account: caller.clone(), recurring: true },
+				RenewalData { account: caller.clone(), recurring: true, paid: false },
 			);
 
 			// Distinct `content_hash` per entry so the on_initialize loop's
@@ -707,7 +718,7 @@ mod benchmarks {
 					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));
 					AutoRenewals::<T>::insert(
 						unique_hash,
-						RenewalData { account: caller.clone(), recurring: true },
+						RenewalData { account: caller.clone(), recurring: true, paid: false },
 					);
 				}
 				Ok(())
