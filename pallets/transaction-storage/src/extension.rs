@@ -68,8 +68,8 @@ where
 	}
 
 	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
-	/// store_with_cid_config, renew, renew_content_hash) — either directly or nested
-	/// inside wrappers.
+	/// store_with_cid_config, force_renew) — either directly or nested inside
+	/// wrappers.
 	///
 	/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
 	/// [`CallInspector`] provides the wrapper-recursion logic, so this function
@@ -80,10 +80,7 @@ where
 		if let Some(inner_call) = call.is_sub_type() {
 			return matches!(
 				inner_call,
-				Call::store { .. } |
-					Call::store_with_cid_config { .. } |
-					Call::renew { .. } |
-					Call::renew_content_hash { .. }
+				Call::store { .. } | Call::store_with_cid_config { .. } | Call::force_renew { .. }
 			);
 		}
 		if depth >= MAX_WRAPPER_DEPTH {
@@ -245,7 +242,8 @@ where
 		match inner_call {
 			Call::store { data, .. } | Call::store_with_cid_config { data, .. } =>
 				T::WeightInfo::validate_store(data.len() as u32),
-			Call::renew { .. } | Call::renew_content_hash { .. } => T::WeightInfo::validate_renew(),
+			Call::renew { .. } | Call::force_renew { .. } | Call::enable_auto_renew { .. } =>
+				T::WeightInfo::validate_renew(),
 			_ => Weight::zero(),
 		}
 	}

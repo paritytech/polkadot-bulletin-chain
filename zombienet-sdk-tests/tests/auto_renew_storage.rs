@@ -1164,8 +1164,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 				.iter()
 				.filter_map(|e| e.ok())
 				.filter(|e| {
-					e.pallet_name() == "TransactionStorage" &&
-						e.variant_name() == "AutoRenewalEnabled"
+					e.pallet_name() == "TransactionStorage" && e.variant_name() == "RenewalEnabled"
 				})
 				.count();
 			if current.number() == 0 {
@@ -1177,7 +1176,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	}
 	if enabled_count != content_hashes.len() {
 		anyhow::bail!(
-			"Expected {} AutoRenewalEnabled events, found {}",
+			"Expected {} RenewalEnabled events, found {}",
 			content_hashes.len(),
 			enabled_count
 		);
@@ -1185,7 +1184,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	tracing::info!("Auto-renewal enabled for all {} items", MANY_ITEMS_COUNT);
 	let _ = nonce; // last use
 
-	// Per-item bitswap probe: catches the case where `Stored` + `AutoRenewalEnabled` events
+	// Per-item bitswap probe: catches the case where `Stored` + `RenewalEnabled` events
 	// fire on-chain but col11 didn't actually receive the chunks (or chunks have wrong hash).
 	// `BITSWAP_VERIFY_CONCURRENCY` persistent connections each handle ~`MANY_ITEMS_COUNT/N`
 	// items — sequential per-item fetches over a fresh litep2p each (the original loop)
@@ -2165,7 +2164,7 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 	let _ = nonce;
 	tracing::info!("All {} enable_auto_renew calls accepted into pool", MANY_ITEMS_COUNT);
 
-	// Sanity: at least 1 AutoRenewalEnabled event must appear before items expire. If 0,
+	// Sanity: at least 1 RenewalEnabled event must appear before items expire. If 0,
 	// fail fast — pruning_window > RP timing got broken.
 	let cadence = BULK_ENABLE_RETENTION_PERIOD as u64 + 1;
 	let cycle1_block = latest_store + cadence;
@@ -2374,8 +2373,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
 			for ev in events.iter().filter_map(|e| e.ok()) {
-				if ev.pallet_name() == "TransactionStorage" &&
-					ev.variant_name() == "AutoRenewalEnabled"
+				if ev.pallet_name() == "TransactionStorage" && ev.variant_name() == "RenewalEnabled"
 				{
 					enabled_count += 1;
 					if block_n > latest_enable_block {
@@ -2394,7 +2392,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	}
 	if enabled_count != ON_INIT_CLEANUP_ITEMS_PER_SET as usize {
 		anyhow::bail!(
-			"Expected {} AutoRenewalEnabled events, found {} (latest enable at block {}, \
+			"Expected {} RenewalEnabled events, found {} (latest enable at block {}, \
 			 {} ExtrinsicFailed events observed in same window)",
 			ON_INIT_CLEANUP_ITEMS_PER_SET,
 			enabled_count,
@@ -2852,8 +2850,8 @@ fn pseudo_random(seed: u64) -> u64 {
 	x
 }
 
-/// 60-minute soak on a 3-collator network: drive steady `store` / `renew_content_hash`
-/// traffic, periodically verify that data older than the pruning window is no longer served.
+/// 60-minute soak on a 3-collator network: drive steady `store` / `force_renew` traffic,
+/// periodically verify that data older than the pruning window is no longer served.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	const TEST: &str = "para_pruning_soak";
@@ -2991,8 +2989,11 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				let hash = stored[idx].content_hash;
 				let renew_call = tx(
 					"TransactionStorage",
-					"renew_content_hash",
-					vec![Value::from_bytes(hash.as_slice())],
+					"force_renew",
+					vec![Value::unnamed_variant(
+						"ContentHash",
+						[Value::from_bytes(hash.as_slice())],
+					)],
 				);
 				let renew_params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 				match client.tx().sign_and_submit(&renew_call, &dev::alice(), renew_params).await {
@@ -3561,10 +3562,10 @@ async fn dump_renewal_window(
 		let events = client.blocks().at(hash).await?.events().await?;
 		let renewed = count_event(&events, "DataAutoRenewed");
 		let failed = count_event(&events, "AutoRenewalFailed");
-		let enabled = count_event(&events, "AutoRenewalEnabled");
+		let enabled = count_event(&events, "RenewalEnabled");
 		let stored = count_event(&events, "Stored");
 		tracing::info!(
-			"[{}]   block {} ({}): Stored={} AutoRenewalEnabled={} DataAutoRenewed={} AutoRenewalFailed={}",
+			"[{}]   block {} ({}): Stored={} RenewalEnabled={} DataAutoRenewed={} AutoRenewalFailed={}",
 			label,
 			n,
 			hex::encode(&hash.0[..4]),
