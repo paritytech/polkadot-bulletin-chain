@@ -382,16 +382,24 @@ function UsageCard() {
             <div>
               <p className="text-sm font-medium mb-2">Authorizations</p>
               <div className="grid grid-cols-2 gap-4">
-                <TotalsStat
-                  label="Users"
-                  value={formatNumber(stats.userAuths.count)}
-                  hint={formatBytes(stats.userAuths.bytes)}
-                />
-                <TotalsStat
-                  label="Preimages"
-                  value={formatNumber(stats.preimageAuths.count)}
-                  hint={formatBytes(stats.preimageAuths.bytes)}
-                />
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">Users</p>
+                  <TotalsStat
+                    label="Transactions"
+                    value={formatNumber(stats.userAuths.count)}
+                  />
+                  <TotalsStat
+                    label="Bytes"
+                    value={formatBytes(stats.userAuths.bytes)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">Preimages</p>
+                  <TotalsStat
+                    label="Bytes"
+                    value={formatBytes(stats.preimageAuths.bytes)}
+                  />
+                </div>
               </div>
             </div>
           </div>
