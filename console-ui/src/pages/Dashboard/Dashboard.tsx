@@ -5,15 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
-import { AuthorizationCard } from "@/components/AuthorizationCard";
+import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
 import { useChainState, useApi, StorageType } from "@/state/chain.state";
-import { useSelectedAccount } from "@/state/wallet.state";
 import {
   extentAllowanceBytes,
   extentAllowanceTransactions,
 } from "@/state/storage.state";
-import { formatAddress, formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
+import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
 function QuickActions() {
   return (
@@ -138,47 +137,6 @@ function ChainInfoCard() {
   );
 }
 
-function AccountCard() {
-  const selectedAccount = useSelectedAccount();
-
-  if (!selectedAccount) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Account</CardTitle>
-          <CardDescription>Connect a wallet to get started</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link to="/accounts">
-            <Button className="w-full">Connect Wallet</Button>
-          </Link>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connected Account</CardTitle>
-        <CardDescription>{selectedAccount.name || "Unknown"}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <p className="font-mono text-sm break-all">
-            {formatAddress(selectedAccount.address, 8)}
-          </p>
-          <Link to="/accounts">
-            <Button variant="outline" size="sm" className="w-full">
-              Manage Accounts
-            </Button>
-          </Link>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function WelcomeCard({ storageType }: { storageType: StorageType }) {
   if (storageType === "web3storage") {
     return (
@@ -278,9 +236,10 @@ function WelcomeCard({ storageType }: { storageType: StorageType }) {
 }
 
 interface UsageStats {
+  ephemeral: { count: number; bytes: bigint };
+  permanent: { count: number; used: bigint; cap: bigint };
   userAuths: { count: number; bytes: bigint };
   preimageAuths: { count: number; bytes: bigint };
-  transactions: { count: number; bytes: bigint };
 }
 
 function UsageCard() {
@@ -298,7 +257,7 @@ function UsageCard() {
 
     const recordPalletError = (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!cancelled && !palletError) setPalletError(msg);
+      if (!cancelled) setPalletError((prev) => prev ?? msg);
     };
 
     Promise.all([
@@ -310,8 +269,18 @@ function UsageCard() {
         recordPalletError(err);
         return null;
       }),
+      api.query.TransactionStorage.PermanentStorageUsed.getValue().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      Promise.resolve(api.constants.TransactionStorage.MaxPermanentStorageSize()).catch(
+        (err: unknown) => {
+          recordPalletError(err);
+          return null;
+        }
+      ),
     ])
-      .then(([authEntries, txEntries]: [any[] | null, any[] | null]) => {
+      .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, any[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
 
         const userAuths = { count: 0, bytes: 0n };
@@ -332,23 +301,32 @@ function UsageCard() {
           }
         }
 
-        let txCount = 0;
-        let txBytes = 0n;
+        const ephemeral = { count: 0, bytes: 0n };
+        const permanentCount = { count: 0 };
         if (txEntries) {
           for (const { value } of txEntries) {
             if (Array.isArray(value)) {
               for (const info of value) {
-                txCount++;
-                txBytes += BigInt(info.size);
+                if (info?.kind?.type === "Renew") {
+                  permanentCount.count++;
+                } else {
+                  ephemeral.count++;
+                  ephemeral.bytes += BigInt(info.size);
+                }
               }
             }
           }
         }
 
         setStats({
+          ephemeral,
+          permanent: {
+            count: permanentCount.count,
+            used: permUsed ?? 0n,
+            cap: permCap ?? 0n,
+          },
           userAuths,
           preimageAuths,
-          transactions: { count: txCount, bytes: txBytes },
         });
       })
       .catch((err) => {
@@ -381,71 +359,55 @@ function UsageCard() {
           <PalletUnavailableNotice pallet="TransactionStorage" details={palletError} />
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Transactions
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatNumber(stats.transactions.count)}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Bytes
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatBytes(stats.transactions.bytes)}
-                </p>
+            <div>
+              <p className="text-sm font-medium mb-2">Ephemeral</p>
+              <div className="grid grid-cols-2 gap-4">
+                <TotalsStat label="Transactions" value={formatNumber(stats.ephemeral.count)} />
+                <TotalsStat label="Bytes" value={formatBytes(stats.ephemeral.bytes)} />
               </div>
             </div>
             <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations for Users</p>
+              <p className="text-sm font-medium mb-2">Permanent</p>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Transactions
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatNumber(stats.userAuths.count)}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Bytes
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatBytes(stats.userAuths.bytes)}
-                  </p>
-                </div>
+                <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
+                <TotalsStat
+                  label="Bytes"
+                  value={formatBytes(stats.permanent.used)}
+                  hint={`of ${formatBytes(stats.permanent.cap)}`}
+                />
               </div>
             </div>
+            <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations for Preimages</p>
+              <p className="text-sm font-medium mb-2">Authorizations</p>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Transactions
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatNumber(stats.preimageAuths.count)}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Bytes
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatBytes(stats.preimageAuths.bytes)}
-                  </p>
-                </div>
+                <TotalsStat
+                  label="Users"
+                  value={formatNumber(stats.userAuths.count)}
+                  hint={formatBytes(stats.userAuths.bytes)}
+                />
+                <TotalsStat
+                  label="Preimages"
+                  value={formatNumber(stats.preimageAuths.count)}
+                  hint={formatBytes(stats.preimageAuths.bytes)}
+                />
               </div>
             </div>
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function TotalsStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-semibold">{value}</p>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
   );
 }
 
@@ -560,9 +522,8 @@ export function Dashboard() {
           <WelcomeCard storageType={storageType} />
           <ChainInfoCard />
           <QuickActions />
-          <AccountCard />
+          <AccountSummaryCard />
           <UsageCard />
-          <AuthorizationCard className="lg:col-start-3" />
         </div>
       )}
     </div>
