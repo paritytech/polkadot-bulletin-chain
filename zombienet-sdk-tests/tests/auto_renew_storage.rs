@@ -3801,7 +3801,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	use crate::utils::{
-		submit_renew_expecting_filtered, submit_signed_renew, sudo_tx_pause, sudo_tx_unpause,
+		get_alice_nonce, submit_renew_expecting_filtered, submit_signed_renew, sudo_tx_pause,
+		sudo_tx_unpause,
 	};
 
 	const TEST: &str = "para_pause_renew";
@@ -3839,18 +3840,31 @@ async fn parachain_pause_renew_filters_dispatch_test() -> Result<()> {
 	// Pause `TransactionStorage::force_renew`.
 	sudo_tx_pause(client, b"TransactionStorage", b"force_renew", nonce).await?;
 	nonce += 1;
+	let chain_nonce_a = get_alice_nonce(collator1).await?;
+	tracing::info!("DEBUG after pause TS::force_renew: local_nonce={}, chain_nonce={}", nonce, chain_nonce_a);
 
 	// force_renew is now filtered. Submit and assert dispatch errors with `CallFiltered`.
 	// Cleanup must always run, even if this assertion fails — use a result holder.
 	let filtered_result =
 		submit_renew_expecting_filtered(client, store_block as u32, 0, nonce).await;
+	tracing::info!("DEBUG submit_renew_expecting_filtered returned: {:?}", filtered_result.as_ref().err().map(|e| format!("{e:?}")));
 	nonce += 1;
+	let chain_nonce_b = get_alice_nonce(collator1).await?;
+	tracing::info!("DEBUG after filtered renew submit: local_nonce={}, chain_nonce={}", nonce, chain_nonce_b);
+
+	// Re-anchor local nonce from the chain so a swallowed/diverged step can't desync the
+	// rest of the run.
+	nonce = chain_nonce_b;
 
 	// Whitelist regression: the outer sudo always succeeds (the inner error becomes a
 	// `Sudid` event payload), so successful inclusion proves nothing. The real check is
 	// that `TxPause::PausedCalls((System, set_storage))` stays absent.
-	let _ = sudo_tx_pause(client, b"System", b"set_storage", nonce).await;
+	let pause_system_result = sudo_tx_pause(client, b"System", b"set_storage", nonce).await;
+	tracing::info!("DEBUG sudo_tx_pause(System, set_storage) returned: {:?}", pause_system_result.as_ref().err().map(|e| format!("{e:?}")));
 	nonce += 1;
+	let chain_nonce_c = get_alice_nonce(collator1).await?;
+	tracing::info!("DEBUG after pause(System, set_storage): local_nonce={}, chain_nonce={}", nonce, chain_nonce_c);
+	nonce = chain_nonce_c;
 	let paused_key = subxt::dynamic::storage(
 		"TxPause",
 		"PausedCalls",
