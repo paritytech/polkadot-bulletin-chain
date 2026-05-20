@@ -29,8 +29,6 @@ pub mod fast_runtime_binary {
 
 mod genesis_config_presets;
 pub mod storage;
-#[cfg(test)]
-mod tx_pause_tests;
 mod weights;
 pub mod xcm_config;
 
