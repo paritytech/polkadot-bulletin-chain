@@ -67,14 +67,6 @@ const CLAIM_TIMEOUT_MS = 60_000;
 const PROMOTION_POLL_INTERVAL_MS = 6_000;   // ~1 block at 6 s/block
 const PROMOTION_TIMEOUT_MS = 300_000;       // ~50 blocks
 
-// Per-recipient metadata overhead the HOP pool charges against capacity,
-// matching `METADATA_COST_PER_RECIPIENT` in substrate/client/hop/src/types.rs.
-const METADATA_COST_PER_RECIPIENT = 40;
-
-function entryAccountedSize(dataLen, recipientCount) {
-	return dataLen + recipientCount * METADATA_COST_PER_RECIPIENT;
-}
-
 // HOP requires raw byte signing — never use getPolkadotSigner, which wraps the
 // payload in <Bytes>…</Bytes> and the node would reject the signature.
 function rawSigner(keyPair) {
@@ -233,7 +225,7 @@ async function main() {
 			'after round-trip submit',
 			afterRoundTripSubmit,
 			1,
-			entryAccountedSize(roundTripData.length, recipientCount),
+			HopClient.calculateEffectiveDataSize(roundTripData.length, recipientCount),
 		);
 
 		logInfo('Receiver (anonymous client) polling claim…');
@@ -267,7 +259,7 @@ async function main() {
 			'after promotion submit',
 			afterPromotionSubmit,
 			1,
-			entryAccountedSize(promotionData.length, recipientCount),
+			HopClient.calculateEffectiveDataSize(promotionData.length, recipientCount),
 		);
 
 		logInfo('Polling is_promoted_on_chain (no ack — let maintenance task promote)…');
