@@ -1,22 +1,24 @@
-import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
-import { getWsProvider } from "@polkadot-api/ws-provider";
+import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
+import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_dotspark, web3_storage } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot, web3_storage } from "@polkadot-api/descriptors";
+import {
+  BULLETIN_NETWORKS,
+  WEB3_STORAGE_NETWORKS,
+  DEFAULT_NETWORKS,
+  type Network,
+} from "../config/networks";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 
 export type StorageType = "bulletin" | "web3storage";
 
 export type NetworkId = string;
 
-export interface Network {
-  id: NetworkId;
-  name: string;
-  endpoints: string[];
-  lightClient: boolean;
-  chainSpec?: string;
-}
+// Re-export Network type for convenience
+export type { Network };
 
 export interface StorageConfig {
   id: StorageType;
@@ -29,58 +31,14 @@ export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
   bulletin: {
     id: "bulletin",
     name: "Bulletin",
-    defaultNetwork: "paseo",
-    networks: {
-      local: {
-        id: "local",
-        name: "Local Dev",
-        endpoints: ["ws://localhost:10000"],
-        lightClient: false,
-      },
-      westend: {
-        id: "westend",
-        name: "Bulletin Westend",
-        endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
-        lightClient: false,
-      },
-      paseo: {
-        id: "paseo",
-        name: "Bulletin Paseo",
-        endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
-        lightClient: false,
-      },
-      dotspark: {
-        id: "dotspark",
-        name: "Bulletin (Prototypes dotspark)",
-        endpoints: ["wss://bulletin.dotspark.app"],
-        lightClient: false,
-      },
-      polkadot: {
-        id: "polkadot",
-        name: "Bulletin Polkadot (not released yet)",
-        endpoints: [],
-        lightClient: false,
-      },
-    },
+    defaultNetwork: DEFAULT_NETWORKS.bulletin,
+    networks: BULLETIN_NETWORKS,
   },
   web3storage: {
     id: "web3storage",
     name: "Web3 Storage",
-    defaultNetwork: "local",
-    networks: {
-      local: {
-        id: "local",
-        name: "Local Dev",
-        endpoints: ["ws://localhost:2222"],
-        lightClient: false,
-      },
-      westend: {
-        id: "westend",
-        name: "Web3 Westend (not released yet)",
-        endpoints: [],
-        lightClient: false,
-      },
-    },
+    defaultNetwork: DEFAULT_NETWORKS.web3storage,
+    networks: WEB3_STORAGE_NETWORKS,
   },
 };
 
@@ -90,7 +48,9 @@ const DESCRIPTORS: Record<string, Record<string, any>> = {
     local: bulletin_westend,
     westend: bulletin_westend,
     paseo: bulletin_paseo,
-    dotspark: bulletin_dotspark,
+    "paseo-next-v2": bulletin_paseo_next_v2,
+    polkadot: bulletin_polkadot,
+    previewnet: bulletin_westend,
   },
   web3storage: {
     local: web3_storage,
@@ -118,6 +78,8 @@ class NullWebSocket {
 
 // Track the current provider's kill switch so we can silence its reconnection loop
 let killCurrentProvider: (() => void) | null = null;
+// Track the bestBlocks$ subscription so we can clean it up on disconnect/reconnect
+let blockSubscription: { unsubscribe(): void } | null = null;
 
 function createKillableWsProvider(endpoint: string) {
   let killed = false;
@@ -156,9 +118,46 @@ export interface ChainState {
   ss58Format?: number;
 }
 
-const initialStorageType: StorageType = "bulletin";
+const STORAGE_KEY_STORAGE_TYPE = "bulletin-storage-type";
+const STORAGE_KEY_NETWORK = "bulletin-network";
+const STORAGE_KEY_CUSTOM_URL = "bulletin-network-custom-url";
+
+export function getCustomNetworkUrl(): string {
+  return localStorage.getItem(STORAGE_KEY_CUSTOM_URL) ?? "";
+}
+
+export function clearCustomNetworkUrl(): void {
+  localStorage.removeItem(STORAGE_KEY_CUSTOM_URL);
+  const current = networkSubject.getValue();
+  if (current.id === "custom") {
+    const config = STORAGE_CONFIGS[storageTypeSubject.getValue()];
+    connectToNetwork(config.defaultNetwork);
+  }
+}
+
+function loadInitialSelection(): { storageType: StorageType; network: Network } {
+  const savedType = localStorage.getItem(STORAGE_KEY_STORAGE_TYPE) as StorageType | null;
+  const storageType = savedType && STORAGE_CONFIGS[savedType] ? savedType : "bulletin";
+  const config = STORAGE_CONFIGS[storageType];
+
+  const savedNetwork = localStorage.getItem(STORAGE_KEY_NETWORK);
+  const networkId = savedNetwork && config.networks[savedNetwork] ? savedNetwork : config.defaultNetwork;
+  const baseNetwork = config.networks[networkId]!;
+
+  if (networkId === "custom") {
+    const customUrl = localStorage.getItem(STORAGE_KEY_CUSTOM_URL);
+    if (customUrl) {
+      return { storageType, network: { ...baseNetwork, endpoints: [customUrl] } };
+    }
+  }
+
+  return { storageType, network: baseNetwork };
+}
+
+const initial = loadInitialSelection();
+const initialStorageType = initial.storageType;
 const initialConfig = STORAGE_CONFIGS[initialStorageType];
-const initialNetwork = initialConfig.networks[initialConfig.defaultNetwork]!;
+const initialNetwork = initial.network;
 
 const storageTypeSubject = new BehaviorSubject<StorageType>(initialStorageType);
 const networksSubject = new BehaviorSubject<Record<string, Network>>(initialConfig.networks);
@@ -189,26 +188,37 @@ async function createSmoldotProvider(network: Network) {
 
   const smoldot = startFromWorker(smoldotWorker);
   const chainSpec = await fetch(`/chain-specs/${network.id}.json`).then(r => r.text());
-  const chain = await smoldot.addChain({ chainSpec });
 
-  return getSmProvider(chain);
+  return getSmProvider(() => smoldot.addChain({ chainSpec }));
 }
 
 export function switchStorageType(type: StorageType): void {
   const config = STORAGE_CONFIGS[type];
+  localStorage.setItem(STORAGE_KEY_STORAGE_TYPE, type);
   storageTypeSubject.next(type);
   networksSubject.next(config.networks);
   connectToNetwork(config.defaultNetwork);
 }
 
-export async function connectToNetwork(networkId: NetworkId): Promise<void> {
+export async function connectToNetwork(
+  networkId: NetworkId,
+  endpointOverride?: string,
+): Promise<void> {
   const networks = networksSubject.getValue();
-  const network = networks[networkId];
-  if (!network) {
+  const baseNetwork = networks[networkId];
+  if (!baseNetwork) {
     throw new Error(`Unknown network: ${networkId}`);
   }
-  if (network.endpoints.length === 0) {
-    throw new Error(`Network ${network.name} has no endpoints available`);
+
+  let network: Network = baseNetwork;
+  if (endpointOverride) {
+    network = { ...baseNetwork, endpoints: [endpointOverride] };
+    if (networkId === "custom") {
+      localStorage.setItem(STORAGE_KEY_CUSTOM_URL, endpointOverride);
+    }
+  } else if (networkId === "custom") {
+    const saved = localStorage.getItem(STORAGE_KEY_CUSTOM_URL);
+    if (saved) network = { ...baseNetwork, endpoints: [saved] };
   }
 
   // Kill previous provider's reconnection loop and destroy client
@@ -221,13 +231,27 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
     existingClient.destroy();
   }
 
+  localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
   networkSubject.next(network);
-  statusSubject.next("connecting");
-  errorSubject.next(undefined);
   apiSubject.next(undefined);
   blockNumberSubject.next(undefined);
   chainInfoSubject.next({});
   sudoKeySubject.next(undefined);
+
+  if (network.endpoints.length === 0) {
+    blockSubscription?.unsubscribe();
+    blockSubscription = null;
+    clientSubject.next(undefined);
+    statusSubject.next("disconnected");
+    errorSubject.next(undefined);
+    if (networkId === "custom") return;
+    statusSubject.next("error");
+    errorSubject.next(`Network ${network.name} has no endpoints available`);
+    return;
+  }
+
+  statusSubject.next("connecting");
+  errorSubject.next(undefined);
 
   try {
     let provider;
@@ -276,8 +300,9 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
       sudoKeySubject.next(undefined);
     }
 
-    // Subscribe to best block
-    client.bestBlocks$.subscribe({
+    // Subscribe to best block (clean up previous subscription first)
+    blockSubscription?.unsubscribe();
+    blockSubscription = client.bestBlocks$.subscribe({
       next: (blocks) => {
         if (blocks.length > 0) {
           blockNumberSubject.next(blocks[0]!.number);
@@ -297,6 +322,8 @@ export async function connectToNetwork(networkId: NetworkId): Promise<void> {
 }
 
 export function disconnect(): void {
+  blockSubscription?.unsubscribe();
+  blockSubscription = null;
   if (killCurrentProvider) {
     killCurrentProvider();
     killCurrentProvider = null;
@@ -362,6 +389,24 @@ export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
+
+/**
+ * Hook that returns a factory for creating AsyncBulletinClient instances.
+ * Returns undefined if not connected. Call with a signer to get a client.
+ *
+ * @example
+ * ```tsx
+ * const createBulletinClient = useCreateBulletinClient();
+ * // later in a handler:
+ * const bulletinClient = createBulletinClient?.(signer);
+ * ```
+ */
+export function useCreateBulletinClient(): ((signer: PolkadotSigner) => AsyncBulletinClient) | undefined {
+  const api = useApi();
+  const client = useClient();
+  if (!api || !client) return undefined;
+  return (signer: PolkadotSigner) => new AsyncBulletinClient(api, signer, client.submit);
+}
 
 // Direct access to subjects for non-React code
 export const network$ = networkSubject.asObservable();

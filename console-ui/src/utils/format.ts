@@ -59,3 +59,38 @@ export function formatBlockNumber(blockNumber: number | undefined): string {
 export function formatTimestamp(timestamp: number): string {
   return new Date(timestamp).toLocaleString();
 }
+
+/**
+ * Estimate the date of a past block given the current block number and block time.
+ * Uses: estimatedDate = now - (currentBlock - targetBlock) * blockTimeSeconds * 1000
+ */
+export function estimateBlockDate(
+  targetBlock: number,
+  currentBlock: number,
+  blockTimeSeconds: number = 6
+): Date {
+  const blockDiff = currentBlock - targetBlock;
+  const msDiff = blockDiff * blockTimeSeconds * 1000;
+  return new Date(Date.now() - msDiff);
+}
+
+/**
+ * Format a duration in blocks as a human-readable string (e.g. "2 days 5 hours")
+ */
+export function formatBlockDuration(
+  blocks: number,
+  blockTimeSeconds: number = 6
+): string {
+  const totalSeconds = blocks * blockTimeSeconds;
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+
+  if (days > 0) {
+    return hours > 0 ? `~${days}d ${hours}h` : `~${days}d`;
+  }
+  if (hours > 0) {
+    return `~${hours}h`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  return `~${minutes}m`;
+}

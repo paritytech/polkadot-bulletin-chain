@@ -3,115 +3,80 @@ name: Release
 on:
   push:
     tags:
-      - v*
+      - 'v[0-9]*-westend'
+      - 'v[0-9]*-paseo'
 
 permissions: {}
 
 jobs:
-  build-runtimes:
+  build-runtime:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      matrix:
-        include:
-          - name: bulletin-westend
-            package: bulletin-westend-runtime
-            path: runtimes/bulletin-westend
-          - name: bulletin-paseo
-            package: bulletin-westend-runtime
-            path: runtimes/bulletin-westend
-          - name: bulletin-polkadot
-            package: bulletin-polkadot-runtime
-            path: runtimes/bulletin-polkadot
+    outputs:
+      name: ${{ steps.config.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Build ${{ matrix.name }} runtime
+      - name: Determine runtime from tag
+        id: config
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == *-westend ]]; then
+            {
+              echo "name=bulletin-westend"
+              echo "package=bulletin-westend-runtime"
+              echo "path=runtimes/bulletin-westend"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *-paseo ]]; then
+            {
+              echo "name=bulletin-paseo"
+              echo "package=bulletin-paseo-runtime"
+              echo "path=runtimes/bulletin-paseo"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $TAG does not end in -westend or -paseo" >&2
+            exit 1
+          fi
+
+      - name: Build ${{ steps.config.outputs.name }} runtime
         id: srtool_build
         uses: chevdor/srtool-actions@48e9baed50ca414936dfac59d34d8b9bbe581abd # v0.9.2
         env:
           BUILD_OPTS: "--features on-chain-release-build"
         with:
-          chain: ${{ matrix.name }}
-          package: ${{ matrix.package }}
-          runtime_dir: ${{ matrix.path }}
+          chain: ${{ steps.config.outputs.name }}
+          package: ${{ steps.config.outputs.package }}
+          runtime_dir: ${{ steps.config.outputs.path }}
           profile: production
 
       - name: Store srtool digest
         env:
           SRTOOL_JSON: ${{ steps.srtool_build.outputs.json }}
+          NAME: ${{ steps.config.outputs.name }}
         run: |
-          echo "$SRTOOL_JSON" | jq > ${{ matrix.name }}_srtool_output.json
+          echo "$SRTOOL_JSON" | jq > "${NAME}_srtool_output.json"
 
-      - name: Upload ${{ matrix.name }} wasm
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - name: Upload ${{ steps.config.outputs.name }} wasm
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.name }}-runtime
+          name: ${{ steps.config.outputs.name }}-runtime
           path: |
             ${{ steps.srtool_build.outputs.wasm_compressed }}
-            ${{ matrix.name }}_srtool_output.json
-
-  build-node:
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: polkadot-bulletin-chain-linux
-          - os: macos-14
-            target: aarch64-apple-darwin
-            artifact_name: polkadot-bulletin-chain-macos-aarch64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: wasm32-unknown-unknown
-          components: rust-src
-
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libclang-dev
-
-      - name: Install system dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install protobuf llvm
-          LLVM_PATH=$(brew --prefix llvm)
-          echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> $GITHUB_ENV
-          echo "LDFLAGS=-L$LLVM_PATH/lib" >> $GITHUB_ENV
-          echo "CPPFLAGS=-I$LLVM_PATH/include" >> $GITHUB_ENV
-
-      - name: Build polkadot-bulletin-chain binary
-        run: cargo build --profile production -p polkadot-bulletin-chain
-
-      - name: Upload polkadot-bulletin-chain binary
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: target/production/polkadot-bulletin-chain
+            ${{ steps.config.outputs.name }}_srtool_output.json
 
   publish-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [build-runtimes, build-node]
+    needs: [build-runtime]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
 
@@ -119,8 +84,6 @@ jobs:
         run: |
           mkdir -p release-assets
           find artifacts -name "*.wasm" -exec cp {} release-assets/ \;
-          cp artifacts/polkadot-bulletin-chain-linux/polkadot-bulletin-chain release-assets/polkadot-bulletin-chain-linux
-          cp artifacts/polkadot-bulletin-chain-macos-aarch64/polkadot-bulletin-chain release-assets/polkadot-bulletin-chain-macos-aarch64
           ls -la release-assets/
 
       - name: Add runtime info to changelog
@@ -154,10 +117,9 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Create release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
+          name: ${{ needs.build-runtime.outputs.name }} ${{ github.ref_name }}
           files: |
             release-assets/*.wasm
-            release-assets/polkadot-bulletin-chain-linux
-            release-assets/polkadot-bulletin-chain-macos-aarch64
           body_path: RELEASE_NOTES.md

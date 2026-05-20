@@ -1,0 +1,42 @@
+# Console UI - Just Commands
+#
+# Local development and testing for the Bulletin Console UI.
+#
+# Quick start:
+#   just dev              - Start vite dev server
+#   just test             - Run integration Playwright tests (chain must be running)
+#
+# See `just --list` for all available recipes.
+
+
+# ── Defaults ─────────────────────────────────────────────────────────
+
+default: dev
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+# Install npm dependencies
+install:
+    npm install
+
+# Install Playwright browsers (only if missing)
+ensure-browsers:
+    npx playwright install --with-deps chromium
+
+# ── Local Development ────────────────────────────────────────────────
+
+# Start vite dev server
+dev: 
+    #!/usr/bin/env bash
+    set -e
+
+    # Run vite dev server in foreground
+    echo "   Starting vite dev server..."
+    npm run dev
+
+# ── Testing ──────────────────────────────────────────────────────────
+
+# Run integration Playwright tests (chain must already be running on ws://localhost:10000)
+test: install ensure-browsers
+    npx papi generate
+    npx playwright test

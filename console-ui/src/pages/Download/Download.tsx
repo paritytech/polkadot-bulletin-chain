@@ -11,6 +11,7 @@ import {
   WifiOff,
   Loader2,
   Globe,
+  History,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -18,11 +19,21 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { CidInput } from "@/components/CidInput";
-import { formatBytes, bytesToHex } from "@/utils/format";
-import { CID } from "multiformats/cid";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/Select";
+import { formatBytes, bytesToHex, estimateBlockDate, formatBlockDuration, formatBlockNumber } from "@/utils/format";
+import { CID, CidCodec, HashAlgorithm, parseCid } from "@parity/bulletin-sdk";
+import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
-import { IPFS_GATEWAYS, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
-import { useNetwork } from "@/state/chain.state";
+import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
+import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
+import { useStorageHistory } from "@/state/history.state";
+import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
 
 const P2P_MULTIADDRS: Record<string, string> = {
   local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
@@ -37,6 +48,12 @@ const P2P_MULTIADDRS: Record<string, string> = {
     "/dns4/paseo-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSgdX2egCUiXtDUNV6hGh6JrtTb9vQ6iRfFMdnTemQDDp",
     "/dns4/paseo-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWG7dt8yAMBaNrWh5juvHMGvJtPKTCaS87kkadWZKpV7ox",
     "/dns4/paseo-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWSS9QNRiLGBoZrDrtXvPyBV7QrV7F3A1V8f6xAXECSnj5",
+  ].join("\n"),
+  "paseo-next-v2": [
+    "/dns4/paseo-bulletin-next-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWDGdPBWpytPdNAXDT2KJWwmPXkxvxyQLGc7pRdFWeZnyB",
+    "/dns4/paseo-bulletin-next-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWC45NgktSLMPQafAhi8TMAtiiatnmNc3Qv6wA74u7YBVc",
+    "/dns4/paseo-bulletin-next-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWS4ptBbHGritdb1T7JPxKT2EN7FXvqq9rUp12jUvjnqQ1",
+    "/dns4/paseo-bulletin-next-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWKMc4jJsU7fdEsis4AsM8Assk5jFqhEUEa2ZSiWJGKpfv",
   ].join("\n"),
 };
 
@@ -54,13 +71,124 @@ function getDefaultMultiaddrs(networkId: string): string {
   return P2P_MULTIADDRS[networkId] ?? "";
 }
 
+function OnChainStatusContent({
+  parsedCid,
+  cidLookupLoading,
+  cidLookupDone,
+  cidLookup,
+  currentBlock,
+  retentionPeriod,
+}: {
+  parsedCid: CID | undefined;
+  cidLookupLoading: boolean;
+  cidLookupDone: boolean;
+  cidLookup: OnChainTransaction | null;
+  currentBlock: number | undefined;
+  retentionPeriod: number | null;
+}) {
+  if (!parsedCid) {
+    return <p className="text-sm text-muted-foreground">Enter a valid CID to check on-chain status</p>;
+  }
+
+  if (cidLookupLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Searching on-chain...
+      </div>
+    );
+  }
+
+  if (cidLookupDone && !cidLookup) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-2 text-sm text-amber-600 bg-amber-500/10 p-3 rounded-md">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            Not found on-chain. The data may have expired and been removed, or was never stored on this network.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!cidLookup || currentBlock === undefined || retentionPeriod === null) {
+    return null;
+  }
+
+  const expiresAtBlock = cidLookup.blockNumber + retentionPeriod;
+  const blocksRemaining = expiresAtBlock - currentBlock;
+  const isExpired = blocksRemaining <= 0;
+  const isExpiringSoon = !isExpired && blocksRemaining < 14400; // ~1 day
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Stored at block</span>
+        <span className="font-mono">{formatBlockNumber(cidLookup.blockNumber)} (idx {cidLookup.index})</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Upload date</span>
+        <span>{estimateBlockDate(cidLookup.blockNumber, currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+      </div>
+      {cidLookup.hashing && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Hashing / Codec</span>
+          <span className="font-mono text-xs">
+            {cidLookup.hashing}
+            {cidLookup.cidCodec !== undefined ? ` / 0x${cidLookup.cidCodec.toString(16)}` : ""}
+          </span>
+        </div>
+      )}
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Expires at block</span>
+        <span className="font-mono">{formatBlockNumber(expiresAtBlock)}</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-muted-foreground">Retention</span>
+        {isExpired ? (
+          <Badge variant="destructive">Expired</Badge>
+        ) : isExpiringSoon ? (
+          <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+            {formatBlockDuration(blocksRemaining)} left
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+            {formatBlockDuration(blocksRemaining)} left
+          </Badge>
+        )}
+      </div>
+      {isExpired && (
+        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md mt-2">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            This data has expired and may no longer be accessible. Consider re-uploading if needed.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Download() {
   const [searchParams, setSearchParams] = useSearchParams();
   const network = useNetwork();
+  const blockNumber = useBlockNumber();
+  const api = useApi();
+  const storageHistory = useStorageHistory();
+
+  // Filter history for current network
+  const networkHistory = storageHistory.filter((entry) => entry.networkId === network.id);
 
   const [cidInput, setCidInput] = useState(searchParams.get("cid") || "");
   const [isCidValid, setIsCidValid] = useState(false);
   const [parsedCid, setParsedCid] = useState<CID | undefined>();
+
+  const [cidInputMode, setCidInputMode] = useState<"cid" | "content-hash">("cid");
+  const [contentHashInput, setContentHashInput] = useState("");
+  const [hashAlgo, setHashAlgo] = useState<HashAlgorithm>(HashAlgorithm.Blake2b256);
+  const [cidCodec, setCidCodec] = useState<CidCodec>(CidCodec.Raw);
+  const [contentHashError, setContentHashError] = useState<string | null>(null);
 
   const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network.id));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
@@ -75,11 +203,17 @@ export function Download() {
   const [copied, setCopied] = useState(false);
   const [displayMode, setDisplayMode] = useState<"text" | "hex" | "preview">("text");
 
+  // On-chain CID lookup
+  const [cidLookup, setCidLookup] = useState<OnChainTransaction | null>(null);
+  const [cidLookupLoading, setCidLookupLoading] = useState(false);
+  const [cidLookupDone, setCidLookupDone] = useState(false);
+  const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
+
   const [gatewayUrl, setGatewayUrl] = useState(
     () => IPFS_GATEWAYS[network.id] ?? ""
   );
 
-  const activeTab = searchParams.get("tab") || "p2p";
+  const activeTab = searchParams.get("tab") || PREFERRED_DOWNLOAD_METHOD[network.id] || "p2p";
 
   const heliaClientRef = useRef<HeliaClient | null>(null);
   const prevNetworkId = useRef(network.id);
@@ -116,7 +250,15 @@ export function Download() {
     setFetchResult(null);
 
     setGatewayUrl(IPFS_GATEWAYS[network.id] ?? "");
-  }, [network.id]);
+
+    // Clear tab param so the new network's preferred method takes effect
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("tab");
+      next.delete("cid");
+      return next;
+    });
+  }, [network.id, setSearchParams]);
 
   // Update URL when CID changes
   useEffect(() => {
@@ -135,10 +277,111 @@ export function Download() {
     }
   }, [cidInput, setSearchParams]);
 
+  // Fetch retention period once per api change
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    api.query.TransactionStorage.RetentionPeriod.getValue().then((period: bigint | number) => {
+      if (!cancelled) setRetentionPeriod(Number(period));
+    });
+    return () => { cancelled = true; };
+  }, [api]);
+
+  // Look up CID on-chain when a valid CID is entered
+  useEffect(() => {
+    if (!parsedCid || !api) {
+      setCidLookup(null);
+      setCidLookupDone(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCidLookupLoading(true);
+    setCidLookupDone(false);
+    setCidLookup(null);
+
+    lookupCidOnChain(api, parsedCid).then((result) => {
+      if (!cancelled) {
+        setCidLookup(result);
+        setCidLookupLoading(false);
+        setCidLookupDone(true);
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error("Failed to look up CID on chain:", err);
+        setCidLookup(null);
+        setCidLookupLoading(false);
+        setCidLookupDone(true);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [parsedCid?.toString(), api]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleCidChange = (value: string, isValid: boolean, cid?: CID) => {
     setCidInput(value);
     setIsCidValid(isValid);
     setParsedCid(cid);
+    setFetchResult(null);
+    setFetchError(null);
+  };
+
+  useEffect(() => {
+    if (cidInputMode !== "content-hash") return;
+
+    if (!contentHashInput.trim()) {
+      setContentHashError(null);
+      setCidInput("");
+      setIsCidValid(false);
+      setParsedCid(undefined);
+      setFetchResult(null);
+      setFetchError(null);
+      return;
+    }
+
+    try {
+      const cleaned = contentHashInput.trim().replace(/^0x/i, "");
+      if (!/^[0-9a-fA-F]+$/.test(cleaned) || cleaned.length % 2 !== 0) {
+        throw new Error("Content hash must be hex");
+      }
+      const bytes = new Uint8Array(cleaned.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
+      }
+      if (bytes.length !== 32) {
+        throw new Error("Content hash must be 32 bytes");
+      }
+      // multiformats `digest.create` types `digest` as `Uint8Array<ArrayBufferLike>`
+      // but `CID.createV1` wants `Uint8Array<ArrayBuffer>`; cast through `any`
+      // at this single seam rather than rewriting the call site.
+      const mh = digest.create(hashAlgo, bytes) as any;
+      const cid = CID.createV1(cidCodec, mh);
+      setContentHashError(null);
+      setCidInput(cid.toString());
+      setIsCidValid(true);
+      setParsedCid(cid);
+      setFetchResult(null);
+      setFetchError(null);
+    } catch (e) {
+      setContentHashError(e instanceof Error ? e.message : String(e));
+      setCidInput("");
+      setIsCidValid(false);
+      setParsedCid(undefined);
+    }
+  }, [cidInputMode, contentHashInput, hashAlgo, cidCodec]);
+
+  const handleHistorySelect = (cid: string) => {
+    if (cid === "none") return;
+    setCidInput(cid);
+    // Try to parse it
+    try {
+      const parsed = parseCid(cid);
+      setIsCidValid(true);
+      setParsedCid(parsed);
+    } catch {
+      setIsCidValid(false);
+      setParsedCid(undefined);
+    }
     setFetchResult(null);
     setFetchError(null);
   };
@@ -396,6 +639,7 @@ export function Download() {
                       value={peerMultiaddrs}
                       onChange={(e) => setPeerMultiaddrs(e.target.value)}
                       placeholder="/ip4/127.0.0.1/tcp/30334/ws/p2p/<peer-id>"
+                      data-testid="peer-multiaddrs"
                       disabled={connectionStatus === "connecting" || isConnected}
                       className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
                       rows={3}
@@ -520,6 +764,7 @@ export function Download() {
                   value={gatewayUrl}
                   onChange={(e) => setGatewayUrl(e.target.value)}
                   placeholder="https://ipfs.example.com"
+                  data-testid="gateway-url-input"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -591,14 +836,101 @@ export function Download() {
                   </span>
                 </div>
               )}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">CID</label>
-                <CidInput
-                  value={cidInput}
-                  onChange={handleCidChange}
-                  disabled={isFetching || !canFetch}
-                />
-              </div>
+              <Tabs
+                value={cidInputMode}
+                onValueChange={(v) => {
+                  setCidInputMode(v as "cid" | "content-hash");
+                  setFetchError(null);
+                  setFetchResult(null);
+                  setContentHashError(null);
+                }}
+              >
+                <TabsList>
+                  <TabsTrigger value="cid">By CID</TabsTrigger>
+                  <TabsTrigger value="content-hash">By ContentHash</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="cid" className="mt-4 space-y-2">
+                  <label className="text-sm font-medium">CID</label>
+                  <CidInput
+                    value={cidInput}
+                    onChange={handleCidChange}
+                    disabled={isFetching || !canFetch}
+                  />
+                </TabsContent>
+
+                <TabsContent value="content-hash" className="mt-4 space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Hashing algorithm</label>
+                      <Select
+                        value={String(hashAlgo)}
+                        onValueChange={(v) => setHashAlgo(Number(v) as HashAlgorithm)}
+                        disabled={isFetching || !canFetch}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={String(HashAlgorithm.Blake2b256)}>Blake2b-256</SelectItem>
+                          <SelectItem value={String(HashAlgorithm.Sha2_256)}>SHA2-256</SelectItem>
+                          <SelectItem value={String(HashAlgorithm.Keccak256)}>Keccak-256</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Codec</label>
+                      <Select
+                        value={String(cidCodec)}
+                        onValueChange={(v) => setCidCodec(Number(v) as CidCodec)}
+                        disabled={isFetching || !canFetch}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={String(CidCodec.Raw)}>Raw (0x55)</SelectItem>
+                          <SelectItem value={String(CidCodec.DagPb)}>DAG-PB (0x70)</SelectItem>
+                          <SelectItem value={String(CidCodec.DagCbor)}>DAG-CBOR (0x71)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Content hash</label>
+                    <input
+                      type="text"
+                      value={contentHashInput}
+                      onChange={(e) => setContentHashInput(e.target.value)}
+                      placeholder="0x… (32-byte hex digest)"
+                      disabled={isFetching || !canFetch}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                    />
+                    {contentHashError ? (
+                      <p className="text-xs text-destructive">{contentHashError}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Pre-computed digest produced by the selected hashing algorithm.
+                      </p>
+                    )}
+                  </div>
+
+                  {isCidValid && cidInput && (
+                    <div className="space-y-2 border-t pt-3">
+                      <label className="text-sm font-medium">Computed CID</label>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs bg-secondary p-2 rounded-md break-all">
+                          {cidInput}
+                        </code>
+                        <Button variant="outline" size="sm" onClick={() => copyToClipboard(cidInput)}>
+                          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
 
               <Button
                 onClick={handleFetch}
@@ -728,8 +1060,52 @@ export function Download() {
           )}
         </div>
 
-        {/* Sidebar: CID Info */}
-        <div>
+        {/* Sidebar: History + CID Info */}
+        <div className="space-y-6">
+          {/* My Storage History */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <History className="h-5 w-5" />
+                My Storage
+              </CardTitle>
+              <CardDescription>Previously stored data on this network</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {networkHistory.length > 0 ? (
+                <div className="space-y-3">
+                  <Select onValueChange={handleHistorySelect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select from history..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {networkHistory.map((entry) => (
+                        <SelectItem key={`${entry.blockNumber}-${entry.index}`} value={entry.cid}>
+                          <div className="flex flex-col items-start">
+                            <span className="text-xs font-medium">
+                              {entry.label || `Block #${entry.blockNumber}`}
+                            </span>
+                            <span className="text-xs text-muted-foreground font-mono">
+                              {entry.cid.slice(0, 20)}...
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {networkHistory.length} item{networkHistory.length !== 1 ? "s" : ""} in history
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No storage history yet. Upload data to see it here.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* CID Info */}
           <Card>
             <CardHeader>
               <CardTitle>CID Info</CardTitle>
@@ -771,6 +1147,27 @@ export function Download() {
               ) : (
                 <p className="text-sm text-muted-foreground">Enter a valid CID to see details</p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* On-chain Status */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                On-chain Status
+              </CardTitle>
+              <CardDescription>Storage and retention info from the chain</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <OnChainStatusContent
+                parsedCid={parsedCid}
+                cidLookupLoading={cidLookupLoading}
+                cidLookupDone={cidLookupDone}
+                cidLookup={cidLookup}
+                currentBlock={blockNumber}
+                retentionPeriod={retentionPeriod}
+              />
             </CardContent>
           </Card>
         </div>

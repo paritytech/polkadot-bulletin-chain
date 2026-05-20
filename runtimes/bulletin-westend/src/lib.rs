@@ -14,8 +14,6 @@
 // limitations under the License.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
-#![recursion_limit = "256"]
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
@@ -40,7 +38,7 @@ use alloc::{vec, vec::Vec};
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
 use frame_support::{
-	construct_runtime, derive_impl,
+	derive_impl,
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
@@ -66,19 +64,17 @@ use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 pub use sp_runtime::BuildStorage;
 use sp_runtime::{
 	generic, impl_opaque_keys,
-	traits::{
-		AsSystemOriginSigner, Block as BlockT, DispatchInfoOf, Implication, NumberFor,
-		PostDispatchInfoOf,
-	},
-	transaction_validity::{
-		TransactionSource, TransactionValidity, TransactionValidityError, ValidTransaction,
-	},
+	traits::{Block as BlockT, NumberFor},
+	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult, MultiAddress, Perbill,
 };
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::WeightToFee, time::*};
+
+/// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
+const SLOT_DURATION: u64 = 24_000;
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
@@ -119,7 +115,14 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		ValidateSigned,
+		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+			Runtime,
+			storage::StorageCallInspector,
+		>,
+		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
+			Runtime,
+			pallet_bulletin_transaction_storage::extension::FlatBoost,
+		>,
 		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
 	),
 >;
@@ -143,15 +146,17 @@ pub mod migrations {
 			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-		pallet_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
+		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
 		pallet_xcm::migration::MigrateToLatestXcmVersion<Runtime>,
-		pallet_transaction_storage::migrations::SetRetentionPeriodIfZero<
+		pallet_bulletin_transaction_storage::migrations::SetRetentionPeriodIfZero<
 			Runtime,
-			pallet_transaction_storage::DefaultRetentionPeriod,
+			pallet_bulletin_transaction_storage::DefaultRetentionPeriod,
 		>,
 	);
 
@@ -159,7 +164,10 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = ();
+	pub type MbmMigrations = (
+		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+	);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -184,7 +192,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_006,
+	spec_version: 1_000_013,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -200,11 +208,20 @@ pub fn native_version() -> NativeVersion {
 /// We allow for 90% of the block to be consumed by normal transactions.
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(90);
 
+/// Block length.
+const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
+
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
 	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
-		BlockLength::max_with_normal_ratio(10 * 1024 * 1024, NORMAL_DISPATCH_RATIO);
+		BlockLength::builder()
+		.max_length(MAX_BLOCK_LENGTH)
+		.modify_max_length_for_class(
+			DispatchClass::Normal,
+			|m| *m = NORMAL_DISPATCH_RATIO * MAX_BLOCK_LENGTH,
+		)
+		.build();
 	pub RuntimeBlockWeights: BlockWeights = BlockWeights::builder()
 		.base_block(BlockExecutionWeight::get())
 		.for_class(DispatchClass::all(), |weights| {
@@ -259,7 +276,7 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = ConstU32<16>;
 
 	type SingleBlockMigrations = migrations::SingleBlockMigrations;
-	type MultiBlockMigrator = migrations::MbmMigrations;
+	type MultiBlockMigrator = MultiBlockMigrations;
 }
 
 impl cumulus_pallet_weight_reclaim::Config for Runtime {
@@ -274,87 +291,6 @@ impl pallet_timestamp::Config for Runtime {
 	type WeightInfo = weights::pallet_timestamp::WeightInfo<Runtime>;
 }
 
-#[derive(
-	Clone,
-	PartialEq,
-	Eq,
-	Debug,
-	codec::Encode,
-	codec::Decode,
-	codec::DecodeWithMemTracking,
-	scale_info::TypeInfo,
-)]
-pub struct ValidateSigned;
-
-impl sp_runtime::traits::TransactionExtension<RuntimeCall> for ValidateSigned {
-	const IDENTIFIER: &'static str = "ValidateSigned";
-
-	type Implicit = ();
-	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
-		Ok(())
-	}
-
-	type Val = ();
-	type Pre = ();
-
-	fn weight(&self, _call: &RuntimeCall) -> Weight {
-		Weight::zero()
-	}
-
-	fn validate(
-		&self,
-		origin: RuntimeOrigin,
-		call: &RuntimeCall,
-		_info: &DispatchInfoOf<RuntimeCall>,
-		_len: usize,
-		_self_implicit: Self::Implicit,
-		_inherited_implication: &impl Implication,
-		_source: TransactionSource,
-	) -> sp_runtime::traits::ValidateResult<Self::Val, RuntimeCall> {
-		// Only enforce special validation for transaction storage calls; pass through others.
-		let who = match origin.as_system_origin_signer() {
-			Some(who) => who,
-			None => return Ok((ValidTransaction::default(), (), origin)),
-		};
-
-		let validity = match call {
-			RuntimeCall::TransactionStorage(inner_call) =>
-				TransactionStorage::validate_signed(who, inner_call),
-
-			_ => Ok(ValidTransaction::default()),
-		}?;
-
-		Ok((validity, (), origin))
-	}
-
-	fn prepare(
-		self,
-		_val: Self::Val,
-		origin: &RuntimeOrigin,
-		call: &RuntimeCall,
-		_info: &DispatchInfoOf<RuntimeCall>,
-		_len: usize,
-	) -> Result<Self::Pre, TransactionValidityError> {
-		// Only enforce pre-dispatch for transaction storage calls; pass through others.
-		if let Some(who) = origin.as_system_origin_signer() {
-			if let RuntimeCall::TransactionStorage(inner_call) = call {
-				TransactionStorage::pre_dispatch_signed(who, inner_call)?;
-			}
-		}
-		Ok(())
-	}
-
-	fn post_dispatch_details(
-		_pre: Self::Pre,
-		_info: &DispatchInfoOf<RuntimeCall>,
-		_post_info: &PostDispatchInfoOf<RuntimeCall>,
-		_len: usize,
-		_result: &sp_runtime::DispatchResult,
-	) -> Result<Weight, TransactionValidityError> {
-		Ok(Weight::zero())
-	}
-}
-
 impl pallet_authorship::Config for Runtime {
 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Aura>;
 	type EventHandler = (CollatorSelection,);
@@ -362,7 +298,7 @@ impl pallet_authorship::Config for Runtime {
 
 parameter_types! {
 	pub const ExistentialDeposit: Balance = EXISTENTIAL_DEPOSIT;
-	pub const RandomParaId: ParaId = ParaId::new(43211234);
+	pub AssetHubParaId: ParaId = ParaId::new(westend_runtime_constants::system_parachain::ASSET_HUB_ID);
 }
 
 impl pallet_balances::Config for Runtime {
@@ -456,6 +392,25 @@ impl pallet_message_queue::Config for Runtime {
 impl parachain_info::Config for Runtime {}
 
 impl cumulus_pallet_aura_ext::Config for Runtime {}
+
+parameter_types! {
+	pub MbmServiceWeight: Weight =
+		Perbill::from_percent(50) * RuntimeBlockWeights::get().max_block;
+}
+
+impl pallet_migrations::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	#[cfg(not(feature = "runtime-benchmarks"))]
+	type Migrations = migrations::MbmMigrations;
+	#[cfg(feature = "runtime-benchmarks")]
+	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
+	type CursorMaxLen = ConstU32<65_536>;
+	type IdentifierMaxLen = ConstU32<256>;
+	type MigrationStatusHandler = ();
+	type FailedMigrationHandler = frame_support::migrations::FreezeChainOnFailedMigration;
+	type MaxServiceWeight = MbmServiceWeight;
+	type WeightInfo = pallet_migrations::weights::SubstrateWeight<Runtime>;
+}
 
 parameter_types! {
 	/// Fellows pluralistic body.
@@ -577,53 +532,151 @@ impl pallet_utility::Config for Runtime {
 	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
 }
 
-// Create the runtime by composing the FRAME pallets that were previously configured.
-construct_runtime!(
-	pub enum Runtime
-	{
-		// System support stuff.
-		System: frame_system = 0,
-		ParachainSystem: cumulus_pallet_parachain_system = 1,
-		Timestamp: pallet_timestamp = 3,
-		ParachainInfo: parachain_info = 4,
-		WeightReclaim: cumulus_pallet_weight_reclaim = 5,
-		Utility: pallet_utility = 6,
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type RuntimeCall = RuntimeCall;
+}
 
-		// Monetary stuff.
-		Balances: pallet_balances = 10,
-		TransactionPayment: pallet_transaction_payment = 11,
-		SkipFeelessPayment: pallet_skip_feeless_payment = 12,
-
-		// Storage
-		TransactionStorage: pallet_transaction_storage = 40,
-
-		// Collator support. The order of these 5 are important and shall not change.
-		Authorship: pallet_authorship = 20,
-		CollatorSelection: pallet_collator_selection = 21,
-		Session: pallet_session = 22,
-		Aura: pallet_aura = 23,
-		AuraExt: cumulus_pallet_aura_ext = 24,
-
-		// XCM & related
-		XcmpQueue: cumulus_pallet_xcmp_queue = 30,
-		PolkadotXcm: pallet_xcm = 31,
-		CumulusXcm: cumulus_pallet_xcm = 32,
-		MessageQueue: pallet_message_queue = 34,
-
-		// Sudo
-		Sudo: pallet_sudo = 100,
+impl<C> frame_system::offchain::CreateBare<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
+		UncheckedExtrinsic::new_bare(call)
 	}
-);
+}
+
+impl<C> frame_system::offchain::CreateTransaction<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extension = TxExtension;
+
+	fn create_transaction(call: RuntimeCall, extension: TxExtension) -> UncheckedExtrinsic {
+		generic::UncheckedExtrinsic::new_transaction(call, extension)
+	}
+}
+
+impl<C> frame_system::offchain::CreateAuthorizedTransaction<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_extension() -> Self::Extension {
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
+			frame_system::AuthorizeCall::<Runtime>::new(),
+			frame_system::CheckNonZeroSender::<Runtime>::new(),
+			frame_system::CheckSpecVersion::<Runtime>::new(),
+			frame_system::CheckTxVersion::<Runtime>::new(),
+			frame_system::CheckGenesis::<Runtime>::new(),
+			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+			frame_system::CheckNonce::<Runtime>::from(0),
+			frame_system::CheckWeight::<Runtime>::new(),
+			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+			),
+			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+				Runtime,
+				storage::StorageCallInspector,
+			>::default(),
+			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+				Runtime,
+				pallet_bulletin_transaction_storage::extension::FlatBoost,
+			>::default(),
+			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		))
+	}
+}
+
+// Create the runtime by composing the FRAME pallets that were previously configured.
+#[frame_support::runtime(legacy_ordering)]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Runtime;
+
+	// System support stuff.
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+	#[runtime::pallet_index(1)]
+	pub type ParachainSystem = cumulus_pallet_parachain_system;
+	#[runtime::pallet_index(3)]
+	pub type Timestamp = pallet_timestamp;
+	#[runtime::pallet_index(4)]
+	pub type ParachainInfo = parachain_info;
+	#[runtime::pallet_index(5)]
+	pub type WeightReclaim = cumulus_pallet_weight_reclaim;
+	#[runtime::pallet_index(6)]
+	pub type Utility = pallet_utility;
+	#[runtime::pallet_index(7)]
+	pub type MultiBlockMigrations = pallet_migrations;
+
+	// Monetary stuff.
+	#[runtime::pallet_index(10)]
+	pub type Balances = pallet_balances;
+	#[runtime::pallet_index(11)]
+	pub type TransactionPayment = pallet_transaction_payment;
+	#[runtime::pallet_index(12)]
+	pub type SkipFeelessPayment = pallet_skip_feeless_payment;
+
+	// Storage
+	#[runtime::pallet_index(40)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+	#[runtime::pallet_index(41)]
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
+
+	// Collator support. The order of these 5 are important and shall not change.
+	#[runtime::pallet_index(20)]
+	pub type Authorship = pallet_authorship;
+	#[runtime::pallet_index(21)]
+	pub type CollatorSelection = pallet_collator_selection;
+	#[runtime::pallet_index(22)]
+	pub type Session = pallet_session;
+	#[runtime::pallet_index(23)]
+	pub type Aura = pallet_aura;
+	#[runtime::pallet_index(24)]
+	pub type AuraExt = cumulus_pallet_aura_ext;
+
+	// XCM & related
+	#[runtime::pallet_index(30)]
+	pub type XcmpQueue = cumulus_pallet_xcmp_queue;
+	#[runtime::pallet_index(31)]
+	pub type PolkadotXcm = pallet_xcm;
+	#[runtime::pallet_index(32)]
+	pub type CumulusXcm = cumulus_pallet_xcm;
+	#[runtime::pallet_index(34)]
+	pub type MessageQueue = pallet_message_queue;
+
+	// Sudo
+	#[runtime::pallet_index(100)]
+	pub type Sudo = pallet_sudo;
+}
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
 	frame_benchmarking::define_benchmarks!(
 		[frame_system, SystemBench::<Runtime>]
+		[frame_system_extensions, SystemExtensionsBench::<Runtime>]
 		[cumulus_pallet_parachain_system, ParachainSystem]
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
+		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -868,6 +921,61 @@ impl_runtime_apis! {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
 		}
+
+		fn indexed_transactions(
+			block: NumberFor<Block>,
+		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
+			use sp_transaction_storage_proof::IndexedTransactionInfo;
+
+			TransactionStorage::transactions_at(block)
+				.map(|txs| {
+					txs.into_iter()
+						.map(|tx| {
+							IndexedTransactionInfo {
+								content_hash: tx.content_hash,
+								size: tx.size,
+								hashing: tx.hashing.into(),
+								cid_codec: tx.cid_codec,
+								extrinsic_index: tx.extrinsic_index,
+							}
+						})
+						.collect()
+				})
+				.unwrap_or_default()
+		}
+	}
+
+	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
+		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
+		}
+
+		fn create_promotion_extrinsic(
+			data: alloc::vec::Vec<u8>,
+			signer: sp_runtime::MultiSigner,
+			signature: sp_runtime::MultiSignature,
+			submit_timestamp: u64,
+		) -> <Block as BlockT>::Extrinsic {
+			use frame_system::offchain::CreateAuthorizedTransaction;
+			<Runtime as CreateAuthorizedTransaction<pallet_bulletin_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
+				pallet_bulletin_hop_promotion::Call::<Runtime>::promote {
+					data,
+					signer,
+					signature,
+					submit_timestamp,
+				}
+				.into(),
+			)
+		}
+
+		fn max_promotion_size() -> u32 {
+			use frame_support::traits::Get;
+			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
+		}
+
+		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+		}
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -897,7 +1005,9 @@ impl_runtime_apis! {
 		) {
 			use frame_benchmarking::BenchmarkList;
 			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{
+				Pallet as SystemBench, extensions::Pallet as SystemExtensionsBench,
+			};
 			use cumulus_pallet_session_benchmarking::Pallet as SessionBench;
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 
@@ -922,7 +1032,9 @@ impl_runtime_apis! {
 			use sp_storage::TrackedStorageKey;
 			use codec::Encode;
 
-			use frame_system_benchmarking::Pallet as SystemBench;
+			use frame_system_benchmarking::{
+				Pallet as SystemBench, extensions::Pallet as SystemExtensionsBench,
+			};
 			impl frame_system_benchmarking::Config for Runtime {
 				fn setup_set_code_requirements(code: &alloc::vec::Vec<u8>) -> Result<(), BenchmarkError> {
 					ParachainSystem::initialize_for_set_code_benchmark(code.len() as u32);
@@ -942,45 +1054,45 @@ impl_runtime_apis! {
 				}
 			}
 
+			use alloc::boxed::Box;
 			use xcm::latest::prelude::*;
 			use xcm_config::TokenRelayLocation;
+			use xcm_executor::AssetsInHolding;
 
 			use pallet_xcm::benchmarking::Pallet as PalletXcmExtrinsicsBenchmark;
 			impl pallet_xcm::benchmarking::Config for Runtime {
-				type DeliveryHelper = (
-					cumulus_primitives_utility::ToParentDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						xcm_config::PriceForParentDelivery,
-					>,
-					polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						PriceForSiblingParachainDelivery,
-						RandomParaId,
-						ParachainSystem,
-					>
-				);
+				type DeliveryHelper = polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
+					xcm_config::XcmConfig,
+					ExistentialDepositAsset,
+					PriceForSiblingParachainDelivery,
+					AssetHubParaId,
+					ParachainSystem,
+				>;
 
 				fn reachable_dest() -> Option<Location> {
-					Some(Parent.into())
+					Some(xcm_config::AssetHubLocation::get())
 				}
 
 				fn teleportable_asset_and_dest() -> Option<(Asset, Location)> {
-					// Non-system parachains do not support teleports.
-					None
+					// Relay/native token can be teleported between Bulletin and Asset Hub.
+					Some((
+						Asset { fun: Fungible(ExistentialDeposit::get()), id: AssetId(Parent.into()) },
+						xcm_config::AssetHubLocation::get(),
+					))
 				}
 
 				fn reserve_transferable_asset_and_dest() -> Option<(Asset, Location)> {
-					// The extrinsic enabled by this benchmark is blocked for the relay token.
-					// See: https://github.com/paritytech/polkadot-sdk/issues/9054
 					None
 				}
 
 				fn set_up_complex_asset_transfer() -> Option<(Assets, u32, Location, alloc::boxed::Box<dyn FnOnce()>)> {
-					// The extrinsic enabled by this benchmark is blocked for the relay token.
-					// See: https://github.com/paritytech/polkadot-sdk/issues/9054
-					None
+					// Only supports native token teleports to system parachain.
+					let native_location = Parent.into();
+					let dest = xcm_config::AssetHubLocation::get();
+					pallet_xcm::benchmarking::helpers::native_teleport_as_asset_transfer::<Runtime>(
+						native_location,
+						dest,
+					)
 				}
 
 				fn get_asset() -> Asset {
@@ -1000,45 +1112,36 @@ impl_runtime_apis! {
 
 			impl pallet_xcm_benchmarks::Config for Runtime {
 				type XcmConfig = xcm_config::XcmConfig;
-
-				type DeliveryHelper = (
-					cumulus_primitives_utility::ToParentDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						xcm_config::PriceForParentDelivery,
-					>,
-					polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
-						xcm_config::XcmConfig,
-						ExistentialDepositAsset,
-						PriceForSiblingParachainDelivery,
-						RandomParaId,
-						ParachainSystem,
-					>
-				);
-
 				type AccountIdConverter = xcm_config::LocationToAccountId;
+				type DeliveryHelper = polkadot_runtime_common::xcm_sender::ToParachainDeliveryHelper<
+					xcm_config::XcmConfig,
+					ExistentialDepositAsset,
+					PriceForSiblingParachainDelivery,
+					AssetHubParaId,
+					ParachainSystem,
+				>;
 				fn valid_destination() -> Result<Location, BenchmarkError> {
-					Ok(TokenRelayLocation::get())
+					Ok(AssetHubLocation::get())
 				}
-				fn worst_case_holding(_depositable_count: u32) -> Assets {
+				fn worst_case_holding(_depositable_count: u32) -> AssetsInHolding {
+					use pallet_xcm_benchmarks::MockCredit;
 					// just concrete assets according to relay chain.
-					let assets: Vec<Asset> = vec![
-						Asset {
-							id: AssetId(TokenRelayLocation::get()),
-							fun: Fungible(1_000_000 * UNITS),
-						}
-					];
-					assets.into()
+					let mut holding = AssetsInHolding::new();
+					holding.fungible.insert(
+						AssetId(TokenRelayLocation::get()),
+						Box::new(MockCredit(1_000_000 * UNITS)),
+					);
+					holding
 				}
 			}
 
 			parameter_types! {
-				pub const TrustedTeleporter: Option<(Location, Asset)> = None;
-				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
-				pub TrustedReserve: Option<(Location, Asset)> = Some((
+				pub TrustedTeleporter: Option<(Location, Asset)> = Some((
 					AssetHubLocation::get(),
 					Asset { fun: Fungible(UNITS), id: AssetId(TokenRelayLocation::get()) },
 				));
+				pub const CheckedAccount: Option<(AccountId, xcm_builder::MintLocation)> = None;
+				pub const TrustedReserve: Option<(Location, Asset)> = None;
 			}
 
 			impl pallet_xcm_benchmarks::fungible::Config for Runtime {
@@ -1073,15 +1176,18 @@ impl_runtime_apis! {
 				}
 
 				fn transact_origin_and_runtime_call() -> Result<(Location, RuntimeCall), BenchmarkError> {
-					Ok((TokenRelayLocation::get(), frame_system::Call::remark_with_event { remark: vec![] }.into()))
+					Ok((
+						AssetHubLocation::get(),
+						frame_system::Call::remark_with_event { remark: vec![] }.into(),
+					))
 				}
 
 				fn subscribe_origin() -> Result<Location, BenchmarkError> {
-					Ok(TokenRelayLocation::get())
+					Ok(AssetHubLocation::get())
 				}
 
 				fn claimable_asset() -> Result<(Location, Location, Assets), BenchmarkError> {
-					let origin = TokenRelayLocation::get();
+					let origin = AssetHubLocation::get();
 					let assets: Assets = (AssetId(TokenRelayLocation::get()), 1_000 * UNITS).into();
 					let ticket = Location { parents: 0, interior: Here };
 					Ok((origin, ticket, assets))
@@ -1104,9 +1210,10 @@ impl_runtime_apis! {
 				}
 
 				fn alias_origin() -> Result<(Location, Location), BenchmarkError> {
-					let origin = Location::new(1, [Parachain(1000)]);
-					let target = Location::new(1, [Parachain(1000), AccountId32 { id: [128u8; 32], network: None }]);
-					Ok((origin, target))
+					Ok((
+						Location::new(1, [Parachain(1000)]),
+						Location::new(1, [Parachain(1000), AccountId32 { id: [111u8; 32], network: None }]),
+					))
 				}
 			}
 

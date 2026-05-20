@@ -1,5 +1,4 @@
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { create } from 'ipfs-http-client';
 import fs from 'fs'
 import os from "os";
 import path from "path";
@@ -13,7 +12,7 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
-    DEFAULT_IPFS_API_URL,
+    waitForBlockProduction,
     DEFAULT_IPFS_GATEWAY_URL,
 } from "./common.js";
 import {
@@ -25,8 +24,8 @@ import {
     logTestResult,
 } from "./logger.js";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from "polkadot-api/ws";
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
 // Note: --signer-disc=XX flag is also supported for parallel runs
@@ -36,8 +35,6 @@ const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Alice';
 const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
-// Derive API URL from gateway URL (port 8283 -> 5011)
-const IPFS_API_URL = IPFS_GATEWAY_URL.replace(':8283', ':5011');
 // Image size preset: small, big32, big64, big96
 const IMAGE_SIZE = args[3] || 'big64';
 const NUM_SIGNERS = 16;
@@ -165,15 +162,11 @@ async function printStatistics(dataSize, typedApi) {
             if (!blockHash) {
                 blockHash = await typedApi.query.System.BlockHash.getValue(blockNum, { at: lastKnownBlockHash });
             }
-            // Convert Binary/Uint8Array to hex string for PAPI's at parameter
-            const blockHashHex = typeof blockHash === 'string'
-                ? blockHash
-                : (blockHash?.asHex?.() || blockHash?.toHex?.() || '0x' + Buffer.from(blockHash).toString('hex'));
             // Skip blocks with zero hash (pruned)
-            if (blockHashHex.match(/^(0x)?0+$/)) {
+            if (blockHash.match(/^(0x)?0+$/)) {
                 continue;
             }
-            const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHashHex });
+            const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHash });
             blockTimestamps[blockNum] = timestamp;
         } catch (e) {
             console.error(`Failed to fetch timestamp for block #${blockNum}:`, e.message);
@@ -244,14 +237,6 @@ export async function storeChunkedFile(api, filePath) {
     return { chunks, dataSize: fileData.length };
 }
 
-// Connect to IPFS API (for ipfs-http-client operations like block.get)
-let ipfs = null;
-if (!SKIP_IPFS_VERIFY) {
-    ipfs = create({
-        url: IPFS_API_URL,
-    });
-}
-
 async function main() {
     await cryptoWaitReady()
 
@@ -269,6 +254,7 @@ async function main() {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
         const bulletinAPI = client.getTypedApi(bulletin);
+        await waitForBlockProduction(bulletinAPI);
 
         // Let's do parallelism with multiple accounts
         const signers = Array.from({ length: NUM_SIGNERS }, (_, i) => {
@@ -282,10 +268,10 @@ async function main() {
 
         // Authorize accounts (skip for live networks with pre-authorized accounts)
         if (!SKIP_AUTHORIZE) {
-            const { sudoSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
+            const { authorizationSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
             await authorizeAccount(
                 bulletinAPI,
-                sudoSigner,
+                authorizationSigner,
                 signers.map(a => a.address),
                 100,
                 BigInt(100 * 1024 * 1024), // 100 MiB
@@ -348,7 +334,7 @@ async function main() {
             let downloadedChunks = [];
             for (const chunk of chunks) {
                 // Download the chunk from IPFS.
-                let block = await ipfs.block.get(chunk.cid, {timeout: 15000});
+                let block = await fetchCid(IPFS_GATEWAY_URL, chunk.cid);
                 downloadedChunks.push(block);
             }
             let fullBuffer = Buffer.concat(downloadedChunks);

@@ -23,7 +23,7 @@ use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
-		Everything, LinearStoragePrice, Nothing,
+		Everything, EverythingBut, LinearStoragePrice, Nothing,
 	},
 };
 use frame_system::EnsureRoot;
@@ -32,7 +32,7 @@ use pallet_xcm::{AuthorizedAliasers, XcmPassthrough};
 use parachains_common::{
 	xcm_config::{
 		AliasAccountId32FromSiblingSystemChain, AllSiblingSystemParachains,
-		ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
+		ConcreteAssetFromSystem, ParentRelayOrSiblingParachains, RelayOrOtherSystemParachains,
 	},
 	TREASURY_PALLET_ID,
 };
@@ -132,6 +132,14 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
+/// Filter that matches any sibling parachain origin.
+pub struct IsSiblingParachain;
+impl Contains<Location> for IsSiblingParachain {
+	fn contains(location: &Location) -> bool {
+		matches!(location.unpack(), (1, [Parachain(_)]))
+	}
+}
+
 pub struct FellowsPlurality;
 impl Contains<Location> for FellowsPlurality {
 	fn contains(location: &Location) -> bool {
@@ -158,8 +166,9 @@ pub type Barrier = TrailingSetTopicAsId<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
 				Equals<GovernanceLocation>,
-				// Let's allow a People chain for PoP authorizations.
-				Equals<PeopleLocation>,
+				// Allow any sibling parachain for unpaid execution, since there
+				// are multiple People testnet chains.
+				IsSiblingParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
@@ -173,7 +182,6 @@ pub type Barrier = TrailingSetTopicAsId<(
 
 parameter_types! {
 	pub TreasuryAccount: AccountId = TREASURY_PALLET_ID.into_account_truncating();
-	pub RelayTreasuryLocation: Location = (Parent, PalletInstance(westend_runtime_constants::TREASURY_PALLET_ID)).into();
 }
 
 /// Locations that will not be charged fees in the executor, neither for execution nor delivery.
@@ -181,37 +189,12 @@ parameter_types! {
 pub type WaivedLocations = (
 	Equals<RootLocation>,
 	RelayOrOtherSystemParachains<AllSiblingSystemParachains, Runtime>,
-	Equals<RelayTreasuryLocation>,
 	Equals<AssetHubLocation>,
 );
 
-/// Helper type to match the relay chain native token from Asset Hub.
-/// Non-system parachains should trust Asset Hub as the reserve location for the relay token.
-pub struct IsRelayTokenFrom<Origin>(core::marker::PhantomData<Origin>);
-impl<Origin> frame_support::traits::ContainsPair<Asset, Location> for IsRelayTokenFrom<Origin>
-where
-	Origin: frame_support::traits::Get<Location>,
-{
-	fn contains(asset: &Asset, origin: &Location) -> bool {
-		let loc = Origin::get();
-		&loc == origin &&
-			matches!(
-				asset,
-				Asset {
-					id: AssetId(asset_id_location),
-					fun: Fungible(_),
-				} if *asset_id_location == TokenRelayLocation::get()
-			)
-	}
-}
-
-/// Reserve locations for assets.
-/// Non-system parachains should trust Asset Hub as the reserve for the relay chain native token.
-pub type Reserves = IsRelayTokenFrom<AssetHubLocation>;
-
 /// Cases where a remote origin is accepted as trusted Teleporter for a given asset.
-/// Non-system parachains should not accept teleports, use reserve transfers instead.
-pub type TrustedTeleporters = ();
+/// Trust the relay chain and other system parachains to teleport the relay chain native token.
+pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
 
 /// Defines origin aliasing rules for this chain.
 ///
@@ -233,10 +216,8 @@ impl xcm_executor::Config for XcmConfig {
 	type XcmEventEmitter = PolkadotXcm;
 	type AssetTransactor = AssetTransactors;
 	type OriginConverter = XcmOriginToTransactDispatchOrigin;
-	// As a non-system parachain, Bulletin accepts DOT reserve transfers from Asset Hub.
-	// Teleports are not supported.
-	type IsReserve = Reserves;
-	type IsTeleporter = ();
+	type IsReserve = ();
+	type IsTeleporter = TrustedTeleporters;
 	type UniversalLocation = UniversalLocation;
 	type Barrier = Barrier;
 	type Weigher = WeightInfoBounds<
@@ -253,7 +234,6 @@ impl xcm_executor::Config for XcmConfig {
 	>;
 	type ResponseHandler = PolkadotXcm;
 	type AssetTrap = PolkadotXcm;
-	type AssetClaims = PolkadotXcm;
 	type SubscriptionService = PolkadotXcm;
 	type PalletInstancesInfo = AllPalletsWithSystem;
 	type MaxAssetsIntoHolding = MaxAssetsIntoHolding;
@@ -266,7 +246,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
-	type SafeCallFilter = Everything;
+	type SafeCallFilter = EverythingBut<crate::storage::StorageCallInspector>;
 	type Aliasers = TrustedAliasers;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
@@ -286,7 +266,7 @@ pub type PriceForParentDelivery =
 /// queues.
 pub type XcmRouter = WithUniqueTopic<(
 	// Two routers - use UMP to communicate with the relay chain:
-	cumulus_primitives_utility::ParentAsUmp<ParachainSystem, PolkadotXcm, ()>,
+	cumulus_primitives_utility::ParentAsUmp<ParachainSystem, PolkadotXcm, PriceForParentDelivery>,
 	// ..and XCMP to communicate with the sibling chains.
 	XcmpQueue,
 )>;
@@ -306,8 +286,8 @@ impl pallet_xcm::Config for Runtime {
 	type ExecuteXcmOrigin = EnsureXcmOrigin<RuntimeOrigin, LocalOriginToLocation>;
 	type XcmExecuteFilter = Everything;
 	type XcmExecutor = XcmExecutor<XcmConfig>;
-	type XcmTeleportFilter = Nothing;
-	type XcmReserveTransferFilter = Everything;
+	type XcmTeleportFilter = Everything;
+	type XcmReserveTransferFilter = Nothing;
 	type Weigher = WeightInfoBounds<
 		crate::weights::xcm::BulletinWestendXcmWeight<RuntimeCall>,
 		RuntimeCall,

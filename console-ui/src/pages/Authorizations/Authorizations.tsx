@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import { useApi } from "@/state/chain.state";
+import { useApi, useCreateBulletinClient } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import {
   useAuthorization,
@@ -17,11 +17,15 @@ import {
   usePreimageAuthsLoading,
   fetchAccountAuthorization,
   fetchPreimageAuthorizations,
+  extentRemainingTransactions,
+  extentRemainingBytes,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
-import { getContentHash } from "@/lib/cid";
-import { formatBytes, formatNumber, formatAddress, bytesToHex } from "@/utils/format";
-import { SS58String, Enum, Binary } from "polkadot-api";
+import { getContentHash, HashAlgorithm, WaitFor, BulletinError } from "@parity/bulletin-sdk";
+import { useProgressHandler } from "@/hooks/useProgressHandler";
+import { bytesToHex, hexToBytes } from "@/utils/format";
+import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
+import { SS58String, Enum } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
 import { Keyring } from "@polkadot/keyring";
 import { getPolkadotSigner } from "polkadot-api/signer";
@@ -52,8 +56,8 @@ function AccountAuthorizationsTab() {
         address: searchAddress,
         authorization: auth
           ? {
-              transactions: BigInt(auth.extent.transactions),
-              bytes: auth.extent.bytes,
+              transactions: extentRemainingTransactions(auth.extent),
+              bytes: extentRemainingBytes(auth.extent),
               expiresAt: auth.expiration ?? undefined,
             }
           : null,
@@ -94,6 +98,7 @@ function AccountAuthorizationsTab() {
               size="icon"
               onClick={handleRefresh}
               disabled={isLoading || !api || !selectedAccount}
+              data-testid="refresh-account-auth"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -255,6 +260,7 @@ function PreimageAuthorizationsTab() {
               size="icon"
               onClick={handleRefresh}
               disabled={isLoading || !api}
+              data-testid="refresh-preimage-list"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -300,6 +306,7 @@ function PreimageAuthorizationsTab() {
 
 function FaucetAuthorizePreimagePanel() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
 
   const [preimageHash, setPreimageHash] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
@@ -312,6 +319,8 @@ function FaucetAuthorizePreimagePanel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   const getSizeValue = (): bigint => {
     const value = parseInt(maxSize, 10);
@@ -334,7 +343,7 @@ function FaucetAuthorizePreimagePanel() {
       setIsComputing(true);
       try {
         const data = new TextEncoder().encode(textData);
-        const hash = await getContentHash(data);
+        const hash = await getContentHash(data, HashAlgorithm.Blake2b256);
         setPreimageHash(bytesToHex(hash));
         setMaxSize(data.length.toString());
         setSizeUnit("B");
@@ -355,7 +364,7 @@ function FaucetAuthorizePreimagePanel() {
     const computeHash = async () => {
       setIsComputing(true);
       try {
-        const hash = await getContentHash(fileData);
+        const hash = await getContentHash(fileData, HashAlgorithm.Blake2b256);
         setPreimageHash(bytesToHex(hash));
         setMaxSize(fileData.length.toString());
         setSizeUnit("B");
@@ -385,6 +394,7 @@ function FaucetAuthorizePreimagePanel() {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setTxStatus(null);
 
     try {
       await cryptoWaitReady();
@@ -396,50 +406,35 @@ function FaucetAuthorizePreimagePanel() {
         (data: Uint8Array) => alice.sign(data)
       );
 
-      const normalizedHash = preimageHash.startsWith("0x") ? preimageHash : `0x${preimageHash}`;
+      const normalizedHash = preimageHash.startsWith("0x") ? preimageHash.slice(2) : preimageHash;
+      const contentHashBytes = hexToBytes(normalizedHash);
       const sizeValue = getSizeValue();
 
-      const tx = api.tx.TransactionStorage.authorize_preimage({
-        content_hash: Binary.fromHex(normalizedHash),
-        max_size: sizeValue > 0n ? sizeValue : 1024n * 1024n,
-      });
+      // Create SDK client with Alice signer
+      const bulletinClient = createBulletinClient!(aliceSigner);
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Use SDK to authorize preimage with progress callback
+      await bulletinClient
+        .authorizePreimage(contentHashBytes, sizeValue > 0n ? sizeValue : 1024n * 1024n)
+        .withCallback(handleProgress)
+        .withWaitFor(WaitFor.Finalized)
+        .send();
 
       setSubmitSuccess("Successfully authorized preimage");
       fetchPreimageAuthorizations(api);
     } catch (err) {
       console.error("Preimage authorization failed:", err);
-      setSubmitError(err instanceof Error ? err.message : "Authorization failed");
+
+      if (err instanceof BulletinError) {
+        setSubmitError(`${err.message} (Hint: ${err.recoveryHint})`);
+      } else if (err instanceof Error) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError(String(err));
+      }
     } finally {
       setIsSubmitting(false);
+      setTxStatus(null);
     }
   };
 
@@ -479,6 +474,7 @@ function FaucetAuthorizePreimagePanel() {
                 onChange={(e) => setPreimageHash(e.target.value)}
                 className="font-mono"
                 disabled={isSubmitting}
+                data-testid="preimage-hash-input"
               />
               {isComputing && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -562,7 +558,7 @@ function FaucetAuthorizePreimagePanel() {
             {isSubmitting ? (
               <>
                 <Spinner size="sm" className="mr-2" />
-                Authorizing Preimage...
+                {txStatus || "Authorizing Preimage..."}
               </>
             ) : (
               <>
@@ -577,8 +573,9 @@ function FaucetAuthorizePreimagePanel() {
   );
 }
 
-function StorageFaucetTab() {
+function FaucetAuthorizeAccountPanel() {
   const api = useApi();
+  const createBulletinClient = useCreateBulletinClient();
   const selectedAccount = useSelectedAccount();
 
   const [forWho, setForWho] = useState("");
@@ -591,31 +588,12 @@ function StorageFaucetTab() {
     bytes: bigint;
     expiresAt?: number;
   } | null>(null);
-  const [aliceBalance, setAliceBalance] = useState<bigint | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
-
-  // Initialize Alice and Bob accounts
-  useEffect(() => {
-    const initAccounts = async () => {
-      if (!api) return;
-
-      try {
-        await cryptoWaitReady();
-        const keyring = new Keyring({ type: "sr25519" });
-        const alice = keyring.addFromUri("//Alice");
-
-        const accountInfo = await api.query.System.Account.getValue(alice.address as SS58String);
-        setAliceBalance(accountInfo?.data?.free ?? null);
-      } catch (err) {
-        console.error("Failed to initialize dev accounts:", err);
-      }
-    };
-
-    initAccounts();
-  }, [api]);
+  const [txStatus, setTxStatus] = useState<string | null>(null);
+  const handleProgress = useProgressHandler(setTxStatus);
 
   // Prefill with connected account address
   useEffect(() => {
@@ -658,8 +636,8 @@ function StorageFaucetTab() {
         setAuthorization(
           auth
             ? {
-                transactions: BigInt(auth.extent.transactions),
-                bytes: auth.extent.bytes,
+                transactions: extentRemainingTransactions(auth.extent),
+                bytes: extentRemainingBytes(auth.extent),
                 expiresAt: auth.expiration ?? undefined,
               }
             : null
@@ -682,6 +660,7 @@ function StorageFaucetTab() {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setTxStatus(null);
 
     try {
       await cryptoWaitReady();
@@ -693,43 +672,18 @@ function StorageFaucetTab() {
         (data: Uint8Array) => alice.sign(data)
       );
 
-      const txCount = BigInt(parseInt(transactions, 10) || 0);
+      const txCount = parseInt(transactions, 10) || 0;
       const bytesValue = getBytesValue();
 
-      const tx = api.tx.TransactionStorage.authorize_account({
-        who: forWho as SS58String,
-        transactions: Number(txCount),
-        bytes: bytesValue,
-      });
+      // Create SDK client with Alice signer
+      const bulletinClient = createBulletinClient!(aliceSigner);
 
-      await new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const subscription = tx.signSubmitAndWatch(aliceSigner).subscribe({
-          next: (ev: any) => {
-            console.log("TX event:", ev.type);
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              resolve();
-            }
-          },
-          error: (err: any) => {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
-          },
-        });
-
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            subscription.unsubscribe();
-            reject(new Error("Transaction timed out"));
-          }
-        }, 120000);
-      });
+      // Use SDK to authorize account with progress callback
+      await bulletinClient
+        .authorizeAccount(forWho, txCount, bytesValue)
+        .withCallback(handleProgress)
+        .withWaitFor(WaitFor.Finalized)
+        .send();
 
       setSubmitSuccess(`Successfully authorized account ${formatAddress(forWho, 8)}`);
 
@@ -739,8 +693,8 @@ function StorageFaucetTab() {
       setAuthorization(
         auth
           ? {
-              transactions: BigInt(auth.extent.transactions),
-              bytes: auth.extent.bytes,
+              transactions: extentRemainingTransactions(auth.extent),
+              bytes: extentRemainingBytes(auth.extent),
               expiresAt: auth.expiration ?? undefined,
             }
           : null
@@ -748,30 +702,23 @@ function StorageFaucetTab() {
     } catch (err) {
       console.error("Authorization failed:", err);
 
-      let errorMessage = "Authorization failed";
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === "object" && err !== null) {
-        const errObj = err as any;
-        if (errObj.type === "Invalid" && errObj.value?.type === "Payment") {
-          errorMessage = "Payment error: Alice account has insufficient balance to pay transaction fees. Please fund Alice's account or use a local dev chain where Alice has initial funds.";
-        } else {
-          errorMessage = JSON.stringify(err);
-        }
+      if (err instanceof BulletinError) {
+        setSubmitError(`${err.message} (Hint: ${err.recoveryHint})`);
+      } else if (err instanceof Error) {
+        setSubmitError(err.message);
+      } else {
+        setSubmitError(String(err));
       }
-
-      setSubmitError(errorMessage);
     } finally {
       setIsSubmitting(false);
+      setTxStatus(null);
     }
   };
 
-  const hasBalanceIssue = aliceBalance !== null && aliceBalance === 0n;
   const canSubmit =
     forWho.length > 0 &&
     (parseInt(transactions, 10) > 0 || getBytesValue() > 0n) &&
-    !isSubmitting &&
-    !hasBalanceIssue;
+    !isSubmitting;
 
   return (
     <div className="space-y-6">
@@ -787,42 +734,22 @@ function StorageFaucetTab() {
         </div>
       )}
 
-      {/* Info Card */}
-      <Card className="border-blue-500/50 bg-blue-500/5">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Droplet className="h-5 w-5 text-blue-500" />
-            Storage Faucet
-          </CardTitle>
-          <CardDescription>
-            Authorize storage allowances for accounts using the Alice dev account. This is for testing purposes only. You can authorize an unlimited amount, so please be reasonable.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2 text-sm">
-            {aliceBalance !== null && aliceBalance === 0n && (
-              <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
-                <AlertCircle className="h-4 w-4 inline mr-2" />
-                Warning: Alice account has zero balance. Transactions will fail.
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Authorization Form */}
       <Card>
         <CardHeader>
-          <CardTitle>Authorize Account</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Authorize Account
+          </CardTitle>
           <CardDescription>
-            Grant storage authorization to any account.
+            Grant storage authorization to any account using the Alice dev account.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAuthorize} className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">
-                Account Address (for_who)
+                Account Address
               </label>
               <Input
                 placeholder="Enter SS58 address..."
@@ -917,26 +844,59 @@ function StorageFaucetTab() {
               {isSubmitting ? (
                 <>
                   <Spinner size="sm" className="mr-2" />
-                  Authorizing...
-                </>
-              ) : hasBalanceIssue ? (
-                <>
-                  <AlertCircle className="h-4 w-4 mr-2" />
-                  Alice Has No Balance
+                  {txStatus || "Authorizing..."}
                 </>
               ) : (
                 <>
                   <Droplet className="h-4 w-4 mr-2" />
-                  Authorize User
+                  Authorize Account
                 </>
               )}
             </Button>
           </form>
         </CardContent>
       </Card>
+    </div>
+  );
+}
 
-      {/* Authorize Preimage */}
-      <FaucetAuthorizePreimagePanel />
+function StorageFaucetTab() {
+  const [faucetTab, setFaucetTab] = useState<"account" | "preimage">("account");
+
+  return (
+    <div className="space-y-6">
+      {/* Info Card */}
+      <Card className="border-blue-500/50 bg-blue-500/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Droplet className="h-5 w-5 text-blue-500" />
+            Storage Faucet
+          </CardTitle>
+          <CardDescription>
+            Authorize storage allowances using the Alice dev account. This is for testing purposes only.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
+      {/* Sub-tabs for Account vs Preimage */}
+      <Tabs value={faucetTab} onValueChange={(v) => setFaucetTab(v as "account" | "preimage")}>
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="account">
+            <User className="h-4 w-4 mr-2" />
+            Authorize Account
+          </TabsTrigger>
+          <TabsTrigger value="preimage">
+            <FileText className="h-4 w-4 mr-2" />
+            Authorize Preimage
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="account" className="mt-4">
+          <FaucetAuthorizeAccountPanel />
+        </TabsContent>
+        <TabsContent value="preimage" className="mt-4">
+          <FaucetAuthorizePreimagePanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

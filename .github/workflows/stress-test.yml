@@ -1,0 +1,264 @@
+name: Stress Test
+# Manually triggered stress test for Bulletin Chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Command: throughput, bitswap, or full"
+        required: true
+        default: "throughput"
+        type: choice
+        options:
+          - throughput
+          - bitswap
+          - full
+      ws_url:
+        description: "WebSocket URL(s), comma-separated for multi-node"
+        required: true
+        default: "wss://westend-bulletin-rpc.polkadot.io"
+      variants:
+        description: "Throughput variants filter (e.g. 1KB,128KB,1MB). Empty = all"
+        required: false
+        default: "1MB"
+      target_blocks:
+        description: "Number of steady-state blocks to measure per variant"
+        required: false
+        default: "20"
+      submitters:
+        description: "Number of concurrent submitter tasks"
+        required: false
+        default: "16"
+      iterations:
+        description: "Number of items for Bitswap read tests"
+        required: false
+        default: "128"
+      payload_size:
+        description: "Bitswap payload size in bytes"
+        required: false
+        default: "131072"
+      authorizer_seed:
+        description: "Seed for the authorizer account"
+        required: false
+        default: "//Alice"
+      p2p_multiaddr:
+        description: "P2P multiaddr for Bitswap (auto-discovered if empty)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stress-test-${{ github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # Resolve inputs with fallback defaults (inputs.* is empty on push triggers)
+  ST_COMMAND: ${{ inputs.command || 'throughput' }}
+  ST_WS_URL: ${{ inputs.ws_url || 'wss://westend-bulletin-rpc.polkadot.io' }}
+  ST_VARIANTS: ${{ inputs.variants || '1MB' }}
+  ST_TARGET_BLOCKS: ${{ inputs.target_blocks || '20' }}
+  ST_SUBMITTERS: ${{ inputs.submitters || '16' }}
+  ST_ITERATIONS: ${{ inputs.iterations || '128' }}
+  ST_PAYLOAD_SIZE: ${{ inputs.payload_size || '131072' }}
+  ST_AUTHORIZER_SEED: ${{ inputs.authorizer_seed || '//Alice' }}
+  ST_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr || '' }}
+
+jobs:
+  set-image:
+    uses: ./.github/workflows/set-image.yml
+
+  stress-test:
+    needs: [set-image]
+    name: "Stress Test (${{ inputs.command || 'throughput' }})"
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 2880
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Load common environment variables
+        run: cat .github/env >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-stress-test"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build stress test binary
+        run: cargo build --release -p bulletin-stress-test
+
+      - name: Mask authorizer seed
+        run: echo "::add-mask::$ST_AUTHORIZER_SEED"
+
+      - name: Validate inputs
+        run: |
+          set -e
+
+          # Validate numeric inputs
+          for var in ST_TARGET_BLOCKS ST_SUBMITTERS ST_ITERATIONS ST_PAYLOAD_SIZE; do
+            val="${!var}"
+            if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+              echo "::error::Invalid numeric input $var='$val'"
+              exit 1
+            fi
+          done
+
+          # Validate URL format (must start with ws:// or wss://)
+          IFS=',' read -ra URLS <<< "$ST_WS_URL"
+          for url in "${URLS[@]}"; do
+            url=$(echo "$url" | xargs)  # trim whitespace
+            if ! [[ "$url" =~ ^wss?:// ]]; then
+              echo "::error::Invalid WebSocket URL: '$url' (must start with ws:// or wss://)"
+              exit 1
+            fi
+          done
+
+          # Validate variants (alphanumeric, dots, commas only)
+          if [ -n "$ST_VARIANTS" ]; then
+            if ! [[ "$ST_VARIANTS" =~ ^[a-zA-Z0-9.,]+$ ]]; then
+              echo "::error::Invalid variants filter: '$ST_VARIANTS' (allowed: alphanumeric, dots, commas)"
+              exit 1
+            fi
+          fi
+
+          # Validate authorizer seed (must start with //)
+          if ! [[ "$ST_AUTHORIZER_SEED" =~ ^// ]]; then
+            echo "::error::Invalid authorizer seed (must start with //)"
+            exit 1
+          fi
+
+          # Validate p2p multiaddr (must start with / if provided)
+          if [ -n "$ST_P2P_MULTIADDR" ]; then
+            if ! [[ "$ST_P2P_MULTIADDR" =~ ^/ ]]; then
+              echo "::error::Invalid P2P multiaddr (must start with /)"
+              exit 1
+            fi
+          fi
+
+          echo "All inputs validated"
+
+      - name: Run stress test
+        run: |
+          set -e
+
+          # Build args array safely — no eval, no string interpolation in shell
+          ARGS=(
+            --ws-url "$ST_WS_URL"
+            --submitters "$ST_SUBMITTERS"
+            --target-blocks "$ST_TARGET_BLOCKS"
+            --iterations "$ST_ITERATIONS"
+            --authorizer-seed "$ST_AUTHORIZER_SEED"
+            --output json
+            --output-file results.json
+          )
+
+          if [ -n "$ST_P2P_MULTIADDR" ]; then
+            ARGS+=(--p2p-multiaddr "$ST_P2P_MULTIADDR")
+          fi
+
+          case "$ST_COMMAND" in
+            throughput)
+              ARGS+=(throughput)
+              if [ -n "$ST_VARIANTS" ]; then
+                ARGS+=(--variants "$ST_VARIANTS")
+              fi
+              ;;
+            bitswap)
+              ARGS+=(bitswap --payload-size "$ST_PAYLOAD_SIZE")
+              ;;
+            full)
+              ARGS+=(full)
+              ;;
+          esac
+
+          # Log command without authorizer seed
+          SAFE_ARGS=("${ARGS[@]}")
+          for i in "${!SAFE_ARGS[@]}"; do
+            if [[ "${SAFE_ARGS[$i]}" == "--authorizer-seed" ]]; then
+              SAFE_ARGS[$((i+1))]="<redacted>"
+            fi
+          done
+          echo "Running: ./target/release/bulletin-stress-test ${SAFE_ARGS[*]}"
+
+          # Tee stderr to file for artifact; results.json written by --output-file.
+          ./target/release/bulletin-stress-test "${ARGS[@]}" 2> >(tee stress-test.log)
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stress-test-results-${{ env.ST_COMMAND }}-${{ github.run_number }}
+          path: |
+            results.json
+            stress-test.log
+          retention-days: 90
+
+      - name: Print summary
+        if: always()
+        run: |
+          if [ -f results.json ]; then
+            echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Command | \`${ST_COMMAND}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Target | \`${ST_WS_URL}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Submitters | ${ST_SUBMITTERS} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Target blocks | ${ST_TARGET_BLOCKS} |" >> $GITHUB_STEP_SUMMARY
+            if [ "$ST_COMMAND" = "throughput" ] && [ -n "$ST_VARIANTS" ]; then
+              echo "| Variants | \`${ST_VARIANTS}\` |" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "$ST_COMMAND" = "bitswap" ]; then
+              echo "| Iterations | ${ST_ITERATIONS} |" >> $GITHUB_STEP_SUMMARY
+              echo "| Payload size | ${ST_PAYLOAD_SIZE} bytes |" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            python3 -c "
+          import json, sys
+          try:
+              with open('results.json') as f:
+                  data = json.load(f)
+          except (json.JSONDecodeError, FileNotFoundError) as e:
+              print(f'Failed to parse results: {e}', file=sys.stderr)
+              sys.exit(0)
+          for r in data:
+              summary = {
+                  'name': r.get('name', ''),
+                  'payload_size': r.get('payload_size', 0),
+                  'throughput_tps': round(r.get('throughput_tps', 0), 2),
+                  'throughput_MB_per_sec': round(r.get('throughput_bytes_per_sec', 0) / 1048576, 2),
+                  'total_confirmed': r.get('total_confirmed', 0),
+                  'total_errors': r.get('total_errors', 0),
+                  'avg_tx_per_block': round(r.get('avg_tx_per_block', 0), 1),
+                  'peak_tx_per_block': r.get('peak_tx_per_block', 0),
+                  'duration_secs': r.get('duration', {}).get('secs', 0),
+              }
+              if r.get('avg_block_interval_ms'):
+                  summary['avg_block_interval_ms'] = round(r['avg_block_interval_ms'], 0)
+              if r.get('fork_detections', 0) > 0:
+                  summary['fork_detections'] = r['fork_detections']
+              if r.get('reads_per_sec'):
+                  summary['reads_per_sec'] = round(r['reads_per_sec'], 1)
+              if r.get('successful_reads'):
+                  summary['successful_reads'] = r['successful_reads']
+              if r.get('failed_reads'):
+                  summary['failed_reads'] = r['failed_reads']
+              print(json.dumps(summary, indent=2))
+              print()
+          " >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Stress Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "No results.json produced." >> $GITHUB_STEP_SUMMARY
+          fi

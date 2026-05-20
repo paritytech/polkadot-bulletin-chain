@@ -27,7 +27,7 @@ use testnet_parachains_constants::westend::{
 };
 
 const BULLETIN_WESTEND_ED: Balance = ExistentialDeposit::get();
-pub const BULLETIN_PARA_ID: ParaId = ParaId::new(2487);
+pub const BULLETIN_PARA_ID: ParaId = ParaId::new(1010);
 
 fn bulletin_westend_genesis(
 	invulnerables: Vec<(AccountId, AuraId)>,
@@ -35,6 +35,8 @@ fn bulletin_westend_genesis(
 	endowment: Balance,
 	id: ParaId,
 	sudo_account: Option<AccountId>,
+	account_authorizations: Vec<(AccountId, u32, u64)>,
+	allowed_authorizers: Vec<(AccountId, u32, u64)>,
 ) -> serde_json::Value {
 	build_struct_json_patch!(RuntimeGenesisConfig {
 		balances: BalancesConfig {
@@ -59,6 +61,11 @@ fn bulletin_westend_genesis(
 		},
 		polkadot_xcm: PolkadotXcmConfig { safe_xcm_version: Some(SAFE_XCM_VERSION) },
 		sudo: SudoConfig { key: sudo_account },
+		transaction_storage: TransactionStorageConfig {
+			account_authorizations,
+			allowed_authorizers,
+			..Default::default()
+		},
 	})
 }
 
@@ -76,6 +83,10 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
+			// Account authorizations (account, transactions_allowance, bytes_allowance).
+			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
+			// Additional account authorizers (account, transactions budget, bytes budget).
+			vec![(Sr25519Keyring::Eve.to_account_id(), 100_000, 100 * 1024 * 1024 * 1024)],
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
@@ -90,6 +101,10 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			BULLETIN_PARA_ID,
 			// Sudo
 			Some(Sr25519Keyring::Alice.to_account_id()),
+			// Account authorizations (account, transactions_allowance, bytes_allowance).
+			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
+			// Additional account authorizers (account, transactions budget, bytes budget).
+			vec![(Sr25519Keyring::Eve.to_account_id(), 100_000, 100 * 1024 * 1024 * 1024)],
 		),
 		_ => return None,
 	};

@@ -18,8 +18,6 @@ validator = true
 p2p_port = 30333
 rpc_port = 9942
 balance = 2000000000000
-# WebSocket P2P on p2p_port + 1 for smoldot light client support
-args = ["--listen-addr", "/ip4/0.0.0.0/tcp/30334/ws"]
 
 [[relaychain.nodes]]
 name = "bob"
@@ -27,11 +25,16 @@ validator = true
 p2p_port = 30433
 rpc_port = 9943
 balance = 2000000000000
-# WebSocket P2P on p2p_port + 1 for smoldot light client support
-args = ["--listen-addr", "/ip4/0.0.0.0/tcp/30434/ws"]
+
+[[relaychain.nodes]]
+name = "charlie"
+validator = true
+p2p_port = 30533
+rpc_port = 9944
+balance = 2000000000000
 
 [[parachains]]
-id = 2487
+id = 1010
 chain_spec_path = "./zombienet/bulletin-westend-spec.json"
 cumulus_based = true
 
@@ -43,12 +46,15 @@ p2p_port = 10001
 rpc_port = 10000
 args = [
 	"--ipfs-server",
-	# Increase tx pool from 20->64 MiB
-	# "--pool-kbytes 65536",
+	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
-	# WebSocket P2P on p2p_port + 1 for smoldot light client support
-	"--listen-addr=/ip4/0.0.0.0/tcp/10001",
-	"--listen-addr=/ip4/0.0.0.0/tcp/10002/ws",
+	# Embedded relay chain args (after "--"):
+	# Use -:--port to exclude zombienet's auto-generated --port flag,
+	# then provide --listen-addr to bind only on 127.0.0.1 (avoids litep2p
+	# IPv6 dual-stack crash on macOS and prevents 0.0.0.0 exposure).
+	"--",
+	"--listen-addr=/ip4/127.0.0.1/tcp/10003/ws",
+	"-:--port",
 ]
 
 [[parachains.collators]]
@@ -59,10 +65,10 @@ p2p_port = 12347
 rpc_port = 12346
 args = [
 	"--ipfs-server",
-	# Increase tx pool from 20->64 MiB
-	# "--pool-kbytes 65536",
+	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
-	# WebSocket P2P on p2p_port + 1 for smoldot light client support
-	"--listen-addr=/ip4/0.0.0.0/tcp/12347",
-	"--listen-addr=/ip4/0.0.0.0/tcp/12348/ws",
+	# Embedded relay chain args (after "--"):
+	"--",
+	"--listen-addr=/ip4/127.0.0.1/tcp/12349/ws",
+	"-:--port",
 ]

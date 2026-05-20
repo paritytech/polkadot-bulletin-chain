@@ -1,26 +1,21 @@
 import fs from 'fs';
 import assert from 'assert';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { Binary, Enum } from '@polkadot-api/substrate-bindings';
+import { Enum } from '@polkadot-api/substrate-bindings';
 import { CHUNK_SIZE, toHex, toHashingEnum } from './common.js';
 
-// Convert data to Binary for PAPI (handles string, Uint8Array, and array-like types)
-function toBinary(data) {
-    let bytes;
+function toBytes(data) {
     if (typeof data === 'string') {
         const buf = Buffer.from(data);
-        bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-    } else if (data instanceof Uint8Array) {
-        bytes = data;
-    } else {
-        bytes = new Uint8Array(data);
+        return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     }
-    return new Binary(bytes);
+    if (data instanceof Uint8Array) return data;
+    return new Uint8Array(data);
 }
 
 export async function authorizeAccount(
     typedApi,
-    sudoSigner,
+    authorizationSigner,
     whos,
     transactions,
     bytes,
@@ -67,20 +62,17 @@ export async function authorizeAccount(
         }).decodedCall
     );
 
-    // Wrap in Sudo(Utility::batchAll(...))
+    // Wrap in Utility::batchAll(...)
     const batchTx = typedApi.tx.Utility.batch_all({
         calls: authorizeCalls
     });
-    const sudoTx = typedApi.tx.Sudo.sudo({
-        call: batchTx.decodedCall
-    });
 
-    await waitForTransaction(sudoTx, sudoSigner, "BatchAuthorize", txMode);
+    await waitForTransaction(batchTx, authorizationSigner, "BatchAuthorize", txMode);
 }
 
 export async function authorizePreimage(
     typedApi,
-    sudoSigner,
+    authorizationSigner,
     contentHashes,
     maxSize = CHUNK_SIZE,
     txMode = TX_MODE_IN_BLOCK,
@@ -97,20 +89,17 @@ export async function authorizePreimage(
 
         const authorizeCalls = batch.map(contentHash =>
             typedApi.tx.TransactionStorage.authorize_preimage({
-                content_hash: toBinary(contentHash),
+                content_hash: toHex(contentHash),
                 max_size: BigInt(maxSize)
             }).decodedCall
         );
 
-        // Wrap in Sudo(Utility::batchAll(...))
+        // Wrap in Utility::batchAll(...)
         const batchTx = typedApi.tx.Utility.batch_all({
             calls: authorizeCalls
         });
-        const sudoTx = typedApi.tx.Sudo.sudo({
-            call: batchTx.decodedCall
-        });
 
-        await waitForTransaction(sudoTx, sudoSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
+        await waitForTransaction(batchTx, authorizationSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
     }
 }
 
@@ -126,11 +115,11 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
                 codec: BigInt(cidCodec),
                 hashing: toHashingEnum(mhCode),
             },
-            data: toBinary(data),
+            data: toBytes(data),
         });
     } else {
         expectedCid = await cidFromBytes(data);
-        tx = typedApi.tx.TransactionStorage.store({ data: toBinary(data) });
+        tx = typedApi.tx.TransactionStorage.store({ data: toBytes(data) });
     }
 
     const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
@@ -159,7 +148,7 @@ const TX_MODE_CONFIG = {
     },
 };
 
-async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
+export async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
     const config = TX_MODE_CONFIG[txMode];
     if (!config) {
         throw new Error(`Unhandled txMode: ${txMode}`);

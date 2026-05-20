@@ -5,14 +5,13 @@ name: Check Runtime Migrations
 
 on:
   push:
-    branches: ["release-*"]
+    branches: [main, "release-*"]
   pull_request:
+    branches: [main, "release-*"]
   workflow_dispatch:
   schedule:
     - cron: '0 5 * * *'  # Daily at 5 AM UTC
 
-# Cancel a currently running workflow from the same PR, branch or tag when a new workflow is
-# triggered (ref https://stackoverflow.com/a/72408109)
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -21,7 +20,15 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   runtime-matrix:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
     runs-on: ubuntu-latest
     outputs:
       runtime: ${{ steps.runtime.outputs.runtime }}
@@ -41,8 +48,23 @@ jobs:
           TASKS=$(echo $TASKS | jq -c .)
           echo "runtime=$TASKS" >> $GITHUB_OUTPUT
 
+  prepare-try-runtime:
+    name: Prepare try-runtime
+    needs: [changes]
+    if: needs.changes.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: prepare
+
   prepare-snapshots:
-    needs: [runtime-matrix]
+    needs: [runtime-matrix, prepare-try-runtime]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -52,10 +74,16 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      # Snapshot lookup uses a deliberately-non-matching primary `key:` so
+      # `restore-keys` always falls through to the most recent dated entry.
+      # With `lookup-only` the snapshot isn't restored — we just decide
+      # whether to regenerate. `cache-matched-key` is empty iff nothing was
+      # found, which is also the case on the daily `schedule` (lookup
+      # skipped) so the snapshot is force-refreshed nightly.
       - name: Check if snapshot exists in cache
         id: cache-restore
         if: github.event_name != 'schedule'
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           lookup-only: true
           path: snapshot.raw
@@ -64,16 +92,12 @@ jobs:
             try-runtime-snapshot-${{ matrix.runtime.name }}-
           fail-on-cache-miss: false
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - name: Install try-runtime-cli
+      - name: Set up Polkadot binaries
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: consume
 
       - name: Generate snapshot for ${{ matrix.runtime.name }}
         if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -114,14 +138,14 @@ jobs:
 
       - name: Save snapshot to cache
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
 
 
   check-migrations:
-    needs: [runtime-matrix, prepare-snapshots]
+    needs: [runtime-matrix, prepare-try-runtime, prepare-snapshots]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -141,39 +165,21 @@ jobs:
           git remote add upstream "https://github.com/${BASE_REPO}.git"
           git fetch upstream --tags
 
-      - name: Build EXTRA_FLAGS
-        env:
-          BLOCKTIME: ${{ matrix.runtime.blocktime }}
-        run: |
-          EXTRA_FLAGS=" --blocktime $BLOCKTIME "
-          EXTRA_FLAGS+=" --disable-spec-version-check"
-          CHECKS="all"
-
-          echo "Flags: $EXTRA_FLAGS"
-          echo "Checks: $CHECKS"
-
-          echo "EXTRA_FLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
-          echo "CHECKS=$CHECKS" >> $GITHUB_ENV
-
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: consume
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
-      - name: Install try-runtime-cli
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
-
       - name: Restore snapshot from cache
-        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-
@@ -182,6 +188,8 @@ jobs:
       - name: Run ${{ matrix.runtime.name }} Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
+          TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
@@ -195,8 +203,9 @@ jobs:
 
           (set -x; try-runtime \
             --runtime "$RUNTIME_BLOB_PATH" \
-            on-runtime-upgrade --checks="$CHECKS" \
-            $EXTRA_FLAGS \
+            $TRY_RUNTIME_SPEC_NAME_CHECK \
+            on-runtime-upgrade --checks="all" \
+            $TRY_RUNTIME_EXTRA_FLAGS \
             snap --path snapshot.raw)
 
   # This will only run if all the tests in its "needs" array passed.
@@ -206,7 +215,10 @@ jobs:
   confirmMigrationsPassed:
     runs-on: ubuntu-latest
     name: All migrations passed
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [check-migrations]
+    if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    needs: [changes, prepare-try-runtime, prepare-snapshots, check-migrations]
     steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
       - run: echo '### Good job! All the migrations passed 🚀' >> $GITHUB_STEP_SUMMARY

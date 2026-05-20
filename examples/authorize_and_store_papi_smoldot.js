@@ -4,11 +4,11 @@ import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store } from './api.js';
-import { setupKeyringAndSigners, waitForChainReady, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
@@ -20,9 +20,8 @@ const WS_BOOTNODE_REGEX = /\/tcp\/\d+\/ws\/p2p\//;
 
 /**
  * Converts a TCP bootnode to WebSocket format for smoldot compatibility.
- * Uses convention: WebSocket port = TCP p2p_port + 1
- *
- * Example: /ip4/127.0.0.1/tcp/30333/p2p/PEER_ID -> /ip4/127.0.0.1/tcp/30334/ws/p2p/PEER_ID
+ * If already a WS address (zombienet default), returns it unchanged.
+ * For plain TCP bootnodes, uses convention: WebSocket port = TCP p2p_port + 1.
  */
 function convertBootNodeToWebSocket(addr) {
     // Already a WebSocket address
@@ -78,19 +77,24 @@ function initSmoldot() {
 async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
 
-    const mainChain = await sd.addChain({ chainSpec: readChainSpec(chainSpecPath) });
-    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    const mainChainSpec = readChainSpec(chainSpecPath);
+    const parachainSpec = parachainSpecPath ? readChainSpec(parachainSpecPath) : null;
 
-    let targetChain = mainChain;
-    if (parachainSpecPath) {
-        targetChain = await sd.addChain({
-            chainSpec: readChainSpec(parachainSpecPath),
-            potentialRelayChains: [mainChain]
-        });
-        console.log(`✅ Added parachain: ${parachainSpecPath}`);
-    }
+    const provider = getSmProvider(async () => {
+        const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
+        console.log(`✅ Added main chain: ${chainSpecPath}`);
+        if (parachainSpec) {
+            const parachain = await sd.addChain({
+                chainSpec: parachainSpec,
+                potentialRelayChains: [mainChain]
+            });
+            console.log(`✅ Added parachain: ${parachainSpecPath}`);
+            return parachain;
+        }
+        return mainChain;
+    });
 
-    return { client: createClient(getSmProvider(targetChain)), sd };
+    return { client: createClient(provider), sd };
 }
 
 async function main() {
@@ -131,10 +135,11 @@ async function main() {
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
         await waitForChainReady(bulletinAPI);
+        await waitForBlockProduction(bulletinAPI);
 
         // Signers: Use Bob for the account being authorized to avoid nonce conflicts
         // when running after ws test (which uses Alice) on the same chain.
-        const { sudoSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
@@ -143,10 +148,11 @@ async function main() {
         // Authorize an account.
         await authorizeAccount(
             bulletinAPI,
-            sudoSigner,
+            authorizationSigner,
             whoAddress,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK,
         );
 
         // Store data.
