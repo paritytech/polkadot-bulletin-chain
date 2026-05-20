@@ -10,7 +10,8 @@ node_spawn_timeout = 240
 [relaychain]
 default_command = "{{POLKADOT_BINARY_PATH}}"
 default_args = ["-lruntime=debug,xcm=trace"]
-chain = "westend-local"
+chain = "paseo-local"
+chain_spec_path = "./zombienet/paseo-local-spec.json"
 
 [[relaychain.nodes]]
 name = "alice"

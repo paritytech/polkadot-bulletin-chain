@@ -20,6 +20,8 @@ pub const PARACHAIN_BINARY_PATH_ENV: &str = "POLKADOT_PARACHAIN_BINARY_PATH";
 pub const DEFAULT_PARACHAIN_BINARY: &str = "polkadot-omni-node";
 pub const PARACHAIN_CHAIN_SPEC_ENV: &str = "PARACHAIN_CHAIN_SPEC_PATH";
 pub const DEFAULT_PARACHAIN_CHAIN_SPEC: &str = "./zombienet/bulletin-westend-spec.json";
+pub const RELAY_CHAIN_SPEC_ENV: &str = "RELAY_CHAIN_SPEC_PATH";
+pub const DEFAULT_RELAY_CHAIN_SPEC: &str = "./zombienet/westend-local-spec.json";
 
 // Timeouts (seconds)
 pub const NETWORK_READY_TIMEOUT_SECS: u64 = 180;

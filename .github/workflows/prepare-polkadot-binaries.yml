@@ -1,0 +1,33 @@
+name: Prepare polkadot binaries
+
+# Centralizes the `use-polkadot-binaries` prepare path so the contract lives
+# in one file and all callers share the same cache keys.
+
+on:
+  workflow_call:
+    inputs:
+      groups:
+        type: string
+        required: true
+        description: Space-separated binary groups (forwarded to use-polkadot-binaries).
+      image:
+        type: string
+        required: true
+        description: Container image (passed by the caller, typically set-image.outputs.CI_IMAGE).
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: parity-large
+    container:
+      image: ${{ inputs.image }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: ${{ inputs.groups }}
+          mode: prepare

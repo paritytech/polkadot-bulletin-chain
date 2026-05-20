@@ -31,20 +31,22 @@ jobs:
 
   prepare-binaries:
     if: needs.changes.outputs.should-run == 'true'
-    name: Fetch polkadot binaries + bulletin chain specs
     needs: [changes, set-image]
+    uses: ./.github/workflows/prepare-polkadot-binaries.yml
+    with:
+      groups: polkadot-node chain-spec-builder westend-relay-runtime paseo-relay-runtime
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+
+  prepare-specs:
+    if: needs.changes.outputs.should-run == 'true'
+    name: Generate bulletin chain specs
+    needs: [changes, set-image, prepare-binaries]
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set up Polkadot binaries
-        uses: ./.github/actions/use-polkadot-binaries
-        with:
-          groups: polkadot-node chain-spec-builder
-          mode: prepare
 
       # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
       - name: Cache bulletin chain specs
@@ -56,6 +58,13 @@ jobs:
             zombienet/bulletin-paseo-spec.json
           key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
 
+      - name: Set up Polkadot binaries
+        if: steps.cache-specs.outputs.cache-hit != 'true'
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: chain-spec-builder
+          mode: consume
+
       - name: Generate chain specs
         if: steps.cache-specs.outputs.cache-hit != 'true'
         run: |
@@ -63,7 +72,7 @@ jobs:
           just chain-spec paseo
 
   zombienet-auto-renew-tests:
-    needs: [set-image, prepare-binaries]
+    needs: [set-image, prepare-binaries, prepare-specs]
     name: auto-renew / ${{ matrix.runtime.name }} / ${{ matrix.group }}
     runs-on: parity-large
     container:
@@ -89,7 +98,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder
+          groups: polkadot-node chain-spec-builder westend-relay-runtime paseo-relay-runtime
           mode: consume
 
       - name: Rust cache
@@ -118,7 +127,17 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
-          path: /tmp/zombie-*/**/*.log
+          # Parachain collator's RocksDB only — relay validators don't carry col11. The
+          # `*.log` glob brings in both stdout logs and WAL fragments; `CURRENT`,
+          # `MANIFEST-*`, `OPTIONS-*`, `IDENTITY`, and `*.sst` are the rest of the rocksdb
+          # surface needed for `rocksdb_ldb` to open the DB post-mortem.
+          path: |
+            /tmp/zombie-*/**/*.log
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/CURRENT
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/MANIFEST-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/OPTIONS-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/IDENTITY
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/*.sst
           retention-days: 14
 
   zombienet-sync-tests:
@@ -126,7 +145,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
-    needs: [set-image, prepare-binaries]
+    needs: [set-image, prepare-binaries, prepare-specs]
     name: sync / ${{ matrix.runtime.name }}
     runs-on: parity-large
     container:
@@ -147,7 +166,7 @@ jobs:
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
         with:
-          groups: polkadot-node chain-spec-builder
+          groups: polkadot-node chain-spec-builder westend-relay-runtime paseo-relay-runtime
           mode: consume
 
       - name: Rust cache
@@ -178,5 +197,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/CURRENT
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/MANIFEST-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/OPTIONS-*
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/IDENTITY
+            /tmp/zombie-*/collator-1/data/chains/*/db/full/*.sst
           retention-days: 14

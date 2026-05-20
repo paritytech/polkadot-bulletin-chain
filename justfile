@@ -40,8 +40,18 @@ binaries-try-runtime:
 binaries-zombienet:
     @./scripts/get_polkadot_binaries.sh zombienet
 
+# Build westend-runtime WASM (WESTEND_RELAY_RUNTIME_VERSION). Used by zombienet
+# runs that need short epochs without baking `--features fast-runtime` into the
+# polkadot node.
+binaries-westend-relay-runtime:
+    @./scripts/get_polkadot_binaries.sh westend-relay-runtime
+
+# Build paseo-runtime WASM (PASEO_RELAY_RUNTIME_VERSION) for paseo zombienet runs.
+binaries-paseo-relay-runtime:
+    @./scripts/get_polkadot_binaries.sh paseo-relay-runtime
+
 # Cold-cache convenience: fetch every group.
-binaries-all: binaries-polkadot binaries-bencher binaries-chain-spec-builder binaries-try-runtime binaries-zombienet
+binaries-all: binaries-polkadot binaries-bencher binaries-chain-spec-builder binaries-try-runtime binaries-zombienet binaries-westend-relay-runtime binaries-paseo-relay-runtime
 
 # ---------------------------------------------------------------------------
 # Chain spec generation
@@ -78,10 +88,13 @@ test-zombienet-auto-renew runtime="westend" group="all":
     CSB_DIR="$(just binaries-chain-spec-builder)"
     export PATH="$CSB_DIR:$PATH"
     ./scripts/create_bulletin_{{runtime}}_spec.sh
+    ./scripts/create_{{runtime}}_local_spec.sh
     export ZOMBIE_PROVIDER=native
     export POLKADOT_RELAY_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
+    export RELAY_CHAIN="{{runtime}}-local"
+    export RELAY_CHAIN_SPEC_PATH="$PWD/zombienet/{{runtime}}-local-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
     declare -a filter_args
     case "{{group}}" in
@@ -129,10 +142,13 @@ test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     CSB_DIR="$(just binaries-chain-spec-builder)"
     export PATH="$CSB_DIR:$PATH"
     ./scripts/create_bulletin_{{runtime}}_spec.sh
+    ./scripts/create_{{runtime}}_local_spec.sh
     export ZOMBIE_PROVIDER=native
     export POLKADOT_RELAY_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
+    export RELAY_CHAIN="{{runtime}}-local"
+    export RELAY_CHAIN_SPEC_PATH="$PWD/zombienet/{{runtime}}-local-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \

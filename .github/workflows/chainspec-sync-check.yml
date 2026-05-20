@@ -22,23 +22,14 @@ jobs:
   set-image:
     uses: ./.github/workflows/set-image.yml
 
-  # Pre-warm the binary cache once so matrix legs hit the cache instead of
-  # each one source-building polkadot-omni-node independently.
+  # Pre-warm the binary cache once. Cross-workflow concurrency lives in the
+  # reusable workflow so all PR-wide prepares for the same SHA serialize.
   setup:
     needs: [set-image]
-    name: Setup
-    runs-on: parity-large
-    container:
+    uses: ./.github/workflows/prepare-polkadot-binaries.yml
+    with:
+      groups: polkadot-node
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Set up Polkadot binaries
-        uses: ./.github/actions/use-polkadot-binaries
-        with:
-          groups: polkadot-node
-          mode: prepare
 
   sync-check:
     needs: [set-image, setup]

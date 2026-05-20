@@ -188,17 +188,14 @@ async fn spawn_shared_harness(
 }
 
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// Extends NODE_LOG_CONFIG with pruning-side targets so a "bitswap still has data after
-	// pruning should have fired" failure has the corresponding node events to read:
-	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (the
-	//     pruning-actually-fired confirmation)
-	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
+	// Pruning harness: minimal target set. Drop sub-libp2p / litep2p / request-response
+	// (substream heartbeat noise, ~95% of bytes, no pruning signal) and keep only the
+	// diagnostic surface we actually read on a failure:
+	//   - `transaction-storage`, `bitswap` at trace: pallet + IPFS request paths.
+	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block.
+	//   - `state-db=debug`: canonicalization + pin/unpin.
 	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets = format!(
-		"{},db=debug,state-db=debug,state-db::pin=debug",
-		// Strip the leading "-l" so we can append more comma-separated targets.
-		NODE_LOG_CONFIG.strip_prefix("-l").unwrap_or(NODE_LOG_CONFIG)
-	);
+	let log_targets = "transaction-storage=trace,bitswap=trace,db=debug,state-db=debug";
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
@@ -3069,7 +3066,9 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 // with modified args (`NetworkNode::restart()` reuses the original), so we SIGTERM the
 // collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
 
-const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
+// 40 not 50: ~9 parachain blocks/min under paseo's 60s epochs (one backing pause per
+// session change) puts 50 right at the 300s timeout. 40 gives "enough state" with margin.
+const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 40;
 
 fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
 	let prefix_eq = format!("{}=", name);
