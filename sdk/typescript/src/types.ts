@@ -169,32 +169,79 @@ export enum AuthorizationScope {
 }
 
 /**
- * Chunk progress event types
+ * One byte payload to upload as a single `store` extrinsic. The SDK computes
+ * the CID upfront from `(data, codec, hashAlgo)` and uses it as the item's
+ * identifier on every event.
  */
-export enum ChunkStatus {
-  ChunkStarted = "chunk_started",
-  ChunkCompleted = "chunk_completed",
-  ChunkFailed = "chunk_failed",
-  ManifestStarted = "manifest_started",
-  ManifestCreated = "manifest_created",
-  Completed = "completed",
+export interface UploadItem {
+  data: Uint8Array
+  /** CID codec (default Raw = 0x55). DagPb is used for UnixFS manifests. */
+  codec?: CidCodec
+  /** Multihash algorithm (default Blake2b-256). */
+  hashAlgo?: HashAlgorithm
+}
+
+/** Final result returned by `upload()`. `cids[i]` matches `items[i]`. */
+export interface UploadResult {
+  cids: CID[]
 }
 
 /**
- * Progress event types for chunked uploads
+ * Final result returned by the high-level `uploadFile()`.
+ *
+ * `cid` is the single identifier the caller uses to retrieve later — the
+ * content CID for a single-chunk upload, or the manifest's root CID for a
+ * chunked upload.
  */
-export type ChunkProgressEvent =
-  | { type: ChunkStatus.ChunkStarted; index: number; total: number }
-  | { type: ChunkStatus.ChunkCompleted; index: number; total: number; cid: CID }
+export interface UploadFileResult {
+  cid: CID
+}
+
+/**
+ * Lifecycle events for an upload. The same set fires whether the upload is
+ * a single item or many — single-item uploads just have `total: 1`. Every
+ * event carries the item's CID; callers use that to correlate with their
+ * own bookkeeping.
+ */
+export enum UploadStatus {
+  ItemStarted = "item_started",
+  ItemInBlock = "item_in_block",
+  ItemFinalized = "item_finalized",
+  ItemFailed = "item_failed",
+}
+
+export type UploadEvent =
   | {
-      type: ChunkStatus.ChunkFailed
+      type: UploadStatus.ItemStarted
       index: number
       total: number
+      cid: CID
+    }
+  | {
+      type: UploadStatus.ItemInBlock
+      index: number
+      total: number
+      cid: CID
+      blockHash: string
+      blockNumber: number
+    }
+  | {
+      type: UploadStatus.ItemFinalized
+      index: number
+      total: number
+      cid: CID
+      blockHash: string
+      blockNumber: number
+    }
+  | {
+      type: UploadStatus.ItemFailed
+      index: number
+      total: number
+      cid: CID
       error: Error
     }
-  | { type: ChunkStatus.ManifestStarted }
-  | { type: ChunkStatus.ManifestCreated; cid: CID }
-  | { type: ChunkStatus.Completed; manifestCid?: CID }
+
+export type UploadCallback = (event: UploadEvent) => void
 
 /**
  * Transaction status event types
@@ -238,7 +285,7 @@ export type TransactionStatusEvent =
 /**
  * Combined progress event types
  */
-export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent
+export type ProgressEvent = TransactionStatusEvent
 
 /**
  * Progress callback type
@@ -267,12 +314,14 @@ export enum ErrorCode {
   MISSING_CHUNK = "MISSING_CHUNK",
   TIMEOUT = "TIMEOUT",
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
+  STORE_STALLED = "STORE_STALLED",
 }
 
 /** Error codes that are retryable */
 const RETRYABLE_CODES = new Set<ErrorCode>([
   ErrorCode.TRANSACTION_FAILED,
   ErrorCode.TIMEOUT,
+  ErrorCode.STORE_STALLED,
 ])
 
 /** Recovery hints per error code */
@@ -300,6 +349,8 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "Transaction was not finalized within the timeout window. Retry the transaction",
   [ErrorCode.UNSUPPORTED_OPERATION]:
     "This operation is not supported in this context",
+  [ErrorCode.STORE_STALLED]:
+    "Store received no chainHead events from the RPC; the connection may be unhealthy. Retry on a fresh client",
 }
 
 /**
@@ -327,6 +378,41 @@ export class BulletinError extends Error {
 }
 
 /**
+ * Per-chain block-capacity constants used by the pipelineStore batch sizer.
+ *
+ * Determined offline from the chain's runtime constants and pallet benchmarks.
+ * Defined here (rather than next to `pipelineStore`) so `ClientConfig` can carry
+ * it without a circular import.
+ */
+export interface BlockLimits {
+  /** Max normal-class weight budget (ref_time) per block. */
+  maxNormalWeight: bigint
+  /** Max normal-class block length in bytes. */
+  normalBlockLength: number
+  /** Hard per-block limit on store extrinsics (`TransactionStorage::MaxBlockTransactions`). */
+  maxBlockTransactions: number
+  /** Base weight of a `store` extrinsic (constant part). */
+  storeWeightBase: bigint
+  /** Per-byte weight slope of a `store` extrinsic. */
+  storeWeightPerByte: bigint
+  /** Encoding overhead per extrinsic (signature + address + extensions), ~110 bytes. */
+  extrinsicOverhead: number
+}
+
+/**
+ * Reasonable defaults for bulletin-westend / bulletin-paseo runtimes.
+ * Derived from runtime constants + pallet benchmarks at the time of writing.
+ */
+export const DEFAULT_BLOCK_LIMITS: BlockLimits = {
+  maxNormalWeight: 1_500_000_000_000n, // 75% of 2s weight budget
+  normalBlockLength: 9_437_184, // 90% of 10 MiB MAX_BLOCK_LENGTH
+  maxBlockTransactions: 512, // TransactionStorage::MaxBlockTransactions
+  storeWeightBase: 35_489_000n,
+  storeWeightPerByte: 6_912n,
+  extrinsicOverhead: 110,
+}
+
+/**
  * Client configuration
  */
 export interface ClientConfig {
@@ -341,6 +427,14 @@ export interface ClientConfig {
    * PAPI handles reconnects and mortality, so this should rarely fire.
    * Set above PAPI's default mortality window (64 blocks ~ 6.4 min at 6s blocks). */
   txTimeout?: number
+  /** RPC WebSocket URLs. When non-empty, chunked stores use the pipelineStore
+   * engine for parallel submission (~10x faster) instead of the legacy serial
+   * loop. Block watching uses the first URL; signed transactions are broadcast
+   * to every URL. */
+  wsUrls?: string[]
+  /** Per-chain block limits used by pipelineStore. Defaults to
+   * {@link DEFAULT_BLOCK_LIMITS} (bulletin-westend / paseo values). */
+  blockLimits?: BlockLimits
 }
 
 /**
@@ -354,6 +448,8 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
+  wsUrls: [], // empty ⇒ legacy serial-loop chunked store
+  blockLimits: DEFAULT_BLOCK_LIMITS,
 }
 
 /** Merge caller-supplied config with defaults, ignoring undefined values. */

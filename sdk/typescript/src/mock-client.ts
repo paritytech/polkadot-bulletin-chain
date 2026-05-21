@@ -11,27 +11,31 @@
  * - Development and prototyping
  */
 
+import type { CID } from "multiformats/cid"
 import {
   AuthCallBuilder,
   type BulletinClientInterface,
   CallBuilder,
-  StoreBuilder,
   type TransactionReceipt,
+  UploadBuilder,
+  UploadFileBuilder,
 } from "./async-client.js"
-import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
-  DEFAULT_STORE_OPTIONS,
   ErrorCode,
-  type ProgressCallback,
+  HashAlgorithm,
   resolveClientConfig,
-  type StoreOptions,
-  type StoreResult,
+  type UploadCallback,
+  type UploadFileResult,
+  type UploadItem,
+  type UploadResult,
+  UploadStatus,
+  type WaitFor,
 } from "./types.js"
-import { calculateCid, estimateAuthorization } from "./utils.js"
+import { calculateCid } from "./utils.js"
 
 /**
  * Configuration for the mock Bulletin client
@@ -143,113 +147,90 @@ export class MockBulletinClient implements BulletinClientInterface {
    */
   async destroy(): Promise<void> {}
 
-  /**
-   * Store data using builder pattern
-   *
-   * @param data - Data to store as `Uint8Array`
-   */
-  store(data: Uint8Array): StoreBuilder {
-    return new StoreBuilder(this, data)
+  uploadFile(data: Uint8Array): UploadFileBuilder {
+    return new UploadFileBuilder(
+      (d, wf, oe, _cc, ca) => this.uploadFileImpl(d, wf, oe, ca),
+      data,
+    )
   }
 
-  /**
-   * Store data with custom options (internal, used by builder)
-   */
-  async storeWithOptions(
+  upload(items: UploadItem[]): UploadBuilder {
+    return new UploadBuilder(
+      (its, _wf, oe, ca) => this.uploadItemsImpl(its, oe, ca),
+      items,
+    )
+  }
+
+  private async uploadFileImpl(
     data: Uint8Array,
-    options?: StoreOptions,
-    _progressCallback?: ProgressCallback,
-    chunkerConfig?: Partial<ChunkerConfig>,
-  ): Promise<StoreResult> {
+    _waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+    checkAuth: boolean,
+  ): Promise<UploadFileResult> {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
+    const { cids } = await this.uploadItemsImpl([{ data }], onEvent, checkAuth)
+    return { cid: cids[0]! }
+  }
 
-    // Simulate insufficient authorization (pre-submission check)
-    if (this.config.simulateInsufficientAuth) {
+  private async uploadItemsImpl(
+    items: UploadItem[],
+    onEvent: UploadCallback | undefined,
+    checkAuth: boolean,
+  ): Promise<UploadResult> {
+    if (items.length === 0) {
       throw new BulletinError(
-        "Insufficient authorization: need 1 transactions, have 0",
+        "upload() requires at least one item",
+        ErrorCode.EMPTY_DATA,
+      )
+    }
+    if (checkAuth && this.config.simulateInsufficientAuth) {
+      throw new BulletinError(
+        "Account is not authorized to store data on this chain",
         ErrorCode.INSUFFICIENT_AUTHORIZATION,
       )
     }
-
-    // Simulate authorization failure
-    if (this.config.simulateAuthFailure) {
-      throw new BulletinError(
-        "Insufficient authorization: need 100 bytes, have 0 bytes",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        { need: 100, available: 0 },
-      )
-    }
-
-    // Simulate storage failure
     if (this.config.simulateStorageFailure) {
       throw new BulletinError(
         "Simulated storage failure",
         ErrorCode.TRANSACTION_FAILED,
       )
     }
-
-    // Handle chunked uploads (mirrors AsyncBulletinClient logic)
-    if (chunkerConfig || data.length > this.config.chunkingThreshold) {
-      const userCodec = options?.cidCodec
-      if (userCodec !== undefined && userCodec !== CidCodec.Raw) {
-        throw new BulletinError(
-          "withCodec() cannot be used with chunked uploads. " +
-            "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
-          ErrorCode.INVALID_CONFIG,
-        )
-      }
-
-      const preparer = new BulletinPreparer(this.config)
-      const prepared = await preparer.prepareStoreChunked(
-        data,
-        chunkerConfig,
-        options,
-      )
-
+    // Compute all CIDs in parallel (matches the real client's behavior).
+    const cids: CID[] = await Promise.all(
+      items.map((item) =>
+        calculateCid(
+          item.data,
+          item.codec ?? CidCodec.Raw,
+          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+        ),
+      ),
+    )
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] as UploadItem
+      const cid = cids[i]!
       this.operations.push({
         type: "store",
-        dataSize: data.length,
-        cid: prepared.manifest?.cid.toString() ?? "",
+        dataSize: item.data.length,
+        cid: cid.toString(),
       })
-
-      return {
-        cid: prepared.manifest?.cid,
-        size: data.length,
+      onEvent?.({
+        type: UploadStatus.ItemStarted,
+        index: i,
+        total: items.length,
+        cid,
+      })
+      onEvent?.({
+        type: UploadStatus.ItemFinalized,
+        index: i,
+        total: items.length,
+        cid,
+        blockHash: MOCK_BLOCK_HASH,
         blockNumber: 1,
-        chunks: {
-          chunkCids: prepared.chunks
-            .map((c) => c.cid)
-            .filter(
-              (c): c is import("multiformats/cid").CID => c !== undefined,
-            ),
-          numChunks: prepared.chunks.length,
-        },
-      }
+      })
     }
-
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw
-    const hashAlgorithm =
-      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
-
-    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
-
-    // Record the operation
-    this.operations.push({
-      type: "store",
-      dataSize: data.length,
-      cid: cid.toString(),
-    })
-
-    // Return a mock receipt
-    return {
-      cid,
-      size: data.length,
-      blockNumber: 1,
-    }
+    return { cids }
   }
 
   private throwIfAuthFailure(): void {
@@ -336,55 +317,15 @@ export class MockBulletinClient implements BulletinClientInterface {
     })
   }
 
-  /**
-   * Store preimage-authorized content (mock)
-   */
-  async storeWithPreimageAuth(
-    data: Uint8Array,
-    options?: StoreOptions,
-  ): Promise<StoreResult> {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-
-    if (this.config.simulateStorageFailure) {
-      throw new BulletinError(
-        "Simulated storage failure",
-        ErrorCode.TRANSACTION_FAILED,
-      )
-    }
-
-    const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-    const cidCodec = opts.cidCodec ?? CidCodec.Raw
-    const hashAlgorithm =
-      opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
-
-    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
-
-    this.operations.push({
-      type: "store_preimage_auth",
-      dataSize: data.length,
-      cid: cid.toString(),
-    })
-
-    return {
-      cid,
-      size: data.length,
-      blockNumber: 1,
-    }
-  }
-
-  /**
-   * Estimate authorization needed for storing data
-   */
   estimateAuthorization(dataSize: number): {
     transactions: number
     bytes: number
   } {
-    return estimateAuthorization(
-      dataSize,
-      this.config.defaultChunkSize,
-      this.config.createManifest,
-    )
+    return {
+      transactions:
+        Math.ceil(dataSize / this.config.defaultChunkSize) +
+        (this.config.createManifest ? 1 : 0),
+      bytes: dataSize,
+    }
   }
 }

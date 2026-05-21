@@ -53,9 +53,10 @@ export {
   type BulletinTypedApi,
   CallBuilder,
   type CallOptions,
-  StoreBuilder,
   type SubmitFn,
   type TransactionReceipt,
+  UploadBuilder,
+  UploadFileBuilder,
 } from "./async-client.js"
 
 // chunker: data splitting and reassembly
@@ -75,15 +76,8 @@ export {
   type MockClientConfig,
   type MockOperation,
 } from "./mock-client.js"
-// pipeline: high-throughput bulk submission
-export {
-  type BlockLimits,
-  type LatencyStats,
-  type PipelineConfig,
-  type PipelineResult,
-  type PipelineStats,
-  pipelineStore,
-} from "./pipeline.js"
+// Block-capacity tuning knob for chunked store; everything else is internal.
+export type { BlockLimits } from "./pipeline.js"
 
 // preparer: offline CID calculation and chunking
 export { BulletinPreparer } from "./preparer.js"
@@ -96,8 +90,6 @@ export {
   type ChunkDetails,
   type ChunkedStoreResult,
   type ChunkerConfig,
-  type ChunkProgressEvent,
-  ChunkStatus,
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
@@ -112,6 +104,11 @@ export {
   type StoreResult,
   type TransactionStatusEvent,
   TxStatus,
+  type UploadCallback,
+  type UploadEvent,
+  type UploadItem,
+  type UploadResult,
+  UploadStatus,
   WaitFor,
 } from "./types.js"
 

@@ -5,14 +5,19 @@
  * Async client with full transaction submission support
  */
 
+import { ss58Address } from "@polkadot-labs/hdkd-helpers"
 import type { CID } from "multiformats/cid"
 import { Binary, type PolkadotSigner } from "polkadot-api"
+import { getWsProvider } from "polkadot-api/ws"
+import {
+  isStallError,
+  type PipelineBootstrap,
+  pipelineStore,
+} from "./pipeline.js"
 import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
-  type ChunkedStoreResult,
   type ChunkerConfig,
-  ChunkStatus,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
@@ -23,10 +28,15 @@ import {
   type StoreOptions,
   type StoreResult,
   TxStatus,
+  type UploadCallback,
+  type UploadFileResult,
+  type UploadItem,
+  type UploadResult,
+  UploadStatus,
   type WaitFor,
 } from "./types.js"
 import {
-  estimateAuthorization,
+  calculateCid,
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
@@ -275,19 +285,8 @@ function mapPapiEventToProgress(
  * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
  */
 export interface BulletinClientInterface {
-  /** Store data with options (used internally by StoreBuilder) */
-  storeWithOptions(
-    data: Uint8Array,
-    options?: StoreOptions,
-    progressCallback?: ProgressCallback,
-    chunkerConfig?: Partial<ChunkerConfig>,
-  ): Promise<StoreResult>
-  /** Store preimage-authorized content as unsigned transaction */
-  storeWithPreimageAuth?(
-    data: Uint8Array,
-    options?: StoreOptions,
-  ): Promise<StoreResult>
-  store(data: Uint8Array): StoreBuilder
+  uploadFile(data: Uint8Array): UploadFileBuilder
+  upload(items: UploadItem[]): UploadBuilder
   authorizeAccount(
     who: string,
     transactions: number,
@@ -307,102 +306,122 @@ export interface BulletinClientInterface {
   destroy(): Promise<void>
 }
 
+/** Dispatch callback for the low-level `upload(items)` execution path. */
+type UploadDispatch = (
+  items: UploadItem[],
+  waitFor: WaitFor,
+  onEvent: UploadCallback | undefined,
+  checkAuth: boolean,
+) => Promise<UploadResult>
+
+/** Dispatch callback for the high-level `uploadFile(data)` execution path. */
+type UploadFileDispatch = (
+  data: Uint8Array,
+  waitFor: WaitFor,
+  onEvent: UploadCallback | undefined,
+  chunkerConfig: Partial<ChunkerConfig> | undefined,
+  checkAuth: boolean,
+) => Promise<UploadFileResult>
+
 /**
- * Builder for store operations with fluent API
+ * Shared base for upload builders. Holds the fluent options every upload
+ * path supports — callback, wait-for, opt-in authorization pre-flight —
+ * and exposes them as `withCallback` / `withWaitFor` / `ensureAuthorized`.
  *
- * @example
- * ```typescript
- * const result = await client
- *   .store(new TextEncoder().encode('Hello'))
- *   .withCodec(CidCodec.DagPb)
- *   .withHashAlgorithm('blake2b-256')
- *   .withCallback((event) => console.log('Progress:', event))
- *   .send();
- * ```
+ * Pre-flight: bulletin's `AllowanceBasedPriority` lowers priority on
+ * exhausted allowance but doesn't reject, so `ensureAuthorized()` only
+ * verifies that an `Authorizations` entry exists and isn't expired. Throws
+ * `BulletinError(INSUFFICIENT_AUTHORIZATION)` so the caller can authorize
+ * and retry.
  */
-export class StoreBuilder {
-  private data: Uint8Array
-  private options: StoreOptions = { ...DEFAULT_STORE_OPTIONS }
-  private callback?: ProgressCallback
-  private chunkerConfig?: Partial<ChunkerConfig>
+abstract class BaseUploadBuilder<TResult> {
+  protected callback?: UploadCallback
+  protected waitFor: WaitFor = "finalized"
+  protected checkAuth = false
 
-  constructor(
-    private executor: BulletinClientInterface,
-    data: Uint8Array,
-  ) {
-    this.data = data
-  }
-
-  /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
-  withCodec(codec: CidCodec | number): this {
-    this.options.cidCodec = codec
-    return this
-  }
-
-  /** Set the hash algorithm */
-  withHashAlgorithm(algorithm: HashAlgorithm): this {
-    this.options.hashingAlgorithm = algorithm
-    return this
-  }
-
-  /** Set what to wait for before returning */
-  withWaitFor(waitFor: WaitFor): this {
-    this.options.waitFor = waitFor
-    return this
-  }
-
-  /** Set progress callback for chunked uploads */
-  withCallback(callback: ProgressCallback): this {
+  withCallback(callback: UploadCallback): this {
     this.callback = callback
     return this
   }
 
-  /** Set chunk size (forces chunked upload path) */
+  withWaitFor(waitFor: WaitFor): this {
+    this.waitFor = waitFor
+    return this
+  }
+
+  ensureAuthorized(): this {
+    this.checkAuth = true
+    return this
+  }
+
+  abstract send(): Promise<TResult>
+}
+
+/**
+ * Builder for the low-level `upload(items)` API. Each item becomes one
+ * `store` extrinsic; resolves with the per-item CIDs (positional, input order).
+ */
+export class UploadBuilder extends BaseUploadBuilder<UploadResult> {
+  constructor(
+    private dispatch: UploadDispatch,
+    private items: UploadItem[],
+  ) {
+    super()
+  }
+
+  async send(): Promise<UploadResult> {
+    return this.dispatch(
+      this.items,
+      this.waitFor,
+      this.callback,
+      this.checkAuth,
+    )
+  }
+}
+
+/**
+ * Builder for the high-level `uploadFile(data)` API. Auto-chunks the data,
+ * builds a DAG-PB manifest, and submits everything through the same
+ * pipeline. Resolves with the single root CID.
+ *
+ * @example
+ * ```typescript
+ * const { cid } = await client
+ *   .uploadFile(bytes)
+ *   .withCallback((event) => console.log(event))
+ *   .send();
+ * ```
+ */
+export class UploadFileBuilder extends BaseUploadBuilder<UploadFileResult> {
+  private chunkerConfig?: Partial<ChunkerConfig>
+
+  constructor(
+    private dispatch: UploadFileDispatch,
+    private data: Uint8Array,
+  ) {
+    super()
+  }
+
+  /** Override the chunk size (forces chunked upload path even for small files). */
   withChunkSize(chunkSize: number): this {
     this.chunkerConfig = { ...this.chunkerConfig, chunkSize }
     return this
   }
 
-  /** Enable or disable DAG-PB manifest creation for chunked uploads (default: true) */
+  /** Disable manifest creation. Without a manifest, only the last chunk CID is returned. */
   withManifest(enabled: boolean): this {
     this.chunkerConfig = { ...this.chunkerConfig, createManifest: enabled }
     return this
   }
 
-  /** Execute the store operation (signed transaction, uses account authorization) */
-  async send(): Promise<StoreResult> {
-    return this.executor.storeWithOptions(
+  async send(): Promise<UploadFileResult> {
+    return this.dispatch(
       this.data,
-      this.options,
+      this.waitFor,
       this.callback,
       this.chunkerConfig,
+      this.checkAuth,
     )
-  }
-
-  /**
-   * Execute store operation as unsigned transaction (for preimage-authorized content)
-   *
-   * Use this when the content has been pre-authorized via `authorizePreimage()`.
-   * Unsigned transactions don't require fees and can be submitted by anyone.
-   *
-   * @example
-   * ```typescript
-   * // First authorize the content hash
-   * const hash = blake2b256(data);
-   * await client.authorizePreimage(hash, BigInt(data.length));
-   *
-   * // Anyone can now store this content without fees
-   * const result = await client.store(data).sendUnsigned();
-   * ```
-   */
-  async sendUnsigned(): Promise<StoreResult> {
-    if (!this.executor.storeWithPreimageAuth) {
-      throw new BulletinError(
-        "Unsigned transactions not supported by this client",
-        ErrorCode.UNSUPPORTED_OPERATION,
-      )
-    }
-    return this.executor.storeWithPreimageAuth(this.data, this.options)
   }
 }
 
@@ -541,6 +560,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   private preparer: BulletinPreparer
   /** Optional teardown callback invoked by `destroy()` */
   private onDestroy?: () => void | Promise<void>
+  /**
+   * Mutable pipeline bootstrap cache shared across every upload from this
+   * client. Populated on the first successful `pipelineStore` call (metadata
+   * fetch + offline-API build); subsequent calls skip the round-trip. Survives
+   * the lifetime of the client.
+   */
+  private pipelineBootstrap: PipelineBootstrap = {}
 
   /**
    * Create a new async client with PAPI client and signer
@@ -589,78 +615,51 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Best-effort authorization check before a store submission.
-   *
-   * If `api.query` is not available (optional interface), this silently returns.
-   * If authorization is explicitly insufficient (numbers too low), throws
-   * `INSUFFICIENT_AUTHORIZATION`. If the query fails or returns nothing (e.g.,
-   * timing issue after recent authorization), silently proceeds and lets the
-   * chain validate.
+   * Opt-in pre-flight (via the builder's `ensureAuthorized()`): verify that
+   * the signer has a non-expired `Authorizations` entry on chain. The chain
+   * does not reject store calls when allowance is exhausted — it lowers
+   * priority via `AllowanceBasedPriority` — so existence + expiry is the
+   * only useful client-side check. Throws
+   * `BulletinError(INSUFFICIENT_AUTHORIZATION)` on failure so the caller
+   * can authorize and retry.
    */
-  private async checkAccountAuthorization(
-    requiredTransactions: number,
-    requiredBytes: number,
-  ): Promise<void> {
-    if (!this.api.query) return
-
-    let auth:
-      | {
-          extent: {
-            transactions: number
-            transactions_allowance?: number
-            bytes: bigint
-            bytes_allowance?: bigint
-          }
-        }
-      | undefined
-    try {
-      const { ss58Address } = await import("@polkadot-labs/hdkd-helpers")
-      const address = ss58Address(this.signer.publicKey)
-
-      auth = await this.api.query.TransactionStorage.Authorizations.getValue({
+  private async ensureAuthorizedOnChain(): Promise<void> {
+    // If the typed API doesn't expose query at all, we can't honor the
+    // caller's fail-fast opt-in — surface that instead of silently passing.
+    if (!this.api.query) {
+      throw new BulletinError(
+        "ensureAuthorized(): the typed API does not expose query support; cannot verify authorization",
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    const address = ss58Address(this.signer.publicKey)
+    const auth =
+      await this.api.query.TransactionStorage.Authorizations.getValue({
         type: "Account",
         value: address,
       })
-    } catch {
-      // Query failed (network error, etc.) — proceed and let the chain validate
-      return
-    }
-
-    // Authorization not found — could be a timing issue (just authorized),
-    // so proceed and let the chain validate rather than blocking
-    if (!auth) return
-
-    // Newer chains expose `*_allowance` (caps) alongside `transactions`/`bytes`
-    // (consumed counters); older chains expose only the cap fields. Available
-    // = allowance - consumed; falling back to the raw field when allowance
-    // is absent keeps the SDK compatible with both shapes.
-    const txAllowance = auth.extent.transactions_allowance
-    const availableTransactions =
-      txAllowance != null
-        ? Math.max(0, txAllowance - auth.extent.transactions)
-        : auth.extent.transactions
-    const bytesAllowance = auth.extent.bytes_allowance
-    const availableBytes =
-      bytesAllowance != null
-        ? Number(
-            bytesAllowance > auth.extent.bytes
-              ? bytesAllowance - auth.extent.bytes
-              : 0n,
-          )
-        : Number(auth.extent.bytes)
-
-    if (availableTransactions < requiredTransactions) {
+    if (!auth) {
       throw new BulletinError(
-        `Insufficient authorization: need ${requiredTransactions} transactions, have ${availableTransactions}`,
+        `Account ${address} is not authorized to store data on this chain`,
         ErrorCode.INSUFFICIENT_AUTHORIZATION,
       )
     }
-
-    if (availableBytes < requiredBytes) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredBytes} bytes, have ${availableBytes}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
+    // Compare expiration (block number) against the current best block.
+    // If api.query.System.Number isn't exposed we skip — the chain rejects
+    // expired auths at submission time anyway.
+    const sysNumber = (
+      this.api.query as {
+        System?: { Number?: { getValue(): Promise<number> } }
+      }
+    ).System?.Number
+    if (sysNumber && typeof auth.expiration === "number") {
+      const currentBlock = await sysNumber.getValue()
+      if (auth.expiration <= currentBlock) {
+        throw new BulletinError(
+          `Authorization for ${address} expired at block ${auth.expiration} (current ${currentBlock})`,
+          ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        )
+      }
     }
   }
 
@@ -846,265 +845,159 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Store data on Bulletin Chain using builder pattern
+   * High-level upload: chunk (if needed), build a DAG-PB manifest, and submit
+   * everything through the shared submission pipeline. Returns the single
+   * root CID the caller can use to retrieve the file later.
    *
-   * Returns a builder that allows fluent configuration of store options.
-   *
-   * @param data - Data to store as `Uint8Array`
+   * **Memory.** `uploadFile` retains the full `data` plus every chunk and
+   * every per-wave signed hex string in RAM until the promise resolves. For
+   * a 100 MiB file expect peak RSS of roughly 300 MiB (data + chunks + hex
+   * inflation during broadcast). For larger files or memory-constrained
+   * environments, use {@link upload} with caller-managed chunks so older
+   * buffers can be freed once their `ItemFinalized` event has fired.
    *
    * @example
    * ```typescript
-   * const result = await client
-   *   .store(new TextEncoder().encode('Hello, Bulletin!'))
-   *   .withCodec(CidCodec.DagPb)
-   *   .withHashAlgorithm('blake2b-256')
-   *   .withCallback((event) => console.log('Progress:', event))
+   * const { cid } = await client
+   *   .uploadFile(bytes)
+   *   .withCallback((event) => console.log(event))
    *   .send();
    * ```
    */
-  store(data: Uint8Array): StoreBuilder {
-    return new StoreBuilder(this, data)
+  uploadFile(data: Uint8Array): UploadFileBuilder {
+    return new UploadFileBuilder(
+      (d, wf, oe, cc, ca) => this.uploadFileImpl(d, wf, oe, cc, ca),
+      data,
+    )
   }
 
   /**
-   * Store data with custom options (internal, used by builder)
+   * Low-level upload: submit a list of items as one `store` extrinsic each.
    *
-   * **Note**: This method is public for use by the builder but users should prefer
-   * the builder pattern via `store()`.
-   *
-   * Automatically chunks data if it exceeds the configured threshold.
+   * Each item is signed and broadcast through the shared submission pipeline,
+   * regardless of how many items are passed. Per-item CIDs are computed by
+   * the SDK from `(data, codec, hashAlgo)` and surface in every progress
+   * event. Returns the CIDs positionally, matching input order.
    */
-  async storeWithOptions(
-    data: Uint8Array,
-    options?: StoreOptions,
-    progressCallback?: ProgressCallback,
-    chunkerConfig?: Partial<ChunkerConfig>,
-  ): Promise<StoreResult> {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-
-    // Best-effort authorization check before submission
-    {
-      const willChunk =
-        !!chunkerConfig || data.length > this.config.chunkingThreshold
-      const chunkSize = chunkerConfig?.chunkSize ?? this.config.defaultChunkSize
-      const createManifest =
-        chunkerConfig?.createManifest ?? this.config.createManifest
-      const required = willChunk
-        ? estimateAuthorization(data.length, chunkSize, createManifest)
-        : { transactions: 1, bytes: data.length }
-      await this.checkAccountAuthorization(
-        required.transactions,
-        required.bytes,
-      )
-    }
-
-    // Decide whether to chunk based on threshold or explicit chunkerConfig
-    if (chunkerConfig || data.length > this.config.chunkingThreshold) {
-      // Chunked uploads use structurally fixed codecs (Raw for chunks, DagPb for manifest).
-      // Reject if the user explicitly set a non-default codec — it would be silently ignored.
-      const userCodec = options?.cidCodec
-      if (userCodec !== undefined && userCodec !== CidCodec.Raw) {
-        throw new BulletinError(
-          "withCodec() cannot be used with chunked uploads. " +
-            "Chunks always use Raw (0x55) and the manifest always uses DagPb (0x70).",
-          ErrorCode.INVALID_CONFIG,
-        )
-      }
-
-      const chunked = await this.storeChunked(
-        data,
-        chunkerConfig,
-        options,
-        progressCallback,
-      )
-      return {
-        cid: chunked.manifestCid,
-        size: data.length,
-        blockNumber: undefined,
-        extrinsicIndex: undefined,
-        chunks: {
-          chunkCids: chunked.chunkCids,
-          numChunks: chunked.numChunks,
-        },
-      }
-    } else {
-      return this.storeInternalSingle(data, options, progressCallback)
-    }
+  upload(items: UploadItem[]): UploadBuilder {
+    return new UploadBuilder(
+      (its, wf, oe, ca) => this.uploadItemsImpl(its, wf, oe, ca),
+      items,
+    )
   }
 
-  /**
-   * Internal: Store data in a single transaction (no chunking)
-   */
-  private async storeInternalSingle(
+  private async uploadFileImpl(
     data: Uint8Array,
-    options?: StoreOptions,
-    progressCallback?: ProgressCallback,
-  ): Promise<StoreResult> {
+    waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+    chunkerConfig: Partial<ChunkerConfig> | undefined,
+    checkAuth: boolean,
+  ): Promise<UploadFileResult> {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
-
-    const { cidCodec, hashAlgorithm, waitFor } = resolveStoreOptions(options)
-    const { cid } = await this.preparer.prepareStore(data, options)
-
-    try {
-      const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
-
-      const result = await this.signAndSubmitWithProgress(
-        tx,
-        progressCallback,
+    const shouldChunk =
+      !!chunkerConfig || data.length > this.config.chunkingThreshold
+    if (!shouldChunk) {
+      const { cids } = await this.uploadItemsImpl(
+        [{ data }],
         waitFor,
+        onEvent,
+        checkAuth,
       )
-
-      return {
-        cid,
-        size: data.length,
-        blockNumber: result.blockNumber,
-        extrinsicIndex:
-          "txIndex" in result
-            ? (result.txIndex as number | undefined)
-            : undefined,
-        chunks: undefined,
-      }
-    } catch (error) {
-      throw new BulletinError(
-        `Failed to store data: ${error}`,
-        ErrorCode.TRANSACTION_FAILED,
-        error,
-      )
+      return { cid: cids[0]! }
     }
-  }
-
-  /**
-   * Store large data with automatic chunking and manifest creation
-   *
-   * Handles the complete workflow:
-   * 1. Chunk the data
-   * 2. Calculate CIDs for each chunk
-   * 3. Submit each chunk as a separate transaction
-   * 4. Create and submit DAG-PB manifest (if enabled)
-   * 5. Return all CIDs and receipt information
-   *
-   * Note: Chunk submissions are not atomic. If chunk N fails, chunks 0..N-1
-   * are already stored on-chain and cannot be rolled back. The caller should
-   * check the error and `chunkCids` in the thrown error's context to understand
-   * what was partially uploaded.
-   *
-   * @param data - Data to store as `Uint8Array`
-   */
-  private async storeChunked(
-    data: Uint8Array,
-    config?: Partial<ChunkerConfig>,
-    options?: StoreOptions,
-    progressCallback?: ProgressCallback,
-  ): Promise<ChunkedStoreResult> {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-
-    const { hashAlgorithm, waitFor } = resolveStoreOptions(options)
-
-    // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
     const prepared = await this.preparer.prepareStoreChunked(
       data,
-      config,
-      options,
+      chunkerConfig,
     )
+    const items: UploadItem[] = prepared.chunks.map((c) => ({ data: c.data }))
+    if (prepared.manifest) {
+      items.push({
+        data: prepared.manifest.data,
+        codec: CidCodec.DagPb,
+      })
+    }
+    const { cids } = await this.uploadItemsImpl(
+      items,
+      waitFor,
+      onEvent,
+      checkAuth,
+    )
+    // For chunked uploads the manifest is the last item; without one, the
+    // last chunk's CID is the best identifier we have.
+    return { cid: cids[cids.length - 1]! }
+  }
 
-    const chunkCids: CID[] = []
-    const totalChunks = prepared.chunks.length
+  private async uploadItemsImpl(
+    items: UploadItem[],
+    waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+    checkAuth: boolean,
+  ): Promise<UploadResult> {
+    if (items.length === 0) {
+      throw new BulletinError(
+        "upload() requires at least one item",
+        ErrorCode.EMPTY_DATA,
+      )
+    }
+    if (checkAuth) await this.ensureAuthorizedOnChain()
 
-    // Submit each chunk transaction
-    for (const chunk of prepared.chunks) {
-      if (progressCallback) {
-        progressCallback({
-          type: ChunkStatus.ChunkStarted,
-          index: chunk.index,
-          total: totalChunks,
-        })
-      }
+    // Compute per-item CIDs once across all retry attempts.
+    const allItemCids: CID[] = await Promise.all(
+      items.map((item) =>
+        calculateCid(
+          item.data,
+          item.codec ?? CidCodec.Raw,
+          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+        ),
+      ),
+    )
+    // Shared bootstrap cache (one per client instance, see field decl)
+    // is reused across uploads AND across retry attempts within one upload.
+    const bootstrap = this.pipelineBootstrap
 
+    // Retry on transient stalls; resume from finalized count so items that
+    // already landed are not re-submitted.
+    const maxRetries = 3
+    let attempt = 0
+    let alreadyFinalized = 0
+    const allCids: CID[] = new Array(items.length)
+    while (true) {
+      const remaining = items.slice(alreadyFinalized)
+      const remainingCids = allItemCids.slice(alreadyFinalized)
       try {
-        // Chunks are always Raw codec
-        const tx = this.createStoreTx(chunk.data, CidCodec.Raw, hashAlgorithm)
-        await this.signAndSubmitWithProgress(
-          tx,
-          progressCallback,
-          waitFor,
-          chunk.index,
-        )
-        const cid = chunk.cid
-        if (cid) chunkCids.push(cid)
-
-        if (progressCallback && cid) {
-          progressCallback({
-            type: ChunkStatus.ChunkCompleted,
-            index: chunk.index,
-            total: totalChunks,
-            cid,
-          })
+        const result = await pipelineStore(this.api, this.signer, remaining, {
+          wsUrls: this.config.wsUrls,
+          createProvider: (url) => getWsProvider(url),
+          blockLimits: this.config.blockLimits,
+          completeOn: waitFor === "in_block" ? "best" : "finalized",
+          bootstrap,
+          precomputedCids: remainingCids,
+          onEvent: onEvent
+            ? (ev) => onEvent({ ...ev, index: alreadyFinalized + ev.index })
+            : undefined,
+        })
+        for (let i = 0; i < result.cids.length; i++) {
+          allCids[alreadyFinalized + i] = result.cids[i]!
         }
+        break
       } catch (error) {
-        if (progressCallback) {
-          progressCallback({
-            type: ChunkStatus.ChunkFailed,
-            index: chunk.index,
-            total: totalChunks,
-            error: error as Error,
-          })
+        if (isStallError(error) && attempt < maxRetries) {
+          alreadyFinalized += error.cause.finalized
+          attempt += 1
+          await new Promise((r) => setTimeout(r, 1_000 * 2 ** (attempt - 1)))
+          continue
         }
-        // Wrap raw errors in BulletinError for consistent error handling
-        if (error instanceof BulletinError) {
-          throw error
-        }
+        if (error instanceof BulletinError) throw error
         throw new BulletinError(
-          `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
-          ErrorCode.CHUNK_FAILED,
+          `upload failed: ${error instanceof Error ? error.message : String(error)}`,
+          ErrorCode.TRANSACTION_FAILED,
           error,
         )
       }
     }
-
-    // Submit manifest transaction if present
-    let manifestCid: CID | undefined
-    if (prepared.manifest) {
-      if (progressCallback) {
-        progressCallback({ type: ChunkStatus.ManifestStarted })
-      }
-
-      // Manifest is always DagPb codec
-      const manifestTx = this.createStoreTx(
-        prepared.manifest.data,
-        CidCodec.DagPb,
-        hashAlgorithm,
-      )
-      await this.signAndSubmitWithProgress(
-        manifestTx,
-        progressCallback,
-        waitFor,
-      )
-      manifestCid = prepared.manifest.cid
-
-      if (progressCallback) {
-        progressCallback({
-          type: ChunkStatus.ManifestCreated,
-          cid: manifestCid,
-        })
-      }
-    }
-
-    if (progressCallback) {
-      progressCallback({ type: ChunkStatus.Completed, manifestCid })
-    }
-
-    return {
-      chunkCids,
-      manifestCid,
-      totalSize: data.length,
-      numChunks: prepared.chunks.length,
-    }
+    return { cids: allCids }
   }
 
   /**

@@ -4,58 +4,106 @@
 /**
  * Optimal bulk submission pipeline for Bulletin Chain.
  *
- * Event-driven algorithm that watches best and finalized blocks on one RPC,
- * speculatively pre-signs the next batch while the current wave propagates,
- * and submits to a single RPC (gossip distributes to the rest).
+ * Event-driven algorithm that watches best and finalized blocks on one RPC
+ * and broadcasts each signed transaction to every configured RPC.
  *
  * Key properties:
- * - Speculative pre-signing: signs the next batch concurrently with the
- *   current broadcast. On the next block, if prediction holds, just
- *   broadcast (sub-second); if not, re-sign.
+ * - Fresh signatures on every best block: each wave signs against the
+ *   current best block's hash so the mortal era stays valid through reorgs
+ *   and so re-broadcast doesn't reuse 30-minute-banned tx hashes
  * - Broadcasts to all RPC endpoints for maximum propagation
- * - Mortal transactions (64-block period) so waves eventually expire
+ * - Mortal transactions (64-block period) — long enough to absorb queueing
+ *   delays under concurrent load while still letting stale waves expire
  * - Batch size computed from block weight/length limits
  * - Finalization-based completion — no false positives from pool nonces
+ *
+ * ## Lifecycle state machine
+ *
+ * ```
+ *                    ┌──────────────────────────────┐
+ *                    │   pipelineStore(api, signer, │
+ *                    │     items, config) entry     │
+ *                    └──────────────┬───────────────┘
+ *                                   │
+ *                                   ▼
+ *                    ┌──────────────────────────────┐
+ *                    │  openFollow() → chainHead    │
+ *                    └──────────────┬───────────────┘
+ *                                   │
+ *                ┌──────────────────┼──────────────────┐
+ *                │                  │                  │
+ *                ▼                  ▼                  ▼
+ *         "initialized"      "newBlock"        "bestBlockChanged"      "finalized"
+ *         ┌──────────┐       ┌─────────┐       ┌──────────────┐        ┌────────────┐
+ *         │ load     │       │ pre-    │       │ sign + wave  │        │ record     │
+ *         │ metadata │       │ warm    │       │ broadcast    │        │ + emit     │
+ *         │ + nonce  │       │ block-# │       │ + classify   │        │ Finalized  │
+ *         └──────────┘       │ cache   │       └──────┬───────┘        └─────┬──────┘
+ *                            └─────────┘              │                      │
+ *                                                     │                      │
+ *                              ╔══════════════════════╧══════════════════════╧═════╗
+ *                              ║                Termination paths                  ║
+ *                              ╚══════════════════════╤══════════════════════╤═════╝
+ *                                                     │                      │
+ *  ┌──────────────────────────────────────────────────┴──────┐               │
+ *  │  failWithStall(reason) — converging error paths:        │               │
+ *  │   • terminal RPC code (1010/1011/1015/1017–1020)        │               │
+ *  │   • chainHead-event watchdog: no event for 18 s         │               │
+ *  │   • no-progress watchdog: 20 best blocks without inclusion advance      │
+ *  │   • chainHead error callback (non-StopError)            │               │
+ *  └─────────────────────────────────┬───────────────────────┘               │
+ *                                    │                                       │
+ *                                    ▼                                       ▼
+ *                              ┌──────────┐                            ┌──────────┐
+ *                              │  reject  │                            │ finish() │
+ *                              └──────────┘                            └──────────┘
+ *                              (StoreStalled)                          ▲  ▲
+ *                                                                      │  │
+ *           finNonce ≥ expectedFinalNonce ───────────────────────────────  │
+ *           completeOn:"best" + 2-block streak at target ──────────────────
+ * ```
+ *
+ * `StopError` from the chainHead error callback is *not* a termination —
+ * it triggers `openFollow()` to re-subscribe transparently while preserving
+ * pipeline state (counters, cids, bootstrap).
  *
  * @packageDocumentation
  */
 
-import { base58Encode, blake2AsU8a } from "@polkadot/util-crypto"
 import type { JsonRpcProvider } from "@polkadot-api/json-rpc-provider"
 import {
   createClient as createSubstrateClient,
   type FollowEventWithoutRuntime,
   type FollowResponse,
+  StopError,
   type SubstrateClient,
 } from "@polkadot-api/substrate-client"
-import { Binary, getOfflineApi, type PolkadotSigner } from "polkadot-api"
-
+import type { CID } from "multiformats/cid"
+import {
+  AccountId,
+  Binary,
+  getOfflineApi,
+  type PolkadotSigner,
+} from "polkadot-api"
 import type { BulletinTypedApi } from "./async-client.js"
+import {
+  BulletinError,
+  CidCodec,
+  ErrorCode,
+  HashAlgorithm,
+  type UploadCallback,
+  type UploadItem,
+  UploadStatus,
+} from "./types.js"
+import { calculateCid, hashAlgorithmCodecToEnum } from "./utils.js"
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-/**
- * Block capacity constants for batch computation.
- *
- * These should be determined offline from the chain's runtime constants
- * and pallet benchmarks. See the module-level docs for guidance.
- */
-export interface BlockLimits {
-  /** Max normal-class weight budget (ref_time) per block. */
-  maxNormalWeight: bigint
-  /** Max normal-class block length in bytes. */
-  normalBlockLength: number
-  /** Hard per-block limit on store extrinsics (`TransactionStorage::MaxBlockTransactions`). */
-  maxBlockTransactions: number
-  /** Base weight of a `store` extrinsic (constant part). */
-  storeWeightBase: bigint
-  /** Per-byte weight slope of a `store` extrinsic. */
-  storeWeightPerByte: bigint
-  /** Encoding overhead per extrinsic (signature + address + extensions), ~110 bytes. */
-  extrinsicOverhead: number
-}
+import type { BlockLimits } from "./types.js"
+
+export type { BlockLimits } from "./types.js"
 
 /** Configuration for {@link pipelineStore}. */
 export interface PipelineConfig {
@@ -70,21 +118,44 @@ export interface PipelineConfig {
   createProvider: (url: string) => JsonRpcProvider
   /** Block capacity limits for batch computation. */
   blockLimits: BlockLimits
-  /** Progress callback fired on each best/finalized block. */
-  onProgress?: (stats: PipelineStats) => void
+  /** Lifecycle events (item-level). */
+  onEvent?: UploadCallback
   /**
-   * Raw signing function for fast-path signing.
+   * When the pipeline considers the upload done.
    *
-   * When provided, the pipeline bypasses PAPI's per-tx metadata decode
-   * (which costs ~100ms per tx) and signs transactions directly.
-   * Pass the `sign` function from your keypair (e.g. `keyPair.sign`).
+   * - `"finalized"` (default): wait until the account nonce at a finalized
+   *   block reaches `expectedFinalNonce`. Strongest guarantee.
+   * - `"best"`: complete once `expectedFinalNonce` is observed at the best
+   *   block for two consecutive `bestBlockChanged` events (single-block
+   *   inclusions can be reorged away).
    */
-  rawSign?: (message: Uint8Array) => Promise<Uint8Array>
-  /** Signing type. Required when `rawSign` is provided. Default: `"Sr25519"`. */
-  signingType?: "Sr25519" | "Ed25519" | "Ecdsa"
+  completeOn?: "best" | "finalized"
+  /**
+   * Optional mutable bootstrap cache. `pipelineStore` reads from it on entry
+   * and writes to it on first init. Sharing the same object across retries
+   * (in `uploadItemsImpl`) skips the `state_getMetadata` + offline-API
+   * construction round-trip on every attempt.
+   */
+  bootstrap?: PipelineBootstrap
+  /**
+   * @internal — `uploadItemsImpl`-only. Pre-computed CIDs aligned with
+   * `items[]` so retries skip recomputation. May be a `Promise<CID[]>` so
+   * the caller can hand off computation in parallel with `pipelineStore`'s
+   * bootstrap RPCs. Length is asserted to match `items.length` once
+   * resolved.
+   */
+  precomputedCids?: CID[] | Promise<CID[]>
 }
 
-/** Snapshot of pipeline progress (emitted via {@link PipelineConfig.onProgress}). */
+/** Mutable bootstrap cache, populated by `pipelineStore` on first call. */
+export interface PipelineBootstrap {
+  metadataRaw?: Uint8Array
+  genesisHash?: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  offlineApi?: any
+}
+
+/** Final-state snapshot of pipeline progress (included in {@link PipelineResult}). */
 export interface PipelineStats {
   /** Number of signing waves dispatched so far. */
   waves: number
@@ -119,6 +190,8 @@ export interface LatencyStats {
 
 /** Final result returned by {@link pipelineStore}. */
 export interface PipelineResult extends PipelineStats {
+  /** CIDs per item, computed from `(data, codec, hashAlgo)`. Matches input order. */
+  cids: CID[]
   /** Total data bytes across all items. */
   totalBytes: number
   /** Duration in milliseconds. */
@@ -145,12 +218,86 @@ export interface PipelineResult extends PipelineStats {
   finalizationLatenciesMs: number[]
 }
 
+/**
+ * `cause` payload on a `BulletinError(STORE_STALLED)`: how many items the
+ * chain had finalized when the store gave up. Callers can resume from the
+ * chain's current state instead of re-submitting everything.
+ */
+export interface StallCause {
+  readonly finalized: number
+}
+
+export function isStallError(
+  err: unknown,
+): err is BulletinError & { cause: StallCause } {
+  return (
+    err instanceof BulletinError &&
+    err.code === ErrorCode.STORE_STALLED &&
+    typeof (err.cause as StallCause | undefined)?.finalized === "number"
+  )
+}
+
+function stallError(finalized: number, reason: string): BulletinError {
+  return new BulletinError(
+    `store stalled: ${reason}; finalized=${finalized}`,
+    ErrorCode.STORE_STALLED,
+    { finalized } satisfies StallCause,
+  )
+}
+
+/**
+ * Substrate transaction-pool RPC error codes. Stable across substrate
+ * versions; see `client/rpc-api/src/author/error.rs`.
+ */
+enum AuthorRpcError {
+  InvalidTransaction = 1010,
+  UnknownValidity = 1011,
+  TemporarilyBanned = 1012,
+  AlreadyImported = 1013,
+  TooLowPriority = 1014,
+  CycleDetected = 1015,
+  ImmediatelyDropped = 1016,
+  InvalidTransactionV2 = 1017,
+  UnauthorizedTransaction = 1018,
+  UnknownCustomValidity = 1019,
+  UnknownBuiltinValidity = 1020,
+  FutureTransaction = 1021,
+}
+
+type RpcErrorClass = "terminal" | "retryable" | "already_imported" | "unknown"
+
+function classifyAuthorRpcError(code: number | undefined): RpcErrorClass {
+  switch (code) {
+    // Bad sig / payment / unauthorized / cycle — no amount of retrying helps.
+    case AuthorRpcError.InvalidTransaction:
+    case AuthorRpcError.UnknownValidity:
+    case AuthorRpcError.CycleDetected:
+    case AuthorRpcError.InvalidTransactionV2:
+    case AuthorRpcError.UnauthorizedTransaction:
+    case AuthorRpcError.UnknownCustomValidity:
+    case AuthorRpcError.UnknownBuiltinValidity:
+      return "terminal"
+    // Pool capacity / hash bans / future nonce — block production will drain
+    // the pool and clear bans; keep going.
+    case AuthorRpcError.TemporarilyBanned:
+    case AuthorRpcError.TooLowPriority:
+    case AuthorRpcError.ImmediatelyDropped:
+    case AuthorRpcError.FutureTransaction:
+      return "retryable"
+    // The tx is sitting in the pool from a prior wave — count as success.
+    case AuthorRpcError.AlreadyImported:
+      return "already_imported"
+    default:
+      return "unknown"
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
-/** Offline transaction entry returned by the offline API. */
-type OfflineStoreTx = (args: { data: Binary }) => {
+/** Minimal subset of the offline API surface used by pipelineStore. */
+interface OfflineTxBuilder {
   sign(
     from: PolkadotSigner,
     extensions: {
@@ -163,7 +310,24 @@ type OfflineStoreTx = (args: { data: Binary }) => {
           }
         | { mortal: false }
     },
-  ): Promise<string>
+  ): Promise<Uint8Array>
+}
+
+interface OfflineTransactionStorage {
+  store(args: { data: Uint8Array }): OfflineTxBuilder
+  store_with_cid_config(args: {
+    cid: { codec: bigint; hashing: { type: string } }
+    data: Uint8Array
+  }): OfflineTxBuilder
+}
+
+/** Returns true when the item should be sent via the lighter `store` extrinsic. */
+/** @internal — exported for unit tests of the codec-dispatch decision. */
+export function isDefaultCidConfig(item: UploadItem): boolean {
+  return (
+    (item.codec ?? CidCodec.Raw) === CidCodec.Raw &&
+    (item.hashAlgo ?? HashAlgorithm.Blake2b256) === HashAlgorithm.Blake2b256
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +340,7 @@ type OfflineStoreTx = (args: { data: Binary }) => {
  * On each best block:
  * 1. Query `system_accountNextIndex` for the current nonce
  * 2. Compute a batch that fits in one block (weight + length + count)
- * 3. Sign each tx with a short mortal era via pre-cached offline API
+ * 3. Sign each tx fresh, mortal era anchored to the current best block
  * 4. Broadcast every signed tx to every RPC endpoint
  *
  * Completion: when the account nonce at a finalized block ≥ `startNonce + items.length`.
@@ -184,27 +348,127 @@ type OfflineStoreTx = (args: { data: Binary }) => {
 export async function pipelineStore(
   _api: BulletinTypedApi,
   signer: PolkadotSigner,
-  items: Uint8Array[],
+  items: UploadItem[],
   config: PipelineConfig,
-  signal?: AbortSignal,
 ): Promise<PipelineResult> {
   if (items.length === 0) return emptyResult()
 
-  const { wsUrls, createProvider, blockLimits, onProgress, rawSign } = config
-  const signingType = config.signingType ?? "Sr25519"
+  const { wsUrls, createProvider, blockLimits, onEvent } = config
+  const completeOn = config.completeOn ?? "finalized"
   if (wsUrls.length === 0) {
     throw new Error("pipelineStore: at least one wsUrl is required")
   }
 
-  // Hex-encoded pubkey for SCALE state_call (AccountNonceApi)
-  const signerHex = hexEncodePublicKey(signer.publicKey)
-  // SS58 address for system_accountNextIndex RPC
-  const signerSs58 = ss58Encode(signer.publicKey, 42)
+  // Kick off CID computation immediately so it runs in parallel with the
+  // bootstrap RPCs (state_getMetadata, chain_getBlockHash, system_properties)
+  // that the `initialized` handler awaits. We don't `await` here — the
+  // upfront `emit(ItemStarted)` loop is deferred into `initialized` where
+  // we can await this promise concurrently with the metadata fetch.
+  const cidsPromise: Promise<CID[]> = (async () => {
+    const supplied = config.precomputedCids
+    if (supplied !== undefined) {
+      const resolved = await Promise.resolve(supplied)
+      if (resolved.length !== items.length) {
+        throw new Error(
+          `pipelineStore: precomputedCids length ${resolved.length} does not match items length ${items.length}`,
+        )
+      }
+      return resolved
+    }
+    return Promise.all(
+      items.map((item) =>
+        calculateCid(
+          item.data,
+          item.codec ?? CidCodec.Raw,
+          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+        ),
+      ),
+    )
+  })()
+  // `cids` is filled in the `initialized` handler — bind by reference.
+  let cids: CID[] = []
+
+  const totalItems = items.length
+  let lastBestBlock: { hash: string; number: number } | undefined
+  let lastFinalizedBlock: { hash: string; number: number } | undefined
+  /**
+   * Single point of emission. `block` is required for InBlock/Finalized and
+   * looked up from the most recently observed best/finalized block; if the
+   * pipeline hasn't seen one yet, the event is dropped silently rather than
+   * emitting with a fabricated block — callers shouldn't see ItemInBlock
+   * without a real block context.
+   */
+  const emit = (status: UploadStatus, i: number): void => {
+    if (!onEvent) return
+    const base = { index: i, total: totalItems, cid: cids[i]! }
+    switch (status) {
+      case UploadStatus.ItemStarted:
+        onEvent({ type: status, ...base })
+        return
+      case UploadStatus.ItemInBlock: {
+        if (!lastBestBlock) return
+        onEvent({
+          type: status,
+          ...base,
+          blockHash: lastBestBlock.hash,
+          blockNumber: lastBestBlock.number,
+        })
+        return
+      }
+      case UploadStatus.ItemFinalized: {
+        if (!lastFinalizedBlock) return
+        onEvent({
+          type: status,
+          ...base,
+          blockHash: lastFinalizedBlock.hash,
+          blockNumber: lastFinalizedBlock.number,
+        })
+        return
+      }
+    }
+  }
+  // ItemInBlock is reorg-aware: emit once per (best-block, item) entry into
+  // the chain. The flag is set when an item first appears at best and
+  // cleared if a reorg drops it back. `tracking.maxConfirmedEver` lets us
+  // skip the tail-clear loop entirely in the common no-reorg case.
+  const inBlockEmitted: boolean[] = new Array(totalItems).fill(false)
+
+  // Block-number cache populated lazily and proactively on `newBlock`.
+  // Saves a `chain_getHeader` RPC on the bestBlockChanged / finalized hot
+  // path when the hash has already been seen.
+  const blockNumberByHash = new Map<string, number>()
+  const MAX_BLOCK_NUMBER_CACHE = 64
+  const getBlockNumber = async (hash: string): Promise<number> => {
+    const hit = blockNumberByHash.get(hash)
+    if (hit !== undefined) return hit
+    const header = await monitorClient.request<{ number: string }>(
+      "chain_getHeader",
+      [hash],
+    )
+    const num = parseInt(header.number, 16)
+    blockNumberByHash.set(hash, num)
+    if (blockNumberByHash.size > MAX_BLOCK_NUMBER_CACHE) {
+      // FIFO eviction (Map preserves insertion order).
+      const firstKey = blockNumberByHash.keys().next().value
+      if (firstKey !== undefined) blockNumberByHash.delete(firstKey)
+    }
+    return num
+  }
+  // ItemFinalized is monotonic (finalization is irreversible).
+  let finalizedEmittedTo = 0
+
+  // signerHex is used for SCALE state_call (the chain doesn't care about
+  // SS58 prefix). signerSs58 is filled at `initialized` time from the chain's
+  // `system_properties.ss58Format` — its only use is the
+  // `system_accountNextIndex` RPC, which accepts any valid SS58 prefix anyway,
+  // but reading the real value avoids assuming a network.
+  const signerHex = Binary.toHex(signer.publicKey)
+  let signerSs58 = ""
 
   // Pre-compute cumulative byte sizes for throughput reporting
   const prefixBytes = new Float64Array(items.length + 1)
   for (let i = 0; i < items.length; i++) {
-    prefixBytes[i + 1] = (prefixBytes[i] ?? 0) + (items[i]?.length ?? 0)
+    prefixBytes[i + 1] = (prefixBytes[i] ?? 0) + (items[i]?.data.length ?? 0)
   }
   const totalDataBytes = prefixBytes[items.length] ?? 0
 
@@ -222,23 +486,34 @@ export async function pipelineStore(
     createSubstrateClient(createProvider(url)),
   )
 
-  // Abort plumbing
-  const ctl = new AbortController()
-  if (signal) {
-    signal.addEventListener("abort", () => ctl.abort(), { once: true })
-  }
-
   const startTime = Date.now()
   let startNonce = 0
   let expectedFinalNonce = 0
   let initialized = false
   let done = false
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let offlineStoreTx: OfflineStoreTx = null as any
-  let effectiveSigner: PolkadotSigner = signer
+  let offlineStorage: OfflineTransactionStorage | undefined
 
-  // Speculative pre-signing state
-  let preSigned: { fromNonce: number; hexes: string[] } | null = null
+  // Watchdog: a healthy WS+follow delivers a chainHead event every block
+  // (~6 s). If we go too long without one, the underlying WS is most likely
+  // dead and our chainHead restart can't recover (it would re-issue against
+  // the same dead client). Bail out with a clear error so callers can retry
+  // with a fresh client rather than silently looping forever.
+  const STALL_TIMEOUT_MS = 18_000
+  let lastChainEventAt = Date.now()
+  let stallTimer: ReturnType<typeof setInterval> | undefined
+  const touchChainEvent = (): void => {
+    lastChainEventAt = Date.now()
+  }
+
+  // Substrate transaction-pool error codes from `author_submitExtrinsic`.
+  // Codes are stable across substrate versions; see
+  // client/rpc-api/src/author/error.rs for the source of truth.
+
+  // No-progress watchdog: cap the time spent retrying on transient pool
+  // pressure. If the account's confirmed nonce doesn't advance for this many
+  // best-block events (≈ this many block times), bail with STORE_STALLED so
+  // the outer retry layer can reconnect with fresh substrate clients.
+  const MAX_NO_PROGRESS_BEST_BLOCKS = 20
 
   const counters = {
     waves: 0,
@@ -254,9 +529,35 @@ export async function pipelineStore(
   // Latency arrays indexed by item offset (0..items.length).
   const inclusionLatenciesMs: number[] = []
   const finalizationLatenciesMs: number[] = []
-  // High-water marks: we have already recorded latency for offsets [0, mark).
-  let inclusionRecordedTo = 0
-  let finalizationRecordedTo = 0
+
+  // Coalesce the per-wave "broadcasts deferred" diagnostic — only log when
+  // the (code, count) changes, so a sustained pool-pressure window produces
+  // 1-2 lines instead of one per block.
+  let lastDeferredCode: number | undefined
+  let lastDeferredCount = 0
+
+  // Mutable scalars consumed by the per-block helpers (see WaveState).
+  const tracking = {
+    inclusionRecordedTo: 0,
+    finalizationRecordedTo: 0,
+    maxConfirmedEver: 0,
+    bestAtTargetStreak: 0,
+    prevConfirmed: 0,
+    noProgressBestBlocks: 0,
+  }
+  const state: WaveState = {
+    items,
+    totalItems,
+    cids,
+    prefixBytes,
+    counters,
+    tracking,
+    inclusionLatenciesMs,
+    finalizationLatenciesMs,
+    broadcastAtMs,
+    inBlockEmitted,
+    emit,
+  }
 
   return new Promise<PipelineResult>((resolve, reject) => {
     // -----------------------------------------------------------------
@@ -272,21 +573,19 @@ export async function pipelineStore(
 
     async function drain(): Promise<void> {
       draining = true
-      while (queue.length > 0 && !done && !ctl.signal.aborted) {
+      while (queue.length > 0 && !done) {
         const fn = queue.shift()
         if (!fn) break
         try {
           await fn()
         } catch {
-          /* event processing errors are non-fatal */
+          /* swallow — surfaced via counters.broadcastErrors */
         }
       }
       draining = false
     }
 
-    function finish(): void {
-      if (done) return
-      done = true
+    function teardown(): void {
       try {
         follower.unfollow()
       } catch {
@@ -304,11 +603,29 @@ export async function pipelineStore(
           /* ignore */
         }
       }
+      if (stallTimer !== undefined) {
+        clearInterval(stallTimer)
+        stallTimer = undefined
+      }
+    }
+
+    function failWithStall(reason: string): void {
+      if (done) return
+      done = true
+      teardown()
+      reject(stallError(counters.finalized, reason))
+    }
+
+    function finish(): void {
+      if (done) return
+      done = true
+      teardown()
 
       const durationMs = Date.now() - startTime
       const sec = durationMs / 1000
       const finalizedBytes = prefixBytes[counters.finalized] ?? 0
       resolve({
+        cids,
         waves: counters.waves,
         txsBroadcast: counters.txsBroadcast,
         broadcastErrors: counters.broadcastErrors,
@@ -329,305 +646,514 @@ export async function pipelineStore(
       })
     }
 
-    // -----------------------------------------------------------------
-    // ChainHead follow — block events drive the state machine
-    // -----------------------------------------------------------------
-    const follower: FollowResponse = monitorClient.chainHead(
-      false,
-      (event: FollowEventWithoutRuntime) => {
-        if (done || ctl.signal.aborted) return
+    // ChainHead follow. `StopError` on the error callback restarts the
+    // session transparently; only the first `initialized` event sets up state.
+    let follower: FollowResponse
+    const openFollow = (): FollowResponse =>
+      monitorClient.chainHead(
+        false,
+        (event: FollowEventWithoutRuntime) => {
+          if (done) return
+          touchChainEvent()
 
-        switch (event.type) {
-          // ---------------------------------------------------------------
-          // initialized — read start nonce from the finalized block
-          // ---------------------------------------------------------------
-          case "initialized": {
-            const hashes = event.finalizedBlockHashes
-            const lastHash = hashes[hashes.length - 1]
-            if (!lastHash) break
-            enqueue(async () => {
-              // Fetch start nonce, genesis hash, and metadata in parallel
-              const [nonce, genesisHash, metadataHex] = await Promise.all([
-                readNonceAtBlock(monitorClient, signerHex, lastHash),
-                monitorClient.request<string>("chain_getBlockHash", [0]),
-                monitorClient.request<string>("state_getMetadata", []),
-              ])
-              startNonce = nonce
-              expectedFinalNonce = startNonce + items.length
-
-              // Build offline API — metadata decoded once, reused for all signing
-              const metadataRaw = hexToBytes(metadataHex)
-              const offlineApi = await (
-                getOfflineApi as (opts: {
-                  genesis: string
-                  getMetadata: () => Promise<Uint8Array>
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                }) => Promise<any>
-              )({
-                genesis: genesisHash,
-                getMetadata: async () => metadataRaw,
-              })
-              offlineStoreTx = offlineApi.tx.TransactionStorage
-                .store as OfflineStoreTx
-
-              // Build fast-path signer (bypasses per-tx metadata decode)
-              if (rawSign) {
-                effectiveSigner = await createFastSigner(
-                  rawSign,
-                  signer.publicKey,
-                  signingType,
-                  metadataRaw,
-                )
+          switch (event.type) {
+            // initialized — read start nonce from finalized block
+            case "initialized": {
+              const hashes = event.finalizedBlockHashes
+              const lastHash = hashes[hashes.length - 1]
+              if (!lastHash) break
+              // Restart path: state is already set up; just unpin and continue
+              if (initialized) {
+                follower.unpin(hashes).catch(() => {})
+                break
               }
+              enqueue(async () => {
+                const cache = config.bootstrap
+                const haveBootstrap = !!cache?.offlineApi && !!cache.metadataRaw
+                // On retry, skip the heavy chain_getBlockHash + state_getMetadata
+                // + getOfflineApi work; the caller passes the cached bootstrap.
+                const [nonce, genesisHash, metadataRaw, properties] =
+                  await Promise.all([
+                    readNonceAtBlock(monitorClient, signerHex, lastHash),
+                    cache?.genesisHash
+                      ? Promise.resolve(cache.genesisHash)
+                      : monitorClient.request<string>(
+                          "chain_getBlockHash",
+                          [0],
+                        ),
+                    cache?.metadataRaw
+                      ? Promise.resolve(cache.metadataRaw)
+                      : monitorClient
+                          .request<string>("state_getMetadata", [])
+                          .then((hex) => Binary.fromHex(hex)),
+                    monitorClient
+                      .request<{ ss58Format?: number | string }>(
+                        "system_properties",
+                        [],
+                      )
+                      .catch(() => ({}) as { ss58Format?: number | string }),
+                  ])
+                startNonce = nonce
+                expectedFinalNonce = startNonce + items.length
+                // `system_properties.ss58Format` is sometimes returned as a
+                // string; coerce. If missing, fall back to 42 (generic Substrate).
+                const ss58Format =
+                  typeof properties.ss58Format === "string"
+                    ? parseInt(properties.ss58Format, 10)
+                    : (properties.ss58Format ?? 42)
+                signerSs58 = AccountId(ss58Format).dec(signer.publicKey)
 
-              initialized = true
-              follower.unpin(hashes).catch(() => {})
-            })
-            break
-          }
-
-          // ---------------------------------------------------------------
-          // newBlock — nothing to do, but we must eventually unpin
-          // ---------------------------------------------------------------
-          case "newBlock":
-            // Unpinned in bulk on the next `finalized` event
-            break
-
-          // ---------------------------------------------------------------
-          // bestBlockChanged — core submission loop
-          // ---------------------------------------------------------------
-          case "bestBlockChanged": {
-            const bestBlockHash = (
-              event as { type: "bestBlockChanged"; bestBlockHash: string }
-            ).bestBlockHash
-            enqueue(async () => {
-              if (!initialized || done) return
-
-              // Query nonce and block header in parallel
-              const [bestNonce, header] = await Promise.all([
-                monitorClient.request<number>("system_accountNextIndex", [
-                  signerSs58,
-                ]),
-                monitorClient.request<{ number: string }>("chain_getHeader", [
-                  bestBlockHash,
-                ]),
-              ])
-              const bestBlockNumber = parseInt(header.number, 16)
-              counters.confirmed = clamp(
-                bestNonce - startNonce,
-                0,
-                items.length,
-              )
-
-              // Record inclusion latency for newly-confirmed items
-              if (counters.confirmed > inclusionRecordedTo) {
-                const observedAt = Date.now()
-                for (let i = inclusionRecordedTo; i < counters.confirmed; i++) {
-                  const broadcast = broadcastAtMs[i]
-                  if (broadcast !== undefined) {
-                    inclusionLatenciesMs.push(observedAt - broadcast)
-                  }
+                const offlineApi = haveBootstrap
+                  ? cache.offlineApi
+                  : await (
+                      getOfflineApi as (opts: {
+                        genesis: string
+                        getMetadata: () => Promise<Uint8Array>
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      }) => Promise<any>
+                    )({
+                      genesis: genesisHash,
+                      getMetadata: async () => metadataRaw,
+                    })
+                if (cache) {
+                  cache.metadataRaw = metadataRaw
+                  cache.genesisHash = genesisHash
+                  cache.offlineApi = offlineApi
                 }
-                inclusionRecordedTo = counters.confirmed
+                offlineStorage = offlineApi.tx
+                  .TransactionStorage as OfflineTransactionStorage
+
+                // Now that bootstrap RPCs are done, await CIDs (which ran
+                // concurrently). On the happy path this is already settled.
+                cids = await cidsPromise
+                state.cids = cids
+                for (let i = 0; i < totalItems; i++) {
+                  emit(UploadStatus.ItemStarted, i)
+                }
+
+                initialized = true
+                follower.unpin(hashes).catch(() => {})
+              })
+              break
+            }
+
+            case "newBlock": {
+              // Pre-warm the block-number cache so `bestBlockChanged` doesn't
+              // pay the chain_getHeader round-trip on the critical path.
+              // Pin is released in bulk on the next `finalized` event.
+              const newHash = (event as { blockHash: string }).blockHash
+              if (!blockNumberByHash.has(newHash)) {
+                getBlockNumber(newHash).catch(() => {})
               }
+              break
+            }
 
-              if (bestNonce >= expectedFinalNonce) return
+            // bestBlockChanged — core submission loop
+            case "bestBlockChanged": {
+              const bestBlockHash = (
+                event as { type: "bestBlockChanged"; bestBlockHash: string }
+              ).bestBlockHash
+              enqueue(async () => {
+                if (!initialized || done) return
 
-              const fromIndex = Math.max(0, bestNonce - startNonce)
-              const toIndex = computeBatchEnd(items, fromIndex, blockLimits)
-              if (fromIndex >= toIndex) return
+                const [bestNonce, bestBlockNumber] = await Promise.all([
+                  monitorClient.request<number>("system_accountNextIndex", [
+                    signerSs58,
+                  ]),
+                  getBlockNumber(bestBlockHash),
+                ])
+                lastBestBlock = { hash: bestBlockHash, number: bestBlockNumber }
+                counters.confirmed = clamp(
+                  bestNonce - startNonce,
+                  0,
+                  items.length,
+                )
 
-              // Use pre-signed batch if the nonce prediction was correct
-              let signed: string[]
-              if (preSigned && preSigned.fromNonce === startNonce + fromIndex) {
-                signed = preSigned.hexes
-                preSigned = null
-              } else {
-                // Prediction missed (reorg / first wave) — sign now
-                preSigned = null
-                signed = await signBatch(
-                  offlineStoreTx,
-                  effectiveSigner,
+                recordInclusionLatency(state, Date.now())
+                emitInBlockEvents(state)
+
+                if (bestNonce >= expectedFinalNonce) {
+                  // `completeOn: "best"` needs 2 consecutive best-block ticks
+                  // at the target to avoid celebrating a one-block inclusion
+                  // that may yet be reorged away.
+                  tracking.bestAtTargetStreak += 1
+                  if (
+                    completeOn === "best" &&
+                    tracking.bestAtTargetStreak >= 2
+                  ) {
+                    finish() // [TERMINATE-OK] completeOn:"best" 2-block streak
+                  }
+                  return
+                }
+                tracking.bestAtTargetStreak = 0
+
+                const watchdog = runNoProgressWatchdog(
+                  state,
+                  MAX_NO_PROGRESS_BEST_BLOCKS,
+                )
+                if (watchdog.bail) {
+                  failWithStall(watchdog.reason!) // [TERMINATE-STALL] no-progress watchdog
+                  return
+                }
+
+                const fromIndex = Math.max(0, bestNonce - startNonce)
+                const toIndex = computeBatchEnd(items, fromIndex, blockLimits)
+                if (fromIndex >= toIndex) return
+
+                // Re-sign every wave: reusing prior bytes is unsafe (stale
+                // era → BadProof, banned-hash on pool eviction).
+                // `initialized` guarantees `offlineStorage` is set.
+                const signed = await signBatch({
+                  storage: offlineStorage!,
+                  signer,
                   items,
                   fromIndex,
                   toIndex,
                   startNonce,
-                  bestBlockNumber,
-                  bestBlockHash,
-                )
-              }
+                  anchor: { number: bestBlockNumber, hash: bestBlockHash },
+                })
 
-              // Record first-broadcast timestamp for each item in the batch
-              const broadcastNow = Date.now()
-              for (let i = fromIndex; i < toIndex; i++) {
-                if (broadcastAtMs[i] === undefined)
-                  broadcastAtMs[i] = broadcastNow
-              }
+                // Record first-broadcast timestamp for each item in the batch
+                const broadcastNow = Date.now()
+                for (let i = fromIndex; i < toIndex; i++) {
+                  if (broadcastAtMs[i] === undefined)
+                    broadcastAtMs[i] = broadcastNow
+                }
 
-              // Broadcast to all RPCs; pre-sign next batch concurrently
-              const broadcastPromises: Promise<void>[] = []
-              for (const hex of signed) {
-                for (const client of submitClients) {
-                  broadcastPromises.push(
-                    client
-                      .request("author_submitExtrinsic", [hex])
-                      .then(() => {
-                        counters.txsBroadcast++
-                      })
-                      .catch(() => {
-                        counters.broadcastErrors++
-                      }),
+                const {
+                  terminalCode: waveTerminalCode,
+                  terminalMsg: waveTerminalMsg,
+                  retryableCount: waveRetryableCount,
+                  retryableLastCode: waveRetryableLastCode,
+                } = await broadcastWave(signed, submitClients, counters)
+                counters.waves++
+
+                if (waveTerminalCode !== undefined) {
+                  // biome-ignore lint/suspicious/noConsole: terminal — show the user why
+                  console.warn(
+                    `[pipelineStore] wave #${counters.waves}: terminal RPC error (code=${waveTerminalCode}, msg=${waveTerminalMsg?.slice(0, 120)})`,
                   )
+                  // [TERMINATE-STALL] terminal RPC code seen in broadcastWave
+                  failWithStall(
+                    `terminal RPC error (code=${waveTerminalCode}): ${waveTerminalMsg}`,
+                  )
+                  return
                 }
-              }
-
-              // Pre-sign the next batch while broadcast is in flight
-              const nextFromIndex = toIndex
-              let preSignPromise: Promise<void> = Promise.resolve()
-              if (nextFromIndex < items.length) {
-                const nextToIndex = computeBatchEnd(
-                  items,
-                  nextFromIndex,
-                  blockLimits,
-                )
-                if (nextFromIndex < nextToIndex) {
-                  preSignPromise = signBatch(
-                    offlineStoreTx,
-                    effectiveSigner,
-                    items,
-                    nextFromIndex,
-                    nextToIndex,
-                    startNonce,
-                    bestBlockNumber,
-                    bestBlockHash,
-                  ).then((nextSigned) => {
-                    preSigned = {
-                      fromNonce: startNonce + nextFromIndex,
-                      hexes: nextSigned,
-                    }
-                  })
-                }
-              }
-
-              await Promise.all([
-                Promise.allSettled(broadcastPromises),
-                preSignPromise,
-              ])
-              counters.waves++
-
-              if (onProgress) {
-                emitProgress(
-                  counters,
-                  items.length,
-                  prefixBytes,
-                  startTime,
-                  onProgress,
-                )
-              }
-            })
-            break
-          }
-
-          // ---------------------------------------------------------------
-          // finalized — check completion, unpin blocks
-          // ---------------------------------------------------------------
-          case "finalized": {
-            const { finalizedBlockHashes, prunedBlockHashes } = event
-            const lastHash =
-              finalizedBlockHashes[finalizedBlockHashes.length - 1]
-            if (!lastHash) break
-
-            enqueue(async () => {
-              // Unpin all reported blocks to avoid hitting the server's pin limit
-              const toUnpin = [...finalizedBlockHashes, ...prunedBlockHashes]
-              follower.unpin(toUnpin).catch(() => {})
-
-              if (!initialized || done) return
-
-              const finNonce = await readNonceAtBlock(
-                monitorClient,
-                signerHex,
-                lastHash,
-              )
-              counters.finalized = clamp(finNonce - startNonce, 0, items.length)
-
-              // Record finalization latency for newly-finalized items
-              if (counters.finalized > finalizationRecordedTo) {
-                const observedAt = Date.now()
-                for (
-                  let i = finalizationRecordedTo;
-                  i < counters.finalized;
-                  i++
-                ) {
-                  const broadcast = broadcastAtMs[i]
-                  if (broadcast !== undefined) {
-                    finalizationLatenciesMs.push(observedAt - broadcast)
+                if (waveRetryableCount > 0) {
+                  // Diagnostic: only warn when the wave's signature changes
+                  // (different code or different deferred count) so a
+                  // sustained 20-block pool-pressure window produces 1–2
+                  // log lines instead of 20.
+                  if (
+                    lastDeferredCode !== waveRetryableLastCode ||
+                    lastDeferredCount !== waveRetryableCount
+                  ) {
+                    // biome-ignore lint/suspicious/noConsole: progress signal under pool pressure
+                    console.warn(
+                      `[pipelineStore] wave #${counters.waves}: ${waveRetryableCount} broadcasts deferred (last code=${waveRetryableLastCode}); no-progress ${tracking.noProgressBestBlocks}/${MAX_NO_PROGRESS_BEST_BLOCKS}`,
+                    )
+                    lastDeferredCode = waveRetryableLastCode
+                    lastDeferredCount = waveRetryableCount
                   }
+                } else {
+                  // A clean wave resets the dedup state so the next stutter
+                  // produces a fresh log line.
+                  lastDeferredCode = undefined
+                  lastDeferredCount = 0
                 }
-                finalizationRecordedTo = counters.finalized
-              }
+              })
+              break
+            }
 
-              if (onProgress) {
-                emitProgress(
-                  counters,
+            // finalized — check completion, unpin blocks
+            case "finalized": {
+              const { finalizedBlockHashes, prunedBlockHashes } = event
+              const lastHash =
+                finalizedBlockHashes[finalizedBlockHashes.length - 1]
+              if (!lastHash) break
+
+              enqueue(async () => {
+                // Unpin all reported blocks to avoid hitting the server's pin limit
+                const toUnpin = [...finalizedBlockHashes, ...prunedBlockHashes]
+                follower.unpin(toUnpin).catch(() => {})
+
+                if (!initialized || done) return
+
+                const [finNonce, finBlockNumber] = await Promise.all([
+                  readNonceAtBlock(monitorClient, signerHex, lastHash),
+                  getBlockNumber(lastHash),
+                ])
+                lastFinalizedBlock = { hash: lastHash, number: finBlockNumber }
+                counters.finalized = clamp(
+                  finNonce - startNonce,
+                  0,
                   items.length,
-                  prefixBytes,
-                  startTime,
-                  onProgress,
                 )
-              }
 
-              if (finNonce >= expectedFinalNonce) {
-                finish()
-              }
-            })
-            break
+                recordFinalizationLatency(state, Date.now())
+
+                // Emit ItemFinalized once per item (monotonic).
+                while (finalizedEmittedTo < counters.finalized) {
+                  emit(UploadStatus.ItemFinalized, finalizedEmittedTo)
+                  finalizedEmittedTo++
+                }
+
+                if (finNonce >= expectedFinalNonce) {
+                  finish() // [TERMINATE-OK] finalized nonce reached target
+                }
+              })
+              break
+            }
           }
-        }
-      },
-      (error) => {
-        if (!done) reject(error)
-      },
-    )
+        },
+        (error) => {
+          if (done) return
+          // `StopError` = JSON-RPC v2 chainHead `stop`. The session is torn
+          // down internally; open a new one and resume.
+          if (error instanceof StopError) {
+            follower = openFollow()
+            return
+          }
+          // [TERMINATE-STALL] chainHead error callback (non-Stop)
+          done = true
+          teardown()
+          reject(error)
+        },
+      )
 
-    // Handle external abort
-    ctl.signal.addEventListener(
-      "abort",
-      () => {
-        if (!done) finish()
-      },
-      { once: true },
-    )
+    follower = openFollow()
+
+    stallTimer = setInterval(() => {
+      if (done) return
+      if (Date.now() - lastChainEventAt > STALL_TIMEOUT_MS) {
+        // [TERMINATE-STALL] chainHead-event watchdog
+        failWithStall(`no chainHead event for ${STALL_TIMEOUT_MS} ms`)
+      }
+    }, 6_000)
+    // Don't pin the Node event loop on the watchdog alone; the chainHead
+    // subscription keeps the loop alive while the pipeline is active.
+    stallTimer.unref?.()
   })
+}
+
+// ---------------------------------------------------------------------------
+// Per-best-block helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Mutable state shared across the per-block helpers. Scalars that change
+ * inside helpers are grouped under `tracking` so they pass by reference.
+ *
+ *       new bestBlock ──► recordInclusionLatency ──► emitInBlockEvents
+ *                                                     │
+ *                                                     ▼
+ *                       runNoProgressWatchdog ◄──── update prevConfirmed
+ *                              │
+ *                              ▼ (bail?)
+ *                          failWithStall
+ */
+interface WaveState {
+  items: UploadItem[]
+  totalItems: number
+  cids: CID[]
+  prefixBytes: Float64Array
+  counters: {
+    waves: number
+    txsBroadcast: number
+    broadcastErrors: number
+    confirmed: number
+    finalized: number
+  }
+  tracking: {
+    inclusionRecordedTo: number
+    finalizationRecordedTo: number
+    maxConfirmedEver: number
+    bestAtTargetStreak: number
+    prevConfirmed: number
+    noProgressBestBlocks: number
+  }
+  inclusionLatenciesMs: number[]
+  finalizationLatenciesMs: number[]
+  broadcastAtMs: Array<number | undefined>
+  inBlockEmitted: boolean[]
+  emit: (status: UploadStatus, i: number) => void
+}
+
+/** Push inclusion-latency entries for items newly observed at best block. */
+function recordInclusionLatency(s: WaveState, observedAt: number): void {
+  if (s.counters.confirmed <= s.tracking.inclusionRecordedTo) return
+  for (let i = s.tracking.inclusionRecordedTo; i < s.counters.confirmed; i++) {
+    const broadcast = s.broadcastAtMs[i]
+    if (broadcast !== undefined) {
+      s.inclusionLatenciesMs.push(observedAt - broadcast)
+    }
+  }
+  s.tracking.inclusionRecordedTo = s.counters.confirmed
+}
+
+/** Push finalization-latency entries for items newly observed at finality. */
+function recordFinalizationLatency(s: WaveState, observedAt: number): void {
+  if (s.counters.finalized <= s.tracking.finalizationRecordedTo) return
+  for (
+    let i = s.tracking.finalizationRecordedTo;
+    i < s.counters.finalized;
+    i++
+  ) {
+    const broadcast = s.broadcastAtMs[i]
+    if (broadcast !== undefined) {
+      s.finalizationLatenciesMs.push(observedAt - broadcast)
+    }
+  }
+  s.tracking.finalizationRecordedTo = s.counters.finalized
+}
+
+/**
+ * Reorg-aware ItemInBlock emission. Items currently in best chain that
+ * haven't been emitted fire now; items that dropped out (reorg from a
+ * prior high) have their emitted-flag cleared so they refire when
+ * re-included. No-reorg case = no tail walk.
+ */
+function emitInBlockEvents(s: WaveState): void {
+  for (let i = 0; i < s.counters.confirmed; i++) {
+    if (!s.inBlockEmitted[i]) {
+      s.emit(UploadStatus.ItemInBlock, i)
+      s.inBlockEmitted[i] = true
+    }
+  }
+  if (s.counters.confirmed < s.tracking.maxConfirmedEver) {
+    for (let i = s.counters.confirmed; i < s.tracking.maxConfirmedEver; i++) {
+      s.inBlockEmitted[i] = false
+    }
+  }
+  if (s.counters.confirmed > s.tracking.maxConfirmedEver) {
+    s.tracking.maxConfirmedEver = s.counters.confirmed
+  }
+}
+
+/**
+ * No-progress watchdog: pool pressure for a few blocks is fine, but if no
+ * inclusion progress is made for `max` consecutive best blocks, signal bail.
+ */
+function runNoProgressWatchdog(
+  s: WaveState,
+  max: number,
+): { bail: boolean; reason?: string } {
+  if (s.counters.confirmed > s.tracking.prevConfirmed) {
+    s.tracking.noProgressBestBlocks = 0
+  } else {
+    s.tracking.noProgressBestBlocks += 1
+    if (s.tracking.noProgressBestBlocks >= max) {
+      return {
+        bail: true,
+        reason: `no inclusion progress for ${max} best blocks (likely persistent pool pressure)`,
+      }
+    }
+  }
+  s.tracking.prevConfirmed = s.counters.confirmed
+  return { bail: false }
 }
 
 // ---------------------------------------------------------------------------
 // Batch signing
 // ---------------------------------------------------------------------------
 
-async function signBatch(
-  offlineStoreTx: OfflineStoreTx,
-  signer: PolkadotSigner,
-  items: Uint8Array[],
-  fromIndex: number,
-  toIndex: number,
-  startNonce: number,
-  blockNumber: number,
-  blockHash: string,
-): Promise<string[]> {
+interface WaveResult {
+  terminalCode?: number
+  terminalMsg?: string
+  retryableCount: number
+  retryableLastCode?: number
+}
+
+/**
+ * Broadcast every signed tx to every RPC, classifying each rejection by
+ * code. Returns the wave summary the caller uses to drive bail/diagnostic
+ * decisions. Mutates `counters.txsBroadcast` / `counters.broadcastErrors`.
+ */
+async function broadcastWave(
+  signed: string[],
+  submitClients: SubstrateClient[],
+  counters: { txsBroadcast: number; broadcastErrors: number },
+): Promise<WaveResult> {
+  let terminalCode: number | undefined
+  let terminalMsg: string | undefined
+  let retryableCount = 0
+  let retryableLastCode: number | undefined
+  const promises: Promise<void>[] = []
+  for (const hex of signed) {
+    for (const client of submitClients) {
+      promises.push(
+        client
+          .request("author_submitExtrinsic", [hex])
+          .then(() => {
+            counters.txsBroadcast++
+          })
+          .catch((err: unknown) => {
+            const e = err as { code?: number; message?: string }
+            switch (classifyAuthorRpcError(e?.code)) {
+              case "already_imported":
+                counters.txsBroadcast++
+                return
+              case "terminal":
+                counters.broadcastErrors++
+                if (terminalCode === undefined) {
+                  terminalCode = e.code
+                  terminalMsg = e.message
+                }
+                return
+              default:
+                // retryable + unknown both fall here.
+                counters.broadcastErrors++
+                retryableCount++
+                retryableLastCode = e?.code
+            }
+          }),
+      )
+    }
+  }
+  await Promise.allSettled(promises)
+  return { terminalCode, terminalMsg, retryableCount, retryableLastCode }
+}
+
+interface SignBatchArgs {
+  storage: OfflineTransactionStorage
+  signer: PolkadotSigner
+  items: UploadItem[]
+  fromIndex: number
+  toIndex: number
+  startNonce: number
+  /** Mortal era anchor — the current best block. */
+  anchor: { number: number; hash: string }
+}
+
+/**
+ * Sign every item in `[fromIndex, toIndex)`. Mortal era period is 64 blocks
+ * (vs. the spec's recommended 4) so a tx still validates if this handler
+ * lags several blocks behind the captured anchor under concurrent load.
+ */
+async function signBatch(args: SignBatchArgs): Promise<string[]> {
+  const { storage, signer, items, fromIndex, toIndex, startNonce, anchor } =
+    args
   const mortality = {
     mortal: true as const,
     period: 64,
-    startAtBlock: { height: blockNumber, hash: blockHash },
+    startAtBlock: { height: anchor.number, hash: anchor.hash },
   }
-  const signed: string[] = []
+  const signed: string[] = new Array(toIndex - fromIndex)
   for (let i = fromIndex; i < toIndex; i++) {
-    const offlineTx = offlineStoreTx({
-      data: Binary.fromBytes(items[i] as Uint8Array),
-    })
-    signed.push(
-      await offlineTx.sign(signer, { nonce: startNonce + i, mortality }),
-    )
+    const item = items[i] as UploadItem
+    const tx = isDefaultCidConfig(item)
+      ? storage.store({ data: item.data })
+      : storage.store_with_cid_config({
+          cid: {
+            codec: BigInt(item.codec ?? CidCodec.Raw),
+            hashing: hashAlgorithmCodecToEnum(
+              item.hashAlgo ?? HashAlgorithm.Blake2b256,
+            ),
+          },
+          data: item.data,
+        })
+    const bytes = await tx.sign(signer, { nonce: startNonce + i, mortality })
+    signed[i - fromIndex] = Binary.toHex(bytes)
   }
   return signed
 }
@@ -643,7 +1169,7 @@ async function signBatch(
  * contribution, and stops when any block limit would be exceeded.
  */
 function computeBatchEnd(
-  items: Uint8Array[],
+  items: UploadItem[],
   fromIndex: number,
   limits: BlockLimits,
 ): number {
@@ -652,7 +1178,7 @@ function computeBatchEnd(
   let accLength = 0
 
   while (toIndex < items.length) {
-    const size = items[toIndex]?.length ?? 0
+    const size = items[toIndex]?.data.length ?? 0
     const txWeight =
       limits.storeWeightBase + limits.storeWeightPerByte * BigInt(size)
     const txLength = size + limits.extrinsicOverhead
@@ -697,178 +1223,20 @@ async function readNonceAtBlock(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function hexToBytes(hex: string): Uint8Array {
-  const h = hex.startsWith("0x") ? hex.slice(2) : hex
-  const bytes = new Uint8Array(h.length / 2)
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16)
-  }
-  return bytes
-}
-
 function decodeU32LE(hex: string): number {
-  const h = hex.startsWith("0x") ? hex.slice(2) : hex
-  return (
-    (parseInt(h.slice(0, 2), 16) |
-      (parseInt(h.slice(2, 4), 16) << 8) |
-      (parseInt(h.slice(4, 6), 16) << 16) |
-      (parseInt(h.slice(6, 8), 16) << 24)) >>>
-    0
-  )
-}
-
-/** Encode a 32-byte public key as SS58 address for RPC calls like system_accountNextIndex. */
-function ss58Encode(pubKey: Uint8Array, prefix: number): string {
-  // SS58 for simple prefixes (0-63): [prefix(1), pubkey(32), checksum(2)]
-  const payload = new Uint8Array(35)
-  payload[0] = prefix
-  payload.set(pubKey, 1)
-  // Checksum = first 2 bytes of blake2b-512("SS58PRE" || prefix || pubkey)
-  const SS58_PREFIX = new TextEncoder().encode("SS58PRE")
-  const input = new Uint8Array(SS58_PREFIX.length + 33) // 7 + 1 + 32 = 40
-  input.set(SS58_PREFIX)
-  input.set(payload.subarray(0, 33), SS58_PREFIX.length)
-  const hash = blake2AsU8a(input, 512)
-  payload[33] = hash[0] ?? 0
-  payload[34] = hash[1] ?? 0
-  return base58Encode(payload)
-}
-
-/** Hex-encode a 32-byte public key as `0x...` for RPC calls. */
-function hexEncodePublicKey(pubKey: Uint8Array): string {
-  return (
-    "0x" +
-    Array.from(pubKey)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-  )
+  return Buffer.from(
+    hex.startsWith("0x") ? hex.slice(2) : hex,
+    "hex",
+  ).readUInt32LE(0)
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function emitProgress(
-  counters: {
-    waves: number
-    txsBroadcast: number
-    broadcastErrors: number
-    confirmed: number
-    finalized: number
-  },
-  totalItems: number,
-  prefixBytes: Float64Array,
-  startTime: number,
-  cb: (stats: PipelineStats) => void,
-): void {
-  const elapsedMs = Date.now() - startTime
-  const sec = elapsedMs / 1000
-  const finalizedBytes = prefixBytes[counters.finalized] ?? 0
-  cb({
-    waves: counters.waves,
-    txsBroadcast: counters.txsBroadcast,
-    broadcastErrors: counters.broadcastErrors,
-    confirmed: counters.confirmed,
-    finalized: counters.finalized,
-    totalItems,
-    elapsedMs,
-    txPerSec: sec > 0 ? counters.finalized / sec : 0,
-    throughputBytesPerSec: sec > 0 ? finalizedBytes / sec : 0,
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Fast-path signer (bypasses per-tx metadata decode)
-// ---------------------------------------------------------------------------
-
-const SIGNER_TYPE_ID: Record<string, number> = {
-  Ed25519: 0,
-  Sr25519: 1,
-  Ecdsa: 2,
-}
-
-/**
- * Create a PolkadotSigner that pre-decodes metadata once.
- *
- * PAPI's standard `getPolkadotSigner` calls `decAnyMetadata(metadata)` on
- * every `signTx()` invocation (~100ms each for typical chain metadata).
- * This wrapper decodes once and reuses the result, reducing per-tx overhead
- * to pure crypto (<5ms).
- */
-async function createFastSigner(
-  rawSign: (message: Uint8Array) => Promise<Uint8Array>,
-  publicKey: Uint8Array,
-  signingType: string,
-  metadataRaw: Uint8Array,
-): Promise<PolkadotSigner> {
-  const [bindings, utils] = await Promise.all([
-    import("@polkadot-api/substrate-bindings"),
-    import("@polkadot-api/utils"),
-  ])
-
-  const decMeta = bindings.unifyMetadata(bindings.decAnyMetadata(metadataRaw))
-
-  // Extract signed extension identifiers (order matters)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const signedExts = (decMeta.extrinsic as any).signedExtensions
-  const extList: Array<{ identifier: string }> = Array.isArray(signedExts)
-    ? (signedExts[0] ?? [])
-    : (Object.values(signedExts)[0] ?? [])
-  const extIdentifiers: string[] = extList.map((e) => e.identifier)
-
-  // Pre-compute address and signature assembly
-  // For Polkadot/Substrate chains: MultiAddress::Id = [0x00, ...pubkey32]
-  const addressBytes = new Uint8Array([0, ...publicKey])
-  const sigTypeTag = SIGNER_TYPE_ID[signingType] ?? 1
-
-  return {
-    publicKey,
-    signTx: async (
-      callData: Uint8Array,
-      signedExtensions: Record<
-        string,
-        { value: Uint8Array; additionalSigned: Uint8Array }
-      >,
-      _metadata: Uint8Array,
-      _blockNumber?: number,
-      hasher: (input: Uint8Array) => Uint8Array = bindings.Blake2256,
-    ): Promise<Uint8Array> => {
-      // Collect extra and additionalSigned from sign extensions
-      const extra: Uint8Array[] = []
-      const additionalSigned: Uint8Array[] = []
-      for (const id of extIdentifiers) {
-        const ext = signedExtensions[id]
-        if (!ext) throw new Error(`Missing ${id} signed extension`)
-        extra.push(ext.value)
-        additionalSigned.push(ext.additionalSigned)
-      }
-
-      // Sign
-      const toSign = utils.mergeUint8([callData, ...extra, ...additionalSigned])
-      const signed = await rawSign(
-        toSign.length > 256 ? hasher(toSign) : toSign,
-      )
-
-      // Assemble V4 signed extrinsic
-      const preResult = utils.mergeUint8([
-        bindings.extrinsicFormat.enc({ version: 4, type: "signed" }),
-        addressBytes,
-        new Uint8Array([sigTypeTag, ...signed]),
-        ...extra,
-        callData,
-      ])
-      return utils.mergeUint8([
-        bindings.compact.enc(preResult.length),
-        preResult,
-      ])
-    },
-    // signBytes not used by the pipeline but required by the interface
-    signBytes: async (data: Uint8Array) => rawSign(data),
-  }
-}
-
 function emptyResult(): PipelineResult {
   return {
+    cids: [],
     waves: 0,
     txsBroadcast: 0,
     broadcastErrors: 0,
