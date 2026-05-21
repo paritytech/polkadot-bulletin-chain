@@ -989,8 +989,11 @@ impl_runtime_apis! {
 			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
 		}
 
-		fn can_renew(account: AccountId, content_hash: [u8; 32]) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, content_hash)
+		fn can_renew(
+			account: AccountId,
+			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
+		) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
 		}
 	}
 

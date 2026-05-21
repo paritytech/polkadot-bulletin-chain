@@ -1758,13 +1758,6 @@ pub mod pallet {
 			Self::authorization_extent(AuthorizationScope::Account(who))
 		}
 
-		/// Returns the expiration block of the account's authorization, or `None` if
-		/// the account has no authorization or its only authorization has expired.
-		pub fn account_authorization_expires_at(who: T::AccountId) -> Option<BlockNumberFor<T>> {
-			let authorization = Authorizations::<T>::get(AuthorizationScope::Account(who))?;
-			(!authorization.expired(Self::now())).then_some(authorization.expiration)
-		}
-
 		/// Active-authorization summary for `who`, shaped for the
 		/// [`BulletinTransactionStorageApi`] runtime API. Returns `None` if the
 		/// account has no authorization or its authorization has expired.
@@ -1801,22 +1794,19 @@ pub mod pallet {
 			Self::account_has_active_authorization(who)
 		}
 
-		/// Returns `true` iff a `renew(TransactionRef::ContentHash(content_hash))`
-		/// call would currently pass transaction validation for `who`.
+		/// Returns `true` iff a `renew(entry)` call would currently pass transaction
+		/// validation for `who`.
 		///
 		/// Mirrors the preconditions enforced by [`Self::renew`] +
 		/// [`Self::check_authorization`] (`is_renew = true`):
 		///
-		/// - `content_hash` refers to currently-stored data
+		/// - `entry` resolves to currently-stored data
 		/// - the stored data's size is within `[1, MaxTransactionSize]`
 		/// - `who` has an unexpired authorization entry
 		/// - per-account hard cap: `bytes_permanent + size <= bytes_allowance`
 		/// - chain-wide hard cap: `PermanentStorageUsed + size <= MaxPermanentStorageSize`
-		pub fn can_renew(who: &T::AccountId, content_hash: ContentHash) -> bool {
-			let Some((block, index)) = TransactionByContentHash::<T>::get(content_hash) else {
-				return false;
-			};
-			let Some(info) = Self::transaction_info(block, index) else { return false };
+		pub fn can_renew(who: &T::AccountId, entry: &TransactionRef<BlockNumberFor<T>>) -> bool {
+			let Ok(info) = Self::resolve_transaction_ref(entry) else { return false };
 			if !Self::data_size_ok(info.size as usize) {
 				return false;
 			}

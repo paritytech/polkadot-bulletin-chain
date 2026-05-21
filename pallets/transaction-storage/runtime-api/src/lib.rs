@@ -6,7 +6,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use bulletin_transaction_storage_primitives::ContentHash;
+use bulletin_transaction_storage_primitives::TransactionRef;
 use codec::{Codec, Decode, Encode};
 use scale_info::TypeInfo;
 
@@ -41,8 +41,8 @@ sp_api::decl_runtime_apis! {
 		/// would currently pass transaction validation for `account`.
 		fn can_store(account: AccountId, data_len: u32) -> bool;
 
-		/// Returns `true` iff a `renew(TransactionRef::ContentHash(content_hash))`
-		/// call would currently pass transaction validation for `account`.
-		fn can_renew(account: AccountId, content_hash: ContentHash) -> bool;
+		/// Returns `true` iff a `renew(entry)` call would currently pass transaction
+		/// validation for `account`.
+		fn can_renew(account: AccountId, entry: TransactionRef<BlockNumber>) -> bool;
 	}
 }
